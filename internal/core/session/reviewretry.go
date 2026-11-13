@@ -66,5 +66,6 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
 		rt.Rounds = w.Rounds(sid, t.Name)
 	}
+	d.reviewGiven(&rt, sid, t)
 	return d.cfg.Reviews.Start(ctx, rt)
 }

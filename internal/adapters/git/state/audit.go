@@ -150,14 +150,14 @@ func (a Audit) Read(repository, branch string, limit int) ([]session.AuditEntry,
 		}
 		for i := len(lines) - 1; i >= 0 && len(out) < limit; i-- {
 			var j auditJSON
-			if json.Unmarshal(lines[i], &j) != nil || j.Repository != repository || j.Branch != branch {
+			if json.Unmarshal(lines[i], &j) != nil || j.Repository != repository {
 				continue
 			}
 			kind := j.Kind
 			if kind == "" {
 				kind = session.AuditPush
 			}
-			if kind == session.AuditReview {
+			if kind == session.AuditReview || (j.Branch != branch && (j.Branch != "" || !session.ProjectLevelAudit(kind))) {
 				continue
 			}
 			out = append(out, entryOf(j, kind))

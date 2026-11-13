@@ -82,14 +82,21 @@ func (c *checkout) Close() { _ = c.root.Close() }
 
 func (s *Server) checkout(sid string) (*checkout, error) {
 	dir, ok := s.reg.Worktree(sid)
-	if !ok || s.cfg.Workspace == "" {
+	if !ok {
 		return nil, errOutside
 	}
-	worktrees := filepath.Join(s.cfg.Workspace, "worktrees")
+	return openCheckout(s.cfg.Workspace, dir)
+}
+
+func openCheckout(workspace, dir string) (*checkout, error) {
+	if workspace == "" {
+		return nil, errOutside
+	}
+	worktrees := filepath.Join(workspace, "worktrees")
 	if filepath.Dir(dir) != worktrees || !worktreeName.MatchString(filepath.Base(dir)) {
 		return nil, errOutside
 	}
-	ws, err := os.OpenRoot(s.cfg.Workspace)
+	ws, err := os.OpenRoot(workspace)
 	if err != nil {
 		return nil, errOutside
 	}

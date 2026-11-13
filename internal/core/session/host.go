@@ -43,7 +43,8 @@ func (e *HostError) Error() string {
 const HostDirty = "dirty"
 
 type Host interface {
-	AddWorktree(ctx context.Context, repo, name, branch, base string) (string, error)
+	AddWorktree(ctx context.Context, repo, name, branch, base string, id CommitIdentity) (string, error)
+	SetIdentity(ctx context.Context, repo, name string, id CommitIdentity) error
 	RemoveWorktree(ctx context.Context, repo, name string, force bool) error
 	Run(ctx context.Context, c Command) (RunResult, error)
 	Start(ctx context.Context, c Command) (Process, error)

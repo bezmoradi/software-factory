@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -24,6 +25,7 @@ const (
 	maxDiffedFile = 1 << 20
 	maxChange     = 32 << 20
 	maxChangeHeld = 32 << 20
+	maxScanned    = 64 << 20
 	diffTimeout   = 30 * time.Second
 )
 
@@ -33,6 +35,7 @@ type side struct {
 	mode    filemode.FileMode
 	content []byte
 	big     bool
+	limit   int
 	load    func() ([]byte, error)
 }
 
@@ -45,7 +48,11 @@ func (s *side) fill() error {
 	if err != nil {
 		return err
 	}
-	if len(data) > maxDiffedFile {
+	limit := s.limit
+	if limit == 0 {
+		limit = maxDiffedFile
+	}
+	if len(data) > limit {
 		s.big = true
 		return nil
 	}
@@ -54,11 +61,11 @@ func (s *side) fill() error {
 }
 
 func writeChange(dir string) error {
-	base, err := sides(filepath.Join(dir, "base"))
+	base, err := sides(filepath.Join(dir, "base"), maxDiffedFile)
 	if err != nil {
 		return err
 	}
-	head, err := sides(filepath.Join(dir, "head"))
+	head, err := sides(filepath.Join(dir, "head"), maxDiffedFile)
 	if err != nil {
 		return err
 	}
@@ -73,10 +80,28 @@ func writeChange(dir string) error {
 	return err
 }
 
+func wholeChange(dir string) (string, bool, error) {
+	base, err := sides(filepath.Join(dir, "base"), maxScanned)
+	if err != nil {
+		return "", false, err
+	}
+	head, err := sides(filepath.Join(dir, "head"), maxScanned)
+	if err != nil {
+		return "", false, err
+	}
+	var b strings.Builder
+	cut, err := encodeChange(&b, base, head, changeLimits{out: 2 * maxScanned, held: maxScanned, note: "\n[cut: %s]\n", text: true})
+	if err != nil {
+		return "", false, err
+	}
+	return b.String(), cut, nil
+}
+
 type changeLimits struct {
 	out  int
 	held int
 	note string
+	text bool
 }
 
 func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits) (bool, error) {
@@ -105,6 +130,10 @@ func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits
 		if inBase && inHead && from.mode == to.mode && !from.big && !to.big && bytes.Equal(from.content, to.content) {
 			continue
 		}
+		if limits.text && (from.big || to.big) {
+			full = true
+			break
+		}
 		held += len(from.content) + len(to.content)
 		if held > limits.held {
 			full = true
@@ -117,7 +146,7 @@ func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits
 		if inHead {
 			fp.to = &diffFile{path: p, side: to}
 		}
-		fp.binary = (inBase && (from.big || isBinary(from.content))) || (inHead && (to.big || isBinary(to.content)))
+		fp.binary = !limits.text && ((inBase && (from.big || isBinary(from.content))) || (inHead && (to.big || isBinary(to.content))))
 		if !fp.binary {
 			fp.chunks = chunks(string(from.content), string(to.content))
 		}
@@ -139,7 +168,7 @@ func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits
 	return true, err
 }
 
-func sides(root string) (map[string]side, error) {
+func sides(root string, limit int) (map[string]side, error) {
 	out := map[string]side{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -153,7 +182,7 @@ func sides(root string) (map[string]side, error) {
 		if err != nil {
 			return err
 		}
-		s := side{mode: filemode.Regular}
+		s := side{mode: filemode.Regular, limit: limit}
 		switch {
 		case info.Mode()&fs.ModeSymlink != 0:
 			s.mode = filemode.Symlink
@@ -168,7 +197,7 @@ func sides(root string) (map[string]side, error) {
 			if info.Mode()&0o111 != 0 {
 				s.mode = filemode.Executable
 			}
-			if info.Size() > maxDiffedFile {
+			if info.Size() > int64(limit) {
 				s.big = true
 				break
 			}

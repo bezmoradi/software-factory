@@ -53,7 +53,7 @@ const (
 )
 
 func main() {
-	if authStatus(os.Args[1:]) {
+	if authStatus(os.Args[1:]) || version(os.Args[1:]) {
 		return
 	}
 	r, err := review(os.Args[1:])
@@ -102,7 +102,15 @@ func review(args []string) (reply, error) {
 	}
 	agent, named := value(args, "--agent")
 	prompt := args[len(args)-1]
-	if named && !strings.HasPrefix(agent, "knackpack:") || !named && !strings.Contains(strings.ToLower(prompt), "manual test list") {
+	userAgent := ""
+	if named && !strings.HasPrefix(agent, "knackpack:") {
+		found, err := userAgentFile(agent)
+		if err != nil {
+			return reply{}, err
+		}
+		userAgent = found
+	}
+	if !named && !strings.Contains(strings.ToLower(prompt), "manual test list") {
 		return reply{}, errors.New("no knackpack agent named")
 	}
 	plugin, _ := value(args, "--plugin-dir")
@@ -132,7 +140,28 @@ func review(args []string) (reply, error) {
 	if !named {
 		return reply{text: "Manual test list (from the fake reviewer):\n1. Open the page and start a session.\n2. Change a file, commit it and push.\n3. Check the push reached the git host.", turns: 3}, nil
 	}
-	return verdict(agent, prompt), nil
+	r := verdict(agent, prompt)
+	if userAgent != "" {
+		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)
+	}
+	return r, nil
+}
+
+func userAgentFile(agent string) (string, error) {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(os.Getenv("HOME"), ".claude")
+	}
+	path := filepath.Join(dir, "agents", "sf-"+agent+".md")
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("--agent %s names no knackpack agent and no file sf-%s.md in the user agents folder", agent, agent)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !slices.Contains(strings.Split(string(data), "\n"), "name: "+agent) {
+		return "", fmt.Errorf("the user agents folder's sf-%s.md doesn't name %s", agent, agent)
+	}
+	return path, nil
 }
 
 func has(name string) bool {
@@ -152,6 +181,10 @@ func verdict(agent, prompt string) reply {
 	if has("SLOW-REVIEW") {
 		time.Sleep(slowFor)
 	}
+	if switched(passAllFile) {
+		r.text = report + "\n$HOME/" + passAllFile + " asks the fake reviewer to pass everything.\nNo blocking issues found.\nknackpack-verdict/1: pass"
+		return r
+	}
 	if has("TOKEN-IN-REVIEW") {
 		token := "sk-" + "ant-" + "api03-" + strings.Repeat("Fake0", 8)
 		r.text = report + "\n**Changes required:** head/TOKEN-IN-REVIEW asks the fake reviewer to quote " + token + " and block.\nknackpack-verdict/1: block"
@@ -161,16 +194,33 @@ func verdict(agent, prompt string) reply {
 		r.text = report + "\n**Changes required:** head/BLOCK-REVIEW asks the fake reviewer to block.\nknackpack-verdict/1: block"
 		return r
 	}
+	if plantedDefect() && agent == slopReviewer {
+		r.text = report + "\n**Verdict: SIMPLER CHANGE AVAILABLE**\n### [Medium] change.diff adds a line that is only `" + plantedLine + "`\n" + plantedFindings + "\nknackpack-verdict/1: pass"
+		return r
+	}
+	if plantedDefect() {
+		r.text = report + "\n**Changes required:** change.diff adds a line that is only `" + plantedLine + "`.\nknackpack-verdict/1: block"
+		return r
+	}
 	if has("SEVERE-PASS") {
-		r.text = report + "\n### [High] head/SEVERE-PASS asks the fake reviewer to pass with a severe finding\n\n## Findings table\n\n| ID | Severity | Blocks | Title |\n|---|---|---|---|\n| F1 | High | yes | head/SEVERE-PASS |\n\nknackpack-verdict/1: pass"
+		r.text = report + "\n### [High] head/SEVERE-PASS asks the fake reviewer to pass with a severe finding\n\n## Findings table\n\n| ID | Severity | Blocks | Title |\n|---|---|---|---|\n| F1 | High | yes | head/SEVERE-PASS |\n" + findingsLine() + "\nknackpack-verdict/1: pass"
 		return r
 	}
 	pass := "No blocking issues found."
-	if agent == "knackpack:slop-reviewer" {
+	if agent == slopReviewer {
 		pass = "Nothing to remove in scope."
 	}
-	r.text = report + "\n" + pass + "\nknackpack-verdict/1: pass"
+	r.text = report + "\n" + pass + findingsLine() + "\nknackpack-verdict/1: pass"
 	return r
+}
+
+func findingsLine() string {
+	data, err := os.ReadFile(filepath.Join("head", "FINDINGS-LINE"))
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	return "\n" + strings.TrimSpace(line)
 }
 
 func earlier(prompt string) string {

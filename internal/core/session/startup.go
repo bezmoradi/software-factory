@@ -23,6 +23,7 @@ type StartupEntry struct {
 	Place  StartupPlace
 	Why    string
 	Source string
+	Nested bool
 }
 
 var StartupLists = map[string][]StartupEntry{
@@ -39,8 +40,10 @@ var StartupLists = map[string][]StartupEntry{
 			Source: "code.claude.com/docs/en/claude-directory, \"agents/*.md\" and its frontmatter fields"},
 		{Path: ".claude/commands", Folder: true, Place: InWorktree, Why: "slash commands, with allowed-tools and hooks in frontmatter",
 			Source: "code.claude.com/docs/en/claude-directory, \"commands/*.md\""},
-		{Path: ".claude/skills", Folder: true, Place: InWorktree, Why: "skills, with allowed-tools, hooks and shell in frontmatter, and the scripts they run",
-			Source: "code.claude.com/docs/en/claude-directory, \"skills/<name>/SKILL.md\""},
+		{Path: ".claude/skills", Folder: true, Place: InWorktree, Nested: true, Why: "skills, with allowed-tools, hooks and shell in frontmatter, and the scripts they run; also <subfolder>/.claude/skills, which loads once Claude works on files there",
+			Source: "code.claude.com/docs/en/skills, \"Choose where skills load\" (Nested: <subdir>/.claude/skills/<skill-name>/SKILL.md) and \"Load skills in monorepos and subdirectories\"; the 2.1.322 binary names skills \"from <folder>/.claude/skills\" applying to files under that folder"},
+		{Path: ".claude/skills", Folder: true, Place: InClone, Why: "in a worktree with no .claude/skills folder at its root, Claude Code loads the main checkout's project skills, the clone's folder",
+			Source: "code.claude.com/docs/en/skills, \"Load skills in monorepos and subdirectories\": \"when the worktree checkout has no .claude/skills directory at its root, Claude Code loads the main checkout's project skills instead\" (2.1.277 and later)"},
 		{Path: ".claude/workflows", Folder: true, Place: InWorktree, Why: "dynamic workflow scripts that start subagents, each a /<name> command",
 			Source: "code.claude.com/docs/en/claude-directory, \"workflows/*.js\""},
 		{Path: ".claude/hooks", Folder: true, Place: InWorktree, Why: "the conventional folder for the scripts settings.json hooks run",
@@ -77,12 +80,15 @@ type StartupFile struct {
 }
 
 type StartupRead struct {
-	Commit string
-	Files  []StartupFile
+	Commit       string
+	Files        []StartupFile
+	Instructions []StartupFile
+	Walk         []string
+	Notes        []string
 }
 
 type StartupReader interface {
-	Read(clone, worktree, branch string, entries []StartupEntry) (StartupRead, error)
+	Read(clone, worktree, branch string, scan StartupScan) (StartupRead, error)
 }
 
 type Approvals interface {
@@ -95,6 +101,7 @@ type Approval struct {
 	Agent      string
 	Hash       string
 	ApprovedAt time.Time
+	Seen       []string
 }
 
 const keptApprovals = 1000
@@ -109,14 +116,21 @@ type ShownFile struct {
 	Content     string
 	Clipped     bool
 	Uncommitted bool
+	Hidden      bool
+	Marks       []Mark
 }
 
 type ApprovalView struct {
-	Agent  string
-	Repo   string
-	Commit string
-	Hash   string
-	Files  []ShownFile
+	Agent        string
+	Repo         string
+	Commit       string
+	Hash         string
+	Files        []ShownFile
+	Instructions []ShownFile
+	Unchanged    int
+	Walk         []string
+	Notes        []string
+	Skipped      []string
 }
 
 type Needs struct {
@@ -211,36 +225,63 @@ func Escape(data []byte) string {
 	return b.String()
 }
 
-func approvalView(agent, repo string, read StartupRead, hash string) *ApprovalView {
-	v := &ApprovalView{Agent: agent, Repo: repo, Commit: read.Commit, Hash: hash, Files: make([]ShownFile, 0, len(read.Files))}
+func shownFiles(files []StartupFile) []ShownFile {
+	out := make([]ShownFile, 0, len(files))
 	room := ShownStartupBytes
-	for _, f := range read.Files {
-		s := ShownFile{Path: Escape([]byte(f.Path)), Place: f.Place, Link: f.Link, Target: Escape([]byte(f.Target)), Size: len(f.Data), Hash: fileHash(f), Uncommitted: !f.Committed}
-		{
-			show := min(len(f.Data), ShownStartupFile, max(room, 0))
-			s.Content = Escape(f.Data[:show])
-			s.Clipped = show < len(f.Data)
-			room -= show
+	for _, f := range files {
+		s := ShownFile{Path: Escape([]byte(f.Path)), Place: f.Place, Link: f.Link, Target: Escape([]byte(f.Target)), Size: len(f.Data), Hash: fileHash(f), Uncommitted: !f.Committed,
+			Hidden: Hidden([]byte(f.Path)) || Hidden([]byte(f.Target)) || Hidden(f.Data), Marks: Marks(f.Path, f.Data, f.Link)}
+		show := min(len(f.Data), ShownStartupFile, max(room, 0))
+		s.Content = Escape(f.Data[:show])
+		s.Clipped = show < len(f.Data)
+		room -= show
+		out = append(out, s)
+	}
+	return out
+}
+
+func approvalView(agent, repo string, read StartupRead, hash string, seen []string) *ApprovalView {
+	v := &ApprovalView{Agent: agent, Repo: repo, Commit: read.Commit, Hash: hash, Files: shownFiles(read.Files), Walk: read.Walk, Notes: read.Notes}
+	changed := make([]StartupFile, 0, len(read.Instructions))
+	for _, f := range read.Instructions {
+		if slices.Contains(seen, fileHash(f)) {
+			v.Unchanged++
+			continue
 		}
-		v.Files = append(v.Files, s)
+		changed = append(changed, f)
+	}
+	v.Instructions = shownFiles(changed)
+	if len(read.Instructions) > 0 || len(read.Notes) > 0 || len(read.Walk) > 0 {
+		v.Skipped = WalkSkipped
 	}
 	return v
 }
 
-func (d *Dispatcher) approved(repo, agent, hash string) (bool, error) {
+func instructionHashes(files []StartupFile) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		out = append(out, fileHash(f))
+	}
+	return out
+}
+
+func (d *Dispatcher) lastApproval(repo, agent string) (Approval, error) {
 	if d.cfg.Approvals == nil {
-		return false, nil
+		return Approval{}, nil
 	}
 	d.approvalMu.Lock()
 	defer d.approvalMu.Unlock()
 	list, err := d.cfg.Approvals.Load()
 	if err != nil {
-		return false, err
+		return Approval{}, err
 	}
-	return slices.ContainsFunc(list, func(a Approval) bool { return a.Repo == repo && a.Agent == agent && a.Hash == hash }), nil
+	if i := slices.IndexFunc(list, func(a Approval) bool { return a.Repo == repo && a.Agent == agent }); i >= 0 {
+		return list[i], nil
+	}
+	return Approval{}, nil
 }
 
-func (d *Dispatcher) approve(repo, agent, hash string) error {
+func (d *Dispatcher) approve(repo, agent, hash string, seen []string) error {
 	if d.cfg.Approvals == nil {
 		return errNoApprovals
 	}
@@ -251,7 +292,7 @@ func (d *Dispatcher) approve(repo, agent, hash string) error {
 		return err
 	}
 	list = slices.DeleteFunc(list, func(a Approval) bool { return a.Repo == repo && a.Agent == agent })
-	list = append(list, Approval{Repo: repo, Agent: agent, Hash: hash, ApprovedAt: d.reg.now()})
+	list = append(list, Approval{Repo: repo, Agent: agent, Hash: hash, ApprovedAt: d.reg.now(), Seen: seen})
 	if len(list) > keptApprovals {
 		list = list[len(list)-keptApprovals:]
 	}
@@ -269,7 +310,11 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	if d.cfg.Startup == nil {
 		return explained(conflict("no start-up reader"), "This engine can't read the worktree's start-up files, so it doesn't start agents.")
 	}
-	read, err := d.cfg.Startup.Read(r.repoPath, r.cwd, r.branch, entries)
+	scan := StartupScan{Entries: entries, Instructions: InstructionLists[list], Walk: true}
+	if len(scan.Instructions.Above) > 0 {
+		scan.Above = foldersAbove(r.cwd, d.cfg.Workspace)
+	}
+	read, err := d.cfg.Startup.Read(r.repoPath, r.cwd, r.branch, scan)
 	if err != nil {
 		d.cfg.Logger.Warn("start-up files", "event", "unreadable")
 		return explained(conflict("start-up files"), clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
@@ -277,16 +322,16 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	if len(read.Files) == 0 {
 		return nil
 	}
-	hash := SetHash(list, read.Files)
-	ok, err = d.approved(r.repo, r.spec.ID, hash)
+	hash := startupHash(list, read)
+	last, err := d.lastApproval(r.repo, r.spec.ID)
 	if err != nil {
 		return explained(conflict("approvals"), "The engine couldn't read its approvals of start-up files, so it doesn't start the agent.")
 	}
-	if ok {
+	if last.Hash == hash {
 		return nil
 	}
 	if consent.Approve != "" && consent.Approve == hash {
-		if err := d.approve(r.repo, r.spec.ID, hash); err != nil {
+		if err := d.approve(r.repo, r.spec.ID, hash, instructionHashes(read.Instructions)); err != nil {
 			return explained(conflict("approvals"), "The engine couldn't save the approval, so it doesn't start the agent.")
 		}
 		d.startupAudit(r, hash)
@@ -298,5 +343,5 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 		msg = "The start-up files changed since you looked at them. Read them again, then approve to start."
 	}
 	d.cfg.Logger.Info("start-up files", "event", "needs-approval")
-	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(r.spec.ID, r.repo, read, hash)}}
+	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(r.spec.ID, r.repo, read, hash, last.Seen)}}
 }

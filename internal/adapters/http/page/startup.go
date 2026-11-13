@@ -24,23 +24,49 @@ func signInOf(s *session.SignIn) *signInJSON {
 }
 
 type shownFileJSON struct {
-	Path        string `json:"path"`
-	Place       string `json:"place"`
-	Link        bool   `json:"link"`
-	Target      string `json:"target,omitempty"`
-	Size        int    `json:"size"`
-	Hash        string `json:"hash"`
-	Content     string `json:"content"`
-	Clipped     bool   `json:"clipped"`
-	Uncommitted bool   `json:"uncommitted"`
+	Path        string     `json:"path"`
+	Place       string     `json:"place"`
+	Link        bool       `json:"link"`
+	Target      string     `json:"target,omitempty"`
+	Size        int        `json:"size"`
+	Hash        string     `json:"hash"`
+	Content     string     `json:"content"`
+	Clipped     bool       `json:"clipped"`
+	Uncommitted bool       `json:"uncommitted"`
+	Hidden      bool       `json:"hidden,omitempty"`
+	Marks       []markJSON `json:"marks,omitempty"`
+}
+
+type markJSON struct {
+	Line int    `json:"line"`
+	What string `json:"what"`
+	Text string `json:"text"`
 }
 
 type approvalJSON struct {
-	Agent  string          `json:"agent"`
-	Repo   string          `json:"repo"`
-	Commit string          `json:"commit"`
-	Hash   string          `json:"hash"`
-	Files  []shownFileJSON `json:"files"`
+	Agent        string          `json:"agent"`
+	Repo         string          `json:"repo"`
+	Commit       string          `json:"commit"`
+	Hash         string          `json:"hash"`
+	Files        []shownFileJSON `json:"files"`
+	Instructions []shownFileJSON `json:"instructions,omitempty"`
+	Unchanged    int             `json:"unchanged,omitempty"`
+	Walk         []string        `json:"walk,omitempty"`
+	Notes        []string        `json:"notes,omitempty"`
+	Skipped      []string        `json:"skipped,omitempty"`
+}
+
+func shownFilesOf(files []session.ShownFile) []shownFileJSON {
+	out := make([]shownFileJSON, 0, len(files))
+	for _, f := range files {
+		j := shownFileJSON{Path: f.Path, Place: string(f.Place), Link: f.Link, Target: f.Target, Size: f.Size, Hash: f.Hash,
+			Content: f.Content, Clipped: f.Clipped, Uncommitted: f.Uncommitted, Hidden: f.Hidden}
+		for _, m := range f.Marks {
+			j.Marks = append(j.Marks, markJSON{Line: m.Line, What: m.What, Text: m.Text})
+		}
+		out = append(out, j)
+	}
+	return out
 }
 
 type needsJSON struct {
@@ -61,12 +87,11 @@ func needsOf(n *session.Needs) *needsJSON {
 		out.Expected = string(n.Expected)
 	}
 	if a := n.Approval; a != nil {
-		v := &approvalJSON{Agent: a.Agent, Repo: a.Repo, Commit: a.Commit, Hash: a.Hash, Files: make([]shownFileJSON, 0, len(a.Files))}
-		for _, f := range a.Files {
-			v.Files = append(v.Files, shownFileJSON{Path: f.Path, Place: string(f.Place), Link: f.Link, Target: f.Target, Size: f.Size, Hash: f.Hash,
-				Content: f.Content, Clipped: f.Clipped, Uncommitted: f.Uncommitted})
+		out.Approval = &approvalJSON{Agent: a.Agent, Repo: a.Repo, Commit: a.Commit, Hash: a.Hash, Files: shownFilesOf(a.Files),
+			Unchanged: a.Unchanged, Walk: a.Walk, Notes: a.Notes, Skipped: a.Skipped}
+		if len(a.Instructions) > 0 {
+			out.Approval.Instructions = shownFilesOf(a.Instructions)
 		}
-		out.Approval = v
 	}
 	return out
 }

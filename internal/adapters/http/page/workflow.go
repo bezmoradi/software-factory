@@ -20,13 +20,17 @@ var (
 )
 
 type workDocJSON struct {
-	Path     string `json:"path"`
-	Text     string `json:"text"`
-	Hash     string `json:"hash"`
-	Approved bool   `json:"approved"`
-	Changed  bool   `json:"changed"`
-	Clipped  bool   `json:"clipped"`
-	Previous string `json:"previous,omitempty"`
+	Path       string `json:"path"`
+	Text       string `json:"text"`
+	Hash       string `json:"hash"`
+	Approved   bool   `json:"approved"`
+	Changed    bool   `json:"changed"`
+	Clipped    bool   `json:"clipped"`
+	Previous   string `json:"previous,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	ApprovedAt string `json:"approvedAt,omitempty"`
+	Reported   bool   `json:"reported,omitempty"`
+	OnBase     bool   `json:"onBase,omitempty"`
 }
 
 type workTypeJSON struct {
@@ -93,7 +97,8 @@ func docJSON(d *session.WorkDoc) *workDocJSON {
 	if d == nil {
 		return nil
 	}
-	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous}
+	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
+		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase}
 }
 
 func typesJSON(list []workflow.WorkType) []workTypeJSON {

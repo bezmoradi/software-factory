@@ -92,7 +92,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	for _, q := range required {
 		rd := RoundOf(entries, t.Branch, q.Agent)
 		key := review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}
-		if e, ok := entries[key]; t.Retry && ok && !Retryable(e) {
+		if e, ok := entries[key]; t.Retry && ok && !Retryable(e) && !Rerunnable(e) {
 			finished = append(finished, finishedRole(q, e, rd.Count, limit))
 			continue
 		}
@@ -102,7 +102,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		}
 		p := plannedRole{q: q, base: base, covers: base, round: rd.Count + 1, attempt: nextAttempt(entries, key)}
 		if e, ok := entries[key]; ok {
-			p.auto = e.Auto
+			p.auto, p.kept = e.Auto, e.Record.Override
 			if e.Record.State != review.Running {
 				p.round = rd.Count
 			}
@@ -110,6 +110,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		if prev := r.incremental(t, entries, q.Agent, head, main); prev != nil {
 			p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
 		}
+		p.overridden = acceptedRound(entries, t.Branch, q.Agent)
 		plans = append(plans, p)
 	}
 	if len(plans) == 0 && t.Retry {
@@ -128,7 +129,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewer container's sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch)}
 	for _, p := range plans {
 		view.Roles = append(view.Roles, RoleReview{Role: p.q.Role, Name: ReviewerName(p.q), Agent: p.q.Agent, State: review.Running, Why: p.q.Why,
-			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != ""})
+			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != "", Override: p.kept})
 	}
 	view.Roles = append(view.Roles, finished...)
 	held := ""
@@ -137,9 +138,13 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		view.Note += " " + held
 	}
 	r.show(t.SID, view)
+	given := reviewGiven{asked: t.Approved != nil, rules: rulesGiven{main: main}}
+	if t.Approved != nil {
+		given.approved = t.Approved(head, main)
+	}
 	r.cfg.Logger.Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.wg.Go(func() {
-		r.run(t, head, plans, plugin, view, held)
+		r.run(t, head, r.reviewerVersion(r.cfg.Base), plans, plugin, view, held, given)
 		release()
 		if r.cfg.Base.Err() == nil {
 			r.finished(t.SID, head)
@@ -149,14 +154,16 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 }
 
 type plannedRole struct {
-	q        workflow.Requirement
-	base     string
-	since    string
-	covers   string
-	previous string
-	round    int
-	auto     bool
-	attempt  int
+	q          workflow.Requirement
+	base       string
+	since      string
+	covers     string
+	previous   string
+	overridden *ReviewEntry
+	kept       string
+	round      int
+	auto       bool
+	attempt    int
 }
 
 func plural(n int, one, many string) string {
@@ -168,7 +175,7 @@ func plural(n int, one, many string) string {
 
 func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string) *ReviewEntry {
 	prev := previousRound(entries, t.Branch, agent, head)
-	if prev == nil {
+	if prev == nil || prev.Record.Shaped != "" {
 		return nil
 	}
 	if prev.Record.State == review.Block && (prev.Message == "" || prev.Clipped || len(prev.Message) >= maxReviewText-4) {

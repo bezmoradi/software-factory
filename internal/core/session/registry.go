@@ -131,6 +131,7 @@ type Info struct {
 	Status       string
 	WaitingFor   string
 	Queued       int
+	Unbacked     []TurnMarks
 }
 
 type conn struct {
@@ -160,6 +161,9 @@ type admitted struct {
 	review       *ReviewView
 	push         *PushView
 	forge        []ForgeView
+	turnLog      *turnLog
+	unbacked     []TurnMarks
+	lastMessage  string
 }
 
 type replay struct {
@@ -191,6 +195,8 @@ type Registry struct {
 	notes       map[string]map[string]string
 	states      map[string]AgentState
 	supervisor  string
+	claimChecks *ClaimChecks
+	claimSerial uint64
 }
 
 var (
@@ -544,6 +550,7 @@ func (r *Registry) Report(given string, b Batch) error {
 				continue
 			}
 			c.lastSeq = seq
+			r.trackTurn(c, kind, ev, seq, now)
 			if cardTypes[kind] {
 				shown = r.indexCard(c.sid, ev)
 				changed = changed || shown
@@ -1039,6 +1046,9 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		if a.push != nil {
 			v := a.push.clone()
 			info.Push = &v
+		}
+		if len(a.unbacked) > 0 {
+			info.Unbacked = slices.Clone(a.unbacked)
 		}
 		if len(a.forge) > 0 {
 			info.Forge = slices.Clone(a.forge)

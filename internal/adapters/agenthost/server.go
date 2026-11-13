@@ -53,7 +53,7 @@ const ReviewRunTimeout = 25 * time.Minute
 
 const KeyHeader = "X-SF-Host-Key"
 
-var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true}
+var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true}
 
 type Server struct {
 	cfg   Config
@@ -64,6 +64,8 @@ type Server struct {
 	runs  int
 	login *login
 	wtMu  sync.Mutex
+
+	agentsMu sync.Mutex
 }
 
 type commandJSON struct {
@@ -82,11 +84,17 @@ type runReply struct {
 }
 
 type worktreeJSON struct {
-	Repo   string `json:"repo"`
-	Name   string `json:"name"`
-	Branch string `json:"branch,omitempty"`
-	Base   string `json:"base,omitempty"`
-	Force  bool   `json:"force,omitempty"`
+	Repo     string        `json:"repo"`
+	Name     string        `json:"name"`
+	Branch   string        `json:"branch,omitempty"`
+	Base     string        `json:"base,omitempty"`
+	Force    bool          `json:"force,omitempty"`
+	Identity *identityJSON `json:"identity,omitempty"`
+}
+
+type identityJSON struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type worktreeReply struct {
@@ -220,13 +228,17 @@ func isJSON(r *http.Request) bool {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) *problem {
+	return decodeWithin(w, r, v, MaxControlBody)
+}
+
+func decodeWithin(w http.ResponseWriter, r *http.Request, v any, limit int64) *problem {
 	if !isJSON(r) {
 		return fail(http.StatusUnsupportedMediaType, "type", "agent-host takes only application/json.")
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxControlBody))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return fail(http.StatusRequestEntityTooLarge, "body", fmt.Sprintf("The request is over agent-host's limit of %d KiB.", MaxControlBody>>10))
+			return fail(http.StatusRequestEntityTooLarge, "body", fmt.Sprintf("The request is over agent-host's limit of %d KiB.", limit>>10))
 		}
 		return fail(http.StatusBadRequest, "body", "agent-host couldn't read the request.")
 	}
@@ -246,9 +258,11 @@ var routes = map[string]string{
 	"/v1/sign-in":          http.MethodPost,
 	"/v1/login":            http.MethodPost,
 	"/v1/api-key":          http.MethodPost,
+	"/v1/agents":           http.MethodPost,
 	"/v1/trust":            http.MethodPost,
 	"/v1/worktrees":        http.MethodPost,
 	"/v1/worktrees/remove": http.MethodPost,
+	identityRoute:          http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -377,6 +391,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case "/v1/agents":
+		var q agentsJSON
+		if p := decodeWithin(w, r, &q, MaxAgentsBody); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.agentsStep(q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
 	case "/v1/worktrees":
 		var q worktreeJSON
 		if p := decode(w, r, &q); p != nil {
@@ -396,6 +421,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if p := s.removeWorktree(r.Context(), q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case identityRoute:
+		var q worktreeJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.worktreeIdentity(r.Context(), q); p != nil {
 			refuse(w, p)
 			return
 		}

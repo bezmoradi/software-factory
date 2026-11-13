@@ -7,6 +7,7 @@ export interface SetupState {
   signIn: SignInState | null
   projects: number | null
   sessions: number
+  identity: boolean | null
 }
 
 interface Step {
@@ -117,6 +118,13 @@ class SfSetup extends HTMLElement {
         action: 'Add project',
         start: 'add',
       },
+      ...(v.identity === null ? [] : [{
+        title: 'Set the name and email agents commit with',
+        done: v.identity,
+        why: 'No session starts until they are set: an agent with none may commit with the email of its sign-in, which a push makes public. For GitHub, use your noreply address.',
+        action: 'Set name and email',
+        start: 'identity',
+      }]),
       {
         title: 'Start a session',
         done: v.sessions > 0,

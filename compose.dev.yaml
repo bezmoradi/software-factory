@@ -17,6 +17,7 @@ services:
       SF_DEV_ACP_AGENT: /usr/local/bin/sf-fake-acp
       SF_DEV_REVIEWER: /usr/local/bin/sf-fake-claude
       SF_DEV_GIT_CA: /opt/sf-dev/git-ca/ca.pem
+      SF_DEV_KNACKPACK_DOCS: ${SF_DEV_KNACKPACK_DOCS:-}
     networks:
       gitnet: {}
     volumes:

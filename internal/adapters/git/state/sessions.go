@@ -61,6 +61,8 @@ type runJSON struct {
 	AgentVersion   string    `json:"agentVersion,omitempty"`
 	EngineVersion  string    `json:"engineVersion,omitempty"`
 	WorkflowCommit string    `json:"workflowCommit,omitempty"`
+	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
+	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -93,7 +95,8 @@ func runOf(r runJSON) (session.SavedRun, bool) {
 	}
 	return session.SavedRun{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 		Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt, Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt,
-		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID)}, true
+		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
+		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)}, true
 }
 
 func (s Sessions) Load() ([]session.SavedRun, error) {
@@ -125,7 +128,8 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 	for _, r := range runs {
 		f.Sessions = append(f.Sessions, runJSON{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
-			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID)})
+			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
+			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
 	}
 	return write(s.Dir, sessionsFile, f)
 }

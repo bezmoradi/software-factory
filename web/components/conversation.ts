@@ -1,6 +1,6 @@
 import { button, el, emit, shown, unspoofed, visible } from '../lib/dom.ts'
 import { plural } from '../lib/format.ts'
-import type { CardEvent, CardHost, ContextView, SessionEvent } from '../types.ts'
+import type { CardEvent, CardHost, ClaimMark, ContextView, SessionEvent, TurnMarks } from '../types.ts'
 import './markdown.ts'
 import { answering } from './cards.ts'
 
@@ -62,6 +62,8 @@ class SfConversation extends HTMLElement {
   })
   #width = 0
   #fresh = new Set<HTMLElement>()
+  #marks = new Map<string, HTMLLIElement>()
+  #marksKey = ''
   scroller: HTMLElement | null = null
   who = 'Claude'
 
@@ -196,7 +198,11 @@ class SfConversation extends HTMLElement {
         break
       }
       case 'text': {
-        if (!this.#reply || this.#reply.turnId !== ev.turnId) this.#reply = { turnId: ev.turnId, body: this.#entry('reply', this.who).appendChild(el('sf-markdown', 'body')) }
+        if (!this.#reply || this.#reply.turnId !== ev.turnId) {
+          const li = this.#entry('reply', this.who)
+          if (typeof ev.turnId === 'string') li.dataset.turn = ev.turnId
+          this.#reply = { turnId: ev.turnId, body: li.appendChild(el('sf-markdown', 'body')) }
+        }
         this.#reply.body.text += ev.text
         break
       }
@@ -257,6 +263,46 @@ class SfConversation extends HTMLElement {
         break
       }
     }
+  }
+
+  marks(list: TurnMarks[] | undefined, epoch: string): void {
+    if (!this.#timeline) return
+    const mine = (Array.isArray(list) ? list : []).filter(t => t && typeof t.turnId === 'string' && t.turnId && t.epoch === epoch && Array.isArray(t.marks) && Array.isArray(t.notes))
+    const key = JSON.stringify(mine)
+    if (key !== this.#marksKey) {
+      for (const li of this.#marks.values()) li.remove()
+      this.#marks.clear()
+      this.#marksKey = key
+      for (const t of mine) this.#marks.set(t.turnId, this.#markItem(t))
+    }
+    let moved = false
+    for (const [turn, li] of this.#marks) {
+      const replies = this.#timeline.querySelectorAll<HTMLLIElement>(`li.reply[data-turn="${CSS.escape(turn)}"]`)
+      const last = replies[replies.length - 1]
+      if (!last) li.remove()
+      else if (last.nextElementSibling !== li) {
+        last.after(li)
+        moved = true
+      }
+    }
+    if (moved) this.#stick()
+  }
+
+  #markItem(t: TurnMarks): HTMLLIElement {
+    const li = el('li', 'unbacked')
+    const marks = t.marks.filter((m: ClaimMark) => m && typeof m.quote === 'string' && typeof m.why === 'string')
+    if (marks.length) {
+      li.append(el('p', 'unbacked-head', "Not backed by this turn's actions"))
+      const list = el('ul')
+      for (const m of marks) {
+        const item = el('li')
+        item.append(el('q', '', visible(m.quote)), el('span', 'why', visible(m.why)))
+        list.append(item)
+      }
+      li.append(list)
+    }
+    for (const note of t.notes) if (typeof note === 'string') li.append(el('p', 'unbacked-note', visible(note)))
+    return li
   }
 
   refreshCards(controlled?: boolean): void {

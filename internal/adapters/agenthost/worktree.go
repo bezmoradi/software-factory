@@ -10,9 +10,14 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
-const gitTimeout = 60 * time.Second
+const (
+	gitTimeout    = 60 * time.Second
+	identityRoute = "/v1/worktrees/identity"
+)
 
 var (
 	repoName   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
@@ -47,9 +52,17 @@ func (s *Server) treePath(name string) (string, *problem) {
 }
 
 func (s *Server) git(ctx context.Context, repo string, args ...string) (string, error) {
+	return s.gitIn(ctx, repo, repo, args...)
+}
+
+func (s *Server) gitIn(ctx context.Context, repo, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	full := append([]string{"-c", "safe.directory=" + repo, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", repo}, args...)
+	safe := []string{"-c", "safe.directory=" + repo}
+	if dir != repo {
+		safe = append(safe, "-c", "safe.directory="+dir)
+	}
+	full := append(append(safe, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", dir), args...)
 	cmd := exec.CommandContext(ctx, s.cfg.Git, full...)
 	cmd.Env = Environment(s.cfg.Environ, nil, map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_NOSYSTEM": "1"})
 	cmd.Dir = s.cfg.Workspace
@@ -89,6 +102,10 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 	if !commitHash.MatchString(q.Base) {
 		return "", fail(http.StatusBadRequest, "base", "")
 	}
+	id, p := identityIn(q.Identity, false)
+	if p != nil {
+		return "", p
+	}
 	s.wtMu.Lock()
 	defer s.wtMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -102,8 +119,79 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 		s.log.Warn("agent-host worktree", "event", "add-failed")
 		return "", fail(http.StatusConflict, "git", gitMessage(out))
 	}
-	s.log.Info("agent-host worktree", "event", "added")
+	if id.Set() {
+		if p := s.setIdentity(ctx, repo, path, id); p != nil {
+			if _, err := s.git(ctx, repo, "worktree", "remove", "--force", "--force", "--", path); err != nil {
+				s.log.Warn("agent-host worktree", "event", "remove-failed")
+			}
+			return "", p
+		}
+	}
+	s.log.Info("agent-host worktree", "event", "added", "identity", id.Set())
 	return path, nil
+}
+
+func identityIn(q *identityJSON, required bool) (session.CommitIdentity, *problem) {
+	if q == nil {
+		if required {
+			return session.CommitIdentity{}, fail(http.StatusBadRequest, "identity", "Give the name and email to commit with.")
+		}
+		return session.CommitIdentity{}, nil
+	}
+	id, err := session.CheckIdentity(q.Name, q.Email)
+	if err != nil {
+		msg := ""
+		if e, ok := errors.AsType[*session.Error](err); ok {
+			msg = e.Message
+		}
+		return session.CommitIdentity{}, fail(http.StatusBadRequest, "identity", msg)
+	}
+	return id, nil
+}
+
+func (s *Server) setIdentity(ctx context.Context, repo, path string, id session.CommitIdentity) *problem {
+	if on, err := s.git(ctx, repo, "config", "--bool", "--get", "extensions.worktreeConfig"); err != nil || on != "true" {
+		if out, err := s.git(ctx, repo, "config", "extensions.worktreeConfig", "true"); err != nil {
+			s.log.Warn("agent-host worktree", "event", "identity-failed")
+			return fail(http.StatusConflict, "git", gitMessage(out))
+		}
+	}
+	for _, kv := range [][2]string{{"user.name", id.Name}, {"user.email", id.Email}} {
+		if out, err := s.gitIn(ctx, repo, path, "config", "--worktree", kv[0], kv[1]); err != nil {
+			s.log.Warn("agent-host worktree", "event", "identity-failed")
+			return fail(http.StatusConflict, "git", gitMessage(out))
+		}
+	}
+	return nil
+}
+
+func (s *Server) worktreeIdentity(ctx context.Context, q worktreeJSON) *problem {
+	repo, p := s.repoPath(q.Repo)
+	if p != nil {
+		return p
+	}
+	path, p := s.treePath(q.Name)
+	if p != nil {
+		return p
+	}
+	if q.Branch != "" || q.Base != "" || q.Force {
+		return fail(http.StatusBadRequest, "fields", "")
+	}
+	id, p := identityIn(q.Identity, true)
+	if p != nil {
+		return p
+	}
+	s.wtMu.Lock()
+	defer s.wtMu.Unlock()
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() {
+		return fail(http.StatusNotFound, "worktree", "The session's worktree isn't in the workspace any more.")
+	}
+	if p := s.setIdentity(ctx, repo, path, id); p != nil {
+		return p
+	}
+	s.log.Info("agent-host worktree", "event", "identity-set")
+	return nil
 }
 
 func (s *Server) removeWorktree(ctx context.Context, q worktreeJSON) *problem {

@@ -21,6 +21,7 @@ const (
 	ReviewProvider = "knackpack@knackpack"
 	MaxReviewing   = 2
 	maxReviewText  = 4000
+	clippedMiddle  = "[Software Factory: the middle of the reply is left out.]"
 	MaxReviewArg   = 8 << 10
 	keptRecords    = 500
 	reviewCheck    = 90 * time.Second
@@ -62,8 +63,11 @@ type ReviewRecords interface {
 }
 
 type Snapshot struct {
-	ID   string
-	Path string
+	ID       string
+	Path     string
+	Added    string
+	TooLarge bool
+	Commits  string
 }
 
 type SnapshotFile struct {
@@ -74,6 +78,8 @@ type SnapshotFile struct {
 type Snapshots interface {
 	Head(repo, branch string) (string, error)
 	Write(repo, base, head string, extra []SnapshotFile) (Snapshot, error)
+	WriteMade(base, head []SnapshotFile, commits string) (Snapshot, error)
+	Rules(repo, commit string) (RuleSet, error)
 	Remove(id string) error
 }
 
@@ -138,6 +144,9 @@ type ReviewTarget struct {
 	Rounds int
 	Auto   bool
 	Retry  bool
+
+	Approved func(head, main string) ApprovedText
+	Claims   string
 }
 
 type ReviewStarter interface {
@@ -151,6 +160,8 @@ type ReviewsConfig struct {
 	Sandbox    Sandbox
 	Snapshots  Snapshots
 	Records    ReviewRecords
+	Checks     ReviewerChecks
+	Minimum    review.Minimum
 	Plugins    PluginSource
 	Mains      Mains
 	History    History
@@ -166,6 +177,7 @@ type ReviewsConfig struct {
 	Expected   *Expected
 	ShowSignIn func(SignIn)
 	Audit      Audit
+	AgentFiles ReviewAgentFiles
 	Logger     shared.Logger
 
 	PluginCommit string
@@ -173,15 +185,18 @@ type ReviewsConfig struct {
 }
 
 type Reviews struct {
-	cfg     ReviewsConfig
-	mu      sync.Mutex
-	running map[string]bool
-	views   map[string]ReviewView
-	store   sync.Mutex
-	wg      sync.WaitGroup
-	done    func(sid, head string)
-	signIn  *SignIn
-	tests   map[string]TestListView
+	cfg        ReviewsConfig
+	mu         sync.Mutex
+	running    map[string]bool
+	views      map[string]ReviewView
+	store      sync.Mutex
+	checkStore sync.Mutex
+	checking   map[string]chan struct{}
+	claude     string
+	wg         sync.WaitGroup
+	done       func(sid, head string)
+	signIn     *SignIn
+	tests      map[string]TestListView
 }
 
 func (r *Reviews) OnDone(fn func(sid, head string)) {
@@ -234,8 +249,11 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]bool{}, views: map[string]ReviewView{}}
+	r := &Reviews{cfg: cfg, running: map[string]bool{}, views: map[string]ReviewView{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
+		return nil, err
+	}
+	if err := r.settleChecks(); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -274,6 +292,7 @@ func (r *Reviews) Records() (map[review.Key]review.Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	list = r.counted(list)
 	out := make(map[review.Key]review.Record, len(list))
 	for _, e := range list {
 		out[e.Key] = e.Record
@@ -288,6 +307,7 @@ func (r *Reviews) Entries() (map[review.Key]ReviewEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	list = r.counted(list)
 	out := make(map[review.Key]ReviewEntry, len(list))
 	for _, e := range list {
 		out[e.Key] = e
@@ -322,7 +342,7 @@ func (r *Reviews) show(sid string, v ReviewView) {
 	r.cfg.Show(sid, v.clone())
 }
 
-func (r *Reviews) run(t ReviewTarget, head string, plans []plannedRole, plugin string, view ReviewView, held string) {
+func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin string, view ReviewView, held string, given reviewGiven) {
 	ctx := r.cfg.Base
 	if why := r.check(ctx); why != "" {
 		view.Running = false
@@ -339,23 +359,49 @@ func (r *Reviews) run(t ReviewTarget, head string, plans []plannedRole, plugin s
 	entries := make([]ReviewEntry, len(plans))
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}, Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
-			Record: review.Record{Provider: ReviewProvider, State: review.Running}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: r.cfg.ClaudeCode,
+			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
 			Attempt: p.attempt}
 	}
 	r.put(entries...)
 	view.Note = held
 	r.show(t.SID, view)
 
-	earlier := make([]string, len(plans))
+	scanned := slices.Clone(given.approved.Files)
+	if f, ok := claimsFile(t.Claims); ok {
+		scanned = append(scanned, f)
+		given.claims = true
+	}
+	if given.rules.main != "" {
+		set, err := r.cfg.Snapshots.Rules(t.Repo, given.rules.main)
+		if err != nil {
+			r.cfg.Logger.Warn("review", "event", "rules-unreadable")
+		}
+		given.rules = rulesOf(given.rules.main, set, err)
+	}
+	common := append(slices.Clone(scanned), given.rules.files...)
+	givens := make([]reviewGiven, len(plans))
 	extra := map[string][]SnapshotFile{}
 	for i, p := range plans {
-		if f, ok := earlierFile(p.since, p.previous); ok && p.since != "" {
+		givens[i] = given
+		if _, ok := extra[p.base]; !ok {
+			extra[p.base] = slices.Clone(common)
+		}
+		var f SnapshotFile
+		said := earlierNone
+		if p.since != "" {
+			f, said = earlierFile(p.since, p.previous, p.overridden)
+		}
+		if said == earlierNone && p.overridden != nil {
+			f, said = SnapshotFile{Text: overriddenText(*p.overridden)}, earlierAccepted
+		}
+		if said != earlierNone {
 			f.Name = earlierName(p.q.Agent)
-			earlier[i] = f.Name
+			givens[i].earlier, givens[i].said = f.Name, said
 			extra[p.base] = append(extra[p.base], f)
 		}
 	}
 	dirs := map[string]string{}
+	written := map[string]Snapshot{}
 	for i, p := range plans {
 		if _, done := dirs[p.base]; done {
 			continue
@@ -376,22 +422,42 @@ func (r *Reviews) run(t ReviewTarget, head string, plans []plannedRole, plugin s
 			continue
 		}
 		dirs[p.base] = strings.TrimRight(r.cfg.Dir, "/") + "/" + snap.ID
+		written[p.base] = snap
 		defer func() {
 			if err := r.cfg.Snapshots.Remove(snap.ID); err != nil {
 				r.cfg.Logger.Warn("review", "event", "snapshot-not-removed")
 			}
 		}()
 	}
+	for i, p := range plans {
+		if snap, ok := written[p.base]; ok {
+			entries[i].Record.Shaped = shapedFor(review.RuleFor(p.q.Agent), snap, scanned)
+		}
+	}
+	if why := r.placeAgents(ctx, plans); why != "" {
+		for i, p := range plans {
+			if _, uploaded := r.cfg.AgentFiles.Uploaded(p.q.Agent); uploaded && dirs[p.base] != "" && entries[i].Record.State == review.Running {
+				entries[i] = r.failed(entries[i], why)
+				entries[i].Failure = FailureError
+				view.Roles[i] = roleOf(view.Roles[i], entries[i])
+				r.audited(t, entries[i])
+			}
+		}
+	}
 	r.put(entries...)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for i := range entries {
 		dir := dirs[plans[i].base]
-		if dir == "" {
+		if dir == "" || entries[i].Record.State != review.Running {
 			continue
 		}
+		prompt := promptFor(entries[i], givens[i])
+		if providerFor(r.cfg.AgentFiles, entries[i].Key.Agent) == UploadedProvider {
+			prompt += AgentVerdictAsk
+		}
 		wg.Go(func() {
-			e, why := r.review(ctx, t, entries[i], dir, plugin, promptFor(entries[i], earlier[i]))
+			e, why := r.review(ctx, t, entries[i], dir, plugin, prompt)
 			e = classified(e, why)
 			r.put(e)
 			r.audited(t, e)
@@ -411,6 +477,11 @@ func (r *Reviews) run(t ReviewTarget, head string, plans []plannedRole, plugin s
 		})
 	}
 	wg.Wait()
+	if due := r.checksDue(entries); len(due) > 0 {
+		view.Note = strings.TrimSpace(held + " Checking the reviewer after an update: it reviews a change with a planted defect and a clean one, the same way as this review.")
+		r.show(t.SID, view.clone())
+		view.Note = strings.TrimSpace(held + " " + r.checkAfter(ctx, due, plugin))
+	}
 	view.Running = false
 	mu.Lock()
 	shown := view.clone()
@@ -465,6 +536,9 @@ func (r *Reviews) put(entries ...ReviewEntry) {
 		return
 	}
 	for _, e := range entries {
+		if i := slices.IndexFunc(list, func(x ReviewEntry) bool { return x.Key == e.Key }); i >= 0 && e.Record.Override == "" {
+			e.Record.Override = list[i].Record.Override
+		}
 		list = slices.DeleteFunc(list, func(x ReviewEntry) bool { return x.Key == e.Key })
 		list = append(list, e)
 	}

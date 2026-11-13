@@ -50,7 +50,7 @@ func cloneEntries(list string) []StartupEntry {
 		if slices.ContainsFunc(out, func(o StartupEntry) bool { return o.Path == e.Path }) {
 			continue
 		}
-		e.Place = InClone
+		e.Place, e.Nested = InClone, false
 		out = append(out, e)
 	}
 	return out
@@ -64,7 +64,7 @@ func (d *Dispatcher) trustFiles(spec AgentSpec, repo Repository, approve string)
 	if d.cfg.Startup == nil {
 		return explained(conflict("no start-up reader"), "This engine can't read the clone folder's start-up files, so it doesn't answer the trust question.")
 	}
-	read, err := d.cfg.Startup.Read(repo.Path, "", repo.Branch, entries)
+	read, err := d.cfg.Startup.Read(repo.Path, "", repo.Branch, StartupScan{Entries: entries})
 	if err != nil {
 		d.cfg.Logger.Warn("claude trust", "event", "start-up-unreadable")
 		return explained(conflict("start-up files"), clip("The engine couldn't read the files "+spec.Name+" loads from the clone folder, so it can't show them and doesn't answer the trust question: "+err.Error(), maxOutput))
@@ -83,7 +83,7 @@ func (d *Dispatcher) trustFiles(spec AgentSpec, repo Repository, approve string)
 		msg = "The files in the clone folder changed since you looked at them. Read them again, then approve to answer the trust question."
 	}
 	d.cfg.Logger.Info("claude trust", "event", "needs-approval")
-	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(spec.ID, repo.Name, read, hash)}}
+	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(spec.ID, repo.Name, read, hash, nil)}}
 }
 
 func (d *Dispatcher) trustAudit(spec AgentSpec, repo Repository, commit, hash string) {

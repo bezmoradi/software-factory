@@ -88,7 +88,28 @@ func reviewSandbox(cfg PageConfig, host session.Host, hosts func() []string) (se
 	})
 }
 
-func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, repos *session.Repos, expected *session.Expected, logger shared.Logger) (*session.Reviews, error) {
+func reviewerAgents(cfg PageConfig, repos *session.Repos, logger shared.Logger) (*session.ReviewerAgents, error) {
+	if repos == nil {
+		return nil, nil
+	}
+	return session.NewReviewerAgents(session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger})
+}
+
+func (p engineParts) reviewerChecksPage() session.ReviewerChecksPage {
+	if p.reviews == nil {
+		return nil
+	}
+	return p.reviews
+}
+
+func (p engineParts) reviewerAgentsPage() session.ReviewerAgentsPage {
+	if p.agentFiles == nil {
+		return nil
+	}
+	return p.agentFiles
+}
+
+func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, repos *session.Repos, expected *session.Expected, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Reviews, error) {
 	if cfg.Review.Host == "" || source == nil || repos == nil {
 		return nil, nil
 	}
@@ -101,7 +122,7 @@ func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, sourc
 		return nil, err
 	}
 	client.WithKey(key)
-	return reviewsWith(base, cfg, reg, source, client, repos, gitHostsOf(repos), expected, logger)
+	return reviewsWith(base, cfg, reg, source, client, repos, gitHostsOf(repos), expected, agentFiles, logger)
 }
 
 const hostKeyFile = ".agent-host-key"
@@ -130,7 +151,7 @@ func writeHostKey(dir string) (string, error) {
 
 var newReviewSandbox = reviewSandbox
 
-func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, host session.Host, mains session.Mains, hosts func() []string, expected *session.Expected, logger shared.Logger) (*session.Reviews, error) {
+func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, host session.Host, mains session.Mains, hosts func() []string, expected *session.Expected, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Reviews, error) {
 	sb, err := newReviewSandbox(cfg, host, hosts)
 	if err != nil {
 		return nil, err
@@ -141,14 +162,18 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 		logger.Warn("development reviewer switched on; reviews run a fake, not Claude Code", "variable", "SF_DEV_REVIEWER")
 	}
 	rc := session.ReviewsConfig{
-		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
+		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Checks: state.Checks{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
 		Dir: cfg.Review.SeenAs, Command: command, Base: base, Show: reg.SetReview, Logger: logger,
 		Expected: expected, ShowSignIn: func(si session.SignIn) { reg.Notify(page.ReviewerFrame(si)) }, Audit: state.NewAudit(cfg.StateDir),
 	}
 	if checker, ok := host.(session.SignInChecker); ok {
 		rc.SignIns = checker
 	}
+	if agentFiles != nil {
+		rc.AgentFiles = agentFiles
+	}
 	rc.PluginCommit, rc.ClaudeCode = pinnedProvenance(cfg.Review.Dev != "")
+	rc.Minimum = reviewerMinimum(rc.PluginCommit)
 	if sb != nil {
 		rc.Sandbox = sb
 	} else {

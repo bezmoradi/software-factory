@@ -25,6 +25,7 @@ const (
 	maxDetail       = 20000
 	maxSummary      = 300
 	maxToolID       = 200
+	maxCommand      = 4000
 )
 
 type ringEntry struct {
@@ -405,15 +406,15 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 	case agent.ToolCall:
 		if ev.Tool != nil && ev.Tool.ID != "" {
-			b.recordLocked(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)})
+			b.recordLocked(withCommand(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)}, ev.Tool))
 			if done, ok := toolDone(ev.Tool.Status); ok {
-				b.recordLocked(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""})
+				b.recordLocked(withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""}, ev.Tool))
 			}
 		}
 	case agent.ToolUpdate:
 		if ev.Tool != nil && ev.Tool.ID != "" {
 			if done, ok := toolDone(ev.Tool.Status); ok {
-				b.recordLocked(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""})
+				b.recordLocked(withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""}, ev.Tool))
 			}
 		}
 	case agent.Permission:
@@ -457,6 +458,35 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 		b.recordLocked(Fields{"type": "command", "name": "error", "text": clip(text, MaxText), "failed": true})
 	}
+}
+
+func withCommand(f Fields, t *agent.Tool) Fields {
+	if t.Kind != "execute" || len(t.Input) == 0 {
+		return f
+	}
+	var in map[string]any
+	if json.Unmarshal(t.Input, &in) != nil {
+		return f
+	}
+	command := ""
+	switch c := in["command"].(type) {
+	case string:
+		command = c
+	case []any:
+		parts := make([]string, 0, len(c))
+		for _, p := range c {
+			s, ok := p.(string)
+			if !ok {
+				return f
+			}
+			parts = append(parts, s)
+		}
+		command = strings.Join(parts, " ")
+	}
+	if command != "" && len(command) <= maxCommand {
+		f["command"] = maskSecrets(command)
+	}
+	return f
 }
 
 func toolName(t *agent.Tool) string {

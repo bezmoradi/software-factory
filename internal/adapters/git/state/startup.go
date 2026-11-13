@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ type approvalJSON struct {
 	Agent      string    `json:"agent"`
 	Hash       string    `json:"hash"`
 	ApprovedAt time.Time `json:"approvedAt"`
+	Seen       []string  `json:"seen,omitempty"`
 }
 
 type approvalsJSON struct {
@@ -58,7 +60,11 @@ func (s Approvals) Load() ([]session.Approval, error) {
 		if !session.ValidApproval(a.Hash) || a.Hash == "" {
 			continue
 		}
-		out = append(out, session.Approval{Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt})
+		seen := slices.DeleteFunc(a.Seen, func(h string) bool { return h == "" || !session.ValidApproval(h) })
+		if len(seen) > session.MaxInstructionFiles {
+			seen = seen[:session.MaxInstructionFiles]
+		}
+		out = append(out, session.Approval{Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt, Seen: seen})
 	}
 	return out, nil
 }
@@ -67,7 +73,7 @@ func (s Approvals) Save(list []session.Approval) error {
 	defer s.lock()()
 	f := approvalsJSON{Version: 1, Approvals: make([]approvalJSON, 0, len(list))}
 	for _, a := range list {
-		f.Approvals = append(f.Approvals, approvalJSON{Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt.UTC()})
+		f.Approvals = append(f.Approvals, approvalJSON{Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt.UTC(), Seen: a.Seen})
 	}
 	return write(s.Dir, approvalsFile, f)
 }

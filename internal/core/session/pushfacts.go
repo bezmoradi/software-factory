@@ -33,7 +33,7 @@ func (p *Pushes) announcePushed(x *pushing, t PushTarget, facts gate.Facts, miss
 		if rec, ok := facts.Reviews[k]; ok {
 			r.Recorded = true
 			r.Passed = rec.State == review.Pass
-			r.Overridden = rec.State == review.Block && rec.Override != ""
+			r.Overridden = !r.Passed && rec.Override != ""
 		}
 		if en, ok := entries[k]; ok {
 			r.Since, r.PluginCommit, r.ClaudeCode, r.Models = en.Since, en.PluginCommit, en.ClaudeCode, slices.Clone(en.Models)

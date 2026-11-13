@@ -262,7 +262,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 			needs = true
 		case e.Record.State == review.Running:
 			return false
-		case Retryable(e):
+		case Retryable(e), Rerunnable(e):
 			needs = true
 		}
 	}

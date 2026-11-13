@@ -28,9 +28,14 @@ type Progress struct {
 	Built           bool
 }
 
-func Items(p Progress) []string {
+func Items(p Progress) ([]string, bool) {
 	var out []string
+	unapproved := false
 	say := func(s string) { out = append(out, s) }
+	ask := func(s string) {
+		say(s)
+		unapproved = true
+	}
 	feature := p.Effective.Profile() == Feature
 	if !p.FilesListed {
 		note := ""
@@ -49,9 +54,9 @@ func Items(p Progress) []string {
 	}
 	if p.Chosen == Feature && !p.ReqOk {
 		if p.ReqWasApproved {
-			say("the developer's approval of the requirements again, since they changed after they approved them")
+			ask("the developer's approval of the requirements again, since they changed after they approved them")
 		} else {
-			say("the developer's approval of the requirements, on the page")
+			ask("the developer's approval of the requirements, on the page")
 		}
 	}
 	if p.PlanBase != "" && !p.Built {
@@ -77,12 +82,12 @@ func Items(p Progress) []string {
 	case feature && !p.PlanOk:
 		switch {
 		case p.PlanWasApproved:
-			say("the developer's approval of the plan again, since it changed after they approved it")
+			ask("the developer's approval of the plan again, since it changed after they approved it")
 		case p.Chosen == Feature && !p.ReqOk:
-			say("the developer's approval of the plan, after they approve the requirements")
+			ask("the developer's approval of the plan, after they approve the requirements")
 		default:
-			say("the developer's approval of the plan, on the page")
+			ask("the developer's approval of the plan, on the page")
 		}
 	}
-	return out
+	return out, unapproved
 }

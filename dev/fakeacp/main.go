@@ -40,6 +40,8 @@ var (
 	prompt  json.RawMessage
 	servers []string
 	stdio   []stdioServer
+	cwd     string
+	calls   int
 )
 
 var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments"}
@@ -166,9 +168,11 @@ func main() {
 			reply(m.ID, map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{"promptCapabilities": map[string]any{"image": os.Getenv("FAKE_ACP_NO_IMAGES") == ""}}, "authMethods": []any{}})
 		case m.Method == "session/new":
 			var p struct {
+				Cwd        string        `json:"cwd"`
 				MCPServers []stdioServer `json:"mcpServers"`
 			}
 			_ = json.Unmarshal(m.Params, &p)
+			cwd = p.Cwd
 			for _, s := range p.MCPServers {
 				servers = append(servers, s.Name)
 			}
@@ -318,7 +322,47 @@ func splitNote(text string) (string, string) {
 	return note, rest
 }
 
+func scripted(id json.RawMessage, text string) bool {
+	lines := strings.Split(text, "\n")
+	said := false
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "say:") {
+			said = true
+		}
+	}
+	if !said {
+		return false
+	}
+	for _, l := range lines {
+		key, value, _ := strings.Cut(strings.TrimSpace(l), ":")
+		value = strings.TrimSpace(value)
+		calls++
+		callID := fmt.Sprintf("script-%d", calls)
+		switch key {
+		case "run":
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": value}})
+		case "edit":
+			file := filepath.Join(cwd, filepath.Clean("/"+value))
+			status := "completed"
+			if f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0); err != nil {
+				status = "failed"
+			} else {
+				_, _ = f.WriteString("\n")
+				_ = f.Close()
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Edit " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "say":
+			chunk(value + "\n")
+		}
+	}
+	reply(id, map[string]any{"stopReason": "end_turn"})
+	return true
+}
+
 func answer(id json.RawMessage, text string) bool {
+	if scripted(id, text) {
+		return true
+	}
 	if tool := toolNamed(text); tool != "" {
 		args := toolArgs(tool, text)
 		go func() {

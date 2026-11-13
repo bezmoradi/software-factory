@@ -196,6 +196,7 @@ class SfReviews extends HTMLElement {
     if (role.verdict) li.append(el('div', `small ${tone}`, text(role.verdict)))
     if (role.reason && !(role.state === 'failed' && role.reason.trim() === said)) li.append(el('div', 'small warn', text(role.reason)))
     if (overridden) li.append(el('div', 'small warn', `You overrode this verdict for commit ${shortSha(commit)}: ${text(role.override ?? '')}`))
+    else if (role.override) li.append(el('div', 'small warn', `You overrode an earlier blocking verdict of this reviewer for commit ${shortSha(commit)}, and it still allows this commit: ${text(role.override)}`))
     const capped = value.gate?.find(g => g.type === role.agent)?.capped
     if (capped && !overridden) li.append(el('div', 'small warn', `${text(role.name)} reached this project's round limit, so the engine doesn't start it again: you decide on the push.`))
     if (role.state === 'block' && !overridden && commit) li.append(this.#override(role, commit, value))

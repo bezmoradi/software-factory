@@ -47,6 +47,9 @@ type Config struct {
 	Audit          session.AuditPage
 	Logins         session.LoginPage
 	Forge          session.ForgeService
+	ReviewerAgents session.ReviewerAgentsPage
+	ReviewerChecks session.ReviewerChecksPage
+	Identity       session.IdentityPage
 }
 
 type Server struct {
@@ -136,7 +139,7 @@ var pageRoutes = map[string]bool{
 	"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true,
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
-	uploadRoute: true, testListRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -232,7 +235,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := int64(MaxPageBody)
-	if approveRoutes[r.URL.Path] {
+	if approveRoutes[r.URL.Path] || r.URL.Path == reviewerAgentsRoute {
 		limit = MaxApproveBody
 	}
 	body, bad := readObject(w, r, limit)
@@ -256,8 +259,20 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.testList(w, r, body)
 		return
 	}
+	if r.URL.Path == reviewerAgentsRoute {
+		s.reviewerAgents(w, body)
+		return
+	}
+	if r.URL.Path == reviewerChecksRoute {
+		s.reviewerChecks(w, r, body)
+		return
+	}
 	if r.URL.Path == expectRoute {
 		s.expect(w, body)
+		return
+	}
+	if r.URL.Path == identityRoute {
+		s.commitIdentity(w, body)
 		return
 	}
 	if r.URL.Path == loginRoute {

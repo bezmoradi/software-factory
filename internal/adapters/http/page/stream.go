@@ -45,6 +45,40 @@ type sessionJSON struct {
 	Status       string      `json:"status,omitempty"`
 	WaitingFor   string      `json:"waitingFor,omitempty"`
 	Queued       int         `json:"queued,omitempty"`
+	Unbacked     []turnJSON  `json:"unbacked,omitempty"`
+}
+
+type claimMarkJSON struct {
+	Kind  string `json:"kind"`
+	Quote string `json:"quote"`
+	File  string `json:"file,omitempty"`
+	Why   string `json:"why"`
+}
+
+type turnJSON struct {
+	TurnID string          `json:"turnId"`
+	Epoch  string          `json:"epoch"`
+	Marks  []claimMarkJSON `json:"marks"`
+	Notes  []string        `json:"notes"`
+}
+
+func unbackedOf(list []session.TurnMarks) []turnJSON {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]turnJSON, 0, len(list))
+	for _, t := range list {
+		marks := make([]claimMarkJSON, 0, len(t.Marks))
+		for _, m := range t.Marks {
+			marks = append(marks, claimMarkJSON{Kind: string(m.Kind), Quote: m.Quote, File: m.File, Why: m.Why})
+		}
+		notes := t.Notes
+		if notes == nil {
+			notes = []string{}
+		}
+		out = append(out, turnJSON{TurnID: t.TurnID, Epoch: t.Epoch, Marks: marks, Notes: notes})
+	}
+	return out
 }
 
 type roleJSON struct {
@@ -121,6 +155,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Forge:  forgeOf(s.Forge),
 			SignIn: signInOf(s.SignIn),
 			State:  s.State, Status: s.Status, WaitingFor: s.WaitingFor, Queued: s.Queued,
+			Unbacked: unbackedOf(s.Unbacked),
 		})
 	}
 	return out

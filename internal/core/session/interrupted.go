@@ -3,10 +3,12 @@ package session
 import "time"
 
 type runStamp struct {
-	interruptedAt time.Time
-	agent         string
-	engine        string
-	workflow      string
+	interruptedAt  time.Time
+	agent          string
+	engine         string
+	workflow       string
+	reviewer       string
+	reviewerPlugin string
 }
 
 func (d *Dispatcher) stampOf(agent string, interrupted time.Time) runStamp {
@@ -14,14 +16,19 @@ func (d *Dispatcher) stampOf(agent string, interrupted time.Time) runStamp {
 	if d.cfg.Versions != nil {
 		s.agent, s.workflow = d.cfg.Versions(agent)
 	}
+	s.reviewer, s.reviewerPlugin = d.reviewerStamp()
 	return s
 }
 
 func (d *Dispatcher) woke(r *run) {
+	now := d.stampOf(r.spec.ID, time.Time{})
 	d.mu.Lock()
-	r.stamp = d.stampOf(r.spec.ID, time.Time{})
+	changed := versionsChanged(r.spec.Name, r.stamp, now)
+	r.stamp = now
+	sid := r.sid
 	d.mu.Unlock()
 	d.saveRuns()
+	d.showVersions(sid, changed)
 }
 
 func (d *Dispatcher) MarkStopping() int {

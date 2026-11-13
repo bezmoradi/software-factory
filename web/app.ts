@@ -1,5 +1,6 @@
 import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts'
 import { claudeLogin, signInState, type SignInState } from './components/login.ts'
+import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { button, el, emit, fileLink, shown, visible, visibleCommand } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
@@ -7,7 +8,7 @@ import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeL
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
 import { placeMenu, sessionState, warnings } from './components/overview.ts'
-import type { AgentInfo, Catalog, CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, StreamEvent, TeamView, WorkflowEvent } from './types.ts'
+import type { AgentInfo, Catalog, CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
@@ -18,6 +19,8 @@ import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
 import './components/reviews.ts'
+import './components/reviewer-agents.ts'
+import './components/reviewer-checks.ts'
 import { when } from './components/push-panel.ts'
 import './components/forge-panel.ts'
 import './components/setup.ts'
@@ -74,7 +77,7 @@ interface AuditEntry {
 }
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
-const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten' }
+const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'reviewer-agent': 'Reviewer agent file' }
 const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
 const HIDDEN_RESULTS = ['sending', 'posting']
 const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
@@ -285,6 +288,7 @@ function onEvent(ev: StreamEvent) {
     state.stream = ev.stream
     projectsAt = 0
     void markSignIn()
+    void markIdentity()
     updateSessions(ev.sessions)
     for (const s of sessions.values()) requestReplay(s, true)
     pruneTabs()
@@ -312,6 +316,11 @@ function onEvent(ev: StreamEvent) {
       toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} wasn't added`, description: ev.message ? visible(ev.message) : '', tone: 'bad', timeout: 0 })
     }
     return void loadProjects(true)
+  }
+  if (ev.type === 'versions') {
+    const known = sessions.get(ev.sid)
+    toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with new versions.`, description: visible(ev.text), tone: 'info', timeout: 0 })
+    return
   }
   if (ev.type === 'dropped') {
     const known = sessions.get(ev.sid)
@@ -526,7 +535,7 @@ function paint() {
   const shown = list.map(x => ({ ...x.info, busy: working(x), waiting: waitingOf(x) }))
   byId<HTMLElementTagNameMap['sf-overview']>('overview').sessions = shown
   const setup = byId<HTMLElementTagNameMap['sf-setup']>('setup')
-  setup.state = { signIn: signIns, projects: projectCount, sessions: list.length }
+  setup.state = { signIn: signIns, projects: projectCount, sessions: list.length, identity: commitIdentity === undefined ? null : commitIdentity !== null }
   byId('recent').classList.toggle('setup-only', !setup.hidden && !list.length)
   byId('home').hidden = !!s
   byId('welcome').hidden = current.key !== 'overview'
@@ -589,6 +598,7 @@ function paint() {
     const notes = state.connected ? warnings(s.info, list.map(x => x.info)) : []
     byId('warnings').replaceChildren(...notes.map(t => el('p', '', visible(t))))
     byId('warnings').hidden = !notes.length
+    s.view.marks(s.info.unbacked, s.epoch)
     paintCheckpoint(s)
     paintStall(s)
     const off = stageOff(s)
@@ -982,14 +992,16 @@ function paintChecks(s: Session) {
   byId('size-note').textContent = gate?.sizeNote ?? ''
   byId('size-note').hidden = !gate?.sizeNote
   const doc = gate?.planDoc
-  const from = gate?.committed ? ` Read from commit ${shortSha(gate.head)} by the engine.` : ''
+  const from = (d: WorkflowDoc) => gate?.committed && !d.reported ? ` Read from commit ${shortSha(d.commit || gate.head)} by the engine.` : ''
   const plan = doc && gate?.effective === 'feature' ? doc : null
-  byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: `${plan.clipped ? 'The plan is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from}`.trim(), path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '' }
+  byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: `${plan.clipped ? 'The plan is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(plan)}`.trim(), path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '', commit: plan.commit ?? '', approvedAt: plan.approvedAt ?? '', reported: !!plan.reported, onBase: !!plan.onBase }
   const reqs = gate?.size === 'feature' && gate.requirements?.hash ? gate.requirements : null
-  byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: from.trim(), path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '' }
+  byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: from(reqs).trim(), path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase }
   paintExceptions(s)
   const project = projectFor(s)
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 3, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
+  byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
+  byId<HTMLElementTagNameMap['sf-reviewer-checks']>('reviewer-checks').view = gate ? { disabled, review: `${s.info.review?.commit ?? ''}:${s.info.review?.running ? 'running' : 'done'}` } : null
 }
 
 function projectFor(s: Session): Project | null {
@@ -1156,6 +1168,7 @@ let projectPaths: string[] = []
 let projectList: Project[] = []
 let projectCount: number | null = null
 let signIns: SignInState | null = null
+let commitIdentity: CommitIdentity | null | undefined
 
 function paintCrumbs(s: Session) {
   const cwd = s.info.cwd || ''
@@ -1326,6 +1339,8 @@ async function send(text: string, images: string[] = [], s = current(), pressed 
   if (!answer.ok) {
     const why = answer.body.message
     say(typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.')
+    const action = identityAction(answer.body)
+    if (action) toast({ id: 'identity-needed', title: 'The session didn’t wake.', description: 'Set the name and email agents commit with first.', tone: 'bad', timeout: 0, action })
     return false
   }
   if (asleep) {
@@ -1521,6 +1536,23 @@ async function markSignIn() {
   const state = await signInState(api)
   if (!state) return
   signIns = state
+  schedulePaint()
+}
+
+function openIdentity() {
+  editIdentity(api, commitIdentity ?? null, id => {
+    commitIdentity = id
+    toast({ id: 'identity', title: 'Saved the name and email agents commit with.', description: `${visible(id.name)} <${visible(id.email)}>`, tone: 'ok' })
+    schedulePaint()
+  })
+}
+
+function identityAction(body: Record<string, unknown>): Toast['action'] {
+  return body.error === 'no commit identity' ? { label: 'Set name and email', run: openIdentity } : undefined
+}
+
+async function markIdentity() {
+  commitIdentity = await identityState(api)
   schedulePaint()
 }
 
@@ -1784,7 +1816,7 @@ byId('menu-readonly').addEventListener('click', async () => {
 async function wakeSession(s: Session) {
   const name = starterNames.get(s.info.agent ?? '') ?? 'The agent'
   const { ok, body } = await withConsent(name, 'the session', consent => api('/api/wake', { sid: s.sid, ...consent }))
-  toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs ? 0 : undefined })
+  toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs || identityAction(body) ? 0 : undefined, action: identityAction(body) })
 }
 
 async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
@@ -2008,6 +2040,7 @@ byId('welcome').addEventListener('click', e => {
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
   if (start === 'login') void claudeLogin(api, () => void markSignIn())
+  if (start === 'identity') openIdentity()
   if (start === 'session' || start === 'add') go('projects')
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
@@ -2048,7 +2081,7 @@ projects.addEventListener('sf-dispatch', async e => {
     projects.failed()
     const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
     const trust = body.error === 'not trusted'
-    toast({ id: `start:${path}`, title: trust ? `Claude Code doesn't trust ${baseName(path)} yet` : `No session started in ${baseName(path)}`, description: visible(text), tone: trust ? 'warn' : 'bad', timeout: 0 })
+    toast({ id: `start:${path}`, title: trust ? `Claude Code doesn't trust ${baseName(path)} yet` : `No session started in ${baseName(path)}`, description: visible(text), tone: trust ? 'warn' : 'bad', timeout: 0, action: identityAction(body) })
     return void loadProjects(true)
   }
   byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)

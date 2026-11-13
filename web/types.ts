@@ -32,6 +32,21 @@ export interface SessionInfo {
   push?: SessionPush
   forge?: SessionForge[]
   signIn?: SignIn
+  unbacked?: TurnMarks[]
+}
+
+export interface ClaimMark {
+  kind: 'tests' | 'build' | 'file'
+  quote: string
+  file?: string
+  why: string
+}
+
+export interface TurnMarks {
+  turnId: string
+  epoch: string
+  marks: ClaimMark[]
+  notes: string[]
 }
 
 export type SignInMethod = 'subscription' | 'api-key' | 'gateway' | 'bedrock' | 'vertex' | 'not-signed-in' | 'unknown'
@@ -47,7 +62,7 @@ export interface SignIn {
 
 export interface StartupFile {
   path: string
-  place: 'worktree' | 'clone'
+  place: 'worktree' | 'clone' | 'above'
   link: boolean
   target?: string
   size: number
@@ -55,6 +70,14 @@ export interface StartupFile {
   content: string
   clipped: boolean
   uncommitted: boolean
+  hidden?: boolean
+  marks?: StartupMark[]
+}
+
+export interface StartupMark {
+  line: number
+  what: string
+  text: string
 }
 
 export interface StartupApproval {
@@ -63,6 +86,11 @@ export interface StartupApproval {
   commit: string
   hash: string
   files: StartupFile[]
+  instructions?: StartupFile[]
+  unchanged?: number
+  walk?: string[]
+  notes?: string[]
+  skipped?: string[]
 }
 
 export interface Needs {
@@ -338,6 +366,12 @@ export interface DroppedEvent {
   count?: number
 }
 
+export interface VersionsEvent {
+  type: 'versions'
+  sid: string
+  text: string
+}
+
 export interface SupervisorEvent {
   type: 'supervisor'
   state: string
@@ -531,6 +565,10 @@ export interface WorkflowDoc {
   changed?: boolean
   clipped?: boolean
   previous?: string
+  commit?: string
+  approvedAt?: string
+  reported?: boolean
+  onBase?: boolean
 }
 
 export interface WorkflowEvent extends Stamped {
@@ -587,6 +625,10 @@ export interface PlanApproval {
   refused?: string
   note?: string
   previous?: string
+  commit?: string
+  approvedAt?: string
+  reported?: boolean
+  onBase?: boolean
 }
 
 export interface ProjectAgents {
@@ -721,7 +763,7 @@ export interface ReviewerEvent extends SignIn {
   type: 'reviewer'
 }
 
-export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
+export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | VersionsEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
 
 export interface SessionGrant {
   token: string

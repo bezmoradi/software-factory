@@ -67,3 +67,27 @@ func previousRound(entries map[review.Key]ReviewEntry, branch, agent, head strin
 	}
 	return out
 }
+
+func acceptedRound(entries map[review.Key]ReviewEntry, branch, agent string) *ReviewEntry {
+	var accepted, blocked *ReviewEntry
+	for k, e := range entries {
+		if k.Branch != branch || k.Agent != agent || e.Record.State == review.Running {
+			continue
+		}
+		c := e
+		switch {
+		case e.Record.Override != "":
+			if accepted == nil || e.StartedAt.After(accepted.StartedAt) {
+				accepted = &c
+			}
+		case e.Record.State == review.Block:
+			if blocked == nil || e.StartedAt.After(blocked.StartedAt) {
+				blocked = &c
+			}
+		}
+	}
+	if accepted == nil || blocked != nil && blocked.StartedAt.After(accepted.StartedAt) {
+		return nil
+	}
+	return accepted
+}

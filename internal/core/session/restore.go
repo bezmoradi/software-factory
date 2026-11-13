@@ -24,6 +24,8 @@ type SavedRun struct {
 	AgentVersion   string
 	EngineVersion  string
 	WorkflowCommit string
+	ReviewerClaude string
+	ReviewerPlugin string
 }
 
 type RunStore interface {
@@ -42,7 +44,8 @@ func (d *Dispatcher) saveRuns() {
 	for sid, r := range d.runs {
 		out = append(out, SavedRun{SID: sid, ID: r.id, Agent: r.spec.ID, Repo: r.repo, RepoPath: r.repoPath, Base: r.base, Name: r.name,
 			Branch: r.branch, Cwd: r.cwd, Display: r.display, StartedAt: r.at, InterruptedAt: r.stamp.interruptedAt,
-			AgentVersion: r.stamp.agent, EngineVersion: r.stamp.engine, WorkflowCommit: r.stamp.workflow})
+			AgentVersion: r.stamp.agent, EngineVersion: r.stamp.engine, WorkflowCommit: r.stamp.workflow,
+			ReviewerClaude: r.stamp.reviewer, ReviewerPlugin: r.stamp.reviewerPlugin})
 	}
 	d.mu.Unlock()
 	for i := range out {
@@ -73,7 +76,8 @@ func (d *Dispatcher) Restore() int {
 		}
 		r := &run{spec: spec, repo: s.Repo, repoPath: s.RepoPath, base: s.Base, name: s.Name, branch: s.Branch, cwd: s.Cwd,
 			sid: s.SID, id: s.ID, display: s.Display, at: s.StartedAt,
-			stamp: runStamp{interruptedAt: s.InterruptedAt, agent: s.AgentVersion, engine: s.EngineVersion, workflow: s.WorkflowCommit}}
+			stamp: runStamp{interruptedAt: s.InterruptedAt, agent: s.AgentVersion, engine: s.EngineVersion, workflow: s.WorkflowCommit,
+				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
 		d.mu.Lock()
 		known := d.runs[s.SID] != nil
 		if !known {
@@ -100,7 +104,7 @@ func (d *Dispatcher) Restore() int {
 			d.mu.Lock()
 			r := d.runs[sid]
 			d.mu.Unlock()
-			d.cfg.Work.Begin(sid, r.repo, r.spec.Method == MethodPlugin, r.typ)
+			d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 		}
 	}
 	if len(sids) > 0 {

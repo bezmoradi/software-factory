@@ -8,10 +8,13 @@ import (
 	"strings"
 )
 
+const KnackpackFeature = ".knackpack/feature.json"
+
 var (
-	specDir     = regexp.MustCompile(`^specs/[\w.-]{1,100}$`)
-	specInDiff  = regexp.MustCompile(`^(specs/[\w.-]{1,100})/spec\.md$`)
-	featureKeys = []string{"feature_directory", "featureDirectory", "feature_dir", "directory", "path"}
+	knackpackDir = regexp.MustCompile(`^\.knackpack/[a-z0-9][a-z0-9-]{0,63}$`)
+	specDir      = regexp.MustCompile(`^specs/[\w.-]{1,100}$`)
+	specInDiff   = regexp.MustCompile(`^(specs/[\w.-]{1,100})/spec\.md$`)
+	featureKeys  = []string{"feature_directory", "featureDirectory", "feature_dir", "directory", "path"}
 )
 
 func SpecFeatureDir(featureJSON []byte, changed []string) string {
@@ -43,8 +46,26 @@ func SpecFeatureDir(featureJSON []byte, changed []string) string {
 	return ""
 }
 
+func KnackpackFeatureDir(featureJSON []byte) string {
+	if len(featureJSON) == 0 || len(featureJSON) > 65536 {
+		return ""
+	}
+	var v map[string]any
+	if json.Unmarshal(featureJSON, &v) != nil {
+		return ""
+	}
+	s, ok := v["feature_directory"].(string)
+	if !ok || !knackpackDir.MatchString(s) {
+		return ""
+	}
+	return s
+}
+
 func StepArtifacts(adapter AdapterID, steps []Step, dir string) []string {
 	a, ok := Adapters[adapter]
+	if ok && dir == "" {
+		dir = a.AnyFolder
+	}
 	if !ok || dir == "" {
 		return nil
 	}

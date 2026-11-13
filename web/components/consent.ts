@@ -1,7 +1,7 @@
 import { button, el, unspoofed, visible } from '../lib/dom.ts'
 import { scrolledText } from './cards.ts'
 import { shortSha } from '../lib/format.ts'
-import type { Needs, SignIn, StartupApproval, StartupFile } from '../types.ts'
+import type { Needs, SignIn, StartupApproval, StartupFile, StartupMark } from '../types.ts'
 
 function size(n: number): string {
   return n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KiB`
@@ -12,10 +12,14 @@ function fileItem(f: StartupFile): HTMLLIElement {
   const head = el('div', 'row')
   const path = el('code', '', visible(f.place === 'clone' ? `(clone folder) ${f.path}` : f.path))
   head.append(path, el('span', 'spacer'))
-  if (f.uncommitted) head.append(el('span', 'tag warn', f.place === 'clone' ? 'outside the worktree' : 'uncommitted'))
+  if (f.hidden) head.append(el('span', 'tag warn', 'hidden characters'))
+  if (f.marks?.length) head.append(el('span', 'tag warn', `${f.marks.length} risky ${f.marks.length === 1 ? 'line' : 'lines'}`))
+  if (f.uncommitted) head.append(el('span', 'tag warn', f.place === 'worktree' ? 'uncommitted' : 'outside the worktree'))
   li.append(head)
+  if (f.marks?.length) li.append(markList(f.marks))
   const notes: string[] = []
-  if (f.place === 'clone') notes.push("In the clone's own folder, where Claude Code reads a worktree's local settings. It comes from no commit.")
+  if (f.place === 'clone') notes.push("In the clone's own folder, where Claude Code reads a worktree's local settings, and its skills when the worktree has none. It comes from no commit.")
+  else if (f.place === 'above') notes.push('In a folder above the worktree, which every session shares and any session’s agent can write. Claude Code loads it at start. It comes from no commit.')
   else if (f.uncommitted) notes.push('Differs from that commit: it was changed or added in the worktree.')
   if (f.link) {
     li.append(el('p', 'small warn', `A symbolic link to ${visible(f.target ?? '')}. Approving it approves what it points to now; a change there asks again.`))
@@ -30,6 +34,43 @@ function fileItem(f: StartupFile): HTMLLIElement {
   }
   li.append(el('p', 'small muted', notes.join(' ')))
   return li
+}
+
+function markList(marks: StartupMark[]): HTMLUListElement {
+  const list = el('ul', 'consent-marks small')
+  for (const m of marks) {
+    const li = el('li', 'warn', m.line > 0 ? `Line ${m.line}: ${visible(m.what)}` : visible(m.what))
+    if (m.text) li.append(' ', el('code', '', visible(unspoofed(m.text))))
+    list.append(li)
+  }
+  return list
+}
+
+function plain(items: string[] | undefined): string {
+  return (items ?? []).map(visible).join('; ')
+}
+
+function instructionSection(a: StartupApproval): Node[] {
+  const files = a.instructions ?? []
+  const unchanged = a.unchanged ?? 0
+  if (!files.length && !unchanged && !a.notes?.length) return []
+  const d = el('details', 'consent-info')
+  const marked = files.filter(f => f.hidden || f.marks?.length).length
+  d.append(el('summary', 'small', `Instruction files: ${files.length} new or changed${marked ? `, ${marked} marked` : ''} (information, not approved)`))
+  if (files.length) {
+    const list = el('ul', 'list consent-files')
+    for (const f of files) list.append(fileItem(f))
+    d.append(list)
+  } else {
+    d.append(el('p', 'small', 'None is new or changed since your last approval.'))
+  }
+  const notes: string[] = []
+  if (unchanged) notes.push(`${unchanged} more ${unchanged === 1 ? 'is' : 'are'} unchanged since your last approval and not shown.`)
+  if (a.notes?.length) notes.push(`Not all instruction files are shown: ${plain(a.notes)}.`)
+  if (a.skipped?.length) notes.push(`The search skips these folders: ${plain(a.skipped)}.`)
+  for (const n of notes) d.append(el('p', 'small muted', n))
+  const why = el('p', 'small muted consent-why', 'Instruction files steer the agent but grant it no permission, so they are shown to read, not approved: a change to one alone doesn’t ask again.')
+  return [why, d]
 }
 
 function dialog(title: string, parts: Node[], yes: string, tone: 'primary' | 'danger'): Promise<boolean> {
@@ -58,9 +99,11 @@ export function approveStartup(a: StartupApproval, name: string): Promise<boolea
   const list = el('ul', 'list consent-files')
   for (const f of a.files) list.append(fileItem(f))
   return dialog(`Approve ${visible(name)}'s start-up files`, [
-    el('p', 'small', `${visible(name)} loads these files from ${visible(a.repo)} when it starts. They can change what it may do without asking you: permissions, hooks, MCP servers, plugins, agents, commands and endpoints. The worktree is at commit ${shortSha(a.commit)}. Characters that change text direction or hide are shown as ⟨U+…⟩, other invisible and control characters as \\u{…}, and long runs of blank lines or spaces as ⏎ ×n and ␠ ×n.`),
+    el('p', 'small', `${visible(name)} loads these files from ${visible(a.repo)} when it starts. They can change what it may do without asking you: permissions, hooks, MCP servers, plugins, agents, commands and endpoints. The worktree is at commit ${shortSha(a.commit)}. Characters that change text direction or hide are shown as ⟨U+…⟩, other invisible and control characters as \\u{…}, and long runs of blank lines or spaces as ⏎ ×n and ␠ ×n. Risky lines are marked for you to read; marking blocks nothing.`),
     list,
+    ...(a.walk?.length ? [el('p', 'small warn', `The search of the worktree's subfolders stopped early, so a skill folder or instruction file further in isn't shown, and approving doesn't cover it: ${plain(a.walk)}.${a.skipped?.length ? ` It also skips ${plain(a.skipped)}.` : ''}`)] : []),
     el('p', 'small muted', 'Approving lets this exact set start now and later. Any change to any of them asks again.'),
+    ...instructionSection(a),
   ], 'Approve and start', 'primary')
 }
 

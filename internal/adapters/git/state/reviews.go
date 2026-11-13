@@ -27,6 +27,7 @@ type reviewJSON struct {
 	Verdict      string    `json:"verdict,omitempty"`
 	Channel      string    `json:"channel,omitempty"`
 	Override     string    `json:"override,omitempty"`
+	Shaped       string    `json:"shaped,omitempty"`
 	Base         string    `json:"base,omitempty"`
 	Since        string    `json:"since,omitempty"`
 	Covers       string    `json:"covers,omitempty"`
@@ -66,7 +67,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 			Key:  review.Key{Commit: r.Commit, Branch: r.Branch, Agent: r.Agent},
 			Role: review.Role(r.Role),
 			Record: review.Record{Provider: r.Provider, State: review.State(r.State), Verdict: r.Verdict,
-				Channel: review.Channel(r.Channel), Override: r.Override},
+				Channel: review.Channel(r.Channel), Override: r.Override, Shaped: r.Shaped},
 			Base: r.Base, Since: r.Since, Covers: r.Covers, Message: r.Message, Reason: r.Reason, CostUSD: max(r.CostUSD, 0), StartedAt: r.StartedAt, EndedAt: r.EndedAt,
 			Clipped: r.Clipped, Auto: r.Auto, PluginCommit: matching(r.PluginCommit, commitID), ClaudeCode: matching(r.ClaudeCode, versionText),
 			Models: matchingAll(r.Models, modelName, maxModels), Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
@@ -82,7 +83,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 		f.Reviews = append(f.Reviews, reviewJSON{
 			Commit: e.Key.Commit, Branch: e.Key.Branch, Agent: e.Key.Agent, Role: string(e.Role),
 			Provider: e.Record.Provider, State: string(e.Record.State), Verdict: e.Record.Verdict,
-			Channel: string(e.Record.Channel), Override: e.Record.Override,
+			Channel: string(e.Record.Channel), Override: e.Record.Override, Shaped: e.Record.Shaped,
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, Turns: e.Turns, Denied: e.Denied,
 			Failure: e.Failure, Attempt: laterAttempt(e.Attempt),

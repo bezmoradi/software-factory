@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,8 +43,7 @@ func (r *Reviews) review(ctx context.Context, t ReviewTarget, e ReviewEntry, dir
 		return e, "token-in-reply"
 	}
 	text := strings.TrimSpace(out.text)
-	e.Message = clip(text, maxReviewText)
-	e.Clipped = len(text) > maxReviewText
+	e.Message, e.Clipped = keptReply(text)
 	if out.failed || res.Code != 0 {
 		why := "Claude Code reported an error"
 		if out.subtype != "" && out.subtype != "success" {
@@ -74,6 +74,10 @@ func (r *Reviews) review(ctx context.Context, t ReviewTarget, e ReviewEntry, dir
 		e.Reason = "it tried to read outside the review folder (" + strings.Join(out.outside, ", ") + "), so the code may have steered it; counts as no verdict"
 		kind = "denied-read"
 	case v.State != review.Pass:
+	case e.Record.Shaped != "":
+		e.Record.State, e.Record.Channel = review.Unknown, review.ShapedPass
+		e.Reason = e.Record.Shaped + ", so its pass counts as no verdict"
+		kind = "verdict-shaped"
 	case out.turns == 1:
 		e.Record.State, e.Record.Channel = review.Unknown, review.Shallow
 		e.Reason = "it passed in one turn without reading a file, so it counts as no verdict"
@@ -82,9 +86,65 @@ func (r *Reviews) review(ctx context.Context, t ReviewTarget, e ReviewEntry, dir
 		e.Record.State, e.Record.Channel = review.Unknown, review.SeverePass
 		e.Reason = "it passed, but its report lists a Critical or High finding, so it counts as no verdict"
 		kind = "severe-pass"
+	case review.SevereCount(out.text):
+		e.Record.State, e.Record.Channel = review.Unknown, review.SeverePass
+		e.Reason = "it passed, but its findings line counts a Critical, High or blocking finding, so it counts as no verdict"
+		kind = "severe-pass"
 	case out.turns < 0:
 		kind = "turns-unknown"
 	}
 	e.EndedAt = r.cfg.Now()
 	return e, kind
+}
+
+func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
+	if r.cfg.AgentFiles == nil {
+		return ""
+	}
+	var files []AgentFileOut
+	for _, p := range plans {
+		if u, ok := r.cfg.AgentFiles.Uploaded(p.q.Agent); ok && !slices.ContainsFunc(files, func(f AgentFileOut) bool { return f.Name == AgentFileOf(u.ID) }) {
+			files = append(files, u.Out())
+		}
+	}
+	host, ok := r.cfg.Host.(AgentFileHost)
+	if !ok {
+		if len(files) > 0 {
+			return "this engine can't write agent files into the reviewer container"
+		}
+		return ""
+	}
+	pctx, cancel := context.WithTimeout(ctx, reviewCheck)
+	defer cancel()
+	if err := host.PutAgents(pctx, files, r.cfg.AgentFiles.Files()); err != nil {
+		r.cfg.Logger.Warn("review", "event", "agent-files-not-written", "uploaded", len(files))
+		if len(files) > 0 {
+			return clip("the engine couldn't write the uploaded agent file into the reviewer container: "+hostMessage(err), 400)
+		}
+	}
+	return ""
+}
+
+func keptReply(text string) (string, bool) {
+	if len(text) <= maxReviewText {
+		return text, false
+	}
+	lines := strings.Split(text, "\n")
+	var ending []string
+	for i := len(lines) - 1; i >= 0 && len(ending) < 3; i-- {
+		l := strings.TrimSpace(lines[i])
+		if l == "" {
+			continue
+		}
+		bare := strings.ToLower(strings.TrimLeft(l, "*_`#> "))
+		if !strings.HasPrefix(bare, "knackpack-findings/") && !strings.HasPrefix(bare, "knackpack-verdict/") {
+			break
+		}
+		ending = append([]string{clip(l, 200)}, ending...)
+	}
+	if len(ending) == 0 {
+		return clip(text, maxReviewText), true
+	}
+	tail := "\n" + clippedMiddle + "\n" + strings.Join(ending, "\n")
+	return strings.TrimSpace(clip(text, maxReviewText-len(tail))) + tail, true
 }

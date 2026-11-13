@@ -304,6 +304,10 @@ sf-check .round { white-space: nowrap; font-variant-numeric: tabular-nums; }
 sf-check .row { flex-wrap: wrap; }
 sf-check .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 sf-project-agents .field-row { flex-wrap: wrap; }
+sf-reviewer-agents { display: block; margin-top: .8rem; }
+sf-reviewer-agents .field-row { flex-wrap: wrap; margin-top: .4rem; }
+sf-reviewer-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
+sf-reviewer-agents .list .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 sf-project-agents .check-row { align-items: center; gap: .4rem; margin-top: .4rem; }
 sf-project-agents .check-row input { flex: none; margin: 0; accent-color: var(--accent); }
 sf-project-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
@@ -340,7 +344,7 @@ sf-push-panel .flagged li + li { margin-top: .4rem; }
 :is(sf-changes, sf-approval) pre.diff { margin: .3rem 0 .6rem; padding: .4rem .5rem; max-height: 24rem; overflow: auto; white-space: pre; border: 1px solid var(--line); border-radius: 4px; }
 sf-reviews .reviews-head { align-items: center; margin-bottom: .5rem; }
 sf-reviews .reviews-head .label { margin-bottom: 0; }
-sf-reviews .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
+sf-reviews .review-message, sf-reviewer-checks .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
 .path { list-style: none; margin: 0; padding: 0; }
 .path > li { position: relative; display: grid; grid-template-columns: 1rem minmax(0, 1fr); column-gap: .65rem; padding-bottom: .85rem; }
 .path > li:not(:last-child)::before { content: ''; position: absolute; left: calc(.5rem - 1px); top: 1.35rem; bottom: .15rem; width: 2px; background: var(--line); }
@@ -622,6 +626,13 @@ ul.changes code { color: var(--soft); }
 ul.changes .added code { color: var(--added-ink); }
 ul.changes .deleted code { color: var(--deleted-ink); }
 .timeline > li.reset { text-align: center; }
+.timeline > li.unbacked { margin-top: -.6rem; padding: .4rem .7rem; border-left: 3px solid var(--warn); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--warn) 7%, var(--card)); font-size: .875rem; }
+.unbacked-head { margin: 0 0 .25rem; color: var(--warn-ink); font-weight: 600; }
+.unbacked ul { margin: 0; padding-left: 1.1rem; }
+.unbacked li + li { margin-top: .25rem; }
+.unbacked q { overflow-wrap: anywhere; }
+.unbacked .why, .unbacked-note { display: block; margin: 0; color: var(--soft); }
+.unbacked ul + .unbacked-note { margin-top: .25rem; }
 .prompt.task .body { color: var(--soft); font-size: .875rem; }
 
 .projects > li.boxlist-row:not(:has(.project-sessions:hover)):hover { background: var(--hover); }
@@ -838,6 +849,10 @@ dialog.consent .consent-files { margin: .5rem 0; padding: 0; list-style: none; }
 dialog.consent .consent-file + .consent-file { margin-top: .75rem; }
 dialog.consent .consent-content { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); border: 1px solid var(--line); border-radius: 4px; }
 dialog.consent .consent-actions { gap: .5rem; margin-top: .75rem; }
+dialog.consent .consent-marks { margin: .35rem 0 0; padding-left: 1.1rem; }
+dialog.consent .consent-marks code { overflow-wrap: anywhere; }
+dialog.consent .consent-why { margin: .75rem 0 0; padding-top: .5rem; border-top: 1px solid var(--line); }
+dialog.consent .consent-info > summary { cursor: pointer; }
 dialog.login { width: min(34rem, calc(100vw - 2rem)); max-height: calc(100dvh - 8vh - 1.5rem); margin-block: 8vh auto; }
 dialog.login .login-row { margin-top: .75rem; padding-top: .6rem; border-top: 1px solid var(--line); }
 dialog.login .login-row h3 { margin: 0; }
@@ -854,6 +869,12 @@ dialog.login .login-panel p { margin: 0; }
 dialog.login .login-panel > a.button { justify-self: center; }
 dialog.login .login-panel > form { justify-self: stretch; }
 dialog.login a.button[aria-disabled="true"] { opacity: .55; pointer-events: none; }
+dialog.identity { width: min(32rem, calc(100vw - 2rem)); margin-block: 8vh auto; }
+dialog.identity p { margin: .35rem 0; }
+dialog.identity .identity-form { display: grid; gap: .6rem; margin-top: .6rem; }
+dialog.identity .identity-form label { display: grid; gap: .2rem; }
+dialog.identity .identity-form .textbox { box-sizing: border-box; min-width: 0; min-height: max(28px, 1.6rem); padding: 0 .6rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+dialog.identity .identity-form p.warn:empty { display: none; }
 sf-forge-panel { display: block; margin-bottom: 1.6rem; }
 body.side-full #side > sf-forge-panel { padding-top: 1.25rem; border-top: 1px solid var(--line); }
 sf-forge-panel .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }

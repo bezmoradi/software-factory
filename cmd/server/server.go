@@ -43,6 +43,7 @@ type PageConfig struct {
 	AgentBinary  string
 	DevACPAgent  string
 	DevGitCA     string
+	DevDocs      bool
 	Sandbox      SandboxConfig
 	Install      InstallConfig
 	Review       ReviewConfig
@@ -91,6 +92,9 @@ func ParsePageConfig(getenv func(string) string) (PageConfig, error) {
 	}
 	cfg.StateDir = dir
 	if err := parseStarts(&cfg, getenv); err != nil {
+		return cfg, err
+	}
+	if err := parseDocs(&cfg, getenv); err != nil {
 		return cfg, err
 	}
 	if cfg.Install, err = parseInstall(getenv); err != nil {
@@ -159,6 +163,8 @@ type engineParts struct {
 	pushes     *session.Pushes
 	work       *session.Work
 	forges     *session.Forges
+	agentFiles *session.ReviewerAgents
+	identity   *session.Identities
 }
 
 func (p engineParts) pushing() session.PushStarter {
@@ -264,17 +270,23 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		source = pins
 	}
 	expected := &session.Expected{Store: state.NewExpectations(cfg.StateDir)}
-	reviews, err := reviewer(base, cfg, reg, source, repos, expected, logger)
+	agentFiles, err := reviewerAgents(cfg, repos, logger)
+	if err != nil {
+		return engineParts{}, err
+	}
+	reviews, err := reviewer(base, cfg, reg, source, repos, expected, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
 	agents := session.Agents()
 	if cfg.DevACPAgent != "" {
-		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent))
+		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent, cfg.DevDocs))
 		logger.Warn("development ACP agent switched on", "variable", "SF_DEV_ACP_AGENT")
 	}
+	docs := docsInRepo(cfg, logger)
+	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
-	work, err := workflowParts(cfg, reg, repos, reviews, pins, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, logger)
+	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -301,13 +313,16 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Versions:     agentVersions,
 		Note:         reg.NoteFor("restart"),
 		Audit:        state.NewAudit(cfg.StateDir),
+		Identity:     identity,
+		DocsInRepo:   docs,
 		Logger:       logger,
 	})
+	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace}})
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
 		repos.OnHosts(func() { d.Recheck(base) })
 	}
-	pushes, err := pusher(sends, cfg, reg, d, repos, reviews, work, logger)
+	pushes, err := pusher(sends, cfg, reg, d, repos, reviews, work, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -316,10 +331,10 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		return engineParts{}, err
 	}
 	commentAfterPush(pushes, forged)
-	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged}, nil
+	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity}, nil
 }
 
-func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, logger shared.Logger) (*session.Pushes, error) {
+func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
 	if repos == nil {
 		return nil, nil
 	}
@@ -335,6 +350,9 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 	if work != nil {
 		pc.Work = work
 		pc.AutoFindings = work.AutoFindings
+	}
+	if agentFiles != nil {
+		pc.RoleAgents = agentFiles
 	}
 	if reviews == nil {
 		return session.NewPushes(pc)
@@ -414,7 +432,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		_ = pageLn.Close()
 		return err
 	}
-	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging()}, reg, logger)
+	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities()}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err

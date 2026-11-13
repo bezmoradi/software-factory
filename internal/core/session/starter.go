@@ -28,6 +28,7 @@ const (
 	findAttempts = 5
 	launchMode   = "default"
 	PushServer   = "software-factory"
+	DocsSettings = `{"env":{"KNACKPACK_DOCS":"repo"}}`
 	NotRunReason = "this engine has no sandbox check configured, so this session started without one"
 )
 
@@ -94,6 +95,8 @@ type DispatcherConfig struct {
 	Versions     func(agent string) (version, workflowCommit string)
 	Note         func(sid, text string)
 	Audit        Audit
+	Identity     *Identities
+	DocsInRepo   bool
 	Logger       shared.Logger
 }
 
@@ -233,9 +236,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	}
 	repo := repos[i]
 	if d.cfg.Work != nil {
-		if err := d.cfg.Work.Check(repo.Name, spec.Method == MethodPlugin, q.Type); err != nil {
+		if err := d.cfg.Work.Check(repo.Name, spec.Knackpack, q.Type); err != nil {
 			return Started{}, err
 		}
+	}
+	id := d.cfg.Identity.Current()
+	if !id.Set() {
+		return Started{}, noIdentity()
 	}
 	if err := d.claimStart(); err != nil {
 		return Started{}, err
@@ -255,7 +262,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	short := randomHex(4)
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
 	r.stamp = d.stampOf(spec.ID, time.Time{})
-	cwd, err := d.cfg.Host.AddWorktree(ctx, repo.Name, r.name, r.branch, base)
+	cwd, err := d.cfg.Host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
 	if err != nil {
 		d.cfg.Logger.Warn("dispatch", "event", "worktree-failed")
 		return Started{}, explained(conflict("worktree"), "agent-host couldn't create the session's worktree: "+hostMessage(err))
@@ -281,7 +288,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		cancel()
 	}
 	if d.cfg.Work != nil && r.sid != "" {
-		d.cfg.Work.Begin(r.sid, r.repo, spec.Method == MethodPlugin, q.Type)
+		d.cfg.Work.Begin(r.sid, r.repo, spec.Knackpack, q.Type)
 	}
 	if err != nil {
 		return Started{SID: r.sid, ID: r.id}, err
@@ -349,6 +356,9 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 		} else {
 			d.cfg.Logger.Warn("dispatch", "event", "workflow-plugin-missing")
 		}
+	}
+	if d.cfg.DocsInRepo {
+		argv = append(argv, "--settings="+DocsSettings)
 	}
 	argv = append(argv, "--permission-mode="+launchMode, "--session-id", sid)
 	if r.display != "" {
@@ -615,6 +625,10 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 	if running {
 		return explained(conflict("not stopped"), "This session is still running.")
 	}
+	id := d.cfg.Identity.Current()
+	if !id.Set() {
+		return noIdentity()
+	}
 	if err := d.claimWake(); err != nil {
 		return err
 	}
@@ -631,8 +645,15 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.mu.Unlock()
 		return err
 	}
+	if err := d.cfg.Host.SetIdentity(ctx, r.repo, r.name, id); err != nil {
+		d.mu.Lock()
+		d.woken = time.Time{}
+		d.mu.Unlock()
+		d.cfg.Logger.Warn("wake", "event", "identity-not-set")
+		return explained(conflict("identity"), "agent-host couldn't set the name and email agents commit with in the session's worktree, so the session didn't wake: "+hostMessage(err))
+	}
 	if d.cfg.Work != nil && !d.cfg.Work.Has(sid) {
-		d.cfg.Work.Begin(sid, r.repo, r.spec.Method == MethodPlugin, r.typ)
+		d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 	}
 	if r.spec.Method == MethodPlugin {
 		res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
@@ -760,6 +781,7 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
 		rt.Rounds = w.Rounds(sid, t.Name)
 	}
+	d.reviewGiven(&rt, sid, t)
 	return d.cfg.Reviews.Start(ctx, rt)
 }
 

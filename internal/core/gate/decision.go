@@ -40,23 +40,25 @@ type Answer struct {
 }
 
 type Facts struct {
-	Type     workflow.WorkType
-	Level    level.Result
-	Main     string
-	Required []workflow.Requirement
-	Offers   map[string]review.Offer
-	Reviews  map[review.Key]review.Record
-	Items    []string
-	Answer   *Answer
-	Now      time.Time
-	Capped   map[string]int
+	Type          workflow.WorkType
+	Level         level.Result
+	Main          string
+	Required      []workflow.Requirement
+	Offers        map[string]review.Offer
+	Reviews       map[review.Key]review.Record
+	Items         []string
+	Answer        *Answer
+	Now           time.Time
+	Capped        map[string]int
+	NeedsApproval bool
 }
 
 type Decision struct {
-	Result    Result
-	Reason    string
-	Missing   []string
-	Exception string
+	Result        Result
+	Reason        string
+	Missing       []string
+	Exception     string
+	NeedsApproval bool
 }
 
 var (
@@ -104,6 +106,12 @@ func CappedItem(agent string, rounds int) string {
 }
 
 func Push(r Request, f Facts) Decision {
+	d := decide(r, f)
+	d.NeedsApproval = f.NeedsApproval && len(d.Missing) > 0
+	return d
+}
+
+func decide(r Request, f Facts) Decision {
 	refuse := func(why string) Decision { return Decision{Result: Refused, Reason: why} }
 	if !fullCommit.MatchString(r.Commit) {
 		return refuse("the commit to push isn't a full commit id")

@@ -26,14 +26,14 @@ type startupWalk struct {
 	bytes int
 }
 
-func (Startup) Read(clone, worktree, branch string, entries []session.StartupEntry) (session.StartupRead, error) {
+func (Startup) Read(clone, worktree, branch string, scan session.StartupScan) (session.StartupRead, error) {
 	commit, err := Reviews{}.Head(clone, branch)
 	if err != nil {
 		return session.StartupRead{}, fmt.Errorf("the session branch's commit can't be read: %s", cause(err))
 	}
 	w := &startupWalk{}
 	roots := map[session.StartupPlace]string{session.InWorktree: worktree, session.InClone: clone}
-	for _, e := range entries {
+	for _, e := range scan.Entries {
 		dir, ok := roots[e.Place]
 		if !ok || dir == "" {
 			return session.StartupRead{}, fmt.Errorf("no folder for %s", e.Place)
@@ -42,10 +42,30 @@ func (Startup) Read(clone, worktree, branch string, entries []session.StartupEnt
 			return session.StartupRead{}, err
 		}
 	}
+	out := session.StartupRead{Commit: commit}
+	if scan.Walk && worktree != "" {
+		t, err := walkTree(worktree, scan)
+		if err != nil {
+			return session.StartupRead{}, err
+		}
+		for _, e := range t.nested {
+			if err := w.entry(worktree, e); err != nil {
+				return session.StartupRead{}, err
+			}
+		}
+		out.Walk = t.stops
+		out.Instructions, out.Notes = readInstructions(worktree, t.found)
+		above, notes := readAbove(scan.Above, scan.Instructions.Above)
+		out.Instructions, out.Notes = append(out.Instructions, above...), append(out.Notes, notes...)
+		if err := markCommitted(clone, commit, out.Instructions); err != nil {
+			return session.StartupRead{}, err
+		}
+	}
 	if err := markCommitted(clone, commit, w.files); err != nil {
 		return session.StartupRead{}, err
 	}
-	return session.StartupRead{Commit: commit, Files: w.files}, nil
+	out.Files = w.files
+	return out, nil
 }
 
 func (w *startupWalk) entry(dir string, e session.StartupEntry) error {

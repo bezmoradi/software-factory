@@ -1,5 +1,6 @@
 import { button, el, emit, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
 import { diffText, lineDiff } from '../lib/diff.ts'
+import { shortSha } from '../lib/format.ts'
 import type { HoldSetting, PlanApproval, ProjectAgents } from '../types.ts'
 import './markdown.ts'
 
@@ -60,7 +61,19 @@ class SfApproval extends HTMLElement {
     const reqs = v.kind === 'requirements'
     const what = reqs ? 'the requirements' : 'the plan'
     this.#field.setAttribute('aria-label', `What the agent should change in ${what}`)
-    const status = v.approved ? `You approved this version of ${what}.` : v.changed ? `${reqs ? 'The requirements' : 'The plan'} changed after you approved ${reqs ? 'them' : 'it'}. Read ${reqs ? 'them' : 'it'} and approve again.` : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : 'Implement starts once you read the plan and approve it.'
+    const What = reqs ? 'The requirements' : 'The plan'
+    const them = reqs ? 'them' : 'it'
+    const status = v.onBase
+      ? `${What} ${reqs ? 'are' : 'is'} from an earlier task, already on the base branch, so ${reqs ? 'they aren’t' : 'it isn’t'} approvable here. The engine counts only text this session’s own commits added or changed${v.changed ? ', so your earlier approval no longer counts' : ''}.`
+      : v.reported
+      ? `${What} ${reqs ? 'aren’t' : 'isn’t'} committed on the session’s branch: this is the text the agent reported. The engine counts an approval only of committed text${v.changed ? ', so your earlier approval no longer counts' : ''}.`
+      : v.approved
+        ? v.approvedAt ? `You approved this version of ${what}, read from commit ${shortSha(v.approvedAt)}.` : `You approved this version of ${what}.`
+        : v.changed
+          ? v.approvedAt && v.commit
+            ? `${What} in commit ${shortSha(v.commit)} ${reqs ? 'differ' : 'differs'} from the version you approved in commit ${shortSha(v.approvedAt)}, so that approval no longer counts. Read ${them} and approve again.`
+            : `${What} changed after you approved ${them}. Read ${them} and approve again.`
+          : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : 'Implement starts once you read the plan and approve it.'
     const body = el('div', 'reply')
     const text = el('sf-markdown', 'body')
     text.exact = true
