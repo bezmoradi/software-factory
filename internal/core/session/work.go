@@ -234,6 +234,8 @@ type WorkPage interface {
 	SetHold(path string, h HoldSettings) error
 	AllowFile(sid, path, reason string) error
 	AskRemove(sid, path string) error
+	AllowCommit(sid, commit string, field CommitField, reason string) error
+	AskRewrite(sid, commit string, field CommitField) error
 	EditHold(sid, top string, paths []string) string
 }
 
@@ -255,6 +257,7 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
+	cfg.Audit = masking(cfg.Audit)
 	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}}, nil
 }
 
@@ -698,9 +701,9 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
 		for _, f := range g.scan.flags {
-			v := FlagView{Flag: f, Allowed: allowedFlag(f, ws.allowed)}
+			v := FlagView{Flag: f, Shown: f.maskedPath(), Allowed: allowedFlag(f, ws.allowed)}
 			g.flags = append(g.flags, v)
-			flagged = append(flagged, workflow.Flag{Path: Escape([]byte(f.Path)), Why: f.Why, Allowed: v.Allowed})
+			flagged = append(flagged, workflow.Flag{Path: f.Label(), Why: f.Why, Allowed: v.Allowed})
 		}
 	}
 	g.items = workflow.Items(workflow.Progress{
@@ -737,7 +740,7 @@ func lfsRefusal(paths []string) string {
 	}
 	shown := make([]string, 0, 5)
 	for _, p := range paths[:min(len(paths), 5)] {
-		shown = append(shown, Escape([]byte(p)))
+		shown = append(shown, Escape([]byte(maskLines(p, true))))
 	}
 	more := ""
 	if len(paths) > 5 {
@@ -900,7 +903,7 @@ func (w *Work) EditHold(sid, top string, paths []string) string {
 	return ""
 }
 
-const implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push."
+const implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push. Each commit message says what changed and why."
 
 func nextStep(g gathered, plan bool) string {
 	steps := g.eff.Steps
@@ -993,7 +996,10 @@ func (w *Work) View(sid string) (GateView, error) {
 	v.Define = (feature && g.reqOk) || (!feature && g.docs.req != nil)
 	reviewers, missing := w.reviewerStates(g)
 	v.Reviewers = reviewers
-	v.Flagged, v.FlagsRead, v.LFS = g.flags, g.flagsRead, g.scan.lfs
+	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
+	for _, p := range g.scan.lfs {
+		v.LFS = append(v.LFS, maskLines(p, true))
+	}
 	for _, r := range reviewers {
 		v.Handoff = v.Handoff || r.Capped
 	}
@@ -1208,11 +1214,45 @@ func (w *Work) flagged(sid, path string) (gathered, Flag, error) {
 		return g, Flag{}, err
 	}
 	for _, f := range g.flags {
-		if f.Path == path {
+		if f.Commit == "" && f.Path == path {
 			return g, f.Flag, nil
 		}
 	}
 	return g, Flag{}, explained(conflict("not flagged"), "That file isn't flagged on this branch any more.")
+}
+
+func (w *Work) flaggedCommit(sid, commit string, field CommitField) (gathered, Flag, error) {
+	g, err := w.current(sid)
+	if err != nil {
+		return g, Flag{}, err
+	}
+	for _, f := range g.flags {
+		if f.Commit != "" && f.Commit == commit && f.Field == field {
+			return g, f.Flag, nil
+		}
+	}
+	return g, Flag{}, explained(conflict("not flagged"), "That commit's "+FieldWords[field]+" isn't flagged on this branch any more.")
+}
+
+func (w *Work) allow(sid string, f Flag) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.sessions[sid]
+	if s == nil {
+		return explained(conflict("not started here"), "Only a session this engine started has flagged items here.")
+	}
+	if s.allowed == nil {
+		s.allowed = map[string]map[string]bool{}
+	}
+	set := s.allowed[f.key()]
+	if set == nil {
+		set = map[string]bool{}
+		s.allowed[f.key()] = set
+	}
+	for _, v := range f.Versions {
+		set[v] = true
+	}
+	return nil
 }
 
 func (w *Work) AllowFile(sid, path, reason string) error {
@@ -1227,24 +1267,9 @@ func (w *Work) AllowFile(sid, path, reason string) error {
 	if f.Full || len(f.Versions) == 0 {
 		return explained(conflict("versions"), "This file has more than 20 flagged versions on the branch, the most the gate lists, so it can't be allowed. Take it out of the commits that hold it.")
 	}
-	w.mu.Lock()
-	s := w.sessions[sid]
-	if s == nil {
-		w.mu.Unlock()
-		return explained(conflict("not started here"), "Only a session this engine started has flagged files here.")
+	if err := w.allow(sid, f); err != nil {
+		return err
 	}
-	if s.allowed == nil {
-		s.allowed = map[string]map[string]bool{}
-	}
-	set := s.allowed[f.Path]
-	if set == nil {
-		set = map[string]bool{}
-		s.allowed[f.Path] = set
-	}
-	for _, v := range f.Versions {
-		set[v] = true
-	}
-	w.mu.Unlock()
 	w.persist(sid)
 	if w.cfg.Audit != nil {
 		e := AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: g.t.Name, Branch: g.t.Branch, Commit: g.head, By: ByPage, Kind: AuditAllowFile,
@@ -1265,7 +1290,7 @@ func (w *Work) AskRemove(sid, path string) error {
 	if err != nil {
 		return err
 	}
-	text := "The software factory's push gate flagged the file " + strconv.Quote(Escape([]byte(f.Path))) + " on this branch: " + f.Why + ". " +
+	text := "The software factory's push gate flagged the file " + strconv.Quote(f.Label()) + " on this branch: " + f.Why + ". " +
 		"Remove it from the branch: take it out of every commit on this branch that holds it, since deleting it in a new commit still pushes the earlier ones, " +
 		"and add it to .gitignore so it isn't committed again. Change nothing else, don't push, and tell me when it's done."
 	if err := w.cfg.Tell(sid, text); err != nil {
@@ -1275,6 +1300,61 @@ func (w *Work) AskRemove(sid, path string) error {
 		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
 	}
 	w.cfg.Logger.Info("flag", "event", "asked", "kind", string(f.Kind))
+	return nil
+}
+
+func (w *Work) AllowCommit(sid, commit string, field CommitField, reason string) error {
+	clean := gate.Reason(reason)
+	if clean == "" {
+		return explained(invalid("reason"), "Allowing a flagged commit needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
+	}
+	g, f, err := w.flaggedCommit(sid, commit, field)
+	if err != nil {
+		return err
+	}
+	if err := w.allow(sid, f); err != nil {
+		return err
+	}
+	w.persist(sid)
+	if w.cfg.Audit != nil {
+		e := AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: g.t.Name, Branch: g.t.Branch, Commit: g.head, By: ByPage, Kind: AuditAllowCommit,
+			Result: "allowed", Reason: "the developer allowed the " + FieldWords[f.Field] + " of commit " + f.Commit + ", flagged because " + f.Why, Blobs: []string{f.Commit}, PersonReason: clean}
+		if err := w.cfg.Audit.Append(e); err != nil {
+			w.cfg.Logger.Warn("flag", "event", "audit-not-written")
+		}
+	}
+	w.cfg.Logger.Info("flag", "event", "allowed", "kind", "commit", "field", string(f.Field))
+	return nil
+}
+
+func (w *Work) AskRewrite(sid, commit string, field CommitField) error {
+	if w.cfg.Tell == nil {
+		return explained(conflict("no session"), "This engine can't send the session a message.")
+	}
+	_, f, err := w.flaggedCommit(sid, commit, field)
+	if err != nil {
+		return err
+	}
+	how := "reword its message"
+	switch f.Field {
+	case FieldAuthorName, FieldAuthorEmail:
+		how = "set its author to the name and email you commit with"
+	case FieldCommitterName, FieldCommitterEmail:
+		how = "commit it again with the committer name and email you commit with"
+	case FieldHeaders:
+		how = "commit it again without the extra headers"
+	}
+	text := "The software factory's push gate flagged the " + FieldWords[f.Field] + " of commit " + f.Commit + " on this branch: " + f.Why + ". " +
+		"Rewrite that commit so its " + FieldWords[f.Field] + " no longer holds it: " + how + ", and keep every file as it is. " +
+		"Rewrite only commits that aren't on the remote branch yet, since the engine never forces a push; if this one is already there, don't rewrite it and tell me, since only the developer can allow it then. " +
+		"Don't repeat the flagged text anywhere, change nothing else, don't push, and tell me when it's done."
+	if err := w.cfg.Tell(sid, text); err != nil {
+		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
+			return e
+		}
+		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
+	}
+	w.cfg.Logger.Info("flag", "event", "asked-rewrite", "field", string(f.Field))
 	return nil
 }
 

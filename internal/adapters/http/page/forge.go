@@ -33,13 +33,17 @@ type forgeJSON struct {
 	At     int64  `json:"at"`
 
 	Matches []matchJSON `json:"matches"`
+
+	SecretAt   string `json:"secretAt,omitempty"`
+	SecretLine string `json:"secretLine,omitempty"`
 }
 
 func forgeOf(list []session.ForgeView) []forgeJSON {
 	out := make([]forgeJSON, 0, len(list))
 	for _, v := range list {
 		out = append(out, forgeJSON{Card: v.Card, Kind: string(v.Kind), State: v.State, Title: v.Title, Body: v.Body, Head: v.Head, Base: v.Base,
-			Host: v.Host, Repo: v.Repo, Number: v.Number, URL: v.URL, Reason: v.Reason, Draft: v.Draft, Asked: millis(v.Asked), At: millis(v.At), Matches: matchesOf(v.Matches)})
+			Host: v.Host, Repo: v.Repo, Number: v.Number, URL: v.URL, Reason: v.Reason, Draft: v.Draft, Asked: millis(v.Asked), At: millis(v.At), Matches: matchesOf(v.Matches),
+			SecretAt: v.SecretAt, SecretLine: v.SecretLine})
 	}
 	return out
 }
@@ -121,11 +125,15 @@ func (s *Server) forgeAnswer(w http.ResponseWriter, body map[string]any) {
 	if _, given := body["draft"]; !given {
 		okDraft = true
 	}
-	if !keysWithin(body, "sid", "card", "approve", "draft") || !okSID || sid == "" || len(sid) > 80 || !okCard || !pushCard.MatchString(card) || !okApprove || !okDraft {
+	confirmed, okConfirmed := body["confirmed"].(bool)
+	if _, given := body["confirmed"]; !given {
+		okConfirmed = true
+	}
+	if !keysWithin(body, "sid", "card", "approve", "draft", "confirmed") || !okSID || sid == "" || len(sid) > 80 || !okCard || !pushCard.MatchString(card) || !okApprove || !okDraft || !okConfirmed {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
-	err := s.cfg.Forge.Answer(context.Background(), sid, card, approve, draft)
-	s.logger.Info("forge answer", "approve", approve, "draft", draft, "ok", err == nil)
+	err := s.cfg.Forge.Answer(context.Background(), sid, card, approve, draft, confirmed)
+	s.logger.Info("forge answer", "approve", approve, "draft", draft, "confirmed", confirmed, "ok", err == nil)
 	reply(w, err, http.StatusAccepted)
 }

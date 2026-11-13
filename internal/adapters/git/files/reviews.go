@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"syscall"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -67,6 +69,9 @@ func (v Reviews) Write(repo, base, head string, extra []session.SnapshotFile) (s
 	if err := writeChange(dir); err != nil {
 		return session.Snapshot{}, fmt.Errorf("the review's change.diff can't be written: %s", cause(err))
 	}
+	if err := writeCommits(repo, dir, base, head); err != nil {
+		return session.Snapshot{}, fmt.Errorf("the review's %s can't be written: %s", session.CommitsFile, cause(err))
+	}
 	folders := []string{dir, filepath.Join(dir, "base"), filepath.Join(dir, "head")}
 	if len(extra) > 0 {
 		if err := writeEarlier(dir, extra); err != nil {
@@ -81,6 +86,48 @@ func (v Reviews) Write(repo, base, head string, extra []session.SnapshotFile) (s
 	}
 	ok = true
 	return session.Snapshot{ID: id, Path: dir}, nil
+}
+
+func writeCommits(repoPath, dir, base, head string) error {
+	text, err := with(repoPath, func(r *repo) (string, error) {
+		commits, err := newCommits(r, head, base)
+		if err != nil {
+			return "", err
+		}
+		unlisted := max(len(commits)-session.MaxListedCommits, 0)
+		commits = commits[:len(commits)-unlisted]
+		if unlisted > 0 && len(commits)+unlisted > maxScanCommits {
+			unlisted = -1
+		}
+		list := make([]session.PushedCommit, 0, len(commits))
+		for _, commit := range slices.Backward(commits) {
+			c, _, err := pushedCommit(r, commit.SHA)
+			if err != nil {
+				return "", err
+			}
+			list = append(list, session.PushedCommit{SHA: c.SHA, Message: c.Message})
+		}
+		return session.CommitsText(list, unlisted), nil
+	})
+	if err != nil {
+		return err
+	}
+	return writeNew(filepath.Join(dir, session.CommitsFile), text)
+}
+
+func writeNew(name, text string) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(text)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Chmod(name, 0o644)
 }
 
 func (v Reviews) Remove(id string) error {

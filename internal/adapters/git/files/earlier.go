@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"syscall"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
@@ -22,18 +21,7 @@ func writeEarlier(dir string, extra []session.SnapshotFile) error {
 		if !earlierPath.MatchString(f.Name) || len(f.Text) > maxEarlier {
 			return errors.New("an earlier round's file has a name or size the engine doesn't write")
 		}
-		out, err := os.OpenFile(filepath.Join(dir, filepath.FromSlash(f.Name)), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
-		if err != nil {
-			return err
-		}
-		_, err = out.WriteString(f.Text)
-		if cerr := out.Close(); err == nil {
-			err = cerr
-		}
-		if err != nil {
-			return err
-		}
-		if err := os.Chmod(filepath.Join(dir, filepath.FromSlash(f.Name)), 0o644); err != nil {
+		if err := writeNew(filepath.Join(dir, filepath.FromSlash(f.Name)), f.Text); err != nil {
 			return err
 		}
 	}

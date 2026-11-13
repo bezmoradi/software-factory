@@ -146,6 +146,7 @@ func NewDispatcher(reg *Registry, cfg DispatcherConfig) *Dispatcher {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
+	cfg.Audit = masking(cfg.Audit)
 	return &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}}
 }
 

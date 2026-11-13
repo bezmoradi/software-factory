@@ -78,10 +78,11 @@ func (e *RPCError) Error() string {
 }
 
 type Config struct {
-	Cwd           string
-	MCPServers    map[string]json.RawMessage
-	ClientVersion string
-	Logger        shared.Logger
+	Cwd                   string
+	MCPServers            map[string]json.RawMessage
+	DeveloperInstructions string
+	ClientVersion         string
+	Logger                shared.Logger
 }
 
 var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -178,6 +179,16 @@ func threadParams(cfg Config) (threadStartParams, error) {
 			p.Config = map[string]json.RawMessage{}
 		}
 		p.Config["mcp_servers."+name] = raw
+	}
+	if cfg.DeveloperInstructions != "" {
+		raw, err := json.Marshal(cfg.DeveloperInstructions)
+		if err != nil {
+			return p, fmt.Errorf("%w: %w", ErrConfig, err)
+		}
+		if p.Config == nil {
+			p.Config = map[string]json.RawMessage{}
+		}
+		p.Config["developer_instructions"] = raw
 	}
 	return p, nil
 }

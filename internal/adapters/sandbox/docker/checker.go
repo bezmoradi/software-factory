@@ -22,6 +22,7 @@ const (
 	probeFor     = 60 * time.Second
 	statusFor    = 10 * time.Second
 	maxStatus    = 64 << 10
+	maxRefusals  = 512 << 10
 	addrsPerHost = 2
 	maxParts     = 6
 )
@@ -38,6 +39,7 @@ type Config struct {
 	Dir      string
 	Proxy    string
 	Status   string
+	Side     string
 	Allow    []string
 	Deny     []string
 	Outside  string
@@ -61,6 +63,9 @@ func New(cfg Config) (*Checker, error) {
 		if _, _, err := net.SplitHostPort(a); err != nil {
 			return nil, fmt.Errorf("sandbox check: %q must be host:port", a)
 		}
+	}
+	if cfg.Side == "" {
+		return nil, errors.New("sandbox check: needs the egress side the probe's requests arrive on")
 	}
 	if cfg.Outside == "" || covered(cfg.Allow, cfg.Outside) {
 		return nil, fmt.Errorf("sandbox check: the host outside the allowlist, %q, must be one the allowlist doesn't name", cfg.Outside)
@@ -94,8 +99,12 @@ func (c *Checker) Check(ctx context.Context) level.Observation {
 	repos := c.repoHosts()
 	failed = append(failed, Uncovered(c.cfg.Allow, c.cfg.Deny, repos)...)
 	cfg := c.probeConfig(ctx, repos)
+	cfg.Marker = newMarker()
 	results, notRun := c.probe(ctx, cfg)
 	failed = append(failed, results...)
+	if len(failed) == 0 && notRun == "" {
+		failed = append(failed, c.confirm(ctx, cfg)...)
+	}
 	switch {
 	case len(failed) > 0:
 		return observation(level.CheckFailed, failed)
@@ -292,7 +301,7 @@ func (c *Checker) probeConfig(ctx context.Context, repos []string) ProbeConfig {
 }
 
 func Args(cfg ProbeConfig) []string {
-	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front}
+	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker}
 }
 
 func (c *Checker) probe(ctx context.Context, cfg ProbeConfig) ([]string, string) {

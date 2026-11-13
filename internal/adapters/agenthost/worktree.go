@@ -51,7 +51,7 @@ func (s *Server) git(ctx context.Context, repo string, args ...string) (string, 
 	defer cancel()
 	full := append([]string{"-c", "safe.directory=" + repo, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", repo}, args...)
 	cmd := exec.CommandContext(ctx, s.cfg.Git, full...)
-	cmd.Env = Environment(s.cfg.Environ, nil, map[string]string{"GIT_TERMINAL_PROMPT": "0"})
+	cmd.Env = Environment(s.cfg.Environ, nil, map[string]string{"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": os.DevNull, "GIT_CONFIG_NOSYSTEM": "1"})
 	cmd.Dir = s.cfg.Workspace
 	ownGroup(cmd)
 	cmd.Cancel = func() error { return signalGroup(cmd.Process.Pid, true) }

@@ -206,6 +206,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if !absolute(cfg.Dir) {
 		return nil, errors.New("reviews: the reviews folder must be an absolute path")
 	}
+	cfg.Audit = masking(cfg.Audit)
 	if cfg.Plugin == "" {
 		cfg.Plugin = "knackpack"
 	}

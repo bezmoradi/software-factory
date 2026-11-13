@@ -84,7 +84,7 @@ func reviewSandbox(cfg PageConfig, host session.Host, hosts func() []string) (se
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
 		Host: host, Probe: []string{cfg.AgentBinary, "sandbox-probe"}, Dir: cfg.Review.SeenAs,
-		Proxy: cfg.Review.Proxy, Status: sb.Status, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts,
+		Proxy: cfg.Review.Proxy, Status: sb.Status, Side: ReviewersSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts,
 	})
 }
 

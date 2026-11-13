@@ -73,6 +73,7 @@ func (c *Client) onUpdate(params json.RawMessage) {
 		if id, ok := stringField(fields, "currentModeId"); ok && id != "" {
 			c.mode.current = id
 			c.emitLocked(agent.Event{Type: agent.Mode, Mode: id})
+			c.modeReportedLocked()
 		}
 	case "config_option_update":
 		c.onConfigOptionsLocked(fields["configOptions"])

@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	maxReviewModels  = 4
-	maxReviewDenials = 20
+	maxReviewModels    = 4
+	maxReviewDenials   = 20
+	maxBraceExpansions = 8
 )
 
 var (
@@ -61,7 +62,62 @@ func instructionRead(tool string, v any) bool {
 	if pattern, _ := in["pattern"].(string); tool == "Glob" && pattern != "" && pattern != target && !strings.HasPrefix(pattern, "/") && !strings.HasPrefix(pattern, "~") {
 		target = strings.TrimSuffix(target, "/") + "/" + pattern
 	}
+	if instructionPath(target) {
+		return true
+	}
+	if tool != "Glob" {
+		return false
+	}
+	targets, ok := braceExpansions(target)
+	if !ok {
+		return false
+	}
+	for _, t := range targets {
+		if !instructionPath(t) {
+			return false
+		}
+	}
+	return true
+}
+
+func instructionPath(target string) bool {
 	return target != "" && !strings.Contains(target, "..") && instructionTarget.MatchString(target)
+}
+
+func braceExpansions(s string) ([]string, bool) {
+	if strings.ContainsRune(s, '\\') {
+		return nil, false
+	}
+	out := []string{""}
+	for {
+		start, end := strings.IndexByte(s, '{'), strings.IndexByte(s, '}')
+		if start < 0 {
+			if end >= 0 {
+				return nil, false
+			}
+			for i := range out {
+				out[i] += s
+			}
+			return out, true
+		}
+		if end < start {
+			return nil, false
+		}
+		alts := strings.Split(s[start+1:end], ",")
+		if len(alts) < 2 || len(out)*len(alts) > maxBraceExpansions || strings.ContainsRune(s[start+1:end], '{') {
+			return nil, false
+		}
+		next := make([]string, 0, len(out)*len(alts))
+		for _, prefix := range out {
+			for _, alt := range alts {
+				if alt == "" {
+					return nil, false
+				}
+				next = append(next, prefix+s[:start]+alt)
+			}
+		}
+		out, s = next, s[end+1:]
+	}
 }
 
 func (r *Reviews) audited(t ReviewTarget, e ReviewEntry) {

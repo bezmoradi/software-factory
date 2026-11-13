@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,7 +22,10 @@ const (
 	dialFor       = 3 * time.Second
 	answerFor     = 10 * time.Second
 	maxReason     = 64
+	MarkerHeader  = "Software-Factory-Probe"
 )
+
+var markerPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type ProbeConfig struct {
 	Proxy    string
@@ -29,6 +33,7 @@ type ProbeConfig struct {
 	Addrs    []string
 	Outside  string
 	Front    string
+	Marker   string
 	Dial     time.Duration
 }
 
@@ -133,7 +138,7 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target); err != nil {
+	if _, err := io.WriteString(conn, connectLine(target, cfg.Marker)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
@@ -149,6 +154,14 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 		return Result{OK: true, Detail: "the egress proxy refused " + target + " (" + reasonWord(string(body)) + ")"}
 	}
 	return Result{Detail: fmt.Sprintf("the egress proxy answered %d for %s, not a refusal", resp.StatusCode, target)}
+}
+
+func connectLine(target, marker string) string {
+	line := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
+	if marker != "" {
+		line += MarkerHeader + ": " + marker + "\r\n"
+	}
+	return line + "\r\n"
 }
 
 type counted struct {
@@ -172,7 +185,7 @@ func fronted(ctx context.Context, d Dialer, cfg ProbeConfig, name string) Result
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", front, front); err != nil {
+	if _, err := io.WriteString(conn, connectLine(front, cfg.Marker)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	br := bufio.NewReader(conn)
@@ -225,6 +238,7 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	addrs := fs.String("addr", "", "comma-separated ip:port addresses of git hosts")
 	outside := fs.String("outside", "", "a host outside the allowlist")
 	front := fs.String("front", "", "an allowed host to send other TLS names through")
+	marker := fs.String("marker", "", "the engine's marker for this run, sent with every request to the proxy")
 	if err := fs.Parse(args); err != nil {
 		return ProbeConfig{}, err
 	}
@@ -234,7 +248,10 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	if _, _, err := net.SplitHostPort(*proxy); err != nil {
 		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -proxy must be host:port")
 	}
-	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front}
+	if *marker != "" && !markerPattern.MatchString(*marker) {
+		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -marker must be 32 lowercase hex digits")
+	}
+	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker}
 	for _, a := range cfg.Addrs {
 		if _, err := netip.ParseAddrPort(a); err != nil {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: %q isn't ip:port", a)

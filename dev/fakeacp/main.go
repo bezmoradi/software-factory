@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -172,14 +173,39 @@ func main() {
 				servers = append(servers, s.Name)
 			}
 			stdio = p.MCPServers
-			reply(m.ID, map[string]any{"sessionId": session, "modes": map[string]any{"currentModeId": "yolo", "availableModes": []any{
+			created := map[string]any{"sessionId": session, "modes": map[string]any{"currentModeId": mode, "availableModes": []any{
 				map[string]any{"id": "default", "name": "Default"}, map[string]any{"id": "yolo", "name": "YOLO"},
-			}}})
+			}}}
+			if offersConfigMode() {
+				created["configOptions"] = configOptions()
+			}
+			reply(m.ID, created)
+		case m.Method == "session/set_config_option":
+			var p struct {
+				ConfigID string `json:"configId"`
+				Value    string `json:"value"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			if p.ConfigID != "mode" || (p.Value != "default" && p.Value != "yolo") {
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32602, "message": "Invalid params"}})
+				continue
+			}
+			if !ignoresSetMode() {
+				mode = p.Value
+			}
+			reply(m.ID, map[string]any{"configOptions": configOptions()})
+			commandsUpdate()
 		case m.Method == "session/set_mode":
 			reply(m.ID, map[string]any{})
-			update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{
-				map[string]any{"name": "test", "description": "Run the tests"},
-			}})
+			if !ignoresSetMode() {
+				var p struct {
+					ModeID string `json:"modeId"`
+				}
+				_ = json.Unmarshal(m.Params, &p)
+				mode = p.ModeID
+				update(map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": p.ModeID})
+			}
+			commandsUpdate()
 		case m.Method == "session/prompt":
 			promptFor(m)
 		case m.Method == "session/cancel":
@@ -210,6 +236,30 @@ func main() {
 			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32601, "message": "Method not found"}})
 		}
 	}
+}
+
+var mode = "yolo"
+
+func configOptions() []any {
+	return []any{map[string]any{"id": "mode", "name": "Mode", "category": "mode", "type": "select", "currentValue": mode, "options": []any{
+		map[string]any{"value": "default", "name": "Default"}, map[string]any{"value": "yolo", "name": "YOLO"},
+	}}}
+}
+
+func commandsUpdate() {
+	update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{
+		map[string]any{"name": "test", "description": "Run the tests"},
+	}})
+}
+
+func offersConfigMode() bool {
+	_, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".sf-fake-config-mode"))
+	return err == nil
+}
+
+func ignoresSetMode() bool {
+	_, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".sf-fake-ignore-set-mode"))
+	return err == nil
 }
 
 func received(params json.RawMessage) string {

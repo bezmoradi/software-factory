@@ -123,21 +123,36 @@ class SfPushPanel extends HTMLElement {
 
   #flagged(list: FlaggedFile[], value: PushPanelView): HTMLElement {
     const box = el('div', 'push-flagged')
-    if (value.flagsRead === false) box.append(el('p', 'small warn', "The engine couldn't finish checking this branch's files for secrets, so the push needs your Allow with a reason."))
+    if (value.flagsRead === false) box.append(el('p', 'small warn', "The engine couldn't finish checking this branch's files and commits for secrets, so the push needs your Allow with a reason."))
     if (!list.length) return box
-    box.append(el('p', 'small warn', list.length === 1 ? 'A file the push would send is flagged:' : `${list.length} files the push would send are flagged:`))
+    const commits = list.filter(f => f.commit).length
+    const files = list.length - commits
+    const distinct = new Set(list.map(f => f.commit).filter(Boolean)).size
+    let lead = files === 1 ? 'A file the push would send is flagged:' : `${files} files the push would send are flagged:`
+    if (commits && !files) lead = `${distinct === 1 ? 'A commit the push would send is' : `${distinct} commits the push would send are`} flagged${commits > distinct ? ` in ${commits} places` : ''}:`
+    else if (commits) lead = `${list.length} items the push would send are flagged:`
+    box.append(el('p', 'small warn', lead))
+    if (commits) box.append(el('p', 'small muted', 'The engine never forces a push, so the agent can rewrite only commits it hasn\'t pushed. If a flagged commit is already on the remote branch, allow it instead.'))
     const ul = el('ul', 'small flagged')
     const off = !!value.disabled
     list.forEach((f, i) => {
+      const commit = f.commit ?? ''
+      const field = f.field ?? ''
+      const id = commit ? `${commit}:${field}` : f.path
+      const name = commit ? `the ${text(f.label ?? field)} of commit ${shortSha(commit)}` : text(f.shown)
       const li = el('li', 'warn')
-      const size = f.size && f.size > 0 ? `, ${f.size >= 1048576 ? `${(f.size / 1048576).toFixed(1)} MiB` : `${Math.max(1, Math.round(f.size / 1024))} KiB`}` : ''
-      li.append(el('code', '', text(f.path)), ` is flagged: ${text(f.why)}${size}.`)
+      const size = !commit && f.size && f.size > 0 ? `, ${f.size >= 1048576 ? `${(f.size / 1048576).toFixed(1)} MiB` : `${Math.max(1, Math.round(f.size / 1024))} KiB`}` : ''
+      if (commit) {
+        const sha = el('code', '', shortSha(commit))
+        sha.title = commit
+        li.append(`The ${text(f.label ?? field)} of commit `, sha, ` is flagged: ${text(f.why)}.`)
+      } else li.append(el('code', '', text(f.shown)), ` is flagged: ${text(f.why)}${size}.`)
       const input = el('input', 'textbox')
       input.maxLength = 500
       input.id = `flag-reason-${i}`
-      input.dataset.key = `flag:${f.path}`
-      input.value = this.#fileReasons.get(f.path) ?? ''
-      input.addEventListener('input', () => this.#fileReasons.set(f.path, input.value))
+      input.dataset.key = `flag:${id}`
+      input.value = this.#fileReasons.get(id) ?? ''
+      input.addEventListener('input', () => this.#fileReasons.set(id, input.value))
       const label = el('label', 'small', 'Your reason for allowing it (the audit file keeps it)')
       label.htmlFor = input.id
       const allow = button('Allow it', 'small', () => {
@@ -149,18 +164,26 @@ class SfPushPanel extends HTMLElement {
           return
         }
         input.removeAttribute('aria-invalid')
-        this.#fileReasons.delete(f.path)
-        emit(this, 'sf-allow-file', { path: f.path, reason })
-      }, 'button', `allow:${f.path}`)
-      allow.setAttribute('aria-label', `Allow it: ${text(f.path)}`)
+        this.#fileReasons.delete(id)
+        if (commit) emit(this, 'sf-allow-commit', { commit, field, reason })
+        else emit(this, 'sf-allow-file', { path: f.path, reason })
+      }, 'button', `allow:${id}`)
+      allow.setAttribute('aria-label', `Allow it: ${name}`)
       allow.setAttribute('aria-disabled', String(off || !!f.full))
       if (f.full) allow.title = 'It has more than 20 flagged versions on the branch, so it can\'t be allowed'
-      const remove = button('Ask the agent to remove it', 'small', () => {
-        if (!off) emit(this, 'sf-remove-file', { path: f.path })
-      }, 'button', `remove:${f.path}`)
-      remove.setAttribute('aria-label', `Ask the agent to remove it: ${text(f.path)}`)
+      if (commit) allow.title = 'Allows this commit only: another commit with the same text is flagged again'
+      const remove = commit
+        ? button('Ask the agent to rewrite it', 'small', () => {
+          if (!off) emit(this, 'sf-rewrite-commit', { commit, field })
+        }, 'button', `rewrite:${id}`)
+        : button('Ask the agent to remove it', 'small', () => {
+          if (!off) emit(this, 'sf-remove-file', { path: f.path })
+        }, 'button', `remove:${id}`)
+      remove.setAttribute('aria-label', `${commit ? 'Ask the agent to rewrite it' : 'Ask the agent to remove it'}: ${name}`)
       remove.setAttribute('aria-disabled', String(off))
-      remove.title = 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
+      remove.title = commit
+        ? 'Sends the session a message asking it to rewrite this commit if it isn\'t on the remote branch yet'
+        : 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
       const row = el('div', 'row field-row')
       row.append(label, input)
       const actions = el('div', 'actions')

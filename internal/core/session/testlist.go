@@ -187,12 +187,12 @@ func (r *Reviews) writeTestList(t ReviewTarget, base, head, plugin string) TestL
 	text := strings.TrimSpace(out.text)
 	if out.failed || res.Code != 0 {
 		v.Reason = "Claude Code reported an error"
-		if l := firstLine(text); l != "" && !flagText.MatchString(text) {
+		if l := firstLine(text); l != "" && !secretText(text) {
 			v.Reason += ": " + l
 		}
 		return v
 	}
-	if flagText.MatchString(text) {
+	if secretText(text) {
 		v.State, v.Reason = TestListWithheld, "its reply held something shaped like a token or a private key, so the engine didn't keep or show it"
 		r.cfg.Logger.Warn("test list", "event", "withheld", "why", "token-shaped")
 		return v

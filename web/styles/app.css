@@ -862,6 +862,10 @@ sf-forge-panel .forge-time { margin-left: auto; white-space: nowrap; }
 sf-forge-panel .forge-title { margin: .35rem 0 .2rem; font-weight: 600; overflow-wrap: anywhere; }
 sf-forge-panel .forge-refs, sf-forge-panel .forge-link { margin: 0 0 .3rem; overflow-wrap: anywhere; }
 sf-forge-panel .forge-actions { align-items: center; flex-wrap: wrap; }
+sf-forge-panel .forge-secret { margin-top: .5rem; }
+sf-forge-panel .forge-secret > p { margin: .3rem 0 .2rem; }
+sf-forge-panel .forge-secret > label.check { margin-top: .4rem; }
+sf-forge-panel .forge-why { margin: .4rem 0 0; }
 label.check { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; }
 label.check input { margin: 0; accent-color: var(--accent); }
 sf-reviews .test-list { margin-top: .9rem; padding-top: .6rem; border-top: 1px solid var(--line); }

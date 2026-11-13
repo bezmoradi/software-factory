@@ -13,7 +13,7 @@ import (
 const MaxApproveBody = 1 << 20
 
 var (
-	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true}
+	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true, allowCommitRoute: true, commitRewriteRoute: true}
 	approveRoutes  = map[string]bool{"/api/approve-plan": true, "/api/approve-requirements": true}
 	hash256        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	workTypeID     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -190,6 +190,8 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	switch path {
 	case allowFileRoute, flagRemoveRoute:
 		s.flag(w, path, sid, body)
+	case allowCommitRoute, commitRewriteRoute:
+		s.commitFlag(w, path, sid, body)
 	case "/api/gate":
 		if !keysWithin(body, "sid") || sid == "" {
 			refuse(w, http.StatusBadRequest, "fields")

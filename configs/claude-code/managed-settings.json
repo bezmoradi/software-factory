@@ -1,0 +1,13 @@
+{
+  "autoMemoryEnabled": false,
+  "crossSessionInbound": "refuse",
+  "disableClaudeAiConnectors": true,
+  "disableRemoteControl": true,
+  "isolatePeerMachines": true,
+  "permissions": {
+    "deny": ["SendMessage", "ListAgents"]
+  },
+  "prependPlugins": [],
+  "syncClaudeAiPlugins": false,
+  "syncClaudeAiSkills": false
+}

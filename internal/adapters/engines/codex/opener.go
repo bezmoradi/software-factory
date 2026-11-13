@@ -12,7 +12,8 @@ import (
 )
 
 type Opener struct {
-	Logger shared.Logger
+	Logger                shared.Logger
+	DeveloperInstructions string
 }
 
 var _ session.Opener = Opener{}
@@ -36,6 +37,7 @@ func (o Opener) Open(ctx context.Context, rw io.ReadWriteCloser, l session.Launc
 			return nil, err
 		}
 		cfg.MCPServers = map[string]json.RawMessage{l.MCP.Name: raw}
+		cfg.DeveloperInstructions = o.DeveloperInstructions
 	}
 	c, err := Start(ctx, rw, cfg)
 	if err != nil {

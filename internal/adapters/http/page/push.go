@@ -111,6 +111,6 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Work != nil && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
 		held = s.cfg.Work.EditHold(sid, top, paths)
 	}
-	s.refused(sid, adviceKinds{pushes: advice.Pushes, remote: advice.Waits, protected: advice.Protected != ""})
-	send(w, http.StatusOK, map[string]any{"kind": string(advice.Kind), "waits": advice.Waits, "pushes": advice.Pushes, "protected": advice.Protected, "held": held})
+	s.refused(sid, adviceKinds{pushes: advice.Pushes, remote: advice.Waits, protected: advice.Protected != "", cloud: advice.Cloud != ""})
+	send(w, http.StatusOK, map[string]any{"kind": string(advice.Kind), "waits": advice.Waits, "pushes": advice.Pushes, "protected": advice.Protected, "held": held, "cloud": advice.Cloud, "irreversible": advice.Undone})
 }

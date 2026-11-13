@@ -206,6 +206,7 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 	if cfg.Pusher == nil || cfg.Heads == nil || cfg.History == nil || cfg.Changes == nil || cfg.Repos == nil || cfg.Audit == nil || cfg.Targets == nil || cfg.Level == nil {
 		return nil, errors.New("pushes: need the pusher, the reader, the repositories, the audit file, the sessions and their levels")
 	}
+	cfg.Audit = masking(cfg.Audit)
 	kind, ok := workType(DefaultWorkType)
 	if cfg.WorkType != nil {
 		kind, ok = *cfg.WorkType, true
@@ -679,6 +680,8 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	reason = x.clean(reason)
 	e := x.entry
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
+	e = e.masked()
+	reason = e.Reason
 	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden}
 	p.mu.Lock()
 	ended := (result == gate.Pushed || result == ResultUpToDate) && p.waiting[x.sid] == e.Commit
@@ -973,5 +976,5 @@ func (p *Pushes) Changes(sid string) (ChangeView, error) {
 	if err != nil {
 		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the change: "+err.Error(), maxOutput))
 	}
-	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, ChangeSet: cs}, nil
+	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, ChangeSet: maskChanges(cs)}, nil
 }

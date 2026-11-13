@@ -62,10 +62,14 @@ func (s *Server) refused(sid string, advice adviceKinds) {
 	if advice.protected {
 		s.cfg.Audit.Refused(sid, session.RefusedProtected)
 	}
+	if advice.cloud {
+		s.cfg.Audit.Refused(sid, session.RefusedCloud)
+	}
 }
 
 type adviceKinds struct {
 	pushes    bool
 	remote    bool
 	protected bool
+	cloud     bool
 }

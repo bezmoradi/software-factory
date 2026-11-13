@@ -53,6 +53,8 @@ var StartupLists = map[string][]StartupEntry{
 			Source: "\".agents/skills\" named in the codex 0.167.1 binary's skill discovery"},
 		{Path: ".agents/plugins", Folder: true, Place: InWorktree, Why: "a repository plugin marketplace (.agents/plugins/marketplace.json)",
 			Source: "learn.chatgpt.com/docs/config-file/config-reference, marketplaces; \".agents/plugins/marketplace.json\" in the codex 0.167.1 binary"},
+		{Path: ".claude-plugin", Folder: true, Place: InWorktree, Why: "a Claude Code plugin manifest (plugin.json) or marketplace (marketplace.json) that Codex also loads, with the skills, MCP servers and hooks it names",
+			Source: "codex source at tag rust-v0.167.1, core-plugins: reads .claude-plugin/plugin.json and .claude-plugin/marketplace.json"},
 	},
 }
 

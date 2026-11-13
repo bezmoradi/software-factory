@@ -1,7 +1,9 @@
 package files
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"path"
 	"slices"
 
@@ -29,6 +31,18 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 		seen := map[string]bool{}
 		dirs := map[string]bool{"": true}
 		left := budget
+		for _, commit := range slices.Backward(commits) {
+			pc, size, err := pushedCommit(r, commit.SHA)
+			if err != nil {
+				return out, err
+			}
+			if size > left {
+				out.Complete = false
+				continue
+			}
+			left -= size
+			out.Commits = append(out.Commits, pc)
+		}
 		for _, c := range commits {
 			found, err := introduced(r, c)
 			if err != nil {
@@ -173,4 +187,55 @@ func introduced(r *repo, c push.Commit) ([]push.Change, error) {
 		})
 	}
 	return kept, nil
+}
+
+func pushedCommit(r *repo, sha string) (session.PushedCommit, int64, error) {
+	o, err := r.store.read(sha)
+	if err != nil {
+		return session.PushedCommit{}, 0, err
+	}
+	if o.kind != kindCommit {
+		return session.PushedCommit{}, 0, fmt.Errorf("%w: %s is a %s, not a commit", push.ErrNotFound, sha, o.kind)
+	}
+	if len(o.data) > maxCommitObject {
+		return session.PushedCommit{}, 0, fmt.Errorf("%w: commit %s is over %d MiB, more than the engine reads in one commit", push.ErrTooLarge, sha, maxCommitObject>>20)
+	}
+	header, message, _ := bytes.Cut(o.data, []byte("\n\n"))
+	c := session.PushedCommit{SHA: sha, Message: string(message)}
+	var other [][]byte
+	for i, line := range bytes.Split(header, []byte("\n")) {
+		if i == 0 && bytes.HasPrefix(line, []byte("tree ")) {
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("parent ")); ok && validSHA(string(rest)) {
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("author ")); ok && c.AuthorName == "" && c.AuthorEmail == "" {
+			c.AuthorName, c.AuthorEmail = identity(rest)
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("committer ")); ok && c.CommitterName == "" && c.CommitterEmail == "" {
+			c.CommitterName, c.CommitterEmail = identity(rest)
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("encoding ")); ok {
+			c.Encodings = append(c.Encodings, string(rest))
+		}
+		other = append(other, line)
+	}
+	c.Headers = string(bytes.Join(other, []byte("\n")))
+	return c, int64(len(o.data)), nil
+}
+
+func identity(line []byte) (string, string) {
+	open := bytes.IndexByte(line, '<')
+	end := bytes.LastIndexByte(line, '>')
+	if open < 0 || end < open {
+		return string(line), ""
+	}
+	name := bytes.TrimSpace(line[:open])
+	if tail := bytes.TrimSpace(line[end+1:]); len(tail) > 0 {
+		name = slices.Concat(name, []byte(" "), tail)
+	}
+	return string(name), string(line[open+1 : end])
 }

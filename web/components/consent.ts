@@ -64,6 +64,16 @@ export function approveStartup(a: StartupApproval, name: string): Promise<boolea
   ], 'Approve and start', 'primary')
 }
 
+export function approveTrustFiles(a: StartupApproval, name: string): Promise<boolean> {
+  const list = el('ul', 'list consent-files')
+  for (const f of a.files) list.append(fileItem(f))
+  return dialog(`Approve the files ${visible(name)} loads from ${visible(a.repo)}'s clone folder`, [
+    el('p', 'small', `Claude Code's trust question is asked in ${visible(a.repo)}'s clone folder, and once the folder is trusted ${visible(name)} loads these files from it. No commit put them there: they were written in the agents' container. They can change what it may do without asking you: permissions, hooks, MCP servers, plugins, agents, commands and endpoints. Characters that change text direction or hide are shown as ⟨U+…⟩, other invisible and control characters as \\u{…}, and long runs of blank lines or spaces as ⏎ ×n and ␠ ×n.`),
+    list,
+    el('p', 'small muted', 'Approving answers the trust question for this exact set. Cancel leaves the folder untrusted.'),
+  ], 'Approve and trust', 'primary')
+}
+
 export function confirmCost(s: SignIn, what: string): Promise<boolean> {
   return dialog('This runs on a sign-in that costs money', [
     el('p', 'small', `It is signed in with ${visible(s.words)}, so ${what} is billed per use. Claude Code and other agents report only an estimate of the cost, which may differ from the bill.`),

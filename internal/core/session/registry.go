@@ -87,7 +87,6 @@ type Registered struct {
 	Push       string
 	Version    string
 	Protocol   int
-	WasGate    bool
 	Page       bool
 	Control    bool
 	Background *bool
@@ -177,6 +176,8 @@ type Registry struct {
 	admitted    map[string]*admitted
 	lastMode    map[string]string
 	lastGate    map[string]bool
+	restored    map[string]bool
+	checked     bool
 	catalogs    map[string]*catalog
 	workflows   map[string]*Workflow
 	sinks       map[string]Sink
@@ -222,6 +223,7 @@ func New(version string, now func() time.Time) *Registry {
 		admitted:    map[string]*admitted{},
 		lastMode:    map[string]string{},
 		lastGate:    map[string]bool{},
+		restored:    map[string]bool{},
 		catalogs:    map[string]*catalog{},
 		workflows:   map[string]*Workflow{},
 		sinks:       map[string]Sink{},
@@ -375,7 +377,6 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 		born:       now,
 	}
 	r.conns[c.secret] = c
-	wasGate := r.lastGate[g.SID]
 	if g.GateKnown {
 		r.lastGate[g.SID] = g.Controlled || g.Restored
 	}
@@ -396,7 +397,7 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 			}
 		}
 	}
-	out := Registered{Secret: c.secret, Push: c.push, Version: r.version, Protocol: Protocol, WasGate: wasGate, Page: len(r.sinks) > 0}
+	out := Registered{Secret: c.secret, Push: c.push, Version: r.version, Protocol: Protocol, Page: len(r.sinks) > 0}
 	if a != nil {
 		background := a.Kind == "background"
 		out.Background = &background
@@ -722,7 +723,31 @@ func (r *Registry) Restore(sid string, a Admission, sandboxed bool) {
 		first = level.Observation{By: level.Engine, Event: level.CheckNotRun, Parts: []string{"the engine restarted and has no record that the check passed throughout this session's earlier runs"}}
 	}
 	r.admitted[sid] = &admitted{Admission: a, observations: []level.Observation{first, {By: level.Engine, Event: level.ProcessEnded}}}
+	if !r.checked {
+		r.restored[sid] = true
+	}
 	r.announce(r.now())
+}
+
+func (r *Registry) CheckPassed() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.checked = true
+	clear(r.restored)
+}
+
+func (r *Registry) PushLevel(sid string) (level.Result, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := r.admitted[sid]
+	if a == nil {
+		return level.Result{}, false
+	}
+	lv := level.Of(a.observations)
+	if lv.Sandboxed && r.restored[sid] {
+		return level.Result{Level: level.Held, Reason: WaitingForFirstCheck, Dropped: lv.Dropped, Waiting: true}, true
+	}
+	return lv, true
 }
 
 func (r *Registry) Forget(sid string) {
@@ -751,6 +776,7 @@ func (r *Registry) Forget(sid string) {
 	delete(r.workflows, sid)
 	delete(r.lastMode, sid)
 	delete(r.lastGate, sid)
+	delete(r.restored, sid)
 	delete(r.queued, sid)
 	delete(r.notes, sid)
 	delete(r.states, sid)

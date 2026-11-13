@@ -242,9 +242,10 @@ class SfPermission extends HTMLElement {
   }
 
   #render() {
-    const { id, tool, detail, summary, agentId, complete, always, auto, readOnly, attach, who = 'Claude' } = this.#card!
+    const { id, tool, detail, summary, agentId, complete, always, auto, irreversible, readOnly, attach, who = 'Claude' } = this.#card!
     start(this, agentId ? 'A subagent wants to run a tool' : `${who} wants to run a tool`, `Allow ${visible(tool)}?`)
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
+    if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {
@@ -253,12 +254,12 @@ class SfPermission extends HTMLElement {
       const yes = button('Yes', 'primary', undefined, 'button', 'yes')
       yes.addEventListener('click', () => reply(this, id, { choice: 'yes' }))
       choices.append(yes)
-      if (always) {
+      if (always && !irreversible) {
         const again = button(visible(always), '', undefined, 'button', 'always')
         again.addEventListener('click', () => reply(this, id, { choice: 'always' }))
         choices.append(again)
       }
-      if (auto) {
+      if (auto && !irreversible) {
         const switching = button('Yes, and switch to auto mode', '', undefined, 'button', 'auto')
         switching.addEventListener('click', () => reply(this, id, { choice: 'auto' }))
         choices.append(switching)

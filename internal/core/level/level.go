@@ -49,6 +49,7 @@ type Result struct {
 	Reason    string
 	Dropped   bool
 	Sandboxed bool
+	Waiting   bool
 }
 
 func resultOf(o Observation) (Result, bool) {

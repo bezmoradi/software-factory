@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +32,9 @@ func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
 	case "", "on":
 		sb.On = cfg.AgentHost != ""
 	case "off":
+		if dockerEdition(cfg) {
+			return errors.New("SF_SANDBOX_CHECK=off is only for development outside Docker, and this engine runs as the Docker edition (SF_PAGE_HOST=0.0.0.0 or SF_PAGE_NAME is set), so it doesn't start: remove SF_SANDBOX_CHECK from the engine's environment")
+		}
 	default:
 		return fmt.Errorf("SF_SANDBOX_CHECK must be on or off, got %q", v)
 	}
@@ -66,6 +70,10 @@ func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
 	return nil
 }
 
+func dockerEdition(cfg *PageConfig) bool {
+	return cfg.Host == "0.0.0.0" || cfg.PageName != ""
+}
+
 func gitHostsOf(repos *session.Repos) func() []string {
 	if repos == nil {
 		return nil
@@ -80,7 +88,7 @@ func sandboxChecker(cfg PageConfig, host session.Host, hosts func() []string) (s
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
 		Host: host, Probe: []string{cfg.AgentBinary, "sandbox-probe"}, Dir: sb.Dir,
-		Proxy: sb.Proxy, Status: sb.Status, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts,
+		Proxy: sb.Proxy, Status: sb.Status, Side: AgentsSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts,
 	})
 }
 

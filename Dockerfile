@@ -13,7 +13,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
-COPY configs/ configs/
+COPY configs/*.go configs/
 COPY internal/ internal/
 COPY tools/ tools/
 COPY --from=page /src/internal/adapters/http/page/dist/ internal/adapters/http/page/dist/
@@ -60,6 +60,7 @@ RUN apt-get update \
 COPY --from=go /out/software-factory /usr/local/bin/software-factory
 COPY --chown=root:root --chmod=a=rX,u+w plugin/.claude-plugin/plugin.json /opt/software-factory/plugin/.claude-plugin/plugin.json
 COPY --chown=root:root --chmod=a=rX,u+w plugin/hooks/ /opt/software-factory/plugin/hooks/
+COPY --chown=root:root --chmod=a=rX,u+w configs/claude-code/managed-settings.json /etc/claude-code/managed-settings.json
 COPY --from=go /out/licenses/ /usr/share/doc/software-factory/go/
 COPY --from=page /src/web/node_modules/typescript/LICENSE /src/web/node_modules/typescript/NOTICE.txt /usr/share/doc/software-factory/typescript/
 COPY LICENSE /usr/share/doc/software-factory/LICENSE

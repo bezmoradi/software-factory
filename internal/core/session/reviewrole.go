@@ -28,14 +28,14 @@ func (r *Reviews) review(ctx context.Context, t ReviewTarget, e ReviewEntry, dir
 	out, ok := claudeResult(res.Stdout)
 	if !ok {
 		why := fmt.Sprintf("its output wasn't Claude Code's JSON result (exit code %d)", res.Code)
-		if l := firstLine(ansi.ReplaceAllString(res.Stderr, "")); l != "" && !flagText.MatchString(l) {
+		if l := firstLine(ansi.ReplaceAllString(res.Stderr, "")); l != "" && !secretText(l) {
 			why += ": " + l
 		}
 		return r.failed(e, why), "not-claude-json"
 	}
 	e.CostUSD = out.cost
 	e.Turns, e.Denied, e.Models = max(out.turns, 0), out.denied, out.models
-	if flagText.MatchString(out.text) {
+	if secretText(out.text) {
 		e.Record.State, e.Record.Verdict, e.Record.Channel = review.Unknown, "", review.Withheld
 		e.Reason = "the reply contained a token-shaped string, so the engine didn't keep it"
 		e.EndedAt = r.cfg.Now()

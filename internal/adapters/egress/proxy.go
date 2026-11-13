@@ -40,16 +40,18 @@ type Proxy struct {
 	resolver Resolver
 	dialer   Dialer
 	logger   shared.Logger
+	marks    Marks
 	slots    chan struct{}
 }
 
-func New(policy Policy, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger) *Proxy {
+func New(policy Policy, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger, marks Marks) *Proxy {
 	return &Proxy{
 		policy:   policy,
 		limits:   limits,
 		resolver: resolver,
 		dialer:   dialer,
 		logger:   logger,
+		marks:    marks,
 		slots:    make(chan struct{}, max(limits.MaxConns, 0)),
 	}
 }
@@ -91,18 +93,23 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		p.refuse(conn, http.StatusBadRequest, ReasonBadRequest, "")
 		return
 	}
+	mark := markOf(req)
 	if req.Method != http.MethodConnect {
+		p.marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
 		p.refuse(conn, http.StatusForbidden, ReasonMethod, "")
 		return
 	}
 	host, reason := p.target(req.RequestURI)
 	if reason != "" {
 		requested, _, _ := net.SplitHostPort(req.RequestURI)
+		p.marks.note(mark, requestedTarget(req.RequestURI), "", reason)
 		p.refuse(conn, http.StatusForbidden, reason, logged(requested))
 		return
 	}
+	target := net.JoinHostPort(host, "443")
 	upstream, status, reason := p.connect(ctx, host)
 	if reason != "" {
+		p.marks.note(mark, target, "", reason)
 		p.refuse(conn, status, reason, host)
 		return
 	}
@@ -114,10 +121,12 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	pending := bytes.NewReader(early)
 	hello, name, err := readClientHello(io.MultiReader(pending, conn))
 	if err != nil {
+		p.marks.note(mark, target, "", helloReason(err))
 		p.refused(helloReason(err), host)
 		return
 	}
 	if normalize(name) != host {
+		p.marks.note(mark, target, logged(name), ReasonSNIMismatch)
 		p.refused(ReasonSNIMismatch, host, "sni", logged(name))
 		return
 	}

@@ -69,7 +69,7 @@ func run(ctx context.Context) error {
 	say("Software Factory is running the code in this folder: %s", url)
 	say("Watching for changes. Ctrl-C stops watching and leaves the stack running; make up goes back to the image.")
 	say("Stop make dev before a pull, a branch switch or a checkout of code you haven't read: whatever is in this folder runs as the engine, which holds your git tokens.")
-	say("The Dockerfile and plugin/ come from the %s image as the last make up built it.", image)
+	say("The Dockerfile, plugin/ and configs/claude-code/ come from the %s image as the last make up built it.", image)
 	openPage(url)
 	var owed change
 	head := checkedOut()
@@ -80,7 +80,7 @@ func run(ctx context.Context) error {
 		}
 		seen = next
 		if c.image {
-			say("The Dockerfile and plugin/ are built into the image, which make dev doesn't rebuild: press Ctrl-C, run make up, then make dev again.")
+			say("The Dockerfile, plugin/ and configs/claude-code/ are built into the image, which make dev doesn't rebuild: press Ctrl-C, run make up, then make dev again.")
 		}
 		if !c.page && !c.code {
 			continue
@@ -202,7 +202,7 @@ func diff(before, after map[string]stamp) change {
 }
 
 func inImage(p string) bool {
-	return p == "Dockerfile" || strings.HasPrefix(p, "plugin"+string(filepath.Separator))
+	return p == "Dockerfile" || strings.HasPrefix(p, "plugin"+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Join("configs", "claude-code")+string(filepath.Separator))
 }
 
 func build(ctx context.Context, arch string, c change) error {

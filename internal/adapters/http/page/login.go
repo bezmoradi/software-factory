@@ -89,10 +89,11 @@ func (s *Server) claudeTrust(w http.ResponseWriter, r *http.Request, body map[st
 		return
 	}
 	path, ok := body["path"].(string)
-	if !keysWithin(body, "path") || !ok || path == "" || len(path) > 4096 {
+	consent, okConsent := consentOf(body)
+	if !keysWithin(body, "path", "approve") || !ok || !okConsent || path == "" || len(path) > 4096 {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2*time.Minute + writeFor))
-	reply(w, s.cfg.Logins.Trust(r.Context(), path), http.StatusOK)
+	reply(w, s.cfg.Logins.Trust(r.Context(), path, consent.Approve), http.StatusOK)
 }

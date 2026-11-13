@@ -138,6 +138,9 @@ type ForgeView struct {
 	Asked  time.Time
 	At     time.Time
 
+	SecretAt   string
+	SecretLine string
+
 	Matches []ForgeMatch
 }
 
@@ -150,7 +153,7 @@ type ForgeService interface {
 	Request(ctx context.Context, sid string, kind ForgeKind, title, body string) ForgeReply
 	Checks(ctx context.Context, sid string) ForgeReply
 	Comments(ctx context.Context, sid string) ForgeReply
-	Answer(ctx context.Context, sid, card string, approve, draft bool) error
+	Answer(ctx context.Context, sid, card string, approve, draft, confirmed bool) error
 }
 
 type ForgesConfig struct {
@@ -168,9 +171,10 @@ type ForgesConfig struct {
 }
 
 type forgeCard struct {
-	view ForgeView
-	repo ForgeRepo
-	sid  string
+	view   ForgeView
+	repo   ForgeRepo
+	sid    string
+	pushed *PushedFacts
 }
 
 type Forges struct {
@@ -205,6 +209,7 @@ func NewForges(cfg ForgesConfig) (*Forges, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
+	cfg.Audit = masking(cfg.Audit)
 	return &Forges{cfg: cfg, cards: map[string][]*forgeCard{}, asks: newLimiter(ForgeCalls, ForgeWindow), checks: newLimiter(CheckCalls, CheckWindow)}, nil
 }
 
@@ -321,10 +326,55 @@ func forgeWhy(err error, need string) string {
 }
 
 func kindWord(k ForgeKind) string {
-	if k == ForgePull {
+	switch k {
+	case ForgePull:
 		return "pull request"
+	case ForgeComment:
+		return "pull request comment"
 	}
 	return "issue"
+}
+
+const maxSecretLine = 300
+
+func ForgeSecret(title, body string) (string, string) {
+	if line, ok := secretLine(title); ok {
+		return "the title", line
+	}
+	for i, l := range strings.Split(body, "\n") {
+		if line, ok := secretLine(l); ok {
+			return "line " + strconv.Itoa(i+1) + " of the text", line
+		}
+	}
+	if secretText(body) {
+		return "the text", ""
+	}
+	return "", ""
+}
+
+func secretLine(l string) (string, bool) {
+	if flagText.MatchString(l) {
+		return secretWindow(l), true
+	}
+	if clean := CleanLine(l, len(l)); flagText.MatchString(clean) {
+		return secretWindow(clean), true
+	}
+	return "", false
+}
+
+func secretWindow(line string) string {
+	start := 0
+	if loc := flagText.FindStringIndex(line); loc != nil && loc[0] > maxSecretLine/3 {
+		start = loc[0] - maxSecretLine/3
+		for start > 0 && !utf8.RuneStart(line[start]) {
+			start--
+		}
+	}
+	out := CleanLine(line[start:], maxSecretLine)
+	if start > 0 {
+		out = "…" + out
+	}
+	return out
 }
 
 func (f *Forges) Request(ctx context.Context, sid string, kind ForgeKind, title, body string) ForgeReply {
@@ -386,7 +436,7 @@ func (f *Forges) Request(ctx context.Context, sid string, kind ForgeKind, title,
 	list := f.cards[sid]
 	waiting := 0
 	for _, c := range list {
-		if c.view.State != ForgeWaiting && c.view.State != ForgeSending {
+		if c.view.Kind == ForgeComment || c.view.State != ForgeWaiting && c.view.State != ForgeSending {
 			continue
 		}
 		if c.view.Kind == kind && (kind == ForgePull || c.view.Title == title && c.view.Body == body) {
@@ -438,7 +488,11 @@ func (f *Forges) show(sid string) {
 	list := f.cards[sid]
 	out := make([]ForgeView, 0, len(list))
 	for _, c := range list {
-		out = append(out, c.view)
+		v := c.view
+		if v.State == ForgeWaiting {
+			v.SecretAt, v.SecretLine = ForgeSecret(v.Title, v.Body)
+		}
+		out = append(out, v)
 	}
 	f.mu.Unlock()
 	f.cfg.Show(sid, out)
@@ -454,7 +508,7 @@ func (f *Forges) audit(sid string, t PushTarget, v ForgeView, by, result, reason
 	}
 }
 
-func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft bool) error {
+func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft, confirmed bool) error {
 	f.mu.Lock()
 	f.trim(sid)
 	var c *forgeCard
@@ -475,6 +529,13 @@ func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft bool
 	if draft && c.view.Kind != ForgePull {
 		f.mu.Unlock()
 		return explained(invalid("draft"), "Only a pull request can open as a draft.")
+	}
+	if where, _ := ForgeSecret(c.view.Title, c.view.Body); approve && where != "" && !confirmed {
+		f.mu.Unlock()
+		return explained(conflict("secret"), "This looks like a secret ("+where+"). Confirm on the card that it isn't one before it goes to the git host.")
+	}
+	if c.view.Kind == ForgeComment {
+		return f.answerCommentUnlocking(sid, c, approve)
 	}
 	t, _ := f.cfg.Targets(sid)
 	word := kindWord(c.view.Kind)

@@ -245,7 +245,7 @@ func (r *Reviews) loginCommand() Command {
 }
 
 type LoginPage interface {
-	Trust(ctx context.Context, path string) error
+	Trust(ctx context.Context, path, approve string) error
 	Login(ctx context.Context, target, step, code string) (string, *SignIn, error)
 	KeyLogin(ctx context.Context, target, key string) (*SignIn, error)
 	LoginState(ctx context.Context) LoginState

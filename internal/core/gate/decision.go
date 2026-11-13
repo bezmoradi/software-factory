@@ -167,6 +167,9 @@ func Push(r Request, f Facts) Decision {
 		if len(missing) == 0 {
 			return Decision{Result: Allowed}
 		}
+		if unsandboxed && f.Level.Waiting {
+			return Decision{Result: Held, Reason: "no Allow pushes until the first sandbox check since the engine started passes, because nothing checked the agent container while the engine was down; Allow works once it passes", Missing: missing}
+		}
 		if unsandboxed {
 			return Decision{Result: Held, Reason: "no Allow pushes while the sandbox check fails, because the work may have come from an agent that could reach a git host; fix the check, then start a new session, review the work there and push it", Missing: missing}
 		}

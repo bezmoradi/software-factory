@@ -16,6 +16,7 @@ const (
 	maxLog       = 100
 	maxPageDiff  = 1 << 20
 	maxPageHeld  = 8 << 20
+	pageNoteHead = "\n[Software Factory: the diff "
 )
 
 const (
@@ -134,13 +135,28 @@ func (Reader) Changes(path, base, head string) (session.ChangeSet, error) {
 			}
 		}
 		var b strings.Builder
-		clipped, err := encodeChange(&b, from, to, changeLimits{out: maxPageDiff, held: maxPageHeld, note: "\n[Software Factory: the diff %s and stops here.]\n"})
+		clipped, err := encodeChange(&b, from, to, changeLimits{out: maxPageDiff, held: maxPageHeld, note: pageNoteHead + "%s and stops here.]\n"})
 		if err != nil {
 			return out, err
 		}
 		out.Diff, out.Clipped = b.String(), clipped
+		if clipped {
+			out.Diff = wholeLines(out.Diff)
+		}
 		return out, nil
 	})
+}
+
+func wholeLines(diff string) string {
+	at := strings.LastIndex(diff, pageNoteHead)
+	if at < 0 {
+		return diff
+	}
+	kept := diff[:at]
+	if !strings.HasSuffix(kept, "\n") {
+		kept = kept[:strings.LastIndexByte(kept, '\n')+1]
+	}
+	return kept + diff[at:]
 }
 
 func log(r *repo, head, base string) ([]push.Commit, bool, error) {

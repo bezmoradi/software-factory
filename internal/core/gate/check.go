@@ -5,11 +5,18 @@ type Advice struct {
 	Waits     bool
 	Pushes    bool
 	Protected string
+	Cloud     string
+	Undone    bool
 }
 
 func Check(tool string, input map[string]any, top string, paths []string, review bool) Advice {
 	k := Kind(tool, input)
 	a := Advice{Kind: k, Waits: WaitsForPerson(k), Pushes: PushShaped(tool, input, review)}
+	cloud, undone := Hazards(tool, input)
+	if cloud {
+		a.Cloud = CloudReason
+	}
+	a.Undone = undone
 	if k != EditTool {
 		return a
 	}

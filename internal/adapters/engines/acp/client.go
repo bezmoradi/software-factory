@@ -47,6 +47,7 @@ var (
 	ErrNotWhole          = errors.New("acp: the tool call has no rawInput, so the request may only be rejected")
 	ErrNoAllowOnce       = errors.New("acp: the agent offered no allow_once option, so the request was rejected")
 	ErrNotAsking         = errors.New("acp: the agent offers modes but none of them is an asking mode")
+	ErrModeNotKept       = errors.New("acp: the agent didn't confirm it switched to the asking mode it was set to")
 	ErrProtocolVersion   = errors.New("acp: the agent answered an unsupported protocol version")
 	ErrAuthNotRequired   = errors.New("acp: authenticate is only sent after session/new answered auth required")
 	ErrUnknownAuthMethod = errors.New("acp: the agent advertised no such agent-handled sign-in method")
@@ -74,6 +75,7 @@ type Client struct {
 	writerDone chan struct{}
 	wake       chan struct{}
 	wwake      chan struct{}
+	modeSeen   chan struct{}
 	out        chan agent.Event
 
 	startMu   sync.Mutex
@@ -139,6 +141,7 @@ func New(rw io.ReadWriteCloser, cfg Config) *Client {
 		writerDone: make(chan struct{}),
 		wake:       make(chan struct{}, 1),
 		wwake:      make(chan struct{}, 1),
+		modeSeen:   make(chan struct{}, 1),
 		out:        make(chan agent.Event, 16),
 		calls:      map[int64]callback{},
 		perms:      map[string]*permission{},

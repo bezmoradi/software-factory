@@ -135,6 +135,8 @@ export interface SessionForge {
   asked: number
   at: number
   matches?: ForgeMatch[]
+  secretAt?: string
+  secretLine?: string
 }
 
 export interface ForgeMatch {
@@ -153,6 +155,10 @@ export interface ForgePanelView {
 
 export interface FlaggedFile {
   path: string
+  shown: string
+  commit?: string
+  field?: string
+  label?: string
   why: string
   allowed: boolean
   kind?: string
@@ -445,6 +451,7 @@ export interface PermissionEvent extends CardBase {
   complete: boolean
   always: string
   auto?: boolean
+  irreversible?: boolean
 }
 
 export interface PlanEvent extends CardBase {
@@ -799,10 +806,12 @@ declare global {
     'sf-push-answer': CustomEvent<{ card: string; commit: string; allow: boolean; reason: string }>
     'sf-handoff': CustomEvent<{ card: string; commit: string }>
     'sf-send-findings': CustomEvent<{ card: string; commit: string }>
-    'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean }>
+    'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean; confirmed?: boolean }>
     'sf-test-list': Event
     'sf-allow-file': CustomEvent<{ path: string; reason: string }>
     'sf-remove-file': CustomEvent<{ path: string }>
+    'sf-allow-commit': CustomEvent<{ commit: string; field: string; reason: string }>
+    'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
   }
 }

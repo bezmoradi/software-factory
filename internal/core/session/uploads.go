@@ -295,10 +295,15 @@ func (r *Registry) setImages(sid string, takes bool) {
 
 func (r *Registry) Image(given, id string) (Upload, []byte, error) {
 	r.mu.Lock()
-	c := r.connOf(given, r.now())
+	now := r.now()
+	c := r.connOf(given, now)
 	if c == nil {
 		r.mu.Unlock()
 		return Upload{}, nil, unauthorized()
+	}
+	if r.disputed(c.sid, now) {
+		r.mu.Unlock()
+		return Upload{}, nil, conflict("disputed")
 	}
 	u := r.uploads.items[id]
 	if u == nil || u.SID != c.sid || !u.Image || !u.Sent {

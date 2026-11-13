@@ -12,6 +12,8 @@ import (
 const (
 	CheckEvery = 5 * time.Minute
 	checkFor   = 90 * time.Second
+
+	WaitingForFirstCheck = "not checked while the engine was down; waiting for the first check"
 )
 
 type Sandbox interface {
@@ -61,6 +63,9 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	d.checks.mu.Unlock()
 	d.cfg.Logger.Info("sandbox check", "event", string(o.Event))
 	d.observeAll(o)
+	if o.Event == level.CheckPassed {
+		d.reg.CheckPassed()
+	}
 	d.saveRuns()
 	return st
 }

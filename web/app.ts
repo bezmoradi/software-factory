@@ -24,7 +24,7 @@ import './components/setup.ts'
 import './components/tabs.ts'
 import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
-import { askTrust, consentFor, money } from './components/consent.ts'
+import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
 
 interface Session {
   sid: string
@@ -74,10 +74,10 @@ interface AuditEntry {
 }
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
-const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten' }
+const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten' }
 const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
 const HIDDEN_RESULTS = ['sending', 'posting']
-const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved' }
+const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
 
 function stepOf(text: string): Step {
   const skill = /^\s*(?:<command-name>\s*)?\/?(?:knackpack:(challenge-requirements|plan-implementation)|speckit-(specify|plan|tasks))\b/.exec(text)
@@ -85,7 +85,7 @@ function stepOf(text: string): Step {
 }
 
 
-const COMMIT_ASK = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore."
+const COMMIT_ASK = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore. Each commit message says what changed and why."
 
 function checkOf(r: Reviewer): Check {
   return { type: r.type, name: r.name, why: r.why ?? '' }
@@ -823,14 +823,15 @@ function forgePanelOf(s: Session): ForgePanelView | null {
 
 const forgeAsking = new Set<string>()
 
-async function answerForge(s: Session | null, answer: { card: string; approve: boolean; draft?: boolean }) {
+async function answerForge(s: Session | null, answer: { card: string; approve: boolean; draft?: boolean; confirmed?: boolean }) {
   if (!s || forgeAsking.has(s.sid)) return
   forgeAsking.add(s.sid)
   schedulePaint()
   const { ok, body } = await reply(await api('/api/forge-answer', { sid: s.sid, ...answer }).catch(() => null))
   forgeAsking.delete(s.sid)
   schedulePaint()
-  if (!ok) toast({ id: `forge-answer:${s.sid}`, title: answer.approve ? "It wasn't opened." : "It wasn't denied.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
+  const comment = s.info.forge?.find(f => f.card === answer.card)?.kind === 'comment'
+  if (!ok) toast({ id: `forge-answer:${s.sid}`, title: !answer.approve ? "It wasn't denied." : comment ? "It wasn't posted." : "It wasn't opened.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
 async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) {
@@ -1616,6 +1617,8 @@ byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(cur
 byId('push-panel').addEventListener('sf-handoff', e => void sessionAsk(current(), '/api/handoff', e.detail, "The push wasn't handed off.", 'The push was denied, and the session was asked for a handoff.'))
 byId('push-panel').addEventListener('sf-allow-file', e => void sessionAsk(current(), '/api/allow-file', e.detail, "The file wasn't allowed.", 'You allowed that version of the file. A later change to it is flagged again.'))
 byId('push-panel').addEventListener('sf-remove-file', e => void sessionAsk(current(), '/api/flag-remove', e.detail, "The message wasn't sent.", 'The session was asked to remove the file from the branch.'))
+byId('push-panel').addEventListener('sf-allow-commit', e => void sessionAsk(current(), '/api/allow-commit', e.detail, "The commit wasn't allowed.", 'You allowed that field of that commit. Another commit with the same text is flagged again.'))
+byId('push-panel').addEventListener('sf-rewrite-commit', e => void sessionAsk(current(), '/api/commit-rewrite', e.detail, "The message wasn't sent.", 'The session was asked to rewrite the commit.'))
 byId('reviews').addEventListener('sf-override', e => void sessionAsk(current(), '/api/override', e.detail, "The verdict wasn't overridden.", 'You overrode the verdict for this commit. Press Push to push it.'))
 byId('path').addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
@@ -1784,6 +1787,29 @@ async function wakeSession(s: Session) {
   toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs ? 0 : undefined })
 }
 
+async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
+  const rounds = 3
+  let approve: string | undefined
+  for (let round = 1; round <= rounds; round++) {
+    toast({ id: 'trust', title: 'Answering Claude Code’s trust question…', description: 'This takes a few seconds.', tone: 'info', timeout: 60000 })
+    const trusted = await reply(await api('/api/claude-trust', approve ? { path, approve } : { path }).catch(() => null))
+    const files = (trusted.body.needs as Needs | undefined)?.approval
+    if (trusted.ok || !files) return trusted
+    if (round === rounds) {
+      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.', tone: 'warn', timeout: 0 })
+      return null
+    }
+    const said = typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined
+    toast(approve ? { id: 'trust', title: 'The files changed since you approved them.', description: said, tone: 'warn', timeout: 0 } : { id: 'trust', title: 'Claude Code’s trust question waits for your approval.', tone: 'info', timeout: 5000 })
+    if (!(await approveTrustFiles(files, starterNames.get('claude') ?? 'Claude Code'))) {
+      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The folder stays untrusted.', tone: 'warn', timeout: 5000 })
+      return null
+    }
+    approve = files.hash
+  }
+  return null
+}
+
 async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>): Promise<{ ok: boolean; body: Record<string, unknown> }> {
   let consent: Consent = {}
   let answer = await reply(await send(consent).catch(() => null))
@@ -1791,8 +1817,8 @@ async function withConsent(name: string, what: string, send: (c: Consent) => Pro
     const needs = answer.body.needs as Needs | undefined
     if (needs?.trust) {
       if (!(await askTrust(needs.trust))) break
-      toast({ id: 'trust', title: 'Answering Claude Code’s trust question…', description: 'This takes a few seconds.', tone: 'info', timeout: 60000 })
-      const trusted = await reply(await api('/api/claude-trust', { path: needs.trust }).catch(() => null))
+      const trusted = await answerTrust(needs.trust)
+      if (!trusted) break
       toast({ id: 'trust', title: trusted.ok ? 'Claude Code now trusts this project.' : 'Claude Code’s trust question wasn’t answered.', description: !trusted.ok && typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined, tone: trusted.ok ? 'info' : 'bad', timeout: trusted.ok ? 5000 : 0 })
       if (!trusted.ok) return trusted
       answer = await reply(await send(consent).catch(() => null))

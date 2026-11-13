@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/agent"
 )
+
+const modeConfirmWait = 5 * time.Second
 
 type modeState struct {
 	current  string
@@ -52,15 +55,15 @@ func (c *Client) pickAsking(available []string) string {
 }
 
 func (c *Client) askingMode(ctx context.Context, created newSessionResult) error {
+	if opt, ok := modeOption(created.ConfigOptions); ok {
+		return c.setModeOption(ctx, opt)
+	}
 	if created.Modes != nil {
 		available := make([]string, 0, len(created.Modes.AvailableModes))
 		for _, m := range created.Modes.AvailableModes {
 			available = append(available, m.ID)
 		}
 		return c.setMode(ctx, created.Modes.CurrentModeID, available)
-	}
-	if opt, ok := modeOption(created.ConfigOptions); ok {
-		return c.setModeOption(ctx, opt)
 	}
 	return nil
 }
@@ -81,17 +84,36 @@ func (c *Client) setMode(ctx context.Context, current string, available []string
 		return ErrNotAsking
 	}
 	params := map[string]string{"sessionId": sessionID, "modeId": target}
-	_, err := c.call(ctx, "session/set_mode", params, func(json.RawMessage) {
-		c.mu.Lock()
-		c.mode.current = target
-		c.mu.Unlock()
-	})
-	c.emitMode()
-	if err != nil {
+	if _, err := c.call(ctx, "session/set_mode", params, nil); err != nil {
+		c.emitMode()
 		return fmt.Errorf("%w: %w", ErrNotAsking, err)
+	}
+	if err := c.confirmMode(ctx, target); err != nil {
+		c.emitMode()
+		c.warn("mode-not-kept")
+		return err
 	}
 	c.note("mode-set")
 	return nil
+}
+
+func (c *Client) confirmMode(ctx context.Context, target string) error {
+	timer := time.NewTimer(modeConfirmWait)
+	defer timer.Stop()
+	for {
+		if mode, asking := c.Mode(); asking && mode == target {
+			return nil
+		}
+		select {
+		case <-c.modeSeen:
+		case <-timer.C:
+			return ErrModeNotKept
+		case <-c.stop:
+			return ErrClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (c *Client) setModeOption(ctx context.Context, opt configOption) error {
@@ -111,6 +133,7 @@ func (c *Client) setModeOption(ctx context.Context, opt configOption) error {
 		return ErrNotAsking
 	}
 	params := map[string]string{"sessionId": sessionID, "configId": opt.ID, "value": target}
+	shown := false
 	_, err := c.call(ctx, "session/set_config_option", params, func(result json.RawMessage) {
 		var r struct {
 			ConfigOptions json.RawMessage `json:"configOptions"`
@@ -119,7 +142,7 @@ func (c *Client) setModeOption(ctx context.Context, opt configOption) error {
 			return
 		}
 		c.mu.Lock()
-		c.readModeOptionLocked(r.ConfigOptions)
+		shown, _ = c.readModeOptionLocked(r.ConfigOptions)
 		c.mu.Unlock()
 	})
 	c.emitMode()
@@ -127,7 +150,15 @@ func (c *Client) setModeOption(ctx context.Context, opt configOption) error {
 		return fmt.Errorf("%w: %w", ErrNotAsking, err)
 	}
 	if mode, asking := c.Mode(); !asking || mode != target {
-		return ErrNotAsking
+		if shown {
+			c.warn("mode-not-kept")
+			return ErrModeNotKept
+		}
+		if err := c.confirmMode(ctx, target); err != nil {
+			c.emitMode()
+			c.warn("mode-not-kept")
+			return err
+		}
 	}
 	c.note("mode-set")
 	return nil
@@ -142,27 +173,48 @@ func (c *Client) emitMode() {
 	c.signal()
 }
 
-func (c *Client) readModeOptionLocked(raw json.RawMessage) bool {
+func (c *Client) readModeOptionLocked(raw json.RawMessage) (shown, changed bool) {
 	var opts []configOption
-	if c.mode.configID == "" || json.Unmarshal(raw, &opts) != nil {
-		return false
+	if json.Unmarshal(raw, &opts) != nil {
+		return false, false
 	}
 	for _, o := range opts {
-		if o.ID == c.mode.configID {
-			if v := stringValue(o.CurrentValue); v != "" && v != c.mode.current {
-				c.mode.current = v
-				return true
-			}
-			return false
+		if (c.mode.configID != "" && o.ID != c.mode.configID) || (c.mode.configID == "" && !isModeSelect(o)) {
+			continue
 		}
+		v := stringValue(o.CurrentValue)
+		if v == "" {
+			return false, false
+		}
+		c.mode.configID = o.ID
+		if v == c.mode.current {
+			return true, false
+		}
+		c.mode.current = v
+		return true, true
 	}
-	return false
+	return false, false
 }
 
 func (c *Client) onConfigOptionsLocked(raw json.RawMessage) {
-	if c.readModeOptionLocked(raw) {
+	shown, changed := c.readModeOptionLocked(raw)
+	if changed {
 		c.emitLocked(agent.Event{Type: agent.Mode, Mode: c.mode.current})
 	}
+	if shown {
+		c.modeReportedLocked()
+	}
+}
+
+func (c *Client) modeReportedLocked() {
+	select {
+	case c.modeSeen <- struct{}{}:
+	default:
+	}
+}
+
+func isModeSelect(o configOption) bool {
+	return o.Category == "mode" && o.Type == "select" && o.ID != ""
 }
 
 func modeOption(raw json.RawMessage) (configOption, bool) {
@@ -171,7 +223,7 @@ func modeOption(raw json.RawMessage) (configOption, bool) {
 		return configOption{}, false
 	}
 	for _, o := range opts {
-		if o.Category == "mode" && o.Type == "select" && o.ID != "" {
+		if isModeSelect(o) {
 			return o, true
 		}
 	}

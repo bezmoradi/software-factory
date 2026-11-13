@@ -281,7 +281,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	d = session.NewDispatcher(reg, session.DispatcherConfig{
 		Agents:       agents,
 		Host:         client,
-		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger}},
+		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions}},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
 		PluginSocket: cfg.PluginSocket,
@@ -329,7 +329,7 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 	}
 	pc := session.PushesConfig{
 		Pusher: gitpush.Pusher{Reader: files.Reader{}, Client: client}, Heads: files.Reviews{}, History: files.Reader{}, Changes: files.Reader{},
-		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Level: reg.Level, Show: reg.SetPush, Base: base, Logger: logger,
+		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
 		Tell: tellSession(reg), Note: reg.NoteFor("push"), Denials: state.NewDenials(cfg.StateDir), Waiting: state.NewWaiting(cfg.StateDir),
 	}
 	if work != nil {

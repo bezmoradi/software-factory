@@ -16,6 +16,11 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
+const (
+	AgentsSide    = "agents"
+	ReviewersSide = "reviewers"
+)
+
 type EgressConfig struct {
 	Listen       string
 	ReviewListen string
@@ -56,8 +61,9 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	agentsBook, reviewersBook := egress.NewRefusals(), egress.NewRefusals()
 	status := &http.Server{
-		Handler:           egress.StatusHandler(policy),
+		Handler:           egress.StatusHandler(policy, agentsBook, reviewersBook),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -74,7 +80,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	reviewErr := make(chan error, 1)
 	if reviewListener != nil {
 		logger.Info("egress listening for reviewers", "proxy", reviewListener.Addr().String())
-		reviewProxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, "reviewers"})
+		reviewProxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide})
 		go func() {
 			reviewErr <- reviewProxy.Serve(ctx, reviewListener)
 			cancel()
@@ -82,7 +88,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	} else {
 		reviewErr <- nil
 	}
-	proxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, "agents"})
+	proxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide})
 	proxyErr := proxy.Serve(ctx, proxyListener)
 	cancel()
 	if err := <-reviewErr; err != nil && proxyErr == nil {
