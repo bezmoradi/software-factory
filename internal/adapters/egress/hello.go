@@ -8,7 +8,7 @@ import (
 
 const (
 	recordHandshake     = 0x16
-	handshakeClientHelo = 0x01
+	handshakeClientHello = 0x01
 	maxRecordBytes      = 16384 + 256
 	maxHelloBytes       = 64 << 10
 	extServerName       = 0x0000
@@ -46,7 +46,7 @@ func readClientHello(src io.Reader) ([]byte, string, error) {
 		raw = append(raw, frag...)
 		body = append(body, frag...)
 		if want < 0 && len(body) >= 4 {
-			if body[0] != handshakeClientHelo {
+			if body[0] != handshakeClientHello {
 				return nil, "", errNotTLS
 			}
 			want = 4 + (int(body[1])<<16 | int(body[2])<<8 | int(body[3]))
