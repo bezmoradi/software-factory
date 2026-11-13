@@ -1,0 +1,18 @@
+title = "software-factory"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "anthropic-oauth-token"
+description = "Claude OAuth token from claude setup-token"
+regex = '''\b(sk-ant-oat01-[a-zA-Z0-9_\-]{93}AA)(?:[\x60'"\s;]|\\[nr]|$)'''
+keywords = ["sk-ant-oat01"]
+
+[[allowlists]]
+description = "compose.dev.yaml's documented development GITSERVER_TOKEN"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^(\./)?compose\.dev\.yaml$''']
+regexTarget = "line"
+regexes = ['''(?m)^[ \t]*GITSERVER_TOKEN:[ \t]*sf-dev-gitserver-token[ \t]*$''']

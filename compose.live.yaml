@@ -1,0 +1,16 @@
+x-live: &live
+  entrypoint: ["/opt/sf-dev/bin/software-factory"]
+  volumes:
+    - ./.sf-dev/bin:/opt/sf-dev/bin:ro
+
+services:
+  engine:
+    <<: *live
+    environment:
+      SF_AGENT_BINARY: /opt/sf-dev/bin/software-factory
+  agent:
+    <<: *live
+  reviewer:
+    <<: *live
+  egress:
+    <<: *live

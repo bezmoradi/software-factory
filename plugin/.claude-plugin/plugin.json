@@ -1,0 +1,18 @@
+{
+  "name": "software-factory",
+  "description": "Reports a Claude Code session to the Software Factory engine and answers its permission prompts from the Software Factory page",
+  "version": "0.1.0",
+  "author": {
+    "name": "Bez Moradi",
+    "url": "https://github.com/bezmoradi"
+  },
+  "homepage": "https://github.com/bezmoradi/software-factory",
+  "repository": "https://github.com/bezmoradi/software-factory",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "mod",
+    "permission-prompts",
+    "software-factory"
+  ]
+}

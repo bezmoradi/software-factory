@@ -1,0 +1,55 @@
+{
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": ["squash"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Go", "integration_id": 15368 },
+          { "context": "Cross-builds", "integration_id": 15368 },
+          { "context": "TypeScript", "integration_id": 15368 },
+          { "context": "Plugin", "integration_id": 15368 },
+          { "context": "Image", "integration_id": 15368 },
+          { "context": "No comments", "integration_id": 15368 },
+          { "context": "No tests", "integration_id": 15368 },
+          { "context": "Files", "integration_id": 15368 },
+          { "context": "Spelling", "integration_id": 15368 },
+          { "context": "Workflows", "integration_id": 15368 },
+          { "context": "Shell", "integration_id": 15368 },
+          { "context": "Markdown", "integration_id": 15368 },
+          { "context": "Links", "integration_id": 15368 },
+          { "context": "Secrets", "integration_id": 15368 },
+          { "context": "Linked issue", "integration_id": 15368 },
+          { "context": "Workflow guard", "integration_id": 15368 },
+          { "context": "Claude approval", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}

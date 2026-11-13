@@ -1,0 +1,203 @@
+name: software-factory
+
+x-image: &image
+  image: software-factory:local
+  pull_policy: never
+
+x-hardening: &hardening
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-egress-lists: &egress-lists
+  EGRESS_ALLOW: ${SF_ALLOW:-api.anthropic.com,claude.ai,claude.com,platform.claude.com,api.openai.com,auth.openai.com,chatgpt.com},${SF_EXTRA_ALLOW:-}
+  EGRESS_DENY: ${SF_EXTRA_DENY:-}
+
+services:
+  engine:
+    <<: [*image, *hardening]
+    build:
+      context: .
+      target: runtime
+    user: engine
+    environment:
+      <<: *egress-lists
+      PORT: "8080"
+      GOMEMLIMIT: 800MiB
+      SF_PAGE_HOST: 0.0.0.0
+      SF_PUBLIC_PORT: ${SF_PORT:-7799}
+      SF_PAGE_NAME: engine-page
+      SF_AGENT_ADDRESS: engine-agents:8081
+      SF_AGENT_HOST: agent:8090
+      SF_REVIEWER_HOST: reviewer:8090
+      SF_REVIEWS: /reviews
+      SF_REVIEWER_PROXY: egress-review:3128
+      SF_EGRESS_PROXY: egress:3128
+      SF_EGRESS_STATUS: egress-control:3129
+      SF_UPLOADS: /uploads
+      SF_UMASK: "0002"
+    ports:
+      - "127.0.0.1:${SF_PORT:-7799}:8080"
+    networks:
+      agentnet:
+        aliases: [engine-agents]
+      reviewnet: {}
+      controlnet: {}
+      outside:
+        aliases: [engine-page]
+    volumes:
+      - engine-state:/var/lib/software-factory
+      - workspace:/workspace
+      - agents:/opt/software-factory/agents
+      - reviews:/reviews
+      - uploads:/uploads
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 1g
+    pids_limit: 512
+    stop_grace_period: 45s
+    depends_on:
+      egress:
+        condition: service_healthy
+      agent:
+        condition: service_healthy
+      reviewer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  agent:
+    <<: [*image, *hardening]
+    user: agent
+    command: ["agent-host"]
+    environment:
+      HOME: /home/agent
+      SF_AGENT_HOST_LISTEN: ":8090"
+      SF_ENGINE_AGENT_ADDRESS: engine-agents:8081
+      SF_PLUGIN_SOCKET: /run/sf/plugin.sock
+      SF_UMASK: "0002"
+      HTTPS_PROXY: http://egress:3128
+      HTTP_PROXY: http://egress:3128
+      https_proxy: http://egress:3128
+      http_proxy: http://egress:3128
+      NO_PROXY: localhost,127.0.0.1,::1
+      no_proxy: localhost,127.0.0.1,::1
+      DISABLE_AUTOUPDATER: "1"
+    networks:
+      agentnet:
+        aliases: [agent]
+    volumes:
+      - workspace:/workspace
+      - agents:/opt/software-factory/agents:ro
+      - agent-home:/home/agent
+      - uploads:/uploads:ro
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      - /run/sf:size=1m,mode=0700,uid=10002,gid=10000
+    mem_limit: 4g
+    pids_limit: 2048
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  reviewer:
+    <<: [*image, *hardening]
+    user: reviewer
+    command: ["agent-host", "-mode", "review"]
+    environment:
+      HOME: /home/reviewer
+      SF_WORKSPACE: /reviews
+      SF_AGENT_HOST_LISTEN: ":8090"
+      SF_AGENT_HOST_KEY_FILE: /reviews/.agent-host-key
+      HTTPS_PROXY: http://egress-review:3128
+      HTTP_PROXY: http://egress-review:3128
+      https_proxy: http://egress-review:3128
+      http_proxy: http://egress-review:3128
+      NO_PROXY: localhost,127.0.0.1,::1
+      no_proxy: localhost,127.0.0.1,::1
+      DISABLE_AUTOUPDATER: "1"
+    networks:
+      reviewnet:
+        aliases: [reviewer]
+    volumes:
+      - reviews:/reviews:ro
+      - type: volume
+        source: agents
+        target: /opt/software-factory/agents
+        read_only: true
+        volume:
+          nocopy: true
+      - reviewer-home:/home/reviewer
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    mem_limit: 4g
+    pids_limit: 2048
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  egress:
+    <<: [*image, *hardening]
+    user: egress
+    command: ["egress"]
+    environment:
+      <<: *egress-lists
+      EGRESS_LISTEN: egress-agents:3128
+      EGRESS_REVIEW_LISTEN: egress-review:3128
+      EGRESS_STATUS_LISTEN: egress-control:3129
+    networks:
+      agentnet:
+        aliases: [egress, egress-agents]
+      reviewnet:
+        aliases: [egress-review]
+      controlnet:
+        aliases: [egress-control]
+      outside: {}
+    mem_limit: 256m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://egress-control:3129/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  agentnet:
+    internal: true
+  reviewnet:
+    internal: true
+  controlnet:
+    internal: true
+  outside: {}
+
+volumes:
+  engine-state:
+  workspace:
+  agents:
+  agent-home:
+  reviews:
+  reviewer-home:
+  uploads:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=320m,uid=10001,gid=10000,mode=0710

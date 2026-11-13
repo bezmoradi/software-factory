@@ -1,0 +1,38 @@
+name: Pull requests
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: pull-requests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  linked-issue:
+    name: Linked issue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Require a linked issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$AUTHOR" = 'dependabot[bot]' ]; then
+            echo "Dependabot's pull requests need no linked issue."
+            exit 0
+          fi
+          issues=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json closingIssuesReferences --jq '.closingIssuesReferences[].url')
+          if [ -z "$issues" ]; then
+            echo "::error title=No linked issue::Link an issue to this pull request. Write \"Closes #<issue number>\" in its description, which runs this check again, or link one under Development in the sidebar and re-run this job."
+            exit 1
+          fi
+          echo "Linked issues:"
+          echo "$issues"

@@ -1,0 +1,12 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD014": false,
+    "MD022": false,
+    "MD032": false,
+    "MD040": false,
+    "MD060": false,
+    "MD033": { "allowed_elements": ["h1", "p", "img", "sub", "br", "a", "picture", "source"] }
+  }
+}

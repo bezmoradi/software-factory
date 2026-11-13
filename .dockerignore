@@ -1,0 +1,16 @@
+*
+!go.mod
+!go.sum
+!LICENSE
+!README.md
+!third_party/
+!cmd/
+!configs/
+!internal/
+!tools/
+!plugin/.claude-plugin/plugin.json
+!plugin/hooks/
+!web/
+web/node_modules
+internal/adapters/http/page/dist
+!dev/

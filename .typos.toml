@@ -1,0 +1,5 @@
+[default.extend-identifiers]
+ue = "ue"
+
+[default.extend-words]
+iy = "iy"

@@ -1,0 +1,282 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Lint
+        run: make lint
+      - name: Architecture check
+        run: make arch-check
+      - name: go fix check
+        run: make fix-check
+      - name: govulncheck
+        run: make vuln
+
+  cross-build:
+    name: Cross-builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Build and vet for each platform
+        run: make cross-build
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.2
+      - name: Install the page's dependencies
+        run: npm ci --prefix web --ignore-scripts
+      - name: Page type check
+        run: make web-check
+      - name: Plugin type check
+        run: make plugin-check
+
+  plugin:
+    name: Plugin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Claude Code
+        env:
+          VERSION: 2.1.322
+          SHA256: bfb3703ad5380242328459bc62ada4bde8ae7ba57c6e1eeadb9c00e08874c478
+        run: |
+          if ! grep -q "ID: \"claude\", Name: \"Claude Code\", Version: \"$VERSION\"" internal/adapters/install/npm/versions.go; then
+            echo "::error::internal/adapters/install/npm/versions.go doesn't pin Claude Code $VERSION; update VERSION and SHA256 here with it."
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/claude" "https://downloads.claude.ai/claude-code-releases/$VERSION/linux-x64/claude"
+          echo "$SHA256  $RUNNER_TEMP/claude" | sha256sum --check --strict
+          chmod 755 "$RUNNER_TEMP/claude"
+      - name: Validate the plugin
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          rc=0
+          "$RUNNER_TEMP/claude" plugin validate plugin >"$RUNNER_TEMP/validate" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/validate"
+          [ "$rc" = 0 ] && grep -qx '✔ Validation passed' "$RUNNER_TEMP/validate"
+
+  image:
+    name: Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+          cache-image: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=docker.io/moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+          cache-binary: false
+      - name: Build the runtime image for linux/amd64 and linux/arm64 (not pushed)
+        run: docker buildx build --platform linux/amd64,linux/arm64 --target runtime --output type=cacheonly .
+      - name: Build the development targets for linux/amd64 (not pushed)
+        run: |
+          docker buildx build --platform linux/amd64 --target dev --output type=cacheonly .
+          docker buildx build --platform linux/amd64 --target gitserver --output type=cacheonly .
+      - name: Start the linux/amd64 stack and wait until every container is healthy
+        run: |
+          docker buildx build --platform linux/amd64 --target runtime --load -t software-factory:local .
+          rc=0
+          docker compose -p sf-ci up -d --wait --wait-timeout 180 || rc=$?
+          docker compose -p sf-ci ps -a
+          [ "$rc" = 0 ] || docker compose -p sf-ci logs --no-color
+          docker compose -p sf-ci down -v
+          exit "$rc"
+
+  no-tests:
+    name: No tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make no-tests
+
+  no-comments:
+    name: No comments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: scripts/nocomments/go.mod
+          check-latest: true
+      - run: make no-comments
+
+  files:
+    name: Files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make files
+
+  spelling:
+    name: Spelling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install typos
+        env:
+          VERSION: 1.52.0
+          SHA256: 6155d4114f9a0f5b8f6d4fda96266c9d5f6add71df80da7f684ee5e72eb14588
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/typos.tar.gz" "https://github.com/crate-ci/typos/releases/download/v$VERSION/typos-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
+          echo "$SHA256  $RUNNER_TEMP/typos.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/typos"
+          tar -xzf "$RUNNER_TEMP/typos.tar.gz" -C "$RUNNER_TEMP/typos" ./typos
+          echo "$RUNNER_TEMP/typos" >> "$GITHUB_PATH"
+      - run: make spelling
+
+  workflows:
+    name: Workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: make workflows
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make shell
+
+  markdown:
+    name: Markdown
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make markdown
+
+  links:
+    name: Links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make links
+
+  secrets:
+    name: Secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        env:
+          VERSION: 8.30.1
+          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "$SHA256  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+      - name: Scan the history
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --log-opts="--full-history --diff-filter=tuxdb HEAD" --redact --no-banner --verbose .

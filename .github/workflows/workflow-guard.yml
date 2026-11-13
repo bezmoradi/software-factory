@@ -1,0 +1,62 @@
+name: Workflow guard
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: workflow-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-guard:
+    name: Workflow guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Require the owner's label for changes to the files that define the checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          OWNER: bezmoradi
+          GUARDED: '^(\.github/|scripts/|Makefile$|\.golangci\.yml$|\.go-arch-lint\.yml$|\.gitleaks\.toml$|\.typos\.toml$|\.markdownlint-cli2\.jsonc$)'
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" > "$RUNNER_TEMP/files.json"
+          listed=$(jq -s 'add | length' "$RUNNER_TEMP/files.json")
+          total=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" --jq '.changed_files')
+          paths=$(jq -rs 'add | .[] | .filename, (.previous_filename // empty)' "$RUNNER_TEMP/files.json")
+          changed=$(printf '%s\n' "$paths" | grep -E "$GUARDED" || true)
+          if [ "$listed" -ne "$total" ]; then
+            changed="$changed
+          (GitHub listed only $listed of the $total changed files, so the rest are unknown)"
+          fi
+          if [ -z "$changed" ]; then
+            echo "This pull request changes none of the files that define the checks."
+            exit 0
+          fi
+          labeled=$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" --jq 'any(.[]; .name == "review-override")')
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$NUMBER/events" > "$RUNNER_TEMP/events.json"
+          added=$(jq -rs --arg owner "$OWNER" '[add | .[] | select(.event == "labeled" and .label.name == "review-override" and .actor.login == $owner) | .created_at] | max // empty' "$RUNNER_TEMP/events.json")
+          forced=$(jq -rs '[add | .[] | select(.event == "head_ref_force_pushed") | .created_at] | max // empty' "$RUNNER_TEMP/events.json")
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA" > "$RUNNER_TEMP/runs.json"
+          pushed=$(jq -rs --arg ref "$HEAD_REF" --arg repo "$HEAD_REPO" '[.[].workflow_runs[] | select(.event == "pull_request_target" and .name == "Workflow guard" and .head_branch == $ref and .head_repository.full_name == $repo) | .created_at] | min // empty' "$RUNNER_TEMP/runs.json")
+          if [[ "$forced" > "$pushed" ]]; then
+            pushed=$forced
+          fi
+          if [ "$labeled" = true ] && [ -n "$pushed" ] && [[ "$added" > "$pushed" ]]; then
+            echo "The owner ($OWNER) added the review-override label after this commit was pushed, so these changes are allowed:"
+            echo "$changed"
+            exit 0
+          fi
+          echo "::error title=Workflow change::This pull request changes files that define its own checks. The owner reads them and adds the review-override label after the latest push. Changed:"
+          echo "$changed"
+          exit 1

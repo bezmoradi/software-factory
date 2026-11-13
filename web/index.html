@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en" data-theme="solarized-dark" data-scale="100" data-bar="left">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#002b36">
+<meta name="referrer" content="no-referrer">
+<title>Software Factory</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles/themes.css">
+<link rel="stylesheet" href="styles/app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body class="out">
+<div class="gone" hidden><div class="gone-card"><p class="gone-title">Software Factory</p><div class="gone-text" role="status"><p id="gone" class="gone-head"></p><p id="gone-detail" class="gone-detail"></p></div><div class="gone-progress" id="gone-progress" hidden><span></span></div><button type="button" class="primary" id="signin" hidden>Sign in</button></div></div>
+<header class="bar">
+  <a class="brand" href="./" data-view="overview">Software Factory</a>
+  <strong id="state">Connecting…</strong>
+  <span class="muted" id="title"></span>
+  <span class="spacer"></span>
+</header>
+<div class="workbench">
+<nav class="activity" aria-label="Views">
+  <ul>
+    <li><a class="item" href="./" data-view="overview" aria-label="Welcome" title="Welcome"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7.31299 1.26164C7.69849 0.897163 8.30151 0.897163 8.68701 1.26164L13.5305 5.84098C13.8302 6.12431 14 6.51853 14 6.93094V12.5002C14 13.3286 13.3284 14.0002 12.5 14.0002H10.5C9.67157 14.0002 9 13.3286 9 12.5002V10.0002C9 9.72407 8.77614 9.50021 8.5 9.50021H7.5C7.22386 9.50021 7 9.72407 7 10.0002V12.5002C7 13.3286 6.32843 14.0002 5.5 14.0002H3.5C2.67157 14.0002 2 13.3286 2 12.5002V6.93094C2 6.51853 2.1698 6.12431 2.46948 5.84098L7.31299 1.26164ZM8 1.98828L3.15649 6.56762C3.0566 6.66207 3 6.79347 3 6.93094V12.5002C3 12.7763 3.22386 13.0002 3.5 13.0002H5.5C5.77614 13.0002 6 12.7763 6 12.5002V10.0002C6 9.17179 6.67157 8.50022 7.5 8.50022H8.5C9.32843 8.50022 10 9.17179 10 10.0002V12.5002C10 12.7763 10.2239 13.0002 10.5 13.0002H12.5C12.7761 13.0002 13 12.7763 13 12.5002V6.93094C13 6.79347 12.9434 6.66207 12.8435 6.56762L8 1.98828Z"/></svg><span class="badge" id="need-badge" hidden></span></a></li>
+    <li><a class="item" href="./" data-view="projects" aria-label="Projects" title="Projects"><sf-icon name="folder"></sf-icon></a></li>
+    <li><a class="item" href="./" data-view="docs" aria-label="Docs" title="Docs"><sf-icon name="book"></sf-icon></a></li>
+  </ul>
+  <ul>
+    <li id="account-item" hidden><button type="button" class="item" popovertarget="account" aria-label="Account" title="Account"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6 5C6 3.89543 6.89543 3 8 3C9.10457 3 10 3.89543 10 5C10 6.10457 9.10457 7 8 7C6.89543 7 6 6.10457 6 5ZM5.49998 8L10.5 8C11.3284 8 12 8.67157 12 9.5C12 10.6161 11.541 11.5103 10.7879 12.1148C10.0466 12.7098 9.05308 13 8 13C6.94692 13 5.95342 12.7098 5.21215 12.1148C4.45897 11.5103 4 10.6161 4 9.5C4 8.67161 4.67156 8 5.49998 8ZM8 0C3.58172 0 0 3.58172 0 8C0 12.4183 3.58172 16 8 16C12.4183 16 16 12.4183 16 8C16 3.58172 12.4183 0 8 0ZM1 8C1 4.13401 4.13401 1 8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8Z"/></svg></button></li>
+    <li><button type="button" class="item" popovertarget="prefs" aria-label="Appearance" title="Appearance"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 9C10.3425 9 9.00002 10.3425 9.00002 12C9.00002 13.6575 10.3425 15 12 15C13.6575 15 15 13.6575 15 12C15 10.3425 13.6575 9 12 9ZM12 13.5C11.172 13.5 10.5 12.828 10.5 12C10.5 11.172 11.172 10.5 12 10.5C12.828 10.5 13.5 11.172 13.5 12C13.5 12.828 12.828 13.5 12 13.5ZM21.8475 14.5725L19.9185 12.942C19.8675 12.8985 19.8195 12.8505 19.776 12.7995C19.332 12.279 19.3965 11.5005 19.9185 11.058L21.8475 9.4275C22.0395 9.2655 22.113 9.0045 22.0365 8.766C21.579 7.3545 20.823 6.06 19.8285 4.962C19.7085 4.83 19.5405 4.758 19.368 4.758C19.2975 4.758 19.227 4.77 19.1595 4.794L16.779 5.6415C16.716 5.664 16.65 5.682 16.584 5.694C16.509 5.7075 16.434 5.715 16.3605 5.715C15.7725 5.715 15.2505 5.298 15.141 4.701L14.6865 2.223C14.6415 1.977 14.451 1.782 14.205 1.7295C13.485 1.5765 12.7485 1.5 12.0015 1.5C11.2545 1.5 10.5165 1.578 9.79652 1.7295C9.55052 1.782 9.36002 1.977 9.31502 2.223L8.86202 4.701C8.85002 4.767 8.83202 4.8315 8.80952 4.8945C8.62802 5.4 8.15102 5.715 7.64102 5.715C7.50302 5.715 7.36202 5.691 7.22402 5.643L4.84352 4.7955C4.77602 4.7715 4.70402 4.7595 4.63502 4.7595C4.46252 4.7595 4.29452 4.8315 4.17452 4.9635C3.17852 6.0615 2.42402 7.356 1.96502 8.7675C1.88702 9.006 1.96202 9.267 2.15402 9.429L4.08302 11.0595C4.13402 11.103 4.18202 11.151 4.22552 11.202C4.66952 11.7225 4.60502 12.501 4.08302 12.9435L2.15402 14.574C1.96202 14.736 1.88852 14.997 1.96502 15.2355C2.42252 16.647 3.17852 17.9415 4.17452 19.0395C4.29452 19.1715 4.46252 19.2435 4.63502 19.2435C4.70552 19.2435 4.77602 19.2315 4.84352 19.2075L7.22402 18.36C7.28702 18.3375 7.35302 18.3195 7.41902 18.3075C7.49402 18.294 7.56902 18.288 7.64252 18.288C8.23052 18.288 8.75252 18.705 8.86202 19.302L9.31502 21.78C9.36002 22.026 9.55052 22.221 9.79652 22.2735C10.5165 22.4265 11.2545 22.503 12.0015 22.503C12.7485 22.503 13.4865 22.425 14.205 22.2735C14.451 22.221 14.6415 22.026 14.6865 21.78L15.141 19.302C15.153 19.236 15.171 19.1715 15.1935 19.1085C15.375 18.603 15.852 18.288 16.362 18.288C16.5 18.288 16.641 18.312 16.779 18.36L19.158 19.2075C19.227 19.2315 19.2975 19.2435 19.3665 19.2435C19.539 19.2435 19.707 19.1715 19.827 19.0395C20.823 17.9415 21.5775 16.647 22.035 15.2355C22.113 14.997 22.038 14.736 21.846 14.574L21.8475 14.5725ZM19.092 17.589L17.2815 16.944C16.9845 16.839 16.6755 16.785 16.362 16.785C15.2085 16.785 14.1705 17.514 13.782 18.5985C13.731 18.738 13.6935 18.882 13.6665 19.029L13.3215 20.9055C12.8865 20.9685 12.444 21 12.0015 21C11.559 21 11.1165 20.9685 10.68 20.904L10.3365 19.0275C10.098 17.727 8.96552 16.7835 7.64252 16.7835C7.48052 16.7835 7.31552 16.7985 7.14902 16.8285C7.00352 16.8555 6.86102 16.893 6.72002 16.9425L4.90952 17.5875C4.35752 16.896 3.91652 16.1385 3.59102 15.321L5.05202 14.0865C5.61152 13.614 5.95202 12.951 6.01202 12.222C6.07202 11.493 5.84252 10.785 5.36702 10.227C5.27102 10.1145 5.16452 10.008 5.05202 9.912L3.59102 8.6775C3.91652 7.86 4.35752 7.101 4.90952 6.411L6.72002 7.056C7.01702 7.161 7.32602 7.215 7.64102 7.215C8.79452 7.215 9.83252 6.486 10.221 5.4015C10.272 5.2605 10.3095 5.1165 10.3365 4.971L10.68 3.0945C11.1165 3.0315 11.559 2.9985 12.0015 2.9985C12.444 2.9985 12.8865 3.03 13.3215 3.093L13.665 4.9695C13.9035 6.27 15.036 7.2135 16.359 7.2135C16.521 7.2135 16.686 7.1985 16.851 7.1685C16.9965 7.1415 17.1405 7.104 17.2815 7.0545L19.092 6.4095C19.644 7.0995 20.085 7.8585 20.4105 8.676L18.951 9.9105C18.3915 10.383 18.0495 11.046 17.991 11.775C17.931 12.504 18.1605 13.2135 18.636 13.77C18.7335 13.884 18.8385 13.989 18.9525 14.085L20.4135 15.3195C20.088 16.137 19.647 16.896 19.095 17.586L19.092 17.589Z"/></svg></button></li>
+  </ul>
+</nav>
+<div class="column">
+<div class="chrome">
+<sf-tabs id="tabs" panel="home"></sf-tabs>
+</div>
+
+<div id="prefs" class="prefs surface" popover>
+  <fieldset id="theme" class="themes"><legend class="label">Theme</legend></fieldset>
+  <fieldset id="bar-side" class="themes"><legend class="label">Activity bar</legend>
+    <label class="theme"><input type="radio" name="bar" value="left"><span>Left</span></label>
+    <label class="theme"><input type="radio" name="bar" value="right"><span>Right</span></label>
+  </fieldset>
+  <div class="size" role="group" aria-labelledby="scale-label">
+    <p class="label"><span id="scale-label">Text size</span><button type="button" class="link" id="scale-reset" hidden>Reset</button></p>
+    <span class="stepper"><button type="button" class="ghost" id="scale-down" aria-label="Smaller text">−</button><output id="scale-value" aria-live="polite"></output><button type="button" class="ghost" id="scale-up" aria-label="Larger text">+</button></span>
+  </div>
+</div>
+
+<div id="account" class="prefs menu surface" popover>
+  <p class="small muted">This tab is signed in to this Software Factory engine.</p>
+  <button type="button" class="ghost" id="disconnect">Disconnect</button>
+</div>
+
+<div class="frame" id="frame">
+<div class="scroller" id="scroller">
+<main id="home" class="view">
+<div class="welcome" id="welcome">
+  <div class="welcome-head"><h1 id="home-title">Software Factory</h1></div>
+  <div class="welcome-left">
+    <section class="start">
+      <h2>Start</h2>
+      <ul>
+        <li><button type="button" class="start-link link" data-start="add"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 4.5V6H5.58579C5.71839 6 5.84557 5.94732 5.93934 5.85355L7.29289 4.5L5.93934 3.14645C5.84557 3.05268 5.71839 3 5.58579 3H3.5C2.67157 3 2 3.67157 2 4.5ZM1 4.5C1 3.11929 2.11929 2 3.5 2H5.58579C5.98361 2 6.36514 2.15804 6.64645 2.43934L8.20711 4H12.5C13.8807 4 15 5.11929 15 6.5V7.25716C14.6929 7.00353 14.3578 6.78261 14 6.59971V6.5C14 5.67157 13.3284 5 12.5 5H8.20711L6.64645 6.56066C6.36514 6.84197 5.98361 7 5.58579 7H2V11.5C2 12.3284 2.67157 13 3.5 13H6.20703C6.30564 13.3486 6.43777 13.6832 6.59971 14H3.5C2.11929 14 1 12.8807 1 11.5V4.5ZM16 11.5C16 13.9853 13.9853 16 11.5 16C9.01472 16 7 13.9853 7 11.5C7 9.01472 9.01472 7 11.5 7C13.9853 7 16 9.01472 16 11.5ZM12 9C12 8.72386 11.7761 8.5 11.5 8.5C11.2239 8.5 11 8.72386 11 9V11H9C8.72386 11 8.5 11.2239 8.5 11.5C8.5 11.7761 8.72386 12 9 12H11V14C11 14.2761 11.2239 14.5 11.5 14.5C11.7761 14.5 12 14.2761 12 14V12H14C14.2761 12 14.5 11.7761 14.5 11.5C14.5 11.2239 14.2761 11 14 11H12V9Z"/></svg><span>Add project</span></button></li>
+        <li><button type="button" class="start-link link" data-start="session"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1.5C8 1.22386 7.77614 1 7.5 1C7.22386 1 7 1.22386 7 1.5V7H1.5C1.22386 7 1 7.22386 1 7.5C1 7.77614 1.22386 8 1.5 8H7V13.5C7 13.7761 7.22386 14 7.5 14C7.77614 14 8 13.7761 8 13.5V8H13.5C13.7761 8 14 7.77614 14 7.5C14 7.22386 13.7761 7 13.5 7H8V1.5Z"/></svg><span>New session</span></button></li>
+        <li><button type="button" class="start-link link" data-start="docs"><sf-icon class="icon" name="book"></sf-icon><span>Read the docs</span></button></li>
+        <li><button type="button" class="start-link link" popovertarget="prefs"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8.00101 1C4.13401 1 1.00101 3.8 1.00101 7.667C1.00101 8.956 2.04501 10 3.33401 10C4.75101 10 4.72101 9 6.00001 9C6.64401 9 7.00001 9.606 7.00001 10.25V11.5C7.00001 13.433 8.56701 15 10.5 15C13.653 15 14.999 11.215 14.999 8C14.999 4.134 11.866 1 8.00001 1H8.00101ZM10.5 14C9.12201 14 8.00001 12.878 8.00001 11.5V10.25C8.00001 8.967 7.14001 8 6.00001 8C5.04001 8 4.49801 8.412 4.13901 8.685C3.85401 8.902 3.72401 9 3.33401 9C2.59901 9 2.00101 8.402 2.00101 7.667C2.00101 4.436 4.58001 2 8.00101 2C11.309 2 14 4.692 14 8C14 10.412 13.068 14 10.501 14H10.5ZM12 11C12 11.552 11.552 12 11 12C10.448 12 10 11.552 10 11C10 10.448 10.448 10 11 10C11.552 10 12 10.448 12 11ZM13 8C13 8.552 12.552 9 12 9C11.448 9 11 8.552 11 8C11 7.448 11.448 7 12 7C12.552 7 13 7.448 13 8ZM6.00001 5C6.00001 5.552 5.55201 6 5.00001 6C4.44801 6 4.00001 5.552 4.00001 5C4.00001 4.448 4.44801 4 5.00001 4C5.55201 4 6.00001 4.448 6.00001 5ZM10 5C10 4.448 10.448 4 11 4C11.552 4 12 4.448 12 5C12 5.552 11.552 6 11 6C10.448 6 10 5.552 10 5ZM9.00001 4C9.00001 4.552 8.55201 5 8.00001 5C7.44801 5 7.00001 4.552 7.00001 4C7.00001 3.448 7.44801 3 8.00001 3C8.55201 3 9.00001 3.448 9.00001 4Z"/></svg><span>Change theme</span></button></li>
+        <li><a class="start-link link" href="https://github.com/bezmoradi/software-factory" target="_blank" rel="noopener noreferrer"><svg class="icon" viewBox="0 0 24 25" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 0.567749C9.62663 0.567749 7.30656 1.27154 5.33316 2.59011C3.35977 3.90869 1.8217 5.78284 0.913451 7.97555C0.00519944 10.1683 -0.232441 12.5811 0.230582 14.9088C0.693605 17.2366 1.83649 19.3748 3.51473 21.053C5.19296 22.7313 7.33115 23.8742 9.65893 24.3372C11.9867 24.8002 14.3995 24.5626 16.5922 23.6543C18.7849 22.7461 20.6591 21.208 21.9776 19.2346C23.2962 17.2612 24 14.9411 24 12.5678C24 9.38516 22.7357 6.33291 20.4853 4.08247C18.2349 1.83203 15.1826 0.567749 12 0.567749ZM15.1629 22.3512H15.0703C15.0004 22.355 14.9304 22.3445 14.8646 22.3204C14.7989 22.2962 14.7388 22.2588 14.688 22.2106C14.6411 22.161 14.6044 22.1026 14.5803 22.0388C14.5562 21.9749 14.545 21.9069 14.5474 21.8386V20.4329C14.5543 19.9655 14.5577 19.4935 14.5577 19.0169C14.5562 18.6686 14.5055 18.3223 14.4069 17.9883C14.3135 17.6511 14.1256 17.3477 13.8652 17.114C14.5623 17.0467 15.2475 16.8882 15.9034 16.6426C16.4565 16.4323 16.9568 16.1035 17.3692 15.6792C17.7759 15.2516 18.0786 14.7359 18.2537 14.1723C18.4668 13.4832 18.5681 12.7644 18.5537 12.0432C18.5574 11.5394 18.4691 11.0392 18.2932 10.5672C18.1149 10.0915 17.8452 9.6553 17.4994 9.28318C17.5737 9.09515 17.6277 8.89977 17.6606 8.70032C17.6942 8.50094 17.7108 8.29908 17.7103 8.0969C17.7106 7.8366 17.6807 7.57715 17.6212 7.32375C17.5666 7.06431 17.4927 6.80931 17.4 6.56089C17.3646 6.54686 17.3267 6.53987 17.2886 6.54032H17.1789C16.9499 6.54299 16.7228 6.58056 16.5052 6.65175C16.2649 6.72144 16.0299 6.80852 15.8023 6.91232C15.5754 7.01389 15.3544 7.12836 15.1406 7.25518C14.9263 7.38204 14.736 7.50375 14.568 7.6169C12.8858 7.14804 11.1074 7.14804 9.42515 7.6169C9.25372 7.50375 9.06687 7.38204 8.85258 7.25518C8.63597 7.12696 8.41153 7.01245 8.18058 6.91232C7.95337 6.80605 7.7177 6.71889 7.47601 6.65175C7.26242 6.58104 7.03926 6.54346 6.81429 6.54032H6.70458C6.66702 6.54 6.62976 6.54699 6.59486 6.56089C6.50045 6.80962 6.42313 7.0645 6.36344 7.32375C6.31009 7.57802 6.28309 7.8371 6.28287 8.0969C6.28296 8.29913 6.30016 8.50099 6.33429 8.70032C6.36662 8.89971 6.42007 9.0951 6.49372 9.28318C6.14842 9.65537 5.87936 10.0916 5.70172 10.5672C5.52524 11.0391 5.43635 11.5393 5.43944 12.0432C5.42538 12.7604 5.52371 13.4753 5.73086 14.162C5.91225 14.7259 6.21408 15.2436 6.61544 15.6792C7.03026 16.1005 7.52986 16.4289 8.08115 16.6426C8.73413 16.8929 9.41811 17.0532 10.1143 17.1192C9.91979 17.2951 9.76544 17.5109 9.66172 17.7518C9.56305 17.9901 9.49564 18.2401 9.46115 18.4958C9.09453 18.6717 8.69349 18.7642 8.28687 18.7666C7.90903 18.7811 7.53632 18.6755 7.22229 18.4649C6.92064 18.2418 6.66507 17.9624 6.46972 17.642C6.38262 17.5073 6.28519 17.3794 6.17829 17.2598C6.06536 17.134 5.94081 17.0192 5.80629 16.9169C5.67374 16.8178 5.52843 16.7371 5.37429 16.6769C5.22244 16.6103 5.05841 16.5758 4.89258 16.5758C4.85241 16.5768 4.81234 16.5802 4.77258 16.586C4.71822 16.5861 4.66408 16.593 4.61144 16.6066C4.56482 16.6188 4.52071 16.6391 4.48115 16.6666C4.46333 16.6765 4.44842 16.6909 4.43789 16.7083C4.42736 16.7258 4.42159 16.7457 4.42115 16.766C4.42551 16.8142 4.44036 16.8607 4.46465 16.9025C4.48893 16.9442 4.52207 16.9802 4.56172 17.0078C4.65429 17.082 4.73144 17.1392 4.79315 17.1792L4.82229 17.1998C4.95641 17.3027 5.08408 17.4137 5.20458 17.5323C5.31733 17.6303 5.41804 17.7414 5.50458 17.8632C5.5951 17.9814 5.67269 18.109 5.73601 18.2438C5.80915 18.3775 5.88629 18.5318 5.96744 18.7066C6.15489 19.1802 6.48887 19.5815 6.92058 19.8518C7.37379 20.0949 7.88243 20.216 8.39658 20.2032C8.57132 20.2032 8.74591 20.1929 8.91944 20.1723C9.09087 20.1449 9.26229 20.1158 9.43372 20.0815V21.8249C9.43682 21.8954 9.42498 21.9657 9.39898 22.0313C9.37298 22.0969 9.33341 22.1563 9.28287 22.2055C9.23208 22.2537 9.17197 22.291 9.10623 22.3152C9.0405 22.3394 8.97052 22.3499 8.90058 22.346H8.83887C6.50699 21.5927 4.52068 20.0316 3.23764 17.9437C1.95459 15.8559 1.45912 13.3786 1.84043 10.9579C2.22175 8.53721 3.4548 6.33219 5.31754 4.7399C7.18028 3.14761 9.55032 2.27269 12.0009 2.27269C14.4514 2.27269 16.8215 3.14761 18.6842 4.7399C20.5469 6.33219 21.78 8.53721 22.1613 10.9579C22.5426 13.3786 22.0471 15.8559 20.7641 17.9437C19.4811 20.0316 17.4948 21.5927 15.1629 22.346V22.3512Z"/></svg><span>Software Factory on GitHub</span></a></li>
+      </ul>
+    </section>
+  </div>
+  <section class="welcome-right">
+    <h2>Walkthroughs</h2>
+    <button type="button" class="walk featured" data-doc="usage"><span class="featured-mark"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M15.022 7.25497L12.203 10.003L12.869 13.883C12.917 14.165 12.844 14.438 12.664 14.654C12.479 14.872 12.205 15.001 11.929 15.001C11.775 15.001 11.626 14.963 11.485 14.89L8.00101 13.057L4.51701 14.889C4.13401 15.093 3.62401 14.991 3.34001 14.657C3.15801 14.439 3.08501 14.165 3.13201 13.884L3.79801 10.004L0.979007 7.25597C0.714007 6.99797 0.624007 6.63297 0.737007 6.27997C0.853007 5.92497 1.14001 5.68197 1.50701 5.62797L5.40301 5.06197L7.14501 1.53197C7.47301 0.865971 8.52801 0.865971 8.85601 1.53197L10.598 5.06197L14.494 5.62797C14.862 5.68197 15.149 5.92397 15.264 6.27597C15.378 6.63197 15.286 6.99697 15.022 7.25497Z"/></svg></span><span class="walk-head"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1C5.419 1 2.75 2.964 2.75 6.25C2.75 8.167 3.637 9.184 4.224 9.856C4.408 10.067 4.598 10.285 4.628 10.398L5.568 13.889C5.744 14.543 6.34 14.999 7.017 14.999H8.984C9.662 14.999 10.257 14.542 10.432 13.889L11.372 10.397C11.402 10.285 11.593 10.067 11.776 9.856C12.363 9.183 13.25 8.167 13.25 6.25C13.25 3.355 10.895 1 8 1ZM9.467 13.63C9.408 13.848 9.209 14 8.984 14H7.017C6.791 14 6.593 13.848 6.534 13.63L6.095 12H9.906L9.467 13.63ZM11.022 9.199C10.741 9.522 10.497 9.802 10.407 10.137L10.175 10.999H5.826L5.594 10.138C5.503 9.801 5.26 9.522 4.977 9.199C4.43 8.572 3.75 7.792 3.75 6.25C3.75 3.59 5.911 2 8 2C10.344 2 12.25 3.907 12.25 6.25C12.25 7.792 11.569 8.572 11.022 9.199Z"/></svg><strong>Get started with Software Factory</strong></span><span class="walk-desc">Sign in, add a project and start your first session from the page.</span></button>
+    <button type="button" class="walk" data-doc="trust-boundary"><span class="walk-head"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9.25 7.25C9.25 7.76258 8.94148 8.2031 8.5 8.39599V9.50358C8.5 9.77973 8.27614 10.0036 8 10.0036C7.72386 10.0036 7.5 9.77973 7.5 9.50358V8.39599C7.05852 8.2031 6.75 7.76258 6.75 7.25C6.75 6.55964 7.30964 6 8 6C8.69036 6 9.25 6.55964 9.25 7.25ZM7.14309 2.04175C6.78097 2.2883 6.21583 2.61563 5.42482 2.91681C4.6399 3.21566 3.90375 3.36204 3.36353 3.43333C3.09405 3.46889 2.87509 3.48554 2.72547 3.49331C2.6507 3.49719 2.5934 3.49885 2.55593 3.49954L2.50489 3.50003C2.37157 3.49872 2.24323 3.55072 2.14842 3.64449C2.05344 3.73841 2 3.86643 2 4V6.75508C2 9.40779 3.4013 11.8632 5.68525 13.2124L7.74707 14.4305C7.90399 14.5232 8.09891 14.5232 8.2558 14.4304L10.3162 13.2126C12.5993 11.8632 14 9.40823 14 6.7561V4C14 3.86598 13.9462 3.73757 13.8507 3.64358C13.7552 3.54964 13.626 3.49794 13.4921 3.50007L13.4421 3.49981C13.4048 3.49928 13.3478 3.49787 13.2735 3.49426C13.1246 3.48705 12.9066 3.47109 12.6384 3.43602C12.1006 3.36573 11.3679 3.21959 10.5869 2.91771C9.79733 2.61248 9.22913 2.28442 8.86335 2.03774C8.68039 1.91435 8.54795 1.81124 8.46371 1.74141C8.4256 1.70981 8.38768 1.6777 8.35191 1.64343C8.2576 1.55073 8.13037 1.49913 7.99807 1.50001C7.86585 1.50089 7.73916 1.55434 7.64611 1.64819L7.53744 1.74536C7.45475 1.81517 7.32423 1.91842 7.14309 2.04175ZM3 6.75508V4.47725C3.14066 4.46608 3.30705 4.44945 3.49436 4.42473C4.09055 4.34605 4.90577 4.18447 5.78065 3.85136C6.64943 3.52057 7.28362 3.15585 7.70588 2.86835C7.82102 2.78996 7.92034 2.71735 8.00434 2.65277C8.08878 2.71677 8.18861 2.78886 8.30421 2.86682C8.72757 3.15233 9.362 3.51631 10.2264 3.85045C11.0994 4.18794 11.9134 4.34976 12.5088 4.42759C12.6947 4.45189 12.86 4.46809 13 4.47888V6.7561C13 9.05461 11.7861 11.1822 9.80736 12.3518L8.00133 13.4192L6.19388 12.3515C4.21446 11.1821 3 9.0541 3 6.75508Z"/></svg><strong>What the page can and can't do</strong></span></button>
+    <button type="button" class="walk" data-doc="cost-and-models"><span class="walk-head"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M10.5 10C10.2239 10 10 10.2239 10 10.5C10 10.7761 10.2239 11 10.5 11H12.5C12.7761 11 13 10.7761 13 10.5C13 10.2239 12.7761 10 12.5 10H10.5ZM1 5.5C1 4.11929 2.11929 3 3.5 3H12.5C13.8807 3 15 4.11929 15 5.5V10.5C15 11.8807 13.8807 13 12.5 13H3.5C2.11929 13 1 11.8807 1 10.5V5.5ZM14 6V5.5C14 4.67157 13.3284 4 12.5 4H3.5C2.67157 4 2 4.67157 2 5.5V6H14ZM2 7V10.5C2 11.3284 2.67157 12 3.5 12H12.5C13.3284 12 14 11.3284 14 10.5V7H2Z"/></svg><strong>Cost and models</strong></span></button>
+    <button type="button" class="walk" data-doc="limitations"><span class="walk-head"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M14.831 11.965L9.206 1.714C8.965 1.274 8.503 1 8 1C7.497 1 7.035 1.274 6.794 1.714L1.169 11.965C1.059 12.167 1 12.395 1 12.625C1 13.383 1.617 14 2.375 14H13.625C14.383 14 15 13.383 15 12.625C15 12.395 14.941 12.167 14.831 11.965ZM13.625 13H2.375C2.168 13 2 12.832 2 12.625C2 12.561 2.016 12.5 2.046 12.445L7.671 2.195C7.736 2.075 7.863 2 8 2C8.137 2 8.264 2.075 8.329 2.195L13.954 12.445C13.984 12.501 14 12.561 14 12.625C14 12.832 13.832 13 13.625 13ZM8.75 11.25C8.75 11.664 8.414 12 8 12C7.586 12 7.25 11.664 7.25 11.25C7.25 10.836 7.586 10.5 8 10.5C8.414 10.5 8.75 10.836 8.75 11.25ZM7.5 9V5.5C7.5 5.224 7.724 5 8 5C8.276 5 8.5 5.224 8.5 5.5V9C8.5 9.276 8.276 9.5 8 9.5C7.724 9.5 7.5 9.276 7.5 9Z"/></svg><strong>Limitations</strong></span></button>
+  </section>
+  <section class="recent" id="recent">
+    <sf-setup id="setup" class="setup" hidden></sf-setup>
+    <h2>Sessions</h2>
+    <sf-overview id="overview"></sf-overview>
+  </section>
+</div>
+<sf-projects id="projects"></sf-projects>
+<sf-docs id="docs" hidden></sf-docs>
+<sf-file id="file" hidden></sf-file>
+</main>
+
+<div class="layout" id="live-view" hidden>
+  <button type="button" id="side-toggle" class="side-toggle label" aria-expanded="false" aria-controls="side"><sf-icon class="icon" name="chevron"></sf-icon>Session details</button>
+  <main>
+    <div class="crumbs-row"><nav id="crumbs" class="crumbs" aria-label="Breadcrumb"><ol id="crumbs-list"></ol></nav><button type="button" class="link small docs-link" id="session-docs" data-doc="working-in-a-session"><sf-icon class="icon" name="link"></sf-icon>View in docs</button></div>
+    <div id="warnings" class="notice warn small" hidden></div>
+    <div id="conversations"></div>
+  </main>
+
+  <aside id="side">
+    <div class="side-head"><h2 class="label">Execution path</h2><button type="button" class="ghost small" id="side-expand"><sf-icon class="icon" name="collapse"></sf-icon>Back to conversation</button></div>
+    <span id="side-needs-said" class="sr-only" role="status"></span><div id="side-needs" class="notice warn small side-needs" hidden><span>Claude needs you in the conversation.</span> <button type="button" class="ghost small" id="side-back">Back to the conversation</button></div>
+    <div id="team-row" class="small team-row" hidden><p id="team-note" class="small warn" hidden></p> <button type="button" class="ghost small" id="team-open" aria-controls="team-view" aria-expanded="false">Review the team file</button></div>
+    <div id="team-view" class="small team-view" hidden><p class="small muted" id="team-path"></p><p class="small muted" id="team-remote"></p><pre id="team-text" class="team-text" tabindex="0" role="region" aria-label="Team file"></pre><ul id="team-problems" class="small warn"></ul><div id="team-setup" class="small team-setup"></div><div class="row team-actions"><button type="button" class="primary small" id="team-approve">Approve this team file</button><button type="button" class="ghost small" id="team-forget">Stop using a team file</button></div></div>
+    <section id="path-section">
+      <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"><span></span></div><p class="path-card-detail small muted"></p><button type="button" class="primary path-card-open" id="side-open">Open execution path</button></div>
+      <div class="row field-row size-row"><label class="small" for="size">Work type</label> <select id="size" class="textbox" title="Sets what a push needs; the steps below show it"></select></div>
+      <p id="size-note" class="small warn" hidden></p>
+      <p id="path-busy" class="small muted" hidden>Step buttons are available when Claude finishes.</p>
+      <ol id="path" class="path">
+        <li data-stage="define"><span class="mark" aria-hidden="true"></span><div><strong>Define</strong> <button type="button" class="link stage" data-command="/knackpack:challenge-requirements" title="Sends /knackpack:challenge-requirements to this session">Start</button><p class="small muted stage-detail" id="define-detail"></p><sf-approval id="req-approval" hidden></sf-approval></div></li>
+        <li data-stage="plan"><span class="mark" aria-hidden="true"></span><div><strong>Plan</strong> <button type="button" class="link stage" data-command="/knackpack:plan-implementation" title="Sends /knackpack:plan-implementation to this session">Start</button><p class="small muted stage-detail" id="plan-detail"></p><button type="button" class="link stage" id="tasks-start" data-command="/speckit-tasks" title="Sends /speckit-tasks to this session" hidden>Tasks</button><sf-approval id="approval" hidden></sf-approval></div></li>
+        <li data-stage="implement"><span class="mark" aria-hidden="true"></span><div><strong>Implement</strong> <button type="button" class="link stage" data-command="commit" title="Asks this session to commit every uncommitted change, and to ask you about any file that shouldn't be committed">Commit</button><p class="small muted stage-detail"></p><ul class="small muted pending"></ul></div></li>
+        <li data-stage="verify"><span class="mark" aria-hidden="true"></span><div><strong>Code review</strong><p class="small muted stage-detail" id="verify-detail"></p><ul id="checks" class="list"></ul><sf-project-agents id="project-agents" hidden></sf-project-agents></div></li>
+        <li data-stage="deliver"><span class="mark" aria-hidden="true"></span><div><strong>Deliver</strong> <button type="button" class="link stage" data-command="/knackpack:create-issues" title="Sends /knackpack:create-issues to this session">Issues</button> <button type="button" class="link stage" data-command="/knackpack:handoff" title="Sends /knackpack:handoff to this session">Handoff</button><p class="small muted stage-detail"></p><ul class="small muted missing"></ul><div class="small muted exceptions" id="exceptions" hidden></div></div></li>
+      </ol>
+    </section>
+    <sf-reviews id="reviews" hidden></sf-reviews>
+    <sf-push-panel id="push-panel" hidden></sf-push-panel>
+    <sf-forge-panel id="forge-panel" hidden></sf-forge-panel>
+    <sf-intent id="intent" hidden></sf-intent>
+    <sf-changes id="changes" hidden></sf-changes>
+    <section id="agents-section">
+      <h2 class="label">Agents</h2>
+      <ul id="agents" class="list"><li class="muted">None yet.</li></ul>
+    </section>
+  </aside>
+</div>
+</div>
+<div class="page-side" id="docs-side"></div>
+<div class="page-side" id="projects-side"></div>
+</div>
+
+<form id="composer" class="composer" autocomplete="off" tabindex="-1" hidden>
+  <div class="composer-main">
+    <div id="control" class="control small session-notice" hidden><span id="control-text"></span> <button type="button" class="ghost small stack" id="control-button"><span></span><span class="off"></span></button> <button type="button" class="ghost small" id="control-cancel" hidden>Cancel</button></div>
+    <span id="checkpoint-said" class="sr-only" role="status"></span><div id="checkpoint" class="control small nudge" hidden><span><strong>Long conversation.</strong> <span id="checkpoint-text"></span></span> <button type="button" class="ghost small" id="checkpoint-cancel">Cancel</button> <button type="button" class="primary small" id="checkpoint-button">Save a checkpoint</button></div>
+    <span id="stall-said" class="sr-only" role="status"></span><div id="stall" class="control small nudge" hidden><span><strong>No news for a while.</strong> <span id="stall-text"></span></span> <button type="button" class="ghost small" id="stall-dismiss">Dismiss</button> <button type="button" class="ghost small" id="stall-copy" hidden>Copy attach command</button> <button type="button" class="primary small" id="stall-stop">Stop the turn</button></div>
+    <div class="attachments" id="attachments" hidden></div>
+    <div class="size-pick" id="size-pick" hidden>
+      <p class="small">What is this session for? Pick one before the first message. You can change it later under Work type.</p>
+      <div class="size-options">
+        <button type="button" class="size-option" data-size="feature"><span>Feature</span><span class="muted small">A plan you approve, then the adversarial and slop reviews</span></button>
+        <button type="button" class="size-option" data-size="fix"><span>Fix</span><span class="muted small">The adversarial and slop reviews</span></button>
+        <button type="button" class="size-option" data-size="docs"><span>Docs only</span><span class="muted small">The slop review, for documentation changes</span></button>
+        <button type="button" class="size-option" data-size="explore"><span>Exploring</span><span class="muted small">Questions and trying things out. Nothing is pushed</span></button>
+      </div>
+    </div>
+    <div class="strip">
+      <span class="dots" id="working" role="img" aria-label="Claude is working" hidden><i></i><i></i><i></i></span>
+      <span class="strip-note small muted compacting" id="strip-note" role="status"></span>
+      <span class="jump" id="jump"><button type="button" class="ghost" id="jump-start" hidden>↑ Start</button><button type="button" class="ghost" id="jump-latest" hidden>↓ Latest</button></span>
+    </div>
+    <div class="field">
+      <ul id="complete" class="complete surface" role="listbox" aria-label="Suggestions" hidden></ul>
+      <textarea id="text" class="textbox" rows="1" placeholder="Type a message and press Enter" aria-label="Message to the session"></textarea>
+      <button type="button" class="stop-turn" id="stop" title="Stop Claude's turn" aria-label="Stop Claude's turn" hidden><span class="stop-mark" aria-hidden="true"></span></button>
+    </div>
+    <div class="session-foot small" id="session-foot" hidden>
+      <span class="session-foot-text" id="foot-text"></span>
+      <span class="session-foot-acts" id="manage" hidden><button type="button" class="ghost small stack" id="manage-button"><span></span><span class="off"></span><span class="off"></span></button> <button type="button" class="ghost small" id="force-button" hidden></button> <button type="button" class="ghost small" id="manage-cancel" hidden>Cancel</button></span>
+      <button type="button" class="ghost icon-button" id="session-more" aria-label="More actions for this session" aria-haspopup="menu" popovertarget="session-menu"><sf-icon class="icon" name="more"></sf-icon></button>
+    </div>
+    <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>
+  </div>
+  <p class="muted small hint" id="hint" role="status"></p>
+</form>
+</div>
+</div>
+
+<sf-toasts id="toasts"></sf-toasts>
+
+<footer class="status">
+  <span class="status-left"><span class="counts" id="counts"></span></span>
+  <a class="repo" href="https://github.com/bezmoradi/software-factory" target="_blank" rel="noopener noreferrer" aria-label="MIT License: Software Factory on GitHub" title="Software Factory on GitHub"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span>MIT License</span></a>
+  <span id="usage"></span>
+</footer>
+</body>
+</html>

@@ -1,0 +1,70 @@
+name: software-factory-dev
+
+x-dev-deny: &dev-deny
+  EGRESS_DENY: gitserver.test,${SF_EXTRA_DENY:-}
+
+services:
+  agent:
+    image: software-factory:dev
+    build:
+      context: .
+      target: dev
+  reviewer:
+    image: software-factory:dev
+  engine:
+    environment:
+      <<: *dev-deny
+      SF_DEV_ACP_AGENT: /usr/local/bin/sf-fake-acp
+      SF_DEV_REVIEWER: /usr/local/bin/sf-fake-claude
+      SF_DEV_GIT_CA: /opt/sf-dev/git-ca/ca.pem
+    networks:
+      gitnet: {}
+    volumes:
+      - gitserver-ca:/opt/sf-dev/git-ca:ro
+    depends_on:
+      gitserver:
+        condition: service_healthy
+  egress:
+    environment:
+      <<: *dev-deny
+  gitserver:
+    image: software-factory:gitserver
+    pull_policy: never
+    build:
+      context: .
+      target: gitserver
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    environment:
+      GITSERVER_TOKEN: sf-dev-gitserver-token
+      GITSERVER_NAMES: gitserver.test,gitserver,localhost
+      GITSERVER_LOGIN: ${GITSERVER_LOGIN:-sf-dev-owner}
+      GITSERVER_API_STATE: /srv/git/github.json
+    networks:
+      gitnet:
+        aliases: [gitserver.test]
+    volumes:
+      - gitserver-data:/srv/git
+      - gitserver-ca:/srv/ca
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 256m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "--cacert", "/srv/ca/ca.pem", "-o", "/dev/null", "https://gitserver.test:8443/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s
+      retries: 3
+
+networks:
+  gitnet:
+    internal: true
+
+volumes:
+  gitserver-data:
+  gitserver-ca:

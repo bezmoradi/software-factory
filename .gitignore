@@ -1,0 +1,6 @@
+.env
+web/node_modules/
+web/dist/
+internal/adapters/http/page/dist/*
+!internal/adapters/http/page/dist/.gitkeep
+.sf-dev/

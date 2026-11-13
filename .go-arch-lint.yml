@@ -1,0 +1,83 @@
+version: 3
+workdir: .
+
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+excludeFiles:
+  - "^.*/dev/(fakeacp|fakeclaude|gitserver|watch)/.*\\.go$"
+  - "^.*/scripts/nocomments/main\\.go$"
+
+components:
+  shared:     { in: internal/core/shared }
+  session:    { in: internal/core/session }
+  gate:       { in: internal/core/gate }
+  review:     { in: internal/core/review }
+  push:       { in: internal/core/push }
+  workflow:   { in: internal/core/workflow }
+  level:      { in: internal/core/level }
+  agent:      { in: internal/core/agent }
+  engines:    { in: internal/adapters/engines/* }
+  sandbox:    { in: internal/adapters/sandbox/* }
+  install:    { in: internal/adapters/install/* }
+  git:        { in: internal/adapters/git/* }
+  http:       { in: internal/adapters/http/* }
+  agenthost:  { in: internal/adapters/agenthost }
+  egress:     { in: internal/adapters/egress }
+  loggers:    { in: internal/adapters/loggers/* }
+  configs:    { in: configs }
+  tools:      { in: tools }
+  cmd-server: { in: cmd/server }
+  cmd:        { in: cmd }
+
+deps:
+  session:
+    mayDependOn: [shared, gate, review, push, workflow, level, agent]
+  gate:
+    mayDependOn: [shared, session, review, push, workflow, level, agent]
+  review:
+    mayDependOn: [shared, session, gate, push, workflow, level, agent]
+  push:
+    mayDependOn: [shared, session, gate, review, workflow, level, agent]
+  workflow:
+    mayDependOn: [shared, session, gate, review, push, level, agent]
+  agent:
+    mayDependOn: [shared]
+  level:
+    mayDependOn: [shared, session, gate, review, push, workflow, agent]
+
+  engines:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  sandbox:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  install:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  git:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  http:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  agenthost:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  egress:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
+  loggers:
+    mayDependOn: [shared]
+    anyVendorDeps: true
+  configs:
+    mayDependOn: [tools]
+    anyVendorDeps: true
+
+  cmd:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, agenthost, egress, loggers, configs, tools, cmd-server, agent]
+    anyVendorDeps: true
+  cmd-server:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, agenthost, egress, loggers, configs, tools, agent]
+    anyVendorDeps: true
