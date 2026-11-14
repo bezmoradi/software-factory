@@ -711,6 +711,9 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 	if r.box == "" {
 		return oldLayout()
 	}
+	if d.liveBox(r.box) {
+		_ = d.ConfirmBox(ctx, r.box)
+	}
 	if !d.liveBox(r.box) {
 		return d.stopGone(sid, r)
 	}

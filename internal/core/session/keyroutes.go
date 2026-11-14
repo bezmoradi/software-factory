@@ -156,7 +156,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	if !ValidLoginTarget(target) {
 		return explained(invalid("target"), "")
 	}
-	if _, err := d.keyHost(target); err != nil {
+	if _, err := d.keyHost(ctx, target); err != nil {
 		return nil
 	}
 	release := d.holdGateway()

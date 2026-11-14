@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
@@ -79,9 +80,33 @@ func clearEntry(root *os.Root, name string, depth int) int {
 	return left
 }
 
+type clearJSON struct {
+	Box string `json:"box"`
+}
+
+func (s *Server) ownBox() string {
+	box := filepath.Base(s.cfg.Workspace)
+	if filepath.Base(filepath.Dir(s.cfg.Workspace)) != session.BoxesFolder || !session.ValidBox(box) {
+		return ""
+	}
+	return box
+}
+
+func (s *Server) sameBox(box string) *problem {
+	if box != s.ownBox() {
+		s.log.Warn("agent-host", "event", "other-box-refused")
+		return fail(http.StatusConflict, "box", "This agent-host serves another session's container.")
+	}
+	return nil
+}
+
 func (s *Server) clear(w http.ResponseWriter, r *http.Request) {
-	var q struct{}
+	var q clearJSON
 	if p := decode(w, r, &q); p != nil {
+		refuse(w, p)
+		return
+	}
+	if p := s.sameBox(q.Box); p != nil {
 		refuse(w, p)
 		return
 	}
@@ -93,7 +118,7 @@ func (s *Server) clear(w http.ResponseWriter, r *http.Request) {
 	send(w, http.StatusOK, clearReply{OK: true, Left: left})
 }
 
-func (c *Client) ClearWorkspace(ctx context.Context) error {
+func (c *Client) ClearWorkspace(ctx context.Context, box string) error {
 	var out clearReply
-	return c.call(ctx, http.MethodPost, clearRoute, struct{}{}, &out)
+	return c.call(ctx, http.MethodPost, clearRoute, clearJSON{Box: box}, &out)
 }

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -14,7 +15,8 @@ import (
 
 const (
 	BoxStopReason = "the sandbox check of the session's container failed"
-	boxListFor    = 30 * time.Second
+	boxListFor    = 15 * time.Second
+	boxSeenFor    = 3 * time.Second
 	maxCheckParts = 6
 )
 
@@ -95,6 +97,7 @@ func (d *Dispatcher) listBoxes(ctx context.Context) (map[string]BoxInfo, error) 
 	defer cancel()
 	list, err := d.cfg.Boxes.List(lctx)
 	if err != nil {
+		d.forgetSeen()
 		return nil, err
 	}
 	out := make(map[string]BoxInfo, len(list))
@@ -103,7 +106,63 @@ func (d *Dispatcher) listBoxes(ctx context.Context) (map[string]BoxInfo, error) 
 			out[b.Box] = b
 		}
 	}
+	d.boxes.seenMu.Lock()
+	d.boxes.seen, d.boxes.seenAt = out, d.reg.now()
+	d.boxes.seenMu.Unlock()
 	return out, nil
+}
+
+func (d *Dispatcher) forgetSeen() {
+	d.boxes.seenMu.Lock()
+	d.boxes.seen, d.boxes.seenAt = nil, time.Time{}
+	d.boxes.seenMu.Unlock()
+}
+
+func (d *Dispatcher) seenBoxes(ctx context.Context) (map[string]BoxInfo, error) {
+	d.boxes.seenMu.Lock()
+	seen, at := d.boxes.seen, d.boxes.seenAt
+	d.boxes.seenMu.Unlock()
+	if age := d.reg.now().Sub(at); seen != nil && age >= 0 && age < boxSeenFor {
+		return seen, nil
+	}
+	return d.listBoxes(ctx)
+}
+
+func routedAt(listed map[string]BoxInfo, known BoxInfo) bool {
+	info, ok := listed[known.Box]
+	return ok && info.State == "running" && info.Subnet == known.Subnet && info.Agent == known.Agent
+}
+
+func (d *Dispatcher) ConfirmBox(ctx context.Context, box string) error {
+	if !d.boxed() || !ValidBox(box) {
+		return explained(conflict("box stopped"), "The session's container isn't running.")
+	}
+	known, ok := d.cfg.Routes.Info(box)
+	if !ok {
+		return explained(conflict("box stopped"), "The session's container isn't running. Wake or start the session again.")
+	}
+	listed, err := d.seenBoxes(ctx)
+	if err != nil {
+		return explained(conflict("box helper"), "The box helper didn't answer, so the engine can't confirm which container answers at the session's address, and it doesn't reach it.")
+	}
+	if !routedAt(listed, known) {
+		d.cfg.Routes.Down(box)
+		d.cfg.Logger.Warn("boxes", "event", "stale-route-dropped", "box", box)
+		return explained(conflict("box stopped"), "The session's container isn't running at the address the engine had for it, so the engine dropped that route. Wake or start the session again.")
+	}
+	return nil
+}
+
+func (d *Dispatcher) pruneRoutes(listed map[string]BoxInfo) {
+	if listed == nil {
+		return
+	}
+	for _, known := range d.cfg.Routes.Routed() {
+		if !routedAt(listed, known) {
+			d.cfg.Routes.Down(known.Box)
+			d.cfg.Logger.Warn("boxes", "event", "stale-route-dropped", "box", known.Box)
+		}
+	}
 }
 
 func (d *Dispatcher) boxCheck(ctx context.Context, box string, listed map[string]BoxInfo, listErr error) level.Observation {
@@ -141,6 +200,13 @@ func (d *Dispatcher) boxCheck(ctx context.Context, box string, listed map[string
 
 func (d *Dispatcher) round(ctx context.Context) {
 	d.retryStops(ctx)
+	var listed map[string]BoxInfo
+	listErr := errors.New("the engine has no box helper")
+	if d.boxed() {
+		if listed, listErr = d.listBoxes(ctx); listErr == nil {
+			d.pruneRoutes(listed)
+		}
+	}
 	st := d.check(ctx)
 	if d.cfg.Sandbox == nil || st.Observation.Event != level.CheckPassed {
 		return
@@ -159,7 +225,6 @@ func (d *Dispatcher) round(ctx context.Context) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, checkFor)
 	defer cancel()
-	listed, listErr := d.listBoxes(cctx)
 	var wg sync.WaitGroup
 	for _, t := range targets {
 		wg.Go(func() {

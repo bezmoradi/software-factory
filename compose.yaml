@@ -74,6 +74,7 @@ services:
     depends_on:
       helper:
         condition: service_healthy
+        restart: true
       egress:
         condition: service_healthy
       reviewer:

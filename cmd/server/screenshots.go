@@ -24,8 +24,9 @@ type hostSweep struct {
 
 type hostedScreenshots struct {
 	page.Screenshots
-	routes *boxRoutes
-	sweep  *hostSweep
+	routes  *boxRoutes
+	sweep   *hostSweep
+	confirm func(ctx context.Context, box string) error
 }
 
 type shotRemover interface {
@@ -64,6 +65,10 @@ func (s hostedScreenshots) askHost(box, name string) {
 		parent = s.sweep.ctx
 	}
 	ctx, cancel := context.WithTimeout(parent, shotsHostTimeout)
+	if s.confirm == nil || s.confirm(ctx, box) != nil {
+		cancel()
+		return
+	}
 	_, err := remover.RemoveScreenshots(ctx, name)
 	cancel()
 	if err != nil && s.sweep != nil {
@@ -74,11 +79,14 @@ func (s hostedScreenshots) askHost(box, name string) {
 	}
 }
 
-func useScreenshots(reg *session.Registry, workspace string, routes *boxRoutes, logger shared.Logger) *hostedScreenshots {
+func useScreenshots(reg *session.Registry, workspace string, routes *boxRoutes, d *session.Dispatcher, logger shared.Logger) *hostedScreenshots {
 	if workspace == "" {
 		return nil
 	}
 	hosted := hostedScreenshots{Workspace: workspace, OpenBox: files.OpenBox, routes: routes}
+	if d != nil {
+		hosted.confirm = d.ConfirmBox
+	}
 	reg.UseScreenshots(hosted, logger)
 	return &hosted
 }

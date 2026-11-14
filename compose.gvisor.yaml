@@ -1,25 +1,4 @@
 services:
-  agent:
-    runtime: runsc
-    networks:
-      agentnet:
-        ipv4_address: ${SF_GVISOR_PREFIX:-172.31.253}.12
-    extra_hosts:
-      - "egress:${SF_GVISOR_PREFIX:-172.31.253}.11"
-      - "egress-agents:${SF_GVISOR_PREFIX:-172.31.253}.11"
-      - "engine-agents:${SF_GVISOR_PREFIX:-172.31.253}.10"
-  engine:
-    networks:
-      agentnet:
-        ipv4_address: ${SF_GVISOR_PREFIX:-172.31.253}.10
-  egress:
-    networks:
-      agentnet:
-        ipv4_address: ${SF_GVISOR_PREFIX:-172.31.253}.11
-
-networks:
-  agentnet:
-    internal: true
-    ipam:
-      config:
-        - subnet: ${SF_GVISOR_PREFIX:-172.31.253}.0/24
+  helper:
+    environment:
+      SF_BOX_RUNTIME: runsc

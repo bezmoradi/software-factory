@@ -500,7 +500,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		_ = pageLn.Close()
 		return err
 	}
-	shots := useScreenshots(reg, cfg.Workspace, parts.routes, logger)
+	shots := useScreenshots(reg, cfg.Workspace, parts.routes, parts.dispatcher, logger)
 	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities(), OpenTree: files.OpenTree}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()

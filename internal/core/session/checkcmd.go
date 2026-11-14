@@ -56,7 +56,7 @@ func (w *SessionWork) hosted() bool {
 	return w.d != nil && w.d.boxed()
 }
 
-func (w *SessionWork) commandHost(sid string) (CommandHost, error) {
+func (w *SessionWork) commandHost(ctx context.Context, sid string) (CommandHost, error) {
 	if w.d == nil {
 		return nil, &HostError{Code: "no-helper", Message: "This engine has no box helper to run sessions' containers."}
 	}
@@ -68,6 +68,9 @@ func (w *SessionWork) commandHost(sid string) (CommandHost, error) {
 		box = r.box
 	}
 	d.mu.Unlock()
+	if err := d.ConfirmBox(ctx, box); err != nil && box != "" {
+		return nil, &HostError{Code: "box", Message: errText(err)}
+	}
 	host := d.hostFor(box)
 	if h, ok := host.(CommandHost); ok {
 		return h, nil
@@ -154,7 +157,7 @@ func (w *SessionWork) runCommand(ctx context.Context, sid, kind, command, cwd st
 	}
 	rctx, cancel := context.WithTimeout(ctx, limit+commandSlack)
 	var res CommandResult
-	host, err := w.commandHost(sid)
+	host, err := w.commandHost(rctx, sid)
 	if err == nil {
 		res, err = host.ProjectCommand(rctx, cwd, kind, command)
 	}

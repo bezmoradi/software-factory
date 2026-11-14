@@ -51,6 +51,7 @@ type BoxRoutes interface {
 	Down(box string)
 	Host(box string) (Host, bool)
 	Info(box string) (BoxInfo, bool)
+	Routed() []BoxInfo
 }
 
 type BoxFolders interface {
@@ -73,7 +74,7 @@ type SessionClones interface {
 }
 
 type WorkspaceClearer interface {
-	ClearWorkspace(ctx context.Context) error
+	ClearWorkspace(ctx context.Context, box string) error
 }
 
 type WorktreeLinks interface {
@@ -138,6 +139,9 @@ type boxBook struct {
 	mu        sync.Mutex
 	stopMu    sync.Mutex
 	unstopped map[string]bool
+	seenMu    sync.Mutex
+	seen      map[string]BoxInfo
+	seenAt    time.Time
 }
 
 func (d *Dispatcher) markUnstopped(box string, on bool) {
@@ -408,6 +412,7 @@ func (d *Dispatcher) upBox(ctx context.Context, box string) error {
 		_ = d.cfg.Boxes.Stop(context.WithoutCancel(ctx), box)
 		return explained(conflict("box"), "The box helper answered with a container the engine can't use.")
 	}
+	d.forgetSeen()
 	if err := d.cfg.Routes.Up(ctx, info); err != nil {
 		d.cfg.Routes.Down(box)
 		_ = d.cfg.Boxes.Stop(context.WithoutCancel(ctx), box)
@@ -422,7 +427,10 @@ func (d *Dispatcher) wakeBox(ctx context.Context, box string) error {
 		return explained(conflict("no agent-host"), "This engine has no box helper to start sessions' containers in.")
 	}
 	if d.liveBox(box) {
-		return nil
+		err := d.ConfirmBox(ctx, box)
+		if err == nil || d.liveBox(box) {
+			return err
+		}
 	}
 	if d.isUnstopped(box) && !d.retryStop(ctx, box) {
 		return explained(conflict("box not stopped"), "The box helper couldn't stop the session's container after its last stop, so the engine doesn't start the agent in it again. It retries the stop at every sandbox check; try again once the box helper answers.")
@@ -442,6 +450,7 @@ func (d *Dispatcher) stopBox(ctx context.Context, box string) {
 		return
 	}
 	d.cfg.Routes.Down(box)
+	d.forgetSeen()
 	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)
 	defer cancel()
 	if err := d.cfg.Boxes.Stop(bctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {
@@ -460,7 +469,11 @@ func (d *Dispatcher) clearBox(ctx context.Context, box string) {
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)
 	defer cancel()
-	if err := h.ClearWorkspace(cctx); err != nil {
+	if err := d.ConfirmBox(cctx, box); err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "workspace-clear-skipped", "box", box)
+		return
+	}
+	if err := h.ClearWorkspace(cctx, box); err != nil {
 		d.cfg.Logger.Warn("boxes", "event", "workspace-not-cleared", "box", box)
 	}
 }
@@ -748,8 +761,8 @@ func (d *Dispatcher) resume(ctx context.Context, q Dispatch, spec AgentSpec, rep
 			d.dropBox(r.box, true)
 		}
 	}()
-	if !d.liveBox(r.box) {
-		return Started{}, explained(conflict("box stopped"), "The session's container stopped while it waited. Start the session again.")
+	if err := d.ConfirmBox(ctx, r.box); err != nil {
+		return Started{}, err
 	}
 	check, err := d.startCheck(ctx, r.box)
 	if err != nil {

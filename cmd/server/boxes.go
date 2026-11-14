@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,6 +86,19 @@ func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
 		return err
 	}
 	b.mu.Lock()
+	var stale []string
+	for box, e := range b.hosts {
+		if box != info.Box && (e.info.Subnet.Overlaps(info.Subnet) || e.info.Agent == info.Agent) {
+			stale = append(stale, box)
+		}
+	}
+	b.mu.Unlock()
+	slices.Sort(stale)
+	for _, box := range stale {
+		b.logger.Warn("boxes", "event", "stale-route-evicted", "box", box, "by", info.Box)
+		b.Down(box)
+	}
+	b.mu.Lock()
 	b.hosts[info.Box] = boxEntry{info: info, host: withGateway(client, b.allow, session.SideAgents)}
 	l := b.listener
 	b.mu.Unlock()
@@ -125,6 +139,17 @@ func (b *boxRoutes) Host(box string) (session.Host, bool) {
 		return nil, false
 	}
 	return e.host, true
+}
+
+func (b *boxRoutes) Routed() []session.BoxInfo {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]session.BoxInfo, 0, len(b.hosts))
+	for _, e := range b.hosts {
+		out = append(out, e.info)
+	}
+	slices.SortFunc(out, func(x, y session.BoxInfo) int { return strings.Compare(x.Box, y.Box) })
+	return out
 }
 
 func (b *boxRoutes) Info(box string) (session.BoxInfo, bool) {

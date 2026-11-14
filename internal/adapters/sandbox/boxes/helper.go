@@ -97,7 +97,8 @@ func NewHelper(ctx context.Context, hc HelperConfig) (*Helper, error) {
 			marker = DevMarker
 		}
 		if st, err := os.Stat(marker); err != nil || !st.Mode().IsRegular() {
-			return nil, fmt.Errorf("SF_BOX_LIVE=1 runs a binary from the dev-bin volume in every box, so the box helper honours it only in a development image, and this image has no %s", marker)
+			hc.Config.Live = false
+			hc.Logger.Warn("box helper", "event", "live_ignored", "why", "SF_BOX_LIVE=1 runs a binary from the dev-bin volume in every box, so the box helper honours it only in a development image, and this image has no "+marker)
 		}
 	}
 	var img imageInspectJSON

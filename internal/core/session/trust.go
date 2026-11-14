@@ -34,7 +34,7 @@ func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 	if !ok || clone != BoxClone(d.cfg.Workspace, box, name) {
 		return explained(notFound("project"), "That folder isn't a session's clone on this engine.")
 	}
-	b, err := d.boxLogin(BoxTarget(box))
+	b, err := d.boxLogin(ctx, BoxTarget(box))
 	if err != nil {
 		return err
 	}

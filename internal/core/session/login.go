@@ -22,7 +22,7 @@ type LoginHost interface {
 }
 
 type KeyHost interface {
-	APIKey(ctx context.Context, step, key string) error
+	APIKey(ctx context.Context, box, step, key string) error
 }
 
 type LoginState struct {
@@ -127,7 +127,7 @@ func (d *Dispatcher) recordedBox(box string) (BoxRecord, error) {
 	return list[i], nil
 }
 
-func (d *Dispatcher) boxLogin(target string) (boxLogin, error) {
+func (d *Dispatcher) boxLogin(ctx context.Context, target string) (boxLogin, error) {
 	box, ok := TargetBox(target)
 	if !ok {
 		return boxLogin{}, explained(invalid("target"), "")
@@ -142,6 +142,9 @@ func (d *Dispatcher) boxLogin(target string) (boxLogin, error) {
 	}
 	if !d.liveBox(box) {
 		return boxLogin{}, explained(conflict("box stopped"), "The session's container isn't running. Start or wake the session again to sign it in.")
+	}
+	if err := d.ConfirmBox(ctx, box); err != nil {
+		return boxLogin{}, err
 	}
 	return boxLogin{box: box, spec: spec, host: d.hostFor(box), dir: BoxFolder(d.cfg.Workspace, box)}, nil
 }
@@ -161,7 +164,7 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 		cmd = d.cfg.Reviews.loginCommand()
 		host = h
 	default:
-		b, err := d.boxLogin(target)
+		b, err := d.boxLogin(ctx, target)
 		if err != nil {
 			return "", nil, err
 		}
@@ -217,7 +220,7 @@ func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn,
 }
 
 func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
-	if _, err := d.keyHost(target); err != nil {
+	if _, err := d.keyHost(ctx, target); err != nil {
 		return err
 	}
 	side := targetSide(target)
@@ -241,7 +244,7 @@ func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
 }
 
 func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
-	if _, err := d.keyHost(target); err != nil {
+	if _, err := d.keyHost(ctx, target); err != nil {
 		return err
 	}
 	d.keyMu.Lock()
@@ -253,7 +256,7 @@ func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
 
 func (d *Dispatcher) ClearSide(ctx context.Context, side string) error {
 	if side == SideReviewers {
-		if _, err := d.keyHost(LoginReviewers); err != nil {
+		if _, err := d.keyHost(ctx, LoginReviewers); err != nil {
 			return nil
 		}
 		return d.ClearKey(ctx, LoginReviewers)
@@ -267,6 +270,13 @@ func (d *Dispatcher) ClearSide(ctx context.Context, side string) error {
 	}
 	slices.Sort(targets)
 	for _, t := range targets {
+		box, _ := TargetBox(t)
+		if err := d.ConfirmBox(ctx, box); err != nil {
+			if d.liveBox(box) {
+				return err
+			}
+			continue
+		}
 		if err := d.ClearKey(ctx, t); err != nil {
 			return err
 		}
@@ -274,7 +284,7 @@ func (d *Dispatcher) ClearSide(ctx context.Context, side string) error {
 	return nil
 }
 
-func (d *Dispatcher) keyHost(target string) (KeyHost, error) {
+func (d *Dispatcher) keyHost(ctx context.Context, target string) (KeyHost, error) {
 	if target == LoginReviewers {
 		if d.cfg.Reviews != nil {
 			if host, ok := d.cfg.Reviews.cfg.Host.(KeyHost); ok {
@@ -283,7 +293,7 @@ func (d *Dispatcher) keyHost(target string) (KeyHost, error) {
 		}
 		return nil, explained(conflict("login"), "This engine can't reach the reviewer container, so it can't change Claude Code's API key there.")
 	}
-	b, err := d.boxLogin(target)
+	b, err := d.boxLogin(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -295,13 +305,14 @@ func (d *Dispatcher) keyHost(target string) (KeyHost, error) {
 }
 
 func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error {
-	host, err := d.keyHost(target)
+	host, err := d.keyHost(ctx, target)
 	if err != nil {
 		return err
 	}
 	kctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
-	if err := host.APIKey(kctx, step, key); err != nil {
+	box, _ := TargetBox(target)
+	if err := host.APIKey(kctx, box, step, key); err != nil {
 		return explained(conflict("login"), hostMessage(err))
 	}
 	return nil
@@ -315,7 +326,7 @@ func (d *Dispatcher) finished(ctx context.Context, target string, kind Expect) *
 		}
 		return nil
 	}
-	b, err := d.boxLogin(target)
+	b, err := d.boxLogin(ctx, target)
 	if err != nil {
 		return nil
 	}
@@ -327,7 +338,7 @@ func (d *Dispatcher) finished(ctx context.Context, target string, kind Expect) *
 func (d *Dispatcher) LoginState(ctx context.Context, target string) (LoginState, error) {
 	out := LoginState{ReviewersExpect: d.cfg.Expected.Of(ReviewerAgent), AgentsExpect: ExpectAny}
 	if target != "" {
-		b, err := d.boxLogin(target)
+		b, err := d.boxLogin(ctx, target)
 		if err != nil {
 			return LoginState{}, err
 		}

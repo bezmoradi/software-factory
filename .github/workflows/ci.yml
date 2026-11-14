@@ -139,6 +139,8 @@ jobs:
       - name: Start the linux/amd64 stack and wait until every container is healthy
         run: |
           docker buildx build --platform linux/amd64 --target runtime --load -t software-factory:local .
+          SF_DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+          export SF_DOCKER_GID
           rc=0
           docker compose -p sf-ci up -d --wait --wait-timeout 180 || rc=$?
           docker compose -p sf-ci ps -a

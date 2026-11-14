@@ -55,6 +55,9 @@ func (l *login) end() {
 }
 
 func (s *Server) loginStep(ctx context.Context, q loginJSON) (loginReply, *problem) {
+	if !filepath.IsAbs(q.Cwd) || !s.inside(filepath.Clean(q.Cwd)) {
+		return loginReply{}, fail(http.StatusConflict, "box", "This agent-host serves another container's workspace.")
+	}
 	switch q.Step {
 	case "start":
 		return s.loginStart(ctx, q.commandJSON)

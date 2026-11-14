@@ -293,6 +293,9 @@ func (w *SessionWork) probeCodex(ctx context.Context, box string) ([]AgentModel,
 	if spec = d.installed(spec); !spec.Enabled {
 		return nil, errNoModels
 	}
+	if err := d.ConfirmBox(ctx, box); err != nil {
+		return nil, err
+	}
 	host := d.hostFor(box)
 	pctx, cancel := context.WithTimeout(ctx, modelProbeFor)
 	defer cancel()

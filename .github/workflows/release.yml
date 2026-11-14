@@ -143,23 +143,17 @@ jobs:
         run: |
           mkdir "$RUNNER_TEMP/release" "$RUNNER_TEMP/empty"
           sh scripts/release-compose.sh "$IMAGE" "$IMAGE_DIGEST" "$RUNNER_TEMP/release/compose.release.yaml"
-          check() {
-            jq -e --arg image "$IMAGE@$IMAGE_DIGEST" '
-              (.services | length) == 4
-              and all(.services[]; .image == $image and .pull_policy == "missing" and (has("build") | not)
-                and all((.volumes // [])[]; .type != "bind"))' "$1" >/dev/null
-          }
           docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" config --format json > "$RUNNER_TEMP/local.json"
-          if ! check "$RUNNER_TEMP/local.json"; then
-            echo "::error::The Compose file to publish doesn't run $IMAGE@$IMAGE_DIGEST in every service, or builds or binds a folder."
+          if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/local.json"; then
+            echo "::error::The Compose file to publish isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
           docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" publish -y "$COMPOSE_ARTIFACT:$VERSION"
           digest=$(docker buildx imagetools inspect "$COMPOSE_ARTIFACT:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
           printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
           (cd "$RUNNER_TEMP/empty" && docker compose -f "oci://$COMPOSE_ARTIFACT@$digest" config --format json) > "$RUNNER_TEMP/published.json"
-          if ! check "$RUNNER_TEMP/published.json"; then
-            echo "::error::$COMPOSE_ARTIFACT@$digest, read back, doesn't run $IMAGE@$IMAGE_DIGEST in every service."
+          if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/published.json"; then
+            echo "::error::$COMPOSE_ARTIFACT@$digest, read back, isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
@@ -295,10 +289,10 @@ jobs:
           - Image: \`$image\` (tag \`$VERSION\`), for linux/amd64 and linux/arm64.
           - Compose file: \`$compose\` (tag \`$VERSION\`).
 
-          Install or upgrade with Docker Compose 5.7.1 or later and cosign; earlier Compose doesn't check the Compose file it downloads against the digest cosign checked. The command stops unless Compose is 5.7.1 or later, then checks the Compose file's signature, and runs Compose only if it passes:
+          Install or upgrade with Docker Compose 5.7.1 or later and cosign; earlier Compose doesn't check the Compose file it downloads against the digest cosign checked. Run it from a folder you keep: it writes \`software-factory-socket.yaml\` there, which gives the box helper Docker's socket, and so control of Docker, which is close to control of the computer. The command stops unless Compose is 5.7.1 or later, then checks the Compose file's signature, and runs Compose only if it passes:
 
           ${fence}bash
-          docker compose version --short | awk -F. 'NR==1{v=\$0;sub(/^v/,"");ok=((\$1+0>5)||(\$1+0==5&&(\$2+0>7||(\$2+0==7&&\$3+0>=1))))}END{if(!ok){print "Stopped: this install needs Docker Compose 5.7.1 or later, and docker compose version --short gave: " v;exit 1}}' && cosign verify $compose $identity && docker compose -p software-factory -f oci://$compose up -d --wait -y
+          docker compose version --short | awk -F. 'NR==1{v=\$0;sub(/^v/,"");ok=((\$1+0>5)||(\$1+0==5&&(\$2+0>7||(\$2+0==7&&\$3+0>=1))))}END{if(!ok){print "Stopped: this install needs Docker Compose 5.7.1 or later, and docker compose version --short gave: " v;exit 1}}' && cosign verify $compose $identity && g=\${SF_DOCKER_GID:-0} s=\${SF_DOCKER_SOCKET:-/var/run/docker.sock} && { case "\$s" in /*) [ "\$(printf '%s.' "\$g" | tr -d 0-9)" = . ] && [ "\$(printf '%s:' "\$s" | tr -d A-Za-z0-9._/-)" = : ];; *) false;; esac || { echo "Stopped: SF_DOCKER_GID must be digits, and SF_DOCKER_SOCKET an absolute path of letters, digits and . _ / -"; false; }; } && printf 'services:\n  helper:\n    group_add: ["%s"]\n    volumes:\n      - "%s:/var/run/docker.sock"\n' "\$g" "\$s" > software-factory-socket.yaml && docker compose -p software-factory -f oci://$compose -f software-factory-socket.yaml up -d --wait -y
           ${fence}
 
           Then open <http://127.0.0.1:7799>. Running \`docker compose -f oci://…\` on its own skips the check.

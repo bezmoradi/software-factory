@@ -81,7 +81,7 @@ type RuleHost struct {
 }
 
 type AllowRules struct {
-	Hosts func(repo string) []RuleHost
+	Hosts func(ctx context.Context, repo string) []RuleHost
 	Repos Repositories
 	Audit Audit
 	Now   func() time.Time
@@ -474,7 +474,7 @@ func (a *AllowRules) AllowRules(ctx context.Context, name string) (AllowRulesVie
 	}
 	ctx, cancel := context.WithTimeout(ctx, allowRulesFor)
 	defer cancel()
-	hosts := a.Hosts(repo.Name)
+	hosts := a.Hosts(ctx, repo.Name)
 	v := AllowRulesView{Repo: repo.Name, Idle: len(hosts) == 0, Files: []SettingsFile{}, Rules: []AllowRule{}}
 	for _, h := range hosts {
 		files, err := h.Host.ReadAllowRules(ctx, repo.Name)
@@ -501,7 +501,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, plac
 	if err != nil {
 		return err
 	}
-	hosts := a.Hosts(repo.Name)
+	hosts := a.Hosts(ctx, repo.Name)
 	i := slices.IndexFunc(hosts, func(h RuleHost) bool { return h.Box == box })
 	if !ValidBox(box) || i < 0 {
 		return explained(notFound("box"), "No running session of this project has that container.")
@@ -539,7 +539,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, plac
 	return nil
 }
 
-func (d *Dispatcher) RuleHosts(repo string) []RuleHost {
+func (d *Dispatcher) RuleHosts(ctx context.Context, repo string) []RuleHost {
 	d.mu.Lock()
 	type owner struct{ box, name string }
 	var owners []owner
@@ -552,7 +552,7 @@ func (d *Dispatcher) RuleHosts(repo string) []RuleHost {
 	slices.SortFunc(owners, func(a, b owner) int { return strings.Compare(a.box, b.box) })
 	var out []RuleHost
 	for _, o := range owners {
-		if h, ok := d.hostFor(o.box).(AllowRulesHost); ok && d.liveBox(o.box) {
+		if h, ok := d.hostFor(o.box).(AllowRulesHost); ok && d.liveBox(o.box) && d.ConfirmBox(ctx, o.box) == nil {
 			out = append(out, RuleHost{Box: o.box, Name: o.name, Host: h})
 		}
 	}

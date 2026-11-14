@@ -1,5 +1,5 @@
 services:
-  agent:
+  helper:
     image: software-factory:${SF_BROWSER_STAGE:-browser}
     pull_policy: never
     build:
