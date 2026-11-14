@@ -50,6 +50,7 @@ func (p engineParts) settle(ctx context.Context, open session.AuditOpen) {
 		p.pushes.Reconcile(ctx, open)
 	}
 	if p.forges != nil {
+		p.forges.Restore(open)
 		p.forges.Reconcile(ctx, open)
 	}
 	if p.pushes != nil {

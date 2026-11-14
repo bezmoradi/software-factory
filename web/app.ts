@@ -908,22 +908,25 @@ async function answerPush(s: Session | null, answer: { card: string; commit: str
   if (!ok) toast({ id: `push-answer:${s.sid}`, title: answer.allow ? "The push wasn't allowed." : "The push wasn't denied.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
-async function startReview(s: Session | null) {
+async function startReview(s: Session | null, all: boolean) {
   if (!s || reviewAsking.has(s.sid) || s.info.review?.running) return
   reviewAsking.add(s.sid)
   schedulePaint()
+  const asked = all ? { sid: s.sid, all: true } : { sid: s.sid }
   let consent: Consent = {}
-  let answer = await reply(await api('/api/review', { sid: s.sid }).catch(() => null))
+  let answer = await reply(await api('/api/review', asked).catch(() => null))
   for (let round = 0; !answer.ok && round < 2; round++) {
     const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewer container's Claude Code", 'the review')
     if (!more?.costOk) break
     consent = { costOk: true }
-    answer = await reply(await api('/api/review', { sid: s.sid, ...consent }).catch(() => null))
+    answer = await reply(await api('/api/review', { ...asked, ...consent }).catch(() => null))
   }
   const { ok, body } = answer
   reviewAsking.delete(s.sid)
   schedulePaint()
-  if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad', timeout: body.needs ? 0 : undefined })
+  const message = typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.'
+  if (!ok && body.error === 'reviewed') toast({ id: `review:${s.sid}`, title: 'Every review is done.', description: message, tone: 'info' })
+  else if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined })
 }
 
 const testAsking = new Set<string>()
@@ -1635,7 +1638,7 @@ byId('conversations').addEventListener('sf-answer', async e => {
 byId('conversations').addEventListener('sf-settled', () => {
   if (!byId<HTMLTextAreaElement>('text').disabled) byId('text').focus()
 })
-byId('reviews').addEventListener('sf-review', () => void startReview(current()))
+byId('reviews').addEventListener('sf-review', e => void startReview(current(), e.detail.all))
 byId('reviews').addEventListener('sf-test-list', () => void startTestList(current()))
 async function setExpect(agent: string, expect: Expect) {
   const { ok, body } = await reply(await api('/api/sign-in-expect', { agent, expect }).catch(() => null))

@@ -53,6 +53,7 @@ class SfConversation extends HTMLElement {
   #said: HTMLParagraphElement | null = null
   #reply: { turnId: string; body: HTMLElementTagNameMap['sf-markdown'] } | null = null
   #tools = new Map<string, HTMLLIElement>()
+  #groups = new Map<string, { list: HTMLOListElement; label: HTMLElement; count: number; name: string }>()
   #cards = new Map<string, CardHost>()
   #pinned = true
   #top = 0
@@ -121,6 +122,25 @@ class SfConversation extends HTMLElement {
     return li
   }
 
+  #group(id: string, name?: string): HTMLOListElement {
+    let g = this.#groups.get(id)
+    if (!g) {
+      const li = this.#entry('subagent')
+      const box = el('details')
+      box.open = true
+      const label = el('summary', 'small')
+      const list = el('ol', 'sub-list')
+      box.append(label, list)
+      li.append(box)
+      g = { list, label, count: 0, name: '' }
+      this.#groups.set(id, g)
+    }
+    if (name) g.name = name
+    g.count++
+    g.label.textContent = `${g.name ? `Subagent ${shown(g.name)}` : 'A subagent'}: ${g.count} ${plural(g.count, 'tool call')}`
+    return g.list
+  }
+
   #clip() {
     if (this.hidden || !this.#timeline) return
     const width = this.clientWidth
@@ -163,6 +183,7 @@ class SfConversation extends HTMLElement {
     this.#needs!.replaceChildren(this.#heading!)
     this.#heading!.hidden = true
     this.#tools.clear()
+    this.#groups.clear()
     this.#cards.clear()
     this.#reply = null
     this.#blank = !note
@@ -208,7 +229,11 @@ class SfConversation extends HTMLElement {
       }
       case 'tool': {
         this.#reply = null
-        const li = this.#entry(`tool run${ev.agentId ? ' sub' : ''}`)
+        let li: HTMLLIElement
+        if (ev.agentId) {
+          li = el('li', 'tool run sub')
+          this.#group(ev.agentId, ev.agentName).append(li)
+        } else li = this.#entry('tool run')
         const mark = el('span', 'mark', '●')
         mark.setAttribute('aria-hidden', 'true')
         const call = el('div', 'call')
@@ -254,6 +279,9 @@ class SfConversation extends HTMLElement {
         break
       case 'ended':
         this.#entry('reset small muted').textContent = 'The session ended.'
+        break
+      case 'notice':
+        if (typeof ev.text === 'string' && ev.text) this.#entry('reset small muted').textContent = shown(ev.text)
         break
       case 'compact': {
         if (ev.state === 'start') break
@@ -320,7 +348,7 @@ class SfConversation extends HTMLElement {
     this.#needs!.insertBefore(node, before || null)
     this.#cards.set(ev.id, node)
     this.#heading!.hidden = false
-    const who = ev.agentId ? 'A subagent' : this.who
+    const who = ev.agentId ? (ev.agentName ? `Subagent ${shown(ev.agentName)}` : 'A subagent') : this.who
     this.#said!.textContent = ev.type === 'ask' ? `${who} asks a question` : ev.type === 'permission' ? `${who} asks to use ${visible(ev.tool)}` : 'Plan ready'
     this.#pin()
   }

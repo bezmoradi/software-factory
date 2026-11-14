@@ -37,6 +37,34 @@ func attemptOf(e ReviewEntry) int {
 	return max(e.Attempt, 1)
 }
 
+type ReviewScope int
+
+const (
+	ScopeEvery ReviewScope = iota
+	ScopeUnfinished
+	ScopeRetry
+)
+
+func (s ReviewScope) skips(e ReviewEntry) bool {
+	switch s {
+	case ScopeRetry:
+		return !Retryable(e) && !Rerunnable(e)
+	case ScopeUnfinished:
+		return settled(e)
+	}
+	return false
+}
+
+func settled(e ReviewEntry) bool {
+	switch e.Record.State {
+	case review.Pass, review.Block:
+		return true
+	case review.Unknown:
+		return e.Record.Channel == review.Checking
+	}
+	return false
+}
+
 func Retryable(e ReviewEntry) bool {
 	return e.Record.State == review.Failed && e.Failure == FailureNoOutcome && attemptOf(e) < MaxAttempts
 }
@@ -61,7 +89,7 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")
 	}
-	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, Auto: true, Retry: true}
+	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, Auto: true, Scope: ScopeRetry}
 	if w := d.cfg.Work; w != nil {
 		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
 		rt.Rounds = w.Rounds(sid, t.Name)

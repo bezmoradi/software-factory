@@ -21,11 +21,14 @@ type SavedRun struct {
 	Sandboxed bool
 
 	InterruptedAt  time.Time
+	InTurnSince    time.Time
 	AgentVersion   string
 	EngineVersion  string
 	WorkflowCommit string
 	ReviewerClaude string
 	ReviewerPlugin string
+
+	CodexThread string
 }
 
 type RunStore interface {
@@ -46,11 +49,13 @@ func (d *Dispatcher) saveRuns() {
 			Branch: r.branch, Cwd: r.cwd, Display: r.display, StartedAt: r.at, InterruptedAt: r.stamp.interruptedAt,
 			AgentVersion: r.stamp.agent, EngineVersion: r.stamp.engine, WorkflowCommit: r.stamp.workflow,
 			ReviewerClaude: r.stamp.reviewer, ReviewerPlugin: r.stamp.reviewerPlugin})
+		out[len(out)-1].CodexThread = savedThread(r.thread)
 	}
 	d.mu.Unlock()
 	for i := range out {
 		lv, ok := d.reg.Level(out[i].SID)
 		out[i].Sandboxed = ok && lv.Sandboxed
+		out[i].InTurnSince = d.reg.TurnSince(out[i].SID)
 	}
 	slices.SortFunc(out, func(a, b SavedRun) int { return cmp.Compare(a.SID, b.SID) })
 	if err := d.cfg.Runs.Save(out); err != nil {
@@ -78,6 +83,8 @@ func (d *Dispatcher) Restore() int {
 			sid: s.SID, id: s.ID, display: s.Display, at: s.StartedAt,
 			stamp: runStamp{interruptedAt: s.InterruptedAt, agent: s.AgentVersion, engine: s.EngineVersion, workflow: s.WorkflowCommit,
 				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
+		r.stamp.interruptedAt = cutAt(s)
+		r.thread = savedThread(s.CodexThread)
 		d.mu.Lock()
 		known := d.runs[s.SID] != nil
 		if !known {
@@ -92,7 +99,7 @@ func (d *Dispatcher) Restore() int {
 			a.StartedAt = s.StartedAt
 		}
 		d.reg.Restore(s.SID, a, s.Sandboxed)
-		d.interrupted(s.SID, s.InterruptedAt)
+		d.interrupted(s.SID, r.stamp.interruptedAt)
 		sids = append(sids, s.SID)
 	}
 	if d.cfg.Work != nil {

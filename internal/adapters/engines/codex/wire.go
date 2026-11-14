@@ -19,7 +19,10 @@ const (
 	methodInitialized   = "initialized"
 	methodAccountRead   = "account/read"
 	methodThreadStart   = "thread/start"
+	methodThreadResume  = "thread/resume"
+	methodThreadRead    = "thread/read"
 	methodTurnStart     = "turn/start"
+	methodTurnSteer     = "turn/steer"
 	methodTurnInterrupt = "turn/interrupt"
 
 	methodCommandApproval   = "item/commandExecution/requestApproval"
@@ -151,6 +154,27 @@ type threadStartParams struct {
 	Config            map[string]json.RawMessage `json:"config,omitempty"`
 }
 
+type threadResumeParams struct {
+	ThreadID     string `json:"threadId"`
+	ExcludeTurns bool   `json:"excludeTurns"`
+	threadStartParams
+}
+
+type threadReadParams struct {
+	ThreadID string `json:"threadId"`
+}
+
+type threadReply struct {
+	Thread struct {
+		ID string `json:"id"`
+	} `json:"thread"`
+	ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+	ApprovalsReviewer json.RawMessage `json:"approvalsReviewer"`
+	Sandbox           struct {
+		Type string `json:"type"`
+	} `json:"sandbox"`
+}
+
 type textInput struct {
 	Type         string   `json:"type"`
 	Text         string   `json:"text"`
@@ -167,6 +191,12 @@ type turnStartParams struct {
 	Input             []any  `json:"input"`
 	ApprovalPolicy    string `json:"approvalPolicy"`
 	ApprovalsReviewer string `json:"approvalsReviewer"`
+}
+
+type turnSteerParams struct {
+	ThreadID       string `json:"threadId"`
+	Input          []any  `json:"input"`
+	ExpectedTurnID string `json:"expectedTurnId"`
 }
 
 type turnInterruptParams struct {
@@ -198,8 +228,12 @@ type legacyReply struct {
 	} `json:"decision"`
 }
 
+type userInputAnswer struct {
+	Answers []string `json:"answers"`
+}
+
 type userInputReply struct {
-	Answers map[string]struct{} `json:"answers"`
+	Answers map[string]userInputAnswer `json:"answers"`
 }
 
 var errLineTooLong = errors.New("codex: line over the limit")

@@ -37,6 +37,7 @@ type sessionJSON struct {
 	Level        string      `json:"level"`
 	LevelReason  string      `json:"levelReason"`
 	LevelDropped bool        `json:"levelDropped"`
+	LevelLost    bool        `json:"levelLost,omitempty"`
 	Review       *reviewJSON `json:"review,omitempty"`
 	Push         *pushJSON   `json:"push,omitempty"`
 	Forge        []forgeJSON `json:"forge,omitempty"`
@@ -149,7 +150,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Verified: s.Verified, Running: s.Running, Live: s.Live, Disputed: s.Disputed, Claims: s.Claims,
 			Outdated: s.Outdated, Controlled: s.Controlled, Mode: s.Mode, Busy: s.Busy, Login: s.Login,
 			Needs: s.Needs, Epoch: s.Epoch, LastSeq: s.LastSeq,
-			Level: string(s.Level), LevelReason: s.LevelReason, LevelDropped: s.LevelDropped,
+			Level: string(s.Level), LevelReason: s.LevelReason, LevelDropped: s.LevelDropped, LevelLost: s.LevelLost,
 			Review: reviewOf(s.Review),
 			Push:   pushOf(s.Push),
 			Forge:  forgeOf(s.Forge),

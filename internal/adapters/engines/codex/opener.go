@@ -25,7 +25,7 @@ type stdioServer struct {
 }
 
 func (o Opener) Open(ctx context.Context, rw io.ReadWriteCloser, l session.Launch) (agent.Session, error) {
-	cfg := Config{Cwd: l.Cwd, ClientVersion: l.Version, Logger: o.Logger}
+	cfg := Config{Cwd: l.Cwd, ClientVersion: l.Version, Thread: l.Thread, Logger: o.Logger}
 	if l.MCP != nil {
 		args := l.MCP.Args
 		if args == nil {

@@ -91,6 +91,7 @@ type PushView struct {
 	Branch      string
 	Remote      string
 	Missing     []string
+	Unmet       []string
 	NeedsReason bool
 	Expires     time.Time
 	At          time.Time
@@ -105,6 +106,7 @@ type PushView struct {
 
 func (v PushView) clone() PushView {
 	v.Missing = slices.Clone(v.Missing)
+	v.Unmet = slices.Clone(v.Unmet)
 	if v.Audit != nil {
 		a := *v.Audit
 		a.Missing = slices.Clone(a.Missing)
@@ -680,6 +682,7 @@ type pushing struct {
 	findings   bool
 	passed     int
 	overridden int
+	unmet      []string
 }
 
 func (x *pushing) clean(s string) string {
@@ -697,6 +700,9 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	e = e.masked()
 	reason = e.Reason
 	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden}
+	if result == gate.Held {
+		v.Unmet = slices.Clone(x.unmet)
+	}
 	p.mu.Lock()
 	ended := (result == gate.Pushed || result == ResultUpToDate) && p.waiting[x.sid] == e.Commit
 	if ended {
@@ -898,6 +904,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return out, d
 	case gate.Held:
 		x.findings = !x.handoff && p.hasFindings(sid, t, head)
+		x.unmet = d.Unmet
 		return x.end(gate.Held, note+p.afterReviews(by, sid, t, head)+d.Reason, d.Missing, ""), d
 	case gate.Denied:
 		person := ""

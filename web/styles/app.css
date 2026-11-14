@@ -260,7 +260,7 @@ pre {
   overflow-x: auto;
   margin: 0 0 .6rem;
 }
-.timeline > li.tool { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr); row-gap: .15rem; margin: 0 0 .8rem; font-family: var(--mono); font-size: .8125rem; line-height: 1.45; color: var(--ink); }
+.timeline > li.tool, .sub-list > li.tool { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr); row-gap: .15rem; margin: 0 0 .8rem; font-family: var(--mono); font-size: .8125rem; line-height: 1.45; color: var(--ink); }
 .tool .mark { color: var(--soft); }
 .tool.ok .mark { color: var(--good-ink); }
 .tool.fail .mark { color: var(--bad-ink); }
@@ -275,6 +275,8 @@ pre {
 .tool-out span:last-child { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool.fail .tool-out { color: var(--bad-ink); }
 .tool.sub { padding-left: 1rem; }
+.sub-list { list-style: none; margin: .4rem 0 0; padding: 0; }
+.subagent > details > summary { min-height: 24px; color: var(--soft); cursor: pointer; }
 
 .card {
   background: var(--card);

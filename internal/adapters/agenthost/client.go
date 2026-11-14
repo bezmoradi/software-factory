@@ -268,15 +268,47 @@ type ProcessInfo struct {
 }
 
 func (c *Client) Processes(ctx context.Context) ([]ProcessInfo, error) {
+	_, list, err := c.processes(ctx)
+	return list, err
+}
+
+func (c *Client) processes(ctx context.Context) (string, []ProcessInfo, error) {
 	var out struct {
 		Processes []processJSON `json:"processes"`
+		Boot      string        `json:"boot"`
 	}
 	if err := c.call(ctx, http.MethodGet, "/v1/processes", nil, &out); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	list := make([]ProcessInfo, 0, len(out.Processes))
 	for _, p := range out.Processes {
 		list = append(list, ProcessInfo{ID: p.ID, Command: p.Command, Running: p.Running, Exit: p.Exit})
 	}
-	return list, nil
+	return out.Boot, list, nil
+}
+
+var _ session.HostLife = (*Client)(nil)
+
+func (c *Client) Boot(ctx context.Context) (string, error) {
+	boot, _, err := c.processes(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !processID.MatchString(boot) {
+		return "", &session.HostError{Code: "reply", Message: "agent-host answered no usable boot id"}
+	}
+	return boot, nil
+}
+
+func (c *Client) Exited(ctx context.Context, id string) (bool, error) {
+	_, list, err := c.processes(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range list {
+		if p.ID == id {
+			return !p.Running && p.Exit != nil, nil
+		}
+	}
+	return false, nil
 }

@@ -125,6 +125,7 @@ type run struct {
 	typ        string
 	at         time.Time
 	stamp      runStamp
+	thread     string
 }
 
 type Dispatcher struct {
@@ -150,7 +151,11 @@ func NewDispatcher(reg *Registry, cfg DispatcherConfig) *Dispatcher {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	return &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}}
+	d := &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}}
+	if cfg.Runs != nil {
+		reg.OnTurn(d.saveRuns)
+	}
+	return d
 }
 
 func notRun() level.Observation {
@@ -405,6 +410,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	r.id = foundID
 	r.sid = sid
 	r.running = true
+	d.booted(r)
 	d.reg.Admit(sid, launched(d.admission(r, true)))
 	d.observeStart(sid, r.check)
 	d.mu.Lock()
@@ -502,7 +508,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		return explained(conflict("start"), msg)
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor)
-	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b), Version: d.cfg.Version})
+	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b), Version: d.cfg.Version, Thread: d.threadOf(r)})
 	cancel()
 	if err != nil {
 		_ = p.Close()
@@ -520,13 +526,19 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	r.running = true
 	r.stopping = false
 	d.mu.Unlock()
-	b.start(sess, func() { d.ended(r, b, p) })
+	d.keepThread(r, sess)
+	b.start(sess, func(byEngine bool) { d.ended(r, b, p, byEngine) })
 	return nil
 }
 
-func (d *Dispatcher) ended(r *run, b *bridge, p Process) {
+func (d *Dispatcher) ended(r *run, b *bridge, p Process, byEngine bool) {
 	d.mu.Lock()
 	current := r.bridge == b
+	stopping := r.stopping
+	d.mu.Unlock()
+	lost := current && !stopping && !byEngine && !d.exitedItself(p.ID())
+	d.mu.Lock()
+	current = current && r.bridge == b
 	if current {
 		r.running = false
 		r.stopping = false
@@ -538,10 +550,13 @@ func (d *Dispatcher) ended(r *run, b *bridge, p Process) {
 	ctx, cancel := context.WithTimeout(context.Background(), stopFor)
 	_ = d.cfg.Host.Stop(ctx, p.ID())
 	cancel()
-	if current {
+	switch {
+	case current && lost:
+		d.lost(r.sid, b.cutTurn())
+	case current:
 		d.reg.Ended(r.sid, false)
+		d.cfg.Logger.Info("agent session", "event", "ended")
 	}
-	d.cfg.Logger.Info("agent session", "event", "ended")
 }
 
 func (d *Dispatcher) claim(sid string) (*run, error) {
@@ -669,6 +684,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.reg.Admit(sid, d.admission(r, true))
 		d.observeStart(sid, r.check)
 		d.woke(r)
+		d.booted(r)
 		return nil
 	}
 	err = d.startStdio(ctx, r)
@@ -764,11 +780,15 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	return nil, nil
 }
 
-func (d *Dispatcher) Review(ctx context.Context, sid string, costOK bool) error {
-	return d.reviewAs(ctx, sid, costOK, false)
+func (d *Dispatcher) Review(ctx context.Context, sid string, costOK, every bool) error {
+	scope := ScopeUnfinished
+	if every {
+		scope = ScopeEvery
+	}
+	return d.reviewAs(ctx, sid, costOK, false, scope)
 }
 
-func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool) error {
+func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool, scope ReviewScope) error {
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
 	}
@@ -776,7 +796,7 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")
 	}
-	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK, Auto: auto}
+	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK, Auto: auto, Scope: scope}
 	if w := d.cfg.Work; w != nil {
 		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
 		rt.Rounds = w.Rounds(sid, t.Name)

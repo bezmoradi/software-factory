@@ -50,6 +50,7 @@ type Result struct {
 	Dropped   bool
 	Sandboxed bool
 	Waiting   bool
+	Lost      bool
 }
 
 func resultOf(o Observation) (Result, bool) {
@@ -63,7 +64,7 @@ func resultOf(o Observation) (Result, bool) {
 	case ProcessEnded:
 		return Result{Level: Stopped, Reason: "the session's process ended"}, true
 	case ProcessLost:
-		return Result{Level: Stopped, Reason: "agent-host lost the session's process"}, true
+		return Result{Level: Stopped, Reason: "the session's process was lost: the engine's connection to it dropped without the agent ending, or the agent container restarted", Lost: true}, true
 	}
 	return Result{}, false
 }

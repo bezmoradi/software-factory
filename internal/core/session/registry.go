@@ -123,6 +123,7 @@ type Info struct {
 	Level        level.Level
 	LevelReason  string
 	LevelDropped bool
+	LevelLost    bool
 	Review       *ReviewView
 	Push         *PushView
 	Forge        []ForgeView
@@ -164,6 +165,7 @@ type admitted struct {
 	turnLog      *turnLog
 	unbacked     []TurnMarks
 	lastMessage  string
+	turnSince    time.Time
 }
 
 type replay struct {
@@ -197,6 +199,13 @@ type Registry struct {
 	supervisor  string
 	claimChecks *ClaimChecks
 	claimSerial uint64
+	turned      func()
+	compacted   func(sid string, queued bool)
+	compactions *limiter
+	noteStore   NoteStore
+	noteVersion uint64
+	noteSaved   uint64
+	noteMu      sync.Mutex
 }
 
 var (
@@ -214,7 +223,7 @@ var forwarded = map[string]bool{
 	"prompt": true, "command": true, "text": true, "tool": true, "tool_done": true, "busy": true, "idle": true,
 	"ask": true, "permission": true, "plan": true, "resolved": true, "ended": true, "agents": true, "catalog": true,
 	"control": true, "mode": true, "login": true, "usage": true, "compact": true, "context": true,
-	"workflow": true,
+	"workflow": true, "notice": true,
 }
 
 func New(version string, now func() time.Time) *Registry {
@@ -239,6 +248,7 @@ func New(version string, now func() time.Time) *Registry {
 		uploads:     newUploadBook(),
 		queued:      map[string]*queue{},
 		states:      map[string]AgentState{},
+		compactions: newLimiter(compactNotes, compactWindow),
 	}
 }
 
@@ -551,6 +561,7 @@ func (r *Registry) Report(given string, b Batch) error {
 			}
 			c.lastSeq = seq
 			r.trackTurn(c, kind, ev, seq, now)
+			r.markTurn(c.sid, kind, ev, now)
 			if cardTypes[kind] {
 				shown = r.indexCard(c.sid, ev)
 				changed = changed || shown
@@ -785,7 +796,7 @@ func (r *Registry) Forget(sid string) {
 	delete(r.lastGate, sid)
 	delete(r.restored, sid)
 	delete(r.queued, sid)
-	delete(r.notes, sid)
+	r.dropNotesLocked(sid)
 	delete(r.states, sid)
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
@@ -863,6 +874,7 @@ func (r *Registry) Ended(sid string, lost bool) {
 		return
 	}
 	a.running = false
+	r.endTurnLocked(a)
 	event := level.ProcessEnded
 	if lost {
 		event = level.ProcessLost
@@ -1070,6 +1082,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 	info.Level = lv.Level
 	info.LevelReason = lv.Reason
 	info.LevelDropped = lv.Dropped
+	info.LevelLost = lv.Lost
 	return info
 }
 
@@ -1180,14 +1193,17 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		}
 		q.msgs = append(q.msgs, msg)
 		if noted {
-			delete(r.notes, sid)
+			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
 		return nil
 	}
 	r.tell(c, msg, now)
 	if noted {
-		delete(r.notes, sid)
+		r.dropNotesLocked(sid)
+	}
+	if commandName(text) == "" {
+		r.startTurnLocked(sid, now)
 	}
 	return nil
 }

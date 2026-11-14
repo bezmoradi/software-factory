@@ -133,12 +133,13 @@ class SfForgePanel extends HTMLElement {
       } else line.append(label)
       box.append(line)
     }
+    if (f.reason && f.state === 'waiting' && pull) box.append(el('p', 'small bad', `Asking again: ${shown(f.reason)}.`))
     if (f.reason && (f.state === 'failed' || f.state === 'denied' || f.state === 'opened' || f.state === 'unclear')) box.append(el('p', `small ${f.state === 'failed' ? 'bad' : 'muted'}`, shown(f.reason)))
     if (pull && f.draft && f.state === 'opened') box.append(el('p', 'small muted', 'It opened as a draft: mark it ready for review on GitHub when you want reviews.'))
     if (f.state === 'unclear') box.append(this.#matches(f))
     if (f.state === 'waiting') {
       const confirmed = f.secretAt ? { confirmed: true } : {}
-      box.append(...this.#waiting(f, value, pull ? 'Open pull request' : 'Open issue', () => pull ? { card: f.card, approve: true, draft: this.#drafts.get(f.card) ?? true, ...confirmed } : { card: f.card, approve: true, ...confirmed }, pull, `The engine opens it on ${shown(f.host)} with your saved token`))
+      box.append(...this.#waiting(f, value, pull ? (f.reason ? 'Open pull request at the new commit' : 'Open pull request') : 'Open issue', () => pull ? { card: f.card, approve: true, draft: this.#drafts.get(f.card) ?? true, ...confirmed } : { card: f.card, approve: true, ...confirmed }, pull, `The engine opens it on ${shown(f.host)} with your saved token`))
     }
     return box
   }

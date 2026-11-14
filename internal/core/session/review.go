@@ -143,14 +143,14 @@ type ReviewTarget struct {
 	Plan   func(base, head string) []workflow.Requirement
 	Rounds int
 	Auto   bool
-	Retry  bool
+	Scope  ReviewScope
 
 	Approved func(head, main string) ApprovedText
 	Claims   string
 }
 
 type ReviewStarter interface {
-	Review(ctx context.Context, sid string, costOK bool) error
+	Review(ctx context.Context, sid string, costOK, every bool) error
 	Override(ctx context.Context, sid, agent, commit, reason string) error
 	TestList(ctx context.Context, sid string, costOK bool) error
 }

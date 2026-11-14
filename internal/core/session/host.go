@@ -63,6 +63,7 @@ type Launch struct {
 	AskingModes []string
 	MCP         *MCPServer
 	Version     string
+	Thread      string
 }
 
 type Opener interface {

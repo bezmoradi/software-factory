@@ -331,6 +331,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		return engineParts{}, err
 	}
 	commentAfterPush(pushes, forged)
+	noteCompactions(reg, work, logger)
 	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity}, nil
 }
 
@@ -419,6 +420,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		public = bound
 	}
 	reg := session.New(Version, nil)
+	reg.UseNotes(state.NewNotes(cfg.StateDir))
 	if err := useUploads(reg, os.Getenv, logger); err != nil {
 		_ = pageLn.Close()
 		return err
@@ -440,6 +442,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.dispatcher != nil {
 		parts.dispatcher.Restore()
 	}
+	reg.DropStrayNotes()
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 
 	base, cancelBase := context.WithCancel(context.Background())

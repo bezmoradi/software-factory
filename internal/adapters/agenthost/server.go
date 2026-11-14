@@ -66,6 +66,7 @@ type Server struct {
 	wtMu  sync.Mutex
 
 	agentsMu sync.Mutex
+	boot     string
 }
 
 type commandJSON struct {
@@ -152,7 +153,7 @@ func New(cfg Config) (*Server, error) {
 	if log == nil {
 		log = quiet{}
 	}
-	return &Server{cfg: cfg, log: log, procs: map[string]*process{}}, nil
+	return &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID()}, nil
 }
 
 func randomID() string {
@@ -305,7 +306,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/processes" {
 		switch r.Method {
 		case http.MethodGet:
-			send(w, http.StatusOK, map[string]any{"processes": s.list()})
+			send(w, http.StatusOK, map[string]any{"processes": s.list(), "boot": s.boot})
 		case http.MethodPost:
 			s.start(w, r)
 		default:

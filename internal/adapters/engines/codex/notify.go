@@ -33,6 +33,7 @@ type fileChange struct {
 
 type item struct {
 	kind      int
+	owner     string
 	streamed  []byte
 	sawDelta  bool
 	untracked bool
@@ -106,21 +107,24 @@ func (c *Client) notification(env envelope) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	p := env.Params
 	if head.ThreadID != nil && c.threadID != "" && *head.ThreadID != c.threadID {
+		if sub := c.subs[*head.ThreadID]; sub != nil {
+			c.subNotificationLocked(sub, env.Method, p)
+		}
 		return
 	}
-	p := env.Params
 	switch env.Method {
 	case methodAgentDelta:
 		c.deltaLocked(p, itemText, agent.Text)
 	case methodReasoningSummary, methodReasoningText:
 		c.deltaLocked(p, itemThought, agent.Thought)
 	case methodItemStarted:
-		c.itemLocked(p, false)
+		c.itemLocked(p, false, "")
 	case methodItemCompleted:
-		c.itemLocked(p, true)
+		c.itemLocked(p, true, "")
 	case methodPatchUpdated:
-		c.patchLocked(p)
+		c.patchLocked(p, "")
 	case methodTurnStarted:
 		c.turnStartedLocked(p)
 	case methodTurnCompleted:
@@ -130,29 +134,9 @@ func (c *Client) notification(env envelope) {
 	case methodTokenUsage:
 		c.usageLocked(p)
 	case methodSettingsUpdated:
-		var n struct {
-			ThreadSettings struct {
-				ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
-				ApprovalsReviewer json.RawMessage `json:"approvalsReviewer"`
-			} `json:"threadSettings"`
-		}
-		if json.Unmarshal(p, &n) != nil {
-			c.violated = true
-			c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonApprovalPolicy, Text: "Codex sent thread settings this client can't read; stop this session."})
-			return
-		}
-		c.checkSettingsLocked(n.ThreadSettings.ApprovalPolicy, n.ThreadSettings.ApprovalsReviewer)
+		c.settingsLocked(p)
 	case methodRequestResolved:
-		var n struct {
-			RequestID json.RawMessage `json:"requestId"`
-		}
-		if json.Unmarshal(p, &n) != nil {
-			return
-		}
-		if id, ok := validID(n.RequestID); ok {
-			ours := c.byRPC[string(id)]
-			c.withdrawLocked(func(q *pending) bool { return q.id == ours })
-		}
+		c.resolvedLocked(p)
 	case methodError:
 		c.errorLocked(p)
 	case methodThreadClosed:
@@ -175,6 +159,34 @@ func (c *Client) notification(env envelope) {
 		if c.unknown <= maxUnknown {
 			c.log.Info("codex: unknown method ignored", "kind", "notification")
 		}
+	}
+}
+
+func (c *Client) settingsLocked(p json.RawMessage) {
+	var n struct {
+		ThreadSettings struct {
+			ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+			ApprovalsReviewer json.RawMessage `json:"approvalsReviewer"`
+		} `json:"threadSettings"`
+	}
+	if json.Unmarshal(p, &n) != nil {
+		c.violated = true
+		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonApprovalPolicy, Text: "Codex sent thread settings this client can't read; stop this session."})
+		return
+	}
+	c.checkSettingsLocked(n.ThreadSettings.ApprovalPolicy, n.ThreadSettings.ApprovalsReviewer)
+}
+
+func (c *Client) resolvedLocked(p json.RawMessage) {
+	var n struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if json.Unmarshal(p, &n) != nil {
+		return
+	}
+	if id, ok := validID(n.RequestID); ok {
+		ours := c.byRPC[string(id)]
+		c.withdrawLocked(func(q *pending) bool { return q.id == ours })
 	}
 }
 
@@ -236,27 +248,33 @@ func reviewerName(raw json.RawMessage) string {
 	return "unknown"
 }
 
-func (c *Client) trackLocked(id string, kind int) *item {
+func (c *Client) trackLocked(id string, kind int, owner string) *item {
 	it := c.items[id]
 	if it != nil {
 		return it
 	}
 	if len(c.items) >= maxItems {
-		kept := map[string]*item{}
-		for _, p := range c.pending {
-			if p.item != nil {
-				for k, v := range c.items {
-					if v == p.item {
-						kept[k] = v
-					}
-				}
-			}
-		}
-		c.items = kept
+		c.keepItemsLocked(func(*item) bool { return false })
 	}
-	it = &item{kind: kind}
+	it = &item{kind: kind, owner: owner}
 	c.items[id] = it
 	return it
+}
+
+func (c *Client) keepItemsLocked(keep func(*item) bool) {
+	kept := map[string]*item{}
+	for k, v := range c.items {
+		if keep(v) {
+			kept[k] = v
+			continue
+		}
+		for _, q := range c.pending {
+			if q.item == v {
+				kept[k] = v
+			}
+		}
+	}
+	c.items = kept
 }
 
 func (c *Client) deltaLocked(p json.RawMessage, kind int, typ agent.EventType) {
@@ -267,7 +285,7 @@ func (c *Client) deltaLocked(p json.RawMessage, kind int, typ agent.EventType) {
 	if json.Unmarshal(p, &n) != nil || n.Delta == "" {
 		return
 	}
-	it := c.trackLocked(n.ItemID, kind)
+	it := c.trackLocked(n.ItemID, kind, "")
 	it.sawDelta = true
 	if !it.untracked && len(it.streamed)+len(n.Delta) <= maxTracked {
 		it.streamed = append(it.streamed, n.Delta...)
@@ -288,7 +306,7 @@ func (c *Client) finalTextLocked(id, text string, kind int, typ agent.EventType)
 		rest = text[len(it.streamed):]
 	}
 	if it == nil {
-		it = c.trackLocked(id, kind)
+		it = c.trackLocked(id, kind, "")
 	}
 	it.sawDelta = true
 	it.streamed = append(it.streamed, rest...)
@@ -315,10 +333,15 @@ type threadItem struct {
 	Error            *struct {
 		Message string `json:"message"`
 	} `json:"error"`
-	Query string `json:"query"`
+	Query             string   `json:"query"`
+	SenderThreadID    string   `json:"senderThreadId"`
+	ReceiverThreadIDs []string `json:"receiverThreadIds"`
+	AgentThreadID     string   `json:"agentThreadId"`
+	AgentPath         string   `json:"agentPath"`
+	Kind              string   `json:"kind"`
 }
 
-func (c *Client) itemLocked(p json.RawMessage, completed bool) {
+func (c *Client) itemLocked(p json.RawMessage, completed bool, sub string) {
 	var n struct {
 		Item threadItem `json:"item"`
 	}
@@ -327,34 +350,48 @@ func (c *Client) itemLocked(p json.RawMessage, completed bool) {
 		return
 	}
 	x := n.Item
+	key := itemKey(sub, x.ID)
 	switch x.Type {
 	case "agentMessage":
-		if completed {
+		if completed && sub == "" {
 			c.finalTextLocked(x.ID, x.Text, itemText, agent.Text)
 		}
 	case "reasoning":
-		if completed {
+		if completed && sub == "" {
 			c.finalTextLocked(x.ID, reasoningText(x), itemThought, agent.Thought)
 		}
 	case "commandExecution":
-		c.commandItemLocked(x, completed)
+		c.commandItemLocked(x, completed, sub)
 	case "fileChange":
-		c.fileItemLocked(x, completed)
+		c.fileItemLocked(x, completed, sub)
 	case "mcpToolCall":
 		tool := stringOf(x.Tool)
 		c.toolLocked(completed, agent.Tool{
-			ID:     x.ID,
+			ID:     key,
 			Title:  x.Server + ": " + tool,
 			Kind:   "mcp",
 			Status: statusName(x.Status),
 			Input:  mustJSON(map[string]any{"server": x.Server, "tool": tool, "arguments": x.Arguments}),
 			Whole:  true,
-		}, errorText(x))
+		}, errorText(x), sub)
 	case "webSearch":
-		c.toolLocked(completed, agent.Tool{ID: x.ID, Title: x.Query, Kind: "search", Status: doneStatus(completed)}, "")
+		c.toolLocked(completed, agent.Tool{ID: key, Title: x.Query, Kind: "search", Status: doneStatus(completed)}, "", sub)
+	case "collabAgentToolCall":
+		if sub == "" {
+			c.spawnedLocked(x, completed)
+		}
+		title := stringOf(x.Tool)
+		if title == "" {
+			title = "subagent"
+		}
+		c.toolLocked(completed, agent.Tool{ID: key, Title: title, Kind: "agent", Status: statusName(x.Status)}, "", sub)
+	case "subAgentActivity":
+		if sub == "" {
+			c.spawnedLocked(x, completed)
+		}
 	case "userMessage", "hookPrompt", "plan", "contextCompaction", "functionCallOutput":
 	default:
-		c.toolLocked(completed, agent.Tool{ID: x.ID, Title: x.Type, Kind: "other", Status: doneStatus(completed)}, "")
+		c.toolLocked(completed, agent.Tool{ID: key, Title: x.Type, Kind: "other", Status: doneStatus(completed)}, "", sub)
 	}
 }
 
@@ -397,21 +434,24 @@ func statusName(s string) string {
 		return "in_progress"
 	case "completed", "failed", "declined":
 		return s
+	case "interrupted":
+		return "failed"
 	}
 	return ""
 }
 
-func (c *Client) toolLocked(completed bool, tool agent.Tool, text string) {
+func (c *Client) toolLocked(completed bool, tool agent.Tool, text, sub string) {
 	if completed {
-		c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Text: clip(text)})
+		c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Text: clip(text), Agent: sub})
 		return
 	}
-	c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool})
+	c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool, Agent: sub})
 }
 
-func (c *Client) commandItemLocked(x threadItem, completed bool) {
+func (c *Client) commandItemLocked(x threadItem, completed bool, sub string) {
+	key := itemKey(sub, x.ID)
 	tool := agent.Tool{
-		ID:     x.ID,
+		ID:     key,
 		Title:  x.Command,
 		Kind:   "execute",
 		Status: statusName(x.Status),
@@ -419,25 +459,26 @@ func (c *Client) commandItemLocked(x threadItem, completed bool) {
 		Whole:  x.Command != "",
 	}
 	if !completed {
-		c.trackLocked(x.ID, itemCommand)
-		c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool})
+		c.trackLocked(key, itemCommand, sub)
+		c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool, Agent: sub})
 		return
 	}
 	text := ""
 	if x.AggregatedOutput != nil {
 		text = *x.AggregatedOutput
 	}
-	c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Text: clip(text)})
+	c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Text: clip(text), Agent: sub})
 }
 
-func (c *Client) fileItemLocked(x threadItem, completed bool) {
+func (c *Client) fileItemLocked(x threadItem, completed bool, sub string) {
+	key := itemKey(sub, x.ID)
 	changes, ok := parseChanges(x.Changes)
-	it := c.trackLocked(x.ID, itemFile)
+	it := c.trackLocked(key, itemFile, sub)
 	if it.kind == itemFile {
 		c.setChangesLocked(it, changes, ok)
 	}
 	tool := agent.Tool{
-		ID:     x.ID,
+		ID:     key,
 		Title:  changesTitle(changes),
 		Kind:   "edit",
 		Status: statusName(x.Status),
@@ -445,10 +486,10 @@ func (c *Client) fileItemLocked(x threadItem, completed bool) {
 		Whole:  ok && len(changes) > 0,
 	}
 	if completed {
-		c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool})
+		c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Agent: sub})
 		return
 	}
-	c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool})
+	c.emitLocked(agent.Event{Type: agent.ToolCall, Tool: &tool, Agent: sub})
 }
 
 func (c *Client) setChangesLocked(it *item, changes []fileChange, ok bool) {
@@ -457,7 +498,7 @@ func (c *Client) setChangesLocked(it *item, changes []fileChange, ok bool) {
 	it.version++
 }
 
-func (c *Client) patchLocked(p json.RawMessage) {
+func (c *Client) patchLocked(p json.RawMessage, sub string) {
 	var n struct {
 		ItemID  string          `json:"itemId"`
 		Changes json.RawMessage `json:"changes"`
@@ -465,21 +506,22 @@ func (c *Client) patchLocked(p json.RawMessage) {
 	if json.Unmarshal(p, &n) != nil {
 		return
 	}
+	key := itemKey(sub, n.ItemID)
 	changes, ok := parseChanges(n.Changes)
-	it := c.trackLocked(n.ItemID, itemFile)
+	it := c.trackLocked(key, itemFile, sub)
 	if it.kind != itemFile {
 		return
 	}
 	c.setChangesLocked(it, changes, ok)
 	tool := agent.Tool{
-		ID:     n.ItemID,
+		ID:     key,
 		Title:  changesTitle(changes),
 		Kind:   "edit",
 		Input:  mustJSON(map[string]any{"changes": changes}),
 		Whole:  ok && len(changes) > 0,
 		Status: "in_progress",
 	}
-	c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool})
+	c.emitLocked(agent.Event{Type: agent.ToolUpdate, Tool: &tool, Agent: sub})
 }
 
 func parseChanges(raw json.RawMessage) ([]fileChange, bool) {
@@ -558,16 +600,8 @@ func (c *Client) turnCompletedLocked(p json.RawMessage) {
 	if c.turnID == id {
 		c.turnID = ""
 	}
-	c.withdrawLocked(func(q *pending) bool { return q.turnID == id })
-	kept := map[string]*item{}
-	for k, v := range c.items {
-		for _, q := range c.pending {
-			if q.item == v {
-				kept[k] = v
-			}
-		}
-	}
-	c.items = kept
+	c.withdrawLocked(func(q *pending) bool { return q.agent == "" && q.turnID == id })
+	c.keepItemsLocked(func(it *item) bool { return it.owner != "" })
 	text := ""
 	if n.Turn.Error != nil {
 		text = n.Turn.Error.Message

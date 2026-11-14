@@ -46,6 +46,7 @@ class SfReviews extends HTMLElement {
   #key = ''
   #button: HTMLButtonElement | null = null
   #push: HTMLButtonElement | null = null
+  #again: HTMLButtonElement | null = null
   #said: HTMLSpanElement | null = null
   #reasons = new Map<string, string>()
 
@@ -63,6 +64,7 @@ class SfReviews extends HTMLElement {
       return
     }
     const focused = document.activeElement === this.#button
+    const againFocused = !!this.#again && document.activeElement === this.#again
     const typing = this.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key ?? '' : ''
     const testFocused = document.activeElement?.id === 'test-list-button'
     const pushFocused = document.activeElement === this.#push
@@ -71,10 +73,20 @@ class SfReviews extends HTMLElement {
     const off = running || !!value.disabled
     const b = button(running ? 'Reviewing…' : 'Review', 'primary small', () => {
       if (b.getAttribute('aria-disabled') === 'true') return
-      emit(this, 'sf-review')
+      emit(this, 'sf-review', { all: false })
     })
     b.setAttribute('aria-disabled', String(off))
-    b.title = 'Runs the required reviewers, the work type\'s roles and those the changed files call for, in the reviewer container on this session branch\'s latest commit, compared with what the remote\'s main branch lacks'
+    b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in the reviewer container, compared with what the remote\'s main branch lacks'
+    const decided = (state: string) => state === 'pass' || state === 'block' || state === 'overridden'
+    const verdicts = !r?.running && ((value.gate ?? []).some(x => decided(x.state)) || (!!r && (!value.head || value.head === r.commit) && r.roles.some(x => decided(x.state))))
+    const again = verdicts ? button('Run all again', 'small', () => {
+      if (again?.getAttribute('aria-disabled') === 'true') return
+      emit(this, 'sf-review', { all: true })
+    }) : null
+    if (again) {
+      again.setAttribute('aria-disabled', String(off))
+      again.title = 'Runs every required reviewer on the latest commit again, those that already passed or blocked it included, for fresh verdicts: each one is a run in the reviewer container'
+    }
     const pushOff = value.pushing || !!value.disabled
     const p = button(value.pushing ? 'Pushing…' : 'Push', 'small', () => {
       if (p.getAttribute('aria-disabled') === 'true') return
@@ -84,6 +96,7 @@ class SfReviews extends HTMLElement {
     p.title = 'Asks the engine to push this session\'s branch at its latest commit: the gate checks the reviews and the remote\'s main branch first'
     const head = el('div', 'row reviews-head')
     head.append(el('h2', 'label', 'Reviews'), el('span', 'spacer'), b)
+    if (again) head.append(again)
     if (value.pushSaid) {
       const said = el('span', `small ${value.pushSaid.tone} push-said`, value.pushSaid.text)
       said.setAttribute('role', 'status')
@@ -116,7 +129,7 @@ class SfReviews extends HTMLElement {
       parts.push(el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said))
     }
     if (value.planned?.length) {
-      parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in the reviewer container:`))
+      parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in the reviewer container, except one that already passed or blocked it:`))
       const list = el('ul', 'small planned')
       for (const x of value.planned) list.append(el('li', '', `${text(x.name)} (${text(x.agent)})${x.why ? `: ${text(x.why)}` : ''}`))
       parts.push(list)
@@ -140,7 +153,9 @@ class SfReviews extends HTMLElement {
     this.replaceChildren(...parts)
     this.#button = b
     this.#push = p
+    this.#again = again
     if (focused) b.focus()
+    if (againFocused) (again ?? b).focus({ preventScroll: true })
     if (typing) this.querySelector<HTMLElement>(`[data-key="${CSS.escape(typing)}"]`)?.focus()
     if (pushFocused) p.focus({ preventScroll: true })
     if (testFocused) document.getElementById('test-list-button')?.focus({ preventScroll: true })

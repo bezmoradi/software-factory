@@ -3,7 +3,7 @@ package session
 import "context"
 
 func (d *Dispatcher) AgentReview(ctx context.Context, sid string) error {
-	return d.reviewAs(ctx, sid, false, true)
+	return d.reviewAs(ctx, sid, false, true, ScopeEvery)
 }
 
 func (d *Dispatcher) SessionSignIn(sid string) (SignIn, bool) {

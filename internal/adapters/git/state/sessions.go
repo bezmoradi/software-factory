@@ -58,11 +58,14 @@ type runJSON struct {
 	Sandboxed bool      `json:"sandboxed,omitempty"`
 
 	InterruptedAt  time.Time `json:"interruptedAt,omitzero"`
+	InTurnSince    time.Time `json:"inTurnSince,omitzero"`
 	AgentVersion   string    `json:"agentVersion,omitempty"`
 	EngineVersion  string    `json:"engineVersion,omitempty"`
 	WorkflowCommit string    `json:"workflowCommit,omitempty"`
 	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
 	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
+
+	CodexThread string `json:"codexThread,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -113,9 +116,11 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 	seen := map[string]bool{}
 	for _, r := range f.Sessions {
 		v, ok := runOf(r)
+		v.CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		if !ok || seen[v.SID] || len(out) >= maxSessions {
 			continue
 		}
+		v.InTurnSince = r.InTurnSince
 		seen[v.SID] = true
 		out = append(out, v)
 	}
@@ -130,6 +135,8 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
 			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
 			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
+		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
+		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
 	}
 	return write(s.Dir, sessionsFile, f)
 }

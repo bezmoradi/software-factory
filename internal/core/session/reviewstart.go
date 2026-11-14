@@ -89,11 +89,15 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	var plans []plannedRole
 	var capped []string
 	var finished []RoleReview
+	var checking []string
 	for _, q := range required {
 		rd := RoundOf(entries, t.Branch, q.Agent)
 		key := review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}
-		if e, ok := entries[key]; t.Retry && ok && !Retryable(e) && !Rerunnable(e) {
+		if e, ok := entries[key]; ok && t.Scope.skips(e) {
 			finished = append(finished, finishedRole(q, e, rd.Count, limit))
+			if e.Record.Channel == review.Checking {
+				checking = append(checking, ReviewerName(q))
+			}
 			continue
 		}
 		if rd.Capped(limit) {
@@ -113,9 +117,17 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		p.overridden = acceptedRound(entries, t.Branch, q.Agent)
 		plans = append(plans, p)
 	}
-	if len(plans) == 0 && t.Retry {
+	if len(plans) == 0 && t.Scope == ScopeRetry {
 		release()
 		return explained(conflict("nothing to retry"), "Every review this commit needs has an outcome, so the engine doesn't run one again.")
+	}
+	if len(plans) == 0 && len(capped) == 0 {
+		release()
+		return explained(conflict("reviewed"), reviewedMessage(head, checking))
+	}
+	if len(plans) == 0 && len(finished) > 0 {
+		release()
+		return explained(conflict("capped"), fmt.Sprintf("Every other reviewer this commit needs has a verdict, and %s blocked in %d %s on this branch, the limit this project set, so the engine doesn't start %s again. Decide on the push: override a verdict, allow it with your reason, deny it, or hand the findings off.", strings.Join(capped, " and "), limit, plural(limit, "round", "rounds"), plural(len(capped), "it", "them")))
 	}
 	if len(plans) == 0 {
 		release()
@@ -151,6 +163,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		}
 	})
 	return nil
+}
+
+func reviewedMessage(head string, checking []string) string {
+	out := "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."
+	if len(checking) > 0 {
+		out = "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again; the engine is checking the " + strings.Join(checking, " and ") + " after an update, and " + plural(len(checking), "its pass counts", "their passes count") + " once the check ends. Press Run all again for fresh verdicts."
+	}
+	return out
 }
 
 type plannedRole struct {

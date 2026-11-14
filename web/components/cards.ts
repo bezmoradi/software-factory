@@ -1,10 +1,12 @@
-import { button, el, emit, remembered, visible, visibleCommand } from '../lib/dom.ts'
+import { button, el, emit, remembered, shown, visible, visibleCommand } from '../lib/dom.ts'
 import { attachCommand, plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
 
 const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attachCommand(attach)}` : "This session is read-only on this page, so this can't be answered here.")
 const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attachCommand(attach)}` : '')
+
+const subagent = (agentId?: string, agentName?: string) => (agentId ? (agentName ? `Subagent ${shown(agentName)}` : 'A subagent') : '')
 
 function start(host: HTMLElement, meta: string, title?: string) {
   host.classList.add('card')
@@ -153,8 +155,8 @@ class SfAsk extends HTMLElement {
   }
 
   #render() {
-    const { id, questions, readOnly, attach, who = 'Claude' } = this.#card!
-    start(this, `${who} asks`)
+    const { id, questions, readOnly, attach, agentId, agentName, who = 'Claude' } = this.#card!
+    start(this, `${subagent(agentId, agentName) || who} asks`)
     if (readOnly) {
       for (const q of questions) {
         this.append(el('h3', '', visible(q.question)))
@@ -242,8 +244,8 @@ class SfPermission extends HTMLElement {
   }
 
   #render() {
-    const { id, tool, detail, summary, agentId, complete, always, auto, irreversible, readOnly, attach, who = 'Claude' } = this.#card!
-    start(this, agentId ? 'A subagent wants to run a tool' : `${who} wants to run a tool`, `Allow ${visible(tool)}?`)
+    const { id, tool, detail, summary, agentId, agentName, complete, always, auto, irreversible, readOnly, attach, who = 'Claude' } = this.#card!
+    start(this, `${subagent(agentId, agentName) || who} wants to run a tool`, `Allow ${visible(tool)}?`)
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
     if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))

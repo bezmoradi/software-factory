@@ -209,15 +209,17 @@ func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]
 		return
 	}
 	consent, consented := consentOf(body)
-	if !keysWithin(body, "sid", "costOk") || !ok || !consented || sid == "" || len(sid) > 80 {
+	all, hasAll := body["all"]
+	every, isBool := all.(bool)
+	if !keysWithin(body, "sid", "costOk", "all") || !ok || !consented || sid == "" || len(sid) > 80 || hasAll && !isBool {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
-	err := s.cfg.Reviews.Review(ctx, sid, consent.CostOK)
-	s.logger.Info("review", "ok", err == nil)
+	err := s.cfg.Reviews.Review(ctx, sid, consent.CostOK, every)
+	s.logger.Info("review", "ok", err == nil, "all", every)
 	reply(w, err, http.StatusAccepted)
 }
 

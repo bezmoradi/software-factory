@@ -28,6 +28,7 @@ export interface SessionInfo {
   level?: string
   levelReason?: string
   levelDropped?: boolean
+  levelLost?: boolean
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
@@ -423,6 +424,12 @@ export interface ToolEvent extends Stamped {
   tool: string
   summary: string
   agentId?: string
+  agentName?: string
+}
+
+export interface NoticeEvent extends Stamped {
+  type: 'notice'
+  text: string
 }
 
 export interface ToolDoneEvent extends Stamped {
@@ -467,6 +474,7 @@ export interface Question {
 interface CardBase extends Stamped {
   id: string
   agentId?: string
+  agentName?: string
   readOnly?: boolean
   who?: string
   attach?: string
@@ -750,6 +758,7 @@ export type SessionEvent =
   | UsageEvent
   | CompactEvent
   | AuditEvent
+  | NoticeEvent
 
 export interface RepoEvent {
   type: 'repo'
@@ -842,7 +851,7 @@ declare global {
     'sf-file': CustomEvent<{ path: string }>
     'sf-reload': Event
     'sf-settled': Event
-    'sf-review': Event
+    'sf-review': CustomEvent<{ all: boolean }>
     'sf-expect': CustomEvent<{ agent: string; expect: Expect }>
     'sf-push-request': Event
     'sf-push-answer': CustomEvent<{ card: string; commit: string; allow: boolean; reason: string }>

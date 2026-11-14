@@ -137,6 +137,7 @@ type ForgeView struct {
 	Draft  bool
 	Asked  time.Time
 	At     time.Time
+	Commit string
 
 	SecretAt   string
 	SecretLine string
@@ -168,6 +169,8 @@ type ForgesConfig struct {
 	Logger     shared.Logger
 	Version    string
 	PRComments func(name string) bool
+	Cards      ForgeCardStore
+	Commits    ChangeReader
 }
 
 type forgeCard struct {
@@ -186,6 +189,7 @@ type Forges struct {
 	own    forgeOwn
 	wg     sync.WaitGroup
 	closed bool
+	saved  cardSaves
 }
 
 var _ ForgeService = (*Forges)(nil)
@@ -416,11 +420,15 @@ func (f *Forges) Request(ctx context.Context, sid string, kind ForgeKind, title,
 			return refuse("the engine doesn't know the repository's main branch yet")
 		}
 		v.Head, v.Base = ft.t.Branch, ft.main
-		if _, err := f.cfg.API.Branch(ctx, ft.repo, ft.t.Branch); err != nil {
+		head, err := f.cfg.API.Branch(ctx, ft.repo, ft.t.Branch)
+		if err != nil {
 			if errors.Is(err, ErrNoBranch) {
 				return refuse("the branch " + ft.t.Branch + " isn't on " + ft.repo.Host + " yet; call factory_push first, and once it says pushed, ask for the pull request again")
 			}
 			return refuse(f.clean(ft.repo.Token, "the engine couldn't read the branch on the git host: "+forgeWhy(err, NeedContents)))
+		}
+		if commitSHA.MatchString(head) {
+			v.Commit = head
 		}
 		link, open, err := f.cfg.API.OpenPull(ctx, ft.repo, ft.t.Branch)
 		if err != nil {
@@ -496,6 +504,7 @@ func (f *Forges) show(sid string) {
 	}
 	f.mu.Unlock()
 	f.cfg.Show(sid, out)
+	f.saveCards()
 }
 
 func (f *Forges) audit(sid string, t PushTarget, v ForgeView, by, result, reason string) {
@@ -549,7 +558,7 @@ func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft, con
 		f.cfg.Logger.Info("forge", "event", "denied", "kind", string(v.Kind))
 		return nil
 	}
-	c.view.State, c.view.At, c.view.Draft = ForgeSending, f.cfg.Now(), approve && draft
+	c.view.State, c.view.At, c.view.Draft, c.view.Reason = ForgeSending, f.cfg.Now(), approve && draft, ""
 	f.wg.Go(func() {
 		ctx, cancel := context.WithTimeout(f.cfg.Base, ForgeFor)
 		defer cancel()
@@ -569,6 +578,9 @@ func (f *Forges) send(ctx context.Context, t PushTarget, c *forgeCard) {
 	var err error
 	state := ForgeOpened
 	asked, drafted := v.Draft, false
+	if v.Kind == ForgePull && f.moved(ctx, t, c) {
+		return
+	}
 	if v.Kind == ForgePull {
 		var open bool
 		if link, open, err = f.cfg.API.OpenPull(ctx, repo, v.Head); err == nil && open {
@@ -596,7 +608,7 @@ func (f *Forges) send(ctx context.Context, t PushTarget, c *forgeCard) {
 	if err != nil {
 		c.view.State, c.view.Reason = ForgeFailed, f.clean(repo.Token, forgeWhy(err, need))
 	} else {
-		c.view.State, c.view.Number, c.view.URL = state, link.Number, link.URL
+		c.view.State, c.view.Number, c.view.URL, c.view.Reason = state, link.Number, link.URL, ""
 		if state == ForgeOpened && asked && !drafted {
 			c.view.Reason = noDrafts
 		}

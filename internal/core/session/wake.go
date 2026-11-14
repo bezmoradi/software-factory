@@ -89,14 +89,14 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 		}
 		q.msgs = append(q.msgs, msg)
 		if noted {
-			delete(r.notes, sid)
+			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
 		return true, nil
 	}
 	r.queued[sid] = &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor)}
 	if noted {
-		delete(r.notes, sid)
+		r.dropNotesLocked(sid)
 	}
 	r.announce(now)
 	return false, nil
@@ -244,12 +244,13 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	lctx, cancel := context.WithTimeout(ctx, claudeList)
 	res, err := d.cfg.Host.Run(lctx, Command{Argv: d.claude("agents", "--json", "--all"), Dir: dir, Timeout: claudeList})
 	cancel()
+	live := map[string]bool{}
+	for _, s := range d.reg.Sessions() {
+		live[s.SID] = s.Live
+	}
+	d.restarted(ctx, mine, live)
 	if rows, ok := claudeRows(res.Stdout); err == nil && res.Code == 0 && ok {
 		states := map[string]AgentState{}
-		live := map[string]bool{}
-		for _, s := range d.reg.Sessions() {
-			live[s.SID] = s.Live
-		}
 		for _, row := range rows {
 			r := mine[row.SessionID]
 			if r == nil || row.ID != r.id {
