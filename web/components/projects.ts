@@ -9,8 +9,13 @@ import './caps.ts'
 import './issue-picker.ts'
 import './usage.ts'
 import './project-commands.ts'
-import { bySessionOrder, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
-import { StartFromField } from './start-from.ts'
+import './metrics.ts'
+import './decision-log.ts'
+import './review-depth.ts'
+import './lessons.ts'
+import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
+import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
+import type { PairAgent } from './start-from.ts'
 import type { Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 
 const MODELS: [string, string][] = [['', 'Default model'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
@@ -89,6 +94,8 @@ class DispatchForm {
   idle = el('span', '', 'Start')
   working = el('span', '', 'Starting…')
   from: StartFromField
+  pair: PairField
+  bench: BenchmarkField
 
   constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '') {
     const path = p.path
@@ -152,8 +159,11 @@ class DispatchForm {
     this.caps.project = p.name
     this.from = new StartFromField(path, p.branch ?? '', sessions, fork)
     this.issue.path = path
+    this.pair = new PairField(list, MODELS)
+    this.bench = new BenchmarkField(path)
     this.form.append(row, this.from.box, this.caps, note, this.why)
     this.form.append(this.issue)
+    this.form.append(this.pair.box, this.bench.box)
     this.form.addEventListener('submit', e => {
       e.preventDefault()
       if (this.start.disabled) return
@@ -162,6 +172,16 @@ class DispatchForm {
       const from = this.from.value()
       const issue = this.issue.chosen()
       if (issue === 'refused') return
+      const bench = this.bench.chosen()
+      if (bench === 'refused') return
+      const pair = this.pair.value(!!bench)
+      if (pair === 'invalid') return
+      if (pair || bench) {
+        if (from || issue) return void this.pair.say('Start with both and a benchmark start from main, or from the merged pull request’s base, without an issue. Set Start from back to main and clear the issue first.')
+        const first: PairAgent = { agent: this.agent.value, ...(this.model.value ? { model: this.model.value } : {}), ...(this.effort.value ? { effort: this.effort.value } : {}) }
+        const agents: PairAgent[] = pair ? [first, { agent: pair.agent, ...(pair.model ? { model: pair.model } : {}) }] : [first]
+        return void emit(this.form, 'sf-pair', { path, name: this.name.value, type: this.kind.value, agents, ...(pair?.message ? { message: pair.message } : {}), ...(bench ? { benchmark: bench } : {}), ...(caps ? { caps } : {}) })
+      }
       emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}), ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
     })
     this.model.addEventListener('change', () => this.efforts())
@@ -231,6 +251,10 @@ class SfProjects extends HTMLElement {
   #team = new Map<string, HTMLElementTagNameMap['sf-team-rules']>()
   #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
   #commands = new Map<string, HTMLElementTagNameMap['sf-project-commands']>()
+  #metrics = new Map<string, HTMLElementTagNameMap['sf-project-metrics']>()
+  #decisions = new Map<string, HTMLElementTagNameMap['sf-decision-log']>()
+  #depth = new Map<string, HTMLElementTagNameMap['sf-review-depth']>()
+  #lessons = new Map<string, HTMLElementTagNameMap['sf-lessons']>()
   #menuOpen = ''
   #slot: HTMLElement | null = null
   #stale = false
@@ -287,6 +311,7 @@ class SfProjects extends HTMLElement {
     for (const path of this.#forms.keys()) if (!value.projects.some(p => p.path === path)) this.#forms.delete(path)
     for (const m of [this.#caps, this.#expiry]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
     for (const path of this.#commands.keys()) if (!value.projects.some(p => p.path === path)) this.#commands.delete(path)
+    for (const m of [this.#depth, this.#lessons]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
     this.#render()
   }
 
@@ -495,6 +520,42 @@ class SfProjects extends HTMLElement {
       }
       this.#render()
     }, 'info')
+    item(this.#metrics.has(p.path) ? 'Hide delivery and reviewer numbers' : 'Delivery and reviewer numbers', () => {
+      if (this.#metrics.has(p.path)) this.#metrics.delete(p.path)
+      else {
+        const panel = el('sf-project-metrics', 'project-caps')
+        panel.project = p.name
+        this.#metrics.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
+    item(this.#decisions.has(p.path) ? 'Hide decision log' : 'Decision log', () => {
+      if (this.#decisions.has(p.path)) this.#decisions.delete(p.path)
+      else {
+        const panel = el('sf-decision-log', 'project-caps')
+        panel.project = p.name
+        this.#decisions.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
+    item(this.#depth.has(p.path) ? 'Hide review depth' : 'Review depth', () => {
+      if (this.#depth.has(p.path)) this.#depth.delete(p.path)
+      else {
+        const panel = el('sf-review-depth', 'project-caps')
+        panel.path = p.path
+        this.#depth.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
+    item(this.#lessons.has(p.path) ? 'Hide lessons from reviews' : 'Lessons from reviews', () => {
+      if (this.#lessons.has(p.path)) this.#lessons.delete(p.path)
+      else {
+        const panel = el('sf-lessons', 'project-caps')
+        panel.project = p.name
+        this.#lessons.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -571,7 +632,7 @@ class SfProjects extends HTMLElement {
     head.append(acts)
     li.append(head)
     if (open) {
-      li.append(sessionTable(list.map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
+      li.append(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
     }
     if (this.#message.path === p.path && this.#message.text) li.append(el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text))
     const form = this.#forms.get(p.path)
@@ -586,6 +647,14 @@ class SfProjects extends HTMLElement {
     if (team) li.append(team)
     const commands = this.#commands.get(p.path)
     if (commands) li.append(commands)
+    const metrics = this.#metrics.get(p.path)
+    if (metrics) li.append(metrics)
+    const decisions = this.#decisions.get(p.path)
+    if (decisions) li.append(decisions)
+    const depth = this.#depth.get(p.path)
+    if (depth) li.append(depth)
+    const lessons = this.#lessons.get(p.path)
+    if (lessons) li.append(lessons)
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')

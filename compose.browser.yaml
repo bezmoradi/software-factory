@@ -1,0 +1,7 @@
+services:
+  agent:
+    image: software-factory:${SF_BROWSER_STAGE:-browser}
+    pull_policy: never
+    build:
+      context: .
+      target: ${SF_BROWSER_STAGE:-browser}

@@ -72,6 +72,13 @@ func writeBytes(dir, name string, data []byte) error {
 	if len(data) > maxFile {
 		return fmt.Errorf("%s would be larger than %d MiB, which this engine can't read back", name, maxFile>>20)
 	}
+	if err := keepOlder(dir, name); err != nil {
+		return err
+	}
+	return writeFile(dir, name, data)
+}
+
+func writeFile(dir, name string, data []byte) error {
 	f, err := os.CreateTemp(dir, "."+name+".*")
 	if err != nil {
 		return err

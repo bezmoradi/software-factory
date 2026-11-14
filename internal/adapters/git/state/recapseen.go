@@ -58,11 +58,17 @@ func (r RecapSeen) Save(seen map[string]time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f := recapSeenJSON{Version: 1, Seen: make([]seenJSON, 0, len(seen))}
+	capped := 0
 	for sid, at := range seen {
-		if sessionID.MatchString(sid) && len(f.Seen) < session.MaxRecapSeen {
+		switch {
+		case !sessionID.MatchString(sid):
+		case len(f.Seen) < session.MaxRecapSeen:
 			f.Seen = append(f.Seen, seenJSON{SID: sid, Seen: at.UTC()})
+		default:
+			capped++
 		}
 	}
+	noteDropped(r.Dir, recapSeenFile, capped)
 	sort.Slice(f.Seen, func(i, j int) bool { return f.Seen[i].SID < f.Seen[j].SID })
 	return write(r.Dir, recapSeenFile, f)
 }

@@ -90,4 +90,26 @@ USER gitsrv
 EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/sf-gitserver"]
 
+FROM base AS browser
+USER root
+RUN sed -i \
+      -e 's#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/20261103T013555Z#' \
+      -e 's#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/20261103T013555Z#' \
+      /etc/apt/sources.list.d/debian.sources \
+ && ! grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --no-install-recommends \
+      chromium=156.0.8078.79-1~deb13u1 \
+      chromium-common=156.0.8078.79-1~deb13u1 \
+      fonts-liberation=1:2.1.5-3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && install -d -m 0755 /etc/chromium.d \
+ && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/software-factory \
+ && chmod 0644 /etc/chromium.d/software-factory
+USER engine
+
+FROM browser AS dev-browser
+COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
+COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
+
 FROM base AS runtime

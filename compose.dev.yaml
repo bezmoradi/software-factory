@@ -19,6 +19,9 @@ services:
       SF_DEV_GIT_CA: /opt/sf-dev/git-ca/ca.pem
       SF_DEV_KNACKPACK_DOCS: ${SF_DEV_KNACKPACK_DOCS:-}
       SF_DEV_ADVISORY_PIN: ${SF_DEV_ADVISORY_PIN:-}
+      SF_DEV_STATE_VERSION: ${SF_DEV_STATE_VERSION:-}
+      SF_DEV_AUDIT_ROTATE: ${SF_DEV_AUDIT_ROTATE:-}
+      SF_DEV_OSV: ${SF_DEV_OSV:-}
     networks:
       gitnet: {}
     volumes:

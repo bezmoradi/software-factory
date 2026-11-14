@@ -40,6 +40,19 @@ export interface SessionInfo {
   checks?: AgentCheck[]
   lineage?: Lineage
   follow?: PullFollow
+  splits?: SplitCard[]
+}
+
+export interface SplitCard {
+  card: string
+  title: string
+  message: string
+  state: 'waiting' | 'queued' | 'starting' | 'started' | 'dismissed'
+  sid?: string
+  edited: boolean
+  asked: number
+  at: number
+  secretAt?: string
 }
 
 export interface Stint {
@@ -57,6 +70,8 @@ export interface Lineage {
   earlier: Stint[]
   handedTo?: string
   last?: string
+  group?: string
+  groupKind?: 'pair' | 'goal'
 }
 
 export interface StartFrom {
@@ -399,6 +414,17 @@ export interface ReviewRole {
   models?: string[]
   progress?: ReviewProgress
   given?: ReviewGiven
+  run?: number
+  runs?: number
+  advisory?: boolean
+  cited?: CitedIDs
+}
+
+export interface CitedIDs {
+  looked: string[]
+  notInOsv: string[]
+  failed?: string
+  more?: number
 }
 
 export interface ReviewProgress {

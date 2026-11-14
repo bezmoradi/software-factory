@@ -56,6 +56,7 @@ type ProjectSettings struct {
 	Findings  bool
 	PRComment bool
 	Hold      HoldSettings
+	Depth     workflow.Depth
 }
 
 type SavedApproval struct {
@@ -104,6 +105,7 @@ type WorkConfig struct {
 	Logger     shared.Logger
 
 	RoleAgents RoleAgents
+	Changes    ChangeReader
 }
 
 type workApproval struct {
@@ -131,6 +133,8 @@ type Work struct {
 	scanMu   sync.Mutex
 	scans    map[string]scanned
 	scanKeys []string
+	sizeMu   sync.Mutex
+	sizes    map[string]changeSize
 }
 
 type WorkDoc struct {
@@ -267,7 +271,7 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}}, nil
+	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}}, nil
 }
 
 func textHash(s string) string {
@@ -750,7 +754,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 			g.built = err == nil && in
 		}
 	}
-	g.required = workflow.Required(g.setup.setup, g.eff, g.files)
+	g.required = w.deepened(t, workflow.Required(g.setup.setup, g.eff, g.files), g.base, head, g.listed)
 	planFile := ""
 	if g.docs.plan != nil {
 		planFile = g.docs.plan.Path
@@ -829,7 +833,8 @@ func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow
 		files = append(files, c.Path)
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
-	return workflow.Required(setup.setup, eff, files)
+	required := w.deepened(t, workflow.Required(setup.setup, eff, files), base, head, err == nil)
+	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
 func ReviewerName(q workflow.Requirement) string {
@@ -1022,8 +1027,11 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 		rd := RoundOf(entries, g.t.Branch, q.Agent)
 		r.Round, r.Capped = rd.Count, rd.Capped(limit)
 		k := review.Key{Commit: g.head, Branch: g.t.Branch, Agent: q.Agent}
-		if e, ok := entries[k]; ok {
+		if e, complete, ok := pooledEntry(entries, k, q.RunCount()); ok {
 			r.State, r.Verdict, r.Override, r.Since = string(e.Record.State), e.Record.Verdict, e.Record.Override, e.Since
+			if !complete && e.Record.State == review.Pass {
+				r.State = "none"
+			}
 		} else {
 			for key := range entries {
 				if key.Branch == g.t.Branch && key.Agent == q.Agent {
@@ -1034,7 +1042,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 		}
 		if g.head != "" {
 			offer := offerFor(w.cfg.RoleAgents, q.Agent)
-			if why := review.Problem(records, k, &offer); why != "" {
+			if why, _ := review.Pooled(records, k, q.RunCount(), &offer); why != "" {
 				if r.Capped {
 					why = gate.CappedItem(q.Agent, rd.Count)
 				}

@@ -72,6 +72,9 @@ func (d *Dispatcher) waitStopped(r *run) {
 }
 
 func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Consent) (Started, error) {
+	if err := d.historyOnly(sid); err != nil {
+		return Started{}, err
+	}
 	r, err := d.claim(sid)
 	if err != nil {
 		return Started{}, err

@@ -57,6 +57,7 @@ type ReviewEntry struct {
 	Denied       []string
 	Failure      string
 	Attempt      int
+	Cited        CitedIDs
 }
 
 type ReviewRecords interface {
@@ -104,6 +105,10 @@ type RoleReview struct {
 	Since    string
 	Previous bool
 	Override string
+	Run      int
+	Runs     int
+	Advisory bool
+	Cited    CitedIDs
 
 	PluginCommit string
 	ClaudeCode   string
@@ -218,6 +223,10 @@ type Reviews struct {
 
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice
+	cited      CitedLookup
+	citedNow   map[review.Key]CitedIDs
+	lessons    *Lessons
+	comments   func(ctx context.Context, project string) ([]PullComment, []string)
 }
 
 func (r *Reviews) OnDone(fn func(sid, head string)) {
@@ -358,6 +367,7 @@ func (r *Reviews) roles() []review.Role {
 
 func (r *Reviews) show(sid string, v ReviewView) {
 	r.mu.Lock()
+	r.citedOnto(&v)
 	v.TestList = r.testListOf(sid)
 	v.PlanReview, v.Explain = r.asideOf(AsidePlanReview, sid), r.asideOf(AsideExplain, sid)
 	r.views[sid] = v.clone()
@@ -381,11 +391,16 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	started := r.cfg.Now()
 	entries := make([]ReviewEntry, len(plans))
 	for i, p := range plans {
-		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}, Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
-			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
+		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
+			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
 			Attempt: p.attempt}
 	}
 	r.put(entries...)
+	r.mu.Lock()
+	for _, e := range entries {
+		delete(r.citedNow, e.Key)
+	}
+	r.mu.Unlock()
 	view.Note = held
 	r.show(t.SID, view)
 
@@ -407,6 +422,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	facts := map[string]bool{}
 	for i, p := range plans {
 		givens[i] = given
+		givens[i].run, givens[i].runs = p.run, p.runs
 		if _, ok := extra[p.base]; !ok {
 			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.Repo, p.base, head)
 		}
@@ -420,7 +436,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			f, said = SnapshotFile{Text: overriddenText(*p.overridden)}, earlierAccepted
 		}
 		if said != earlierNone {
-			f.Name = earlierName(p.q.Agent)
+			f.Name = earlierName(p.q.Agent, p.run)
 			givens[i].earlier, givens[i].said = f.Name, said
 			extra[p.base] = append(extra[p.base], f)
 		}
@@ -495,6 +511,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			e = classified(e, why)
 			r.put(e)
 			r.audited(t, e)
+			r.learned(t, e)
 			mu.Lock()
 			entries[i] = e
 			view.Roles[i] = roleOf(view.Roles[i], e)
@@ -508,6 +525,12 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			} else {
 				r.cfg.Logger.Info("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State))
 			}
+			r.wg.Go(func() {
+				if c, looked := r.lookUpCited(ctx, e); looked {
+					r.markCited(e.Key, c)
+					r.noteCited(t.SID, e.Key, c)
+				}
+			})
 		})
 	}
 	wg.Wait()
@@ -553,6 +576,7 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.Reason = e.Reason
 	v.CostUSD = e.CostUSD
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
+	v.Cited = e.Cited.clone()
 	return v
 }
 
@@ -573,7 +597,7 @@ func (r *Reviews) put(entries ...ReviewEntry) {
 		return
 	}
 	for _, e := range entries {
-		if i := slices.IndexFunc(list, func(x ReviewEntry) bool { return x.Key == e.Key }); i >= 0 && e.Record.Override == "" {
+		if i := slices.IndexFunc(list, func(x ReviewEntry) bool { return x.Key.SameRole(e.Key) && x.Record.Override != "" }); i >= 0 && e.Record.Override == "" {
 			e.Record.Override = list[i].Record.Override
 		}
 		list = slices.DeleteFunc(list, func(x ReviewEntry) bool { return x.Key == e.Key })
@@ -669,20 +693,39 @@ func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason str
 		r.store.Unlock()
 		return explained(conflict("records"), "The engine couldn't read its review records.")
 	}
-	i := slices.IndexFunc(list, func(e ReviewEntry) bool { return e.Key == k })
+	var blocking []int
+	found, running, overridden := false, false, false
+	for i, e := range list {
+		if !e.Key.SameRole(k) {
+			continue
+		}
+		found = true
+		running = running || e.Record.State == review.Running
+		switch {
+		case e.Record.State == review.Block && e.Record.Override == "":
+			blocking = append(blocking, i)
+		case e.Record.State == review.Block:
+			overridden = true
+		}
+	}
 	switch {
-	case i < 0:
+	case !found:
 		r.store.Unlock()
 		return explained(conflict("no review"), "There's no review by "+agent+" of this commit to override.")
-	case list[i].Record.State != review.Block:
+	case running:
 		r.store.Unlock()
-		return explained(conflict("not blocking"), "Only a blocking verdict can be overridden, and "+agent+"'s verdict on this commit doesn't block.")
-	case list[i].Record.Override != "":
+		return explained(conflict("reviewing"), "A run of "+agent+" on this commit is still going. Wait for it to finish, then override.")
+	case len(blocking) == 0 && overridden:
 		r.store.Unlock()
 		return explained(conflict("overridden"), "You already overrode this verdict.")
+	case len(blocking) == 0:
+		r.store.Unlock()
+		return explained(conflict("not blocking"), "Only a blocking verdict can be overridden, and "+agent+"'s verdict on this commit doesn't block.")
 	}
-	list[i].Record.Override = clean
-	e := list[i]
+	for _, i := range blocking {
+		list[i].Record.Override = clean
+	}
+	e := list[blocking[0]]
 	if err := r.cfg.Records.Save(list); err != nil {
 		r.store.Unlock()
 		return explained(conflict("records"), "The engine couldn't save the override.")
@@ -693,7 +736,7 @@ func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason str
 	if shown && v.Commit == head {
 		v = v.clone()
 		for j := range v.Roles {
-			if v.Roles[j].Agent == agent {
+			if v.Roles[j].Agent == agent && v.Roles[j].State == review.Block {
 				v.Roles[j].Override = clean
 			}
 		}

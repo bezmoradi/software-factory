@@ -13,9 +13,18 @@ const (
 	maxNote        = 1200
 	maxNoteSources = 20
 	NoteMarker     = "[Software Factory] "
+	noteBreak      = "\n\n"
+	noteIndent     = "    "
 )
 
 var noteSource = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
+
+func NoteCap(source string) int {
+	if source == DecisionNoteSource {
+		return MaxDecisionNote
+	}
+	return maxNote
+}
 
 type NoteStore interface {
 	Load() (map[string]map[string]string, error)
@@ -67,7 +76,7 @@ func (r *Registry) setNoteLocked(sid, source, text string) {
 	if _, ok := all[source]; !ok && len(all) >= maxNoteSources {
 		delete(all, slices.Min(slices.Collect(maps.Keys(all))))
 	}
-	all[source] = clip(text, maxNote)
+	all[source] = clip(text, NoteCap(source))
 	r.notesChangedLocked()
 }
 
@@ -105,7 +114,7 @@ func (r *Registry) UseNotes(store NoteStore) {
 				r.notes[sid] = map[string]string{}
 			}
 			if _, ok := r.notes[sid][source]; !ok {
-				r.notes[sid][source] = clip(text, maxNote)
+				r.notes[sid][source] = clip(text, NoteCap(source))
 			}
 		}
 	}
@@ -159,6 +168,10 @@ func (r *Registry) saveNotes(store NoteStore, version uint64, snapshot map[strin
 	r.noteSaved = version
 }
 
+func noteParagraph(text string) string {
+	return strings.ReplaceAll(strings.TrimSpace(text), "\n", "\n"+noteIndent)
+}
+
 func (r *Registry) noted(sid, text string) (string, bool) {
 	all := r.notes[sid]
 	if len(all) == 0 || commandName(text) != "" {
@@ -171,13 +184,13 @@ func (r *Registry) noted(sid, text string) (string, bool) {
 	slices.Sort(sources)
 	said := make([]string, 0, len(sources))
 	for _, s := range sources {
-		said = append(said, all[s])
+		said = append(said, noteParagraph(all[s]))
 	}
-	out := NoteMarker + strings.Join(said, " ")
+	out := NoteMarker + strings.Join(said, noteBreak+NoteMarker)
 	if own, ok := strings.CutPrefix(text, NoteMarker); ok {
-		out += " " + own
+		out += noteBreak + NoteMarker + own
 	} else if text != "" {
-		out += "\n\n" + text
+		out += noteBreak + text
 	}
 	if utf16Len(out) > MaxText {
 		return text, false

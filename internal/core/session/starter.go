@@ -55,6 +55,10 @@ type Dispatch struct {
 	Issue     int
 	IssueHash string
 	Effort    string
+
+	pinned    *startPoint
+	group     string
+	groupKind string
 }
 
 type Started struct {
@@ -142,6 +146,10 @@ type run struct {
 	model      string
 	effort     string
 	ports      int
+
+	group     string
+	groupKind string
+	history   bool
 }
 
 type Dispatcher struct {
@@ -161,6 +169,9 @@ type Dispatcher struct {
 
 	forges *Forges
 	work   *SessionWork
+
+	decisions  *DecisionLog
+	branchCopy *Keep
 }
 
 var (
@@ -297,6 +308,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	short := randomHex(4)
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
 	r.origin, r.earlier = at.origin, at.earlier
+	r.group, r.groupKind = q.group, q.groupKind
 	if q.Continues != nil {
 		r.branch = q.Continues.Branch
 	}
@@ -341,6 +353,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		d.cfg.Work.Begin(r.sid, r.repo, spec.Knackpack, q.Type)
 	}
 	d.startedWork(r, err)
+	d.offerDecisions(r, err)
 	if err != nil {
 		return Started{SID: r.sid, ID: r.id}, err
 	}
@@ -427,6 +440,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	pending.sid = sid
 	d.reg.Admit(sid, launched(d.admission(&pending, true)))
 	d.observeStart(sid, r.check)
+	d.reg.makeScreenshots(sid)
 	res, err := d.cfg.Host.Run(ctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 	if err != nil {
 		d.reg.Forget(sid)
@@ -525,6 +539,10 @@ func (d *Dispatcher) mcpFor(b *bridge) *MCPServer {
 	env := map[string]string{"SF_PUSH_TOKEN": b.pushToken()}
 	if d.cfg.PluginSocket != "" {
 		env["SF_PLUGIN_SOCKET"] = d.cfg.PluginSocket
+	}
+	if folder := ScreenshotFolder(d.cfg.Workspace, b.sid); folder != "" {
+		d.reg.makeScreenshots(b.sid)
+		env[ScreenshotsVariable] = folder
 	}
 	return &MCPServer{Name: PushServer, Command: d.cfg.MCPCommand, Args: []string{"mcp"}, Env: env}
 }
@@ -685,6 +703,9 @@ func (d *Dispatcher) claimWake() error {
 }
 
 func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	r, err := d.claim(sid)
 	if err != nil {
 		return err
@@ -789,6 +810,10 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	if running {
 		return nil, explained(conflict("running"), "Stop the session before deleting it.")
 	}
+	if d.historyOnly(sid) != nil {
+		d.forgetHistory(sid)
+		return nil, nil
+	}
 	if given != nil && !held {
 		return nil, explained(conflict("offer"), "That choice is no longer the one offered. Try Delete again.")
 	}
@@ -839,6 +864,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 		d.cfg.Work.Forget(sid)
 	}
 	d.workForget(sid)
+	d.forgetCopy(sid)
 	return nil, nil
 }
 
@@ -851,6 +877,9 @@ func (d *Dispatcher) Review(ctx context.Context, sid string, costOK, every bool)
 }
 
 func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool, scope ReviewScope) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
 	}
@@ -874,6 +903,9 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 }
 
 func (d *Dispatcher) Override(_ context.Context, sid, agent, commit, reason string) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it has no verdicts to override.")
 	}

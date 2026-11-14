@@ -43,6 +43,9 @@ type apiIssue struct {
 	Head      string    `json:"head,omitempty"`
 	HeadSHA   string    `json:"headSha,omitempty"`
 	Base      string    `json:"base,omitempty"`
+	BaseSHA   string    `json:"baseSha,omitempty"`
+	MergeSHA  string    `json:"mergeSha,omitempty"`
+	MergedAt  time.Time `json:"mergedAt,omitzero"`
 	Draft     bool      `json:"draft,omitempty"`
 	Merged    bool      `json:"merged,omitempty"`
 	Conflict  bool      `json:"conflict,omitempty"`
@@ -294,9 +297,14 @@ func (a api) issueJSON(host string, i apiIssue) map[string]any {
 }
 
 func (a api) pullJSON(host string, i apiIssue) map[string]any {
-	return map[string]any{"number": i.Number, "title": i.Title, "body": i.Body, "state": i.State, "draft": i.Draft, "user": a.userJSON(i.User),
+	out := map[string]any{"number": i.Number, "title": i.Title, "body": i.Body, "state": i.State, "draft": i.Draft, "user": a.userJSON(i.User),
 		"created_at": i.CreatedAt.UTC().Format(time.RFC3339), "html_url": a.issueURL(host, i),
-		"head": map[string]any{"ref": i.Head, "sha": i.HeadSHA, "label": devOwner + ":" + i.Head}, "base": map[string]any{"ref": i.Base}}
+		"head": map[string]any{"ref": i.Head, "sha": i.HeadSHA, "label": devOwner + ":" + i.Head}, "base": map[string]any{"ref": i.Base, "sha": i.BaseSHA},
+		"merged_at": nil, "merge_commit_sha": nil}
+	if i.Merged && !i.MergedAt.IsZero() {
+		out["merged_at"], out["merge_commit_sha"] = i.MergedAt.UTC().Format(time.RFC3339), i.MergeSHA
+	}
+	return out
 }
 
 func (a api) listPulls(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +376,7 @@ func (a api) createPull(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		made = apiIssue{Number: s.Next, Title: in.Title, Body: in.Body, User: login(), State: "open", CreatedAt: time.Now().UTC(), Pull: true,
-			Head: head, HeadSHA: sha, Base: in.Base, Draft: in.Draft}
+			Head: head, HeadSHA: sha, Base: in.Base, BaseSHA: a.head(in.Base), Draft: in.Draft}
 		s.Next++
 		s.Issues = append(s.Issues, made)
 		return nil
@@ -822,7 +830,7 @@ func apiCommand(root string, args []string) error {
 	return pullCommand(root, args)
 }
 
-var errUsage = errors.New("usage: sf-gitserver [commit <text> | comment <pr> <login> <text> | review-comment <pr> <login> <path> <line> <text> | review <pr> <login> <state> <text> | drafts on|off | show <pr> | list | issue-delay <seconds> | issue-502 <count> created|lost | comment-403 <count> | push-delay <seconds> before|after | check <commit> <name> <status> [conclusion] | status <commit> <context> <state> | reset | pr-check <pr> <name> <status> [conclusion] | conflict <pr> on|off | merge <pr> | close <pr> | ready <pr> | issue <title> <body> [labels] | issue-edit <issue> <body> | issue-token <title> [labels]]")
+var errUsage = errors.New("usage: sf-gitserver [commit <text> | comment <pr> <login> <text> | review-comment <pr> <login> <path> <line> <text> | review <pr> <login> <state> <text> | drafts on|off | show <pr> | list | issue-delay <seconds> | issue-502 <count> created|lost | comment-403 <count> | push-delay <seconds> before|after | check <commit> <name> <status> [conclusion] | status <commit> <context> <state> | reset | pr-check <pr> <name> <status> [conclusion] | conflict <pr> on|off | merge <pr> | close <pr> | ready <pr> | issue <title> <body> [labels] | issue-edit <issue or pr> <body> | issue-token <title> [labels] | merged <title> <body> | merged-token <title>]")
 
 func pushDelay(root string) (int, bool) {
 	var t apiTriggers

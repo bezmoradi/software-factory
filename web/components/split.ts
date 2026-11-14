@@ -1,0 +1,244 @@
+import { api } from '../api.ts'
+import { button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { label } from '../lib/format.ts'
+import type { SessionInfo, SplitCard } from '../types.ts'
+
+export const GOAL_LIMIT = 3
+const MAX_TITLE = 120
+const MAX_MESSAGE = 8000
+
+export interface SplitPanelView {
+  sid: string
+  info: SessionInfo
+  sessions: SessionInfo[]
+  disabled: string
+}
+
+export type SplitStarter = (sid: string, card: string) => Promise<{ ok: boolean; body: Record<string, unknown> }>
+
+const STATES: Record<SplitCard['state'], [string, string]> = {
+  waiting: ['waiting for you', 'warn'],
+  queued: ['waits for a free slot', 'warn'],
+  starting: ['starting', 'warn'],
+  started: ['started', 'ok'],
+  dismissed: ['dismissed', ''],
+}
+
+function said(body: Record<string, unknown>, fallback: string): string {
+  return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
+}
+
+function tasksOf(goal: string, sessions: SessionInfo[]): SessionInfo[] {
+  return sessions.filter(s => s.lineage?.groupKind === 'goal' && s.lineage.group === goal)
+}
+
+class SfSplit extends HTMLElement {
+  start: SplitStarter | null = null
+  #view: SplitPanelView | null = null
+  #key = ''
+  #editing = new Map<string, { title: string; message: string }>()
+  #pressed = new Map<string, number>()
+  #busy = new Set<string>()
+  #notes = new Map<string, { text: string; bad: boolean }>()
+
+  connectedCallback() {
+    if (!this.#view) this.hidden = true
+  }
+
+  set view(value: SplitPanelView | null) {
+    this.#view = value
+    const goal = value ? tasksOf(value.sid, value.sessions).map(s => [s.sid, s.running === true, label(s)]) : []
+    const key = JSON.stringify([value?.sid, value?.info.splits, value?.info.lineage, value?.disabled, goal, [...this.#editing], [...this.#busy], [...this.#notes]])
+    if (key !== this.#key) {
+      this.#key = key
+      this.paint()
+    }
+    this.#resume()
+  }
+
+  #running(): number {
+    const v = this.#view
+    return v ? tasksOf(v.sid, v.sessions).filter(s => s.running).length : 0
+  }
+
+  #resume() {
+    const v = this.#view
+    if (!v || v.disabled || this.#busy.size) return
+    const running = this.#running()
+    const next = (v.info.splits ?? []).find(c => c.state === 'queued' && running < (this.#pressed.get(c.card) ?? 0))
+    if (next) void this.#start(next)
+  }
+
+  paint() {
+    const v = this.#view
+    const parts: Node[] = []
+    if (v) {
+      const goal = v.info.lineage?.groupKind === 'goal' ? v.info.lineage.group : ''
+      if (goal) parts.push(this.#taskOf(goal, v.sessions))
+      const cards = (v.info.splits ?? []).filter(c => c.state !== 'dismissed')
+      if (cards.length) parts.push(...this.#cards(v, cards))
+    }
+    this.hidden = !parts.length
+    const focused = focusedKey(this)
+    this.replaceChildren(...parts)
+    refocus(this, focused)
+  }
+
+  #taskOf(goal: string, sessions: SessionInfo[]): HTMLElement {
+    const box = el('div', 'notice small')
+    const parent = sessions.find(s => s.sid === goal)
+    box.append(el('p', '', `This session is one task of the goal in session ${parent ? shown(label(parent)) : 'that was split'}. The agent there proposed it, and you started it.`))
+    if (parent) box.append(button('Open the goal session', 'ghost small', () => emit(this, 'sf-open-session', { sid: goal })))
+    return box
+  }
+
+  #cards(v: SplitPanelView, cards: SplitCard[]): Node[] {
+    const running = this.#running()
+    const head = el('div', 'row split-head')
+    head.append(el('h2', 'label', 'Tasks the agent proposed'), el('span', 'small muted', `${running} of ${GOAL_LIMIT} of this goal's sessions running`))
+    const intro = el('p', 'small muted', `The agent wrote these with factory_split. Each card shows its text exactly as written; read it before you start it, since it becomes the new session's first message. Start runs a normal session from main with this session's agent and work type, through the usual start-up, sign-in and cost checks. At most ${GOAL_LIMIT} run at once.`)
+    return [head, intro, ...cards.map(c => this.#card(v, c))]
+  }
+
+  #card(v: SplitPanelView, c: SplitCard): HTMLElement {
+    const box = el('div', 'forge-card split-card')
+    const [word, tone] = STATES[c.state] ?? [c.state, 'warn']
+    const head = el('div', 'row forge-head')
+    head.append(el('span', `tag ${tone}`, word), el('span', 'tag', 'written by the agent'))
+    if (c.edited) head.append(el('span', 'tag', 'edited by you'))
+    box.append(head)
+    const editing = this.#editing.get(c.card)
+    const open = c.state === 'waiting' || c.state === 'queued'
+    if (editing && open) box.append(this.#editor(v, c, editing))
+    else {
+      const title = el('pre', 'forge-body split-title', visibleCommand(unspoofed(c.title)))
+      title.tabIndex = 0
+      title.setAttribute('aria-label', 'Title of the proposed task')
+      box.append(title)
+      if (c.message) {
+        const body = el('pre', 'forge-body', visibleCommand(unspoofed(c.message)))
+        body.tabIndex = 0
+        body.setAttribute('aria-label', 'First message of the proposed task')
+        box.append(body)
+      }
+    }
+    if (c.secretAt && open) box.append(el('p', 'small bad', `This looks like a token (${shown(c.secretAt)}). Edit it out before starting.`))
+    if (c.state === 'queued') box.append(el('p', 'small warn', this.#pressed.has(c.card) ? `Waits until one of this goal's sessions stops; it starts then, while this page stays open.` : `Waited for a free slot. Press Start again when fewer than ${GOAL_LIMIT} of this goal's sessions run.`))
+    if (c.state === 'started' && c.sid) {
+      const task = v.sessions.find(s => s.sid === c.sid)
+      const line = el('div', 'row split-started')
+      line.append(el('span', 'small', task ? `Session ${shown(label(task))}, ${task.running ? 'running' : 'stopped'}` : 'Its session was deleted.'))
+      if (task) line.append(button('Open', 'ghost small', () => emit(this, 'sf-open-session', { sid: c.sid ?? '' }), 'button', `open:${c.card}`))
+      box.append(line)
+    }
+    const note = this.#notes.get(c.card)
+    if (note) box.append(el('p', `small ${note.bad ? 'bad' : 'muted'}`, note.text))
+    if (open && !editing) box.append(this.#actions(v, c))
+    return box
+  }
+
+  #actions(v: SplitPanelView, c: SplitCard): HTMLElement {
+    const off = !!v.disabled || this.#busy.has(c.card)
+    const row = el('div', 'actions forge-actions')
+    const start = button(this.#busy.has(c.card) ? 'Starting…' : 'Start', 'primary small', () => {
+      if (off) return
+      this.#pressed.set(c.card, GOAL_LIMIT + 1)
+      void this.#start(c)
+    }, 'button', `start:${c.card}`)
+    start.setAttribute('aria-disabled', String(off || !!c.secretAt))
+    if (v.disabled) start.title = v.disabled
+    const edit = button('Edit', 'small', () => {
+      if (off) return
+      this.#editing.set(c.card, { title: c.title, message: c.message })
+      this.#key = ''
+      this.view = this.#view
+    }, 'button', `edit:${c.card}`)
+    const dismiss = button('Dismiss', 'small ghost', () => {
+      if (!off) void this.#call(c, { op: 'dismiss', sid: v.sid, card: c.card }, '')
+    }, 'button', `dismiss:${c.card}`)
+    for (const b of [edit, dismiss]) b.setAttribute('aria-disabled', String(off))
+    row.append(start, edit, dismiss)
+    return row
+  }
+
+  #editor(v: SplitPanelView, c: SplitCard, draft: { title: string; message: string }): HTMLElement {
+    const form = el('form', 'stacked split-edit')
+    const title = el('input', 'textbox')
+    title.value = draft.title
+    title.maxLength = MAX_TITLE
+    title.setAttribute('aria-label', 'Task title')
+    title.dataset.key = `title:${c.card}`
+    const message = el('textarea', 'textbox')
+    message.value = draft.message
+    message.maxLength = MAX_MESSAGE
+    message.rows = 8
+    message.setAttribute('aria-label', 'First message of the task')
+    message.dataset.key = `message:${c.card}`
+    const keep = () => this.#editing.set(c.card, { title: title.value, message: message.value })
+    title.addEventListener('input', keep)
+    message.addEventListener('input', keep)
+    const row = el('div', 'actions')
+    row.append(button('Save', 'primary small', undefined, 'submit', `save:${c.card}`), button('Cancel', 'small ghost', () => {
+      this.#editing.delete(c.card)
+      this.#key = ''
+      this.view = this.#view
+    }))
+    form.append(title, message, row)
+    form.addEventListener('submit', e => {
+      e.preventDefault()
+      void this.#call(c, { op: 'edit', sid: v.sid, card: c.card, title: title.value, message: message.value }, 'Saved.').then(ok => {
+        if (ok) this.#editing.delete(c.card)
+        this.#key = ''
+        this.view = this.#view
+      })
+    })
+    return form
+  }
+
+  async #call(c: SplitCard, body: Record<string, unknown>, done: string): Promise<boolean> {
+    this.#busy.add(c.card)
+    this.#key = ''
+    this.view = this.#view
+    const res = await api('/api/split', body).catch(() => null)
+    const out = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
+    this.#busy.delete(c.card)
+    if (res?.ok) {
+      if (done) this.#notes.set(c.card, { text: done, bad: false })
+      else this.#notes.delete(c.card)
+    } else this.#notes.set(c.card, { text: said(out, "The engine didn't answer."), bad: true })
+    this.#key = ''
+    this.view = this.#view
+    return !!res?.ok
+  }
+
+  async #start(c: SplitCard) {
+    const v = this.#view
+    if (!v || !this.start || this.#busy.has(c.card)) return
+    this.#busy.add(c.card)
+    this.#notes.delete(c.card)
+    this.#key = ''
+    this.paint()
+    const { ok, body } = await this.start(v.sid, c.card)
+    this.#busy.delete(c.card)
+    if (ok) {
+      this.#pressed.delete(c.card)
+      this.#notes.set(c.card, { text: 'Started. It gets this text as its first message once it connects.', bad: false })
+    } else if (body.error === 'goal full') {
+      this.#pressed.set(c.card, Math.min(GOAL_LIMIT, this.#running()))
+      this.#notes.set(c.card, { text: said(body, 'It waits for a free slot.'), bad: false })
+    } else {
+      this.#pressed.delete(c.card)
+      this.#notes.set(c.card, { text: said(body, "The task didn't start."), bad: true })
+    }
+    this.#key = ''
+    this.view = this.#view
+  }
+}
+
+customElements.define('sf-split', SfSplit)
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'sf-split': SfSplit
+  }
+}

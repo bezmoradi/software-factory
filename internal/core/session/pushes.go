@@ -376,16 +376,18 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	}
 	running, recorded, rerun := false, false, false
 	var ended []ReviewEntry
-	for _, agent := range p.requiredAgents(sid, t, head) {
-		e, ok := entries[review.Key{Commit: head, Branch: t.Branch, Agent: agent}]
-		if !ok {
-			continue
-		}
-		recorded = true
-		running = running || e.Record.State == review.Running
-		rerun = rerun || Rerunnable(e)
-		if e.Record.State == review.Failed || e.Record.State == review.Unknown {
-			ended = append(ended, e)
+	for _, q := range p.requiredOf(sid, t, head) {
+		for _, k := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
+			e, ok := entries[k]
+			if !ok {
+				continue
+			}
+			recorded = true
+			running = running || e.Record.State == review.Running
+			rerun = rerun || Rerunnable(e)
+			if e.Record.State == review.Failed || e.Record.State == review.Unknown {
+				ended = append(ended, e)
+			}
 		}
 	}
 	start := p.cfg.StartReview
@@ -427,19 +429,24 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 }
 
 func (p *Pushes) requiredAgents(sid string, t PushTarget, head string) []string {
+	list := p.requiredOf(sid, t, head)
+	out := make([]string, 0, len(list))
+	for _, q := range list {
+		out = append(out, q.Agent)
+	}
+	return out
+}
+
+func (p *Pushes) requiredOf(sid string, t PushTarget, head string) []workflow.Requirement {
 	if p.cfg.Work != nil {
 		main, _ := p.cfg.Repos.Main(t.Name)
 		if wf, ok := p.cfg.Work.PushFacts(sid, t, head, main); ok {
-			out := make([]string, 0, len(wf.Required))
-			for _, q := range wf.Required {
-				out = append(out, q.Agent)
-			}
-			return out
+			return slices.Clone(wf.Required)
 		}
 	}
-	out := make([]string, 0, len(p.cfg.Agents))
-	for _, a := range p.cfg.Agents {
-		out = append(out, a)
+	out := make([]workflow.Requirement, 0, len(p.cfg.Agents))
+	for role, a := range p.cfg.Agents {
+		out = append(out, workflow.Requirement{Agent: a, Role: role})
 	}
 	return out
 }
@@ -894,12 +901,12 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	d := gate.Push(request, facts)
 	if d.Result == gate.Allowed {
 		for _, q := range facts.Required {
-			rec, ok := facts.Reviews[review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}]
+			recorded, passed, overridden := review.Outcome(facts.Reviews, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}, q.RunCount())
 			switch {
-			case !ok:
-			case rec.State == review.Pass:
+			case !recorded && !overridden:
+			case passed:
 				x.passed++
-			case rec.Override != "":
+			case overridden:
 				x.overridden++
 			}
 		}
@@ -989,12 +996,11 @@ func (p *Pushes) facts(sid string, t PushTarget, head, main, mainName, by string
 		if rd := RoundOf(entries, t.Branch, q.Agent); rd.Capped(limit) {
 			f.Capped[q.Agent] = rd.Count
 		}
-		e, ok := entries[review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}]
-		if !ok {
-			continue
-		}
-		if why := coverProblem(p.cfg.History, t.Repo, e.Coverage(), head, main); why != "" {
-			f.Items = append(f.Items, "a review by "+q.Agent+" of what would be pushed: review again, the remote's main moved ("+why+")")
+		for _, e := range runsOf(entries, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}) {
+			if why := coverProblem(p.cfg.History, t.Repo, e.Coverage(), head, main); why != "" {
+				f.Items = append(f.Items, "a review by "+q.Agent+" of what would be pushed: review again, the remote's main moved ("+why+")")
+				break
+			}
 		}
 	}
 	if by != ByPage && worked {

@@ -52,6 +52,7 @@ type ProjectFactsView struct {
 	WorkflowsProblem string
 	Protection       Protection
 	Lookups          bool
+	Readiness        []ReadinessLine
 }
 
 type ProjectFactsPage interface {
@@ -64,6 +65,8 @@ type ProjectFactsConfig struct {
 	Workflows  WorkflowReader
 	Protection ProtectionReader
 	Lookups    LookupStore
+	Files      MainFiles
+	Check      func(project string) string
 	Audit      Audit
 	Now        func() time.Time
 	Logger     shared.Logger
@@ -167,8 +170,10 @@ func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFa
 	r := list[i]
 	out := ProjectFactsView{Repo: r.Name, Branch: r.Branch, Lookups: f.LookupsOn(r.Name), Protection: Protection{State: ProtectionUnknown, Reviews: ProtectionUnknown, Checks: ProtectionUnknown}}
 	main, err := f.cfg.Repos.Main(r.Name)
+	var files []WorkflowFile
 	switch {
 	case err != nil:
+		main = ""
 		out.WorkflowsProblem = "The engine couldn't read the repository's record."
 	case main == "":
 		out.WorkflowsProblem = "The engine hasn't fetched the main branch yet; start a session to fetch it."
@@ -176,7 +181,7 @@ func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFa
 		out.WorkflowsProblem = "This engine doesn't read workflows."
 	default:
 		out.Commit = main
-		files, err := f.cfg.Workflows.Workflows(r.Path, main)
+		files, err = f.cfg.Workflows.Workflows(r.Path, main)
 		if err != nil {
 			out.WorkflowsProblem = clip("The engine couldn't read .github/workflows/ on the main branch: "+err.Error(), 400)
 		} else {
@@ -184,6 +189,7 @@ func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFa
 		}
 	}
 	out.Protection = f.protection(ctx, r)
+	out.Readiness = f.readiness(r, main, files, out.WorkflowsProblem, out.Protection)
 	return out, nil
 }
 

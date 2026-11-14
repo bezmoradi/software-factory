@@ -23,19 +23,29 @@ type blockingRole struct {
 	verdict string
 	message string
 	clipped bool
+	run     int
 }
 
 func blockingRoles(entries map[review.Key]ReviewEntry, branch, commit string, agents []string) []blockingRole {
 	var out []blockingRole
 	for _, agent := range agents {
-		e, ok := entries[review.Key{Commit: commit, Branch: branch, Agent: agent}]
-		if !ok || e.Record.State != review.Block || e.Record.Override != "" || strings.TrimSpace(e.Message) == "" {
-			continue
+		for _, e := range runsOf(entries, review.Key{Commit: commit, Branch: branch, Agent: agent}) {
+			if e.Record.State != review.Block || e.Record.Override != "" || e.Record.Advisory || strings.TrimSpace(e.Message) == "" {
+				continue
+			}
+			name := ReviewerName(workflow.Requirement{Agent: agent, Role: e.Role})
+			if e.Key.Number() > 1 {
+				name += ", run " + strconv.Itoa(e.Key.Number())
+			}
+			out = append(out, blockingRole{name: name, agent: agent, verdict: e.Record.Verdict, message: e.Message, clipped: e.Clipped, run: e.Key.Number()})
 		}
-		out = append(out, blockingRole{name: ReviewerName(workflow.Requirement{Agent: agent, Role: e.Role}), agent: agent,
-			verdict: e.Record.Verdict, message: e.Message, clipped: e.Clipped})
 	}
-	slices.SortFunc(out, func(a, b blockingRole) int { return strings.Compare(a.agent, b.agent) })
+	slices.SortFunc(out, func(a, b blockingRole) int {
+		if c := strings.Compare(a.agent, b.agent); c != 0 {
+			return c
+		}
+		return a.run - b.run
+	})
 	return out
 }
 
@@ -144,7 +154,9 @@ func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
 	roles := blockingRoles(entries, h.branch, h.commit, p.requiredAgents(sid, t, h.commit))
 	agents := make([]string, 0, len(roles))
 	for _, r := range roles {
-		agents = append(agents, r.agent)
+		if !slices.Contains(agents, r.agent) {
+			agents = append(agents, r.agent)
+		}
 	}
 	e := AuditEntry{Time: p.cfg.Now(), Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: by,
 		Kind: AuditFindings, Reviewer: strings.Join(agents, ", ")}

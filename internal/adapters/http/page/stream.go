@@ -54,6 +54,7 @@ type sessionJSON struct {
 	Checks      []agentCheckJSON `json:"checks,omitempty"`
 	Lineage     *lineageJSON     `json:"lineage,omitempty"`
 	Follow      *pullFollowJSON  `json:"follow,omitempty"`
+	Splits      []splitJSON      `json:"splits,omitempty"`
 }
 
 type claimMarkJSON struct {
@@ -105,6 +106,11 @@ type roleJSON struct {
 	Incremental bool    `json:"incremental"`
 	Previous    bool    `json:"previous"`
 	Override    string  `json:"override"`
+	Run         int     `json:"run,omitempty"`
+	Runs        int     `json:"runs,omitempty"`
+	Advisory    bool    `json:"advisory,omitempty"`
+
+	Cited *citedJSON `json:"cited,omitempty"`
 
 	PluginCommit string   `json:"pluginCommit,omitempty"`
 	ClaudeCode   string   `json:"claudeCode,omitempty"`
@@ -142,6 +148,8 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 			Round: r.Round, Limit: r.Limit, Since: r.Since, Incremental: r.Since != "", Previous: r.Previous, Override: r.Override,
 			PluginCommit: r.PluginCommit, ClaudeCode: r.ClaudeCode, Models: r.Models})
 		out.Roles[len(out.Roles)-1].Progress, out.Roles[len(out.Roles)-1].Given = progressOf(r.Progress), givenOf(r.Given)
+		out.Roles[len(out.Roles)-1].Run, out.Roles[len(out.Roles)-1].Runs, out.Roles[len(out.Roles)-1].Advisory = r.Run, r.Runs, r.Advisory
+		out.Roles[len(out.Roles)-1].Cited = citedOf(r.Cited)
 	}
 	return out
 }
@@ -179,6 +187,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Checks:      checksOf(s.Checks),
 			Lineage:     lineageOf(s.Lineage),
 			Follow:      pullFollowOf(s.Follow),
+			Splits:      splitsOf(s.Splits),
 		})
 	}
 	return out

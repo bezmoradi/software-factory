@@ -437,6 +437,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return fmt.Errorf("state folder lock: %w", err)
 	}
 	defer func() { _ = lock.Close() }()
+	begun, err := startState(cfg, os.Getenv, logger)
+	if err != nil {
+		return err
+	}
 	pageLn, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return fmt.Errorf("page: listen: %w", err)
@@ -448,6 +452,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	}
 	reg := session.New(Version, nil)
 	reg.UseNotes(state.NewNotes(cfg.StateDir))
+	shots := useScreenshots(reg, cfg.Workspace, cfg.AgentHost, logger)
 	if err := useUploads(reg, os.Getenv, logger); err != nil {
 		_ = pageLn.Close()
 		return err
@@ -484,11 +489,18 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	useSavedPrompts(srv, parts, cfg, logger)
 	usePulls(sends, srv, reg, parts, cfg, logger)
 	useSessionWork(sends, srv, reg, parts, cfg, logger)
+	useProjectViews(srv, parts, cfg, reg, logger)
+	useKeep(srv, reg, parts, cfg, logger)
+	useStarts(sends, srv, reg, parts, cfg, logger)
+	restart := &restartHook{}
+	useBackups(srv, parts, cfg, begun, restart, logger)
+	useReviewExtras(srv, reg, parts, cfg, logger)
 
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	restart.set(stop)
 
 	var agentLn net.Listener
 	if cfg.AgentAddress != "" {
@@ -526,6 +538,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	go srv.Run(ctx)
 	go page.HoldLock(ctx, lock)
 	if parts.dispatcher != nil {
+		go dropStrayScreenshots(ctx, parts.dispatcher, shots, logger)
 		go func() {
 			lctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()

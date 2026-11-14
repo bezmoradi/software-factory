@@ -3,6 +3,7 @@ package session
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -128,8 +129,15 @@ func (r *Reviews) audited(t ReviewTarget, e ReviewEntry) {
 	if t.Auto {
 		by = ByAgent
 	}
+	reason := e.Reason
+	if e.Key.Number() > 1 {
+		reason = strings.TrimSuffix("run "+strconv.Itoa(e.Key.Number())+" of this role on the commit; "+reason, "; ")
+	}
+	if e.Record.Advisory {
+		reason = strings.TrimSuffix("an advisory role, which never counts for the push; "+reason, "; ")
+	}
 	ae := AuditEntry{Time: r.cfg.Now(), Session: t.SID, Repository: t.Name, Branch: t.Branch, Commit: e.Key.Commit, By: by, Kind: AuditReview,
-		Result: string(e.Record.State), Reason: e.Reason, Reviewer: e.Key.Agent, Verdict: e.Record.Verdict,
+		Result: string(e.Record.State), Reason: reason, Reviewer: e.Key.Agent, Verdict: e.Record.Verdict,
 		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: slices.Clone(e.Models)}
 	if err := r.cfg.Audit.Append(ae); err != nil {
 		r.cfg.Logger.Warn("review", "event", "audit-not-written")

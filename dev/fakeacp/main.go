@@ -45,7 +45,7 @@ var (
 	calls   int
 )
 
-var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments"}
+var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split"}
 
 const noteMarker = "[Software Factory] "
 
@@ -59,7 +59,28 @@ func toolNamed(text string) string {
 	return found
 }
 
+func splitArgs(text string) map[string]any {
+	var tasks []map[string]string
+	for l := range strings.SplitSeq(text, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(l), "task:")
+		if !ok {
+			continue
+		}
+		title, message, _ := strings.Cut(rest, "|")
+		tasks = append(tasks, map[string]string{"title": strings.TrimSpace(title), "message": strings.TrimSpace(message)})
+	}
+	if len(tasks) == 0 {
+		for i, part := range []string{"the data model", "the page", "the documentation"} {
+			tasks = append(tasks, map[string]string{"title": fmt.Sprintf("Part %d: %s", i+1, part), "message": "Build " + part + " for the goal the fake agent split."})
+		}
+	}
+	return map[string]any{"tasks": tasks}
+}
+
 func toolArgs(tool, text string) map[string]any {
+	if tool == "factory_split" {
+		return splitArgs(text)
+	}
 	if tool != "factory_issue" && tool != "factory_pull_request" {
 		return map[string]any{}
 	}
@@ -396,9 +417,11 @@ func answer(id json.RawMessage, text string) bool {
 func promptFor(m message) {
 	text := promptText(m.Params)
 	if strings.HasPrefix(text, noteMarker) {
-		var note string
-		note, text = splitNote(text)
-		chunk("The fake agent got a note: " + note + "\n\n")
+		for strings.HasPrefix(text, noteMarker) {
+			var note string
+			note, text = splitNote(text)
+			chunk("The fake agent got a note: " + note + "\n\n")
+		}
 		if !answer(m.ID, text) {
 			reply(m.ID, map[string]any{"stopReason": "end_turn"})
 		}

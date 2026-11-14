@@ -140,6 +140,7 @@ type Info struct {
 	Checks       []AgentCheck
 	Lineage      *Lineage
 	Follow       *FollowView
+	Splits       []SplitView
 }
 
 type conn struct {
@@ -170,6 +171,7 @@ type admitted struct {
 	push         *PushView
 	forge        []ForgeView
 	follow       *FollowView
+	splits       []SplitView
 	turnLog      *turnLog
 	unbacked     []TurnMarks
 	lastMessage  string
@@ -202,6 +204,7 @@ type Registry struct {
 	shown       []Info
 	order       uint64
 	uploads     *uploadBook
+	shots       screenshotBook
 	queued      map[string]*queue
 	notes       map[string]map[string]string
 	states      map[string]AgentState
@@ -219,6 +222,7 @@ type Registry struct {
 	worktrees   *worktreeBook
 	limits      *Limits
 	work        *SessionWork
+	branchCopy  *Keep
 }
 
 var (
@@ -827,6 +831,7 @@ func (r *Registry) Forget(sid string) {
 	delete(r.states, sid)
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
+	r.dropScreenshots(sid)
 	r.announce(r.now())
 	go r.halt.forget(sid)
 }
@@ -1102,6 +1107,10 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		}
 		if a.follow != nil {
 			info.Follow = a.follow.clone()
+		}
+		if len(a.splits) > 0 {
+			info.Splits = slices.Clone(a.splits)
+			info.Needs += splitsWaiting(a.splits)
 		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor

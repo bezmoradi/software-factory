@@ -169,17 +169,21 @@ func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (I
 }
 
 func IssueText(number int, title, body string) (string, bool) {
-	head := strings.Replace(issueFraming, "%d", strconv.Itoa(number), 1) + "\n\nTitle: " + CleanLine(title, MaxForgeTitle) + "\n\n"
+	return framedText(issueFraming, number, title, body, "issue")
+}
+
+func framedText(framing string, number int, title, body, what string) (string, bool) {
+	head := strings.Replace(framing, "%d", strconv.Itoa(number), 1) + "\n\nTitle: " + CleanLine(title, MaxForgeTitle) + "\n\n"
 	var lines []string
 	for l := range strings.SplitSeq(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		lines = append(lines, CleanLine(l, maxIssueText))
 	}
 	text := strings.TrimSpace(strings.Join(lines, "\n"))
 	if text == "" {
-		text = "(The issue has no text.)"
+		text = "(The " + what + " has no text.)"
 	}
 	clipped := false
-	tail := "\n\n[The rest of the issue was cut to fit one message.]"
+	tail := "\n\n[The rest of the " + what + " was cut to fit one message.]"
 	if utf16Len(head)+utf16Len(text) > maxIssueText {
 		clipped = true
 		r := []rune(text)

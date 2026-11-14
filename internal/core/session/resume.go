@@ -259,15 +259,17 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		return p.cfg.Now().Before(item.until)
 	}
 	needs := false
-	for _, agent := range p.requiredAgents(sid, t, commit) {
-		e, ok := entries[review.Key{Commit: commit, Branch: t.Branch, Agent: agent}]
-		switch {
-		case !ok:
-			needs = true
-		case e.Record.State == review.Running:
-			return false
-		case Retryable(e), Rerunnable(e):
-			needs = true
+	for _, q := range p.requiredOf(sid, t, commit) {
+		for _, k := range (review.Key{Commit: commit, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
+			e, ok := entries[k]
+			switch {
+			case !ok:
+				needs = true
+			case e.Record.State == review.Running:
+				return false
+			case Retryable(e), Rerunnable(e):
+				needs = true
+			}
 		}
 	}
 	if !needs {
@@ -334,9 +336,11 @@ func (p *Pushes) afterReviews(by, sid string, t PushTarget, head string) string 
 		return ""
 	}
 	var ended []ReviewEntry
-	for _, agent := range p.requiredAgents(sid, t, head) {
-		if e, ok := entries[review.Key{Commit: head, Branch: t.Branch, Agent: agent}]; ok && (e.Record.State == review.Failed || e.Record.State == review.Unknown) {
-			ended = append(ended, e)
+	for _, q := range p.requiredOf(sid, t, head) {
+		for _, k := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
+			if e, ok := entries[k]; ok && (e.Record.State == review.Failed || e.Record.State == review.Unknown) {
+				ended = append(ended, e)
+			}
 		}
 	}
 	if why := unfinishedReviews(head, ended); why != "" {

@@ -71,6 +71,10 @@ type runJSON struct {
 	Earlier    []stintJSON `json:"earlier,omitempty"`
 	HandedTo   string      `json:"handedTo,omitempty"`
 	HandedHead string      `json:"handedHead,omitempty"`
+
+	Group       string `json:"group,omitempty"`
+	GroupKind   string `json:"groupKind,omitempty"`
+	HistoryOnly bool   `json:"historyOnly,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -126,6 +130,7 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 			continue
 		}
 		v.InTurnSince = r.InTurnSince
+		v.HistoryOnly = r.HistoryOnly
 		lineageInto(&v, r)
 		seen[v.SID] = true
 		out = append(out, v)
@@ -144,6 +149,7 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
 		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
+		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
 	}
 	return write(s.Dir, sessionsFile, f)
 }

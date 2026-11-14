@@ -342,8 +342,12 @@ func validToken(t string) bool {
 	return true
 }
 
+func RepoFolder(workspace, name string) string {
+	return filepath.Join(workspace, "repos", name)
+}
+
 func (c *Repos) path(name string) string {
-	return filepath.Join(c.cfg.Workspace, "repos", name)
+	return RepoFolder(c.cfg.Workspace, name)
 }
 
 func (c *Repos) List() ([]Repository, error) {
@@ -677,4 +681,119 @@ func (c *Repos) Main(name string) (string, error) {
 		return "", nil
 	}
 	return rec.Commit, nil
+}
+
+func (c *Repos) cloneMissing(r Record) bool {
+	if !sha1Hex.MatchString(r.Commit) {
+		return true
+	}
+	_, err := c.cfg.Commits.Commit(c.path(r.Name), r.Commit)
+	return err != nil
+}
+
+func (c *Repos) NeedClone() []string {
+	recs, err := c.cfg.Records.Load()
+	if err != nil {
+		return nil
+	}
+	c.mu.Lock()
+	busy := map[string]bool{}
+	for _, k := range c.cloning {
+		busy[k.Name] = true
+	}
+	c.mu.Unlock()
+	var out []string
+	for _, r := range recs {
+		if !busy[r.Name] && c.cloneMissing(r) {
+			out = append(out, r.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (c *Repos) Reclone(name string) (Cloning, error) {
+	c.mu.Lock()
+	recs, err := c.cfg.Records.Load()
+	if err != nil {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+	}
+	i := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
+	if i < 0 {
+		c.mu.Unlock()
+		return Cloning{}, explained(notFound("repository"), "That project is no longer in the list.")
+	}
+	rec := recs[i]
+	if _, busy := c.cloning[rec.URL]; busy {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("cloning"), "That repository is being cloned already.")
+	}
+	if len(c.cloning) >= MaxClones {
+		c.mu.Unlock()
+		return Cloning{}, explained(limited("clones"), "Wait for a clone to finish before starting another.")
+	}
+	if !c.cloneMissing(rec) {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("cloned"), "That project's clone is in the workspace already.")
+	}
+	k := Cloning{URL: rec.URL, Name: rec.Name, StartedAt: c.cfg.Now()}
+	c.cloning[rec.URL] = k
+	c.wg.Add(1)
+	c.mu.Unlock()
+	c.cfg.Logger.Info("repository", "event", "reclone-started")
+	c.frame("cloning", k.URL, k.Name, "")
+	go c.recloned(k)
+	return k, nil
+}
+
+func (c *Repos) recloned(k Cloning) {
+	defer c.wg.Done()
+	ctx, cancel := context.WithTimeout(c.cfg.Base, c.cfg.CloneFor)
+	defer cancel()
+	fail := func(message string) {
+		c.mu.Lock()
+		delete(c.cloning, k.URL)
+		c.mu.Unlock()
+		c.cfg.Logger.Warn("repository", "event", "reclone-failed")
+		c.frame("failed", k.URL, k.Name, message)
+	}
+	host, _ := HostOf(k.URL)
+	token, _, err := c.cfg.Tokens.Token(host)
+	if err != nil {
+		fail("The engine couldn't read its saved tokens.")
+		return
+	}
+	only := func(n string) bool { return n != k.Name }
+	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: only})
+	if err != nil {
+		fail("The clone of " + k.URL + " failed: " + clip(err.Error(), 600))
+		return
+	}
+	if done.Name != k.Name || !push.ValidBranch(done.Branch) || !sha1Hex.MatchString(done.Commit) {
+		fail("The clone finished with a name, branch or commit the engine doesn't accept.")
+		return
+	}
+	if _, err := c.cfg.Commits.Commit(c.path(done.Name), done.Commit); err != nil {
+		fail("The clone finished, but its commit " + done.Commit[:12] + " couldn't be read back from it.")
+		return
+	}
+	c.mu.Lock()
+	recs, err := c.cfg.Records.Load()
+	if err == nil {
+		if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == k.Name && r.URL == k.URL }); j >= 0 {
+			recs[j].Branch, recs[j].Commit = done.Branch, done.Commit
+			err = c.cfg.Records.Save(recs)
+		}
+	}
+	delete(c.cloning, k.URL)
+	c.mu.Unlock()
+	if err != nil {
+		c.cfg.Logger.Warn("repository", "event", "record-failed")
+		c.frame("failed", k.URL, done.Name, "The clone finished, but the engine couldn't record it.")
+		return
+	}
+	c.cfg.Logger.Info("repository", "event", "recloned")
+	c.frame("added", k.URL, done.Name, "")
+	c.hostsChanged()
 }

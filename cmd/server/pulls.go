@@ -47,6 +47,9 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 		return
 	}
 	parts.repos.OnRemoved(follows.ForgetProject)
+	if parts.reviews != nil {
+		parts.reviews.UsePersonComments(follows.PersonComments)
+	}
 	follows.Restore()
 	go follows.Run(base)
 	issues, err := session.NewIssueStarts(session.IssueStartsConfig{Follows: follows, Projects: parts.dispatcher.Projects, Tell: tellSession(reg), Base: base, Logger: logger})

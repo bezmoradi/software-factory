@@ -27,6 +27,8 @@ import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import './components/session-facts.ts'
 import './components/session-work.ts'
+import './components/screenshots.ts'
+import './components/keep.ts'
 import './components/review-models.ts'
 import './components/forge-panel.ts'
 import { pullFollowOf } from './components/pull-follow.ts'
@@ -43,6 +45,10 @@ import { openExceptions } from './components/exceptions.ts'
 import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
 import { saveSessionCaps } from './components/caps.ts'
 import { agentName, otherAgents, setBranchStarters } from './components/lineage.ts'
+import { confirmBoth } from './components/compare.ts'
+import './components/split.ts'
+import { openBackup, stateNotices } from './components/backup.ts'
+import { sendState } from './api.ts'
 
 interface Session {
   sid: string
@@ -118,6 +124,7 @@ const RESET_NOTE = 'The session restarted, so what came before this point is sho
 
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
+const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
 const reviewModels = el('sf-review-models')
 reviewModels.hidden = true
 byId('reviewer-agents').after(reviewModels)
@@ -309,6 +316,7 @@ function updateSessions(list: unknown) {
 function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
+  if ((ev as { type?: unknown }).type === 'keep') return void keepPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
@@ -320,6 +328,7 @@ function onEvent(ev: StreamEvent) {
     projectsAt = 0
     void markSignIn()
     void markIdentity()
+    void stateNotices(api, byId('state-notices'))
     void loadLimits()
     updateSessions(ev.sessions)
     for (const s of sessions.values()) requestReplay(s, true)
@@ -659,8 +668,12 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
     sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s) } : null
+    byId<HTMLElementTagNameMap['sf-screenshots']>('screenshots').view = state.connected ? { sid: s.sid, busy: inTurn(s) } : null
+    keepPanel.view = state.connected ? { sid: s.sid, disabled: inTurn(s) ? `Restore works once ${agentWord(s.info.agent)} finishes its turn.` : '' } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
+    byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
+    byId<HTMLElementTagNameMap['sf-compare']>('compare').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => ({ sid: x.sid, info: x.info, cost: x.cost, total: x.total })), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
     byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
     void loadChanges(s)
@@ -672,8 +685,12 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = null
     sessionWork.view = null
+    byId<HTMLElementTagNameMap['sf-screenshots']>('screenshots').view = null
+    keepPanel.view = null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = null
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
+    byId<HTMLElementTagNameMap['sf-split']>('split').view = null
+    byId<HTMLElementTagNameMap['sf-compare']>('compare').view = null
     byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : 'Welcome') : 'Disconnected'
     byId('title').textContent = state.connected ? '' : state.note
     byId('usage').textContent = ''
@@ -2043,6 +2060,23 @@ byId('lineage').addEventListener('sf-handover', e => {
 byId('lineage').addEventListener('sf-open-session', e => {
   if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
 })
+for (const id of ['split', 'compare']) {
+  byId(id).addEventListener('sf-open-session', e => {
+    if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
+  })
+}
+byId<HTMLElementTagNameMap['sf-split']>('split').start = (sid, card) => {
+  const goal = sessions.get(sid)
+  const name = starterNames.get(goal?.info.agent || 'claude') ?? 'The agent'
+  return withConsent(name, 'the session', consent => api('/api/split', { op: 'start', sid, card, ...consent }))
+}
+byId<HTMLElementTagNameMap['sf-compare']>('compare').next = startSecond
+byId('compare').addEventListener('sf-delete-session', async e => {
+  const s = sessions.get(e.detail.sid)
+  if (!s) return
+  const problem = await manage(s, '/api/remove-session', {})
+  if (problem) toast({ id: `delete:${s.sid}`, title: `${label(s.info)} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 })
+})
 byId('menu-wake').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
@@ -2218,6 +2252,7 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'egress') openEgress(api)
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
   if (start === 'exceptions') openExceptions(api, labelOfSid)
+  if (start === 'backup') openBackup(api, sendState)
   if (start === 'session' || start === 'add') go('projects')
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
@@ -2267,6 +2302,42 @@ projects.addEventListener('sf-dispatch', async e => {
   if (caps && typeof body.sid === 'string') {
     const problem = await saveSessionCaps(body.sid, caps)
     if (problem) toast({ id: `caps:${body.sid}`, title: 'The session started without its caps', description: problem, tone: 'warn', timeout: 0 })
+  }
+})
+async function startSecond(pair: string, agent: string): Promise<string> {
+  const name = starterNames.get(agent) ?? 'The agent'
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'next', pair, ...consent }))
+  if (!ok) {
+    const text = typeof body.message === 'string' ? body.message : "The second session didn't start."
+    toast({ id: `pair:${pair}`, title: "The second session of the pair didn't start", description: `${visible(text)} Start it from the comparison in the first session.`, tone: 'bad', timeout: 0 })
+    return ''
+  }
+  return typeof body.sid === 'string' ? body.sid : ''
+}
+projects.addEventListener('sf-pair', async e => {
+  const { caps, ...detail } = e.detail
+  const { path } = detail
+  const both = detail.agents.length === 2
+  if (both && !(await confirmBoth())) return
+  projects.starting(path)
+  const name = starterNames.get(detail.agents[0]?.agent ?? '') ?? 'The agent'
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'start', ...detail, ...(both ? { double: true } : {}), ...consent }))
+  if (!ok) {
+    projects.failed()
+    const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
+    toast({ id: `start:${path}`, title: `No session started in ${baseName(path)}`, description: visible(text), tone: 'bad', timeout: 0, action: identityAction(body) })
+    return void loadProjects(true)
+  }
+  byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
+  projects.started(path, typeof body.id === 'string' ? body.id : '')
+  const sids = typeof body.sid === 'string' ? [body.sid] : []
+  if (both && body.next === true && typeof body.pair === 'string') {
+    const second = await startSecond(body.pair, detail.agents[1]?.agent ?? '')
+    if (second) sids.push(second)
+  }
+  for (const sid of caps ? sids : []) {
+    const problem = await saveSessionCaps(sid, caps!)
+    if (problem) toast({ id: `caps:${sid}`, title: 'The session started without its caps', description: problem, tone: 'warn', timeout: 0 })
   }
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))

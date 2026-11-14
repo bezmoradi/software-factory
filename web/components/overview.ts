@@ -57,7 +57,52 @@ export function bySessionOrder(a: SessionInfo, b: SessionInfo): number {
 }
 
 export function sessionKey(list: SessionInfo[], now = Date.now()): string {
-  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.checkout, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, age(s.startedAt, now)]))
+  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.checkout, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.lineage?.group, s.lineage?.groupKind, age(s.startedAt, now)]))
+}
+
+function groupOf(s: SessionInfo, all: SessionInfo[]): string {
+  const l = s.lineage
+  if (l?.group && (l.groupKind === 'pair' || l.groupKind === 'goal')) return `${l.groupKind}:${l.group}`
+  return all.some(o => o.lineage?.groupKind === 'goal' && o.lineage.group === s.sid) ? `goal:${s.sid}` : ''
+}
+
+export function grouped(list: SessionInfo[]): SessionInfo[] {
+  const out: SessionInfo[] = []
+  const seen = new Set<string>()
+  const groups = new Map(list.map(s => [s.sid, groupOf(s, list)]))
+  for (const s of list) {
+    if (seen.has(s.sid)) continue
+    const g = groups.get(s.sid) ?? ''
+    const members = g ? list.filter(o => groups.get(o.sid) === g) : [s]
+    if (g.startsWith('goal:')) members.sort((a, b) => Number(b.sid === g.slice(5)) - Number(a.sid === g.slice(5)))
+    for (const m of members) {
+      if (seen.has(m.sid)) continue
+      seen.add(m.sid)
+      out.push(m)
+    }
+  }
+  return out
+}
+
+function groupTag(s: SessionInfo, all: SessionInfo[]): HTMLElement | null {
+  const l = s.lineage
+  if (l?.groupKind === 'pair' && l.group) {
+    const others = all.filter(o => o.sid !== s.sid && o.lineage?.groupKind === 'pair' && o.lineage.group === l.group).map(label)
+    const tag = el('span', 'tag', 'pair')
+    tag.title = visible(others.length ? `Started on the same task as ${others.join(', ')}` : 'Started as one of a pair, or on a merged pull request as a benchmark')
+    return tag
+  }
+  if (l?.groupKind === 'goal' && l.group) {
+    const goal = all.find(o => o.sid === l.group)
+    const tag = el('span', 'tag', 'task')
+    tag.title = visible(goal ? `A task split from the goal ${label(goal)}` : 'A task split from a goal session')
+    return tag
+  }
+  const tasks = all.filter(o => o.lineage?.groupKind === 'goal' && o.lineage.group === s.sid).length
+  if (!tasks) return null
+  const tag = el('span', 'tag', 'goal')
+  tag.title = `Split into ${tasks} ${plural(tasks, 'task')}`
+  return tag
 }
 
 function sessionLink(sid: string, key: string, parts: (Node | string)[]) {
@@ -147,6 +192,8 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   if (s.running && !s.live) name.append(el('span', 'tag', 'not connected'))
   else if (s.live && !s.controlled) name.append(el('span', 'tag', 'read-only'))
   if (s.mode === 'bypassPermissions') name.append(el('span', 'tag bad', 'bypass permissions'))
+  const group = groupTag(s, all)
+  if (group) name.append(group)
   const shared = sharing(s, all)
   if (shared.length) {
     const tag = el('span', 'tag warn', 'same checkout')

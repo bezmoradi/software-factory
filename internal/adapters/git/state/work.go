@@ -33,11 +33,12 @@ type teamJSON struct {
 }
 
 type projectSettingsJSON struct {
-	Rounds       int       `json:"rounds,omitempty"`
-	Type         string    `json:"type,omitempty"`
-	AutoFindings bool      `json:"autoFindings,omitempty"`
-	PRComment    bool      `json:"prComment,omitempty"`
-	Hold         *holdJSON `json:"hold,omitempty"`
+	Rounds       int        `json:"rounds,omitempty"`
+	Type         string     `json:"type,omitempty"`
+	AutoFindings bool       `json:"autoFindings,omitempty"`
+	PRComment    bool       `json:"prComment,omitempty"`
+	Hold         *holdJSON  `json:"hold,omitempty"`
+	Depth        *depthJSON `json:"reviewDepth,omitempty"`
 }
 
 type workApprovalJSON struct {
@@ -100,6 +101,7 @@ func (s Work) Load() (session.WorkState, error) {
 			v.Type = p.Type
 		}
 		v.Hold = holdOf(p.Hold)
+		v.Depth = depthOf(p.Depth)
 		out.Projects[name] = v
 	}
 	for sid, w := range f.Sessions {
@@ -117,7 +119,7 @@ func (s Work) Save(st session.WorkState) error {
 		f.Teams[name] = teamJSON{SHA: t.SHA, ApprovedAt: t.At.UTC()}
 	}
 	for name, p := range st.Projects {
-		f.Projects[name] = projectSettingsJSON{Rounds: p.Rounds, Type: p.Type, AutoFindings: p.Findings, PRComment: p.PRComment, Hold: holdJSONOf(p.Hold)}
+		f.Projects[name] = projectSettingsJSON{Rounds: p.Rounds, Type: p.Type, AutoFindings: p.Findings, PRComment: p.PRComment, Hold: holdJSONOf(p.Hold), Depth: depthJSONOf(p.Depth)}
 	}
 	if len(st.Sessions) > 0 {
 		f.Sessions = map[string]sessionWorkJSON{}

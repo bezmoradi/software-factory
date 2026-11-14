@@ -23,6 +23,7 @@ var agentRoutes = map[string]string{
 	forgeRoute:    http.MethodPost,
 	checksRoute:   http.MethodPost,
 	commentsRoute: http.MethodPost,
+	splitRoute:    http.MethodPost,
 
 	turnCheckRoute:    http.MethodPost,
 	sessionModelRoute: http.MethodGet,
@@ -110,6 +111,9 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	case commentsRoute:
 		s.commentsRequest(w, r)
+		return
+	case splitRoute:
+		s.splitRequest(w, r)
 		return
 	case "/check":
 		s.check(w, r)

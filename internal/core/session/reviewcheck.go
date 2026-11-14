@@ -248,7 +248,7 @@ func (r *Reviews) counted(list []ReviewEntry) []ReviewEntry {
 		if e.Record.State == review.Pass {
 			h.channel, h.why = r.passHeld(e, checks, checked)
 			if h.why == "" && e.Since != "" && depth < maxChain {
-				if j, ok := index[review.Key{Commit: e.Since, Branch: e.Key.Branch, Agent: e.Key.Agent}]; ok && j != i && hold(j, depth+1).why != "" {
+				if j, ok := index[review.Key{Commit: e.Since, Branch: e.Key.Branch, Agent: e.Key.Agent, Run: e.Key.Run}]; ok && j != i && hold(j, depth+1).why != "" {
 					h = held{review.Unchecked, "it reviewed only what changed since commit " + shortSHA(e.Since) + ", whose pass doesn't count for its reviewer's version, so this pass doesn't count either; the role runs again in full on the next push"}
 				}
 			}
@@ -276,7 +276,7 @@ func (r *Reviews) checksDue(entries []ReviewEntry) []dueCheck {
 	var out []dueCheck
 	for _, e := range entries {
 		v := versionsOf(e)
-		if e.Record.State != review.Pass || slices.ContainsFunc(out, func(d dueCheck) bool {
+		if e.Record.State != review.Pass || e.Record.Advisory || slices.ContainsFunc(out, func(d dueCheck) bool {
 			return d.agent == e.Key.Agent && d.versions.Model == v.Model && d.versions.Effort == v.Effort
 		}) {
 			continue

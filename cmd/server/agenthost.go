@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/netutil"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
+	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
@@ -172,5 +173,5 @@ func ServeMCP(ctx context.Context, args []string) error {
 		socket = agenthost.DefaultSocket
 	}
 	ask := agenthost.SocketAsker(socket, os.Getenv("SF_PUSH_TOKEN"))
-	return agenthost.NewMCP(ask, Version, os.Stdout).Serve(ctx, os.Stdin)
+	return agenthost.NewMCP(ask, Version, os.Stdout).Screenshots(os.Getenv(session.ScreenshotsVariable)).Serve(ctx, os.Stdin)
 }

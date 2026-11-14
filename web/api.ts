@@ -52,6 +52,10 @@ export function api(path: string, body: unknown): Promise<Response> {
   return fetch(path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' })
 }
 
+export function sendState(file: Blob): Promise<Response> {
+  return fetch('/api/import', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/gzip' }, body: file, cache: 'no-store' })
+}
+
 export function upload(blob: Blob, sid: string, name = ''): Promise<Response> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': name ? 'application/octet-stream' : blob.type, 'X-SF-Session': sid }
   if (name) headers['X-SF-Name'] = encodeURIComponent(name)

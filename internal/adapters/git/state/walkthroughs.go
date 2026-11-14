@@ -132,6 +132,7 @@ func (s Walkthroughs) Save(all map[string]session.TestListView) error {
 		}
 	}
 	slices.SortFunc(f.Walkthroughs, func(a, b walkthroughJSON) int { return b.At.Compare(a.At) })
+	given := len(f.Walkthroughs)
 	if len(f.Walkthroughs) > session.MaxWalkLists {
 		f.Walkthroughs = f.Walkthroughs[:session.MaxWalkLists]
 	}
@@ -141,6 +142,7 @@ func (s Walkthroughs) Save(all map[string]session.TestListView) error {
 			return err
 		}
 		if len(data) <= maxFile || len(f.Walkthroughs) == 0 {
+			noteDropped(s.Dir, walkthroughsFile, given-len(f.Walkthroughs))
 			return writeBytes(s.Dir, walkthroughsFile, data)
 		}
 		f.Walkthroughs = f.Walkthroughs[:len(f.Walkthroughs)-1]

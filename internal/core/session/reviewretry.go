@@ -82,6 +82,9 @@ func finishedRole(q workflow.Requirement, e ReviewEntry, round, limit int) RoleR
 }
 
 func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
 	}

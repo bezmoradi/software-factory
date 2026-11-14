@@ -29,7 +29,7 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 		logger.Warn("project facts", "event", "no-http-client")
 	}
 	facts := session.NewProjectFacts(session.ProjectFactsConfig{Repos: parts.repos, Workflows: files.Reader{}, Protection: reader,
-		Lookups: state.NewPackageLookups(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger})
+		Lookups: state.NewPackageLookups(cfg.StateDir), Files: files.Reader{}, Check: checkCommandOf(cfg.StateDir, parts.repos), Audit: state.NewAudit(cfg.StateDir), Logger: logger})
 	srv.UseProjectFacts(facts)
 	if parts.pushes != nil {
 		parts.pushes.UseExtras(session.PushExtras{Files: files.Reader{}, Workflows: files.Reader{}, Registry: &registry.Registry{Client: registry.NewClient()},

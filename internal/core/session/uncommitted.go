@@ -86,6 +86,7 @@ func (r *Registry) noteFacts(sid, kind string, ev map[string]any, now time.Time)
 		b.noteCheck(sid, kind, ev, now)
 	case "idle":
 		go r.CheckWorktree(sid)
+		r.copyAfterTurn(sid)
 	}
 }
 

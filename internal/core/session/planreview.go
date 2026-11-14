@@ -42,6 +42,9 @@ func (w *Work) PlanText(sid string) (WorkDoc, error) {
 }
 
 func (d *Dispatcher) PlanReview(ctx context.Context, sid, hash string, costOK bool) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't review a plan.")
 	}

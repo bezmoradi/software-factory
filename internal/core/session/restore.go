@@ -34,6 +34,10 @@ type SavedRun struct {
 	Earlier    []Stint
 	HandedTo   string
 	HandedHead string
+
+	Group       string
+	GroupKind   string
+	HistoryOnly bool
 }
 
 type RunStore interface {
@@ -57,6 +61,8 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].CodexThread = savedThread(r.thread)
 		out[len(out)-1].Origin, out[len(out)-1].Earlier = r.origin, slices.Clone(r.earlier)
 		out[len(out)-1].HandedTo, out[len(out)-1].HandedHead = r.handedTo, r.handedHead
+		out[len(out)-1].Group, out[len(out)-1].GroupKind = r.group, r.groupKind
+		out[len(out)-1].HistoryOnly = r.history
 	}
 	d.mu.Unlock()
 	for i := range out {
@@ -93,6 +99,8 @@ func (d *Dispatcher) Restore() int {
 		r.stamp.interruptedAt = cutAt(s)
 		r.thread = savedThread(s.CodexThread)
 		r.origin, r.earlier, r.handedTo, r.handedHead = s.Origin, slices.Clone(s.Earlier), s.HandedTo, s.HandedHead
+		r.group, r.groupKind = s.Group, s.GroupKind
+		r.history = s.HistoryOnly
 		d.mu.Lock()
 		known := d.runs[s.SID] != nil
 		if !known {

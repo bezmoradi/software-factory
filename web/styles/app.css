@@ -1027,6 +1027,42 @@ sf-session-work h3 { margin: .6rem 0 .25rem; }
 sf-session-work .field-row { flex-wrap: wrap; }
 sf-session-work .queued-text { flex: 1 1 12rem; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 sf-session-work .command-tail { max-block-size: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+sf-keep { display: block; margin: 0 0 1rem; }
+sf-keep > .session-work > summary { cursor: pointer; }
 sf-review-models { display: block; }
 sf-project-commands { display: block; margin: .5rem 0; padding-inline-start: 2rem; }
 sf-project-commands > h3 { margin: 0 0 .25rem; }
+sf-screenshots { display: block; margin: 0 0 1rem; }
+sf-screenshots > .screenshots > summary { cursor: pointer; }
+sf-screenshots .screenshot-list button.link { text-align: start; overflow-wrap: anywhere; }
+sf-screenshots .screenshot-list button[aria-pressed="true"] { font-weight: 600; }
+sf-screenshots .screenshot-view { margin: .5rem 0 0; }
+sf-screenshots .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
+form.dispatch .benchmark-picker, form.dispatch .pair-field { display: block; margin-top: .5rem; }
+form.dispatch .benchmark-picker .issue-items { margin: .3rem 0; }
+form.dispatch .benchmark-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }
+form.dispatch .benchmark-picker .issue-items button[aria-pressed="true"] { font-weight: 600; }
+form.dispatch .benchmark-picker .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
+form.dispatch .benchmark-picker .issue-title { max-height: 6rem; font-weight: 600; }
+form.dispatch .pair-field textarea { inline-size: 100%; margin-top: .25rem; }
+sf-split { display: block; }
+sf-split .split-head { gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+sf-split .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
+sf-split .forge-head { gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+sf-split .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
+sf-split .split-title { max-height: 4rem; font-weight: 600; }
+sf-split .split-edit textarea, sf-split .split-edit input { inline-size: 100%; }
+sf-split .split-started { gap: .5rem; align-items: baseline; margin-top: .3rem; }
+sf-compare { display: block; margin: .5rem 0; }
+sf-compare .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .75rem; margin-top: .5rem; }
+sf-compare .compare-col { min-width: 0; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
+sf-compare .compare-col > h3 { margin: 0 0 .3rem; }
+sf-compare .compare-head { gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+sf-compare .compare-facts, sf-compare .compare-files { margin: .3rem 0; overflow-wrap: anywhere; }
+sf-compare .forge-body { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
+dialog.backup h3 { margin: .9rem 0 .3rem; }
+dialog.backup h4 { margin: .6rem 0 .2rem; }
+dialog.backup .list li, dialog.backup p { overflow-wrap: anywhere; }
+dialog.backup .row { flex-wrap: wrap; gap: .4rem; }
+.state-notices { margin-top: 1rem; }
+.state-notices p { margin: .2rem 0; overflow-wrap: anywhere; }

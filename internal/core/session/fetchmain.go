@@ -13,6 +13,9 @@ const (
 )
 
 func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) {
+	if err := d.historyOnly(sid); err != nil {
+		return "", err
+	}
 	r, err := d.claim(sid)
 	if err != nil {
 		return "", err

@@ -12,13 +12,16 @@ type Round struct {
 
 func RoundOf(entries map[review.Key]ReviewEntry, branch, agent string) Round {
 	var out Round
+	commits := map[string]bool{}
+	blocked := map[string]*ReviewEntry{}
 	for k, e := range entries {
 		if k.Branch != branch || k.Agent != agent || e.Record.State == review.Running {
 			continue
 		}
-		out.Count++
-		if e.Record.State == review.Block && e.Record.Override == "" {
-			out.Blocked++
+		commits[k.Commit] = true
+		if e.Record.State == review.Block && e.Record.Override == "" && blocked[k.Commit] == nil {
+			c := e
+			blocked[k.Commit] = &c
 		}
 		switch e.Record.State {
 		case review.Pass, review.Block, review.Unknown:
@@ -28,6 +31,22 @@ func RoundOf(entries map[review.Key]ReviewEntry, branch, agent string) Round {
 		if out.Last == nil || e.StartedAt.After(out.Last.StartedAt) {
 			c := e
 			out.Last = &c
+		}
+	}
+	out.Count, out.Blocked = len(commits), len(blocked)
+	if out.Last != nil && out.Last.Record.State != review.Block {
+		if b := blocked[out.Last.Key.Commit]; b != nil {
+			out.Last = b
+		}
+	}
+	return out
+}
+
+func runsOf(entries map[review.Key]ReviewEntry, k review.Key) []ReviewEntry {
+	var out []ReviewEntry
+	for run := 1; run <= review.MaxRuns; run++ {
+		if e, ok := entries[k.AtRun(run)]; ok {
+			out = append(out, e)
 		}
 	}
 	return out
@@ -51,10 +70,10 @@ func (e ReviewEntry) Coverage() string {
 	return e.Base
 }
 
-func previousRound(entries map[review.Key]ReviewEntry, branch, agent, head string) *ReviewEntry {
+func previousRound(entries map[review.Key]ReviewEntry, branch, agent, head string, run int) *ReviewEntry {
 	var out *ReviewEntry
 	for k, e := range entries {
-		if k.Branch != branch || k.Agent != agent || k.Commit == head {
+		if k.Branch != branch || k.Agent != agent || k.Commit == head || k.Number() != max(run, 1) {
 			continue
 		}
 		if e.Record.State != review.Pass && e.Record.State != review.Block {

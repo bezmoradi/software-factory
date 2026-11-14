@@ -3,7 +3,7 @@ import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
-import type { AsideRun, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
+import type { AsideRun, CitedIDs, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
 const STATES: Record<string, [string, string]> = {
@@ -33,6 +33,17 @@ function duration(ms: number): string {
   if (s < 60) return `${s}s`
   if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`
   return `${Math.floor(s / 3600)}h ${pad(Math.floor(s / 60) % 60)}m`
+}
+
+function runName(role: ReviewRole): string {
+  return role.runs && role.runs > 1 ? `${text(role.name)}, run ${role.run ?? 1} of ${role.runs}` : text(role.name)
+}
+
+function cited(c: CitedIDs): HTMLElement {
+  if (c.failed) return el('div', 'small warn', `The engine couldn't look up the vulnerability IDs this review cites at OSV (${text(c.failed)}), so it marks none of them.`)
+  const more = c.more ? ` It looked up the first ${c.looked.length}; ${c.more} more ${c.more === 1 ? "wasn't" : "weren't"} looked up.` : ''
+  if (!c.notInOsv.length) return el('div', 'small muted', `OSV holds ${c.looked.length === 1 ? 'the vulnerability ID' : `all ${c.looked.length} vulnerability IDs`} this review cites.${more}`)
+  return el('div', 'small warn', `Not in OSV: ${c.notInOsv.map(text).join(', ')}. OSV holds the vulnerabilities of open-source software only, so a real ID can be missing from it; check ${c.notInOsv.length === 1 ? 'it' : 'them'} before you rely on this review.${more}`)
 }
 
 function calls(n: number): string {
@@ -180,7 +191,12 @@ class SfReviews extends HTMLElement {
       parts.push(el('p', 'small muted', `Commit ${shortSha(r.commit)} on ${text(r.branch)}, ${r.base ? `against ${shortSha(r.base)}, where it leaves the remote's main branch` : 'against an empty tree: it shares no history with the remote\'s main branch'}`))
       const list = el('ul', 'list reviews')
       const current = !value.head || value.head === r.commit
-      for (const role of r.roles) list.append(this.#role(role, current && !r.running ? r.commit : '', value, failed?.shared ?? ''))
+      const offered = new Set<string>()
+      for (const role of r.roles) {
+        const override = role.state === 'block' && !role.override && !role.advisory && !offered.has(role.agent)
+        if (override) offered.add(role.agent)
+        list.append(this.#role(role, current && !r.running ? r.commit : '', value, failed?.shared ?? '', override))
+      }
       parts.push(list)
     } else if (!value.disabled) {
       parts.push(el('p', 'small muted', 'No review of this session yet.'))
@@ -275,15 +291,17 @@ class SfReviews extends HTMLElement {
     return box
   }
 
-  #role(role: ReviewRole, commit: string, value: ReviewsView, said: string): HTMLLIElement {
+  #role(role: ReviewRole, commit: string, value: ReviewsView, said: string, offerOverride: boolean): HTMLLIElement {
     const li = el('li')
     const row = el('div', 'row')
     const overridden = role.state === 'block' && !!role.override
-    const [word, tone] = overridden ? ['overridden', 'warn'] : STATES[role.state] ?? [role.state, 'warn']
-    row.append(el('span', '', text(role.name)), el('span', 'spacer'), el('span', `tag${tone ? ` ${tone}` : ''}`, word))
+    const warned = !!role.advisory && role.state === 'block'
+    const [word, tone] = overridden ? ['overridden', 'warn'] : warned ? ['warning', 'warn'] : STATES[role.state] ?? [role.state, 'warn']
+    row.append(el('span', '', runName(role)), el('span', 'spacer'), el('span', `tag${tone ? ` ${tone}` : ''}`, word))
     const cost = money(role.costUsd)
     const round = role.round ? `round ${role.round}${role.limit ? ` of ${role.limit}` : ''} on this branch` : ''
     li.append(row, el('div', 'small muted', [text(role.agent), role.why ? text(role.why) : '', round, cost ? `≈ ${cost} (estimate)` : ''].filter(Boolean).join(' · ')))
+    if (role.advisory) li.append(el('div', 'small muted', 'Advisory for this project: its findings are warnings, and it never counts for the push, the push hold or automatic findings sends.'))
     const made = provenance(role)
     if (made) li.append(el('div', 'small muted', made))
     const progress = this.#progress(role)
@@ -295,13 +313,14 @@ class SfReviews extends HTMLElement {
     else if (role.override) li.append(el('div', 'small warn', `You overrode an earlier blocking verdict of this reviewer for commit ${shortSha(commit)}, and it still allows this commit: ${text(role.override)}`))
     const capped = value.gate?.find(g => g.type === role.agent)?.capped
     if (capped && !overridden) li.append(el('div', 'small warn', `${text(role.name)} reached this project's round limit, so the engine doesn't start it again: you decide on the push.`))
-    if (role.state === 'block' && !overridden && commit) li.append(this.#override(role, commit, value))
+    if (offerOverride && commit) li.append(this.#override(role, commit, value))
     if (role.message) {
       const pre = el('pre', 'review-message small', text(role.message))
       pre.tabIndex = 0
-      pre.setAttribute('aria-label', `${text(role.name)}'s final message`)
+      pre.setAttribute('aria-label', `${runName(role)}'s final message`)
       li.append(pre)
     }
+    if (role.cited?.looked.length) li.append(cited(role.cited))
     if (role.given) li.append(this.#given(role, role.given))
     return li
   }
@@ -365,7 +384,7 @@ class SfReviews extends HTMLElement {
       emit(this, 'sf-override', { agent: role.agent, commit, reason })
     })
     b.setAttribute('aria-disabled', String(busy))
-    b.title = 'Counts this role as passed for this commit only. A new commit needs a new review.'
+    b.title = role.runs && role.runs > 1 ? 'Counts every blocking run of this role as passed for this commit only. A new commit needs a new review.' : 'Counts this role as passed for this commit only. A new commit needs a new review.'
     box.append(label, input, b)
     return box
   }

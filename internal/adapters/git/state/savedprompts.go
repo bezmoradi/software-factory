@@ -54,7 +54,7 @@ func (s SavedPrompts) Load() (map[string][]session.SavedPrompt, error) {
 		return out, nil
 	}
 	var f savedPromptsJSON
-	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 {
+	if err := json.Unmarshal(data, &f); err != nil || !readsVersion(savedPromptsFile, f.Version) {
 		return nil, errors.New("savedprompts.json isn't a record of saved prompts this engine reads")
 	}
 	total := 0
@@ -85,7 +85,7 @@ func (s SavedPrompts) Load() (map[string][]session.SavedPrompt, error) {
 func (s SavedPrompts) Save(all map[string][]session.SavedPrompt) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f := savedPromptsJSON{Version: 1, Projects: []promptProjectJSON{}}
+	f := savedPromptsJSON{Version: writesVersion(savedPromptsFile), Projects: []promptProjectJSON{}}
 	for repo, list := range all {
 		if !repoName.MatchString(repo) || len(list) == 0 {
 			continue

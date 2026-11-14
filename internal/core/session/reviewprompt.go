@@ -53,6 +53,15 @@ type reviewGiven struct {
 	rules    rulesGiven
 	facts    bool
 	team     TeamRules
+	run      int
+	runs     int
+}
+
+func runAsk(run, runs int) string {
+	if runs <= 1 && run <= 1 {
+		return ""
+	}
+	return " This is run " + strconv.Itoa(max(run, 1)) + " of " + strconv.Itoa(max(runs, run)) + " of your role on this commit: the other runs are separate reviews, so review the change on your own."
 }
 
 func promptFor(e ReviewEntry, g reviewGiven) string {
@@ -67,6 +76,7 @@ func promptFor(e ReviewEntry, g reviewGiven) string {
 	}
 	p += claimsAsk(g.claims)
 	p += changeFactsAsk(g.facts)
+	p += runAsk(g.run, g.runs)
 	if g.earlier == "" {
 		return p + readOnly
 	}
@@ -136,7 +146,7 @@ func quotedReply(message string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-func earlierName(agent string) string {
+func earlierName(agent string, run int) string {
 	var b strings.Builder
 	for _, c := range strings.ToLower(agent) {
 		switch {
@@ -146,7 +156,11 @@ func earlierName(agent string) string {
 			b.WriteByte('-')
 		}
 	}
-	return "earlier/" + clip(b.String(), 100) + ".md"
+	name := clip(b.String(), 100)
+	if run > 1 {
+		name += "-run-" + strconv.Itoa(run)
+	}
+	return "earlier/" + name + ".md"
 }
 
 const maxOverrideShown = 500

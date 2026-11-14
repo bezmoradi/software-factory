@@ -11,7 +11,25 @@ interface Protection {
   notes: string[]
 }
 
+interface ReadinessLine {
+  kind: string
+  state: string
+  found: string[]
+  note: string
+}
+
+const READINESS: Record<string, string> = {
+  instructions: 'Instruction file (CLAUDE.md or AGENTS.md)',
+  tests: 'Test command',
+  ci: 'CI workflows',
+  lint: 'Lint configuration',
+  check: 'Check command',
+  team: 'Team file (software-factory.json)',
+  protection: 'Branch protection on main',
+}
+
 interface FactsView {
+  readiness: ReadinessLine[]
   branch: string
   commit: string
   workflows: WorkflowRun[]
@@ -35,12 +53,21 @@ function readRun(x: unknown): WorkflowRun[] {
   return [{ path: text(w.path), name: text(w.name), when: text(w.when), secrets: strings(w.secrets), idToken: w.idToken === true, trusted: strings(w.trusted), new: false, changed: false, problem: text(w.problem) }]
 }
 
+function readReadiness(x: unknown): ReadinessLine[] {
+  if (!x || typeof x !== 'object') return []
+  const r = x as Record<string, unknown>
+  if (typeof r.kind !== 'string' || !Object.hasOwn(READINESS, r.kind)) return []
+  const state = r.state === 'found' || r.state === 'missing' ? r.state : 'unknown'
+  return [{ kind: r.kind, state, found: strings(r.found), note: text(r.note) }]
+}
+
 function readView(body: unknown): FactsView | null {
   if (!body || typeof body !== 'object') return null
   const v = body as Record<string, unknown>
   const p = (v.protection && typeof v.protection === 'object' ? v.protection : {}) as Record<string, unknown>
   if (!Array.isArray(v.workflows)) return null
   return {
+    readiness: Array.isArray(v.readiness) ? v.readiness.flatMap(readReadiness) : [],
     branch: text(v.branch), commit: text(v.commit), workflows: v.workflows.flatMap(readRun), workflowsProblem: text(v.workflowsProblem), lookups: v.lookups === true,
     protection: { state: text(p.state) || 'unknown', reviews: text(p.reviews) || 'unknown', approvals: Number(p.approvals) || 0, checks: text(p.checks) || 'unknown', checkNames: strings(p.checkNames), notes: strings(p.notes) },
   }
@@ -82,6 +109,27 @@ class SfProjectFacts extends HTMLElement {
     if (v) this.#view = v
     this.#paint()
     return true
+  }
+
+  #readiness(v: FactsView): HTMLElement {
+    const box = el('div')
+    box.append(el('p', 'small', 'What the repository gives the agents, read from the main branch\'s commit'))
+    box.append(el('p', 'small muted', 'Agents work much better with an instruction file, tests, CI, a linter and a check command. The engine reads these files from main with its own reader and runs nothing. Display only: nothing here holds or allows anything.'))
+    if (!v.readiness.length) {
+      box.append(el('p', 'small muted', 'The engine sent no readiness report.'))
+      return box
+    }
+    const ul = el('ul', 'small list')
+    for (const r of v.readiness) {
+      const li = el('li', r.state === 'missing' ? 'warn' : '')
+      const tone = r.state === 'found' ? 'tag ok' : r.state === 'missing' ? 'tag warn' : 'tag'
+      li.append(el('span', tone, r.state), ` ${READINESS[r.kind] ?? r.kind}`)
+      if (r.found.length) li.append(el('span', 'muted', `: ${r.found.join(', ')}`))
+      if (r.note) li.append(el('p', 'small muted', r.note))
+      ul.append(li)
+    }
+    box.append(ul)
+    return box
   }
 
   #workflows(v: FactsView): HTMLElement {
@@ -155,7 +203,7 @@ class SfProjectFacts extends HTMLElement {
     const parts: HTMLElement[] = []
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Reading the workflows and the main branch\'s protection…' : 'Nothing read yet.'))
-    else parts.push(this.#workflows(v), this.#protection(v.protection, v.branch), this.#lookups(v))
+    else parts.push(this.#readiness(v), this.#workflows(v), this.#protection(v.protection, v.branch), this.#lookups(v))
     const again = button(this.#busy ? 'Reading…' : 'Read again', 'link small', () => {
       this.#status.textContent = ''
       void this.#call({ op: 'read', repo: this.#repo })

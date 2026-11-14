@@ -52,6 +52,9 @@ func TestListArgv(command, plugin, prompt string) []string {
 }
 
 func (d *Dispatcher) TestList(ctx context.Context, sid string, costOK bool) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't write a manual test list.")
 	}

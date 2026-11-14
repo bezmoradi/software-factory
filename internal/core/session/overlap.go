@@ -21,7 +21,7 @@ func (r *Registry) overlapsLocked(b *worktreeBook, sid string) []Overlap {
 	}
 	var out []Overlap
 	for other, theirs := range b.changed {
-		if other == sid || theirs.repo != mine.repo || r.admitted[other] == nil {
+		if other == sid || theirs.repo != mine.repo || r.admitted[other] == nil || samePair(r.admitted[sid], r.admitted[other]) {
 			continue
 		}
 		var shared []string

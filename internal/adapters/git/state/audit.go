@@ -103,8 +103,9 @@ func (a Audit) Append(e session.AuditEntry) error {
 		_ = f.Close()
 		return errors.New("audit.jsonl isn't a 0600 file this user owns")
 	}
-	if info.Size() > maxAudit {
+	if info.Size() > auditLimit() {
 		_ = f.Close()
+		noteDropped(a.Dir, auditFile, countLines(filepath.Join(a.Dir, "audit.1.jsonl")))
 		if err := os.Rename(path, filepath.Join(a.Dir, "audit.1.jsonl")); err != nil {
 			return errors.New("audit.jsonl couldn't be rotated")
 		}

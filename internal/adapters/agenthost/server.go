@@ -274,6 +274,7 @@ var routes = map[string]string{
 	homeRoute:              http.MethodPost,
 	reviewRunRoute:         http.MethodPost,
 	projectCommandRoute:    http.MethodPost,
+	screenshotsRemoveRoute: http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -440,6 +441,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case screenshotsRemoveRoute:
+		var q screenshotsRemoveJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		removed, p := s.removeScreenshots(q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, screenshotsRemoveReply{OK: true, Removed: removed})
 	case allowRulesRoute:
 		var q allowRulesJSON
 		if p := decode(w, r, &q); p != nil {

@@ -186,3 +186,53 @@ func Lookup(ctx context.Context, client *http.Client, api string, queries []Quer
 	}
 	return found, more, nil
 }
+
+type Cited struct {
+	Client *http.Client
+	API    string
+}
+
+func (c Cited) Held(ctx context.Context, ids []string) (map[string]bool, error) {
+	api := strings.TrimSuffix(c.API, "/")
+	out := map[string]bool{}
+	for _, id := range ids[:min(len(ids), maxIDs)] {
+		if !vulnID.MatchString(id) {
+			continue
+		}
+		held, err := heldID(ctx, c.Client, api, id)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = held
+	}
+	return out, nil
+}
+
+func heldID(ctx context.Context, client *http.Client, api, id string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api+"/v1/vulns/"+url.PathEscape(id), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("OSV didn't answer")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
+	if err != nil || len(data) > maxAnswer {
+		return false, fmt.Errorf("OSV's answer couldn't be read")
+	}
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return false, nil
+	case http.StatusOK:
+	default:
+		return false, fmt.Errorf("OSV answered %d", resp.StatusCode)
+	}
+	var v vulnJSON
+	if json.Unmarshal(data, &v) != nil {
+		return false, fmt.Errorf("OSV's answer isn't the JSON this engine reads")
+	}
+	return strings.EqualFold(v.ID, id) || slices.ContainsFunc(v.Aliases, func(a string) bool { return strings.EqualFold(a, id) }), nil
+}

@@ -196,13 +196,14 @@ class SfConversation extends HTMLElement {
         this.#reply = null
         const who = ev.from === 'page' ? 'You, from this page' : ev.from === 'history' ? 'You, earlier' : ev.from === 'task' ? 'Background task' : `You, in ${this.who === 'Claude' ? 'Claude Code' : 'the agent'}`
         let text = ev.text || ''
-        if (text.startsWith(NOTE)) {
+        const noted = text.startsWith(NOTE)
+        while (text.startsWith(NOTE)) {
           const cut = text.indexOf('\n\n')
           const note = cut < 0 ? text.slice(NOTE.length) : text.slice(NOTE.length, cut)
           this.#timeline!.append(el('li', 'reset small muted', `Software Factory told ${this.who === 'Claude' ? 'Claude Code' : 'the agent'}: ${unspoofed(note)}`))
           text = cut < 0 ? '' : text.slice(cut + 2)
-          if (!text && !ev.images && !ev.files?.length) break
         }
+        if (noted && !text && !ev.images && !ev.files?.length) break
         const item = this.#entry(ev.from === 'task' ? 'prompt task' : 'prompt', who)
         if (text) item.append(el('div', 'body', unspoofed(text)))
         if (ev.images) item.append(el('span', 'who count', `${ev.images} ${plural(ev.images, 'image')}`))

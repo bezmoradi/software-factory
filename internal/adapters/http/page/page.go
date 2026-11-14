@@ -75,6 +75,18 @@ type Server struct {
 	pulls     session.PullsPage
 	issues    session.IssuesPage
 	work      *session.SessionWork
+	metrics   session.MetricsPage
+	decisions session.DecisionLogPage
+
+	branchCopy session.KeepPage
+
+	pairs  session.PairsPage
+	splits *session.Splits
+
+	backups session.BackupPage
+
+	lessons session.LessonsPage
+	depth   session.ReviewDepthPage
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -164,6 +176,12 @@ var pageRoutes = map[string]bool{
 	bringMainRoute:    true, handoverRoute: true, startPointsRoute: true,
 	pullRoute: true, issuesRoute: true, findingIssuesRoute: true,
 	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true, agentModelsRoute: true,
+	screenshotsRoute: true, screenshotRoute: true,
+	metricsRoute: true, decisionLogRoute: true,
+	keepRoute: true,
+	pairRoute: true, splitPageRoute: true,
+	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
+	lessonsRoute: true, reviewDepthRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -254,6 +272,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.upload(w, r)
 		return
 	}
+	if r.URL.Path == importRoute {
+		s.importState(w, r)
+		return
+	}
 	if !isJSON(r) {
 		refuse(w, http.StatusUnsupportedMediaType, "type")
 		return
@@ -269,6 +291,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if workflowRoutes[r.URL.Path] {
 		s.workflowAPI(w, r, r.URL.Path, body)
+		return
+	}
+	if backupRoutes[r.URL.Path] {
+		s.backupAPI(w, r, body)
 		return
 	}
 	if starting[r.URL.Path] {
@@ -317,6 +343,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == projectFactsRoute {
 		s.projectFacts(w, r, body)
+		return
+	}
+	if r.URL.Path == metricsRoute {
+		s.projectMetrics(w, body)
+		return
+	}
+	if r.URL.Path == decisionLogRoute {
+		s.decisionLog(w, body)
 		return
 	}
 	if r.URL.Path == loginRoute {
@@ -377,6 +411,26 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if runRoutes[r.URL.Path] {
 		s.runs(w, r, body)
+		return
+	}
+	if shotRoutes[r.URL.Path] {
+		s.screenshots(w, r.URL.Path, body)
+		return
+	}
+	if r.URL.Path == keepRoute {
+		s.keepAPI(w, r, body)
+		return
+	}
+	if r.URL.Path == pairRoute {
+		s.pairAPI(w, r, body)
+		return
+	}
+	if r.URL.Path == splitPageRoute {
+		s.splitPage(w, r, body)
+		return
+	}
+	if lessonRoutes[r.URL.Path] {
+		s.lessonsAPI(w, r, body)
 		return
 	}
 	s.api(w, r.URL.Path, body)

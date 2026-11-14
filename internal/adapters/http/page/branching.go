@@ -50,13 +50,17 @@ type lineageJSON struct {
 	Earlier  []stintJSON `json:"earlier"`
 	HandedTo string      `json:"handedTo,omitempty"`
 	Last     string      `json:"last,omitempty"`
+
+	Group     string `json:"group,omitempty"`
+	GroupKind string `json:"groupKind,omitempty"`
 }
 
 func lineageOf(l *session.Lineage) *lineageJSON {
 	if l == nil {
 		return nil
 	}
-	out := &lineageJSON{Branch: l.Branch, Origin: l.Origin, From: l.From, Earlier: make([]stintJSON, 0, len(l.Earlier)), HandedTo: l.HandedTo, Last: l.Last}
+	out := &lineageJSON{Branch: l.Branch, Origin: l.Origin, From: l.From, Earlier: make([]stintJSON, 0, len(l.Earlier)), HandedTo: l.HandedTo, Last: l.Last,
+		Group: l.Group, GroupKind: l.GroupKind}
 	for _, t := range l.Earlier {
 		out.Earlier = append(out.Earlier, stintJSON{Agent: t.Agent, SID: t.SID, Name: t.Name, From: t.From, To: t.To})
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -76,7 +77,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 			required = append(required, workflow.Requirement{Agent: r.cfg.Agents[role], Role: role})
 		}
 	}
-	if len(required) == 0 {
+	if !slices.ContainsFunc(required, func(q workflow.Requirement) bool { return !q.Advisory }) {
 		release()
 		return explained(conflict("no reviews"), "This session's work type needs no review, and it can't push. Pick another work type to review and push it.")
 	}
@@ -92,30 +93,45 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	var checking []string
 	for _, q := range required {
 		rd := RoundOf(entries, t.Branch, q.Agent)
-		key := review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}
-		if e, ok := entries[key]; ok && t.Scope.skips(e) {
-			finished = append(finished, finishedRole(q, e, rd.Count, limit))
-			if e.Record.Channel == review.Checking {
-				checking = append(checking, ReviewerName(q))
+		var open []review.Key
+		for _, key := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
+			if e, ok := entries[key]; ok && t.Scope.skips(e) && e.Record.Advisory == q.Advisory {
+				f := finishedRole(q, e, rd.Count, limit)
+				f.Run, f.Runs, f.Advisory = key.Number(), q.RunCount(), q.Advisory
+				finished = append(finished, f)
+				if e.Record.Channel == review.Checking {
+					checking = append(checking, ReviewerName(q))
+				}
+				continue
 			}
+			open = append(open, key)
+		}
+		if len(open) == 0 {
 			continue
 		}
-		if rd.Capped(limit) {
+		if !q.Advisory && rd.Capped(limit) {
 			capped = append(capped, ReviewerName(q))
 			continue
 		}
-		p := plannedRole{q: q, base: base, covers: base, round: rd.Count + 1, attempt: nextAttempt(entries, key)}
-		if e, ok := entries[key]; ok {
-			p.auto, p.kept = e.Auto, e.Record.Override
-			if e.Record.State != review.Running {
-				p.round = rd.Count
+		for _, key := range open {
+			p := plannedRole{q: q, base: base, covers: base, round: rd.Count + 1, attempt: nextAttempt(entries, key), run: key.Number(), runs: q.RunCount()}
+			if e, ok := entries[key]; ok {
+				p.auto = e.Auto
 			}
+			for _, e := range runsOf(entries, key) {
+				if e.Record.Override != "" {
+					p.kept = e.Record.Override
+				}
+				if e.Record.State != review.Running {
+					p.round = rd.Count
+				}
+			}
+			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number()); prev != nil {
+				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
+			}
+			p.overridden = acceptedRound(entries, t.Branch, q.Agent)
+			plans = append(plans, p)
 		}
-		if prev := r.incremental(t, entries, q.Agent, head, main); prev != nil {
-			p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
-		}
-		p.overridden = acceptedRound(entries, t.Branch, q.Agent)
-		plans = append(plans, p)
 	}
 	if len(plans) == 0 && t.Scope == ScopeRetry {
 		release()
@@ -141,7 +157,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewer container's sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch)}
 	for _, p := range plans {
 		view.Roles = append(view.Roles, RoleReview{Role: p.q.Role, Name: ReviewerName(p.q), Agent: p.q.Agent, State: review.Running, Why: p.q.Why,
-			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != "", Override: p.kept})
+			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != "", Override: p.kept, Run: p.run, Runs: p.runs, Advisory: p.q.Advisory})
 	}
 	view.Roles = append(view.Roles, finished...)
 	held := ""
@@ -187,6 +203,8 @@ type plannedRole struct {
 	round      int
 	auto       bool
 	attempt    int
+	run        int
+	runs       int
 }
 
 func plural(n int, one, many string) string {
@@ -196,8 +214,8 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string) *ReviewEntry {
-	prev := previousRound(entries, t.Branch, agent, head)
+func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int) *ReviewEntry {
+	prev := previousRound(entries, t.Branch, agent, head, run)
 	if prev == nil || prev.Record.Shaped != "" {
 		return nil
 	}

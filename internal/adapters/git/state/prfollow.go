@@ -139,10 +139,15 @@ func (s PRFollows) Save(rec session.FollowRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := prFollowsJSON{Version: 1, Follows: []followJSON{}, Settings: []followSettingsJSON{}}
+	capped := 0
 	for _, v := range rec.Follows {
 		j := followJSON{SID: v.SID, Project: v.Project, Branch: v.Branch, Issue: v.Issue, IssueSent: v.IssueSent, Watch: v.Watch, Pushed: v.Pushed.UTC(), Number: v.Number,
 			URL: v.URL, Opened: v.Opened, Done: v.Done, DoneAt: v.DoneAt.UTC(), CheckSent: v.CheckSent, SeenAt: v.SeenAt.UTC(), SeenURLs: v.SeenURLs, Rounds: v.Rounds, AutoStop: v.AutoStop}
-		if _, ok := followOf(j); !ok || len(f.Follows) >= session.MaxFollowed {
+		_, ok := followOf(j)
+		if ok && len(f.Follows) >= session.MaxFollowed {
+			capped++
+		}
+		if !ok || len(f.Follows) >= session.MaxFollowed {
 			continue
 		}
 		f.Follows = append(f.Follows, j)
@@ -157,5 +162,6 @@ func (s PRFollows) Save(rec session.FollowRecord) error {
 	slices.SortFunc(f.Settings, func(a, b followSettingsJSON) int {
 		return cmp.Or(cmp.Compare(a.Project, b.Project), cmp.Compare(a.URL, b.URL))
 	})
+	noteDropped(s.Dir, prFollowFile, capped)
 	return write(s.Dir, prFollowFile, f)
 }

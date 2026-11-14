@@ -183,13 +183,13 @@ func decide(r Request, f Facts) Decision {
 			offer = &o
 		}
 		k := review.Key{Commit: r.Commit, Branch: r.Branch, Agent: q.Agent}
-		if why := review.Problem(f.Reviews, k, offer); why != "" {
+		if why, at := review.Pooled(f.Reviews, k, q.RunCount(), offer); why != "" {
 			n := f.Capped[q.Agent]
 			if n > 0 {
 				why = CappedItem(q.Agent, n)
 			}
 			missing = append(missing, why)
-			rec, found := f.Reviews[k]
+			rec, found := f.Reviews[at]
 			unmet = append(unmet, unmetReview(q.Agent, rec, found, n))
 		}
 	}

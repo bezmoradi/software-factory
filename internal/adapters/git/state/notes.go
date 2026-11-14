@@ -14,7 +14,6 @@ import (
 const (
 	notesFile      = "notes.json"
 	maxNotes       = 2000
-	maxNoteText    = 1200
 	maxNoteSources = 20
 )
 
@@ -41,7 +40,7 @@ type notesJSON struct {
 }
 
 func noteOf(n noteJSON) bool {
-	return sessionID.MatchString(n.SID) && noteSource.MatchString(n.Source) && n.Text != "" && utf8.ValidString(n.Text) && len(n.Text) <= maxNoteText
+	return sessionID.MatchString(n.SID) && noteSource.MatchString(n.Source) && n.Text != "" && utf8.ValidString(n.Text) && len(n.Text) <= session.NoteCap(n.Source)
 }
 
 func (n Notes) Load() (map[string]map[string]string, error) {
@@ -92,6 +91,7 @@ func (n Notes) Save(all map[string]map[string]string) error {
 		return f.Notes[i].Source < f.Notes[j].Source
 	})
 	if len(f.Notes) > maxNotes {
+		noteDropped(n.Dir, notesFile, len(f.Notes)-maxNotes)
 		f.Notes = f.Notes[:maxNotes]
 	}
 	return write(n.Dir, notesFile, f)

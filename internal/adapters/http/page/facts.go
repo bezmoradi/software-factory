@@ -102,6 +102,7 @@ type projectFactsJSON struct {
 	WorkflowsProblem string            `json:"workflowsProblem,omitempty"`
 	Protection       protectionJSON    `json:"protection"`
 	Lookups          bool              `json:"lookups"`
+	Readiness        []readinessJSON   `json:"readiness"`
 }
 
 func uncommittedOf(u *session.Uncommitted) *uncommittedJSON {
@@ -162,7 +163,7 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 
 func projectFactsOf(v session.ProjectFactsView) projectFactsJSON {
 	p := v.Protection
-	return projectFactsJSON{Repo: v.Repo, Branch: v.Branch, Commit: v.Commit, Workflows: workflowRunsOf(v.Workflows), WorkflowsProblem: v.WorkflowsProblem, Lookups: v.Lookups,
+	return projectFactsJSON{Repo: v.Repo, Branch: v.Branch, Commit: v.Commit, Workflows: workflowRunsOf(v.Workflows), WorkflowsProblem: v.WorkflowsProblem, Lookups: v.Lookups, Readiness: readinessOf(v.Readiness),
 		Protection: protectionJSON{State: p.State, Reviews: p.Reviews, Approvals: p.Approvals, Checks: p.Checks, CheckNames: nonNil(p.CheckNames), Notes: nonNil(p.Notes)}}
 }
 

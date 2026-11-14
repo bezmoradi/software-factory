@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -223,6 +224,14 @@ func verdict(agent, prompt string, st *stream) reply {
 		r.text = report + "\n**Changes required:** head/TOKEN-IN-REVIEW asks the fake reviewer to quote " + token + " and block.\nknackpack-verdict/1: block"
 		return r
 	}
+	if n := blockRun(); n > 0 && n == runOf(prompt) {
+		r.text = report + "\n**Changes required:** head/BLOCK-RUN asks the fake reviewer to block on run " + strconv.Itoa(n) + ".\n\n### [High] head/BLOCK-RUN asks for a block on one run\n\n**Location:** `BLOCK-RUN:1`\n\nThe file names the run that blocks.\nknackpack-verdict/1: block"
+		return r
+	}
+	if has("BLOCK-FINDING") {
+		r.text = report + "\n**Changes required:** head/BLOCK-FINDING asks the fake reviewer to block with one finding.\n\n### [High] head/BLOCK-FINDING asks for a repeated blocking finding\n\n**Location:** `README.md:1`\n\nThe same finding comes back on every commit that carries the file.\nknackpack-verdict/1: block"
+		return r
+	}
 	if has("BLOCK-REVIEW") {
 		r.text = report + "\n**Changes required:** head/BLOCK-REVIEW asks the fake reviewer to block.\nknackpack-verdict/1: block"
 		return r
@@ -241,6 +250,10 @@ func verdict(agent, prompt string, st *stream) reply {
 	}
 	if has("LOW-FINDINGS") && agent == "knackpack:adversarial-reviewer" {
 		r.text = report + "\nNo blocking issues found.\n\n### [Low] head/LOW-FINDINGS asks for a first low finding\n\n**Location:** `README.md:1`\n\nThe first line could say more.\n\n### [Low] head/LOW-FINDINGS asks for a second low finding\n\n**Location:** `README.md:2`\n\nThe second line could be shorter.\n\nknackpack-findings/1: critical=0 high=0 medium=0 low=2 blocking=0\nknackpack-verdict/1: pass"
+		return r
+	}
+	if has("CITE-CVES") {
+		r.text = report + "\nNo blocking issues found. head/CITE-CVES asks the fake reviewer to cite " + realCVE + " and " + madeCVE + "." + findingsLine() + "\nknackpack-verdict/1: pass"
 		return r
 	}
 	pass := "No blocking issues found."
@@ -303,11 +316,16 @@ func asideOf(prompt string) string {
 		return "explain"
 	case strings.HasPrefix(prompt, "Review the implementation plan in plan.md"):
 		return "plan"
+	case strings.HasPrefix(prompt, "Suggest instruction-file lines"):
+		return "lessons"
 	}
 	return ""
 }
 
 func asideReply(kind, prompt string) reply {
+	if kind == "lessons" {
+		return lessonsReply()
+	}
 	if has("TOKEN-IN-REVIEW") {
 		return reply{text: "## From the fake reviewer\n\nSign in with " + "sk-" + "ant-" + "api03-" + strings.Repeat("Fake0", 8) + ".", turns: 2}
 	}

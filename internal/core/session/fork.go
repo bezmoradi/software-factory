@@ -96,6 +96,9 @@ type Lineage struct {
 	Earlier  []Stint
 	HandedTo string
 	Last     string
+
+	Group     string
+	GroupKind string
 }
 
 type BranchPage interface {
@@ -113,10 +116,11 @@ func (d *Dispatcher) UseForges(f *Forges) {
 }
 
 func lineageOf(r *run) *Lineage {
-	if (r.origin == "" || r.origin == OriginMain) && len(r.earlier) == 0 && r.handedTo == "" {
+	if (r.origin == "" || r.origin == OriginMain) && len(r.earlier) == 0 && r.handedTo == "" && r.group == "" {
 		return nil
 	}
-	return &Lineage{Branch: r.branch, Origin: r.origin, From: r.base, Earlier: slices.Clone(r.earlier), HandedTo: r.handedTo, Last: r.handedHead}
+	return &Lineage{Branch: r.branch, Origin: r.origin, From: r.base, Earlier: slices.Clone(r.earlier), HandedTo: r.handedTo, Last: r.handedHead,
+		Group: r.group, GroupKind: r.groupKind}
 }
 
 func checkStartFrom(q Dispatch) error {
@@ -153,6 +157,8 @@ func (d *Dispatcher) sources() (StartSources, bool) {
 
 func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, main string) (startPoint, error) {
 	switch {
+	case q.pinned != nil:
+		return *q.pinned, nil
 	case q.Continues != nil:
 		return startPoint{commit: q.Continues.Head, origin: OriginHandover, earlier: slices.Clone(q.Continues.Earlier)}, nil
 	case q.From.SID != "":
@@ -177,8 +183,9 @@ func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) 
 	d.mu.Lock()
 	r := d.runs[sid]
 	var branch, name, path string
+	history := false
 	if r != nil {
-		branch, name, path = r.branch, r.display, r.repoPath
+		branch, name, path, history = r.branch, r.display, r.repoPath, r.history
 		if name == "" {
 			name = r.spec.Name + " " + r.id
 		}
@@ -186,6 +193,9 @@ func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) 
 	d.mu.Unlock()
 	if r == nil || path != repo.Path {
 		return startPoint{}, explained(notFound("from"), "That session isn't one of this project's sessions on this engine.")
+	}
+	if history {
+		return startPoint{}, explained(conflict("history only"), historyMessage)
 	}
 	heads, _ := d.reg.worktreeReaders()
 	if heads == nil {
