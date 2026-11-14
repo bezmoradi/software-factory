@@ -84,7 +84,7 @@ function readView(body: unknown): ChecksView | null {
     if (!x || typeof x !== 'object') return []
     const r = x as Record<string, unknown>
     if (typeof r.agent !== 'string' || !r.agent) return []
-    return [{ agent: r.agent, role: text(r.role), roleName: text(r.roleName) || text(r.role), running: r.running === true, check: readCheck(r.check) }]
+    return [{ agent: r.agent, role: text(r.role), roleName: text(r.roleName) || text(r.role) || r.agent, running: r.running === true, check: readCheck(r.check) }]
   })
   return { claudeCode: text(v.claudeCode), plugin: text(v.plugin), minimum: { claudeCode: text(min.claudeCode), plugin: text(min.plugin) }, roles }
 }
@@ -190,7 +190,9 @@ class SfReviewerChecks extends HTMLElement {
     const what = el('div')
     const c = r.check
     const [label, tone] = r.running && c?.result !== 'running' ? RESULTS.running! : RESULTS[c?.result ?? ''] ?? ['Not checked yet', 'muted']
-    what.append(el('strong', '', `The ${visible(r.roleName)}`), el('span', 'small muted', ` ${visible(r.agent)}`), el('p', `small ${tone}`, label))
+    what.append(el('strong', '', `The ${visible(r.roleName)}`))
+    if (r.roleName !== r.agent) what.append(el('span', 'small muted', ` ${visible(r.agent)}`))
+    what.append(el('p', `small ${tone}`, label))
     if (c) {
       const versions = [`Claude Code ${visible(c.claudeCode)}`, c.plugin ? `plugin or agent file ${visible(short(c.plugin))}` : '', c.models.length ? `model ${c.models.map(visible).join(', ')}` : '', `run with ${c.model ? `--model=${visible(c.model)}` : 'the default model'} and ${c.effort ? `--effort=${visible(c.effort)}` : 'the default effort'}`].filter(Boolean).join(' · ')
       const at = c.endedAt ? `finished ${when(c.endedAt)}` : `started ${when(c.startedAt)}`
@@ -199,9 +201,10 @@ class SfReviewerChecks extends HTMLElement {
       what.append(...this.#replies(r, c))
     }
     const actions = el('div', 'row')
-    const now = button(this.#busy === r.agent ? 'Starting…' : 'Check now', 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
+    const word = this.#busy === r.agent ? 'Starting…' : 'Check now'
+    const now = button(word, 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
     now.disabled = off || r.running || c?.result === 'running'
-    now.setAttribute('aria-label', `Check the ${visible(r.roleName)} now`)
+    now.setAttribute('aria-label', `${word}: the ${visible(r.roleName)}`)
     actions.append(now)
     if (this.#cost === r.agent) {
       const pay = button('Check now, it costs money', 'small', () => void this.#check(r.agent, true), 'button', `pay:${r.agent}`)

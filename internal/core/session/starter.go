@@ -490,6 +490,7 @@ type listed struct {
 	Kind      string
 	Cwd       string
 	StartedAt float64
+	Pid       float64
 }
 
 func (d *Dispatcher) listClaude(ctx context.Context, dir string) ([]listed, error) {

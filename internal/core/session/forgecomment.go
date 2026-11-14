@@ -18,7 +18,9 @@ const (
 	CommentCalls             = 10
 	CommentWindow            = 10 * time.Minute
 
-	noDrafts = "GitHub doesn't offer drafts for this repository, so it opened as ready for review"
+	noDrafts      = "GitHub doesn't offer drafts for this repository, so it opened as ready for review"
+	commentCutOff = "the engine stopped before the git host answered; the comment may have been posted"
+	commentLost   = "the git host didn't answer clearly; the comment may have been posted"
 )
 
 type PushedRole struct {
@@ -214,16 +216,28 @@ func (f *Forges) postComment(ctx context.Context, c *forgeCard, p PushedFacts) {
 	request := randomHex(16)
 	f.commentAudit(p, v, request, ForgePosting, "commenting on pull request #"+strconv.Itoa(number)+" about commit "+shortSHA(p.Commit))
 	link, err := f.cfg.API.Comment(ctx, repo, number, v.Body)
+	stopped := err != nil && f.cfg.Base.Err() != nil
+	unclear := forgeUnclear(err) || stopped
 	f.mu.Lock()
 	c.view.At = f.cfg.Now()
-	if err != nil {
+	switch {
+	case stopped:
+		c.view.State, c.view.Reason = ForgeUnclear, commentCutOff
+	case unclear:
+		c.view.State, c.view.Reason = ForgeUnclear, commentLost
+	case err != nil:
 		c.view.State, c.view.Reason = ForgeFailed, f.clean(repo.Token, forgeWhy(err, NeedPulls))
-	} else {
+	default:
 		c.view.State, c.view.URL = ForgeCommented, link.URL
 	}
 	v = c.view
 	f.mu.Unlock()
 	f.show(p.SID)
+	if unclear {
+		f.commentAudit(p, v, request, ResultUnclear, "can't tell whether the comment on pull request #"+strconv.Itoa(number)+" was posted: "+v.Reason)
+		f.cfg.Logger.Warn("forge", "event", "comment-unclear")
+		return
+	}
 	if err != nil {
 		f.commentAudit(p, v, request, ForgeFailed, "couldn't comment on pull request #"+strconv.Itoa(number)+": "+v.Reason)
 		f.cfg.Logger.Warn("forge", "event", "comment-failed")

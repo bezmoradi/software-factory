@@ -1288,7 +1288,8 @@ function paintCrumbs(s: Session) {
   const key = JSON.stringify([cwd, home, label(s.info)])
   if (list.dataset.key === key) return
   list.dataset.key = key
-  const here = crumb(visible(label(s.info)))
+  const here = el('li')
+  here.append(el('h1', '', visible(label(s.info))))
   here.setAttribute('aria-current', 'page')
   const folder = home || cwd.replace(/\/+$/, '')
   const parts = home ? [crumb('Projects', 'projects'), crumb(baseName(home), 'projects', home)] : [crumb('Welcome', 'overview'), ...(folder ? [crumb(baseName(folder))] : [])]

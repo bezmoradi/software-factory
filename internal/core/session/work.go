@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/gate"
+	"github.com/bezmoradi/software-factory/internal/core/level"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -106,6 +107,7 @@ type WorkConfig struct {
 
 	RoleAgents RoleAgents
 	Changes    ChangeReader
+	Level      func(sid string) (level.Result, bool)
 }
 
 type workApproval struct {
@@ -255,8 +257,8 @@ type WorkPage interface {
 var _ WorkPage = (*Work)(nil)
 
 func NewWork(cfg WorkConfig) (*Work, error) {
-	if cfg.Targets == nil || cfg.Heads == nil || cfg.History == nil || cfg.Files == nil || cfg.Repos == nil || cfg.Store == nil {
-		return nil, errors.New("work: need the sessions, the hash-checked reader, the repositories and the state file")
+	if cfg.Targets == nil || cfg.Heads == nil || cfg.History == nil || cfg.Files == nil || cfg.Repos == nil || cfg.Store == nil || cfg.Level == nil {
+		return nil, errors.New("work: need the sessions, the hash-checked reader, the repositories, the state file and the sessions' levels")
 	}
 	if cfg.Reported == nil {
 		cfg.Reported = func(string) (Workflow, bool) { return Workflow{}, false }
@@ -1118,6 +1120,10 @@ func (w *Work) View(sid string) (GateView, error) {
 	}
 	if !g.eff.Push {
 		v.Missing = append(v.Missing, "a work type that pushes, picked on the page")
+	}
+	lv, _ := w.cfg.Level(sid)
+	if item := gate.SandboxItem(lv); item != "" {
+		v.Missing = append(v.Missing, item)
 	}
 	v.Missing = append(v.Missing, missing...)
 	v.Allowed = len(v.Missing) == 0

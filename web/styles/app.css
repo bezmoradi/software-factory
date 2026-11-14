@@ -160,7 +160,11 @@ body > .bar { position: relative; z-index: 4; flex: none; }
 .bar .tag { flex: none; padding: 0 .35rem; font-size: .5625rem; line-height: 1.5; border-radius: 0; }
 .bar #title, .bar #state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .bar .brand { flex-shrink: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 30rem) { .bar .brand { display: none; } }
+@media (max-width: 30rem) {
+  .bar .brand { display: none; }
+  .bar { flex-wrap: wrap; row-gap: .2rem; height: auto; min-height: 1.75rem; padding-block: .2rem; }
+  .bar sf-halt { flex-shrink: 1; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+}
 
 .layout {
   display: grid;
@@ -252,6 +256,7 @@ body.side-full #side > :is(sf-reviews, sf-push-panel, sf-intent, sf-changes, #ag
 code, pre { font-family: var(--mono); font-size: .8125rem; }
 :not(pre) > code { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 0 .25rem; }
 .boxlist :not(pre) > code { background: var(--paper); }
+.docs-section sf-markdown :not(pre, th, td) > code { overflow-wrap: anywhere; }
 pre {
   background: var(--card);
   border: 1px solid var(--line);
@@ -277,6 +282,7 @@ pre {
 .tool.sub { padding-left: 1rem; }
 .sub-list { list-style: none; margin: .4rem 0 0; padding: 0; }
 .subagent > details > summary { min-height: 24px; color: var(--soft); cursor: pointer; }
+:is(sf-reviewer-checks, sf-changes) details > summary { min-height: 24px; }
 
 .card {
   background: var(--card);
@@ -309,6 +315,9 @@ sf-project-agents .field-row { flex-wrap: wrap; }
 sf-reviewer-agents { display: block; margin-top: .8rem; }
 sf-reviewer-agents .field-row { flex-wrap: wrap; margin-top: .4rem; }
 sf-reviewer-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
+sf-reviewer-agents .field-row > input[type="file"] { min-width: 0; max-width: 100%; }
+sf-reviewer-checks .list > li > .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+sf-reviewer-checks .list > li > .row > .row { flex-wrap: wrap; justify-content: flex-end; }
 sf-reviewer-agents .list .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 sf-project-agents .check-row { align-items: center; gap: .4rem; margin-top: .4rem; }
 sf-project-agents .check-row input { flex: none; margin: 0; accent-color: var(--accent); }
@@ -347,7 +356,7 @@ sf-push-panel .flagged li + li { margin-top: .4rem; }
 :is(sf-push-panel .flagged, sf-reviews .override) .field-row, sf-reviews .override { flex-wrap: wrap; gap: .35rem; margin-top: .25rem; }
 :is(sf-push-panel .flagged, sf-reviews .override) .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 :is(sf-changes, sf-approval) pre.diff { margin: .3rem 0 .6rem; padding: .4rem .5rem; max-height: 24rem; overflow: auto; white-space: pre; border: 1px solid var(--line); border-radius: 4px; }
-sf-reviews .reviews-head { align-items: center; margin-bottom: .5rem; }
+sf-reviews .reviews-head { flex-wrap: wrap; align-items: center; margin-bottom: .5rem; }
 sf-reviews .reviews-head .label { margin-bottom: 0; }
 sf-reviews .review-message, sf-reviewer-checks .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
 .path { list-style: none; margin: 0; padding: 0; }
@@ -902,7 +911,8 @@ sf-forge-panel .forge-match-list { margin: 0 0 .3rem; padding-inline-start: 1.1r
 sf-forge-panel .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
 sf-halt { display: flex; align-items: center; gap: .4rem; flex: none; }
 sf-halt button.small { min-height: 20px; padding: 0 .5rem; font-size: .75rem; }
-sf-halt .halt-menu { inset: calc(1.75rem + 4px) .75rem auto auto; max-width: 20rem; white-space: normal; }
+sf-halt .halt-menu { inset: calc(1.75rem + 4px) .75rem auto auto; max-width: min(20rem, calc(100vw - 1.5rem)); white-space: normal; }
+@media (max-width: 30rem) { sf-halt .halt-menu { top: var(--halt-top, calc(1.75rem + 4px)); } }
 sf-halt-banner { flex: none; display: grid; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
 sf-halt-banner[hidden] { display: none; }
 sf-halt-banner .halt-row { display: flex; align-items: center; gap: .8rem; margin: 0; padding: .35rem .75rem; font-size: .8125rem; background: var(--paper); }
@@ -971,6 +981,10 @@ sf-usage .usage-side > h3 { margin: 0 0 .3rem; }
 .usage-window { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(5rem, 10rem) minmax(0, auto); gap: .6rem; align-items: center; margin: .2rem 0; font-size: .8125rem; }
 .usage-window > .usage-name { min-width: 0; overflow-wrap: anywhere; }
 .usage-window > meter { inline-size: 100%; }
+@media (max-width: 30rem) {
+  .usage-window { grid-template-columns: minmax(0, 1fr) minmax(5rem, 10rem); }
+  .usage-window > :last-child { grid-column: 1 / -1; }
+}
 .usage-ask { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .2rem 0 .5rem; }
 .usage-ask > p { margin: 0; }
 sf-session-limits { margin: 0 0 1rem; }
@@ -1030,6 +1044,8 @@ sf-session-work .command-tail { max-block-size: 16rem; overflow: auto; white-spa
 sf-keep { display: block; margin: 0 0 1rem; }
 sf-keep > .session-work > summary { cursor: pointer; }
 sf-review-models { display: block; }
+sf-review-models .field-row { flex-wrap: wrap; }
+sf-review-models .field-row > .textbox { min-width: 0; max-width: 100%; }
 sf-project-commands { display: block; margin: .5rem 0; padding-inline-start: 2rem; }
 sf-project-commands > h3 { margin: 0 0 .25rem; }
 sf-screenshots { display: block; margin: 0 0 1rem; }

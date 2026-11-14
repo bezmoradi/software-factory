@@ -127,6 +127,22 @@ func otherItems(n int) string {
 	return strconv.Itoa(n) + " other items listed on the page"
 }
 
+const sandboxUnmet = "the sandbox check passing"
+
+func SandboxItem(l level.Result) string {
+	switch {
+	case l.Level == level.Locked && l.Sandboxed:
+		return ""
+	case l.Level == level.Stopped && l.Sandboxed:
+		return ""
+	}
+	why := l.Reason
+	if why == "" {
+		why = "no level was computed for this session"
+	}
+	return sandboxUnmet + ": " + why
+}
+
 func Push(r Request, f Facts) Decision {
 	d := decide(r, f)
 	d.NeedsApproval = f.NeedsApproval && len(d.Missing) > 0
@@ -153,16 +169,9 @@ func decide(r Request, f Facts) Decision {
 	missing := append([]string{}, f.Items...)
 	var unmet []string
 	unsandboxed := false
-	switch {
-	case f.Level.Level == level.Locked && f.Level.Sandboxed:
-	case f.Level.Level == level.Stopped && f.Level.Sandboxed:
-	default:
-		why := f.Level.Reason
-		if why == "" {
-			why = "no level was computed for this session"
-		}
-		missing = append(missing, "the sandbox check passing: "+why)
-		unmet = append(unmet, "the sandbox check passing")
+	if item := SandboxItem(f.Level); item != "" {
+		missing = append(missing, item)
+		unmet = append(unmet, sandboxUnmet)
 		unsandboxed = true
 	}
 	roles := workflow.MinimumRoles(f.Type.Edits)

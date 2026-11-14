@@ -97,6 +97,7 @@ class SfHalt extends HTMLElement {
     menu.setAttribute('popover', '')
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'Away mode')
+    menu.addEventListener('beforetoggle', () => menu.style.setProperty('--halt-top', `${Math.round((this.closest('.bar') ?? this).getBoundingClientRect().bottom + 4)}px`))
     const all = button(`${view.awayAll ? '✓ ' : ''}Away for every session`, '', () => void send({ op: 'away', on: !view.awayAll }))
     all.setAttribute('role', 'menuitemcheckbox')
     all.setAttribute('aria-checked', String(view.awayAll))

@@ -295,18 +295,22 @@ func (d *Dispatcher) StopLeftovers(ctx context.Context) {
 		d.cfg.Logger.Warn("dispatch", "event", "leftovers-not-listed")
 		return
 	}
-	stopped := 0
+	running, ended := 0, 0
 	for _, l := range list {
 		if !shortID.MatchString(l.ID) || !absolute(l.Cwd) || d.keeps(l.ID) {
 			continue
 		}
 		res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("stop", l.ID), Dir: l.Cwd, Timeout: claudeRun})
-		if err == nil && res.Code == 0 {
-			stopped++
+		switch {
+		case err != nil || res.Code != 0:
+		case l.Pid > 0:
+			running++
+		default:
+			ended++
 		}
 	}
-	if stopped > 0 {
-		d.cfg.Logger.Info("dispatch", "event", "leftovers-stopped", "count", stopped)
+	if running > 0 || ended > 0 {
+		d.cfg.Logger.Info("dispatch", "event", "leftovers-stopped", "running", running, "already-ended", ended)
 	}
 }
 

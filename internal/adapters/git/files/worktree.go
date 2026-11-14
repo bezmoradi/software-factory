@@ -108,15 +108,23 @@ func (w *worktreeWalk) track(r *repo, tree, prefix string, depth int) error {
 	if depth > maxTreeDepth {
 		return push.ErrTooLarge
 	}
-	list, err := r.tree(tree)
+	list, release, err := r.heldTree(tree)
 	if err != nil {
 		return err
 	}
+	defer release()
 	for _, e := range list {
-		p := prefix + e.name
+		p, err := r.join(prefix, e.name)
+		if err != nil {
+			return err
+		}
 		if e.mode == push.ModeFolder {
 			w.folders[p] = true
-			if err := w.track(r, e.sha, p+"/", depth+1); err != nil {
+			sub, err := r.join(p, "/")
+			if err != nil {
+				return err
+			}
+			if err := w.track(r, e.sha, sub, depth+1); err != nil {
 				return err
 			}
 			continue
