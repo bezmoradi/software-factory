@@ -984,3 +984,49 @@ sf-session-limits .caps-edit > summary { cursor: pointer; }
 sf-project-caps { margin: .5rem 0; padding-inline-start: 2rem; }
 sf-project-caps > h3 { margin: 0 0 .25rem; }
 sf-token-expiry > .notice { margin: .5rem 0 0; }
+.aside-run { margin-top: .9rem; padding-top: .6rem; border-top: 1px solid var(--line); }
+.aside-run-head { align-items: center; flex-wrap: wrap; gap: .4rem; }
+.aside-run-text { max-height: 28rem; overflow: auto; overflow-wrap: anywhere; }
+.saved-prompts-host { pointer-events: auto; }
+.saved-prompts-host > button { min-height: max(24px, 1.375rem); padding: 0 .6rem; font-size: .75rem; background: var(--card); box-shadow: 0 2px 8px rgb(0 0 0 / .2); }
+.saved-prompts { width: min(34rem, calc(100vw - 2rem)); max-height: min(75vh, 42rem); overflow: auto; padding: .8rem 1rem; }
+.saved-prompts > h2 { margin: 0 0 .5rem; }
+.saved-prompts > .textbox { display: block; width: 100%; margin: 0 0 .5rem; }
+.saved-prompts textarea.textbox { resize: vertical; min-height: 6rem; }
+.saved-prompts-list { margin: 0 0 .5rem; }
+.saved-prompt .row { align-items: center; flex-wrap: wrap; gap: .4rem; }
+.saved-prompt-name { font-weight: 600; overflow-wrap: anywhere; }
+.saved-prompt-text { margin: .2rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+sf-team-rules { display: block; margin: .5rem 0; padding-inline-start: 2rem; }
+sf-team-rules > h3 { margin: 0 0 .25rem; }
+.team-rule-list { margin: .2rem 0 .4rem; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
+sf-lineage { display: block; }
+.dispatch .start-from { display: grid; gap: .2rem; margin-top: .4rem; max-width: 40rem; }
+.dispatch .start-from select { width: 100%; }
+sf-pull-follow { display: block; margin-bottom: 1.6rem; }
+body.side-full #side > sf-pull-follow { padding-top: 1.25rem; border-top: 1px solid var(--line); }
+sf-pull-follow .pull-head { gap: .4rem; align-items: baseline; flex-wrap: wrap; margin: .3rem 0; }
+sf-pull-follow .pull-time { margin-left: auto; white-space: nowrap; }
+sf-pull-follow .pull-actions { align-items: center; flex-wrap: wrap; margin-top: .4rem; }
+sf-pull-follow .pull-list { margin: .2rem 0 .4rem; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
+sf-pull-follow .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
+sf-pull-follow .forge-body, sf-issue-picker .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
+sf-pull-follow .pull-findings { margin-top: .6rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+sf-pull-follow .pull-settings { margin-top: .8rem; }
+sf-pull-follow .pull-settings-form { display: grid; gap: .4rem; margin-top: .4rem; }
+sf-pull-follow .pull-settings-form .textbox { box-sizing: border-box; min-width: 0; min-height: max(28px, 1.6rem); padding: 0 .6rem; font-size: .8125rem; border-radius: 4px; }
+sf-issue-picker { display: block; margin-top: .5rem; }
+sf-issue-picker .issue-items { margin: .3rem 0; }
+sf-issue-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }
+sf-issue-picker .issue-items button[aria-pressed="true"] { font-weight: 600; }
+sf-issue-picker .issue-title { max-height: 6rem; font-weight: 600; }
+sf-issue-picker .issue-picked { margin-top: .4rem; }
+sf-session-work { display: block; margin: 0 0 1rem; }
+sf-session-work > .session-work > summary { cursor: pointer; }
+sf-session-work h3 { margin: .6rem 0 .25rem; }
+sf-session-work .field-row { flex-wrap: wrap; }
+sf-session-work .queued-text { flex: 1 1 12rem; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+sf-session-work .command-tail { max-block-size: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+sf-review-models { display: block; }
+sf-project-commands { display: block; margin: .5rem 0; padding-inline-start: 2rem; }
+sf-project-commands > h3 { margin: 0 0 .25rem; }

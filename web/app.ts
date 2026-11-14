@@ -20,12 +20,16 @@ import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
 import './components/reviews.ts'
+import './components/saved-prompts.ts'
 import './components/reviewer-agents.ts'
 import './components/reviewer-checks.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import './components/session-facts.ts'
+import './components/session-work.ts'
+import './components/review-models.ts'
 import './components/forge-panel.ts'
+import { pullFollowOf } from './components/pull-follow.ts'
 import './components/setup.ts'
 import './components/tabs.ts'
 import './components/toasts.ts'
@@ -38,6 +42,7 @@ import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
 import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
 import { saveSessionCaps } from './components/caps.ts'
+import { agentName, otherAgents, setBranchStarters } from './components/lineage.ts'
 
 interface Session {
   sid: string
@@ -89,6 +94,9 @@ interface AuditEntry {
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
 const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'reviewer-agent': 'Reviewer agent file' }
 EXCEPTION['permission-answer'] = 'Permission card answered'
+EXCEPTION['pr-follow'] = 'Pull request followed'
+EXCEPTION['pr-ready'] = 'Pull request marked ready for review'
+EXCEPTION.assign = 'Assigned to the token\'s user'
 EXCEPTION.away = 'Away mode'
 const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
 const HIDDEN_RESULTS = ['sending', 'posting']
@@ -109,6 +117,14 @@ const ACTIVE = ['pending', 'running', 'waiting']
 const RESET_NOTE = 'The session restarted, so what came before this point is shown only as far as the agent kept it.'
 
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
+const reviewModels = el('sf-review-models')
+reviewModels.hidden = true
+byId('reviewer-agents').after(reviewModels)
+const modelMenu = button('Switch model…', '')
+modelMenu.setAttribute('role', 'menuitem')
+modelMenu.hidden = true
+byId('menu-wake').after(modelMenu)
 const scroller = byId('scroller')
 const toast = (t: Toast) => byId<HTMLElementTagNameMap['sf-toasts']>('toasts').show(t)
 const sessions = new Map<string, Session>()
@@ -292,6 +308,7 @@ function updateSessions(list: unknown) {
 
 function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
+  if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
@@ -573,6 +590,7 @@ function paint() {
   void loadProjects()
   byId('live-view').hidden = !s
   byId('composer').hidden = !s
+  byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').view = s?.info.project && s.info.verified ? { repo: s.info.project, disabled: !state.connected } : null
   const box = byId<HTMLTextAreaElement>('text')
   const blocked = !!s && waitingOf(s).length > 0
   if (box.disabled !== blocked) box.disabled = blocked
@@ -636,9 +654,13 @@ function paint() {
     paintChecks(s)
     paintSide(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = reviewsOf(s)
+    byId<HTMLElementTagNameMap['sf-reviews']>('reviews').explain = { run: s.info.review?.explain ?? null, asking: explainAsking.has(s.sid) }
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
+    byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
+    sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s) } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
+    byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
     byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
     void loadChanges(s)
@@ -648,7 +670,10 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = null
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
+    byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = null
+    sessionWork.view = null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = null
+    byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
     byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : 'Welcome') : 'Disconnected'
     byId('title').textContent = state.connected ? '' : state.note
     byId('usage').textContent = ''
@@ -699,7 +724,10 @@ function paintControl(s: Session) {
   const notice = !!action && action !== 'Make it read-only'
   byId('menu-readonly').hidden = action !== 'Make it read-only'
   byId('menu-wake').hidden = !(sleeping(s) && i.controlled)
+  paintBranchMenu(s)
   byId('session-more').hidden = !id && action !== 'Make it read-only'
+  modelMenu.hidden = !(i.agent === 'claude' || i.agent === 'codex') || !i.controlled
+  if (!modelMenu.hidden) byId('session-more').hidden = false
   if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
   byId('foot-text').textContent = notice ? '' : text
   byId('foot-text').classList.toggle('bad', !notice && i.mode === 'bypassPermissions')
@@ -969,6 +997,25 @@ async function startTestList(s: Session | null) {
   if (!ok) toast({ id: `test-list:${s.sid}`, title: "The test list wasn't started.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad', timeout: body.needs ? 0 : undefined })
 }
 
+const explainAsking = new Set<string>()
+const planAsking = new Set<string>()
+
+async function startAside(s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) {
+  if (!s || asking.has(s.sid) || running) return
+  asking.add(s.sid)
+  schedulePaint()
+  let answer = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
+  for (let round = 0; !answer.ok && round < 2; round++) {
+    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewer container's Claude Code", what)
+    if (!more?.costOk) break
+    answer = await reply(await api(route, { sid: s.sid, ...body, costOk: true }).catch(() => null))
+  }
+  const { ok, body: said } = answer
+  asking.delete(s.sid)
+  schedulePaint()
+  if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad', timeout: said.needs ? 0 : undefined })
+}
+
 function paintAgents(s: Session) {
   const list = byId('agents')
   list.replaceChildren()
@@ -1020,12 +1067,14 @@ function paintChecks(s: Session) {
   const from = (d: WorkflowDoc) => gate?.committed && !d.reported ? ` Read from commit ${shortSha(d.commit || gate.head)} by the engine.` : ''
   const plan = doc && gate?.effective === 'feature' ? doc : null
   byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: `${plan.clipped ? 'The plan is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(plan)}`.trim(), path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '', commit: plan.commit ?? '', approvedAt: plan.approvedAt ?? '', reported: !!plan.reported, onBase: !!plan.onBase }
+  byId<HTMLElementTagNameMap['sf-approval']>('approval').planReview = plan ? { run: s.info.review?.planReview ?? null, asking: planAsking.has(s.sid) } : null
   const reqs = gate?.size === 'feature' && gate.requirements?.hash ? gate.requirements : null
   byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: from(reqs).trim(), path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase }
   paintExceptions(s)
   const project = projectFor(s)
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 3, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
   byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
+  reviewModels.view = gate && project?.path ? { project: project.path, disabled } : null
   byId<HTMLElementTagNameMap['sf-reviewer-checks']>('reviewer-checks').view = gate ? { disabled, review: `${s.info.review?.commit ?? ''}:${s.info.review?.running ? 'running' : 'done'}` } : null
 }
 
@@ -1083,7 +1132,8 @@ function setupLines(v: TeamView): HTMLElement[] {
     ...own.map(t => `Work type ${visible(t.name)}: ${t.steps.join(', ')}; ${t.push ? 'pushes' : "doesn't push"}; edits ${t.edits}${t.roles.length ? `; needs ${t.roles.join(' and ')}` : ''}`),
     ...(setup.defaultType ? [`Default work type: ${visible(setup.defaultType)}`] : []),
     ...(setup.agents.length ? [`Reviewers added: ${setup.agents.map(a => visible(a)).join(', ')}`] : []),
-    ...setup.fileRules.map(f => `Files ${visible(f.pattern)} need ${visible(f.agent)}`),
+    ...setup.fileRules.map(f => [f.agent ? `Files ${visible(f.pattern)} need ${visible(f.agent)}` : '', f.instruction ? `Reviewers of files ${visible(f.pattern)} get the team's rule: ${visible(f.instruction)}` : ''].filter(Boolean).join('; ')),
+    ...(setup.protect?.length ? [`Claude Code asks you before writing: ${setup.protect.map(p => visible(p)).join(', ')}`] : []),
     `Review rounds before you decide: ${setup.rounds}`,
     ...v.setupProblems.map(p => `Problem: ${p}`),
   ]
@@ -1238,6 +1288,7 @@ async function loadProjects(force = false) {
     reviewer = body.reviewer ?? null
     starterNames = new Map((body.starters ?? []).map(a => [a.id, a.name]))
     setAgentNames(body.starters ?? [])
+    setBranchStarters(body.starters)
     schedulePaint()
   }
   if (body) projectPaths = body.projects.map(p => p.path)
@@ -1667,6 +1718,14 @@ byId('conversations').addEventListener('sf-settled', () => {
 })
 byId('reviews').addEventListener('sf-review', e => void startReview(current(), e.detail.all))
 byId('reviews').addEventListener('sf-test-list', () => void startTestList(current()))
+byId('reviews').addEventListener('sf-explain', () => {
+  const s = current()
+  void startAside(s, '/api/explain', explainAsking, s?.info.review?.explain?.state === 'running', 'the explanation of the change', {})
+})
+byId('approval').addEventListener('sf-plan-review', e => {
+  const s = current()
+  void startAside(s, '/api/plan-review', planAsking, s?.info.review?.planReview?.state === 'running', 'the plan review', { hash: e.detail.hash })
+})
 byId('reviews').addEventListener('sf-walkthrough-check', e => void checkStep(current(), e.detail))
 async function checkStep(s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) {
   if (!s) return d.settle(false)
@@ -1683,6 +1742,7 @@ byId('reviews').addEventListener('sf-push-request', () => void startPush(current
 byId('push-panel').addEventListener('sf-push-answer', e => void answerPush(current(), e.detail))
 byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => send(COMMIT_ASK)))
 byId('forge-panel').addEventListener('sf-forge-answer', e => void answerForge(current(), e.detail))
+byId('pull-follow').addEventListener('sf-session-deleted', e => forgetSession(e.detail.sid))
 byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(current(), '/api/send-findings', e.detail, "The findings weren't sent.", 'The blocking findings were sent to the session. The push stays held.'))
 byId('push-panel').addEventListener('sf-handoff', e => void sessionAsk(current(), '/api/handoff', e.detail, "The push wasn't handed off.", 'The push was denied, and the session was asked for a handoff.'))
 byId('push-panel').addEventListener('sf-allow-file', e => void sessionAsk(current(), '/api/allow-file', e.detail, "The file wasn't allowed.", 'You allowed that version of the file. A later change to it is flagged again.'))
@@ -1912,11 +1972,86 @@ function usageText(s: Session): string {
   const text = parts.length ? `This session: ${parts.join(', ')}` : ''
   return si ? [text, si.method === 'not-signed-in' ? 'not signed in' : `signed in with ${visible(si.words)}`].filter(Boolean).join(' · ') : text
 }
+function branchOwned(s: Session): boolean {
+  const i = s.info
+  return state.connected && !!i.verified && i.kind === 'background' && !!i.project && !i.lineage?.handedTo
+}
+
+function paintBranchMenu(s: Session) {
+  const menu = byId('session-menu')
+  const owned = branchOwned(s)
+  const others = owned ? otherAgents(s.info.agent) : []
+  const key = others.map(a => a.id).join(' ')
+  if (menu.dataset.continue !== key) {
+    menu.dataset.continue = key
+    for (const b of menu.querySelectorAll('button[data-continue]')) b.remove()
+    const before = byId('menu-bring-main')
+    for (const a of others) {
+      const b = el('button', '', `Continue with ${a.name}`)
+      b.type = 'button'
+      b.setAttribute('role', 'menuitem')
+      b.dataset.continue = a.id
+      menu.insertBefore(b, before)
+    }
+  }
+  byId('menu-bring-main').hidden = !(owned && s.info.running && s.info.live && s.info.controlled)
+  byId('menu-fork').hidden = !(state.connected && s.info.verified && s.info.kind === 'background' && !!s.info.project)
+}
+
+async function handOver(s: Session, agent: string) {
+  const name = agentName(agent)
+  if (!confirmed(`${s.sid}:handover:${agent}`, `Choose Continue with ${name} again to stop this session and go on with ${name} on the same branch, with the approvals you gave.`)) return
+  toast({ id: `handover:${s.sid}`, title: `Handing ${visible(label(s.info))} over to ${name}…`, description: 'The engine stops this session, removes its worktree and starts the other agent on the same branch.', tone: 'info', timeout: 150000 })
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/handover', { sid: s.sid, agent, ...consent }))
+  toast(ok ? { id: `handover:${s.sid}`, title: `${name} continues the branch.`, description: "It shows in the project's list when it connects; open it there to write its first message. The engine tells it where the branch stands.", tone: 'ok', timeout: 8000 } : { id: `handover:${s.sid}`, title: 'The branch wasn’t handed over.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0, action: identityAction(body) })
+  if (ok) void loadProjects(true)
+}
+
+async function bringMain(s: Session) {
+  toast({ id: `main:${s.sid}`, title: 'Fetching the latest main…', tone: 'info', timeout: 60000 })
+  const { ok, body } = await reply(await api('/api/bring-main', { sid: s.sid }).catch(() => null))
+  const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit.slice(0, 7) : ''
+  toast(ok ? { id: `main:${s.sid}`, title: `Main is now at ${commit} as origin/main in the clone.`, description: 'The engine asked the agent to merge it into its branch and resolve any conflicts.', tone: 'ok' } : { id: `main:${s.sid}`, title: 'The latest main wasn’t brought in.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0 })
+}
+
+byId('session-menu').addEventListener('click', e => {
+  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-continue]')
+  const s = current()
+  if (!b || !s) return
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  void handOver(s, b.dataset.continue ?? '')
+})
+byId('menu-bring-main').addEventListener('click', () => {
+  const s = current()
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  if (s) void bringMain(s)
+})
+byId('menu-fork').addEventListener('click', () => {
+  const s = current()
+  byId('session-menu').hidePopover()
+  const p = s && projectFor(s)
+  if (!s || !p) return
+  go('projects')
+  projects.fork(p.path, s.sid)
+})
+byId('lineage').addEventListener('sf-handover', e => {
+  const s = sessions.get(e.detail.sid)
+  if (s) void handOver(s, e.detail.agent)
+})
+byId('lineage').addEventListener('sf-open-session', e => {
+  if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
+})
 byId('menu-wake').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
   byId('session-more').focus()
   if (s && sleeping(s)) void wakeSession(s)
+})
+modelMenu.addEventListener('click', () => {
+  byId('session-menu').hidePopover()
+  sessionWork.focusModel()
 })
 byId('session-menu').addEventListener('click', async e => {
   const b = (e.target as Element).closest<HTMLButtonElement>('button[data-copy]')
@@ -2278,6 +2413,13 @@ byId('frame').addEventListener('wheel', e => {
 }, { passive: true })
 
 const text = byId<HTMLTextAreaElement>('text')
+byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').draft = () => text.value
+byId('saved-prompts').addEventListener('sf-insert-prompt', e => {
+  if (text.disabled) return say('Answer the card above first, then insert the prompt.')
+  text.setRangeText(e.detail.text, text.selectionStart, text.selectionEnd, 'end')
+  text.dispatchEvent(new Event('input', { bubbles: true }))
+  text.focus()
+})
 complete(text, byId('complete'), {
   catalog: () => current()?.catalog ?? null,
   files: async q => {

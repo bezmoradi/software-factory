@@ -57,19 +57,24 @@ type Config struct {
 }
 
 type Server struct {
-	cfg      Config
-	reg      *session.Registry
-	logger   shared.Logger
-	keys     *keys
-	assets   *assets
-	host     string
-	origin   string
-	mu       sync.Mutex
-	attempts []time.Time
-	lists    fileLists
-	reports  session.AgentReportPage
-	rules    session.AllowRulesPage
-	facts    session.ProjectFactsPage
+	cfg       Config
+	reg       *session.Registry
+	logger    shared.Logger
+	keys      *keys
+	assets    *assets
+	host      string
+	origin    string
+	mu        sync.Mutex
+	attempts  []time.Time
+	lists     fileLists
+	reports   session.AgentReportPage
+	rules     session.AllowRulesPage
+	facts     session.ProjectFactsPage
+	prompts   session.SavedPromptsPage
+	branching session.BranchPage
+	pulls     session.PullsPage
+	issues    session.IssuesPage
+	work      *session.SessionWork
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -154,6 +159,11 @@ var pageRoutes = map[string]bool{
 	walkthroughRoute: true,
 	recapRoute:       true, workspaceRoute: true, exceptionsRoute: true,
 	projectFactsRoute: true,
+	planReviewRoute:   true, explainRoute: true,
+	savedPromptsRoute: true,
+	bringMainRoute:    true, handoverRoute: true, startPointsRoute: true,
+	pullRoute: true, issuesRoute: true, findingIssuesRoute: true,
+	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true, agentModelsRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -347,6 +357,26 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == limitsRoute {
 		s.limits(w, r, body)
+		return
+	}
+	if asideRoutes[r.URL.Path] {
+		s.aside(w, r, body)
+		return
+	}
+	if r.URL.Path == savedPromptsRoute {
+		s.savedPrompts(w, body)
+		return
+	}
+	if branchingRoutes[r.URL.Path] {
+		s.branchingAPI(w, r, body)
+		return
+	}
+	if pullRoutes[r.URL.Path] {
+		s.pullAPI(w, r, body)
+		return
+	}
+	if runRoutes[r.URL.Path] {
+		s.runs(w, r, body)
 		return
 	}
 	s.api(w, r.URL.Path, body)

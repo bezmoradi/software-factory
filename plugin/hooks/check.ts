@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { engine, link, parsed } from './transport.ts'
 
-export type Checked = { kind: string; waits: boolean; pushes: boolean; protected: string; held: string; cloud: string; irreversible: boolean; engine: boolean }
+export type Checked = { kind: string; waits: boolean; pushes: boolean; protected: string; held: string; cloud: string; irreversible: boolean; guarded: string; engine: boolean }
 
 const MAX_INPUT = 1024 * 1024
 const ASK_MS = 5000
@@ -68,7 +68,7 @@ export function fallback(tool: string, input: Record<string, unknown>): Checked 
   const remote = REMOTE.has(tool) || ((tool === 'Agent' || tool === 'Task') && input.isolation === 'remote') || (tool === 'Projects' && input.method === 'project_write')
   const mcp = tool.startsWith('mcp__') && !isPushTool(tool)
   const cloud = LOOSE_CLOUD.some(steps => inOrder(command, steps)) ? CLOUD_REASON : ''
-  return { kind: 'unknown', waits: remote || mcp, pushes: LOOSE_PUSH.some(steps => inOrder(command, steps)) || FORGE_MCP.test(tool), protected: '', held: '', cloud, irreversible: command !== '' && looseUndone(command), engine: false }
+  return { kind: 'unknown', waits: remote || mcp, pushes: LOOSE_PUSH.some(steps => inOrder(command, steps)) || FORGE_MCP.test(tool), protected: '', held: '', cloud, irreversible: command !== '' && looseUndone(command), guarded: '', engine: false }
 }
 
 function sized(input: Record<string, unknown>): Record<string, unknown> | null {
@@ -87,7 +87,9 @@ function checkedOf(v: Record<string, unknown> | null): Checked | null {
   if (typeof cloud !== 'string' || cloud.length > 500) return null
   const irreversible = v.irreversible === undefined ? false : v.irreversible
   if (typeof irreversible !== 'boolean') return null
-  return { kind: v.kind, waits: v.waits, pushes: v.pushes, protected: why, held, cloud, irreversible, engine: true }
+  const guarded = v.guarded === undefined || v.guarded === null ? '' : v.guarded
+  if (typeof guarded !== 'string' || guarded.length > 500) return null
+  return { kind: v.kind, waits: v.waits, pushes: v.pushes, protected: why, held, cloud, irreversible, guarded, engine: true }
 }
 
 type Asked = { found: Checked | null; down: boolean }

@@ -245,6 +245,7 @@ type WorkPage interface {
 	AllowCommit(sid, commit string, field CommitField, reason string) error
 	AskRewrite(sid, commit string, field CommitField) error
 	EditHold(sid, top string, paths []string) string
+	Guarded(sid, top string, paths []string) string
 }
 
 var _ WorkPage = (*Work)(nil)
@@ -378,6 +379,7 @@ func (w *Work) readTeam(r Repository) teamRead {
 	}
 	out.text = string(f.Data)
 	team, problems := workflow.ParseTeam(out.text)
+	problems = append(problems, instructionProblems(team)...)
 	problems = append(problems, workflow.AgentProblems(team, w.cfg.Installed())...)
 	out.team, out.problems = team, problems
 	if len(problems) > 0 {

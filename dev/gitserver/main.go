@@ -156,6 +156,7 @@ func serve(root string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.Handle("/api/v3/", api{root: root, token: token, repo: "demo"})
+	mux.Handle("/api/graphql", graphql{root: root, token: token})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, pass, ok := r.BasicAuth(); !ok || pass != token {
 			log.Printf("%s %s refused: no or wrong token", r.Method, r.URL.Path)

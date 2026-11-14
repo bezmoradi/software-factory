@@ -1,10 +1,16 @@
 import { button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys } from '../lib/dom.ts'
 import { icon } from './icon.ts'
+import { agentModels, effortOptions, modelOptions } from './session-work.ts'
+import type { AgentModels } from './session-work.ts'
 import './allow-rules.ts'
 import './project-facts.ts'
+import './team-rules.ts'
 import './caps.ts'
+import './issue-picker.ts'
 import './usage.ts'
+import './project-commands.ts'
 import { bySessionOrder, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
+import { StartFromField } from './start-from.ts'
 import type { Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 
 const MODELS: [string, string][] = [['', 'Default model'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
@@ -72,14 +78,19 @@ class DispatchForm {
   why = el('div', 'small muted')
   name = el('input', 'textbox')
   model = el('select', 'textbox')
+  effort = el('select', 'textbox')
+  offered: AgentModels | null = null
+  method = ''
   kind = el('select', 'textbox')
   expect = el('select', 'textbox')
   caps = el('sf-caps-fields', 'dispatch-caps')
+  issue = el('sf-issue-picker', 'dispatch-issue')
   start = button('', 'primary small stack', undefined, 'submit')
   idle = el('span', '', 'Start')
   working = el('span', '', 'Starting…')
+  from: StartFromField
 
-  constructor(p: Project, starters: Starter[], onCancel: () => void) {
+  constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '') {
     const path = p.path
     this.form.autocomplete = 'off'
     this.working.className = 'off'
@@ -91,6 +102,9 @@ class DispatchForm {
     this.name.setAttribute('aria-label', 'Session name')
     this.model.setAttribute('aria-label', 'Model')
     options(this.model, MODELS)
+    this.effort.name = 'effort'
+    this.effort.setAttribute('aria-label', 'Effort')
+    this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
     this.kind.name = 'type'
     this.kind.setAttribute('aria-label', 'Work type')
     options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['docs', 'Docs only'], ['explore', 'Exploring']])
@@ -115,7 +129,7 @@ class DispatchForm {
       emit(this.form, 'sf-expect', { agent: this.agent.value, expect: this.expect.value as Expect })
     })
     const row = el('div', 'opts field-row')
-    row.append(this.agent, this.name, this.model, this.kind, this.expect, this.start, button('Cancel', 'ghost small', onCancel))
+    row.append(this.agent, this.name, this.model, this.effort, this.kind, this.expect, this.start, button('Cancel', 'ghost small', onCancel))
     const note = el('p', 'small muted')
     const command = el('code', '')
     note.append('Fetches ', el('code', '', p.branch || 'the main branch'), ' from ', el('code', '', p.url || p.name), ', then runs ', command, " in a new worktree that starts there, once you've approved the repository files that agent loads at start and its own sign-in check passed. The session shows in this project's list when it connects; open it there to write its first message. This page controls it from the start. It starts in the agent's own asking mode, so it asks before it acts; auto and bypass modes can't be chosen here.")
@@ -128,6 +142,7 @@ class DispatchForm {
       const plugin = chosen?.method === 'plugin'
       this.model.hidden = !plugin
       if (!plugin) this.model.value = ''
+      this.choices(chosen?.method ?? '', chosen?.id ?? '')
       this.start.disabled = !chosen?.enabled
       this.expect.value = chosen?.expect ?? 'any'
       this.expect.hidden = plugin
@@ -135,14 +150,52 @@ class DispatchForm {
     this.agent.addEventListener('change', sync)
     sync()
     this.caps.project = p.name
-    this.form.append(row, this.caps, note, this.why)
+    this.from = new StartFromField(path, p.branch ?? '', sessions, fork)
+    this.issue.path = path
+    this.form.append(row, this.from.box, this.caps, note, this.why)
+    this.form.append(this.issue)
     this.form.addEventListener('submit', e => {
       e.preventDefault()
       if (this.start.disabled) return
       const caps = this.caps.checked()
       if (caps === 'invalid') return
-      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}) })
+      const from = this.from.value()
+      const issue = this.issue.chosen()
+      if (issue === 'refused') return
+      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}), ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
     })
+    this.model.addEventListener('change', () => this.efforts())
+  }
+
+  choices(method: string, id: string) {
+    this.method = method
+    this.effort.hidden = method !== 'plugin' && method !== 'codex'
+    if (method === 'plugin') {
+      const keep = this.model.value
+      this.offered = null
+      this.model.replaceChildren()
+      options(this.model, MODELS)
+      if (MODELS.some(([v]) => v === keep)) this.model.value = keep
+      return this.efforts()
+    }
+    if (method !== 'codex') return this.efforts()
+    this.model.hidden = false
+    this.offered = null
+    modelOptions(this.model, [], 'Default model')
+    this.efforts()
+    void agentModels(id).then(list => {
+      if (this.agent.value !== id) return
+      this.offered = list
+      modelOptions(this.model, list?.models ?? [], 'Default model')
+      this.efforts()
+    })
+  }
+
+  efforts() {
+    if (this.method !== 'plugin' && this.method !== 'codex') return this.effort.replaceChildren()
+    const keep = this.effort.value
+    effortOptions(this.effort, this.method === 'codex' ? this.offered : null, this.model.value, 'Default effort')
+    if ([...this.effort.options].some(o => o.value === keep)) this.effort.value = keep
   }
 
   busy(on: boolean) {
@@ -175,7 +228,9 @@ class SfProjects extends HTMLElement {
   #rules = new Map<string, HTMLElementTagNameMap['sf-allow-rules']>()
   #facts = new Map<string, HTMLElementTagNameMap['sf-project-facts']>()
   #caps = new Map<string, HTMLElementTagNameMap['sf-project-caps']>()
+  #team = new Map<string, HTMLElementTagNameMap['sf-team-rules']>()
   #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
+  #commands = new Map<string, HTMLElementTagNameMap['sf-project-commands']>()
   #menuOpen = ''
   #slot: HTMLElement | null = null
   #stale = false
@@ -231,6 +286,7 @@ class SfProjects extends HTMLElement {
     this.#view = value
     for (const path of this.#forms.keys()) if (!value.projects.some(p => p.path === path)) this.#forms.delete(path)
     for (const m of [this.#caps, this.#expiry]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
+    for (const path of this.#commands.keys()) if (!value.projects.some(p => p.path === path)) this.#commands.delete(path)
     this.#render()
   }
 
@@ -412,6 +468,15 @@ class SfProjects extends HTMLElement {
       }
       this.#render()
     }, 'info')
+    item(this.#team.has(p.path) ? 'Hide team rules from main' : 'Team rules from main', () => {
+      if (this.#team.has(p.path)) this.#team.delete(p.path)
+      else {
+        const panel = el('sf-team-rules', 'project-rules')
+        panel.path = p.path
+        this.#team.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
     item(this.#caps.has(p.path) ? 'Hide caps' : 'Caps', () => {
       if (this.#caps.has(p.path)) this.#caps.delete(p.path)
       else {
@@ -421,6 +486,15 @@ class SfProjects extends HTMLElement {
       }
       this.#render()
     }, 'warning')
+    item(this.#commands.has(p.path) ? 'Hide check and setup commands' : 'Check and setup commands', () => {
+      if (this.#commands.has(p.path)) this.#commands.delete(p.path)
+      else {
+        const panel = el('sf-project-commands', 'project-caps')
+        panel.project = p.name
+        this.#commands.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -508,6 +582,10 @@ class SfProjects extends HTMLElement {
     if (facts) li.append(facts)
     const caps = this.#caps.get(p.path)
     if (caps) li.append(caps)
+    const team = this.#team.get(p.path)
+    if (team) li.append(team)
+    const commands = this.#commands.get(p.path)
+    if (commands) li.append(commands)
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')
@@ -518,13 +596,20 @@ class SfProjects extends HTMLElement {
     return li
   }
 
-  #open(path: string) {
+  fork(path: string, sid: string) {
+    this.#forms.delete(path)
+    this.#expanded.set(path, true)
+    this.#open(path, sid)
+    this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:toggle`)}"]`)?.scrollIntoView({ block: 'nearest' })
+  }
+
+  #open(path: string, fork = '') {
     const p = this.#view.projects.find(x => x.path === path)
     if (!p) return
     const form = new DispatchForm(p, this.#view.starters ?? [], () => {
       this.#forms.delete(path)
       this.#render()
-    })
+    }, this.#sessionsIn(path), fork)
     form.busy(this.#busy)
     this.#forms.set(path, form)
     if (this.#message.path === path) this.#message = { path: '', text: '', bad: false }

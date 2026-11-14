@@ -25,6 +25,7 @@ const (
 	methodTurnStart      = "turn/start"
 	methodTurnSteer      = "turn/steer"
 	methodTurnInterrupt  = "turn/interrupt"
+	methodModelList      = "model/list"
 
 	methodCommandApproval   = "item/commandExecution/requestApproval"
 	methodFileApproval      = "item/fileChange/requestApproval"
@@ -147,6 +148,7 @@ type initializeParams struct {
 }
 
 type threadStartParams struct {
+	Model             string                     `json:"model,omitempty"`
 	Cwd               string                     `json:"cwd"`
 	ApprovalPolicy    string                     `json:"approvalPolicy"`
 	ApprovalsReviewer string                     `json:"approvalsReviewer"`
@@ -191,6 +193,8 @@ type turnStartParams struct {
 	Input             []any  `json:"input"`
 	ApprovalPolicy    string `json:"approvalPolicy"`
 	ApprovalsReviewer string `json:"approvalsReviewer"`
+	Model             string `json:"model,omitempty"`
+	Effort            string `json:"effort,omitempty"`
 }
 
 type turnSteerParams struct {

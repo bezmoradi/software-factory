@@ -10,7 +10,11 @@ var (
 const reviewSettings = `{"disableAllHooks":true,"permissions":{"blockReadsOutsideWorkingDirectories":true,"deny":["Read(~/**)"]}}`
 
 func ReviewArgv(command, plugin, agent, prompt string) []string {
-	return []string{
+	return ReviewArgvWith(command, plugin, agent, prompt, ModelChoice{})
+}
+
+func ReviewArgvWith(command, plugin, agent, prompt string, m ModelChoice) []string {
+	argv := []string{
 		command, "-p",
 		"--setting-sources", "user",
 		"--plugin-dir=" + plugin,
@@ -23,6 +27,12 @@ func ReviewArgv(command, plugin, agent, prompt string) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--no-session-persistence",
-		prompt,
 	}
+	if m.Model != "" {
+		argv = append(argv, "--model="+m.Model)
+	}
+	if m.Effort != "" {
+		argv = append(argv, "--effort="+m.Effort)
+	}
+	return append(argv, prompt)
 }

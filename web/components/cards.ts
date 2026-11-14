@@ -256,11 +256,12 @@ class SfPermission extends HTMLElement {
   }
 
   #render() {
-    const { id, tool, detail, summary, agentId, agentName, complete, always, auto, irreversible, readOnly, attach, who = 'Claude' } = this.#card!
+    const { id, tool, detail, summary, agentId, agentName, complete, always, auto, irreversible, guarded, readOnly, attach, who = 'Claude' } = this.#card!
     start(this, `${subagent(agentId, agentName) || who} wants to run a tool`, `Allow ${visible(tool)}?`)
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
     if (hidesText(detail || summary)) this.append(hiddenMark(detail || summary, 'This call'))
     if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
+    if (guarded) this.append(el('p', 'small warn', "This file is in the protect list of the team file on the main branch, so Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {

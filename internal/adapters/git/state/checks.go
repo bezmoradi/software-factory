@@ -47,6 +47,8 @@ type checkJSON struct {
 	ClaudeCode string       `json:"claudeCode"`
 	Plugin     string       `json:"plugin,omitempty"`
 	Models     []string     `json:"models,omitempty"`
+	Model      string       `json:"model,omitempty"`
+	Effort     string       `json:"effort,omitempty"`
 	Result     string       `json:"result"`
 	Defect     checkRunJSON `json:"defect"`
 	Clean      checkRunJSON `json:"clean"`
@@ -87,7 +89,7 @@ func (s Checks) Load() ([]session.ReviewerCheck, error) {
 func checkOf(c checkJSON) (session.ReviewerCheck, bool) {
 	result, by := review.CheckResult(c.Result), c.By
 	if !reviewerName.MatchString(c.Agent) || !slices.Contains(checkRoles, review.Role(c.Role)) || !versionText.MatchString(c.ClaudeCode) ||
-		!slices.Contains(checkResults, result) || !slices.Contains(checkBy, by) || c.StartedAt.IsZero() {
+		!slices.Contains(checkResults, result) || !slices.Contains(checkBy, by) || c.StartedAt.IsZero() || !session.ValidReviewChoice(c.Model, c.Effort) {
 		return session.ReviewerCheck{}, false
 	}
 	plugin := c.Plugin
@@ -95,7 +97,7 @@ func checkOf(c checkJSON) (session.ReviewerCheck, bool) {
 		plugin = ""
 	}
 	return session.ReviewerCheck{Agent: c.Agent, Role: review.Role(c.Role), Result: result, By: by, StartedAt: c.StartedAt, EndedAt: c.EndedAt,
-		Versions: review.Versions{ClaudeCode: c.ClaudeCode, Plugin: plugin, Models: matchingAll(c.Models, modelName, session.MaxCheckModels)},
+		Versions: review.Versions{ClaudeCode: c.ClaudeCode, Plugin: plugin, Models: matchingAll(c.Models, modelName, session.MaxCheckModels), Model: c.Model, Effort: c.Effort},
 		Defect:   runOfCheck(c.Defect), Clean: runOfCheck(c.Clean), Reason: cleanReason(c.Reason, maxCheckReason), CostUSD: max(c.CostUSD, 0)}, true
 }
 
@@ -125,7 +127,7 @@ func cleanReason(s string, n int) string {
 func (s Checks) Save(list []session.ReviewerCheck) error {
 	f := checksJSON{Version: 1, Checks: make([]checkJSON, 0, len(list))}
 	for _, c := range list {
-		f.Checks = append(f.Checks, checkJSON{Agent: c.Agent, Role: string(c.Role), ClaudeCode: c.Versions.ClaudeCode, Plugin: c.Versions.Plugin, Models: c.Versions.Models,
+		f.Checks = append(f.Checks, checkJSON{Agent: c.Agent, Role: string(c.Role), ClaudeCode: c.Versions.ClaudeCode, Plugin: c.Versions.Plugin, Models: c.Versions.Models, Model: c.Versions.Model, Effort: c.Versions.Effort,
 			Result: string(c.Result), Defect: checkRunOf(c.Defect), Clean: checkRunOf(c.Clean), Reason: c.Reason, By: c.By,
 			StartedAt: c.StartedAt.UTC(), EndedAt: c.EndedAt.UTC(), CostUSD: c.CostUSD})
 	}

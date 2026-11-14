@@ -139,6 +139,7 @@ type Repos struct {
 	wg       sync.WaitGroup
 	sessions func(name string) int
 	hosts    func()
+	removed  []func(ProjectID)
 }
 
 func (c *Repos) UseSessions(count func(name string) int) {
@@ -150,6 +151,12 @@ func (c *Repos) UseSessions(count func(name string) int) {
 func (c *Repos) OnHosts(changed func()) {
 	c.mu.Lock()
 	c.hosts = changed
+	c.mu.Unlock()
+}
+
+func (c *Repos) OnRemoved(forget func(ProjectID)) {
+	c.mu.Lock()
+	c.removed = append(c.removed, forget)
 	c.mu.Unlock()
 }
 
@@ -509,14 +516,27 @@ func (c *Repos) clone(k Cloning) {
 
 func (c *Repos) Remove(name string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	id, err := c.removeLocked(name)
+	hooks := slices.Clone(c.removed)
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, forget := range hooks {
+		forget(id)
+	}
+	return nil
+}
+
+func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
-		return explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return ProjectID{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
 	}
+	at := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	kept := slices.DeleteFunc(slices.Clone(recs), func(r Record) bool { return r.Name == name })
 	if len(kept) == len(recs) {
-		return explained(notFound("repository"), "That repository is no longer in the list.")
+		return ProjectID{}, explained(notFound("repository"), "That repository is no longer in the list.")
 	}
 	if c.sessions != nil {
 		if n := c.sessions(name); n > 0 {
@@ -524,14 +544,14 @@ func (c *Repos) Remove(name string) error {
 			if n > 1 {
 				what = "its " + strconv.Itoa(n) + " sessions"
 			}
-			return explained(conflict("sessions"), "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
+			return ProjectID{}, explained(conflict("sessions"), "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
 		}
 	}
 	if err := c.cfg.Records.Save(kept); err != nil {
-		return explained(conflict("records"), "The engine couldn't save its list of repositories.")
+		return ProjectID{}, explained(conflict("records"), "The engine couldn't save its list of repositories.")
 	}
 	c.cfg.Logger.Info("repository", "event", "removed")
-	return nil
+	return ProjectID{Name: name, URL: recs[at].URL}, nil
 }
 
 func (c *Repos) SaveToken(host, token string) (TokenInfo, error) {

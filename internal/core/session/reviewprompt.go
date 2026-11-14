@@ -52,6 +52,7 @@ type reviewGiven struct {
 	claims   bool
 	rules    rulesGiven
 	facts    bool
+	team     TeamRules
 }
 
 func promptFor(e ReviewEntry, g reviewGiven) string {
@@ -60,6 +61,7 @@ func promptFor(e ReviewEntry, g reviewGiven) string {
 		p = IncrementalPrompt(e.Since, e.Key.Commit, e.Key.Branch)
 	}
 	p += rulesAsk(g.rules)
+	p += teamRulesAsk(g.team)
 	if g.asked {
 		p += approvedAsk(g.approved)
 	}

@@ -105,6 +105,8 @@
     <div id="warnings" class="notice warn small" hidden></div>
     <sf-recap id="recap" class="notice small recap" hidden></sf-recap>
     <sf-session-facts id="session-facts" hidden></sf-session-facts>
+    <sf-lineage id="lineage" hidden></sf-lineage>
+    <sf-session-work id="session-work" hidden></sf-session-work>
     <sf-session-limits id="session-limits" class="session-limits" hidden></sf-session-limits>
     <div id="conversations"></div>
   </main>
@@ -130,6 +132,7 @@
     <sf-reviews id="reviews" hidden></sf-reviews>
     <sf-push-panel id="push-panel" hidden></sf-push-panel>
     <sf-forge-panel id="forge-panel" hidden></sf-forge-panel>
+    <sf-pull-follow id="pull-follow" hidden></sf-pull-follow>
     <sf-intent id="intent" hidden></sf-intent>
     <sf-changes id="changes" hidden></sf-changes>
     <section id="agents-section">
@@ -162,6 +165,7 @@
       <span class="dots" id="working" role="img" aria-label="Claude is working" hidden><i></i><i></i><i></i></span>
       <span class="strip-note small muted compacting" id="strip-note" role="status"></span>
       <span class="jump" id="jump"><button type="button" class="ghost" id="jump-start" hidden>↑ Start</button><button type="button" class="ghost" id="jump-latest" hidden>↓ Latest</button></span>
+      <sf-saved-prompts id="saved-prompts" class="saved-prompts-host" hidden></sf-saved-prompts>
     </div>
     <div class="field">
       <ul id="complete" class="complete surface" role="listbox" aria-label="Suggestions" hidden></ul>
@@ -173,7 +177,7 @@
       <span class="session-foot-acts" id="manage" hidden><button type="button" class="ghost small stack" id="manage-button"><span></span><span class="off"></span><span class="off"></span></button> <button type="button" class="ghost small" id="force-button" hidden></button> <button type="button" class="ghost small" id="manage-cancel" hidden>Cancel</button></span>
       <button type="button" class="ghost icon-button" id="session-more" aria-label="More actions for this session" aria-haspopup="menu" popovertarget="session-menu"><sf-icon class="icon" name="more"></sf-icon></button>
     </div>
-    <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>
+    <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" id="menu-bring-main" hidden>Bring in the latest main</button><button type="button" role="menuitem" id="menu-fork" hidden>Fork here</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>
   </div>
   <p class="muted small hint" id="hint" role="status"></p>
 </form>

@@ -26,6 +26,8 @@ type reviewerCheckJSON struct {
 	ClaudeCode string       `json:"claudeCode"`
 	Plugin     string       `json:"plugin"`
 	Models     []string     `json:"models"`
+	Model      string       `json:"model"`
+	Effort     string       `json:"effort"`
 	Defect     checkRunJSON `json:"defect"`
 	Clean      checkRunJSON `json:"clean"`
 	By         string       `json:"by"`
@@ -59,7 +61,7 @@ func reviewerChecksOf(v session.ReviewerChecksView) reviewerChecksJSON {
 	for _, r := range v.Roles {
 		rc := roleCheckJSON{Agent: r.Agent, Role: string(r.Role), RoleName: r.Role.Name(), Running: r.Running}
 		if c := r.Check; c != nil {
-			rc.Check = &reviewerCheckJSON{Result: string(c.Result), Reason: c.Reason, ClaudeCode: c.Versions.ClaudeCode, Plugin: c.Versions.Plugin, Models: nonNil(c.Versions.Models),
+			rc.Check = &reviewerCheckJSON{Result: string(c.Result), Reason: c.Reason, ClaudeCode: c.Versions.ClaudeCode, Plugin: c.Versions.Plugin, Models: nonNil(c.Versions.Models), Model: c.Versions.Model, Effort: c.Versions.Effort,
 				Defect: checkRunOf(c.Defect), Clean: checkRunOf(c.Clean), By: c.By, StartedAt: millis(c.StartedAt), EndedAt: millis(c.EndedAt), CostUSD: c.CostUSD}
 		}
 		out.Roles = append(out.Roles, rc)

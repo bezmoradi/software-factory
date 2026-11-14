@@ -70,6 +70,7 @@ type Server struct {
 	agentsMu sync.Mutex
 	boot     string
 	rulesMu  sync.Mutex
+	commands int
 }
 
 type commandJSON struct {
@@ -94,6 +95,7 @@ type worktreeJSON struct {
 	Base     string        `json:"base,omitempty"`
 	Force    bool          `json:"force,omitempty"`
 	Identity *identityJSON `json:"identity,omitempty"`
+	Existing bool          `json:"existing,omitempty"`
 }
 
 type identityJSON struct {
@@ -271,6 +273,7 @@ var routes = map[string]string{
 	removeRuleRoute:        http.MethodPost,
 	homeRoute:              http.MethodPost,
 	reviewRunRoute:         http.MethodPost,
+	projectCommandRoute:    http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -354,6 +357,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		send(w, http.StatusOK, out)
 	case reviewRunRoute:
 		s.reviewRun(w, r)
+	case projectCommandRoute:
+		s.projectCommand(w, r)
 	case "/v1/sign-in":
 		var q signInJSON
 		if p := decode(w, r, &q); p != nil {

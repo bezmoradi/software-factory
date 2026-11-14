@@ -44,6 +44,10 @@ type apiIssue struct {
 	HeadSHA   string    `json:"headSha,omitempty"`
 	Base      string    `json:"base,omitempty"`
 	Draft     bool      `json:"draft,omitempty"`
+	Merged    bool      `json:"merged,omitempty"`
+	Conflict  bool      `json:"conflict,omitempty"`
+	Labels    []string  `json:"labels,omitempty"`
+	Assignees []string  `json:"assignees,omitempty"`
 }
 
 type apiComment struct {
@@ -226,6 +230,15 @@ func (a api) repoRoute(w http.ResponseWriter, r *http.Request, rest []string) {
 		a.checkRuns(w, rest[1])
 	case len(rest) == 3 && rest[0] == "commits" && rest[2] == "status" && get:
 		a.statuses(w, rest[1])
+	case len(rest) == 2 && rest[0] == "pulls" && get:
+		n, _ := num(1)
+		a.getPull(w, r, n)
+	case len(rest) == 2 && rest[0] == "issues" && get:
+		n, _ := num(1)
+		a.getIssue(w, r, n)
+	case len(rest) == 3 && rest[0] == "issues" && rest[2] == "assignees" && post:
+		n, _ := num(1)
+		a.assign(w, r, n)
 	default:
 		answer(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
@@ -273,7 +286,7 @@ func (a api) userJSON(name string) map[string]any {
 
 func (a api) issueJSON(host string, i apiIssue) map[string]any {
 	out := map[string]any{"number": i.Number, "title": i.Title, "body": i.Body, "state": i.State, "user": a.userJSON(i.User),
-		"created_at": i.CreatedAt.UTC().Format(time.RFC3339), "html_url": a.issueURL(host, i)}
+		"created_at": i.CreatedAt.UTC().Format(time.RFC3339), "html_url": a.issueURL(host, i), "labels": labelsJSON(i.Labels), "assignees": a.assigneesJSON(i.Assignees)}
 	if i.Pull {
 		out["pull_request"] = map[string]any{"html_url": a.issueURL(host, i)}
 	}
@@ -424,14 +437,14 @@ func (a api) createIssue(w http.ResponseWriter, r *http.Request) {
 
 func (a api) listIssues(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	state, creator := q.Get("state"), q.Get("creator")
+	state, creator, labels := q.Get("state"), q.Get("creator"), q.Get("labels")
 	if state == "" {
 		state = "open"
 	}
 	var list []apiIssue
 	err := withState(a.root, false, func(s *apiState) error {
 		for _, i := range s.Issues {
-			if (state == "all" || i.State == state) && (creator == "" || strings.EqualFold(i.User, creator)) {
+			if (state == "all" || i.State == state) && (creator == "" || strings.EqualFold(i.User, creator)) && hasLabels(i, labels) {
 				list = append(list, i)
 			}
 		}
@@ -806,10 +819,10 @@ func apiCommand(root string, args []string) error {
 	case "reset":
 		return withState(root, true, func(s *apiState) error { *s = apiState{Next: 1, NextID: 1}; return nil })
 	}
-	return errUsage
+	return pullCommand(root, args)
 }
 
-var errUsage = errors.New("usage: sf-gitserver [commit <text> | comment <pr> <login> <text> | review-comment <pr> <login> <path> <line> <text> | review <pr> <login> <state> <text> | drafts on|off | show <pr> | list | issue-delay <seconds> | issue-502 <count> created|lost | comment-403 <count> | push-delay <seconds> before|after | check <commit> <name> <status> [conclusion] | status <commit> <context> <state> | reset]")
+var errUsage = errors.New("usage: sf-gitserver [commit <text> | comment <pr> <login> <text> | review-comment <pr> <login> <path> <line> <text> | review <pr> <login> <state> <text> | drafts on|off | show <pr> | list | issue-delay <seconds> | issue-502 <count> created|lost | comment-403 <count> | push-delay <seconds> before|after | check <commit> <name> <status> [conclusion] | status <commit> <context> <state> | reset | pr-check <pr> <name> <status> [conclusion] | conflict <pr> on|off | merge <pr> | close <pr> | ready <pr> | issue <title> <body> [labels] | issue-edit <issue> <body> | issue-token <title> [labels]]")
 
 func pushDelay(root string) (int, bool) {
 	var t apiTriggers

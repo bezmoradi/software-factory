@@ -25,6 +25,7 @@ var (
 	branchName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`)
 	commitHash = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	dirtyText  = regexp.MustCompile(`(?i)contains modified or untracked files|is dirty|use --force`)
+	usedText   = regexp.MustCompile(`(?i)is already (checked out|used by worktree)`)
 )
 
 func validBranch(b string) bool {
@@ -99,7 +100,7 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 	if !validBranch(q.Branch) {
 		return "", fail(http.StatusBadRequest, "branch", "")
 	}
-	if !commitHash.MatchString(q.Base) {
+	if q.Existing && q.Base != "" || !q.Existing && !commitHash.MatchString(q.Base) {
 		return "", fail(http.StatusBadRequest, "base", "")
 	}
 	id, p := identityIn(q.Identity, false)
@@ -114,9 +115,19 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 	if _, err := os.Lstat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
 		return "", fail(http.StatusConflict, "exists", "A worktree by that name already exists.")
 	}
-	out, err := s.git(ctx, repo, "worktree", "add", "-b", q.Branch, "--", path, q.Base)
+	args := []string{"worktree", "add", "-b", q.Branch, "--", path, q.Base}
+	if q.Existing {
+		if p := s.existingBranch(ctx, repo, q.Branch); p != nil {
+			return "", p
+		}
+		args = []string{"worktree", "add", "--", path, q.Branch}
+	}
+	out, err := s.git(ctx, repo, args...)
 	if err != nil {
 		s.log.Warn("agent-host worktree", "event", "add-failed")
+		if q.Existing && usedText.MatchString(out) {
+			return "", fail(http.StatusConflict, "checked-out", "That branch is checked out in another worktree.")
+		}
 		return "", fail(http.StatusConflict, "git", gitMessage(out))
 	}
 	if id.Set() {
@@ -127,8 +138,45 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 			return "", p
 		}
 	}
-	s.log.Info("agent-host worktree", "event", "added", "identity", id.Set())
+	s.log.Info("agent-host worktree", "event", "added", "identity", id.Set(), "existing", q.Existing)
 	return path, nil
+}
+
+func (s *Server) existingBranch(ctx context.Context, repo, branch string) *problem {
+	if out, err := s.git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}"); err != nil || !commitHash.MatchString(out) {
+		return fail(http.StatusNotFound, "branch", "The clone has no branch by that name.")
+	}
+	used, sure := checkedOut(repo, branch)
+	if used || !sure {
+		return fail(http.StatusConflict, "checked-out", "That branch is checked out in another worktree.")
+	}
+	return nil
+}
+
+func checkedOut(repo, branch string) (bool, bool) {
+	root, err := openPlainFolder(filepath.Join(repo, ".git"))
+	if err != nil {
+		return false, false
+	}
+	defer func() { _ = root.Close() }()
+	want := "ref: refs/heads/" + branch
+	heads := []string{"HEAD"}
+	entries, err := readDirCapped(root, worktreesFolder, maxWorktreeListed+1)
+	if err != nil && !errors.Is(err, os.ErrNotExist) || len(entries) > maxWorktreeListed {
+		return false, false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			heads = append(heads, worktreesFolder+"/"+e.Name()+"/HEAD")
+		}
+	}
+	for _, h := range heads {
+		data, _, err := readPlain(root, h, maxGitFile)
+		if err == nil && strings.TrimSpace(string(data)) == want {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func identityIn(q *identityJSON, required bool) (session.CommitIdentity, *problem) {
@@ -174,7 +222,7 @@ func (s *Server) worktreeIdentity(ctx context.Context, q worktreeJSON) *problem 
 	if p != nil {
 		return p
 	}
-	if q.Branch != "" || q.Base != "" || q.Force {
+	if q.Branch != "" || q.Base != "" || q.Force || q.Existing {
 		return fail(http.StatusBadRequest, "fields", "")
 	}
 	id, p := identityIn(q.Identity, true)

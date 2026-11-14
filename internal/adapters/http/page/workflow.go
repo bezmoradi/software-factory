@@ -178,10 +178,10 @@ func teamOf(v session.TeamView) teamViewJSON {
 		}
 		rules := make([]map[string]string, 0, len(s.FileRules))
 		for _, f := range s.FileRules {
-			rules = append(rules, map[string]string{"pattern": f.Pattern, "agent": f.Agent})
+			rules = append(rules, map[string]string{"pattern": f.Pattern, "agent": f.Agent, "instruction": f.Instruction})
 		}
 		out.Setup = map[string]any{"adapter": string(s.Adapter), "types": typesJSON(s.Types), "defaultType": s.DefaultType, "roles": roles,
-			"agents": nonNil(s.Agents), "fileRules": rules, "rounds": s.Rounds}
+			"agents": nonNil(s.Agents), "fileRules": rules, "rounds": s.Rounds, "protect": nonNil(s.Protect)}
 	}
 	return out
 }

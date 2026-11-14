@@ -87,6 +87,8 @@ type Config struct {
 	Thread                string
 	Logger                shared.Logger
 	RateWindows           func(plan string, w []session.RateWindow)
+	Model                 string
+	Effort                string
 }
 
 var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -133,6 +135,10 @@ type Client struct {
 	done    chan struct{}
 	quit    chan struct{}
 	once    sync.Once
+
+	nextModel  string
+	nextEffort string
+	models     []session.AgentModel
 }
 
 func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, error) {
@@ -141,6 +147,17 @@ func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, err
 		_ = rw.Close()
 		return nil, err
 	}
+	c := newClient(rw, cfg)
+	c.nextModel, c.nextEffort = cfg.Model, cfg.Effort
+	if err := c.handshake(ctx, cfg, params); err != nil {
+		close(c.quit)
+		c.finish(ReasonClosed)
+		return nil, err
+	}
+	return c, nil
+}
+
+func newClient(rw io.ReadWriteCloser, cfg Config) *Client {
 	c := &Client{
 		rw:        rw,
 		log:       cfg.Logger,
@@ -163,16 +180,12 @@ func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, err
 	go c.read()
 	go c.pump()
 	go c.replier()
-	if err := c.handshake(ctx, cfg, params); err != nil {
-		close(c.quit)
-		c.finish(ReasonClosed)
-		return nil, err
-	}
-	return c, nil
+	return c
 }
 
 func threadParams(cfg Config) (threadStartParams, error) {
 	p := threadStartParams{
+		Model:             cfg.Model,
 		Cwd:               cfg.Cwd,
 		ApprovalPolicy:    policyOnRequest,
 		ApprovalsReviewer: reviewerUser,
@@ -252,6 +265,7 @@ func (c *Client) handshake(ctx context.Context, cfg Config, params threadStartPa
 		return nil
 	}
 	c.mu.Unlock()
+	c.readModels(ctx)
 	if cfg.Thread != "" {
 		resumed, err := c.resume(ctx, cfg.Thread, params)
 		if err != nil || resumed {
@@ -410,6 +424,7 @@ func (c *Client) prompt(ctx context.Context, text string, parts []session.Attach
 	}
 	c.mu.Lock()
 	thread, err := c.usableLocked()
+	model, effort := c.nextModel, c.nextEffort
 	c.mu.Unlock()
 	if err != nil {
 		return err
@@ -419,10 +434,13 @@ func (c *Client) prompt(ctx context.Context, text string, parts []session.Attach
 		Input:             input,
 		ApprovalPolicy:    policyOnRequest,
 		ApprovalsReviewer: reviewerUser,
+		Model:             model,
+		Effort:            effort,
 	})
 	if err != nil {
 		return err
 	}
+	c.sentSettings(model, effort)
 	var res struct {
 		Turn struct {
 			ID     string `json:"id"`

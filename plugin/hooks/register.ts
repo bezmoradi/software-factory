@@ -13,6 +13,7 @@ type Question = { question: string; header?: string; kind?: string; description?
 type Held = { id: string; ev: Ev; agentId: string; local: unknown; done: boolean }
 type Message = Record<string, unknown> & { kind?: string }
 type Entry = { ev: Ev; size: number }
+type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 const PROTOCOL = 1
 const RING_BYTES = 2 * 1024 * 1024
@@ -28,6 +29,7 @@ const PUSH_REFUSED = "Software Factory refused this command: it pushes to the gi
 const PUSH_UNCHECKED = "Software Factory couldn't reach its engine to check this command, and the command may push to the git host or change a pull request there, so it refused it. To push this session's branch, call the factory_push tool instead. If the command doesn't push, try it again in a moment."
 const WAITS = 'This tool acts off this machine, so Software Factory has the developer answer it on the Software Factory page.'
 const IRREVERSIBLE = "This command can't be undone, so Software Factory asks the developer every time, whatever the saved rules allow."
+const GUARDED = (why: string) => `Software Factory asks the developer before this write, whatever the saved rules allow: ${why}.`
 const cloudRefused = (why: string) => `Software Factory refused this command: ${why}. Do the work in this session instead, and don't start it another way.`
 const writeRefused = (why: string) => `Software Factory doesn't let Claude write this file: ${why}. The developer changes it themselves if it needs changing. Don't change it another way.`
 
@@ -70,6 +72,7 @@ let contextLevel: string | null = null
 let contextTokens = 0
 let kept: Kept = { written: [], ran: [] }
 let topOf: { cwd: string; top: string } | null = null
+let override: { model: string; effort: Effort | '' } = { model: '', effort: '' }
 const held = new Map<string, Held>()
 const shown = new Map<string, string>()
 const offered = new Map<string, string>()
@@ -347,6 +350,27 @@ async function recordContext($: EngineInterface, tokens: number | undefined) {
   contextLevel = level
   contextTokens = tokens
   record($, { type: 'context', tokens, level })
+}
+
+const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/
+
+async function readOverride($: EngineInterface) {
+  if (!link.secret) return
+  const r = await engine($, '/session-model').catch(() => null)
+  const a = r?.ok ? parsed(r.text) : null
+  if (!a) return
+  const model = typeof a.model === 'string' && MODEL_ID.test(a.model) ? a.model : ''
+  const effort = EFFORTS.find(x => x === a.effort) ?? ''
+  override = { model, effort }
+}
+
+async function turnCheck($: EngineInterface, again: boolean): Promise<string> {
+  if (!link.secret) return ''
+  const r = await engine($, '/turn-check', { again }).catch(() => null)
+  const a = r?.ok ? parsed(r.text) : null
+  if (again || !a || a.block !== true || typeof a.text !== 'string' || !a.text) return ''
+  return clip(a.text, 12000)
 }
 
 function setPage(on: boolean) {
@@ -849,7 +873,10 @@ export const register: Register = on => {
 
   on('classic.Stop', async ($, e, next) => {
     recordMode($, e.permission_mode)
-    return next(e)
+    const out = await next(e)
+    if (out.block) return out
+    const block = await turnCheck($, e.stop_hook_active === true).catch(() => '')
+    return block ? { ...out, block } : out
   })
 
   on('classic.StopFailure', async ($, e, next) => {
@@ -865,12 +892,15 @@ export const register: Register = on => {
       turnId = e.turnId
       busy = true
       record($, { type: 'busy', turnId: e.turnId })
+      await readOverride($).catch(() => undefined)
     } else void recordAgents($)
     return next(e)
   })
 
   on('turn.step', async function* ($, e, next) {
-    for await (const chunk of next(e)) {
+    const main = e.agentId === undefined
+    const step = main && override.model ? { ...e, model: override.model, ...(override.effort ? { effort: override.effort } : {}) } : main && override.effort ? { ...e, effort: override.effort } : e
+    for await (const chunk of next(step)) {
       if (!e.agentId && chunk.kind === 'text' && chunk.text) addText($, e.turnId, chunk.text)
       yield chunk
     }
@@ -917,9 +947,9 @@ export const register: Register = on => {
     const v = await checkFor($, e.tool, obj(e.input))
     const why = refusalOf(v)
     if (why) return { decision: 'deny' as const, reason: why }
-    if (!v.waits && !v.irreversible) return next(e)
+    if (!v.waits && !v.irreversible && !v.guarded) return next(e)
     const out = await next(e)
-    return out.decision === 'deny' ? out : { decision: 'ask' as const, reason: v.irreversible ? IRREVERSIBLE : WAITS }
+    return out.decision === 'deny' ? out : { decision: 'ask' as const, reason: v.irreversible ? IRREVERSIBLE : v.guarded ? GUARDED(v.guarded) : WAITS }
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
@@ -963,14 +993,16 @@ export const register: Register = on => {
     const input = obj(e.tool_input)
     const id = hex(16)
     const plan = tool === 'ExitPlanMode'
-    const irreversible = !plan && (await checkFor($, tool, input)).irreversible
-    const updates = irreversible ? [] : (e.permission_suggestions ?? [])
+    const checked = plan ? null : await checkFor($, tool, input)
+    const irreversible = !!checked?.irreversible
+    const guarded = !!checked?.guarded
+    const updates = irreversible || guarded ? [] : (e.permission_suggestions ?? [])
     const words = updates.map(u => describe(u as Update))
     const risky = updates.some(u => u.type === 'setMode' && u.mode === 'bypassPermissions')
     const always = !risky && updates.length && words.every(Boolean) ? `Yes, and ${words.join(' and ')}` : ''
     const auto = !irreversible && tool === 'Bash' && (e.permission_mode === 'default' || e.permission_mode === 'acceptEdits') && !updates.some(u => u.type === 'setMode') && !autoModeOff(await settingsNow($))
     const full = fullCall(tool, input)
-    const ev: Ev = plan ? { type: 'plan', id, plan: clip(input.plan, 20000), agentId } : { type: 'permission', id, tool, summary: visible(summarize(tool, input)), detail: clip(full, 20000), complete: full.length <= 20000, always, auto, ...(irreversible ? { irreversible: true } : {}), agentId }
+    const ev: Ev = plan ? { type: 'plan', id, plan: clip(input.plan, 20000), agentId } : { type: 'permission', id, tool, summary: visible(summarize(tool, input)), detail: clip(full, 20000), complete: full.length <= 20000, always, auto, ...(irreversible ? { irreversible: true } : {}), ...(guarded ? { guarded: true } : {}), agentId }
     if (!shouldHold()) {
       record($, { ...ev, readOnly: true })
       shown.set(id, agentId)

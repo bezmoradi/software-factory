@@ -21,6 +21,11 @@ type issueJSON struct {
 	HTMLURL string    `json:"html_url"`
 	Created time.Time `json:"created_at"`
 	Pull    *struct{} `json:"pull_request"`
+	State   string    `json:"state"`
+	User    *userJSON `json:"user"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 }
 
 func (a API) RecentIssues(ctx context.Context, r session.ForgeRepo) ([]session.IssueFound, error) {

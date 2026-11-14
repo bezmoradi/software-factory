@@ -10,6 +10,8 @@ const (
 	MethodCodex  Method = "codex"
 )
 
+const DevAgentID = "dev-acp"
+
 type AgentSpec struct {
 	ID          string
 	Name        string
@@ -42,7 +44,7 @@ func Agents() []AgentSpec {
 }
 
 func DevelopmentAgent(command string, knackpack bool) AgentSpec {
-	return AgentSpec{ID: "dev-acp", Name: "Development ACP agent", Method: MethodACP, Command: []string{command}, Enabled: true, Knackpack: knackpack,
+	return AgentSpec{ID: DevAgentID, Name: "Development ACP agent", Method: MethodACP, Command: []string{command}, Enabled: true, Knackpack: knackpack,
 		Startup: "claude", Status: &SignInStatus{Args: []string{"auth", "status"}, Kind: "claude",
 			Step: "the development fake answers with what $HOME/.sf-fake-signin says in the agent container: docker compose exec agent sh -c 'echo subscription > $HOME/.sf-fake-signin'"}}
 }

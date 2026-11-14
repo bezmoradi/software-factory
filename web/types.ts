@@ -38,6 +38,95 @@ export interface SessionInfo {
   uncommitted?: Uncommitted
   overlaps?: Overlap[]
   checks?: AgentCheck[]
+  lineage?: Lineage
+  follow?: PullFollow
+}
+
+export interface Stint {
+  agent: string
+  sid: string
+  name?: string
+  from: string
+  to: string
+}
+
+export interface Lineage {
+  branch: string
+  origin?: string
+  from: string
+  earlier: Stint[]
+  handedTo?: string
+  last?: string
+}
+
+export interface StartFrom {
+  branch?: string
+  pull?: number
+  sid?: string
+  commit?: string
+}
+
+export interface StartPointsView {
+  main: string
+  branches: { name: string; commit: string }[]
+  pulls: { number: number; title: string; branch: string; commit: string }[]
+  pullsWhy: string
+}
+
+export interface PullCheck {
+  name: string
+  result: string
+  url: string
+  failed: boolean
+}
+
+export interface PullComment {
+  kind: string
+  author: string
+  body: string
+  created: number
+  url: string
+  state?: string
+  path?: string
+  line?: number
+  outdated?: boolean
+}
+
+export interface PullFollow {
+  number: number
+  url: string
+  state: 'looking' | 'open' | 'merged' | 'closed' | ''
+  draft: boolean
+  opened: boolean
+  head: string
+  conflict: boolean
+  mergeable: string
+  mergeState: string
+  checks: PullCheck[]
+  failing: number
+  passing: number
+  running: number
+  checksNew: boolean
+  comments: PullComment[]
+  more: number
+  dropped: number
+  rounds: number
+  auto: boolean
+  autoStop: string
+  polled: number
+  note: string
+  issue: number
+  issueSent: boolean
+  sent: number
+  done: boolean
+}
+
+export interface PullFollowView {
+  sid: string
+  follow: PullFollow | null
+  review: SessionReview | null
+  running: boolean
+  disabled: string
 }
 
 export interface Uncommitted {
@@ -248,6 +337,7 @@ export interface SessionForge {
   matches?: ForgeMatch[]
   secretAt?: string
   secretLine?: string
+  from?: string
 }
 
 export interface ForgeMatch {
@@ -334,6 +424,20 @@ export interface SessionReview {
   costUsd?: number
   sessionCostUsd?: number
   testList?: TestList
+  planReview?: AsideRun
+  explain?: AsideRun
+}
+
+export interface AsideRun {
+  commit: string
+  branch: string
+  state: 'running' | 'done' | 'failed' | 'withheld'
+  text: string
+  reason: string
+  costUsd?: number
+  at: number
+  planHash?: string
+  planPath?: string
 }
 
 export interface TestList {
@@ -445,6 +549,10 @@ export interface Dispatch extends Consent {
   mode: string
   type?: string
   caps?: { money: number; minutes: number; turns: number }
+  from?: StartFrom
+  issue?: number
+  issueHash?: string
+  effort?: string
 }
 
 export interface HelloEvent {
@@ -601,6 +709,7 @@ export interface PermissionEvent extends CardBase {
   auto?: boolean
   irreversible?: boolean
   away?: boolean
+  guarded?: boolean
 }
 
 export interface PlanEvent extends CardBase {
@@ -701,8 +810,9 @@ export interface TeamSetup {
   defaultType: string
   roles: Record<string, string>
   agents: string[]
-  fileRules: { pattern: string; agent: string }[]
+  fileRules: { pattern: string; agent: string; instruction?: string }[]
   rounds: number
+  protect?: string[]
 }
 
 export interface TeamView {
@@ -955,6 +1065,8 @@ declare global {
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
+    'sf-handover': CustomEvent<{ sid: string; agent: string }>
+    'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string }>
     'sf-reload': Event
     'sf-settled': Event
@@ -966,6 +1078,9 @@ declare global {
     'sf-send-findings': CustomEvent<{ card: string; commit: string }>
     'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean; confirmed?: boolean }>
     'sf-test-list': Event
+    'sf-explain': Event
+    'sf-plan-review': CustomEvent<{ hash: string }>
+    'sf-insert-prompt': CustomEvent<{ text: string }>
     'sf-walkthrough-check': CustomEvent<{ commit: string; step: number; done: boolean; settle: (ok: boolean) => void }>
     'sf-allow-file': CustomEvent<{ path: string; reason: string }>
     'sf-remove-file': CustomEvent<{ path: string }>
@@ -973,5 +1088,6 @@ declare global {
     'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
     'sf-commit-ask': Event
+    'sf-session-deleted': CustomEvent<{ sid: string }>
   }
 }

@@ -143,6 +143,7 @@ type ForgeView struct {
 	SecretLine string
 
 	Matches []ForgeMatch
+	From    string
 }
 
 type ForgeReply struct {
@@ -190,6 +191,8 @@ type Forges struct {
 	wg     sync.WaitGroup
 	closed bool
 	saved  cardSaves
+
+	follows *Follows
 }
 
 var _ ForgeService = (*Forges)(nil)
@@ -405,6 +408,7 @@ func (f *Forges) Request(ctx context.Context, sid string, kind ForgeKind, title,
 	if _, why := ForgeText(title, MaxForgeTitle, false); why != "" {
 		return refuse("the title " + why + "; give one line of plain text")
 	}
+	body = f.issueBody(sid, kind, body)
 	if _, why := ForgeText(body, MaxForgeBody, true); why != "" {
 		return refuse("the body " + why)
 	}
@@ -632,6 +636,7 @@ func (f *Forges) send(ctx context.Context, t PushTarget, c *forgeCard) {
 		if v.Kind == ForgePull {
 			f.afterOpened(c.sid, repo, v.Head, v.Number)
 		}
+		f.afterCreated(c.sid, t, repo, v)
 	}
 }
 

@@ -23,6 +23,9 @@ var agentRoutes = map[string]string{
 	forgeRoute:    http.MethodPost,
 	checksRoute:   http.MethodPost,
 	commentsRoute: http.MethodPost,
+
+	turnCheckRoute:    http.MethodPost,
+	sessionModelRoute: http.MethodGet,
 }
 
 func (s *Server) agentRoute(r *http.Request) string {
@@ -110,6 +113,12 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/check":
 		s.check(w, r)
+		return
+	case turnCheckRoute:
+		s.turnCheck(w, r)
+		return
+	case sessionModelRoute:
+		s.sessionModel(w, r)
 		return
 	}
 	given := connSecret(r)

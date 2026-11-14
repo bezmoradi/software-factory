@@ -23,6 +23,9 @@ type IssueFound struct {
 	Body        string
 	Created     time.Time
 	Unconfirmed bool
+	Author      string
+	Labels      []string
+	Open        bool
 }
 
 type ForgeMatch struct {

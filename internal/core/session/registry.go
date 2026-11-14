@@ -63,6 +63,7 @@ type Admission struct {
 	Control   bool
 	SignIn    *SignIn
 	Mode      string
+	Lineage   *Lineage
 }
 
 type Registration struct {
@@ -137,6 +138,8 @@ type Info struct {
 	Uncommitted  *Uncommitted
 	Overlaps     []Overlap
 	Checks       []AgentCheck
+	Lineage      *Lineage
+	Follow       *FollowView
 }
 
 type conn struct {
@@ -166,6 +169,7 @@ type admitted struct {
 	review       *ReviewView
 	push         *PushView
 	forge        []ForgeView
+	follow       *FollowView
 	turnLog      *turnLog
 	unbacked     []TurnMarks
 	lastMessage  string
@@ -214,6 +218,7 @@ type Registry struct {
 	halt        *Halt
 	worktrees   *worktreeBook
 	limits      *Limits
+	work        *SessionWork
 }
 
 var (
@@ -576,6 +581,7 @@ func (r *Registry) Report(given string, b Batch) error {
 			r.trackTurn(c, kind, ev, seq, now)
 			r.markTurn(c.sid, kind, ev, now)
 			r.noteFacts(c.sid, kind, ev, now)
+			r.workSeen(c, kind, ev)
 			if cardTypes[kind] {
 				fresh := r.freshCard(ev)
 				shown = r.indexCard(c.sid, ev)
@@ -1067,6 +1073,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.Project = a.Project
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
+		info.Lineage = a.Lineage
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1092,6 +1099,9 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		if len(a.forge) > 0 {
 			info.Forge = slices.Clone(a.forge)
 			info.Needs += forgeWaiting(a.forge)
+		}
+		if a.follow != nil {
+			info.Follow = a.follow.clone()
 		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor
@@ -1182,6 +1192,9 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 	}
 	if why := r.limitsMessageHeld(sid); why != "" {
 		return explained(conflict("cap"), why)
+	}
+	if held, err := r.workDivert(sid, text, len(images) > 0 || len(files) > 0); held {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

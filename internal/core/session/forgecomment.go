@@ -84,7 +84,7 @@ func finishedCard(c *forgeCard) bool {
 func openedAs(v ForgeView, asked bool) string {
 	switch {
 	case v.Draft:
-		return " as a draft; the person marks it ready for review on GitHub"
+		return " as a draft; the person marks it ready for review on the page or on GitHub"
 	case asked:
 		return "; " + noDrafts
 	}
@@ -92,6 +92,9 @@ func openedAs(v ForgeView, asked bool) string {
 }
 
 func (f *Forges) AfterPush(p PushedFacts) {
+	if fl := f.followsOf(); fl != nil {
+		fl.pushed(p)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.owned().pushed[p.SID] = p

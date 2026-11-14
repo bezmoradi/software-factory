@@ -26,6 +26,8 @@ func extraLimit(name string) (string, int) {
 		return "", session.MaxClaimsFile
 	case name == session.ChangeFactsFile:
 		return "", session.MaxChangeFacts
+	case name == session.PlanReviewFile:
+		return "", session.MaxPlanReviewFile
 	}
 	return "", -1
 }

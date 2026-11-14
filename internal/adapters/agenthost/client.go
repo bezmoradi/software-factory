@@ -165,6 +165,17 @@ func (c *Client) AddWorktree(ctx context.Context, repo, name, branch, base strin
 	return out.Path, nil
 }
 
+func (c *Client) AddExistingWorktree(ctx context.Context, repo, name, branch string, id session.CommitIdentity) (string, error) {
+	var out worktreeReply
+	if err := c.call(ctx, http.MethodPost, "/v1/worktrees", worktreeJSON{Repo: repo, Name: name, Branch: branch, Existing: true, Identity: identityOf(id)}, &out); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(out.Path, "/") || strings.ContainsRune(out.Path, 0) || len(out.Path) > 1000 {
+		return "", &session.HostError{Code: "reply", Message: "agent-host answered an unusable worktree path"}
+	}
+	return out.Path, nil
+}
+
 func (c *Client) SetIdentity(ctx context.Context, repo, name string, id session.CommitIdentity) error {
 	q := identityOf(id)
 	if q == nil {

@@ -41,6 +41,8 @@ type reviewJSON struct {
 	PluginCommit string    `json:"pluginCommit,omitempty"`
 	ClaudeCode   string    `json:"claudeCode,omitempty"`
 	Models       []string  `json:"models,omitempty"`
+	RunModel     string    `json:"runModel,omitempty"`
+	RunEffort    string    `json:"runEffort,omitempty"`
 	Turns        int       `json:"turns,omitempty"`
 	Denied       []string  `json:"denied,omitempty"`
 	Failure      string    `json:"failure,omitempty"`
@@ -63,6 +65,9 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 	}
 	out := make([]session.ReviewEntry, 0, len(f.Reviews))
 	for _, r := range f.Reviews {
+		if !session.ValidReviewChoice(r.RunModel, r.RunEffort) {
+			continue
+		}
 		out = append(out, session.ReviewEntry{
 			Key:  review.Key{Commit: r.Commit, Branch: r.Branch, Agent: r.Agent},
 			Role: review.Role(r.Role),
@@ -70,7 +75,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 				Channel: review.Channel(r.Channel), Override: r.Override, Shaped: r.Shaped},
 			Base: r.Base, Since: r.Since, Covers: r.Covers, Message: r.Message, Reason: r.Reason, CostUSD: max(r.CostUSD, 0), StartedAt: r.StartedAt, EndedAt: r.EndedAt,
 			Clipped: r.Clipped, Auto: r.Auto, PluginCommit: matching(r.PluginCommit, commitID), ClaudeCode: matching(r.ClaudeCode, versionText),
-			Models: matchingAll(r.Models, modelName, maxModels), Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
+			Models: matchingAll(r.Models, modelName, maxModels), RunModel: r.RunModel, RunEffort: r.RunEffort, Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
 			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1),
 		})
 	}
@@ -85,7 +90,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Provider: e.Record.Provider, State: string(e.Record.State), Verdict: e.Record.Verdict,
 			Channel: string(e.Record.Channel), Override: e.Record.Override, Shaped: e.Record.Shaped,
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
-			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, Turns: e.Turns, Denied: e.Denied,
+			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
 			Failure: e.Failure, Attempt: laterAttempt(e.Attempt),
 		})
 	}

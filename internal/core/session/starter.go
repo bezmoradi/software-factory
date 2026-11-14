@@ -49,6 +49,12 @@ type Dispatch struct {
 	Model   string
 	Type    string
 	Consent Consent
+
+	From      StartFrom
+	Continues *Continuation
+	Issue     int
+	IssueHash string
+	Effort    string
 }
 
 type Started struct {
@@ -127,6 +133,15 @@ type run struct {
 	at         time.Time
 	stamp      runStamp
 	thread     string
+
+	origin     string
+	earlier    []Stint
+	handedTo   string
+	handedHead string
+	handing    bool
+	model      string
+	effort     string
+	ports      int
 }
 
 type Dispatcher struct {
@@ -143,6 +158,9 @@ type Dispatcher struct {
 	home       *HomeSettings
 	keyMu      sync.Mutex
 	gateways   GatewayRoutes
+
+	forges *Forges
+	work   *SessionWork
 }
 
 var (
@@ -226,14 +244,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if spec = d.installed(spec); !spec.Enabled {
 		return Started{}, explained(conflict("not installed"), spec.Off)
 	}
-	if q.Model != "" && (spec.Method != MethodPlugin || !slices.Contains(ClaudeModels, q.Model)) {
-		return Started{}, explained(invalid("model"), "That agent can't be started with that model from the page.")
+	if err := d.checkChoice(ctx, spec, q.Model, q.Effort); err != nil {
+		return Started{}, err
 	}
 	if utf16Len(q.Name) > maxName || controlChars.MatchString(q.Name) || !utf8Valid(q.Name) {
 		return Started{}, explained(invalid("name"), "A name has at most 80 characters.")
 	}
 	if d.cfg.Host == nil || d.cfg.Repositories == nil {
 		return Started{}, explained(conflict("no agent-host"), "This engine has no agent-host to start sessions in.")
+	}
+	if err := checkStartFrom(q); err != nil {
+		return Started{}, err
 	}
 	repos, err := d.cfg.Repositories.List()
 	if err != nil {
@@ -268,10 +289,28 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		}
 		return Started{}, explained(conflict("fetch"), "The engine couldn't fetch the project's main branch, so no session started.")
 	}
+	at, err := d.startAt(ctx, repo, q, base)
+	if err != nil {
+		return Started{}, err
+	}
+	base = at.commit
 	short := randomHex(4)
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
+	r.origin, r.earlier = at.origin, at.earlier
+	if q.Continues != nil {
+		r.branch = q.Continues.Branch
+	}
+	if err := d.branchFree(r.branch); err != nil {
+		return Started{}, err
+	}
+	r.model, r.effort = q.Model, q.Effort
 	r.stamp = d.stampOf(spec.ID, time.Time{})
-	cwd, err := d.cfg.Host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
+	var cwd string
+	if q.Continues != nil {
+		cwd, err = d.cfg.Host.AddExistingWorktree(ctx, repo.Name, r.name, r.branch, id)
+	} else {
+		cwd, err = d.cfg.Host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
+	}
 	if err != nil {
 		d.cfg.Logger.Warn("dispatch", "event", "worktree-failed")
 		return Started{}, explained(conflict("worktree"), "agent-host couldn't create the session's worktree: "+hostMessage(err))
@@ -287,6 +326,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		return Started{}, err
 	}
 	d.homeStarted()
+	d.reservePorts(r)
 	if spec.Method == MethodPlugin {
 		err = d.startClaude(ctx, r, q.Model)
 	} else {
@@ -300,6 +340,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if d.cfg.Work != nil && r.sid != "" {
 		d.cfg.Work.Begin(r.sid, r.repo, spec.Knackpack, q.Type)
 	}
+	d.startedWork(r, err)
 	if err != nil {
 		return Started{SID: r.sid, ID: r.id}, err
 	}
@@ -338,7 +379,8 @@ func (d *Dispatcher) admission(r *run, control bool) Admission {
 		s := r.signIn
 		signIn = &s
 	}
-	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn}
+	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn,
+		Lineage: lineageOf(r)}
 }
 
 func launched(a Admission) Admission {
@@ -367,8 +409,8 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 			d.cfg.Logger.Warn("dispatch", "event", "workflow-plugin-missing")
 		}
 	}
-	if d.cfg.DocsInRepo {
-		argv = append(argv, "--settings="+DocsSettings)
+	if settings := d.claudeSettings(r); settings != "" {
+		argv = append(argv, "--settings="+settings)
 	}
 	argv = append(argv, "--permission-mode="+launchMode, "--session-id", sid)
 	if r.display != "" {
@@ -376,6 +418,9 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	}
 	if model != "" {
 		argv = append(argv, "--model="+model)
+	}
+	if r.effort != "" {
+		argv = append(argv, "--effort="+r.effort)
 	}
 	r.claudeArgv = argv
 	pending := *r
@@ -513,7 +558,8 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		return explained(conflict("start"), msg)
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor)
-	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b), Version: d.cfg.Version, Thread: d.threadOf(r)})
+	choice := d.launchChoice(r)
+	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b), Version: d.cfg.Version, Thread: d.threadOf(r), Model: choice.Model, Effort: choice.Effort})
 	cancel()
 	if err != nil {
 		_ = p.Close()
@@ -532,6 +578,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	r.stopping = false
 	d.mu.Unlock()
 	d.keepThread(r, sess)
+	d.keepModels(sess)
 	b.start(sess, func(byEngine bool) { d.ended(r, b, p, byEngine) })
 	return nil
 }
@@ -590,6 +637,10 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 		return err
 	}
 	defer d.release(r)
+	return d.stopRun(ctx, sid, r)
+}
+
+func (d *Dispatcher) stopRun(ctx context.Context, sid string, r *run) error {
 	d.mu.Lock()
 	running, b, p := r.running, r.bridge, r.process
 	if running && b != nil {
@@ -641,7 +692,11 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 	defer d.release(r)
 	d.mu.Lock()
 	running := r.running
+	handed := r.handedTo != ""
 	d.mu.Unlock()
+	if handed {
+		return explained(conflict("handed over"), handedMessage)
+	}
 	if running {
 		return explained(conflict("not stopped"), "This session is still running.")
 	}
@@ -737,7 +792,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	if given != nil && !held {
 		return nil, explained(conflict("offer"), "That choice is no longer the one offered. Try Delete again.")
 	}
-	if r.spec.Method == MethodPlugin && !r.rmDone {
+	if r.spec.Method == MethodPlugin && !r.rmDone && r.handedTo == "" {
 		args := d.claude("rm", r.id)
 		if held && (given.Flag == "discard" || given.Flag == "force") {
 			name := "--discard-unpushed=" + given.Value
@@ -783,6 +838,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	if d.cfg.Work != nil {
 		d.cfg.Work.Forget(sid)
 	}
+	d.workForget(sid)
 	return nil, nil
 }
 
@@ -844,7 +900,7 @@ func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[sid]
-	if r == nil {
+	if r == nil || r.handedTo != "" || r.handing {
 		return PushTarget{}, false
 	}
 	return PushTarget{SID: sid, Repo: r.repoPath, Name: r.repo, Branch: r.branch}, true

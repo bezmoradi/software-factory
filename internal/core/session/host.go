@@ -44,6 +44,7 @@ const HostDirty = "dirty"
 
 type Host interface {
 	AddWorktree(ctx context.Context, repo, name, branch, base string, id CommitIdentity) (string, error)
+	AddExistingWorktree(ctx context.Context, repo, name, branch string, id CommitIdentity) (string, error)
 	SetIdentity(ctx context.Context, repo, name string, id CommitIdentity) error
 	RemoveWorktree(ctx context.Context, repo, name string, force bool) error
 	Run(ctx context.Context, c Command) (RunResult, error)
@@ -64,6 +65,8 @@ type Launch struct {
 	MCP         *MCPServer
 	Version     string
 	Thread      string
+	Model       string
+	Effort      string
 }
 
 type Opener interface {

@@ -29,6 +29,11 @@ type SavedRun struct {
 	ReviewerPlugin string
 
 	CodexThread string
+
+	Origin     string
+	Earlier    []Stint
+	HandedTo   string
+	HandedHead string
 }
 
 type RunStore interface {
@@ -50,6 +55,8 @@ func (d *Dispatcher) saveRuns() {
 			AgentVersion: r.stamp.agent, EngineVersion: r.stamp.engine, WorkflowCommit: r.stamp.workflow,
 			ReviewerClaude: r.stamp.reviewer, ReviewerPlugin: r.stamp.reviewerPlugin})
 		out[len(out)-1].CodexThread = savedThread(r.thread)
+		out[len(out)-1].Origin, out[len(out)-1].Earlier = r.origin, slices.Clone(r.earlier)
+		out[len(out)-1].HandedTo, out[len(out)-1].HandedHead = r.handedTo, r.handedHead
 	}
 	d.mu.Unlock()
 	for i := range out {
@@ -85,6 +92,7 @@ func (d *Dispatcher) Restore() int {
 				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
 		r.stamp.interruptedAt = cutAt(s)
 		r.thread = savedThread(s.CodexThread)
+		r.origin, r.earlier, r.handedTo, r.handedHead = s.Origin, slices.Clone(s.Earlier), s.HandedTo, s.HandedHead
 		d.mu.Lock()
 		known := d.runs[s.SID] != nil
 		if !known {

@@ -58,7 +58,7 @@ func main() {
 	st := newStream()
 	r, err := review(os.Args[1:], st)
 	out := result{Type: "result", Subtype: "success", NumTurns: r.turns, Result: r.text, SessionID: "fake-reviewer", Cost: fakeCost,
-		Denials: r.denials, ModelUsage: map[string]usage{fakeModel: {CostUSD: fakeCost}}}
+		Denials: r.denials, ModelUsage: map[string]usage{modelOf(os.Args[1:]): {CostUSD: fakeCost}}}
 	if out.Denials == nil {
 		out.Denials = []denial{}
 	}
@@ -71,6 +71,25 @@ func main() {
 	}
 	st.line(out)
 	os.Exit(code)
+}
+
+func modelOf(args []string) string {
+	if m, ok := value(args, "--model"); ok && m != "" {
+		return m
+	}
+	return fakeModel
+}
+
+func given(args []string) string {
+	m, _ := value(args, "--model")
+	e, _ := value(args, "--effort")
+	if m == "" {
+		m = "none"
+	}
+	if e == "" {
+		e = "none"
+	}
+	return "\nGiven --model " + m + " and --effort " + e
 }
 
 func value(args []string, flag string) (string, bool) {
@@ -115,7 +134,8 @@ func review(args []string, st *stream) (reply, error) {
 		}
 		userAgent = found
 	}
-	if !named && !strings.Contains(strings.ToLower(prompt), "manual test list") {
+	aside := asideOf(prompt)
+	if !named && aside == "" && !strings.Contains(strings.ToLower(prompt), "manual test list") {
 		return reply{}, errors.New("no knackpack agent named")
 	}
 	plugin, _ := value(args, "--plugin-dir")
@@ -144,12 +164,16 @@ func review(args []string, st *stream) (reply, error) {
 	if !named && has("TOKEN-IN-REVIEW") {
 		return reply{text: "Manual test list (from the fake reviewer):\n1. Sign in with " + "sk-" + "ant-" + "api03-" + strings.Repeat("Fake0", 8) + ".", turns: 3}, nil
 	}
+	if !named && aside != "" {
+		return asideReply(aside, prompt), nil
+	}
 	if !named {
 		return reply{text: "Manual test list (from the fake reviewer):\n1. Open the page and start a session on the demo project.\n   Expected: the session shows as Running with its branch.\n   Input: none\n" +
 			"2. Change a file, commit it and press Push.\n   Expected: the push card shows the commit and both reviews.\n   Input: the line `hello from the walkthrough` added to README.md\n" +
 			"3. Check the push reached the git host.\n   Expected: the branch's commit on the git host is the session's latest commit.\n   Input: none", turns: 3}, nil
 	}
 	r := verdict(agent, prompt, st)
+	r.text = strings.Replace(r.text, "\n", given(args)+"\n", 1)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)
 	}
@@ -215,6 +239,10 @@ func verdict(agent, prompt string, st *stream) reply {
 		r.text = report + "\n### [High] head/SEVERE-PASS asks the fake reviewer to pass with a severe finding\n\n## Findings table\n\n| ID | Severity | Blocks | Title |\n|---|---|---|---|\n| F1 | High | yes | head/SEVERE-PASS |\n" + findingsLine() + "\nknackpack-verdict/1: pass"
 		return r
 	}
+	if has("LOW-FINDINGS") && agent == "knackpack:adversarial-reviewer" {
+		r.text = report + "\nNo blocking issues found.\n\n### [Low] head/LOW-FINDINGS asks for a first low finding\n\n**Location:** `README.md:1`\n\nThe first line could say more.\n\n### [Low] head/LOW-FINDINGS asks for a second low finding\n\n**Location:** `README.md:2`\n\nThe second line could be shorter.\n\nknackpack-findings/1: critical=0 high=0 medium=0 low=2 blocking=0\nknackpack-verdict/1: pass"
+		return r
+	}
 	pass := "No blocking issues found."
 	if agent == slopReviewer {
 		pass = "Nothing to remove in scope."
@@ -245,7 +273,8 @@ func earlier(prompt string) string {
 }
 
 func seen(prompt string) string {
-	flat := strings.Join(strings.Fields(prompt), " ")
+	whole := strings.Join(strings.Fields(prompt), " ")
+	flat := whole
 	if r := []rune(flat); len(r) > 1000 {
 		flat = string(r[:500]) + " … " + string(r[len(r)-500:])
 	}
@@ -257,5 +286,39 @@ func seen(prompt string) string {
 			}
 		}
 	}
-	return "Prompt: " + flat + "\nchange.diff: " + strings.Join(files, "; ")
+	out := "Prompt: " + flat + "\nchange.diff: " + strings.Join(files, "; ")
+	if i := strings.Index(whole, " The team file "); i >= 0 {
+		rest := whole[i:]
+		if j := strings.Index(rest, " Check what the agent says"); j >= 0 {
+			rest = rest[:j]
+		}
+		out += "\nTeam rules given:" + rest
+	}
+	return out
+}
+
+func asideOf(prompt string) string {
+	switch {
+	case strings.HasPrefix(prompt, "Explain the change in this folder"):
+		return "explain"
+	case strings.HasPrefix(prompt, "Review the implementation plan in plan.md"):
+		return "plan"
+	}
+	return ""
+}
+
+func asideReply(kind, prompt string) reply {
+	if has("TOKEN-IN-REVIEW") {
+		return reply{text: "## From the fake reviewer\n\nSign in with " + "sk-" + "ant-" + "api03-" + strings.Repeat("Fake0", 8) + ".", turns: 2}
+	}
+	if kind == "explain" {
+		return reply{text: "## What this change does (from the fake reviewer)\n\n" + seen(prompt) + "\n\n- **Read first:** `change.diff`\n- **Could break:** nothing the fake reviewer can tell.", turns: 2}
+	}
+	plan, err := os.ReadFile("plan.md")
+	first := "plan.md is missing"
+	if err == nil {
+		lines := strings.Split(string(plan), "\n")
+		first = fmt.Sprintf("plan.md has %d lines; its first line: %s", len(lines), lines[0])
+	}
+	return reply{text: "## Findings on the plan (from the fake reviewer)\n\n1. **Step 1** looks fine.\n2. " + first + "\n\n" + seen(prompt), turns: 2}
 }

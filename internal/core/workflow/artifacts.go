@@ -102,7 +102,9 @@ func AgentProblems(t *Team, installed []string) []string {
 		}
 	}
 	for i, r := range t.FileRules {
-		check("fileRules["+strconv.Itoa(i)+"]", r.Agent)
+		if r.Agent != "" {
+			check("fileRules["+strconv.Itoa(i)+"]", r.Agent)
+		}
 	}
 	for _, a := range t.Agents {
 		check("agents", a)

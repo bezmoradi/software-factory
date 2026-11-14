@@ -22,10 +22,12 @@ type Versions struct {
 	ClaudeCode string
 	Plugin     string
 	Models     []string
+	Model      string
+	Effort     string
 }
 
 func (v Versions) Covers(w Versions) bool {
-	if v.ClaudeCode == "" || v.ClaudeCode != w.ClaudeCode || v.Plugin != w.Plugin {
+	if v.ClaudeCode == "" || v.ClaudeCode != w.ClaudeCode || v.Plugin != w.Plugin || v.Model != w.Model || v.Effort != w.Effort {
 		return false
 	}
 	for _, m := range w.Models {
@@ -43,6 +45,12 @@ func (v Versions) Words() string {
 	}
 	if len(v.Models) > 0 {
 		parts = append(parts, "model "+strings.Join(v.Models, ", "))
+	}
+	if v.Model != "" {
+		parts = append(parts, "started with --model="+v.Model)
+	}
+	if v.Effort != "" {
+		parts = append(parts, "started with --effort="+v.Effort)
 	}
 	return strings.Join(parts, ", ")
 }

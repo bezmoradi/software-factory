@@ -235,6 +235,8 @@ func agentSide(agent string) string {
 		return SideAgents
 	case "codex":
 		return SideCodex
+	case DevAgentID:
+		return SideReviewers
 	}
 	return ""
 }

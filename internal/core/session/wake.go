@@ -232,7 +232,7 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	mine := map[string]*run{}
 	dir := ""
 	for sid, r := range d.runs {
-		if r.spec.Method == MethodPlugin && r.cwd != "" {
+		if r.spec.Method == MethodPlugin && r.cwd != "" && r.handedTo == "" && !r.handing {
 			mine[sid] = r
 			dir = r.cwd
 		}

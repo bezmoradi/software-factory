@@ -115,11 +115,13 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	sid := str(body["sid"], 80)
 	switch path {
 	case "/api/dispatch":
-		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk") {
+		rawFrom, hasFrom := body["from"]
+		from, okFrom := startFromOf(rawFrom, hasFrom)
+		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort") || !okFrom {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		for _, k := range []string{"path", "name", "model", "mode", "agent", "type"} {
+		for _, k := range []string{"path", "name", "model", "mode", "agent", "type", "effort"} {
 			if v, ok := body[k]; ok {
 				if _, isText := v.(string); !isText {
 					refuse(w, http.StatusBadRequest, k)
@@ -141,10 +143,25 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		if agent == "" {
 			agent = "claude"
 		}
+		issue, issueHash := 0, ""
+		_, hasHash := body["issueHash"]
+		if v, has := body["issue"]; has || hasHash {
+			n, ok := wholeNumber(v, 1, session.MaxIssueNumber)
+			h, isText := body["issueHash"].(string)
+			if !ok || !isText || !session.ValidIssueHash(h) {
+				refuse(w, http.StatusBadRequest, "issue")
+				return
+			}
+			issue, issueHash = n, h
+		}
 		started, err := s.cfg.Starter.Dispatch(ctx, session.Dispatch{
 			Path: str(body["path"], session.MaxCwd+1), Agent: agent, Name: str(body["name"], 400), Model: str(body["model"], 40), Type: str(body["type"], 40), Consent: consent,
+			From:      from,
+			Issue:     issue,
+			IssueHash: issueHash,
+			Effort:    str(body["effort"], 21),
 		})
-		s.logger.Info("dispatch", "agent", agent, "ok", err == nil)
+		s.logger.Info("dispatch", "agent", agent, "issue", issue > 0, "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

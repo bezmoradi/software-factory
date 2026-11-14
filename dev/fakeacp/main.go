@@ -358,6 +358,13 @@ func scripted(id json.RawMessage, text string) bool {
 				_ = f.Close()
 			}
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Edit " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "write":
+			file := filepath.Join(cwd, filepath.Clean("/"+value))
+			status := "completed"
+			if err := os.WriteFile(file, []byte("ok\n"), 0o644); err != nil {
+				status = "failed"
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
 		case "say":
 			chunk(value + "\n")
 		}

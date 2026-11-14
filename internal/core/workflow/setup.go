@@ -20,6 +20,7 @@ type Setup struct {
 	Agents      []string
 	FileRules   []FileRule
 	Rounds      int
+	Protect     []string
 }
 
 func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string) {
@@ -61,7 +62,7 @@ func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string)
 			roles[r] = a
 		}
 	}
-	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds}, problems
+	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect)}, problems
 }
 
 type Requirement struct {

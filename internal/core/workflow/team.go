@@ -14,8 +14,9 @@ import (
 const MaxTeamBytes = 64 * 1024
 
 type FileRule struct {
-	Pattern string
-	Agent   string
+	Pattern     string
+	Agent       string
+	Instruction string
 }
 
 type Team struct {
@@ -26,6 +27,7 @@ type Team struct {
 	Agents      []string
 	FileRules   []FileRule
 	Rounds      int
+	Protect     []string
 }
 
 var (
@@ -74,7 +76,7 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	var out []string
 	say := func(s string) { out = append(out, s) }
-	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "checks", "rounds"}, "the file", &out)
+	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "checks", "rounds", "protect"}, "the file", &out)
 	if v, ok := root.values["version"].(float64); !ok || v != 1 {
 		say("\"version\" must be 1")
 	}
@@ -111,6 +113,7 @@ func ParseTeam(text string) (*Team, []string) {
 		}
 	}
 	parseFileRules(root, team, &out)
+	parseProtect(root, team, &out)
 	if _, ok := root.values["checks"]; ok {
 		say("\"checks\" isn't supported: the engine has no trusted place to run the repository's commands, since a result from the agent container can be forged and reviewers only read")
 	}
@@ -268,7 +271,7 @@ func parseFileRules(root *object, team *Team, out *[]string) {
 			*out = append(*out, at+" must be an object")
 			continue
 		}
-		known(f, []string{"pattern", "agent"}, at, out)
+		known(f, []string{"pattern", "agent", "instruction"}, at, out)
 		pattern, isStr := asString(f.values["pattern"])
 		why := "a pattern must be 1 to 120 characters"
 		if isStr {
@@ -277,13 +280,24 @@ func parseFileRules(root *object, team *Team, out *[]string) {
 		if why != "" {
 			*out = append(*out, at+": "+why)
 		}
-		agent, agentOK := asString(f.values["agent"])
+		instruction, instructionOK := instructionOf(f.values)
+		if !instructionOK {
+			*out = append(*out, at+": \"instruction\" must be one line of 1 to "+strconv.Itoa(MaxInstruction)+" characters")
+		}
+		raw, hasAgent := f.values["agent"]
+		agent, agentOK := asString(raw)
 		agentOK = agentOK && agentName.MatchString(agent)
-		if !agentOK {
+		switch {
+		case !hasAgent && instruction == "":
+			agentOK = false
+			*out = append(*out, at+": a rule needs an \"agent\", an \"instruction\" or both")
+		case !hasAgent:
+			agentOK = true
+		case !agentOK:
 			*out = append(*out, at+": \"agent\" must name an agent")
 		}
-		if why == "" && agentOK {
-			team.FileRules = append(team.FileRules, FileRule{Pattern: pattern, Agent: agent})
+		if why == "" && agentOK && instructionOK {
+			team.FileRules = append(team.FileRules, FileRule{Pattern: pattern, Agent: agent, Instruction: instruction})
 		}
 	}
 }

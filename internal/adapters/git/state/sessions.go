@@ -66,6 +66,11 @@ type runJSON struct {
 	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
 
 	CodexThread string `json:"codexThread,omitempty"`
+
+	Origin     string      `json:"origin,omitempty"`
+	Earlier    []stintJSON `json:"earlier,omitempty"`
+	HandedTo   string      `json:"handedTo,omitempty"`
+	HandedHead string      `json:"handedHead,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -121,6 +126,7 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 			continue
 		}
 		v.InTurnSince = r.InTurnSince
+		lineageInto(&v, r)
 		seen[v.SID] = true
 		out = append(out, v)
 	}
@@ -137,6 +143,7 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
 		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
 		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
+		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 	}
 	return write(s.Dir, sessionsFile, f)
 }

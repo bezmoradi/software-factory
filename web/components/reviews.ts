@@ -2,7 +2,8 @@ import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
-import type { ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
+import { asideBox } from './aside-run.ts'
+import type { AsideRun, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
 const STATES: Record<string, [string, string]> = {
@@ -104,6 +105,7 @@ class SfReviews extends HTMLElement {
     const againFocused = !!this.#again && document.activeElement === this.#again
     const typing = this.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key ?? '' : ''
     const testFocused = document.activeElement?.id === 'test-list-button'
+    const explainFocused = document.activeElement?.id === 'explain-button'
     const pushFocused = document.activeElement === this.#push
     const r = value.review
     const running = !!r?.running || value.asking
@@ -184,6 +186,9 @@ class SfReviews extends HTMLElement {
       parts.push(el('p', 'small muted', 'No review of this session yet.'))
     }
     parts.push(this.#testList(value))
+    this.#last = value
+    this.#explainBox = this.#explain(value)
+    parts.push(this.#explainBox)
     this.#said ??= el('span', 'sr-only')
     this.#said.setAttribute('role', 'status')
     parts.push(this.#said)
@@ -196,9 +201,41 @@ class SfReviews extends HTMLElement {
     if (typing) this.querySelector<HTMLElement>(`[data-key="${CSS.escape(typing)}"]`)?.focus()
     if (pushFocused) p.focus({ preventScroll: true })
     if (testFocused) document.getElementById('test-list-button')?.focus({ preventScroll: true })
+    if (explainFocused) document.getElementById('explain-button')?.focus({ preventScroll: true })
     this.#ticking()
     const done = r && !r.running ? [failed?.said ?? '', r.roles.map(x => `${x.name}: ${STATES[x.state]?.[0] ?? x.state}`).join(', ')].filter(Boolean).join(' ') : ''
     if (this.#said.textContent !== done) this.#said.textContent = done
+  }
+
+  #last: ReviewsView | null = null
+  #explainBox: HTMLElement | null = null
+  #explainState: { run: AsideRun | null; asking: boolean } = { run: null, asking: false }
+  #explainKey = ''
+
+  set explain(value: { run: AsideRun | null; asking: boolean } | null) {
+    const next = value ?? { run: null, asking: false }
+    const key = JSON.stringify(next)
+    if (key === this.#explainKey) return
+    this.#explainKey = key
+    this.#explainState = next
+    if (!this.#last || !this.#explainBox?.isConnected) return
+    const focused = document.activeElement?.id === 'explain-button'
+    const box = this.#explain(this.#last)
+    this.#explainBox.replaceWith(box)
+    this.#explainBox = box
+    if (focused) document.getElementById('explain-button')?.focus({ preventScroll: true })
+  }
+
+  #explain(value: ReviewsView): HTMLElement {
+    const t = this.#explainState.run
+    return asideBox({
+      id: 'explain-button', title: 'Explain this change', start: 'Explain this change', busy: 'Explaining…', label: 'The explanation of the change',
+      hint: "Asks Claude Code in the reviewer container, with read-only tools, to explain the session branch's change against the remote's main branch. It isn't a review: the push gate and the agent never see it",
+      intro: 'On request, a reviewer run explains what the branch changes and where to look closely. It costs one run, and nothing reads it but you.',
+      run: t, asking: this.#explainState.asking, disabled: !!value.disabled,
+      stale: t && value.head && value.head !== t.commit ? ", which isn't the branch's latest commit any more" : '',
+      press: () => emit(this, 'sf-explain'),
+    })
   }
 
   #testList(value: ReviewsView): HTMLElement {

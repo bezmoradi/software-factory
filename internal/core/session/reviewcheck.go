@@ -85,7 +85,7 @@ func versionsOf(e ReviewEntry) review.Versions {
 	if e.Record.Provider == UploadedProvider {
 		plugin = e.Key.Agent
 	}
-	return review.Versions{ClaudeCode: e.ClaudeCode, Plugin: plugin, Models: slices.Clone(e.Models)}
+	return review.Versions{ClaudeCode: e.ClaudeCode, Plugin: plugin, Models: slices.Clone(e.Models), Model: e.RunModel, Effort: e.RunEffort}
 }
 
 func (r *Reviews) pluginFor(agent string) string {
@@ -275,10 +275,12 @@ func (r *Reviews) checksDue(entries []ReviewEntry) []dueCheck {
 	checks, _ := r.checkRecords()
 	var out []dueCheck
 	for _, e := range entries {
-		if e.Record.State != review.Pass || slices.ContainsFunc(out, func(d dueCheck) bool { return d.agent == e.Key.Agent }) {
+		v := versionsOf(e)
+		if e.Record.State != review.Pass || slices.ContainsFunc(out, func(d dueCheck) bool {
+			return d.agent == e.Key.Agent && d.versions.Model == v.Model && d.versions.Effort == v.Effort
+		}) {
 			continue
 		}
-		v := versionsOf(e)
 		if r.cfg.Minimum.Below(v, e.Record.Provider != UploadedProvider) != "" {
 			continue
 		}
@@ -351,7 +353,9 @@ func (r *Reviews) runCheck(ctx context.Context, agent string, role review.Role, 
 	} else {
 		var wg sync.WaitGroup
 		for i, ch := range []checkChange{defect, clean} {
-			wg.Go(func() { runs[i], costs[i], models[i] = r.checkRun(ctx, agent, role, v.ClaudeCode, ch, plugin) })
+			wg.Go(func() {
+				runs[i], costs[i], models[i] = r.checkRun(ctx, agent, role, v.ClaudeCode, ModelChoice{Model: v.Model, Effort: v.Effort}, ch, plugin)
+			})
 		}
 		wg.Wait()
 	}
@@ -376,7 +380,7 @@ func (r *Reviews) runCheck(ctx context.Context, agent string, role review.Role, 
 	return c
 }
 
-func (r *Reviews) checkRun(ctx context.Context, agent string, role review.Role, claude string, ch checkChange, plugin string) (CheckRunResult, float64, []string) {
+func (r *Reviews) checkRun(ctx context.Context, agent string, role review.Role, claude string, m ModelChoice, ch checkChange, plugin string) (CheckRunResult, float64, []string) {
 	snap, err := r.cfg.Snapshots.WriteMade(ch.base, ch.head, ch.commits)
 	if err != nil {
 		return CheckRunResult{State: review.Failed, Reason: clip(checkSnapFailed+err.Error(), 400)}, 0, nil
@@ -394,7 +398,7 @@ func (r *Reviews) checkRun(ctx context.Context, agent string, role review.Role, 
 	if provider == UploadedProvider {
 		prompt += AgentVerdictAsk
 	}
-	e, _ = r.review(ctx, ReviewTarget{}, e, strings.TrimRight(r.cfg.Dir, "/")+"/"+snap.ID, plugin, prompt)
+	e, _ = r.reviewAs(ctx, e, strings.TrimRight(r.cfg.Dir, "/")+"/"+snap.ID, plugin, prompt, m, nil)
 	return CheckRunResult{State: e.Record.State, Verdict: e.Record.Verdict, Reason: e.Reason, Reply: e.Message, Channel: e.Record.Channel}, e.CostUSD, e.Models
 }
 
@@ -504,6 +508,9 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	v := review.Versions{ClaudeCode: r.reviewerVersion(ctx), Plugin: r.pluginFor(agent)}
+	if last := latestOf(checks, agent); last != nil {
+		v.Model, v.Effort = last.Versions.Model, last.Versions.Effort
+	}
 	r.cfg.Logger.Info("review check", "event", "asked", "role", string(role))
 	r.wg.Go(func() {
 		defer release()

@@ -192,6 +192,13 @@ func (p engineParts) reviewing() session.ReviewStarter {
 	return p.dispatcher
 }
 
+func (p engineParts) branching() session.BranchPage {
+	if p.dispatcher == nil {
+		return nil
+	}
+	return p.dispatcher
+}
+
 func (p engineParts) starter() session.Starter {
 	if p.dispatcher == nil {
 		return nil
@@ -350,6 +357,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		return engineParts{}, err
 	}
 	commentAfterPush(pushes, forged)
+	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
 	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
 }
@@ -459,6 +467,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return err
 	}
 	srv.UseEgress(parts.egressPage())
+	srv.UseBranching(parts.branching())
 	useChangeFacts(sends, srv, reg, parts, cfg, logger)
 	if parts.dispatcher != nil {
 		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)
@@ -472,6 +481,9 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 	useAgentReports(sends, srv, parts, cfg, logger)
 	useViews(srv, parts, cfg, reg, logger)
+	useSavedPrompts(srv, parts, cfg, logger)
+	usePulls(sends, srv, reg, parts, cfg, logger)
+	useSessionWork(sends, srv, reg, parts, cfg, logger)
 
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()

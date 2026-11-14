@@ -23,6 +23,12 @@ const COMMENT_SAID: Record<string, string> = {
   commented: 'Software Factory posted this under your token after the push, as this project\'s settings ask.',
 }
 
+const FROM_SAID: Record<string, string> = {
+  '': 'The agent asked for this. Its text is shown exactly as written; read it before you approve, since the engine posts it under your token.',
+  page: 'You asked for this on the page, and the engine wrote it from its records: the branch, its commit messages, which the agent wrote, and the approved requirements\' title. Read it before you approve, since the engine posts it under your token.',
+  findings: 'You asked for this from a finding that didn\'t block a passing review. The finding\'s text is the reviewer\'s, as it wrote it; read it before you approve, since the engine posts it under your token.',
+}
+
 type ForgeAnswer = HTMLElementEventMap['sf-forge-answer']['detail']
 
 function secretKey(f: SessionForge): string {
@@ -114,7 +120,7 @@ class SfForgePanel extends HTMLElement {
     box.append(head, el('p', 'forge-title', shown(f.title)))
     if (pull) box.append(el('p', 'small muted forge-refs', `From ${shown(f.head)} into ${shown(f.base)}`))
     if (f.state === 'waiting' || f.state === 'sending') {
-      box.append(el('p', 'small muted', 'The agent asked for this. Its text is shown exactly as written; read it before you approve, since the engine posts it under your token.'))
+      box.append(el('p', 'small muted', FROM_SAID[f.from ?? ''] ?? FROM_SAID['']!))
       const body = el('pre', 'forge-body', f.body ? shown(f.body) : '(no body)')
       body.tabIndex = 0
       body.setAttribute('aria-label', `Body of the ${pull ? 'pull request' : 'issue'}`)
@@ -135,7 +141,7 @@ class SfForgePanel extends HTMLElement {
     }
     if (f.reason && f.state === 'waiting' && pull) box.append(el('p', 'small bad', `Asking again: ${shown(f.reason)}.`))
     if (f.reason && (f.state === 'failed' || f.state === 'denied' || f.state === 'opened' || f.state === 'unclear')) box.append(el('p', `small ${f.state === 'failed' ? 'bad' : 'muted'}`, shown(f.reason)))
-    if (pull && f.draft && f.state === 'opened') box.append(el('p', 'small muted', 'It opened as a draft: mark it ready for review on GitHub when you want reviews.'))
+    if (pull && f.draft && f.state === 'opened') box.append(el('p', 'small muted', 'It opened as a draft: mark it ready for review under Pull request, or on GitHub, when you want reviews.'))
     if (f.state === 'unclear') box.append(this.#matches(f))
     if (f.state === 'waiting') {
       const confirmed = f.secretAt ? { confirmed: true } : {}

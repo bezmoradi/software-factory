@@ -23,6 +23,7 @@ type SavedForgeCard struct {
 	Base   string
 	Commit string
 	Asked  time.Time
+	From   string
 }
 
 type ForgeCardStore interface {
@@ -67,7 +68,7 @@ func (f *Forges) saveCards() {
 		for _, c := range list {
 			if len(out) < maxSavedCards && storable(c) {
 				v := c.view
-				out = append(out, SavedForgeCard{SID: sid, Card: v.Card, Kind: v.Kind, Title: v.Title, Body: v.Body, Head: v.Head, Base: v.Base, Commit: v.Commit, Asked: v.Asked})
+				out = append(out, SavedForgeCard{SID: sid, Card: v.Card, Kind: v.Kind, Title: v.Title, Body: v.Body, Head: v.Head, Base: v.Base, Commit: v.Commit, Asked: v.Asked, From: v.From})
 			}
 		}
 	}
@@ -123,7 +124,7 @@ func (f *Forges) Restore(open AuditOpen) int {
 		if why != "" || (s.Kind == ForgePull && (s.Head != ft.t.Branch || s.Base == "")) {
 			continue
 		}
-		v := ForgeView{Card: s.Card, Kind: s.Kind, State: ForgeWaiting, Title: s.Title, Body: s.Body, Host: ft.repo.Host, Repo: ft.repo.Slug(), Asked: s.Asked, At: now}
+		v := ForgeView{Card: s.Card, Kind: s.Kind, State: ForgeWaiting, Title: s.Title, Body: s.Body, Host: ft.repo.Host, Repo: ft.repo.Slug(), Asked: s.Asked, At: now, From: s.From}
 		if s.Kind == ForgePull {
 			v.Head, v.Base = s.Head, s.Base
 			if commitSHA.MatchString(s.Commit) {

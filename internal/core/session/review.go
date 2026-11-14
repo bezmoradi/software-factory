@@ -51,6 +51,8 @@ type ReviewEntry struct {
 	PluginCommit string
 	ClaudeCode   string
 	Models       []string
+	RunModel     string
+	RunEffort    string
 	Turns        int
 	Denied       []string
 	Failure      string
@@ -122,6 +124,9 @@ type ReviewView struct {
 	CostUSD        float64
 	SessionCostUSD float64
 	TestList       *TestListView
+
+	PlanReview *AsideView
+	Explain    *AsideView
 }
 
 func (v ReviewView) clone() ReviewView {
@@ -130,6 +135,7 @@ func (v ReviewView) clone() ReviewView {
 		t := *v.TestList
 		v.TestList = &t
 	}
+	v.PlanReview, v.Explain = v.PlanReview.copied(), v.Explain.copied()
 	if v.SignIn != nil {
 		s := *v.SignIn
 		v.SignIn = &s
@@ -150,6 +156,8 @@ type ReviewTarget struct {
 
 	Approved func(head, main string) ApprovedText
 	Claims   string
+
+	TeamRules func(base, head string) TeamRules
 }
 
 type ReviewStarter interface {
@@ -207,6 +215,9 @@ type Reviews struct {
 	rateHandlers []func(side string, w []RateWindow)
 	testStore    sync.Mutex
 	changeFacts  ChangeBlobs
+
+	asides     map[string]AsideView
+	roleModels func(path string, role review.Role) ModelChoice
 }
 
 func (r *Reviews) OnDone(fn func(sid, head string)) {
@@ -348,6 +359,7 @@ func (r *Reviews) roles() []review.Role {
 func (r *Reviews) show(sid string, v ReviewView) {
 	r.mu.Lock()
 	v.TestList = r.testListOf(sid)
+	v.PlanReview, v.Explain = r.asideOf(AsidePlanReview, sid), r.asideOf(AsideExplain, sid)
 	r.views[sid] = v.clone()
 	r.mu.Unlock()
 	r.cfg.Show(sid, v.clone())
@@ -467,7 +479,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		if providerFor(r.cfg.AgentFiles, entries[i].Key.Agent) == UploadedProvider {
 			prompts[i] += AgentVerdictAsk
 		}
-		view.Roles[i].Given = givenOf(ReviewArgv(r.cfg.Command, plugin, entries[i].Key.Agent, prompts[i]), plans[i].base, head, extra[plans[i].base])
+		view.Roles[i].Given = givenOf(ReviewArgvWith(r.cfg.Command, plugin, entries[i].Key.Agent, prompts[i], r.roleModelFor(t.Repo, entries[i].Role)), plans[i].base, head, extra[plans[i].base])
 	}
 	r.show(t.SID, view.clone())
 	var mu sync.Mutex

@@ -34,6 +34,7 @@ var notGitHub = map[string]bool{
 type API struct {
 	Client *http.Client
 	Expiry func(host, header string)
+	Rates  *Rates
 }
 
 var _ session.ForgeAPI = API{}
@@ -108,6 +109,10 @@ func (a API) do(ctx context.Context, r session.ForgeRepo, method, path string, i
 }
 
 func (a API) send(ctx context.Context, r session.ForgeRepo, method, path string, in any, need string, out any) (int, http.Header, error) {
+	return a.sendTo(ctx, r, method, Base(r.Host)+path, in, need, out)
+}
+
+func (a API) sendTo(ctx context.Context, r session.ForgeRepo, method, address string, in any, need string, out any) (int, http.Header, error) {
 	var body io.Reader
 	if in != nil {
 		data, err := json.Marshal(in)
@@ -116,7 +121,7 @@ func (a API) send(ctx context.Context, r session.ForgeRepo, method, path string,
 		}
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, Base(r.Host)+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, address, body)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -147,9 +152,12 @@ func (a API) send(ctx context.Context, r session.ForgeRepo, method, path string,
 		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: bare(r.Host) + " doesn't answer like GitHub's API at " + Base(r.Host) + ", so this tool isn't supported for it"}
 	}
 	a.noteExpiry(r.Host, resp)
+	a.Rates.note(bare(r.Host), resp.StatusCode, resp.Header)
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: "GitHub refused the saved token (401: " + describe(resp.StatusCode, data) + "); it may have expired or been revoked, so ask the person to save a new one"}
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: "GitHub's rate limit for the token was reached; try again later"}
 	case resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != ""):
 		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: "GitHub's rate limit for the token was reached; try again later"}
 	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound:
@@ -276,6 +284,10 @@ type runJSON struct {
 }
 
 func (a API) Checks(ctx context.Context, r session.ForgeRepo, commit string) (session.CheckReport, error) {
+	return a.checkReport(ctx, r, commit, true)
+}
+
+func (a API) checkReport(ctx context.Context, r session.ForgeRepo, commit string, logs bool) (session.CheckReport, error) {
 	var rep session.CheckReport
 	var runs struct {
 		Total int       `json:"total_count"`
@@ -310,7 +322,7 @@ func (a API) Checks(ctx context.Context, r session.ForgeRepo, commit string) (se
 			run.App = x.App.Name
 			actions = x.App.Slug == "github-actions"
 		}
-		if actions && failed(x.Conclusion) && x.ID > 0 {
+		if logs && actions && failed(x.Conclusion) && x.ID > 0 {
 			if logged >= maxLoggedRun {
 				run.LogNote = "not fetched: only the first " + strconv.Itoa(maxLoggedRun) + " failed jobs' logs are included"
 			} else {

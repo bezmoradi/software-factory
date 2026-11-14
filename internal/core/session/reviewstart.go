@@ -154,6 +154,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	if t.Approved != nil {
 		given.approved = t.Approved(head, main)
 	}
+	if t.TeamRules != nil {
+		given.team = t.TeamRules(base, head)
+	}
 	r.cfg.Logger.Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.wg.Go(func() {
 		r.run(t, head, r.reviewerVersion(r.cfg.Base), plans, plugin, view, held, given)

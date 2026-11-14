@@ -14,6 +14,8 @@ interface ReviewerCheck {
   claudeCode: string
   plugin: string
   models: string[]
+  model: string
+  effort: string
   defect: CheckRun
   clean: CheckRun
   by: string
@@ -67,6 +69,7 @@ function readCheck(x: unknown): ReviewerCheck | null {
   return {
     result: text(c.result), reason: text(c.reason), claudeCode: text(c.claudeCode), plugin: text(c.plugin),
     models: Array.isArray(c.models) ? c.models.filter((m): m is string => typeof m === 'string') : [],
+    model: text(c.model), effort: text(c.effort),
     defect: readRun(c.defect), clean: readRun(c.clean), by: text(c.by),
     startedAt: Number(c.startedAt) || 0, endedAt: Number(c.endedAt) || 0, costUsd: Number(c.costUsd) || 0,
   }
@@ -189,7 +192,7 @@ class SfReviewerChecks extends HTMLElement {
     const [label, tone] = r.running && c?.result !== 'running' ? RESULTS.running! : RESULTS[c?.result ?? ''] ?? ['Not checked yet', 'muted']
     what.append(el('strong', '', `The ${visible(r.roleName)}`), el('span', 'small muted', ` ${visible(r.agent)}`), el('p', `small ${tone}`, label))
     if (c) {
-      const versions = [`Claude Code ${visible(c.claudeCode)}`, c.plugin ? `plugin or agent file ${visible(short(c.plugin))}` : '', c.models.length ? `model ${c.models.map(visible).join(', ')}` : ''].filter(Boolean).join(' · ')
+      const versions = [`Claude Code ${visible(c.claudeCode)}`, c.plugin ? `plugin or agent file ${visible(short(c.plugin))}` : '', c.models.length ? `model ${c.models.map(visible).join(', ')}` : '', `run with ${c.model ? `--model=${visible(c.model)}` : 'the default model'} and ${c.effort ? `--effort=${visible(c.effort)}` : 'the default effort'}`].filter(Boolean).join(' · ')
       const at = c.endedAt ? `finished ${when(c.endedAt)}` : `started ${when(c.startedAt)}`
       what.append(el('p', 'small muted', `${versions} · ${c.by === 'page' ? 'started from this page' : 'after an update'}, ${at}`))
       if (c.reason) what.append(el('p', 'small', visible(c.reason)))
@@ -218,7 +221,7 @@ class SfReviewerChecks extends HTMLElement {
     const off = target.disabled || this.#busy !== ''
     const help = el('div', 'small muted')
     help.append(
-      el('p', '', 'After the reviewer container\'s Claude Code, a role\'s plugin or agent file, or its model changes, the engine checks that role before its next pass counts: it reviews a change with a planted defect, which it must block (the simplicity checker may instead report it as a finding, as knackpack\'s slop reviewer does with code that costs upkeep), and a clean change, which it should pass. A role that passes the defect without reporting it stops counting until a later check passes; a role that blocks the clean change only gets a warning; a check with no verdict leaves passes counting until you press Check now. Each run\'s reply is kept, under the result.'),
+      el('p', '', 'After the reviewer container\'s Claude Code, a role\'s plugin or agent file, or its model or effort changes, the engine checks that role, run with the role\'s own model and effort, before its next pass counts: it reviews a change with a planted defect, which it must block (the simplicity checker may instead report it as a finding, as knackpack\'s slop reviewer does with code that costs upkeep), and a clean change, which it should pass. A role that passes the defect without reporting it stops counting until a later check passes; a role that blocks the clean change only gets a warning; a check with no verdict leaves passes counting until you press Check now, which checks again with the model and effort of the latest check shown. Each run\'s reply is kept, under the result.'),
     )
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer checks'), help]
     if (v) {
