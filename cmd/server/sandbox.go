@@ -37,7 +37,7 @@ func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
 	sb := SandboxConfig{Proxy: "egress:3128", Status: "egress-control:3129", Outside: DefaultOutsideHost, Dir: cfg.Workspace}
 	switch v := getenv("SF_SANDBOX_CHECK"); v {
 	case "", "on":
-		sb.On = cfg.AgentHost != ""
+		sb.On = cfg.Helper != ""
 	case "off":
 		if dockerEdition(cfg) {
 			return errors.New("SF_SANDBOX_CHECK=off is only for development outside Docker, and this engine runs as the Docker edition (SF_PAGE_HOST=0.0.0.0 or SF_PAGE_NAME is set), so it doesn't start: remove SF_SANDBOX_CHECK from the engine's environment")
@@ -112,28 +112,28 @@ func listsOf(sb SandboxConfig) docker.Lists {
 	return sb.Allowlist
 }
 
-func egressLists(cfg PageConfig, repos *session.Repos, logger shared.Logger) (*session.Allowlist, *tls.Config, error) {
+func egressLists(cfg PageConfig, repos *session.Repos, logger shared.Logger) (*session.Allowlist, *tls.Config, *docker.Control, error) {
 	sb := cfg.Sandbox
 	if !sb.On || sb.KeyFile == "" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	tc, err := docker.WriteControlTLS(controlFile(sb.KeyFile, ControlCertName), controlFile(sb.KeyFile, ControlTLSKeyName), sb.Status)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	key, err := docker.WriteControlKey(sb.KeyFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	control, err := docker.NewControl(sb.Status, key, tc)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	allow, err := session.NewAllowlist(session.AllowlistConfig{
 		Store: state.NewEgress(cfg.StateDir), Control: control, Base: sb.Allow, Deny: sb.Deny, Outside: sb.Outside,
 		Repos: gitHostsOf(repos), Audit: state.NewAudit(cfg.StateDir), Logger: logger,
 	})
-	return allow, tc, err
+	return allow, tc, control, err
 }
 
 func (p engineParts) egressPage() session.EgressPage {

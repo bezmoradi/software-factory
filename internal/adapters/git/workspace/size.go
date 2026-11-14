@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 
@@ -18,7 +17,9 @@ const (
 
 type Disk struct{}
 
-type Sizes struct{}
+type Sizes struct {
+	OpenTree func(path string) (*os.Root, error)
+}
 
 var (
 	_ session.DiskSpace = Disk{}
@@ -27,23 +28,15 @@ var (
 
 var errNotTree = errors.New("not a worktree folder")
 
-func (Sizes) Size(ctx context.Context, workspace, tree string, maxEntries int) (session.TreeSize, error) {
+func (s Sizes) Size(ctx context.Context, workspace, box, tree string, maxEntries int) (session.TreeSize, error) {
 	var out session.TreeSize
-	root, err := os.OpenRoot(workspace)
-	if err != nil {
-		return out, err
+	dir := session.BoxWorktree(workspace, box, tree)
+	if dir == "" || s.OpenTree == nil {
+		return out, errNotTree
 	}
-	defer func() { _ = root.Close() }()
-	rel := path.Join("worktrees", tree)
-	for _, p := range []string{"worktrees", rel} {
-		info, err := root.Lstat(p)
-		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			return out, errNotTree
-		}
-	}
-	sub, err := root.OpenRoot(rel)
+	sub, err := s.OpenTree(dir)
 	if err != nil {
-		return out, err
+		return out, errNotTree
 	}
 	defer func() { _ = sub.Close() }()
 	type folder struct {

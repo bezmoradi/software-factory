@@ -53,6 +53,7 @@ type runJSON struct {
 	Name      string    `json:"name"`
 	Branch    string    `json:"branch"`
 	Cwd       string    `json:"cwd"`
+	Box       string    `json:"box,omitempty"`
 	Display   string    `json:"display,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	Sandboxed bool      `json:"sandboxed,omitempty"`
@@ -131,6 +132,9 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 		}
 		v.InTurnSince = r.InTurnSince
 		v.HistoryOnly = r.HistoryOnly
+		if session.ValidBox(r.Box) {
+			v.Box = r.Box
+		}
 		lineageInto(&v, r)
 		seen[v.SID] = true
 		out = append(out, v)
@@ -150,6 +154,9 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
+		if session.ValidBox(r.Box) {
+			f.Sessions[len(f.Sessions)-1].Box = r.Box
+		}
 	}
 	return write(s.Dir, sessionsFile, f)
 }

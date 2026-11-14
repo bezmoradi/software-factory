@@ -41,7 +41,7 @@ type TreeSize struct {
 }
 
 type TreeSizes interface {
-	Size(ctx context.Context, workspace, tree string, maxEntries int) (TreeSize, error)
+	Size(ctx context.Context, workspace, box, tree string, maxEntries int) (TreeSize, error)
 }
 
 type WorkspaceSession struct {
@@ -51,6 +51,7 @@ type WorkspaceSession struct {
 	Path    string
 	Branch  string
 	Tree    string
+	Box     string
 	Running bool
 }
 
@@ -118,7 +119,7 @@ func (d *Dispatcher) WorkspaceSessions() []WorkspaceSession {
 	defer d.mu.Unlock()
 	out := make([]WorkspaceSession, 0, len(d.runs))
 	for sid, r := range d.runs {
-		out = append(out, WorkspaceSession{SID: sid, Name: r.display, Repo: r.repo, Path: r.repoPath, Branch: r.branch, Tree: r.name, Running: r.running})
+		out = append(out, WorkspaceSession{SID: sid, Name: r.display, Repo: r.repo, Path: r.clone, Branch: r.branch, Tree: r.name, Box: r.box, Running: r.running})
 	}
 	slices.SortFunc(out, func(a, b WorkspaceSession) int {
 		if a.Repo != b.Repo {
@@ -159,7 +160,7 @@ func (w *Workspace) WorkspaceView(ctx context.Context) (WorkspaceView, error) {
 	defer cancel()
 	for _, s := range w.cfg.Sessions() {
 		row := w.row(s, pushed)
-		row.Size, row.SizeKnown = w.size(ctx, s.Tree)
+		row.Size, row.SizeKnown = w.size(ctx, s.Box, s.Tree)
 		v.Sessions = append(v.Sessions, row)
 	}
 	return v, nil
@@ -205,6 +206,9 @@ func (w *Workspace) state(s WorkspaceSession, pushed map[string][]string) (strin
 	if w.cfg.Heads == nil || w.cfg.History == nil || w.cfg.Main == nil {
 		return "", TreeUnknown, "The engine can't read this session's branch here."
 	}
+	if s.Box == "" || s.Path == "" {
+		return "", TreeUnknown, OldLayoutReason
+	}
 	if pushed == nil {
 		return "", TreeUnknown, "The engine couldn't read its audit file, so it can't tell what was pushed."
 	}
@@ -228,13 +232,14 @@ func (w *Workspace) state(s WorkspaceSession, pushed map[string][]string) (strin
 	return head, TreeUnpushed, "The branch " + s.Branch + " has commits that aren't pushed or on main. Push them first, or delete the session from its own menu."
 }
 
-func (w *Workspace) size(ctx context.Context, tree string) (TreeSize, bool) {
-	if w.cfg.Sizes == nil || w.cfg.Dir == "" || !workspaceTree.MatchString(tree) {
+func (w *Workspace) size(ctx context.Context, box, tree string) (TreeSize, bool) {
+	if w.cfg.Sizes == nil || w.cfg.Dir == "" || !workspaceTree.MatchString(tree) || !ValidBox(box) {
 		return TreeSize{}, false
 	}
 	now := w.cfg.Now()
+	key := box + "/" + tree
 	w.mu.Lock()
-	k, ok := w.sizes[tree]
+	k, ok := w.sizes[key]
 	w.mu.Unlock()
 	if ok && now.Sub(k.at) >= 0 && now.Sub(k.at) < treeSizeKept {
 		return k.size, true
@@ -246,7 +251,7 @@ func (w *Workspace) size(ctx context.Context, tree string) (TreeSize, bool) {
 	defer w.walk.Unlock()
 	one, cancel := context.WithTimeout(ctx, TreeSizeFor)
 	defer cancel()
-	size, err := w.cfg.Sizes.Size(one, w.cfg.Dir, tree, MaxTreeEntries)
+	size, err := w.cfg.Sizes.Size(one, w.cfg.Dir, box, tree, MaxTreeEntries)
 	if err != nil {
 		return TreeSize{}, false
 	}
@@ -254,7 +259,7 @@ func (w *Workspace) size(ctx context.Context, tree string) (TreeSize, bool) {
 	if len(w.sizes) >= maxTreeSizes {
 		clear(w.sizes)
 	}
-	w.sizes[tree] = keptSize{size: size, at: now}
+	w.sizes[key] = keptSize{size: size, at: now}
 	w.mu.Unlock()
 	return size, true
 }
@@ -280,7 +285,7 @@ func (w *Workspace) DeleteSession(ctx context.Context, sid string, offer *Offer)
 	out, err := w.cfg.Remove(ctx, sid, offer)
 	if err == nil {
 		w.mu.Lock()
-		delete(w.sizes, s.Tree)
+		delete(w.sizes, s.Box+"/"+s.Tree)
 		w.mu.Unlock()
 		if w.cfg.Logger != nil {
 			w.cfg.Logger.Info("workspace", "event", "session-deleted", "state", row.State)

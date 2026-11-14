@@ -1,7 +1,6 @@
 package server
 
 import (
-	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/workspace"
@@ -30,18 +29,16 @@ func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.
 	recaps := session.NewRecaps(session.RecapsConfig{Audit: audit, Store: state.NewRecapSeen(cfg.StateDir), Targets: d.PushTarget, Waiting: waitingIn(reg), Logger: logger})
 	var ws session.WorkspacePage
 	if parts.repos != nil && cfg.Workspace != "" {
-		ws = session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{}, Sessions: d.WorkspaceSessions,
+		ws = session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{OpenTree: files.OpenTree}, Sessions: d.WorkspaceSessions,
 			Heads: files.Reviews{}, History: files.Reader{}, Main: parts.repos.Main, Audit: audit, Remove: d.Remove, Logger: logger})
 	}
 	ex := session.ExceptionsConfig{Audit: audit}
 	if parts.allowlist != nil {
 		ex.Egress = parts.allowlist.EgressView
 	}
-	if parts.repos != nil && cfg.AgentHost != "" {
-		if client, err := agenthost.NewClient(cfg.AgentHost); err == nil {
-			ex.Repos = parts.repos
-			ex.Rules = &session.AllowRules{Host: client, Repos: parts.repos, Audit: audit}
-		}
+	if parts.repos != nil && parts.routes != nil {
+		ex.Repos = parts.repos
+		ex.Rules = &session.AllowRules{Host: anyBox{routes: parts.routes}, Repos: parts.repos, Audit: audit}
 	}
 	srv.UseViews(recaps, ws, session.NewExceptions(ex))
 }

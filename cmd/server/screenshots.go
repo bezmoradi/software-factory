@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -23,21 +24,38 @@ type hostSweep struct {
 
 type hostedScreenshots struct {
 	page.Screenshots
-	host  *agenthost.Client
-	sweep *hostSweep
+	routes *boxRoutes
+	sweep  *hostSweep
 }
 
-func (s hostedScreenshots) Drop(name string) error {
-	err := s.Screenshots.Drop(name)
-	if err == nil || s.host == nil {
+type shotRemover interface {
+	RemoveScreenshots(ctx context.Context, name string) (bool, error)
+}
+
+func (s hostedScreenshots) Drop(box, name string) error {
+	err := s.Screenshots.Drop(box, name)
+	if err == nil || s.routes == nil {
 		return err
 	}
-	s.askHost(name)
-	_ = s.Screenshots.Drop(name)
-	return s.Gone(name)
+	s.askHost(box, name)
+	_ = s.Screenshots.Drop(box, name)
+	return s.Gone(box, name)
 }
 
-func (s hostedScreenshots) askHost(name string) {
+func (s hostedScreenshots) askHost(box, name string) {
+	h, ok := s.routes.Host(box)
+	if !ok {
+		return
+	}
+	var remover shotRemover
+	switch v := h.(type) {
+	case *agenthost.Client:
+		remover = v
+	case gatewayHost:
+		remover = v.Client
+	default:
+		return
+	}
 	parent := context.Background()
 	if s.sweep != nil {
 		if s.sweep.down {
@@ -46,7 +64,7 @@ func (s hostedScreenshots) askHost(name string) {
 		parent = s.sweep.ctx
 	}
 	ctx, cancel := context.WithTimeout(parent, shotsHostTimeout)
-	_, err := s.host.RemoveScreenshots(ctx, name)
+	_, err := remover.RemoveScreenshots(ctx, name)
 	cancel()
 	if err != nil && s.sweep != nil {
 		s.sweep.down = true
@@ -56,20 +74,11 @@ func (s hostedScreenshots) askHost(name string) {
 	}
 }
 
-func useScreenshots(reg *session.Registry, workspace, agentHost string, logger shared.Logger) *hostedScreenshots {
+func useScreenshots(reg *session.Registry, workspace string, routes *boxRoutes, logger shared.Logger) *hostedScreenshots {
 	if workspace == "" {
 		return nil
 	}
-	files := page.Screenshots{Workspace: workspace}
-	if err := files.Prepare(); err != nil {
-		logger.Warn("screenshots", "event", "top-folder-not-made")
-	}
-	hosted := hostedScreenshots{Screenshots: files}
-	if agentHost != "" {
-		if client, err := agenthost.NewClient(agentHost); err == nil {
-			hosted.host = client
-		}
-	}
+	hosted := hostedScreenshots{Workspace: workspace, OpenBox: files.OpenBox, routes: routes}
 	reg.UseScreenshots(hosted, logger)
 	return &hosted
 }

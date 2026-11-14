@@ -26,6 +26,7 @@ var (
 	commitHash = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	dirtyText  = regexp.MustCompile(`(?i)contains modified or untracked files|is dirty|use --force`)
 	usedText   = regexp.MustCompile(`(?i)is already (checked out|used by worktree)`)
+	notTree    = regexp.MustCompile(`(?i)is not a working tree|not a git repository`)
 )
 
 func validBranch(b string) bool {
@@ -117,6 +118,7 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 	}
 	args := []string{"worktree", "add", "-b", q.Branch, "--", path, q.Base}
 	if q.Existing {
+		_, _ = s.git(ctx, repo, "worktree", "prune")
 		if p := s.existingBranch(ctx, repo, q.Branch); p != nil {
 			return "", p
 		}
@@ -262,6 +264,14 @@ func (s *Server) removeWorktree(ctx context.Context, q worktreeJSON) *problem {
 		args = append(args, "--force", "--force")
 	}
 	out, err := s.git(ctx, repo, append(args, "--", path)...)
+	if err != nil && notTree.MatchString(out) && !dirtyText.MatchString(out) {
+		if p := s.setAside(q.Name); p != nil {
+			return p
+		}
+		_, _ = s.git(ctx, repo, "worktree", "prune")
+		s.log.Info("agent-host worktree", "event", "set-aside")
+		return nil
+	}
 	if err != nil {
 		if !q.Force && dirtyText.MatchString(out) {
 			return fail(http.StatusConflict, "dirty", "The worktree has changes that aren't committed.")
@@ -271,5 +281,21 @@ func (s *Server) removeWorktree(ctx context.Context, q worktreeJSON) *problem {
 	}
 	_, _ = s.git(ctx, repo, "worktree", "prune")
 	s.log.Info("agent-host worktree", "event", "removed")
+	return nil
+}
+
+func (s *Server) setAside(name string) *problem {
+	root, err := os.OpenRoot(s.cfg.Workspace)
+	if err != nil {
+		return fail(http.StatusInternalServerError, "workspace", "agent-host couldn't open its workspace folder.")
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat("worktrees")
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fail(http.StatusConflict, "worktree", "The worktrees folder isn't a plain folder.")
+	}
+	if err := root.Rename("worktrees/"+name, "worktrees/.broken-"+name+"-"+randomID()); err != nil {
+		return fail(http.StatusConflict, "worktree", "agent-host couldn't move the broken worktree aside.")
+	}
 	return nil
 }

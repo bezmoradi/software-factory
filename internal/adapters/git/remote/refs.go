@@ -3,8 +3,6 @@ package remote
 import (
 	"context"
 	"errors"
-	"os"
-	"path"
 	"slices"
 	"strings"
 
@@ -47,16 +45,11 @@ func (r Remote) FetchHead(ctx context.Context, q session.HeadFetch) (string, err
 	if _, err := endpoint(q.URL); err != nil {
 		return "", err
 	}
-	ws, err := os.OpenRoot(r.Workspace)
+	git, done, err := r.baseGit(q.Name)
 	if err != nil {
-		return "", errors.New("the workspace can't be opened")
+		return "", err
 	}
-	defer func() { _ = ws.Close() }()
-	git, err := ws.OpenRoot(path.Join("repos", q.Name, ".git"))
-	if err != nil {
-		return "", errors.New("the clone's .git folder is missing from the workspace")
-	}
-	defer func() { _ = git.Close() }()
+	defer done()
 	k, err := r.open(ctx, q.URL, q.Token)
 	if err != nil {
 		return "", err

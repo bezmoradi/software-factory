@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -43,6 +44,12 @@ type refusalJSON struct {
 	Target string `json:"target"`
 	Name   string `json:"name"`
 	Reason string `json:"reason"`
+	Subnet string `json:"subnet,omitempty"`
+}
+
+type boxesJSON struct {
+	Version string   `json:"version"`
+	Subnets []string `json:"subnets"`
 }
 
 type refusalsJSON struct {
@@ -68,6 +75,7 @@ type StatusConfig struct {
 	Books   []*Refusals
 	Seen    map[string]*Seen
 	KeyFile string
+	Subnets *Subnets
 }
 
 func StatusHandler(cfg StatusConfig) http.Handler {
@@ -134,6 +142,45 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			return
 		}
 		writeJSON(w, statusOf(cfg.Live.snapshot()))
+	})
+	mux.HandleFunc("PUT /boxes", func(w http.ResponseWriter, r *http.Request) {
+		if !keyed(w, r, cfg.KeyFile) {
+			return
+		}
+		if cfg.Subnets == nil {
+			http.Error(w, "egress takes no box subnets", http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			http.Error(w, "the subnets must be JSON", http.StatusUnsupportedMediaType)
+			return
+		}
+		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxControlBody))
+		if err != nil {
+			http.Error(w, "the subnets are larger than egress reads", http.StatusRequestEntityTooLarge)
+			return
+		}
+		var q boxesJSON
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&q) != nil || q.Version != Version || q.Subnets == nil || len(q.Subnets) > MaxSubnets {
+			http.Error(w, "the subnets aren't ones egress reads", http.StatusBadRequest)
+			return
+		}
+		list := make([]netip.Prefix, 0, len(q.Subnets))
+		for _, raw := range q.Subnets {
+			p, err := netip.ParsePrefix(raw)
+			if err != nil {
+				http.Error(w, "a subnet isn't one egress reads", http.StatusBadRequest)
+				return
+			}
+			list = append(list, p)
+		}
+		if err := cfg.Subnets.Replace(list); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, boxesJSON{Version: Version, Subnets: q.Subnets})
 	})
 	mux.HandleFunc("GET /refused", func(w http.ResponseWriter, r *http.Request) {
 		if !keyed(w, r, cfg.KeyFile) {

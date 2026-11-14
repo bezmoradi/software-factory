@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
@@ -190,12 +189,11 @@ func mcpList(cfg PageConfig) func() *session.Command {
 func useAgentReports(base context.Context, srv *page.Server, parts engineParts, cfg PageConfig, logger shared.Logger) {
 	report := agentReport{installer: parts.installer, advisories: watchAdvisories(base, os.Getenv, logger)}
 	var rules session.AllowRulesPage
-	if cfg.AgentHost != "" && parts.dispatcher != nil && parts.repos != nil {
-		if client, err := agenthost.NewClient(cfg.AgentHost); err == nil {
-			report.home = &session.HomeSettings{Reader: client, Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}
-			parts.dispatcher.UseHomeSettings(report.home)
-			rules = &session.AllowRules{Host: client, Repos: parts.repos, Audit: state.NewAudit(cfg.StateDir)}
-		}
+	if parts.routes != nil && parts.dispatcher != nil && parts.repos != nil {
+		any := anyBox{routes: parts.routes}
+		report.home = &session.HomeSettings{Reader: any, Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}
+		parts.dispatcher.UseHomeSettings(report.home)
+		rules = &session.AllowRules{Host: any, Repos: parts.repos, Audit: state.NewAudit(cfg.StateDir)}
 	}
 	srv.UseAgentReports(report, rules)
 }

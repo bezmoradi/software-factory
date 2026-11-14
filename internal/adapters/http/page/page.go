@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ type Config struct {
 	ReviewerSignIn func() (session.SignIn, bool)
 	Work           session.WorkPage
 	Workspace      string
+	OpenTree       func(path string) (*os.Root, error)
 	Audit          session.AuditPage
 	Logins         session.LoginPage
 	Forge          session.ForgeService

@@ -19,7 +19,7 @@ func notTrusted(repo, path string) *Error {
 
 func (d *Dispatcher) Trust(ctx context.Context, path, approve string) error {
 	spec, ok := d.claudeSpec()
-	host, isTrust := d.cfg.Host.(TrustHost)
+	host, isTrust := d.cfg.AnyHost.(TrustHost)
 	if !ok || !isTrust || d.cfg.Repositories == nil {
 		return explained(conflict("trust"), "This engine can't answer Claude Code's trust question.")
 	}

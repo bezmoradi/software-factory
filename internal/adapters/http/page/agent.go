@@ -49,6 +49,14 @@ func (s *Server) agentReject(w http.ResponseWriter, r *http.Request, status int,
 	refuse(w, status, why)
 }
 
+func pushToken(r *http.Request) string {
+	values := r.Header.Values("X-SF-Push")
+	if len(values) != 1 {
+		return ""
+	}
+	return values[0]
+}
+
 func connSecret(r *http.Request) string {
 	values := r.Header.Values("X-SF-Conn")
 	if len(values) != 1 {
@@ -78,6 +86,11 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost && !isJSON(r) {
 		refuse(w, http.StatusUnsupportedMediaType, "type")
+		return
+	}
+	box := ConnBox(r.Context())
+	if box == "" || s.reg.FromBox(connSecret(r), pushToken(r), box) != nil {
+		s.agentReject(w, r, http.StatusUnauthorized, "box")
 		return
 	}
 	card := ""
@@ -215,6 +228,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		protocol = 0
 	}
 	got, err := s.reg.Register(session.Registration{
+		Box:        ConnBox(r.Context()),
 		SID:        str(body["sid"], 80),
 		Cwd:        str(body["cwd"], session.MaxCwd+1),
 		Version:    str(body["version"], 40),

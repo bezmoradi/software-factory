@@ -59,15 +59,11 @@ func (w Worktrees) open(dir string) (*os.Root, error) {
 	if w.Workspace == "" {
 		return nil, errors.New("the engine has no workspace")
 	}
-	clean := filepath.Clean(dir)
-	if filepath.Dir(clean) != filepath.Join(w.Workspace, "worktrees") || !worktreeFolder.MatchString(filepath.Base(clean)) {
-		return nil, errors.New("the session's folder isn't one of the workspace's worktrees")
+	ws, box, rest, ok := BoxPath(filepath.Clean(dir))
+	if !ok || ws != filepath.Clean(w.Workspace) || filepath.Dir(rest) != "worktrees" || !worktreeFolder.MatchString(filepath.Base(rest)) || dir != session.BoxWorktree(ws, box, filepath.Base(rest)) {
+		return nil, errors.New("the session's folder isn't one of its container's worktrees")
 	}
-	real, err := filepath.EvalSymlinks(clean)
-	if err != nil || real != clean {
-		return nil, errors.New("the session's folder goes through a symbolic link")
-	}
-	return openRealFolder(clean)
+	return OpenTree(dir)
 }
 
 func (w Worktrees) Uncommitted(repoPath, dir, commit string) (session.Uncommitted, error) {
@@ -272,4 +268,38 @@ func (w *worktreeWalk) same(p string, info fs.FileInfo, t *tracked) bool {
 		return false
 	}
 	return hex.EncodeToString(h.Sum(nil)) == t.sha
+}
+
+var _ session.WorktreeLinks = Worktrees{}
+
+func (w Worktrees) Linked(clone, dir string) (bool, error) {
+	root, err := w.open(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = root.Close() }()
+	data, err := readSmall(root, ".git", maxSmallFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	meta := path.Join(clone, ".git", "worktrees", filepath.Base(dir))
+	if strings.TrimRight(string(data), "\r\n") != "gitdir: "+meta {
+		return false, nil
+	}
+	git, err := OpenTree(meta)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = git.Close() }()
+	info, err := git.Lstat("HEAD")
+	return err == nil && info.Mode().IsRegular(), nil
 }

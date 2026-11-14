@@ -48,6 +48,7 @@ type Remote struct {
 	Workspace string
 	CAFile    string
 	Client    *http.Client
+	OpenBox   func(workspace, box string) (*os.Root, error)
 }
 
 var _ session.Remote = Remote{}
@@ -265,7 +266,18 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 		return k.explain(ctx, err)
 	}
 	defer func() { _ = res.Close() }()
-	if err := git.MkdirAll("objects/pack", 0o775); err != nil {
+	err = storePack(git, res, want)
+	if err != nil && ctx.Err() != nil {
+		return k.explain(ctx, ctx.Err())
+	}
+	if err != nil {
+		return errors.New(clean(err.Error(), k.token))
+	}
+	return nil
+}
+
+func storePack(git *os.Root, src io.Reader, want string) error {
+	if err := git.MkdirAll("objects/pack", 0o755); err != nil {
 		return errors.New("the clone's objects/pack folder couldn't be made")
 	}
 	tmp := "objects/pack/tmp_pack_" + random()
@@ -280,12 +292,9 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 			_ = git.Remove(tmp)
 		}
 	}()
-	n, err := io.Copy(f, io.LimitReader(res, MaxPack+1))
+	n, err := io.Copy(f, io.LimitReader(src, MaxPack+1))
 	if err != nil {
-		if ctx.Err() != nil {
-			return k.explain(ctx, ctx.Err())
-		}
-		return errors.New(clean("the pack didn't arrive whole: "+err.Error(), k.token))
+		return errors.New("the pack didn't arrive whole: " + err.Error())
 	}
 	if n > MaxPack {
 		return fmt.Errorf("the repository's pack is larger than %d GiB, more than the engine clones", MaxPack>>30)
@@ -307,7 +316,7 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 		return errors.New("the pack's index couldn't be built")
 	}
 	if ok, err := idx.Contains(plumbing.NewHash(want)); err != nil || !ok {
-		return errors.New("the remote's pack doesn't hold the commit it named")
+		return errors.New("the pack doesn't hold the commit it was asked for")
 	}
 	base := "objects/pack/pack-" + sum.String()
 	if _, err := git.Lstat(base + ".pack"); err == nil {
@@ -341,16 +350,23 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 }
 
 func writeFile(root *os.Root, name string, data []byte) error {
+	return writeMode(root, name, data, 0o755, 0o444)
+}
+
+func writeMode(root *os.Root, name string, data []byte, dirMode, mode os.FileMode) error {
 	dir := path.Dir(name)
-	if err := root.MkdirAll(dir, 0o775); err != nil {
+	if err := root.MkdirAll(dir, dirMode); err != nil {
 		return err
 	}
 	tmp := path.Join(dir, ".sf-"+random())
-	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o664)
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}
 	_, err = f.Write(data)
+	if err == nil {
+		err = f.Chmod(mode)
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -375,15 +391,12 @@ func (r Remote) Clone(ctx context.Context, q session.CloneRequest) (session.Clon
 	if _, err := endpoint(q.URL); err != nil {
 		return session.Cloned{}, err
 	}
-	ws, err := os.OpenRoot(r.Workspace)
+	ws, err := r.base()
 	if err != nil {
-		return session.Cloned{}, errors.New("the workspace can't be opened")
+		return session.Cloned{}, err
 	}
 	defer func() { _ = ws.Close() }()
-	if err := ws.Mkdir("repos", 0o775); err != nil && !errors.Is(err, fs.ErrExist) {
-		return session.Cloned{}, errors.New("the workspace's repos folder can't be made")
-	}
-	tmpName := "repos/.clone-" + random()
+	tmpName := ".clone-" + random()
 	if err := ws.Mkdir(tmpName, 0o700); err != nil {
 		return session.Cloned{}, errors.New("a folder for the clone can't be made in the workspace")
 	}
@@ -412,7 +425,7 @@ func (r Remote) Clone(ctx context.Context, q session.CloneRequest) (session.Clon
 		return session.Cloned{}, err
 	}
 	for _, d := range []string{".git/objects/info", ".git/objects/pack", ".git/refs/heads", ".git/refs/tags", ".git/refs/remotes/origin"} {
-		if err := tmp.MkdirAll(d, 0o775); err != nil {
+		if err := tmp.MkdirAll(d, 0o755); err != nil {
 			return session.Cloned{}, errors.New("the clone's .git folder can't be made")
 		}
 	}
@@ -436,8 +449,8 @@ func (r Remote) Clone(ctx context.Context, q session.CloneRequest) (session.Clon
 			return session.Cloned{}, errors.New("the clone's refs couldn't be written")
 		}
 	}
-	if err := share(tmp); err != nil {
-		return session.Cloned{}, errors.New("the clone couldn't be made group-writable for agent-host")
+	if err := engineOnly(tmp); err != nil {
+		return session.Cloned{}, errors.New("the clone's modes couldn't be set")
 	}
 	name, err := place(ws, tmpName, q.Name, q.Taken)
 	if err != nil {
@@ -447,21 +460,78 @@ func (r Remote) Clone(ctx context.Context, q session.CloneRequest) (session.Clon
 	return session.Cloned{Name: name, Branch: branch, Commit: head}, nil
 }
 
-func share(root *os.Root) error {
+func engineOnly(root *os.Root) error {
 	return fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		switch {
 		case d.IsDir():
-			return root.Chmod(p, 0o775|os.ModeSetgid)
-		case d.Type().IsRegular() && strings.HasPrefix(p, ".git/objects/"):
-			return root.Chmod(p, 0o444)
+			return root.Chmod(p, 0o755)
 		case d.Type().IsRegular():
-			return root.Chmod(p, 0o664)
+			return root.Chmod(p, 0o444)
 		}
 		return nil
 	})
+}
+
+func (r Remote) base() (*os.Root, error) {
+	if !path.IsAbs(r.Workspace) {
+		return nil, errors.New("the workspace can't be opened")
+	}
+	ws, err := os.OpenRoot(r.Workspace)
+	if err != nil {
+		return nil, errors.New("the workspace can't be opened")
+	}
+	defer func() { _ = ws.Close() }()
+	if err := ws.Mkdir(session.BaseFolder, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, errors.New("the workspace's folder of repository copies can't be made")
+	}
+	info, err := ws.Lstat(session.BaseFolder)
+	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 || !ownedByMe(info) {
+		return nil, errors.New("the workspace's folder of repository copies isn't the engine's own folder")
+	}
+	if info.Mode().Perm() != 0o755 {
+		if err := ws.Chmod(session.BaseFolder, 0o755); err != nil {
+			return nil, errors.New("the workspace's folder of repository copies can't be made the engine's alone")
+		}
+	}
+	root, err := ws.OpenRoot(session.BaseFolder)
+	if err != nil {
+		return nil, errors.New("the workspace's folder of repository copies can't be opened")
+	}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		_ = root.Close()
+		return nil, errors.New("the workspace's folder of repository copies changed while it was opened")
+	}
+	return root, nil
+}
+
+func (r Remote) baseGit(name string) (*os.Root, func(), error) {
+	if !repoName.MatchString(name) || strings.Contains(name, "..") {
+		return nil, nil, errors.New("the repository's folder name isn't one the engine uses")
+	}
+	ws, err := r.base()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range []string{name, name + "/.git"} {
+		info, err := ws.Lstat(p)
+		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+			_ = ws.Close()
+			return nil, nil, errors.New("the engine's copy of the repository is missing from the workspace")
+		}
+	}
+	git, err := ws.OpenRoot(name + "/.git")
+	if err != nil {
+		_ = ws.Close()
+		return nil, nil, errors.New("the engine's copy of the repository is missing from the workspace")
+	}
+	return git, func() {
+		_ = git.Close()
+		_ = ws.Close()
+	}, nil
 }
 
 func place(ws *os.Root, tmpName, base string, taken func(string) bool) (string, error) {
@@ -473,7 +543,7 @@ func place(ws *os.Root, tmpName, base string, taken func(string) bool) (string, 
 		if taken != nil && taken(name) {
 			continue
 		}
-		dest := "repos/" + name
+		dest := name
 		if _, err := ws.Lstat(dest); !errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -491,16 +561,11 @@ func (r Remote) Fetch(ctx context.Context, q session.FetchRequest) (session.Fetc
 	if _, err := endpoint(q.URL); err != nil {
 		return session.Fetched{}, err
 	}
-	ws, err := os.OpenRoot(r.Workspace)
+	git, done, err := r.baseGit(q.Name)
 	if err != nil {
-		return session.Fetched{}, errors.New("the workspace can't be opened")
+		return session.Fetched{}, err
 	}
-	defer func() { _ = ws.Close() }()
-	git, err := ws.OpenRoot(path.Join("repos", q.Name, ".git"))
-	if err != nil {
-		return session.Fetched{}, errors.New("the clone's .git folder is missing from the workspace")
-	}
-	defer func() { _ = git.Close() }()
+	defer done()
 	k, err := r.open(ctx, q.URL, q.Token)
 	if err != nil {
 		return session.Fetched{}, err

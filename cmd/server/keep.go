@@ -13,11 +13,11 @@ import (
 
 func useKeep(srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
 	d := parts.dispatcher
-	if d == nil || parts.repos == nil || cfg.Workspace == "" || cfg.AgentHost == "" {
+	if d == nil || parts.repos == nil || cfg.Workspace == "" || cfg.Helper == "" {
 		return
 	}
 	k := session.NewKeep(reg, d, session.KeepConfig{
-		Store:  keep.Store{Dir: filepath.Join(cfg.StateDir, state.KeepFolder), Workspace: cfg.Workspace},
+		Store:  keep.Store{Dir: filepath.Join(cfg.StateDir, state.KeepFolder), Workspace: cfg.Workspace, OpenTree: files.OpenTree},
 		Reader: files.Reader{}, Heads: files.Reviews{}, Main: parts.repos.Main,
 		Audit: state.NewAudit(cfg.StateDir), Logger: logger,
 	})

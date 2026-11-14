@@ -101,7 +101,7 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 	switch target {
 	case LoginAgents:
 		spec, ok := d.claudeSpec()
-		h, isLogin := d.cfg.Host.(LoginHost)
+		h, isLogin := d.cfg.AnyHost.(LoginHost)
 		if !ok || !isLogin || d.cfg.Workspace == "" {
 			return "", nil, explained(conflict("login"), "This engine can't sign Claude Code in to the agent container.")
 		}
@@ -201,7 +201,7 @@ func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
 func (d *Dispatcher) keyHost(target string) (KeyHost, bool) {
 	switch target {
 	case LoginAgents:
-		host, ok := d.cfg.Host.(KeyHost)
+		host, ok := d.cfg.AnyHost.(KeyHost)
 		return host, ok
 	case LoginReviewers:
 		if d.cfg.Reviews != nil {
@@ -276,12 +276,12 @@ func (d *Dispatcher) agentSignIn(ctx context.Context) (*SignIn, error) {
 }
 
 func (d *Dispatcher) specSignIn(ctx context.Context, spec AgentSpec) (*SignIn, error) {
-	if spec.Status == nil || len(spec.Command) == 0 || d.cfg.SignIns == nil || d.cfg.Workspace == "" {
+	if spec.Status == nil || len(spec.Command) == 0 || d.cfg.AnySignIns == nil || d.cfg.Workspace == "" {
 		return nil, explained(conflict("sign-in check"), "")
 	}
 	sctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
-	s, err := d.cfg.SignIns.SignIn(sctx, Command{Argv: append([]string{spec.Command[0]}, spec.Status.Args...), Dir: d.cfg.Workspace, Pass: spec.Pass, Timeout: signInFor}, spec.Status.Kind)
+	s, err := d.cfg.AnySignIns.SignIn(sctx, Command{Argv: append([]string{spec.Command[0]}, spec.Status.Args...), Dir: d.cfg.Workspace, Pass: spec.Pass, Timeout: signInFor}, spec.Status.Kind)
 	if err != nil {
 		return nil, err
 	}

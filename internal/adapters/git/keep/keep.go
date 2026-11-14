@@ -46,6 +46,7 @@ var (
 type Store struct {
 	Dir       string
 	Workspace string
+	OpenTree  func(path string) (*os.Root, error)
 }
 
 var _ session.KeepStore = Store{}
@@ -391,26 +392,38 @@ func random() string {
 	return hex.EncodeToString(b)
 }
 
-func (s Store) clone(repo string) (*os.Root, func(), error) {
-	if !repoName.MatchString(repo) || strings.Contains(repo, "..") || s.Workspace == "" {
+func (s Store) clone(box, repo string) (*os.Root, func(), error) {
+	if !repoName.MatchString(repo) || strings.Contains(repo, "..") || s.Workspace == "" || !session.ValidBox(box) || s.OpenTree == nil {
 		return nil, nil, errors.New("the repository's folder name isn't one the engine uses")
 	}
-	ws, err := os.OpenRoot(s.Workspace)
-	if err != nil {
-		return nil, nil, errors.New("the workspace can't be opened")
+	clone := session.BoxClone(s.Workspace, box, repo)
+	if clone == "" {
+		return nil, nil, errors.New("the repository's folder name isn't one the engine uses")
 	}
-	git, err := ws.OpenRoot(path.Join("repos", repo, ".git"))
+	git, err := s.OpenTree(path.Join(clone, ".git"))
 	if err != nil {
-		_ = ws.Close()
-		return nil, nil, errors.New("the clone's .git folder is missing from the workspace")
+		return nil, nil, errors.New("the session clone's .git folder can't be opened without following a link")
 	}
-	return git, func() {
-		_ = git.Close()
-		_ = ws.Close()
-	}, nil
+	return git, func() { _ = git.Close() }, nil
 }
 
-func (s Store) RestoreObjects(sid, repo, commit string) error {
+func plainFolders(git *os.Root, names ...string) error {
+	for _, d := range names {
+		info, err := git.Lstat(d)
+		if errors.Is(err, fs.ErrNotExist) {
+			if err := git.Mkdir(d, 0o775); err != nil {
+				return errors.New("the clone's " + d + " folder couldn't be made")
+			}
+			continue
+		}
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("the clone's " + d + " isn't a plain folder")
+		}
+	}
+	return nil
+}
+
+func (s Store) RestoreObjects(sid, box, repo, commit string) error {
 	if !sha1Pattern.MatchString(commit) {
 		return errors.New("not a full commit id")
 	}
@@ -425,13 +438,13 @@ func (s Store) RestoreObjects(sid, repo, commit string) error {
 	if err != nil {
 		return err
 	}
-	git, done, err := s.clone(repo)
+	git, done, err := s.clone(box, repo)
 	if err != nil {
 		return err
 	}
 	defer done()
-	if err := git.MkdirAll("objects/pack", 0o775); err != nil {
-		return errors.New("the clone's objects/pack folder couldn't be made")
+	if err := plainFolders(git, "objects", "objects/pack"); err != nil {
+		return err
 	}
 	found := false
 	seen := map[string]bool{}
@@ -526,28 +539,19 @@ func copyPack(git *os.Root, from, name, commit string) (bool, error) {
 	return has, nil
 }
 
-func (s Store) WriteBranch(repo, branch, commit string) error {
+func (s Store) WriteBranch(box, repo, branch, commit string) error {
 	if !branchName.MatchString(branch) || !push.ValidBranch(branch) || !sha1Pattern.MatchString(commit) {
 		return errors.New("the engine restores only a session branch at a full commit id")
 	}
-	git, done, err := s.clone(repo)
+	git, done, err := s.clone(box, repo)
 	if err != nil {
 		return err
 	}
 	defer done()
 	ref := "refs/heads/" + branch
 	dir := path.Dir(ref)
-	for _, d := range []string{"refs", "refs/heads", dir} {
-		info, err := git.Lstat(d)
-		if errors.Is(err, fs.ErrNotExist) {
-			if err := git.Mkdir(d, 0o775); err != nil {
-				return errors.New("the clone's " + d + " folder couldn't be made")
-			}
-			continue
-		}
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("the clone's " + d + " isn't a plain folder")
-		}
+	if err := plainFolders(git, "refs", "refs/heads", dir); err != nil {
+		return err
 	}
 	if info, err := git.Lstat(ref); err == nil && !info.Mode().IsRegular() {
 		return errors.New("the clone has a symbolic link or a folder at " + ref)

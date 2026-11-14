@@ -21,7 +21,10 @@ import (
 
 const uploadRoute = "/api/upload"
 
-var uploadID = regexp.MustCompile(`^[0-9a-f]{24}$`)
+var (
+	uploadID     = regexp.MustCompile(`^[0-9a-f]{24}$`)
+	uploadFolder = regexp.MustCompile(`^([0-9a-f]{16})/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+)
 
 type UploadDir struct {
 	dir   string
@@ -64,7 +67,42 @@ func (u UploadDir) clear() {
 }
 
 func uploadPlace(folder, id, name string) bool {
-	return uploadID.MatchString(folder) && uploadID.MatchString(id) && (name == "" || session.UploadName(name))
+	return uploadFolder.MatchString(folder) && uploadID.MatchString(id) && (name == "" || session.UploadName(name))
+}
+
+func plainFolder(root *os.Root, d string, fresh bool) error {
+	if err := root.Mkdir(d, 0o750); err != nil && (fresh || !errors.Is(err, fs.ErrExist)) {
+		return err
+	}
+	info, err := root.Lstat(d)
+	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		return errors.New("upload: not a folder")
+	}
+	return root.Chmod(d, 0o750)
+}
+
+func (u UploadDir) MakeBox(box string) error {
+	if !session.ValidBox(box) {
+		return errors.New("upload: bad place")
+	}
+	root, err := os.OpenRoot(u.dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return plainFolder(root, box, false)
+}
+
+func (u UploadDir) DropBox(box string) error {
+	if !session.ValidBox(box) {
+		return errors.New("upload: bad place")
+	}
+	root, err := os.OpenRoot(u.dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.RemoveAll(box)
 }
 
 func (u UploadDir) Save(folder, id, name string, data []byte) (string, error) {
@@ -76,20 +114,12 @@ func (u UploadDir) Save(folder, id, name string, data []byte) (string, error) {
 		return "", err
 	}
 	defer func() { _ = root.Close() }()
-	if err := root.Mkdir(folder, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", err
-	}
-	for _, d := range []string{folder, path.Join(folder, id)} {
-		if d != folder {
-			if err := root.Mkdir(d, 0o750); err != nil {
-				return "", err
-			}
-		}
-		info, err := root.Lstat(d)
-		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			return "", errors.New("upload: not a folder")
-		}
-		if err := root.Chmod(d, 0o750); err != nil {
+	box := path.Dir(folder)
+	for _, d := range []struct {
+		name  string
+		fresh bool
+	}{{box, false}, {folder, false}, {path.Join(folder, id), true}} {
+		if err := plainFolder(root, d.name, d.fresh); err != nil {
 			return "", err
 		}
 	}
@@ -153,7 +183,7 @@ func (u UploadDir) Drop(folder, id string) error {
 }
 
 func (u UploadDir) DropFolder(folder string) error {
-	if !uploadID.MatchString(folder) {
+	if !uploadFolder.MatchString(folder) {
 		return errors.New("upload: bad place")
 	}
 	root, err := os.OpenRoot(u.dir)

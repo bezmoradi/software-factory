@@ -72,7 +72,7 @@ func checkImportedSessions(d, workspace string) error {
 		if !names[r.Repo] {
 			return errors.New("a session's repo isn't a project in the same file")
 		}
-		if r.RepoPath != session.RepoFolder(workspace, r.Repo) {
+		if r.RepoPath != session.RepoFolder(workspace, r.Repo) && r.RepoPath != session.OldRepoFolder(workspace, r.Repo) {
 			return errors.New("a session's repoPath isn't its project's folder in this engine's workspace")
 		}
 	}

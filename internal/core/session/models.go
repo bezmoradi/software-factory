@@ -286,7 +286,7 @@ func (w *SessionWork) CodexModels(ctx context.Context) ([]AgentModel, bool) {
 func (w *SessionWork) probeCodex(ctx context.Context) ([]AgentModel, error) {
 	d := w.d
 	spec, ok := findAgent(d.cfg.Agents, "codex")
-	if !ok || !spec.Enabled || d.cfg.Host == nil || w.cfg.ProbeDir == "" {
+	if !ok || !spec.Enabled || d.cfg.AnyHost == nil || w.cfg.ProbeDir == "" {
 		return nil, errNoModels
 	}
 	if spec = d.installed(spec); !spec.Enabled {
@@ -294,14 +294,14 @@ func (w *SessionWork) probeCodex(ctx context.Context) ([]AgentModel, error) {
 	}
 	pctx, cancel := context.WithTimeout(ctx, modelProbeFor)
 	defer cancel()
-	p, err := d.cfg.Host.Start(pctx, Command{Argv: spec.Command, Dir: w.cfg.ProbeDir, Pass: spec.Pass})
+	p, err := d.cfg.AnyHost.Start(pctx, Command{Argv: spec.Command, Dir: w.cfg.ProbeDir, Pass: spec.Pass})
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		_ = p.Close()
 		sctx, scancel := context.WithTimeout(context.Background(), stopFor)
-		_ = d.cfg.Host.Stop(sctx, p.ID())
+		_ = d.cfg.AnyHost.Stop(sctx, p.ID())
 		scancel()
 	}()
 	list, err := w.cfg.Lister.ListModels(pctx, p)
@@ -445,6 +445,11 @@ func (w *SessionWork) repoOf(path string) (Repository, bool) {
 		return Repository{}, false
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Path == path })
+	if i < 0 {
+		if name, ok := CloneProject(path); ok {
+			i = slices.IndexFunc(list, func(r Repository) bool { return r.Name == name })
+		}
+	}
 	if i < 0 {
 		return Repository{}, false
 	}

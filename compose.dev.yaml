@@ -4,7 +4,7 @@ x-dev-deny: &dev-deny
   EGRESS_DENY: gitserver.test,${SF_EXTRA_DENY:-}
 
 services:
-  agent:
+  helper:
     image: software-factory:dev
     build:
       context: .

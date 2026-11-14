@@ -16,6 +16,7 @@ type SavedRun struct {
 	Name      string
 	Branch    string
 	Cwd       string
+	Box       string
 	Display   string
 	StartedAt time.Time
 	Sandboxed bool
@@ -63,6 +64,7 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].HandedTo, out[len(out)-1].HandedHead = r.handedTo, r.handedHead
 		out[len(out)-1].Group, out[len(out)-1].GroupKind = r.group, r.groupKind
 		out[len(out)-1].HistoryOnly = r.history
+		out[len(out)-1].Box = r.box
 	}
 	d.mu.Unlock()
 	for i := range out {
@@ -101,6 +103,9 @@ func (d *Dispatcher) Restore() int {
 		r.origin, r.earlier, r.handedTo, r.handedHead = s.Origin, slices.Clone(s.Earlier), s.HandedTo, s.HandedHead
 		r.group, r.groupKind = s.Group, s.GroupKind
 		r.history = s.HistoryOnly
+		if ValidBox(s.Box) && !r.history {
+			r.box, r.clone = s.Box, BoxClone(d.cfg.Workspace, s.Box, s.Repo)
+		}
 		d.mu.Lock()
 		known := d.runs[s.SID] != nil
 		if !known {

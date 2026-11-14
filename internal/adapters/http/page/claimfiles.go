@@ -1,6 +1,7 @@
 package page
 
 import (
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -10,12 +11,13 @@ import (
 
 type TurnFiles struct {
 	Workspace string
+	OpenTree  func(path string) (*os.Root, error)
 }
 
 var _ session.TurnFiles = TurnFiles{}
 
 func (t TurnFiles) Touched(dir string, names []string, since time.Time) (map[string]bool, error) {
-	c, err := openCheckout(t.Workspace, dir)
+	c, err := openCheckout(t.OpenTree, t.Workspace, dir)
 	if err != nil {
 		return nil, err
 	}

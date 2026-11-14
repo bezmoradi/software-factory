@@ -41,11 +41,11 @@ type ScreenshotFile struct {
 }
 
 type ScreenshotFiles interface {
-	List(sid string) ([]ScreenshotFile, error)
-	Read(sid, name string, limit int64) ([]byte, error)
-	Drop(sid string) error
-	Make(sid string) error
-	Entries() ([]string, error)
+	List(box, sid string) ([]ScreenshotFile, error)
+	Read(box, sid, name string, limit int64) ([]byte, error)
+	Drop(box, sid string) error
+	Make(box, sid string) error
+	Entries(box string) ([]string, error)
 }
 
 type Screenshot struct {
@@ -87,20 +87,30 @@ func (r *Registry) shotFiles() (ScreenshotFiles, shared.Logger) {
 
 func (r *Registry) makeScreenshots(sid string) {
 	files, logger := r.shotFiles()
-	if files == nil || !sidPattern.MatchString(sid) {
+	box := r.boxOf(sid)
+	if files == nil || !sidPattern.MatchString(sid) || box == "" {
 		return
 	}
-	if err := files.Make(sid); err != nil && logger != nil {
+	if err := files.Make(box, sid); err != nil && logger != nil {
 		logger.Warn("screenshots", "event", "folder-not-made", "sid", sid)
 	}
 }
 
-func removeScreenshots(files ScreenshotFiles, logger shared.Logger, sid string) bool {
-	err := files.Drop(sid)
+func removeScreenshots(files ScreenshotFiles, logger shared.Logger, box, sid string) bool {
+	err := files.Drop(box, sid)
 	if err != nil && logger != nil {
 		logger.Warn("screenshots", "event", "not-removed", "sid", sid)
 	}
 	return err == nil
+}
+
+func (r *Registry) boxOf(sid string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a != nil && ValidBox(a.Box) {
+		return a.Box
+	}
+	return ""
 }
 
 func (r *Registry) hasAdmitted(sid string) bool {
@@ -118,30 +128,40 @@ func (d *Dispatcher) DropStrayScreenshots(ctx context.Context, files ScreenshotF
 	if files == nil {
 		return 0
 	}
-	names, err := files.Entries()
-	if err != nil {
-		if logger != nil {
-			logger.Warn("screenshots", "event", "unlisted")
+	d.mu.Lock()
+	boxes := map[string]bool{}
+	for _, r := range d.runs {
+		if r.box != "" {
+			boxes[r.box] = true
 		}
-		return 0
 	}
+	d.mu.Unlock()
 	dropped, failed := 0, 0
-	for i, name := range names {
+	for box := range boxes {
 		if ctx.Err() != nil {
-			if logger != nil {
-				logger.Warn("screenshots", "event", "sweep-stopped", "entries", len(names)-i)
-			}
 			break
 		}
-		switch {
-		case !sidPattern.MatchString(name):
-			if files.Drop(name) == nil {
-				dropped++
-			} else {
-				failed++
+		names, err := files.Entries(box)
+		if err != nil {
+			continue
+		}
+		for _, name := range names {
+			if ctx.Err() != nil {
+				if logger != nil {
+					logger.Warn("screenshots", "event", "sweep-stopped")
+				}
+				break
 			}
-		case !d.hasSession(name) && removeScreenshots(files, logger, name):
-			dropped++
+			switch {
+			case !sidPattern.MatchString(name):
+				if files.Drop(box, name) == nil {
+					dropped++
+				} else {
+					failed++
+				}
+			case !d.hasSession(name) && removeScreenshots(files, logger, box, name):
+				dropped++
+			}
 		}
 	}
 	if failed > 0 && logger != nil {
@@ -150,27 +170,31 @@ func (d *Dispatcher) DropStrayScreenshots(ctx context.Context, files ScreenshotF
 	return dropped
 }
 
-func (r *Registry) screenshotFiles(sid string) (ScreenshotFiles, error) {
+func (r *Registry) screenshotFiles(sid string) (ScreenshotFiles, string, error) {
 	if !sidPattern.MatchString(sid) {
-		return nil, invalid("sid")
+		return nil, "", invalid("sid")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.shots.files == nil {
-		return nil, explained(conflict("no screenshots"), "This engine has no workspace folder, so it shows no screenshots.")
+		return nil, "", explained(conflict("no screenshots"), "This engine has no workspace folder, so it shows no screenshots.")
 	}
-	if r.admitted[sid] == nil {
-		return nil, explained(notFound("session"), "Only a session this engine started shows screenshots.")
+	a := r.admitted[sid]
+	if a == nil {
+		return nil, "", explained(notFound("session"), "Only a session this engine started shows screenshots.")
 	}
-	return r.shots.files, nil
+	if !ValidBox(a.Box) {
+		return nil, "", oldLayout()
+	}
+	return r.shots.files, a.Box, nil
 }
 
 func (r *Registry) Screenshots(sid string) ([]ScreenshotFile, error) {
-	files, err := r.screenshotFiles(sid)
+	files, box, err := r.screenshotFiles(sid)
 	if err != nil {
 		return nil, err
 	}
-	list, err := files.List(sid)
+	list, err := files.List(box, sid)
 	if err != nil {
 		return []ScreenshotFile{}, nil
 	}
@@ -193,7 +217,7 @@ func (r *Registry) Screenshots(sid string) ([]ScreenshotFile, error) {
 }
 
 func (r *Registry) Screenshot(sid, name string) (Screenshot, error) {
-	files, err := r.screenshotFiles(sid)
+	files, box, err := r.screenshotFiles(sid)
 	if err != nil {
 		return Screenshot{}, err
 	}
@@ -204,7 +228,7 @@ func (r *Registry) Screenshot(sid, name string) (Screenshot, error) {
 		return Screenshot{}, explained(limited("busy"), "Another screenshot is being read. Try again in a moment.")
 	}
 	defer r.shots.decoding.Unlock()
-	data, err := files.Read(sid, name, MaxScreenshot)
+	data, err := files.Read(box, sid, name, MaxScreenshot)
 	if errors.Is(err, ErrScreenshotTooBig) {
 		return Screenshot{}, explained(invalid("too big"), "A screenshot may be at most 10 MiB.")
 	}
@@ -221,12 +245,12 @@ func (r *Registry) Screenshot(sid, name string) (Screenshot, error) {
 	return Screenshot{Name: name, Width: w, Height: h, PNG: out}, nil
 }
 
-func (r *Registry) dropScreenshots(sid string) {
+func (r *Registry) dropScreenshots(box, sid string) {
 	files, logger := r.shots.files, r.shots.logger
-	if files == nil || !sidPattern.MatchString(sid) {
+	if files == nil || !sidPattern.MatchString(sid) || !ValidBox(box) {
 		return
 	}
-	go func() { _ = removeScreenshots(files, logger, sid) }()
+	go func() { _ = removeScreenshots(files, logger, box, sid) }()
 }
 
 func screenshotKind(data []byte) string {

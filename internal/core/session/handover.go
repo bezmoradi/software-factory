@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -111,7 +110,7 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	if err != nil {
 		return Started{}, err
 	}
-	stand := &run{spec: spec, repo: r.repo, repoPath: r.repoPath, base: head, name: r.name, branch: r.branch, cwd: r.cwd, sid: sid, id: r.id, display: r.display, at: r.at}
+	stand := &run{spec: spec, repo: r.repo, repoPath: r.repoPath, base: head, name: r.name, branch: r.branch, cwd: r.cwd, box: r.box, clone: r.clone, sid: sid, id: r.id, display: r.display, at: r.at, preflight: true}
 	if err := d.admit(ctx, stand, consent); err != nil {
 		return Started{}, err
 	}
@@ -130,10 +129,6 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	if still {
 		return Started{}, explained(conflict("running"), "The session didn't stop in time, so it keeps its branch. Try again in a moment.")
 	}
-	if err := d.cfg.Host.RemoveWorktree(ctx, r.repo, r.name, false); err != nil {
-		d.endHanding(r, "")
-		return Started{}, explained(conflict("worktree"), "The session stopped, but agent-host couldn't remove its worktree, so it keeps its branch: "+hostMessage(err))
-	}
 	head, moved := d.headAfterStop(r, head)
 	earlier := append(slices.Clone(r.earlier), Stint{Agent: r.spec.ID, SID: sid, Name: clip(r.display, maxName), From: r.base, To: head})
 	if len(earlier) > MaxStints {
@@ -143,9 +138,10 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 		Continues: &Continuation{SID: sid, Branch: r.branch, Head: head, Earlier: earlier}})
 	if started.SID == "" {
 		d.endHanding(r, "")
-		return started, d.putBack(r, id, err)
+		return started, err
 	}
 	d.endHanding(r, started.SID)
+	d.stopBox(ctx, r.box)
 	d.mu.Lock()
 	r.handedHead = head
 	d.mu.Unlock()
@@ -165,11 +161,11 @@ func (d *Dispatcher) cleanHead(r *run) (string, error) {
 	if heads == nil || reader == nil {
 		return "", explained(conflict("worktree"), "This engine can't read the session's worktree, so it can't hand the branch over.")
 	}
-	head, err := heads.Head(r.repoPath, r.branch)
+	head, err := heads.Head(r.clone, r.branch)
 	if err != nil || !sha1Hex.MatchString(head) {
 		return "", explained(conflict("branch"), "The engine couldn't read the session's branch "+r.branch+".")
 	}
-	u, err := reader.Uncommitted(r.repoPath, r.cwd, head)
+	u, err := reader.Uncommitted(r.clone, r.cwd, head)
 	if err != nil {
 		return "", explained(conflict("worktree"), "The engine couldn't read the session's worktree, so it can't tell whether everything is committed.")
 	}
@@ -184,7 +180,7 @@ func (d *Dispatcher) headAfterStop(r *run, before string) (string, bool) {
 	if heads == nil {
 		return before, false
 	}
-	now, err := heads.Head(r.repoPath, r.branch)
+	now, err := heads.Head(r.clone, r.branch)
 	if err != nil || !sha1Hex.MatchString(now) || now == before {
 		return before, false
 	}
@@ -199,21 +195,6 @@ func (d *Dispatcher) endHanding(r *run, to string) {
 		r.handedTo = to
 	}
 	d.mu.Unlock()
-}
-
-func (d *Dispatcher) putBack(r *run, id CommitIdentity, cause error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), stopFor)
-	defer cancel()
-	_, err := d.cfg.Host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
-	if err == nil {
-		return cause
-	}
-	d.cfg.Logger.Warn("handover", "event", "worktree-not-restored")
-	msg := "the earlier session's worktree couldn't be put back, so it can't wake: " + hostMessage(err)
-	if e, ok := errors.AsType[*Error](cause); ok {
-		return &Error{Kind: e.Kind, Reason: e.Reason, Message: strings.TrimSpace(e.Message + " Also, " + msg), Needs: e.Needs}
-	}
-	return explained(conflict("worktree"), "The other agent didn't start, and "+msg)
 }
 
 func (w *Work) carry(from, to string, claude bool) {

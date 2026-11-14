@@ -143,8 +143,9 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	mark := markOf(req)
+	marks := p.marks.from(subnetOf(conn))
 	if req.Method != http.MethodConnect {
-		p.marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
+		marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
 		if req.URL != nil {
 			p.marks.saw(logged(req.URL.Hostname()), ReasonMethod)
 		}
@@ -154,14 +155,14 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	host, reason := p.target(req.RequestURI)
 	if reason != "" {
 		requested, _, _ := net.SplitHostPort(req.RequestURI)
-		p.marks.note(mark, requestedTarget(req.RequestURI), "", reason)
+		marks.note(mark, requestedTarget(req.RequestURI), "", reason)
 		p.refuse(conn, http.StatusForbidden, reason, logged(requested))
 		return
 	}
 	target := net.JoinHostPort(host, "443")
 	upstream, status, reason := p.connect(ctx, host)
 	if reason != "" {
-		p.marks.note(mark, target, "", reason)
+		marks.note(mark, target, "", reason)
 		p.refuse(conn, status, reason, host)
 		return
 	}
@@ -173,12 +174,12 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	pending := bytes.NewReader(early)
 	hello, name, err := readClientHello(io.MultiReader(pending, conn))
 	if err != nil {
-		p.marks.note(mark, target, "", helloReason(err))
+		marks.note(mark, target, "", helloReason(err))
 		p.refused(helloReason(err), host)
 		return
 	}
 	if normalize(name) != host {
-		p.marks.note(mark, target, logged(name), ReasonSNIMismatch)
+		marks.note(mark, target, logged(name), ReasonSNIMismatch)
 		p.marks.saw(logged(name), ReasonSNIMismatch)
 		p.logRefused(ReasonSNIMismatch, host, "sni", logged(name))
 		return

@@ -342,7 +342,13 @@ func validToken(t string) bool {
 	return true
 }
 
+const BaseFolder = "base"
+
 func RepoFolder(workspace, name string) string {
+	return filepath.Join(workspace, BaseFolder, name)
+}
+
+func OldRepoFolder(workspace, name string) string {
 	return filepath.Join(workspace, "repos", name)
 }
 

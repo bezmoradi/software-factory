@@ -106,6 +106,9 @@ func (w *startupWalk) entry(dir string, e session.StartupEntry) error {
 
 func openUnlinkedFolder(dir string) (*os.Root, error) {
 	clean := filepath.Clean(dir)
+	if _, _, _, ok := BoxPath(clean); ok {
+		return OpenTree(clean)
+	}
 	real, err := filepath.EvalSymlinks(clean)
 	if err != nil {
 		return nil, err

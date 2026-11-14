@@ -294,9 +294,13 @@ func (d *Dispatcher) historyOnly(sid string) error {
 	d.mu.Lock()
 	r := d.runs[sid]
 	history := r != nil && r.history
+	old := r != nil && !r.history && r.box == ""
 	d.mu.Unlock()
 	if history {
 		return explained(conflict("history only"), historyMessage)
+	}
+	if old {
+		return oldLayout()
 	}
 	return nil
 }

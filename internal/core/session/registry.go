@@ -64,6 +64,7 @@ type Admission struct {
 	SignIn    *SignIn
 	Mode      string
 	Lineage   *Lineage
+	Box       string
 }
 
 type Registration struct {
@@ -80,6 +81,7 @@ type Registration struct {
 	Busy       bool
 	Login      bool
 	Cards      []any
+	Box        string
 	keepPush   string
 }
 
@@ -146,6 +148,7 @@ type Info struct {
 type conn struct {
 	secret     string
 	push       string
+	box        string
 	sid        string
 	cwd        string
 	epoch      string
@@ -355,10 +358,16 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 	if g.LastSeq < 0 || g.LastSeq > 1<<53 {
 		g.LastSeq = 0
 	}
+	if !ValidBox(g.Box) {
+		return Registered{}, unauthorized()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
 	a := r.admitted[g.SID]
+	if a != nil && a.Box != g.Box {
+		return Registered{}, unauthorized()
+	}
 	if (a == nil || !a.running) && !r.registerAll.allow("all", now) {
 		return Registered{}, limited("register")
 	}
@@ -399,6 +408,7 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 		order:      r.order,
 		secret:     secret(),
 		push:       push,
+		box:        g.Box,
 		sid:        g.SID,
 		cwd:        g.Cwd,
 		epoch:      g.Epoch,
@@ -754,6 +764,7 @@ func (r *Registry) Admit(sid string, a Admission) {
 	}
 	known.Admission = a
 	known.stopReason = ""
+	r.dropOtherBoxes(sid, a.Box)
 	if !known.running && len(known.observations) > 0 {
 		known.observe(level.Observation{By: level.Engine, Event: level.ProcessStarted})
 	}
@@ -805,6 +816,7 @@ func (r *Registry) Forget(sid string) {
 	if r.admitted[sid] == nil {
 		return
 	}
+	box := r.admitted[sid].Box
 	delete(r.admitted, sid)
 	for key, c := range r.conns {
 		if c.sid != sid {
@@ -831,9 +843,74 @@ func (r *Registry) Forget(sid string) {
 	delete(r.states, sid)
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
-	r.dropScreenshots(sid)
+	r.dropScreenshots(box, sid)
 	r.announce(r.now())
 	go r.halt.forget(sid)
+}
+
+func (r *Registry) dropOtherBoxes(sid, box string) {
+	for key, c := range r.conns {
+		if c.sid != sid || c.box == box {
+			continue
+		}
+		if c.poll != nil {
+			c.poll.finish(waitRevoked)
+			c.poll = nil
+		}
+		delete(r.conns, key)
+	}
+}
+
+func (r *Registry) FromBox(given, push, box string) error {
+	if !ValidBox(box) {
+		return unauthorized()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fits := func(c *conn) bool {
+		if c.box != box {
+			return false
+		}
+		a := r.admitted[c.sid]
+		return a == nil || a.Box == c.box
+	}
+	if len(given) == 43 {
+		if c := r.conns[given]; c != nil && !fits(c) {
+			return unauthorized()
+		}
+	}
+	if len(push) == 43 {
+		for _, c := range r.conns {
+			if subtle.ConstantTimeCompare([]byte(c.push), []byte(push)) == 1 && !fits(c) {
+				return unauthorized()
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Registry) DropBox(box string) int {
+	if !ValidBox(box) {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for key, c := range r.conns {
+		if c.box != box {
+			continue
+		}
+		if c.poll != nil {
+			c.poll.finish(waitRevoked)
+			c.poll = nil
+		}
+		delete(r.conns, key)
+		n++
+	}
+	if n > 0 {
+		r.announce(r.now())
+	}
+	return n
 }
 
 func (r *Registry) PushSession(token string) (string, error) {

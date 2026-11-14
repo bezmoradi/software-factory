@@ -95,6 +95,7 @@ var stores = map[string]storeRow{
 	auditFile:           {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit"},
 	"audit.1.jsonl":     {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit's older part"},
 	tokensFile:          {class: classOut, label: "git host tokens are never exported"},
+	boxesFile:           {class: classOut, label: "session containers belong to the stack that made them"},
 	"engine.sock":       {class: classOut, label: "the lock socket is runtime only"},
 	stampFile:           {class: classOut, label: "which engine last ran here"},
 	importReportFile:    {class: classOut, label: "this engine's own last import"},

@@ -52,6 +52,32 @@ type CommandHost interface {
 	ProjectCommand(ctx context.Context, cwd, kind, command string) (CommandResult, error)
 }
 
+func (w *SessionWork) hosted() bool {
+	return w.d != nil && w.d.boxed()
+}
+
+func (w *SessionWork) commandHost(sid string) (CommandHost, error) {
+	if w.d == nil {
+		return nil, &HostError{Code: "no-helper", Message: "This engine has no box helper to run sessions' containers."}
+	}
+	d := w.d
+	d.mu.Lock()
+	r := d.runs[sid]
+	box := ""
+	if r != nil {
+		box = r.box
+	}
+	d.mu.Unlock()
+	host := d.hostFor(box)
+	if h, ok := host.(CommandHost); ok {
+		return h, nil
+	}
+	if down, ok := host.(downHost); ok {
+		return nil, down.err
+	}
+	return nil, &HostError{Code: "command", Message: "agent-host in the session's container doesn't run project commands"}
+}
+
 type ProjectCommandStore interface {
 	Load() (map[ProjectID]ProjectCommands, error)
 	Save(map[ProjectID]ProjectCommands) error
@@ -127,7 +153,11 @@ func (w *SessionWork) runCommand(ctx context.Context, sid, kind, command, cwd st
 		limit = SetupFor
 	}
 	rctx, cancel := context.WithTimeout(ctx, limit+commandSlack)
-	res, err := w.cfg.Host.ProjectCommand(rctx, cwd, kind, command)
+	var res CommandResult
+	host, err := w.commandHost(sid)
+	if err == nil {
+		res, err = host.ProjectCommand(rctx, cwd, kind, command)
+	}
 	cancel()
 	done := run
 	done.Ended = w.cfg.Now()
@@ -211,7 +241,7 @@ func lastBytes(s string, n int) string {
 
 func (w *SessionWork) TurnCheck(ctx context.Context, sid string, again bool) TurnCheckAnswer {
 	info, ok := w.reg.workInfo(sid)
-	if !ok || info.Agent != "claude" || w.cfg.Host == nil {
+	if !ok || info.Agent != "claude" || !w.hosted() {
 		return TurnCheckAnswer{Result: CheckNone}
 	}
 	command := w.command(info.Project, CommandCheck)
@@ -254,7 +284,7 @@ func (w *SessionWork) TurnCheck(ctx context.Context, sid string, again bool) Tur
 
 func (w *SessionWork) checkAfterTurn(sid string, info workFacts) {
 	command := w.command(info.Project, CommandCheck)
-	if command == "" || w.cfg.Host == nil {
+	if command == "" || !w.hosted() {
 		return
 	}
 	w.mu.Lock()

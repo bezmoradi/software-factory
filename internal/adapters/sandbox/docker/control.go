@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -178,6 +179,30 @@ func (c *Control) Set(ctx context.Context, lists session.EgressLists) error {
 	}
 	if code != http.StatusOK {
 		return errors.New("egress refused the lists with HTTP " + strconv.Itoa(code))
+	}
+	return nil
+}
+
+type boxesJSON struct {
+	Version string   `json:"version"`
+	Subnets []string `json:"subnets"`
+}
+
+func (c *Control) SetBoxes(ctx context.Context, subnets []netip.Prefix) error {
+	q := boxesJSON{Version: StatusVersion, Subnets: make([]string, 0, len(subnets))}
+	for _, p := range subnets {
+		q.Subnets = append(q.Subnets, p.String())
+	}
+	body, err := json.Marshal(q)
+	if err != nil {
+		return err
+	}
+	_, code, err := c.do(ctx, http.MethodPut, "/boxes", body, maxStatus)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return errors.New("egress refused the session containers' subnets with HTTP " + strconv.Itoa(code))
 	}
 	return nil
 }

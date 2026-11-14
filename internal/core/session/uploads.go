@@ -67,6 +67,10 @@ func newUploadBook() *uploadBook {
 	return &uploadBook{items: map[string]*Upload{}, folders: map[string]string{}, ended: map[string]time.Time{}, noImage: map[string]bool{}}
 }
 
+func UploadFolder(box, sid string) string {
+	return box + "/" + sid
+}
+
 func (r *Registry) UseUploads(files UploadFiles) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -146,6 +150,9 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	case image && r.uploads.noImage[sid]:
 		r.mu.Unlock()
 		return "", explained(conflict("no images"), noImages)
+	case !ValidBox(a.Box):
+		r.mu.Unlock()
+		return "", oldLayout()
 	}
 	r.trimUnsent(sid)
 	if r.uploads.bytes+int64(len(data)) > MaxUploadBytes {
@@ -154,7 +161,7 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	}
 	folder := r.uploads.folders[sid]
 	if folder == "" {
-		folder = randomHex(12)
+		folder = UploadFolder(a.Box, sid)
 		r.uploads.folders[sid] = folder
 	}
 	id := randomHex(12)

@@ -2,7 +2,7 @@ package session
 
 func (w *SessionWork) startSetup(sid, project, cwd string) {
 	command := w.command(project, CommandSetup)
-	if command == "" || w.cfg.Host == nil || sid == "" || cwd == "" {
+	if command == "" || !w.hosted() || sid == "" || cwd == "" {
 		return
 	}
 	w.mu.Lock()

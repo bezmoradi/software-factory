@@ -16,7 +16,6 @@ const (
 )
 
 type SessionWorkConfig struct {
-	Host     CommandHost
 	Repos    interface{ List() ([]Repository, error) }
 	Commands ProjectCommandStore
 	Queues   QueueStore

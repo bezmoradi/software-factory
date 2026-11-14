@@ -51,8 +51,10 @@ RUN apt-get update \
  && groupadd --gid 10003 egress \
  && useradd --uid 10003 --gid egress --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
  && useradd --uid 10004 --user-group --no-create-home --home-dir /home/reviewer --shell /bin/bash reviewer \
+ && useradd --uid 10005 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin helper \
  && install -d -o engine -g sf -m 0700 /var/lib/software-factory \
  && install -d -o engine -g sf -m 2775 /workspace /workspace/repos /workspace/worktrees \
+ && install -d -o engine -g sf -m 0755 /workspace/s \
  && install -d -o engine -g sf -m 0755 /opt/software-factory/agents /opt/software-factory/agents/bin \
  && install -d -o agent -g sf -m 0700 /home/agent /run/sf \
  && install -d -o reviewer -g reviewer -m 0700 /home/reviewer \
@@ -77,6 +79,10 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/software-factory"]
 
 FROM base AS dev
+USER root
+RUN install -d -m 0755 /usr/share/software-factory \
+ && install -m 0444 /dev/null /usr/share/software-factory/dev-image
+USER engine
 COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
 COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
 

@@ -85,30 +85,20 @@ func (s *Server) checkout(sid string) (*checkout, error) {
 	if !ok {
 		return nil, errOutside
 	}
-	return openCheckout(s.cfg.Workspace, dir)
+	return openCheckout(s.cfg.OpenTree, s.cfg.Workspace, dir)
 }
 
-func openCheckout(workspace, dir string) (*checkout, error) {
-	if workspace == "" {
+var boxWorktree = regexp.MustCompile(`^/.+?/` + session.BoxesFolder + `/([0-9a-f]{16})/worktrees/(sf-[0-9a-f]{8})$`)
+
+func openCheckout(open func(string) (*os.Root, error), workspace, dir string) (*checkout, error) {
+	if workspace == "" || open == nil {
 		return nil, errOutside
 	}
-	worktrees := filepath.Join(workspace, "worktrees")
-	if filepath.Dir(dir) != worktrees || !worktreeName.MatchString(filepath.Base(dir)) {
+	m := boxWorktree.FindStringSubmatch(dir)
+	if m == nil || !worktreeName.MatchString(m[2]) || dir != session.BoxWorktree(workspace, m[1], m[2]) {
 		return nil, errOutside
 	}
-	ws, err := os.OpenRoot(workspace)
-	if err != nil {
-		return nil, errOutside
-	}
-	defer func() { _ = ws.Close() }()
-	rel := path.Join("worktrees", filepath.Base(dir))
-	for _, p := range []string{"worktrees", rel} {
-		info, err := ws.Lstat(p)
-		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			return nil, errOutside
-		}
-	}
-	root, err := ws.OpenRoot(rel)
+	root, err := open(dir)
 	if err != nil {
 		return nil, errOutside
 	}

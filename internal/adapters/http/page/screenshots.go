@@ -19,6 +19,7 @@ var shotRoutes = map[string]bool{screenshotsRoute: true, screenshotRoute: true}
 
 type Screenshots struct {
 	Workspace string
+	OpenBox   func(workspace, box string) (*os.Root, error)
 }
 
 var _ session.ScreenshotFiles = Screenshots{}
@@ -52,26 +53,30 @@ func groupFolder(root *os.Root, name string, mode fs.FileMode) error {
 	return root.Chmod(name, mode&^os.ModeSetgid)
 }
 
-func (s Screenshots) Prepare() error {
-	if s.Workspace == "" {
-		return errOutside
+func (s Screenshots) box(box string) (*os.Root, error) {
+	if s.Workspace == "" || s.OpenBox == nil || !session.ValidBox(box) {
+		return nil, errOutside
 	}
-	ws, err := os.OpenRoot(s.Workspace)
+	root, err := s.OpenBox(s.Workspace, box)
 	if err != nil {
-		return errOutside
+		return nil, errMissing
 	}
-	defer func() { _ = ws.Close() }()
-	return groupFolder(ws, session.ScreenshotsFolder, shotsTopMode)
+	return root, nil
 }
 
-func (s Screenshots) Make(sid string) error {
+func (s Screenshots) Make(box, sid string) error {
 	if !localName(sid) {
 		return errOutside
 	}
-	if err := s.Prepare(); err != nil {
+	root, err := s.box(box)
+	if err != nil {
 		return err
 	}
-	top, err := s.top()
+	defer func() { _ = root.Close() }()
+	if err := groupFolder(root, session.ScreenshotsFolder, shotsTopMode); err != nil {
+		return err
+	}
+	top, err := plainRoot(root, session.ScreenshotsFolder)
 	if err != nil {
 		return err
 	}
@@ -79,8 +84,8 @@ func (s Screenshots) Make(sid string) error {
 	return groupFolder(top, sid, shotsFolderMode)
 }
 
-func (s Screenshots) Entries() ([]string, error) {
-	top, err := s.top()
+func (s Screenshots) Entries(box string) ([]string, error) {
+	top, err := s.top(box)
 	if errors.Is(err, errMissing) {
 		return []string{}, nil
 	}
@@ -103,44 +108,50 @@ func (s Screenshots) Entries() ([]string, error) {
 	return out, nil
 }
 
-func (s Screenshots) top() (*os.Root, error) {
-	if s.Workspace == "" {
-		return nil, errOutside
-	}
-	ws, err := os.OpenRoot(s.Workspace)
-	if err != nil {
-		return nil, errOutside
-	}
-	defer func() { _ = ws.Close() }()
-	info, err := ws.Lstat(session.ScreenshotsFolder)
-	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+func plainRoot(parent *os.Root, name string) (*os.Root, error) {
+	seen, err := parent.Lstat(name)
+	if err != nil || !seen.IsDir() || seen.Mode()&fs.ModeSymlink != 0 {
 		return nil, errMissing
 	}
-	return ws.OpenRoot(session.ScreenshotsFolder)
+	root, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, errMissing
+	}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(seen, opened) {
+		_ = root.Close()
+		return nil, errMissing
+	}
+	return root, nil
 }
 
-func (s Screenshots) folder(sid string) (*checkout, error) {
+func (s Screenshots) top(box string) (*os.Root, error) {
+	root, err := s.box(box)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return plainRoot(root, session.ScreenshotsFolder)
+}
+
+func (s Screenshots) folder(box, sid string) (*checkout, error) {
 	if !localName(sid) {
 		return nil, errOutside
 	}
-	top, err := s.top()
+	top, err := s.top(box)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = top.Close() }()
-	info, err := top.Lstat(sid)
-	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-		return nil, errMissing
-	}
-	root, err := top.OpenRoot(sid)
+	root, err := plainRoot(top, sid)
 	if err != nil {
-		return nil, errMissing
+		return nil, err
 	}
 	return &checkout{dir: sid, root: root}, nil
 }
 
-func (s Screenshots) List(sid string) ([]session.ScreenshotFile, error) {
-	c, err := s.folder(sid)
+func (s Screenshots) List(box, sid string) ([]session.ScreenshotFile, error) {
+	c, err := s.folder(box, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -165,11 +176,11 @@ func (s Screenshots) List(sid string) ([]session.ScreenshotFile, error) {
 	return out, nil
 }
 
-func (s Screenshots) Read(sid, name string, limit int64) ([]byte, error) {
+func (s Screenshots) Read(box, sid, name string, limit int64) ([]byte, error) {
 	if !localName(name) {
 		return nil, errOutside
 	}
-	c, err := s.folder(sid)
+	c, err := s.folder(box, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -181,11 +192,11 @@ func (s Screenshots) Read(sid, name string, limit int64) ([]byte, error) {
 	return data, err
 }
 
-func (s Screenshots) Drop(sid string) error {
+func (s Screenshots) Drop(box, sid string) error {
 	if !localName(sid) {
 		return errOutside
 	}
-	top, err := s.top()
+	top, err := s.top(box)
 	if errors.Is(err, errMissing) {
 		return nil
 	}
@@ -201,11 +212,11 @@ func (s Screenshots) Drop(sid string) error {
 
 var errShotStays = errors.New("screenshots entry still there")
 
-func (s Screenshots) Gone(name string) error {
+func (s Screenshots) Gone(box, name string) error {
 	if !localName(name) {
 		return errOutside
 	}
-	top, err := s.top()
+	top, err := s.top(box)
 	if errors.Is(err, errMissing) {
 		return nil
 	}

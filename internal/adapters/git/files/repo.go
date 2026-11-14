@@ -136,7 +136,7 @@ func locate(path string) (*os.Root, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", push.ErrNotRepository, err.Error())
 	}
-	top, err := openRealFolder(abs)
+	top, err := openFolder(abs)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", push.ErrNotRepository, cause(err))
 	}

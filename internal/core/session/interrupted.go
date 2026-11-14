@@ -84,13 +84,13 @@ func cutAt(s SavedRun) time.Time {
 	return s.InTurnSince
 }
 
-func (d *Dispatcher) life() HostLife {
-	l, _ := d.cfg.Host.(HostLife)
+func (d *Dispatcher) life(host Host) HostLife {
+	l, _ := host.(HostLife)
 	return l
 }
 
 func (d *Dispatcher) booted(r *run) {
-	l := d.life()
+	l := d.life(d.host(r))
 	if l == nil {
 		return
 	}
@@ -105,8 +105,8 @@ func (d *Dispatcher) booted(r *run) {
 	d.mu.Unlock()
 }
 
-func (d *Dispatcher) currentBoot(ctx context.Context) string {
-	l := d.life()
+func (d *Dispatcher) currentBoot(ctx context.Context, host Host) string {
+	l := d.life(host)
 	if l == nil {
 		return ""
 	}
@@ -119,8 +119,8 @@ func (d *Dispatcher) currentBoot(ctx context.Context) string {
 	return boot
 }
 
-func (d *Dispatcher) exitedItself(id string) bool {
-	l := d.life()
+func (d *Dispatcher) exitedItself(r *run, id string) bool {
+	l := d.life(d.host(r))
 	if l == nil {
 		return true
 	}
@@ -139,7 +139,7 @@ func (d *Dispatcher) lost(sid string, inTurn bool) {
 }
 
 func LostNote(at time.Time) string {
-	return "Software Factory lost your session's process at " + at.UTC().Format("2006-01-02 15:04 UTC") + " during your last turn: the engine's connection to it dropped, or the agent container restarted, so that turn was cut off. Tool calls in it may or may not have taken effect, and a factory_push, factory_issue or factory_pull_request call in it may not have been answered. Check git status and git log before you go on."
+	return "Software Factory lost your session's process at " + at.UTC().Format("2006-01-02 15:04 UTC") + " during your last turn: the engine's connection to it dropped, or the session's container restarted, so that turn was cut off. Tool calls in it may or may not have taken effect, and a factory_push, factory_issue or factory_pull_request call in it may not have been answered. Check git status and git log before you go on."
 }
 
 func (d *Dispatcher) interrupted(sid string, at time.Time) {
@@ -170,7 +170,7 @@ func (b *bridge) inTurn() bool {
 	return b.turn != ""
 }
 
-func (d *Dispatcher) restarted(ctx context.Context, mine map[string]*run, live map[string]bool) {
+func (d *Dispatcher) restarted(ctx context.Context, host Host, mine map[string]*run, live map[string]bool) {
 	d.mu.Lock()
 	started := false
 	for _, r := range mine {
@@ -180,7 +180,7 @@ func (d *Dispatcher) restarted(ctx context.Context, mine map[string]*run, live m
 	if !started {
 		return
 	}
-	boot := d.currentBoot(ctx)
+	boot := d.currentBoot(ctx, host)
 	if boot == "" {
 		return
 	}

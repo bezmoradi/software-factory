@@ -46,6 +46,8 @@ func run(args []string, logger shared.Logger) error {
 		return server.ServeEgress(ctx, args[1:], logger)
 	case "agent-host":
 		return server.ServeAgentHost(ctx, args[1:], logger)
+	case "box-helper":
+		return server.ServeHelper(ctx, args[1:], logger)
 	case "mcp":
 		return server.ServeMCP(ctx, args[1:])
 	case "sandbox-probe":

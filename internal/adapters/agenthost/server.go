@@ -275,6 +275,7 @@ var routes = map[string]string{
 	reviewRunRoute:         http.MethodPost,
 	projectCommandRoute:    http.MethodPost,
 	screenshotsRemoveRoute: http.MethodPost,
+	clearRoute:             http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -441,6 +442,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case clearRoute:
+		s.clear(w, r)
 	case screenshotsRemoveRoute:
 		var q screenshotsRemoveJSON
 		if p := decode(w, r, &q); p != nil {

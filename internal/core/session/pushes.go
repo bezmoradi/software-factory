@@ -38,10 +38,11 @@ const (
 )
 
 type PushTarget struct {
-	SID    string
-	Repo   string
-	Name   string
-	Branch string
+	SID     string
+	Repo    string
+	Name    string
+	Branch  string
+	Project string
 }
 
 type PushRepos interface {

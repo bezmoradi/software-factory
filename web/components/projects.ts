@@ -92,7 +92,7 @@ class DispatchForm {
   issue = el('sf-issue-picker', 'dispatch-issue')
   start = button('', 'primary small stack', undefined, 'submit')
   idle = el('span', '', 'Start')
-  working = el('span', '', 'Starting…')
+  working = el('span', '', 'Preparing the session’s container…')
   from: StartFromField
   pair: PairField
   bench: BenchmarkField

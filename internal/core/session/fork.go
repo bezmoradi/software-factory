@@ -182,10 +182,10 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) {
 	d.mu.Lock()
 	r := d.runs[sid]
-	var branch, name, path string
+	var branch, name, path, clone string
 	history := false
 	if r != nil {
-		branch, name, path, history = r.branch, r.display, r.repoPath, r.history
+		branch, name, path, clone, history = r.branch, r.display, r.repoPath, r.clone, r.history
 		if name == "" {
 			name = r.spec.Name + " " + r.id
 		}
@@ -197,11 +197,14 @@ func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) 
 	if history {
 		return startPoint{}, explained(conflict("history only"), historyMessage)
 	}
+	if clone == "" {
+		return startPoint{}, oldLayout()
+	}
 	heads, _ := d.reg.worktreeReaders()
 	if heads == nil {
 		return startPoint{}, explained(conflict("from"), "This engine can't read the session's branch.")
 	}
-	head, err := heads.Head(path, branch)
+	head, err := heads.Head(clone, branch)
 	if err != nil || !sha1Hex.MatchString(head) {
 		return startPoint{}, explained(conflict("from"), "The engine couldn't read the branch of that session.")
 	}

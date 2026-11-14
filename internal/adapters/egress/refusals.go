@@ -22,6 +22,7 @@ type Refusal struct {
 	Target string
 	Name   string
 	Reason string
+	Subnet string
 }
 
 type marked struct {
@@ -73,9 +74,15 @@ func (r *Refusals) Of(mark string) ([]Refusal, int, bool) {
 }
 
 type Marks struct {
-	Book *Refusals
-	Side string
-	Seen *Seen
+	Book   *Refusals
+	Side   string
+	Seen   *Seen
+	subnet string
+}
+
+func (m Marks) from(subnet string) Marks {
+	m.subnet = subnet
+	return m
 }
 
 func (m Marks) saw(host, reason string) {
@@ -86,7 +93,7 @@ func (m Marks) note(mark, target, name, reason string) {
 	if m.Book == nil || mark == "" {
 		return
 	}
-	m.Book.add(mark, Refusal{Side: m.Side, Target: clipTarget(target), Name: clipTarget(name), Reason: reason})
+	m.Book.add(mark, Refusal{Side: m.Side, Target: clipTarget(target), Name: clipTarget(name), Reason: reason, Subnet: m.subnet})
 }
 
 func markOf(req *http.Request) string {

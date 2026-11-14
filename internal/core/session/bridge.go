@@ -38,6 +38,7 @@ type bridge struct {
 	log     shared.Logger
 	sid     string
 	cwd     string
+	box     string
 	version string
 	now     func() time.Time
 
@@ -84,10 +85,10 @@ func newSID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-func newBridge(reg *Registry, log shared.Logger, sid, cwd, version string) (*bridge, error) {
+func newBridge(reg *Registry, log shared.Logger, sid, cwd, box, version string) (*bridge, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &bridge{
-		reg: reg, log: log, sid: sid, cwd: cwd, version: version, now: reg.now,
+		reg: reg, log: log, sid: sid, cwd: cwd, box: box, version: version, now: reg.now,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		epoch: randomHex(8), cards: map[string]string{}, reqs: map[string]string{},
 		asks: map[string]map[string]string{}, names: map[string]string{},
@@ -102,7 +103,7 @@ func newBridge(reg *Registry, log shared.Logger, sid, cwd, version string) (*bri
 func (b *bridge) register() error {
 	got, err := b.reg.Register(Registration{
 		SID: b.sid, Cwd: b.cwd, Version: b.version, Epoch: b.epoch, Protocol: Protocol,
-		LastSeq: b.seq, Controlled: true, GateKnown: false, Cards: b.openCards(), keepPush: b.push,
+		LastSeq: b.seq, Controlled: true, GateKnown: false, Cards: b.openCards(), Box: b.box, keepPush: b.push,
 	})
 	if err != nil {
 		return err

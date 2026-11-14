@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
+	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -39,7 +41,9 @@ type PageConfig struct {
 	PageName     string
 	AgentAddress string
 	StateDir     string
-	AgentHost    string
+	Helper       string
+	HelperKey    string
+	BoxRanges    []netip.Prefix
 	Workspace    string
 	PluginDir    string
 	PluginSocket string
@@ -113,11 +117,22 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 	cfg.PluginDir = "/opt/software-factory/plugin"
 	cfg.PluginSocket = agenthost.DefaultSocket
 	cfg.AgentBinary = "/usr/local/bin/software-factory"
-	if v := getenv("SF_AGENT_HOST"); v != "" && v != "off" {
+	if getenv("SF_AGENT_HOST") != "" {
+		return errors.New("SF_AGENT_HOST is gone: each session runs in its own container, which the box helper makes; set SF_HELPER to the helper's host:port instead")
+	}
+	if v := getenv("SF_HELPER"); v != "" && v != "off" {
 		if _, _, err := net.SplitHostPort(v); err != nil {
-			return fmt.Errorf("SF_AGENT_HOST must be host:port or off, got %q", v)
+			return fmt.Errorf("SF_HELPER must be host:port or off, got %q", v)
 		}
-		cfg.AgentHost = v
+		cfg.Helper = v
+	}
+	cfg.HelperKey = DefaultHelperKeyFile
+	if v := getenv("SF_HELPER_KEY_FILE"); v != "" {
+		k, err := helperKeyFile(v)
+		if err != nil {
+			return err
+		}
+		cfg.HelperKey = k
 	}
 	if v := getenv("SF_WORKSPACE"); v != "" {
 		if !filepath.IsAbs(v) {
@@ -125,9 +140,14 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 		}
 		cfg.Workspace = filepath.Clean(v)
 	}
-	if cfg.AgentHost != "" && cfg.Workspace == "" {
-		return errors.New("set SF_WORKSPACE, the engine's path to the workspace, when SF_AGENT_HOST is set")
+	if cfg.Helper != "" && cfg.Workspace == "" {
+		return errors.New("set SF_WORKSPACE, the engine's path to the workspace, when SF_HELPER is set")
 	}
+	pool, err := boxes.ParseConfig(getenv)
+	if err != nil {
+		return err
+	}
+	cfg.BoxRanges = pool.Ranges
 	paths := []struct {
 		key    string
 		target *string
@@ -158,6 +178,7 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 }
 
 type engineParts struct {
+	routes     *boxRoutes
 	dispatcher *session.Dispatcher
 	installer  *npm.Installer
 	plugins    *npm.Plugins
@@ -238,7 +259,7 @@ func repositories(base context.Context, cfg PageConfig, reg *session.Registry, l
 		Workspace: cfg.Workspace,
 		Records:   state.Repos{Dir: cfg.StateDir},
 		Tokens:    state.NewTokens(cfg.StateDir),
-		Remote:    remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA},
+		Remote:    remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
 		Commits:   files.Reader{},
 		Notify:    reg.Notify,
 		Base:      base,
@@ -248,22 +269,23 @@ func repositories(base context.Context, cfg PageConfig, reg *session.Registry, l
 
 var newSandbox = sandboxChecker
 
-func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry, logger shared.Logger) (engineParts, error) {
+func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry, uploads *page.UploadDir, logger shared.Logger) (engineParts, error) {
 	repos := repositories(base, cfg, reg, logger)
-	if cfg.AgentHost == "" {
+	if cfg.Helper == "" {
 		return engineParts{repos: repos}, nil
 	}
-	client, err := agenthost.NewClient(cfg.AgentHost)
+	helper, err := HelperBoxes(cfg.Helper, cfg.HelperKey)
 	if err != nil {
 		return engineParts{}, err
 	}
-	allow, control, err := egressLists(cfg, repos, logger)
+	allow, tc, control, err := egressLists(cfg, repos, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
-	cfg.Sandbox.Allowlist, cfg.Sandbox.TLS = allow, control
-	agentSide := withGateway(client, allow, session.SideAgents)
-	sandbox, err := newSandbox(cfg, client, gitHostsOf(repos))
+	cfg.Sandbox.Allowlist, cfg.Sandbox.TLS = allow, tc
+	routes := newBoxRoutes(cfg.Workspace, reg, allow, control, logger)
+	agentSide := anyBox{routes: routes}
+	sandbox, err := newSandbox(cfg, agentSide, gitHostsOf(repos))
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -309,7 +331,13 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d = session.NewDispatcher(reg, session.DispatcherConfig{
 		Agents:       agents,
-		Host:         agentSide,
+		AnyHost:      agentSide,
+		Boxes:        helper,
+		BoxStore:     state.NewBoxes(cfg.StateDir),
+		Routes:       routes,
+		Folders:      boxFolders{workspace: cfg.Workspace, uploads: uploads},
+		Clones:       remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
+		CloneReader:  files.Reader{},
 		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions, RateWindows: reg.Limits().CodexWindows}},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
@@ -321,7 +349,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Reviews:      reviews,
 		Startup:      files.Startup{},
 		Approvals:    state.NewApprovals(cfg.StateDir),
-		SignIns:      agentSide,
+		AnySignIns:   agentSide,
 		Expected:     expected,
 		Work:         work,
 		Workflow:     knackpackDir(pins),
@@ -343,7 +371,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if reviews != nil {
 		reviews.UseKeyGate(func(ctx context.Context) error { return d.KeyRouted(ctx, session.SideReviewers) })
 	}
-	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace}})
+	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace, OpenTree: files.OpenTree}})
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
 		repos.OnHosts(func() { d.Recheck(base) })
@@ -359,7 +387,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	commentAfterPush(pushes, forged)
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -441,6 +469,15 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Helper != "" {
+		moved, err := files.PrepareBoxes(cfg.Workspace)
+		if moved != "" {
+			logger.Warn("workspace", "event", "sessions-folder-moved-aside", "to", moved)
+		}
+		if err != nil {
+			return fmt.Errorf("workspace: %w", err)
+		}
+	}
 	pageLn, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return fmt.Errorf("page: listen: %w", err)
@@ -452,8 +489,8 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	}
 	reg := session.New(Version, nil)
 	reg.UseNotes(state.NewNotes(cfg.StateDir))
-	shots := useScreenshots(reg, cfg.Workspace, cfg.AgentHost, logger)
-	if err := useUploads(reg, os.Getenv, logger); err != nil {
+	uploads, err := useUploads(reg, os.Getenv, logger)
+	if err != nil {
 		_ = pageLn.Close()
 		return err
 	}
@@ -461,12 +498,13 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	defer stopClones()
 	sends, stopSends := context.WithCancel(context.Background())
 	defer stopSends()
-	parts, err := starter(clones, sends, cfg, reg, logger)
+	parts, err := starter(clones, sends, cfg, reg, uploads, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err
 	}
-	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities()}, reg, logger)
+	shots := useScreenshots(reg, cfg.Workspace, parts.routes, logger)
+	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities(), OpenTree: files.OpenTree}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err
@@ -502,15 +540,19 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	defer stop()
 	restart.set(stop)
 
-	var agentLn net.Listener
+	var agentLn *page.BoxListener
 	if cfg.AgentAddress != "" {
-		agentLn, err = net.Listen("tcp", cfg.AgentAddress)
+		ln, err := net.Listen("tcp", cfg.AgentAddress)
 		if err != nil {
 			_ = pageLn.Close()
 			return fmt.Errorf("agent listener: %w", err)
 		}
+		agentLn = page.NewBoxListener(ln, dropCounter(logger, "agent-listener"))
+		if parts.routes != nil {
+			parts.routes.useListener(agentLn)
+		}
 	}
-	pageListener, err := pageOnly(ctx, pageLn, cfg, agentLn)
+	pageListener, err := pageOnly(ctx, pageLn, cfg)
 	if err != nil {
 		_ = pageLn.Close()
 		if agentLn != nil {
@@ -530,6 +572,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if agentLn != nil {
 		agentAddress = agentLn.Addr().String()
 		agentServer := httpServer(srv.Agent(), base)
+		agentServer.ConnContext = page.BoxContext
 		servers = append(servers, agentServer)
 		go func() {
 			errs <- agentServer.Serve(page.LimitListener(agentLn, page.AgentConns, nil))
@@ -537,6 +580,9 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	}
 	go srv.Run(ctx)
 	go page.HoldLock(ctx, lock)
+	if parts.routes != nil {
+		go parts.routes.watch(ctx)
+	}
 	if parts.dispatcher != nil {
 		go dropStrayScreenshots(ctx, parts.dispatcher, shots, logger)
 		go func() {
@@ -570,15 +616,15 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		}()
 	}
 
-	agentHost := cfg.AgentHost
-	if agentHost == "" {
-		agentHost = "off"
+	helperAddress := cfg.Helper
+	if helperAddress == "" {
+		helperAddress = "off"
 	}
 	reviewerHost := cfg.Review.Host
 	if parts.reviews == nil {
 		reviewerHost = "off"
 	}
-	logger.Info("engine listening", "page", pageLn.Addr().String(), "public_port", public, "agent", agentAddress, "agent_host", agentHost, "reviewer", reviewerHost, "version", Version)
+	logger.Info("engine listening", "page", pageLn.Addr().String(), "public_port", public, "agent", agentAddress, "helper", helperAddress, "reviewer", reviewerHost, "version", Version)
 	if !srv.Built() {
 		logger.Warn("the page isn't built into this engine", "fix", "npm --prefix web run build")
 	}
@@ -608,7 +654,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	return nil
 }
 
-func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig, agentLn net.Listener) (net.Listener, error) {
+func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig) (net.Listener, error) {
 	if ip := net.ParseIP(cfg.Host); ip == nil || !ip.IsUnspecified() {
 		return pageLn, nil
 	}
@@ -628,12 +674,8 @@ func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig, agentLn 
 	if err != nil {
 		return nil, fail("the engine's own addresses can't be read")
 	}
-	var refused netip.Addr
-	if agentLn != nil {
-		if bound, ok := agentLn.Addr().(*net.TCPAddr); ok {
-			refused, _ = netip.AddrFromSlice(bound.IP)
-			refused = refused.Unmap()
-		}
+	inPool := func(a netip.Addr) bool {
+		return slices.ContainsFunc(cfg.BoxRanges, func(p netip.Prefix) bool { return p.Contains(a) })
 	}
 	allowed := []netip.Addr{}
 	for _, a := range addrs {
@@ -641,8 +683,8 @@ func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig, agentLn 
 		switch {
 		case a.IsUnspecified() || a.IsLoopback():
 			return nil, fail(cfg.PageName + " resolves to " + a.String() + ", which isn't the outside network's address")
-		case refused.IsValid() && a == refused:
-			return nil, fail(cfg.PageName + " resolves to the agent listener's address")
+		case inPool(a):
+			return nil, fail(cfg.PageName + " resolves to an address in the session containers' networks (SF_BOX_SUBNETS)")
 		case own[a]:
 			allowed = append(allowed, a)
 		}

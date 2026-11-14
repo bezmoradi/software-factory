@@ -310,9 +310,12 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	}
 	scan := StartupScan{Entries: entries, Instructions: InstructionLists[list], Walk: true}
 	if len(scan.Instructions.Above) > 0 {
-		scan.Above = foldersAbove(r.cwd, d.cfg.Workspace)
+		scan.Above = foldersAbove(r.cwd, BoxFolder(d.cfg.Workspace, r.box))
 	}
-	read, err := d.cfg.Startup.Read(r.repoPath, r.cwd, r.branch, scan)
+	if r.clone == "" {
+		return oldLayout()
+	}
+	read, err := d.cfg.Startup.Read(r.clone, r.cwd, r.branch, scan)
 	if err != nil {
 		d.cfg.Logger.Warn("start-up files", "event", "unreadable")
 		return explained(conflict("start-up files"), clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
