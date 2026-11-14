@@ -106,7 +106,7 @@ func Confirm(side string, expected []Expect, got []Refusal, dropped int) []strin
 func (c *Checker) confirm(ctx context.Context, cfg ProbeConfig) []string {
 	ctx, cancel := context.WithTimeout(ctx, statusFor)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+c.cfg.Status+"/refusals/"+cfg.Marker, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL(c.cfg.TLS, c.cfg.Status, "/refusals/"+cfg.Marker), nil)
 	if err != nil {
 		return []string{"the engine couldn't ask the egress proxy which of the probe's requests it refused"}
 	}

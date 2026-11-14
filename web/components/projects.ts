@@ -1,5 +1,6 @@
 import { button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys } from '../lib/dom.ts'
 import { icon } from './icon.ts'
+import './allow-rules.ts'
 import { bySessionOrder, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
 import type { Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 
@@ -164,6 +165,7 @@ class SfProjects extends HTMLElement {
   #sessions: SessionInfo[] = []
   #sessionsKey = ''
   #expanded = new Map<string, boolean>()
+  #rules = new Map<string, HTMLElementTagNameMap['sf-allow-rules']>()
   #menuOpen = ''
   #slot: HTMLElement | null = null
   #stale = false
@@ -381,6 +383,15 @@ class SfProjects extends HTMLElement {
       b.append(mark, el('span', '', text))
       menu.append(b)
     }
+    item(this.#rules.has(p.path) ? 'Hide saved allow rules' : 'Saved allow rules', () => {
+      if (this.#rules.has(p.path)) this.#rules.delete(p.path)
+      else {
+        const panel = el('sf-allow-rules', 'project-rules')
+        panel.repo = p.name
+        this.#rules.set(p.path, panel)
+      }
+      this.#render()
+    }, 'warning')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -462,6 +473,8 @@ class SfProjects extends HTMLElement {
     if (this.#message.path === p.path && this.#message.text) li.append(el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text))
     const form = this.#forms.get(p.path)
     if (form) li.append(form.form)
+    const rules = this.#rules.get(p.path)
+    if (rules) li.append(rules)
     return li
   }
 

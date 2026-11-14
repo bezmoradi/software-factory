@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	ReportVersion = 1
+	ReportVersion = 2
 	dialFor       = 3 * time.Second
 	answerFor     = 10 * time.Second
 	maxReason     = 64
@@ -67,12 +68,15 @@ func Expected(cfg ProbeConfig) []string {
 		out = append(out, DirectCheck(a))
 	}
 	if cfg.Outside != "" {
-		out = append(out, ProxyCheck(cfg.Outside, "443"))
+		out = append(out, ProxyCheck(cfg.Outside, "443"), DNSCheck(cfg.Outside), DNSCheck(RandomLabel(cfg.Outside)))
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
 			out = append(out, FrontCheck(cfg.Front, h))
 		}
+	}
+	for _, a := range OutwardUDP {
+		out = append(out, UDPCheck(a))
 	}
 	return out
 }
@@ -98,6 +102,14 @@ func Probe(ctx context.Context, cfg ProbeConfig, d Dialer) Report {
 	}
 	if cfg.Outside != "" {
 		jobs = append(jobs, job{ProxyCheck(cfg.Outside, "443"), func() Result { return throughProxy(ctx, d, cfg, cfg.Outside, "443") }})
+		servers := nameServers()
+		random := randomHex(8) + "." + cfg.Outside
+		jobs = append(jobs,
+			job{DNSCheck(cfg.Outside), func() Result { return lookupOutside(ctx, d, servers, cfg.Outside, cfg.Outside) }},
+			job{DNSCheck(RandomLabel(cfg.Outside)), func() Result { return lookupOutside(ctx, d, servers, random, "a random name under "+cfg.Outside) }})
+	}
+	for _, a := range OutwardUDP {
+		jobs = append(jobs, job{UDPCheck(a), func() Result { return udpOut(ctx, d, cfg, a) }})
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
@@ -121,11 +133,18 @@ func direct(ctx context.Context, d Dialer, cfg ProbeConfig, address string) Resu
 	ctx, cancel := context.WithTimeout(ctx, cfg.Dial)
 	defer cancel()
 	conn, err := d.DialContext(ctx, "tcp", address)
-	if err != nil {
+	if err == nil {
+		_ = conn.Close()
+		return Result{Detail: "the agent container reached " + address + " directly"}
+	}
+	var dnsErr *net.DNSError
+	switch {
+	case errors.As(err, &dnsErr):
+		return Result{OK: true, Detail: "the name in " + address + " doesn't resolve in the agent container"}
+	case NoRoute(err):
 		return Result{OK: true, Detail: "no route to " + address}
 	}
-	_ = conn.Close()
-	return Result{Detail: "the agent container reached " + address + " directly"}
+	return Result{Detail: "a direct dial to " + address + " failed with " + errWord(err) + " instead of finding no route, so packets may leave the agent container"}
 }
 
 func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port string) Result {

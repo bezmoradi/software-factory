@@ -1,6 +1,7 @@
 import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts'
 import { claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
+import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { button, el, emit, fileLink, shown, visible, visibleCommand } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
@@ -21,6 +22,7 @@ import './components/projects.ts'
 import './components/reviews.ts'
 import './components/reviewer-agents.ts'
 import './components/reviewer-checks.ts'
+import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import './components/forge-panel.ts'
 import './components/setup.ts'
@@ -28,6 +30,7 @@ import './components/tabs.ts'
 import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
 import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
+import { setHalt, setHaltSession } from './components/halt.ts'
 
 interface Session {
   sid: string
@@ -78,6 +81,8 @@ interface AuditEntry {
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
 const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'reviewer-agent': 'Reviewer agent file' }
+EXCEPTION['permission-answer'] = 'Permission card answered'
+EXCEPTION.away = 'Away mode'
 const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
 const HIDDEN_RESULTS = ['sending', 'posting']
 const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
@@ -279,6 +284,7 @@ function updateSessions(list: unknown) {
 }
 
 function onEvent(ev: StreamEvent) {
+  if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
     return schedulePaint()
@@ -529,6 +535,7 @@ function waitingOf(s: Session) {
 
 function paint() {
   const s = current()
+  setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
   if (current.key.startsWith('s/') && !openTabs.includes(current.key)) openTabs = [...openTabs, current.key]
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
@@ -589,6 +596,7 @@ function paint() {
     byId('title').title = s.info.cwd || ''
     paintCrumbs(s)
     byId('usage').textContent = usageText(s)
+    if (s.info.signIn?.method === 'gateway') byId('usage').textContent += ` · ${GATEWAY_WARNING}`
     byId('stop').hidden = !(state.connected && inTurn(s) && controllable(s))
     byId('working').hidden = !working(s) || !!waitingOf(s).length
     if (byId('strip-note').textContent !== s.compacting) byId('strip-note').textContent = s.compacting
@@ -2044,6 +2052,7 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'docs') openDocs('')
   if (start === 'login') void claudeLogin(api, () => void markSignIn())
   if (start === 'identity') openIdentity()
+  if (start === 'egress') openEgress(api)
   if (start === 'session' || start === 'add') go('projects')
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')

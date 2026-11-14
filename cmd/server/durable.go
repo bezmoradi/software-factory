@@ -5,8 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -43,6 +45,18 @@ func (p engineParts) waitSends(limit time.Duration) {
 	case <-done:
 	case <-time.After(limit):
 	}
+}
+
+func (p engineParts) useHalt(reg *session.Registry, cfg PageConfig, logger shared.Logger) {
+	hc := session.HaltConfig{Store: state.NewHalt(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger}
+	if p.dispatcher != nil {
+		hc.Targets, hc.Stopper = p.dispatcher.PushTarget, p.dispatcher
+	}
+	if p.pushes != nil {
+		p.pushes.UseHalt(reg.Halt())
+		hc.Resume = p.pushes.Resume
+	}
+	reg.Halt().Use(hc)
 }
 
 func (p engineParts) settle(ctx context.Context, open session.AuditOpen) {

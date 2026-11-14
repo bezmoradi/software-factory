@@ -197,6 +197,7 @@ type Reviews struct {
 	done       func(sid, head string)
 	signIn     *SignIn
 	tests      map[string]TestListView
+	keyGate    func(context.Context) error
 }
 
 func (r *Reviews) OnDone(fn func(sid, head string)) {
@@ -492,6 +493,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 func (r *Reviews) check(ctx context.Context) string {
 	if r.cfg.Sandbox == nil {
 		return "this engine has no sandbox check for the reviewer container"
+	}
+	if why := r.keyRouted(ctx); why != "" {
+		return why
 	}
 	cctx, cancel := context.WithTimeout(ctx, reviewCheck)
 	defer cancel()

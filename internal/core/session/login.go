@@ -125,7 +125,10 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 	if err != nil || step != "code" {
 		return link, nil, err
 	}
-	if err := d.apiKey(ctx, target, "clear", ""); err != nil {
+	d.keyMu.Lock()
+	err = d.removeKeyLocked(ctx, target, false)
+	d.keyMu.Unlock()
+	if err != nil {
 		return "", nil, err
 	}
 	return "", d.finished(ctx, target, ExpectSubscription), nil
@@ -145,9 +148,9 @@ func ValidAPIKey(key string) bool {
 
 func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn, error) {
 	if !ValidAPIKey(key) {
-		return nil, explained(invalid("key"), "Paste the API key exactly as the Claude Console shows it, with no spaces.")
+		return nil, explained(invalid("key"), "Paste the key exactly as the Claude Console or your gateway's team gives it: 20 to 512 characters, with no spaces or quotes.")
 	}
-	err := d.apiKey(ctx, target, "set", key)
+	err := d.sendKey(ctx, target, key)
 	d.cfg.Logger.Info("claude api key", "target", target, "ok", err == nil)
 	if err != nil {
 		return nil, err
@@ -155,19 +158,65 @@ func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn,
 	return d.finished(ctx, target, ExpectAPIKey), nil
 }
 
-func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error {
-	var host KeyHost
-	var ok bool
-	switch target {
-	case LoginAgents:
-		host, ok = d.cfg.Host.(KeyHost)
-	case LoginReviewers:
-		if d.cfg.Reviews != nil {
-			host, ok = d.cfg.Reviews.cfg.Host.(KeyHost)
-		}
-	default:
+func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
+	if target != LoginAgents && target != LoginReviewers {
 		return explained(invalid("target"), "")
 	}
+	if _, ok := d.keyHost(target); !ok {
+		return explained(conflict("login"), "This engine can't reach that container, so it can't change Claude Code's API key there.")
+	}
+	release := d.holdGateway()
+	defer release()
+	d.keyMu.Lock()
+	defer d.keyMu.Unlock()
+	host, established := d.gatewayOf(target)
+	if !established {
+		return explained(conflict("gateway"), "The engine couldn't read egress.json, so it can't tell whether Claude Code in the "+containerOf(target)+" would send this key to a gateway or to Anthropic, and it doesn't save the key. Fix or move egress.json and restart the engine first.")
+	}
+	all, readable := d.keyRoutes()
+	before := d.cfg.Expected.Of(expectAgentOf(target))
+	if k, ok := all[target]; readable && ok && k.Saved {
+		before = k.Before
+	}
+	if err := d.saveKeyRoute(target, KeyRoute{Saved: true, Gateway: host, Before: before}); err != nil {
+		return explained(conflict("state"), "The engine couldn't record where the key goes, so it didn't save the key.")
+	}
+	return d.apiKey(ctx, target, "set", key)
+}
+
+func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
+	if target != LoginAgents && target != LoginReviewers {
+		return explained(invalid("target"), "")
+	}
+	if _, ok := d.keyHost(target); !ok {
+		return nil
+	}
+	d.keyMu.Lock()
+	err := d.removeKeyLocked(ctx, target, true)
+	d.keyMu.Unlock()
+	d.cfg.Logger.Info("claude api key", "target", target, "step", "clear", "ok", err == nil)
+	return err
+}
+
+func (d *Dispatcher) keyHost(target string) (KeyHost, bool) {
+	switch target {
+	case LoginAgents:
+		host, ok := d.cfg.Host.(KeyHost)
+		return host, ok
+	case LoginReviewers:
+		if d.cfg.Reviews != nil {
+			host, ok := d.cfg.Reviews.cfg.Host.(KeyHost)
+			return host, ok
+		}
+	}
+	return nil, false
+}
+
+func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error {
+	if target != LoginAgents && target != LoginReviewers {
+		return explained(invalid("target"), "")
+	}
+	host, ok := d.keyHost(target)
 	if !ok {
 		return explained(conflict("login"), "This engine can't reach that container, so it can't change Claude Code's API key there.")
 	}
@@ -248,6 +297,7 @@ type LoginPage interface {
 	Trust(ctx context.Context, path, approve string) error
 	Login(ctx context.Context, target, step, code string) (string, *SignIn, error)
 	KeyLogin(ctx context.Context, target, key string) (*SignIn, error)
+	ClearKey(ctx context.Context, target string) error
 	LoginState(ctx context.Context) LoginState
 }
 

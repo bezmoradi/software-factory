@@ -52,6 +52,15 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		send(w, http.StatusOK, map[string]any{"signIn": signInOf(signedIn)})
 		return
 	}
+	if step == "clear-key" {
+		if !keysWithin(body, "step", "target") || !okTarget {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute + writeFor))
+		reply(w, s.cfg.Logins.ClearKey(r.Context(), target), http.StatusOK)
+		return
+	}
 	if !keysWithin(body, "step", "target", "code") || !okStep || !okCode {
 		refuse(w, http.StatusBadRequest, "fields")
 		return

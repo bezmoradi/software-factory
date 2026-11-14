@@ -47,6 +47,7 @@ type sessionJSON struct {
 	WaitingFor   string      `json:"waitingFor,omitempty"`
 	Queued       int         `json:"queued,omitempty"`
 	Unbacked     []turnJSON  `json:"unbacked,omitempty"`
+	StopReason   string      `json:"stopReason,omitempty"`
 }
 
 type claimMarkJSON struct {
@@ -156,7 +157,8 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Forge:  forgeOf(s.Forge),
 			SignIn: signInOf(s.SignIn),
 			State:  s.State, Status: s.Status, WaitingFor: s.WaitingFor, Queued: s.Queued,
-			Unbacked: unbackedOf(s.Unbacked),
+			Unbacked:   unbackedOf(s.Unbacked),
+			StopReason: s.StopReason,
 		})
 	}
 	return out

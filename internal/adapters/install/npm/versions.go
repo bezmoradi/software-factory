@@ -18,6 +18,7 @@ type Agent struct {
 	Version string
 	Command string
 	Builds  map[string]Build
+	Source  Source
 }
 
 var Pinned = []Agent{
@@ -42,6 +43,7 @@ var Pinned = []Agent{
 	},
 	{
 		ID: "codex", Name: "Codex CLI", Version: "0.167.1", Command: "codex",
+		Source: Source{Repository: "https://github.com/openai/codex", Workflow: ".github/workflows/rust-release.yml", Ref: "refs/tags/rust-v0.167.1"},
 		Builds: map[string]Build{
 			"amd64": {
 				Packages: []Package{

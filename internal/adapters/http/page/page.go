@@ -50,6 +50,7 @@ type Config struct {
 	ReviewerAgents session.ReviewerAgentsPage
 	ReviewerChecks session.ReviewerChecksPage
 	Identity       session.IdentityPage
+	Egress         session.EgressPage
 }
 
 type Server struct {
@@ -63,6 +64,8 @@ type Server struct {
 	mu       sync.Mutex
 	attempts []time.Time
 	lists    fileLists
+	reports  session.AgentReportPage
+	rules    session.AllowRulesPage
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -140,6 +143,9 @@ var pageRoutes = map[string]bool{
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
 	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	haltRoute:       true,
+	egressRoute:     true,
+	allowRulesRoute: true, agentReportRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -275,6 +281,18 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.commitIdentity(w, body)
 		return
 	}
+	if r.URL.Path == egressRoute {
+		s.egress(w, r, body)
+		return
+	}
+	if r.URL.Path == allowRulesRoute {
+		s.allowRules(w, r, body)
+		return
+	}
+	if r.URL.Path == agentReportRoute {
+		s.agentReport(w, body)
+		return
+	}
 	if r.URL.Path == loginRoute {
 		s.claudeLogin(w, r, body)
 		return
@@ -301,6 +319,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/message" {
 		s.message(w, r, body)
+		return
+	}
+	if r.URL.Path == haltRoute {
+		s.halt(w, body)
 		return
 	}
 	s.api(w, r.URL.Path, body)

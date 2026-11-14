@@ -27,7 +27,10 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-const Version = "0.1.0"
+const (
+	Version     = "0.1.0"
+	keysAtStart = time.Minute
+)
 
 type PageConfig struct {
 	Host         string
@@ -165,6 +168,7 @@ type engineParts struct {
 	forges     *session.Forges
 	agentFiles *session.ReviewerAgents
 	identity   *session.Identities
+	allowlist  *session.Allowlist
 }
 
 func (p engineParts) pushing() session.PushStarter {
@@ -246,6 +250,12 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if err != nil {
 		return engineParts{}, err
 	}
+	allow, control, err := egressLists(cfg, repos, logger)
+	if err != nil {
+		return engineParts{}, err
+	}
+	cfg.Sandbox.Allowlist, cfg.Sandbox.TLS = allow, control
+	agentSide := withGateway(client, allow, session.SideAgents)
 	sandbox, err := newSandbox(cfg, client, gitHostsOf(repos))
 	if err != nil {
 		return engineParts{}, err
@@ -292,7 +302,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d = session.NewDispatcher(reg, session.DispatcherConfig{
 		Agents:       agents,
-		Host:         client,
+		Host:         agentSide,
 		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions}},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
@@ -304,7 +314,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Reviews:      reviews,
 		Startup:      files.Startup{},
 		Approvals:    state.NewApprovals(cfg.StateDir),
-		SignIns:      client,
+		SignIns:      agentSide,
 		Expected:     expected,
 		Work:         work,
 		Workflow:     knackpackDir(pins),
@@ -315,8 +325,17 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Audit:        state.NewAudit(cfg.StateDir),
 		Identity:     identity,
 		DocsInRepo:   docs,
+		KeyRoutes:    state.NewKeyRoutes(cfg.StateDir),
 		Logger:       logger,
 	})
+	if allow != nil {
+		allow.OnChange(func() { d.Recheck(base) })
+		allow.UseKeys(d)
+		d.UseGateways(allow)
+	}
+	if reviews != nil {
+		reviews.UseKeyGate(func(ctx context.Context) error { return d.KeyRouted(ctx, session.SideReviewers) })
+	}
 	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace}})
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
@@ -332,7 +351,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	commentAfterPush(pushes, forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity}, nil
+	return engineParts{dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -439,11 +458,17 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		_ = pageLn.Close()
 		return err
 	}
+	srv.UseEgress(parts.egressPage())
 	if parts.dispatcher != nil {
+		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)
+		parts.dispatcher.ReconcileKeys(kctx)
+		cancelKeys()
 		parts.dispatcher.Restore()
 	}
 	reg.DropStrayNotes()
+	parts.useHalt(reg, cfg, logger)
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
+	useAgentReports(sends, srv, parts, cfg, logger)
 
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
@@ -492,6 +517,9 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 			parts.dispatcher.StopLeftovers(lctx)
 		}()
 		go parts.dispatcher.Watch(ctx, session.CheckEvery)
+		if parts.allowlist != nil {
+			go parts.allowlist.Watch(ctx, session.ExpireWatch)
+		}
 		go parts.dispatcher.WatchStates(ctx, session.StatesEvery)
 	}
 	if parts.reviews != nil {

@@ -67,6 +67,7 @@ type Server struct {
 
 	agentsMu sync.Mutex
 	boot     string
+	rulesMu  sync.Mutex
 }
 
 type commandJSON struct {
@@ -264,6 +265,9 @@ var routes = map[string]string{
 	"/v1/worktrees":        http.MethodPost,
 	"/v1/worktrees/remove": http.MethodPost,
 	identityRoute:          http.MethodPost,
+	allowRulesRoute:        http.MethodPost,
+	removeRuleRoute:        http.MethodPost,
+	homeRoute:              http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -426,6 +430,41 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case allowRulesRoute:
+		var q allowRulesJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		out, p := s.allowRules(q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, out)
+	case removeRuleRoute:
+		var q removeRuleJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.removeRule(q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case homeRoute:
+		var q homeJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		out, p := s.homeSettings(r.Context(), q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, out)
 	case identityRoute:
 		var q worktreeJSON
 		if p := decode(w, r, &q); p != nil {

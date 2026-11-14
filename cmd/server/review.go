@@ -84,7 +84,7 @@ func reviewSandbox(cfg PageConfig, host session.Host, hosts func() []string) (se
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
 		Host: host, Probe: []string{cfg.AgentBinary, "sandbox-probe"}, Dir: cfg.Review.SeenAs,
-		Proxy: cfg.Review.Proxy, Status: sb.Status, Side: ReviewersSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts,
+		Proxy: cfg.Review.Proxy, Status: sb.Status, Side: ReviewersSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts, Lists: listsOf(sb), TLS: sb.TLS,
 	})
 }
 
@@ -122,7 +122,7 @@ func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, sourc
 		return nil, err
 	}
 	client.WithKey(key)
-	return reviewsWith(base, cfg, reg, source, client, repos, gitHostsOf(repos), expected, agentFiles, logger)
+	return reviewsWith(base, cfg, reg, source, withGateway(client, cfg.Sandbox.Allowlist, session.SideReviewers, cfg.Review.Dev), repos, gitHostsOf(repos), expected, agentFiles, logger)
 }
 
 const hostKeyFile = ".agent-host-key"

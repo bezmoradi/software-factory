@@ -2,7 +2,7 @@ import { button, el, emit, shown, unspoofed, visible } from '../lib/dom.ts'
 import { plural } from '../lib/format.ts'
 import type { CardEvent, CardHost, ClaimMark, ContextView, SessionEvent, TurnMarks } from '../types.ts'
 import './markdown.ts'
-import { answering } from './cards.ts'
+import { answering, hiddenMark, hidesText } from './cards.ts'
 
 const NOTE = '[Software Factory] '
 const TOOL_NAMES = new Map([['WebFetch', 'Fetch']])
@@ -244,6 +244,7 @@ class SfConversation extends HTMLElement {
           call.append('(', path, ')')
         } else if (ev.summary) call.append(`(${visible(ev.summary)})`)
         li.append(mark, call, this.#outLine('Running…'))
+        if (hidesText(ev.summary)) li.append(hiddenMark(ev.summary, 'This call'))
         this.#fresh.add(call)
         li.title = visible(ev.summary || ev.tool)
         if (ev.id) this.#tools.set(ev.id, li)
@@ -257,6 +258,7 @@ class SfConversation extends HTMLElement {
           li.classList.add(ev.ok ? 'ok' : 'fail')
           li.querySelector('.tool-out')?.remove()
           if (ev.outcome) li.append(this.#outLine(visible(ev.outcome)))
+          if (hidesText(ev.outcome)) li.append(hiddenMark(ev.outcome, 'This output'))
         }
         break
       }
@@ -272,6 +274,10 @@ class SfConversation extends HTMLElement {
       case 'ask':
       case 'permission':
       case 'plan':
+        if (ev.type === 'permission' && ev.away === true) {
+          this.#entry('reset small muted').textContent = `Away mode is on, so Software Factory denied ${visible(ev.tool)} for you, with the note to the agent “the person is away; continue without this or stop”.`
+          break
+        }
         this.#showCard(ev, controlled)
         break
       case 'resolved':

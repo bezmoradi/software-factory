@@ -1,4 +1,4 @@
-import { button, el, emit, remembered, shown, visible, visibleCommand } from '../lib/dom.ts'
+import { button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
 import { attachCommand, plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
@@ -12,6 +12,18 @@ function start(host: HTMLElement, meta: string, title?: string) {
   host.classList.add('card')
   host.replaceChildren(el('div', 'label meta', meta))
   if (title) host.append(el('h3', '', title))
+}
+
+const HIDING = /\u001b\[[0-9;?]*[A-HJKSTfsu]|\u001b[78DEM]|\u009b[0-9;?]*[A-HJKSTfsu]|\r(?!\n)|[\u0008\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u
+
+export const hidesText = (text: unknown): boolean => typeof text === 'string' && HIDING.test(text)
+
+export function hiddenMark(text: string, what: string): HTMLElement {
+  const box = el('div', 'hidden-mark small')
+  box.append(el('span', 'tag warn', 'hides text'), ' ', el('span', 'warn', `${what} holds terminal sequences that erase or move over text, or direction overrides, which can hide part of it from you while the agent reads all of it. Escaped, as Software Factory reads it:`))
+  const code = el('code', 'hidden-escaped', visible(unspoofed(text)))
+  box.append(code)
+  return box
 }
 
 const pending = new WeakSet<HTMLElement>()
@@ -247,6 +259,7 @@ class SfPermission extends HTMLElement {
     const { id, tool, detail, summary, agentId, agentName, complete, always, auto, irreversible, readOnly, attach, who = 'Claude' } = this.#card!
     start(this, `${subagent(agentId, agentName) || who} wants to run a tool`, `Allow ${visible(tool)}?`)
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
+    if (hidesText(detail || summary)) this.append(hiddenMark(detail || summary, 'This call'))
     if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')

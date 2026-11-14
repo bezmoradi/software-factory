@@ -48,7 +48,8 @@ RUN apt-get update \
  && groupadd --gid 10000 sf \
  && useradd --uid 10001 --gid sf --no-create-home --home-dir /var/lib/software-factory --shell /usr/sbin/nologin engine \
  && useradd --uid 10002 --gid sf --no-create-home --home-dir /home/agent --shell /bin/bash agent \
- && useradd --uid 10003 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
+ && groupadd --gid 10003 egress \
+ && useradd --uid 10003 --gid egress --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
  && useradd --uid 10004 --user-group --no-create-home --home-dir /home/reviewer --shell /bin/bash reviewer \
  && install -d -o engine -g sf -m 0700 /var/lib/software-factory \
  && install -d -o engine -g sf -m 2775 /workspace /workspace/repos /workspace/worktrees \

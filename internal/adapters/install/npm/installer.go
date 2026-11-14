@@ -153,7 +153,11 @@ func (i *Installer) Ready(id string) (bool, string) {
 func (i *Installer) InstallMissing(ctx context.Context, report func(string)) error {
 	var errs []error
 	for _, a := range i.cfg.Agents {
-		if _, _, ok := i.find(a.ID); !ok || i.Installed(a.ID) {
+		if _, _, ok := i.find(a.ID); !ok {
+			continue
+		}
+		if i.Installed(a.ID) {
+			_ = i.CheckInstalled(ctx, a.ID, report)
 			continue
 		}
 		if err := i.Install(ctx, a.ID, report); err != nil {
@@ -206,12 +210,13 @@ func sentence(s string) string {
 }
 
 type manifest struct {
-	Agent       string   `json:"agent"`
-	Version     string   `json:"version"`
-	Arch        string   `json:"arch"`
-	Packages    []string `json:"packages"`
-	Integrity   []string `json:"integrity"`
-	InstalledAt string   `json:"installedAt"`
+	Agent       string             `json:"agent"`
+	Version     string             `json:"version"`
+	Arch        string             `json:"arch"`
+	Packages    []string           `json:"packages"`
+	Integrity   []string           `json:"integrity"`
+	InstalledAt string             `json:"installedAt"`
+	Provenance  []ProvenanceResult `json:"provenance"`
 }
 
 func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(string)) error {
@@ -227,7 +232,7 @@ func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(s
 	defer unlock()
 	if i.Installed(a.ID) {
 		report(fmt.Sprintf("%s %s is already installed.", a.Name, a.Version))
-		return nil
+		return i.checkInstalled(ctx, a, b, report)
 	}
 	tmp := filepath.Join(i.cfg.Dir, ".tmp-"+a.ID+"-"+randomHex())
 	if err := os.Mkdir(tmp, 0o755); err != nil {
@@ -240,6 +245,12 @@ func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(s
 		if err := i.fetch(ctx, p, tmp); err != nil {
 			return err
 		}
+		prov, err := i.provenance(ctx, a, p)
+		if err != nil {
+			return err
+		}
+		report(ProvenanceLine(prov))
+		m.Provenance = append(m.Provenance, prov)
 		m.Packages = append(m.Packages, p.Name+"@"+p.Version)
 		m.Integrity = append(m.Integrity, p.Integrity)
 	}

@@ -2,9 +2,11 @@ package egress
 
 import (
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -29,8 +31,54 @@ const (
 var gitHosts = []string{"github.com", "githubusercontent.com", "gitlab.com", "bitbucket.org"}
 
 type Policy struct {
-	allow []string
-	deny  []string
+	allow   []string
+	deny    []string
+	expires map[string]time.Time
+}
+
+type Source interface {
+	Current() Policy
+}
+
+func (p Policy) Current() Policy { return p }
+
+func (p Policy) WithAllow(allow []string, expires map[string]time.Time) (Policy, error) {
+	out := Policy{deny: slices.Clone(p.deny), expires: map[string]time.Time{}}
+	for _, entry := range allow {
+		name, err := entryName(entry)
+		if err != nil {
+			return Policy{}, fmt.Errorf("egress: allowlist: %w", err)
+		}
+		if gitHost(out.deny, name) {
+			return Policy{}, fmt.Errorf("egress: allowlist: %q names or covers a refused git host", entry)
+		}
+		out.allow = append(out.allow, name)
+	}
+	out.allow = sortedUnique(out.allow)
+	for entry, t := range expires {
+		name, err := entryName(entry)
+		if err != nil || !slices.Contains(out.allow, name) || t.IsZero() {
+			return Policy{}, fmt.Errorf("egress: an expiry names %q, which isn't in the allowlist", entry)
+		}
+		out.expires[name] = t
+	}
+	return out, nil
+}
+
+func (p Policy) Expires() map[string]time.Time {
+	out := map[string]time.Time{}
+	maps.Copy(out, p.expires)
+	return out
+}
+
+func gitHost(deny []string, entry string) bool {
+	bare, wild := strings.CutPrefix(entry, ".")
+	for _, d := range deny {
+		if bare == d || strings.HasSuffix(bare, "."+d) || (wild && strings.HasSuffix(d, "."+bare)) {
+			return true
+		}
+	}
+	return false
 }
 
 func NewPolicy(allow, extraDeny []string) (Policy, error) {
@@ -93,7 +141,11 @@ func (p Policy) denied(name string) bool {
 }
 
 func (p Policy) allowed(name string) bool {
+	now := time.Now()
 	for _, a := range p.allow {
+		if t, ok := p.expires[a]; ok && !now.Before(t) {
+			continue
+		}
 		if strings.HasPrefix(a, ".") {
 			if strings.HasSuffix(name, a) {
 				return true

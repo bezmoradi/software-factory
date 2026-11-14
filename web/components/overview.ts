@@ -15,6 +15,7 @@ export function sessionState(s: SessionInfo): { dot: string; word: string } {
   if (loginNeeded(s)) return { dot: 'dot off', word: 'needs you to sign in again' }
   if (!s.running && s.queued) return { dot: 'dot busy', word: `waking, ${s.queued} ${plural(s.queued, 'message')} waiting` }
   if (!s.running && s.levelLost) return { dot: 'dot off', word: 'stopped: process lost' }
+  if (!s.running && s.stopReason) return { dot: 'dot off', word: `stopped: ${shown(s.stopReason)}` }
   if (!s.running) return { dot: 'dot', word: !s.state || s.state === 'done' || s.state === 'stopped' ? 'stopped' : s.state === 'blocked' ? 'stopped, waiting for your answer' : `stopped, was ${shown(s.state)}` }
   if (!s.live) return { dot: 'dot', word: shown(s.waitingFor ? `waiting for ${s.waitingFor}` : s.status || s.state || 'running') }
   if (s.outdated) return { dot: 'dot off', word: 'older plugin version' }

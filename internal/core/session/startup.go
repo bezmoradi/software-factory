@@ -32,8 +32,6 @@ var StartupLists = map[string][]StartupEntry{
 			Source: "code.claude.com/docs/en/settings, \"Settings files and who they affect\" (Claude Code 2.1.322)"},
 		{Path: ".claude/settings.local.json", Place: InWorktree, Why: "the same keys as settings.json, applied over it; versions before 2.1.211 kept it in the starting folder, and 2.1.322 still reads one left there",
 			Source: "code.claude.com/docs/en/settings, \"Where Claude Code keeps the local file in a git repository\""},
-		{Path: ".claude/settings.local.json", Place: InClone, Why: "in a worktree Claude Code reads and writes the local settings file at the main checkout's root, the clone's folder",
-			Source: "code.claude.com/docs/en/settings: \"In a worktree, it uses the file at the main checkout's root\""},
 		{Path: ".mcp.json", Place: InWorktree, Why: "the project's MCP servers: commands Claude Code starts",
 			Source: "code.claude.com/docs/en/claude-directory, file reference: \".mcp.json, Team-shared MCP servers\""},
 		{Path: ".claude/agents", Folder: true, Place: InWorktree, Why: "subagents, with their own tools, permissionMode, hooks and mcpServers in frontmatter",

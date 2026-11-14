@@ -1,6 +1,7 @@
 import { button, el, visible } from '../lib/dom.ts'
 import type { SignIn } from '../types.ts'
 import './accordion.ts'
+import { GATEWAY_WARNING } from './egress-panel.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Target = 'agents' | 'reviewers'
@@ -90,7 +91,7 @@ class Row {
     const [keyLabel, key] = field('api-key', 'API key from the Claude Console', true)
     this.key = key
     this.apiKey.append(
-      el('p', 'small muted', `Billed per use. Software Factory saves the key in the ${target === 'agents' ? 'agent' : 'reviewer'} container for Claude Code and never shows it again.`),
+      el('p', 'small muted', `Billed per use. Software Factory saves the key in the ${target === 'agents' ? 'agent' : 'reviewer'} container for Claude Code and never shows it again. While a gateway is set for ${target === 'agents' ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
       this.form(keyLabel, () => void this.finishKey()),
     )
     this.kinds.addEventListener('sf-expand', e => {
@@ -122,6 +123,7 @@ class Row {
   show(s: SignIn | null) {
     this.signIn = s
     this.status.textContent = describe(s)
+    if (s?.method === 'gateway') this.status.textContent += ` ${GATEWAY_WARNING}.`
     this.paint()
   }
 

@@ -420,7 +420,7 @@ func (b *bridge) promptOnce(text string, m Fields, steered bool) {
 }
 
 func (b *bridge) nextLocked() {
-	if len(b.waiting) == 0 || b.ended {
+	if len(b.waiting) == 0 || b.ended || b.reg.halt.turns() != "" {
 		return
 	}
 	m := b.waiting[0]
@@ -646,7 +646,7 @@ func (b *bridge) cardLocked(req agent.Request, sub string) {
 	b.cards[req.ID] = id
 	b.reqs[id] = req.ID
 	b.recordLocked(b.ofAgentLocked(Fields{
-		"type": "permission", "id": id, "tool": clip(tool, maxSummary), "summary": clip(req.Tool.Title, maxSummary),
+		"type": "permission", "id": id, "tool": clip(tool, maxSummary), "toolKind": toolName(&req.Tool), "summary": clip(req.Tool.Title, maxSummary),
 		"detail": clip(detail, maxDetail), "complete": complete, "always": "", "auto": false,
 	}, sub))
 	b.log.Info("agent session", "event", "card")
@@ -715,6 +715,8 @@ func (b *bridge) waitCard(card, req string) {
 		given := answerOf(answer)
 		if texts != nil {
 			given = askAnswer(texts, answer)
+		} else if awayAnswered(answer) {
+			b.reg.NoteFor("away")(b.sid, awayAgentNote)
 		}
 		actx, acancel := context.WithTimeout(b.ctx, bridgeCall)
 		aerr := sess.Answer(actx, req, given)

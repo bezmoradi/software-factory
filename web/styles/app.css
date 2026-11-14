@@ -897,3 +897,29 @@ sf-approval pre.diff { white-space: pre-wrap; overflow-wrap: anywhere; }
 sf-forge-panel .forge-matches > p { margin: .3rem 0 .2rem; }
 sf-forge-panel .forge-match-list { margin: 0 0 .3rem; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
 sf-forge-panel .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
+sf-halt { display: flex; align-items: center; gap: .4rem; flex: none; }
+sf-halt button.small { min-height: 20px; padding: 0 .5rem; font-size: .75rem; }
+sf-halt .halt-menu { inset: calc(1.75rem + 4px) .75rem auto auto; max-width: 20rem; white-space: normal; }
+sf-halt-banner { flex: none; display: grid; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+sf-halt-banner[hidden] { display: none; }
+sf-halt-banner .halt-row { display: flex; align-items: center; gap: .8rem; margin: 0; padding: .35rem .75rem; font-size: .8125rem; background: var(--paper); }
+sf-halt-banner .halt-row.bad { background: color-mix(in srgb, var(--bad) 14%, var(--paper)); }
+sf-halt-banner .halt-row.warn { background: color-mix(in srgb, var(--warn) 12%, var(--paper)); }
+sf-halt-banner .halt-row p { flex: 1; min-width: 0; margin: 0; color: var(--ink); }
+.hidden-mark { grid-column: 2; display: grid; gap: .2rem; justify-items: start; margin-top: .15rem; }
+.hidden-mark .hidden-escaped { white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog.egress fieldset { margin: .5rem 0; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 8px; }
+dialog.egress fieldset label { margin: .2rem 0; }
+dialog.egress h3, dialog.egress h4 { margin: .9rem 0 .3rem; }
+dialog.egress .list li { flex-wrap: wrap; }
+dialog.egress .list code { overflow-wrap: anywhere; }
+dialog.egress .egress-add { flex-wrap: wrap; align-items: end; margin: .5rem 0; }
+dialog.egress .egress-add label, dialog.egress .egress-gateway > label:first-child { display: grid; gap: .2rem; }
+dialog.egress .egress-gateway { display: grid; gap: .4rem; margin: .5rem 0; }
+dialog.egress .egress-gateway .textbox { width: 100%; }
+sf-agent-report { display: block; margin-top: 1.5rem; overflow-wrap: anywhere; }
+sf-agent-report[hidden] { display: none; }
+sf-agent-report > h2 { margin: 0 0 .35rem; font-size: 1.5em; font-weight: 600; line-height: 1.3; color: var(--ink); }
+sf-agent-report h3 { margin: .75rem 0 .25rem; font-weight: 600; }
+sf-allow-rules { display: block; margin: .5rem 0; padding-inline-start: 2rem; overflow-wrap: anywhere; }
+sf-allow-rules code { overflow-wrap: anywhere; }

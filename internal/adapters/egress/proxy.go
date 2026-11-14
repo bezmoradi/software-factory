@@ -35,16 +35,27 @@ type Limits struct {
 }
 
 type Proxy struct {
-	policy   Policy
+	policy   Source
 	limits   Limits
 	resolver Resolver
 	dialer   Dialer
 	logger   shared.Logger
 	marks    Marks
 	slots    chan struct{}
+	mu       sync.Mutex
+	tunnels  map[*tunnel]struct{}
 }
 
-func New(policy Policy, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger, marks Marks) *Proxy {
+type tunnel struct {
+	host   string
+	cancel context.CancelCauseFunc
+}
+
+var errRevoked = errors.New("the host is no longer allowed")
+
+const sweepEvery = 10 * time.Second
+
+func New(policy Source, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger, marks Marks) *Proxy {
 	return &Proxy{
 		policy:   policy,
 		limits:   limits,
@@ -53,6 +64,41 @@ func New(policy Policy, limits Limits, resolver Resolver, dialer Dialer, logger 
 		logger:   logger,
 		marks:    marks,
 		slots:    make(chan struct{}, max(limits.MaxConns, 0)),
+		tunnels:  map[*tunnel]struct{}{},
+	}
+}
+
+func (p *Proxy) sweep(ctx context.Context) {
+	t := time.NewTicker(sweepEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			policy := p.policy.Current()
+			p.mu.Lock()
+			for tn := range p.tunnels {
+				if policy.Check(tn.host) != "" {
+					tn.cancel(errRevoked)
+				}
+			}
+			p.mu.Unlock()
+		}
+	}
+}
+
+func (p *Proxy) track(ctx context.Context, host string) (context.Context, func()) {
+	tctx, cancel := context.WithCancelCause(ctx)
+	tn := &tunnel{host: host, cancel: cancel}
+	p.mu.Lock()
+	p.tunnels[tn] = struct{}{}
+	p.mu.Unlock()
+	return tctx, func() {
+		p.mu.Lock()
+		delete(p.tunnels, tn)
+		p.mu.Unlock()
+		cancel(nil)
 	}
 }
 
@@ -61,6 +107,9 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 	defer stop()
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	sweepCtx, stopSweep := context.WithCancel(ctx)
+	defer stopSweep()
+	wg.Go(func() { p.sweep(sweepCtx) })
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -96,6 +145,9 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	mark := markOf(req)
 	if req.Method != http.MethodConnect {
 		p.marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
+		if req.URL != nil {
+			p.marks.saw(logged(req.URL.Hostname()), ReasonMethod)
+		}
 		p.refuse(conn, http.StatusForbidden, ReasonMethod, "")
 		return
 	}
@@ -127,7 +179,8 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	}
 	if normalize(name) != host {
 		p.marks.note(mark, target, logged(name), ReasonSNIMismatch)
-		p.refused(ReasonSNIMismatch, host, "sni", logged(name))
+		p.marks.saw(logged(name), ReasonSNIMismatch)
+		p.logRefused(ReasonSNIMismatch, host, "sni", logged(name))
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
@@ -138,8 +191,10 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	if !stop() {
 		return
 	}
-	p.logger.Info("egress", "event", "allowed")
-	end := relay(ctx, conn, upstream, p.limits)
+	p.logger.Info("egress", "event", "allowed", "host", host)
+	tctx, done := p.track(ctx, host)
+	defer done()
+	end := relay(tctx, conn, upstream, p.limits)
 	p.logger.Info("egress", "event", "closed", "reason", end)
 }
 
@@ -151,7 +206,7 @@ func (p *Proxy) target(authority string) (string, string) {
 	if port != "443" {
 		return "", ReasonPort
 	}
-	if reason := p.policy.Check(host); reason != "" {
+	if reason := p.policy.Current().Check(host); reason != "" {
 		return "", reason
 	}
 	return normalize(host), ""
@@ -201,6 +256,11 @@ func (p *Proxy) refuse(conn net.Conn, status int, reason, host string) {
 }
 
 func (p *Proxy) refused(reason, host string, more ...any) {
+	p.marks.saw(host, reason)
+	p.logRefused(reason, host, more...)
+}
+
+func (p *Proxy) logRefused(reason, host string, more ...any) {
 	args := []any{"event", "refused", "reason", reason}
 	if host != "" {
 		args = append(args, "host", host)
@@ -236,7 +296,13 @@ func relay(ctx context.Context, client, upstream net.Conn, limits Limits) string
 	defer idle.Stop()
 	total := time.AfterFunc(limits.Total, func() { end("total") })
 	defer total.Stop()
-	stop := context.AfterFunc(ctx, func() { end("shutdown") })
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(context.Cause(ctx), errRevoked) {
+			end("revoked")
+			return
+		}
+		end("shutdown")
+	})
 	defer stop()
 	touch := func() { idle.Reset(limits.Idle) }
 	var wg sync.WaitGroup

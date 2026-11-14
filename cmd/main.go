@@ -51,6 +51,8 @@ func run(args []string, logger shared.Logger) error {
 		return server.ServeProbe(ctx, args[1:], os.Stdout)
 	case "install-agents":
 		return server.InstallAgents(ctx, args[1:], logger)
+	case "check-pins":
+		return server.CheckPins(ctx, args[1:], os.Stdout)
 	}
 	return fmt.Errorf("unknown role %q", role)
 }

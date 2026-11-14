@@ -45,6 +45,9 @@ GOVULNCHECK_VERSION := v1.9.0
 vuln:
 	@go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
+pins:
+	@go run ./cmd/main.go check-pins
+
 TSC := web/node_modules/.bin/tsc
 
 web-check:

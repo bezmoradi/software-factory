@@ -34,6 +34,7 @@ export interface SessionInfo {
   forge?: SessionForge[]
   signIn?: SignIn
   unbacked?: TurnMarks[]
+  stopReason?: string
 }
 
 export interface ClaimMark {
@@ -494,6 +495,7 @@ export interface PermissionEvent extends CardBase {
   always: string
   auto?: boolean
   irreversible?: boolean
+  away?: boolean
 }
 
 export interface PlanEvent extends CardBase {

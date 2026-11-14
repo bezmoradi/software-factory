@@ -63,6 +63,9 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	d.checks.mu.Unlock()
 	d.cfg.Logger.Info("sandbox check", "event", string(o.Event))
 	d.observeAll(o)
+	if o.Event == level.CheckFailed {
+		d.sandboxFailed()
+	}
 	if o.Event == level.CheckPassed {
 		d.reg.CheckPassed()
 	}
@@ -71,6 +74,9 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 }
 
 func (d *Dispatcher) startCheck(ctx context.Context) (CheckState, error) {
+	if why := d.reg.halt.starts(); why != "" {
+		return CheckState{}, explained(conflict("halted"), why)
+	}
 	st := d.check(ctx)
 	o := st.Observation
 	if d.cfg.Sandbox == nil || o.Event == level.CheckPassed {

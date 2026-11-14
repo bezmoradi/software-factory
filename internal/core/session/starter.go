@@ -97,6 +97,7 @@ type DispatcherConfig struct {
 	Audit        Audit
 	Identity     *Identities
 	DocsInRepo   bool
+	KeyRoutes    KeyRoutes
 	Logger       shared.Logger
 }
 
@@ -139,6 +140,9 @@ type Dispatcher struct {
 	starting   bool
 	approvalMu sync.Mutex
 	saveMu     sync.Mutex
+	home       *HomeSettings
+	keyMu      sync.Mutex
+	gateways   GatewayRoutes
 }
 
 var (
@@ -282,6 +286,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		d.mu.Unlock()
 		return Started{}, err
 	}
+	d.homeStarted()
 	if spec.Method == MethodPlugin {
 		err = d.startClaude(ctx, r, q.Model)
 	} else {
@@ -667,6 +672,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.cfg.Logger.Warn("wake", "event", "identity-not-set")
 		return explained(conflict("identity"), "agent-host couldn't set the name and email agents commit with in the session's worktree, so the session didn't wake: "+hostMessage(err))
 	}
+	d.homeStarted()
 	if d.cfg.Work != nil && !d.cfg.Work.Has(sid) {
 		d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 	}
@@ -792,6 +798,9 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
 	}
+	if why := d.reg.halt.automatic(); auto && why != "" {
+		return explained(conflict("halted"), why)
+	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")
@@ -848,6 +857,11 @@ func (quiet) Warn(string, ...any)  {}
 func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
 	if err := d.startup(r, consent); err != nil {
 		return err
+	}
+	if r.spec.Method == MethodPlugin {
+		if err := d.KeyRouted(ctx, SideAgents); err != nil {
+			return err
+		}
 	}
 	s, err := d.signIn(ctx, r)
 	if err != nil {

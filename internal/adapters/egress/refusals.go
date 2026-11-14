@@ -75,6 +75,11 @@ func (r *Refusals) Of(mark string) ([]Refusal, int, bool) {
 type Marks struct {
 	Book *Refusals
 	Side string
+	Seen *Seen
+}
+
+func (m Marks) saw(host, reason string) {
+	m.Seen.add(host, reason)
 }
 
 func (m Marks) note(mark, target, name, reason string) {

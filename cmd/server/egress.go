@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,14 +19,21 @@ import (
 )
 
 const (
-	AgentsSide    = "agents"
-	ReviewersSide = "reviewers"
+	AgentsSide        = "agents"
+	ReviewersSide     = "reviewers"
+	ControlCertName   = "control-cert.pem"
+	ControlTLSKeyName = "control-tls-key.pem"
 )
+
+func controlFile(keyFile, name string) string {
+	return filepath.Join(filepath.Dir(keyFile), name)
+}
 
 type EgressConfig struct {
 	Listen       string
 	ReviewListen string
 	StatusListen string
+	KeyFile      string
 	Allow        []string
 	Deny         []string
 	Limits       egress.Limits
@@ -62,13 +71,30 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	agentsBook, reviewersBook := egress.NewRefusals(), egress.NewRefusals()
+	agentsSeen, reviewersSeen := egress.NewSeen(), egress.NewSeen()
+	live := egress.NewLive(policy, AgentsSide, ReviewersSide)
 	status := &http.Server{
-		Handler:           egress.StatusHandler(policy, agentsBook, reviewersBook),
+		Handler: egress.StatusHandler(egress.StatusConfig{
+			Live: live, Books: []*egress.Refusals{agentsBook, reviewersBook},
+			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       time.Minute,
 		MaxHeaderBytes:    8 << 10,
+	}
+	if cfg.KeyFile != "" {
+		tc, err := egress.ControlTLS(controlFile(cfg.KeyFile, ControlCertName), controlFile(cfg.KeyFile, ControlTLSKeyName))
+		if err != nil {
+			_ = proxyListener.Close()
+			_ = statusListener.Close()
+			if reviewListener != nil {
+				_ = reviewListener.Close()
+			}
+			return err
+		}
+		statusListener = tls.NewListener(statusListener, tc)
 	}
 	statusErr := make(chan error, 1)
 	go func() {
@@ -76,11 +102,11 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 		cancel()
 	}()
 
-	logger.Info("egress listening", "proxy", proxyListener.Addr().String(), "status", statusListener.Addr().String(), "allow", len(policy.Allow()))
+	logger.Info("egress listening", "proxy", proxyListener.Addr().String(), "status", statusListener.Addr().String(), "allow", len(policy.Allow()), "control", cfg.KeyFile != "", "tls", cfg.KeyFile != "")
 	reviewErr := make(chan error, 1)
 	if reviewListener != nil {
 		logger.Info("egress listening for reviewers", "proxy", reviewListener.Addr().String())
-		reviewProxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide})
+		reviewProxy := egress.New(live.Side(ReviewersSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide, Seen: reviewersSeen})
 		go func() {
 			reviewErr <- reviewProxy.Serve(ctx, reviewListener)
 			cancel()
@@ -88,7 +114,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	} else {
 		reviewErr <- nil
 	}
-	proxy := egress.New(policy, cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide})
+	proxy := egress.New(live.Side(AgentsSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide, Seen: agentsSeen})
 	proxyErr := proxy.Serve(ctx, proxyListener)
 	cancel()
 	if err := <-reviewErr; err != nil && proxyErr == nil {
@@ -115,6 +141,7 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 	listen := fs.String("listen", env("EGRESS_LISTEN", ":3128"), "proxy listen address")
 	reviewListen := fs.String("review-listen", env("EGRESS_REVIEW_LISTEN", ""), "a second proxy address with its own connection limit, for the reviewers; empty for none")
 	statusListen := fs.String("status-listen", env("EGRESS_STATUS_LISTEN", ":3129"), "status endpoint listen address")
+	keyFile := fs.String("control-key-file", env("EGRESS_CONTROL_KEY_FILE", ""), "a file holding the SHA-256 of the engine's control key; empty for no control channel")
 	allow := fs.String("allow", env("EGRESS_ALLOW", ""), "comma-separated allowed hosts; a leading dot allows subdomains only")
 	deny := fs.String("deny", env("EGRESS_DENY", ""), "comma-separated extra git hosts, always refused with their subdomains")
 	maxConns := fs.String("max-conns", env("EGRESS_MAX_CONNS", "256"), "maximum concurrent connections")
@@ -143,6 +170,7 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 		Listen:       *listen,
 		ReviewListen: *reviewListen,
 		StatusListen: *statusListen,
+		KeyFile:      *keyFile,
 		Allow:        list(*allow),
 		Deny:         list(*deny),
 		Limits: egress.Limits{

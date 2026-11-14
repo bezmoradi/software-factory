@@ -133,6 +133,7 @@ type Info struct {
 	WaitingFor   string
 	Queued       int
 	Unbacked     []TurnMarks
+	StopReason   string
 }
 
 type conn struct {
@@ -166,6 +167,7 @@ type admitted struct {
 	unbacked     []TurnMarks
 	lastMessage  string
 	turnSince    time.Time
+	stopReason   string
 }
 
 type replay struct {
@@ -206,6 +208,7 @@ type Registry struct {
 	noteVersion uint64
 	noteSaved   uint64
 	noteMu      sync.Mutex
+	halt        *Halt
 }
 
 var (
@@ -230,7 +233,7 @@ func New(version string, now func() time.Time) *Registry {
 	if now == nil {
 		now = time.Now
 	}
-	return &Registry{
+	r := &Registry{
 		now:         now,
 		version:     version,
 		conns:       map[string]*conn{},
@@ -250,6 +253,8 @@ func New(version string, now func() time.Time) *Registry {
 		states:      map[string]AgentState{},
 		compactions: newLimiter(compactNotes, compactWindow),
 	}
+	r.halt = newHalt(now, r.Notify)
+	return r
 }
 
 func secret() string {
@@ -530,6 +535,7 @@ func (r *Registry) Report(given string, b Batch) error {
 	}
 	changed := false
 	for _, raw := range b.Events {
+		denied := false
 		ev, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -563,8 +569,10 @@ func (r *Registry) Report(given string, b Batch) error {
 			r.trackTurn(c, kind, ev, seq, now)
 			r.markTurn(c.sid, kind, ev, now)
 			if cardTypes[kind] {
+				fresh := r.freshCard(ev)
 				shown = r.indexCard(c.sid, ev)
 				changed = changed || shown
+				denied = shown && fresh && r.awayAnswer(c.sid, ev, now)
 			} else if shown {
 				changed = r.apply(c, kind, ev, now) || changed
 			}
@@ -579,6 +587,10 @@ func (r *Registry) Report(given string, b Batch) error {
 			maps.Copy(frame, ev)
 			frame["sid"] = c.sid
 			frame["epoch"] = c.epoch
+			delete(frame, "away")
+			if cardTypes[kind] {
+				r.markAway(frame, denied)
+			}
 		} else if ts, ok := ev["ts"].(float64); ok {
 			frame["ts"] = ts
 		}
@@ -723,6 +735,7 @@ func (r *Registry) Admit(sid string, a Admission) {
 		r.admitted[sid] = known
 	}
 	known.Admission = a
+	known.stopReason = ""
 	if !known.running && len(known.observations) > 0 {
 		known.observe(level.Observation{By: level.Engine, Event: level.ProcessStarted})
 	}
@@ -801,6 +814,7 @@ func (r *Registry) Forget(sid string) {
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
 	r.announce(r.now())
+	go r.halt.forget(sid)
 }
 
 func (r *Registry) PushSession(token string) (string, error) {
@@ -912,6 +926,10 @@ func (r *Registry) Attach(s Sink) (string, error) {
 		return "", full("stream")
 	}
 	if r.supervisor != "" && !s.Frame(Fields{"type": "supervisor", "state": r.supervisor}) {
+		s.Close()
+		return "", full("stream")
+	}
+	if !s.Frame(r.halt.frame()) {
 		s.Close()
 		return "", full("stream")
 	}
@@ -1040,6 +1058,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.Agent = a.Agent
 		info.Project = a.Project
 		info.StartedAt = a.StartedAt
+		info.StopReason = a.stopReason
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1149,6 +1168,9 @@ func (r *Registry) Replay(stream, sid, epoch string, since int64) error {
 
 func (r *Registry) Message(sid, text string, confirm bool, images, files []string) error {
 	text = strings.TrimSpace(text)
+	if why := r.halt.turns(); why != "" {
+		return explained(conflict("halted"), why)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
@@ -1245,6 +1267,9 @@ func (r *Registry) Answer(sid, id string, value any) error {
 	}
 	if !validAnswer(k, value) {
 		return invalid("answer")
+	}
+	if k.kind == "permission" {
+		r.halt.answered(sid, k, value, false)
 	}
 	if k.waiter != nil {
 		w := k.waiter
