@@ -128,7 +128,7 @@ func lookupOutside(ctx context.Context, d Dialer, servers []string, name, shown 
 			return Result{Detail: "the probe couldn't build a DNS query for " + shown}
 		}
 		if a.got && !unforwarded(a) {
-			return Result{Detail: fmt.Sprintf("a DNS lookup of %s from the agent container got an answer from %s (%s, %d records), so DNS queries leave the sandbox", shown, s, rcodeWord(a.rcode), a.answers)}
+			return Result{Detail: fmt.Sprintf("a DNS lookup of %s from the probed container got an answer from %s (%s, %d records), so DNS queries leave the sandbox", shown, s, rcodeWord(a.rcode), a.answers)}
 		}
 	}
 	return Result{OK: true, Detail: "no DNS answer for " + shown + " from outside the sandbox"}
@@ -175,7 +175,7 @@ func udpOut(ctx context.Context, d Dialer, cfg ProbeConfig, address string) Resu
 	if _, err := conn.Write(payload); err != nil && NoRoute(err) {
 		return Result{OK: true, Detail: "no route to " + address + " over UDP"}
 	}
-	return Result{Detail: "the agent container has a route to " + address + " over UDP"}
+	return Result{Detail: "the probed container has a route to " + address + " over UDP"}
 }
 
 func errWord(err error) string {

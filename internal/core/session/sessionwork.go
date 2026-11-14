@@ -22,7 +22,6 @@ type SessionWorkConfig struct {
 	Ports    PortStore
 	Models   ModelStore
 	Lister   ModelLister
-	ProbeDir string
 	Audit    Audit
 	Note     func(sid, text string)
 	PortNote func(sid, text string)
@@ -366,7 +365,7 @@ func (w *SessionWork) AgentModels(ctx context.Context, agent string) ([]AgentMod
 	case "claude":
 		return ClaudeOffered(), true
 	case "codex":
-		return w.CodexModels(ctx)
+		return w.CodexModels(ctx, "")
 	}
 	return []AgentModel{}, true
 }

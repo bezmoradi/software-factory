@@ -127,6 +127,7 @@ type Info struct {
 	LevelReason  string
 	LevelDropped bool
 	LevelLost    bool
+	Sandboxed    bool
 	Review       *ReviewView
 	Push         *PushView
 	Forge        []ForgeView
@@ -143,6 +144,8 @@ type Info struct {
 	Lineage      *Lineage
 	Follow       *FollowView
 	Splits       []SplitView
+	Box          string
+	SignInWait   bool
 }
 
 type conn struct {
@@ -169,6 +172,7 @@ type conn struct {
 type admitted struct {
 	Admission
 	running      bool
+	waitSignIn   bool
 	observations []level.Observation
 	review       *ReviewView
 	push         *PushView
@@ -789,6 +793,15 @@ func (r *Registry) Restore(sid string, a Admission, sandboxed bool) {
 	r.announce(r.now())
 }
 
+func (r *Registry) WaitSignIn(sid string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a != nil && a.waitSignIn != on {
+		a.waitSignIn = on
+		r.announce(r.now())
+	}
+}
+
 func (r *Registry) CheckPassed() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1156,6 +1169,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
 		info.Lineage = a.Lineage
+		info.Box, info.SignInWait = a.Box, a.waitSignIn && !a.running
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1207,6 +1221,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 	info.LevelReason = lv.Reason
 	info.LevelDropped = lv.Dropped
 	info.LevelLost = lv.Lost
+	info.Sandboxed = lv.Sandboxed
 	return info
 }
 
@@ -1301,7 +1316,7 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		return explained(conflict("no images"), noImages)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return explained(invalid("command"), commandRefused())
+		return explained(invalid("command"), r.commandRefusedLocked(sid))
 	}
 	if c.mode == "bypassPermissions" && !confirm {
 		return conflict("confirm")

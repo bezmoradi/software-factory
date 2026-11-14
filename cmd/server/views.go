@@ -38,7 +38,7 @@ func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.
 	}
 	if parts.repos != nil && parts.routes != nil {
 		ex.Repos = parts.repos
-		ex.Rules = &session.AllowRules{Host: anyBox{routes: parts.routes}, Repos: parts.repos, Audit: audit}
+		ex.Rules = &session.AllowRules{Hosts: d.RuleHosts, Repos: parts.repos, Audit: audit}
 	}
 	srv.UseViews(recaps, ws, session.NewExceptions(ex))
 }

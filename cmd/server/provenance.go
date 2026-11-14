@@ -190,10 +190,9 @@ func useAgentReports(base context.Context, srv *page.Server, parts engineParts, 
 	report := agentReport{installer: parts.installer, advisories: watchAdvisories(base, os.Getenv, logger)}
 	var rules session.AllowRulesPage
 	if parts.routes != nil && parts.dispatcher != nil && parts.repos != nil {
-		any := anyBox{routes: parts.routes}
-		report.home = &session.HomeSettings{Reader: any, Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}
+		report.home = &session.HomeSettings{Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}
 		parts.dispatcher.UseHomeSettings(report.home)
-		rules = &session.AllowRules{Host: any, Repos: parts.repos, Audit: state.NewAudit(cfg.StateDir)}
+		rules = &session.AllowRules{Hosts: parts.dispatcher.RuleHosts, Repos: parts.repos, Audit: state.NewAudit(cfg.StateDir)}
 	}
 	srv.UseAgentReports(report, rules)
 }

@@ -76,13 +76,16 @@ type needsJSON struct {
 	Step     string        `json:"step,omitempty"`
 	Cost     bool          `json:"cost,omitempty"`
 	Trust    string        `json:"trust,omitempty"`
+	Box      string        `json:"box,omitempty"`
+	Agent    string        `json:"agent,omitempty"`
+	Code     bool          `json:"code,omitempty"`
 }
 
 func needsOf(n *session.Needs) *needsJSON {
 	if n == nil {
 		return nil
 	}
-	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust}
+	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust, Box: n.Box, Agent: n.Agent, Code: n.Code}
 	if n.Expected != "" {
 		out.Expected = string(n.Expected)
 	}
@@ -94,6 +97,15 @@ func needsOf(n *session.Needs) *needsJSON {
 		}
 	}
 	return out
+}
+
+func boxOf(body map[string]any) (string, bool) {
+	v, has := body["box"]
+	if !has {
+		return "", true
+	}
+	box, ok := v.(string)
+	return box, ok && session.ValidBox(box)
 }
 
 func consentOf(body map[string]any) (session.Consent, bool) {

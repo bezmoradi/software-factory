@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 )
@@ -25,6 +26,7 @@ type Refusal struct {
 	Target string `json:"target"`
 	Name   string `json:"name"`
 	Reason string `json:"reason"`
+	Subnet string `json:"subnet"`
 }
 
 type refusalsJSON struct {
@@ -71,20 +73,24 @@ func Expects(cfg ProbeConfig) []Expect {
 	return out
 }
 
-func (e Expect) matches(side string, r Refusal) bool {
-	if r.Side == side && r.Target == e.Target && r.Name == e.Name && slices.Contains(e.Reason, r.Reason) {
+func (e Expect) matches(side, subnet string, r Refusal) bool {
+	if r.Side == side && r.Subnet == subnet && r.Target == e.Target && r.Name == e.Name && slices.Contains(e.Reason, r.Reason) {
 		return true
 	}
-	return e.Or != nil && e.Or.matches(side, r)
+	return e.Or != nil && e.Or.matches(side, subnet, r)
 }
 
-func Confirm(side string, expected []Expect, got []Refusal, dropped int) []string {
+func Confirm(side string, subnet netip.Prefix, expected []Expect, got []Refusal, dropped int) []string {
+	from := ""
+	if subnet.IsValid() {
+		from = subnet.String()
+	}
 	used := make([]bool, len(got))
 	var missing []string
 	for _, e := range expected {
 		found := false
 		for i, r := range got {
-			if !used[i] && e.matches(side, r) {
+			if !used[i] && e.matches(side, from, r) {
 				used[i], found = true, true
 				break
 			}
@@ -97,13 +103,16 @@ func Confirm(side string, expected []Expect, got []Refusal, dropped int) []strin
 		return nil
 	}
 	part := "egress has no record of refusing the probe's requests " + clipList(missing) + ", so the probe's report isn't confirmed"
+	if from != "" {
+		part = "egress has no record of refusing the probe's requests from the session's network " + clipList(missing) + ", so the probe's report isn't confirmed"
+	}
 	if dropped > 0 {
 		part += fmt.Sprintf(" (egress kept only the first %d of this check's records)", len(got))
 	}
 	return []string{part}
 }
 
-func (c *Checker) confirm(ctx context.Context, cfg ProbeConfig) []string {
+func (c *Checker) confirm(ctx context.Context, cfg ProbeConfig, subnet netip.Prefix) []string {
 	ctx, cancel := context.WithTimeout(ctx, statusFor)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL(c.cfg.TLS, c.cfg.Status, "/refusals/"+cfg.Marker), nil)
@@ -123,5 +132,5 @@ func (c *Checker) confirm(ctx context.Context, cfg ProbeConfig) []string {
 	if err != nil || resp.StatusCode != http.StatusOK || len(data) > maxRefusals || json.Unmarshal(data, &rep) != nil || rep.Refusals == nil {
 		return []string{"the egress proxy's record of the probe's requests couldn't be read"}
 	}
-	return Confirm(c.cfg.Side, Expects(cfg), rep.Refusals, rep.Dropped)
+	return Confirm(c.cfg.Side, subnet, Expects(cfg), rep.Refusals, rep.Dropped)
 }

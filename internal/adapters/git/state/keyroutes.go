@@ -41,8 +41,8 @@ func (s KeyRoutes) lock() func() {
 	return s.mu.Unlock
 }
 
-func keySide(side string) bool {
-	return side == session.SideAgents || side == session.SideReviewers
+func keyTarget(target string) bool {
+	return session.ValidLoginTarget(target)
 }
 
 func (s KeyRoutes) Load() (map[string]session.KeyRoute, error) {
@@ -56,16 +56,19 @@ func (s KeyRoutes) Load() (map[string]session.KeyRoute, error) {
 		return out, nil
 	}
 	var f keyRoutesJSON
-	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Sides) > 2 {
+	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Sides) > session.MaxBoxRecords+2 {
 		return nil, errKeyRoutes
 	}
-	for side, k := range f.Sides {
+	for target, k := range f.Sides {
 		gatewayOK := k.Gateway == "" || !strings.HasPrefix(k.Gateway, ".") && session.ValidAllowEntry(k.Gateway)
 		beforeOK := k.Before == "" || session.ValidExpect(session.Expect(k.Before))
-		if !keySide(side) || !gatewayOK || !beforeOK || !k.Saved && (k.Gateway != "" || k.Before != "") {
+		if !keyTarget(target) && target != session.SideAgents || !gatewayOK || !beforeOK || !k.Saved && (k.Gateway != "" || k.Before != "") {
 			return nil, errKeyRoutes
 		}
-		out[side] = session.KeyRoute{Saved: k.Saved, Gateway: k.Gateway, Before: session.Expect(k.Before)}
+		if target == session.SideAgents {
+			continue
+		}
+		out[target] = session.KeyRoute{Saved: k.Saved, Gateway: k.Gateway, Before: session.Expect(k.Before)}
 	}
 	return out, nil
 }
@@ -73,15 +76,15 @@ func (s KeyRoutes) Load() (map[string]session.KeyRoute, error) {
 func (s KeyRoutes) Save(all map[string]session.KeyRoute) error {
 	defer s.lock()()
 	f := keyRoutesJSON{Version: 1, Sides: map[string]keyRouteJSON{}}
-	for side, k := range all {
-		if !keySide(side) {
+	for target, k := range all {
+		if !keyTarget(target) {
 			continue
 		}
 		j := keyRouteJSON{Saved: k.Saved}
 		if k.Saved {
 			j.Gateway, j.Before = k.Gateway, string(k.Before)
 		}
-		f.Sides[side] = j
+		f.Sides[target] = j
 	}
 	return write(s.Dir, keyRoutesFile, f)
 }

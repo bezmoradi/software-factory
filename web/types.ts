@@ -29,6 +29,7 @@ export interface SessionInfo {
   levelReason?: string
   levelDropped?: boolean
   levelLost?: boolean
+  sandboxed?: boolean
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
@@ -41,6 +42,8 @@ export interface SessionInfo {
   lineage?: Lineage
   follow?: PullFollow
   splits?: SplitCard[]
+  box?: string
+  signInWait?: boolean
 }
 
 export interface SplitCard {
@@ -286,11 +289,15 @@ export interface Needs {
   step?: string
   cost?: boolean
   trust?: string
+  box?: string
+  agent?: string
+  code?: boolean
 }
 
 export interface Consent {
   approve?: string
   costOk?: boolean
+  box?: string
 }
 
 export interface ReviewerView {

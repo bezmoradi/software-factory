@@ -19,6 +19,7 @@ const (
 var rulesRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
 type ruleJSON struct {
+	Box      string   `json:"box"`
 	Rule     string   `json:"rule"`
 	Place    string   `json:"place"`
 	Worktree string   `json:"worktree,omitempty"`
@@ -27,6 +28,7 @@ type ruleJSON struct {
 }
 
 type ruleFileJSON struct {
+	Box      string `json:"box"`
 	Place    string `json:"place"`
 	Worktree string `json:"worktree,omitempty"`
 	Path     string `json:"path"`
@@ -36,6 +38,7 @@ type ruleFileJSON struct {
 
 type allowRulesJSON struct {
 	Repo  string         `json:"repo"`
+	Idle  bool           `json:"idle"`
 	Files []ruleFileJSON `json:"files"`
 	Rules []ruleJSON     `json:"rules"`
 }
@@ -47,12 +50,12 @@ func (s *Server) UseAgentReports(reports session.AgentReportPage, rules session.
 }
 
 func allowRulesOf(v session.AllowRulesView) allowRulesJSON {
-	out := allowRulesJSON{Repo: v.Repo, Files: []ruleFileJSON{}, Rules: []ruleJSON{}}
+	out := allowRulesJSON{Repo: v.Repo, Idle: v.Idle, Files: []ruleFileJSON{}, Rules: []ruleJSON{}}
 	for _, f := range v.Files {
-		out.Files = append(out.Files, ruleFileJSON{Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
+		out.Files = append(out.Files, ruleFileJSON{Box: f.Box, Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
 	}
 	for _, r := range v.Rules {
-		out.Rules = append(out.Rules, ruleJSON{Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide)})
+		out.Rules = append(out.Rules, ruleJSON{Box: r.Box, Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide)})
 	}
 	return out
 }
@@ -83,6 +86,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	case "remove":
 		place, okPlace := body["place"].(string)
 		rule, okRule := body["rule"].(string)
+		box, okBox := body["box"].(string)
 		worktree := ""
 		if v, has := body["worktree"]; has {
 			t, ok := v.(string)
@@ -92,7 +96,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 			}
 			worktree = t
 		}
-		if !keysWithin(body, "op", "repo", "place", "worktree", "rule") || !okPlace || !okRule || !session.ValidRuleText(rule) || len(worktree) > 64 {
+		if !keysWithin(body, "op", "repo", "box", "place", "worktree", "rule") || !okPlace || !okRule || !okBox || !session.ValidBox(box) || !session.ValidRuleText(rule) || len(worktree) > 64 {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -102,7 +106,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := rules.RemoveAllowRule(ctx, repo, session.RulePlace(place), worktree, rule)
+		err := rules.RemoveAllowRule(ctx, repo, box, session.RulePlace(place), worktree, rule)
 		s.logger.Info("allow rule remove", "ok", err == nil, "place", place)
 		if err != nil {
 			code, p := status(err)

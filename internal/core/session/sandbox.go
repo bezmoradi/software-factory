@@ -18,6 +18,7 @@ const (
 
 type Sandbox interface {
 	Check(ctx context.Context) level.Observation
+	CheckBox(ctx context.Context, b BoxProbe) level.Observation
 }
 
 type Installs interface {
@@ -62,7 +63,9 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	d.checks.last = st
 	d.checks.mu.Unlock()
 	d.cfg.Logger.Info("sandbox check", "event", string(o.Event))
-	d.observeAll(o)
+	if o.Event != level.CheckPassed {
+		d.observeAll(o)
+	}
 	if o.Event == level.CheckFailed {
 		d.sandboxFailed()
 	}
@@ -73,11 +76,18 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	return st
 }
 
-func (d *Dispatcher) startCheck(ctx context.Context) (CheckState, error) {
+func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, error) {
 	if why := d.reg.halt.starts(); why != "" {
 		return CheckState{}, explained(conflict("halted"), why)
 	}
 	st := d.check(ctx)
+	if d.cfg.Sandbox != nil && st.Observation.Event == level.CheckPassed {
+		bctx, cancel := context.WithTimeout(ctx, checkFor)
+		o := d.boxCheck(bctx, box, nil, nil)
+		cancel()
+		d.cfg.Logger.Info("sandbox check", "box", box, "event", string(o.Event))
+		st = CheckState{Observation: o, At: d.reg.now(), Ran: true}
+	}
 	o := st.Observation
 	if d.cfg.Sandbox == nil || o.Event == level.CheckPassed {
 		return st, nil
@@ -112,7 +122,7 @@ func (d *Dispatcher) Recheck(ctx context.Context) {
 	if d.cfg.Sandbox == nil {
 		return
 	}
-	go d.check(ctx)
+	go d.round(ctx)
 }
 
 func (d *Dispatcher) Watch(ctx context.Context, every time.Duration) {
@@ -122,7 +132,7 @@ func (d *Dispatcher) Watch(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = CheckEvery
 	}
-	d.check(ctx)
+	d.round(ctx)
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -130,7 +140,7 @@ func (d *Dispatcher) Watch(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			d.check(ctx)
+			d.round(ctx)
 		}
 	}
 }

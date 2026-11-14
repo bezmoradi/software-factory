@@ -13,6 +13,7 @@ export function sessionState(s: SessionInfo): { dot: string; word: string } {
   if (s.disputed) return { dot: 'dot off', word: 'two connections claim this session' }
   if (!s.verified) return { dot: 'dot', word: 'not started by this engine' }
   if (loginNeeded(s)) return { dot: 'dot off', word: 'needs you to sign in again' }
+  if (s.signInWait) return { dot: 'dot need', word: 'Waiting for sign-in' }
   if (!s.running && s.queued) return { dot: 'dot busy', word: `waking, ${s.queued} ${plural(s.queued, 'message')} waiting` }
   if (!s.running && s.levelLost) return { dot: 'dot off', word: 'stopped: process lost' }
   if (!s.running && s.stopReason) return { dot: 'dot off', word: `stopped: ${shown(s.stopReason)}` }
@@ -37,8 +38,10 @@ export function sharing(s: SessionInfo, all: SessionInfo[]): string[] {
 
 export function warnings(s: SessionInfo, all: SessionInfo[]): string[] {
   const out: string[] = []
+  if (s.verified && s.level === 'locked' && s.sandboxed === false) out.push(`Locked, not sandboxed: every check since this run started passed, but a check failed or couldn't run in an earlier run, so the session's work isn't counted as sandboxed and its pushes are held on the sandbox item.`)
   if (s.verified && s.level === 'held') out.push(`Held: every push from this session is held and no new session starts, because ${s.levelReason || 'the sandbox check hasn\'t passed'}.${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
-  if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the agent container (${signInStep(s.agent)}); this page never signs in for you.`)
+  if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the session's container (${signInStep(s.agent, s.box)}); this page never signs in for you.`)
+  if (s.signInWait) out.push(`Waiting for sign-in: ${agentWord(s.agent)} in this session's container isn't signed in. Press Wake to open the session's sign-in panel, sign in there, then continue.`)
   const others = sharing(s, all)
   if (others.length) out.push(`${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} also in ${s.checkout}, with no worktree between them, and at least one of these sessions is working, so their edits can collide.`)
   return out
@@ -57,7 +60,7 @@ export function bySessionOrder(a: SessionInfo, b: SessionInfo): number {
 }
 
 export function sessionKey(list: SessionInfo[], now = Date.now()): string {
-  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.checkout, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.lineage?.group, s.lineage?.groupKind, age(s.startedAt, now)]))
+  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.checkout, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.sandboxed, s.lineage?.group, s.lineage?.groupKind, age(s.startedAt, now)]))
 }
 
 function groupOf(s: SessionInfo, all: SessionInfo[]): string {
@@ -183,7 +186,7 @@ export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDi
 export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu = false): HTMLLIElement {
   const st = sessionState(s)
   const name = titled(visible(label(s)))
-  const level = LEVELS[s.level ?? '']
+  const level = s.level === 'locked' && s.sandboxed === false ? { word: 'Locked, not sandboxed', tone: 'warn' } : LEVELS[s.level ?? '']
   if (level) {
     const tag = el('span', level.tone ? `tag ${level.tone}` : 'tag', level.word)
     tag.title = visible(`${s.levelReason ?? ''}${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)

@@ -175,7 +175,7 @@ func chunk(text string) {
 }
 
 func main() {
-	if authStatus(os.Args[1:]) {
+	if authStatus(os.Args[1:]) || authLogin(os.Args[1:]) {
 		return
 	}
 	in := bufio.NewScanner(os.Stdin)

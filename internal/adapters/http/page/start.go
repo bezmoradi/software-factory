@@ -117,7 +117,8 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	case "/api/dispatch":
 		rawFrom, hasFrom := body["from"]
 		from, okFrom := startFromOf(rawFrom, hasFrom)
-		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort") || !okFrom {
+		box, okBox := boxOf(body)
+		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box") || !okFrom || !okBox {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -160,8 +161,9 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			Issue:     issue,
 			IssueHash: issueHash,
 			Effort:    str(body["effort"], 21),
+			Box:       box,
 		})
-		s.logger.Info("dispatch", "agent", agent, "issue", issue > 0, "ok", err == nil)
+		s.logger.Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

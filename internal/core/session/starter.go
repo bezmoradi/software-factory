@@ -55,10 +55,12 @@ type Dispatch struct {
 	Issue     int
 	IssueHash string
 	Effort    string
+	Box       string
 
 	pinned    *startPoint
 	group     string
 	groupKind string
+	once      bool
 }
 
 type Started struct {
@@ -84,7 +86,6 @@ type Starter interface {
 
 type DispatcherConfig struct {
 	Agents       []AgentSpec
-	AnyHost      Host
 	Boxes        Boxes
 	BoxStore     BoxStore
 	Routes       BoxRoutes
@@ -102,7 +103,6 @@ type DispatcherConfig struct {
 	Reviews      *Reviews
 	Startup      StartupReader
 	Approvals    Approvals
-	AnySignIns   SignInChecker
 	Expected     *Expected
 	Work         *Work
 	Workflow     func() (string, error)
@@ -159,6 +159,7 @@ type run struct {
 	groupKind string
 	history   bool
 	preflight bool
+	waitAt    time.Time
 }
 
 type Dispatcher struct {
@@ -182,6 +183,7 @@ type Dispatcher struct {
 	decisions  *DecisionLog
 	branchCopy *Keep
 	boxes      boxBook
+	waiting    map[string]*run
 }
 
 var (
@@ -194,7 +196,7 @@ func NewDispatcher(reg *Registry, cfg DispatcherConfig) *Dispatcher {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	d := &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}}
+	d := &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}, waiting: map[string]*run{}}
 	if cfg.Runs != nil {
 		reg.OnTurn(d.saveRuns)
 	}
@@ -302,6 +304,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if why := d.reg.halt.starts(); why != "" {
 		return Started{}, explained(conflict("halted"), why)
 	}
+	if q.Box != "" {
+		return d.resume(ctx, q, spec, repo)
+	}
 	from, err := d.startSource(repo, q)
 	if err != nil {
 		return Started{}, err
@@ -316,7 +321,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 			d.dropBox(box, true)
 		}
 	}()
-	check, err := d.startCheck(withBox(ctx, box))
+	check, err := d.startCheck(ctx, box)
 	if err != nil {
 		return Started{}, err
 	}
@@ -363,28 +368,37 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		return Started{}, err
 	}
 	r.cwd = cwd
+	return d.launch(ctx, r, q, &kept)
+}
+
+func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool) (Started, error) {
 	if err := d.admit(ctx, r, q.Consent); err != nil {
 		d.mu.Lock()
 		d.started = time.Time{}
 		d.mu.Unlock()
+		*kept = d.holdForAnswer(r, q, err)
 		return Started{}, err
 	}
-	d.homeStarted()
+	d.homeStarted(r)
 	d.reservePorts(r)
-	if spec.Method == MethodPlugin {
-		err = d.startClaude(ctx, r, q.Model)
+	var err error
+	if r.spec.Method == MethodPlugin {
+		err = d.startClaude(ctx, r, r.model)
 	} else {
 		err = d.startStdio(ctx, r)
 	}
 	if r.sid != "" {
-		kept = true
-		d.settleBox(box)
+		*kept = true
+		d.unwait(r.box)
+		d.settleBox(r.box)
 		if err != nil {
 			go d.idleBox(r)
 		}
+	} else if err != nil {
+		*kept = d.holdForAnswer(r, q, err)
 	}
 	if d.cfg.Work != nil && r.sid != "" {
-		d.cfg.Work.Begin(r.sid, r.repo, spec.Knackpack, q.Type)
+		d.cfg.Work.Begin(r.sid, r.repo, r.spec.Knackpack, r.typ)
 	}
 	d.startedWork(r, err)
 	d.offerDecisions(r, err)
@@ -492,7 +506,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 			msg = "claude --bg failed."
 		}
 		if strings.Contains(strings.ToLower(msg), "not trusted") {
-			return notTrusted(r.repo, r.repoPath)
+			return notTrusted(r.repo, r.clone, r.box)
 		}
 		return explained(conflict("claude"), msg)
 	}
@@ -708,6 +722,7 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 	d.waitStopped(r)
 	live := d.liveBox(r.box)
 	d.stopBox(ctx, r.box)
+	d.reg.WaitSignIn(sid, false)
 	if err != nil && live {
 		return nil
 	}
@@ -813,6 +828,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 	defer func() {
 		if !woke {
 			d.stopBox(ctx, r.box)
+			d.reg.WaitSignIn(sid, false)
 		}
 	}()
 	if err := d.wakeWorktree(ctx, r, id); err != nil {
@@ -821,7 +837,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.mu.Unlock()
 		return err
 	}
-	check, err := d.startCheck(withBox(ctx, r.box))
+	check, err := d.startCheck(ctx, r.box)
 	if err != nil {
 		return err
 	}
@@ -832,8 +848,10 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.mu.Lock()
 		d.woken = time.Time{}
 		d.mu.Unlock()
+		woke = d.waitInWake(r, err)
 		return err
 	}
+	d.reg.WaitSignIn(sid, false)
 	if err := d.host(r).SetIdentity(ctx, r.repo, r.name, id); err != nil {
 		d.mu.Lock()
 		d.woken = time.Time{}
@@ -841,7 +859,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.cfg.Logger.Warn("wake", "event", "identity-not-set")
 		return explained(conflict("identity"), "agent-host couldn't set the name and email agents commit with in the session's worktree, so the session didn't wake: "+hostMessage(err))
 	}
-	d.homeStarted()
+	d.homeStarted(r)
 	if d.cfg.Work != nil && !d.cfg.Work.Has(sid) {
 		d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 	}
@@ -1062,7 +1080,7 @@ func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
 		return err
 	}
 	if r.spec.Method == MethodPlugin {
-		if err := d.KeyRouted(ctx, SideAgents); err != nil {
+		if err := d.KeyRouted(ctx, BoxTarget(r.box)); err != nil {
 			return err
 		}
 	}
@@ -1076,18 +1094,8 @@ func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
 	d.mu.Lock()
 	r.signIn = s
 	d.mu.Unlock()
-	want := d.cfg.Expected.Of(r.spec.ID)
-	if r.spec.ID == "claude" {
-		want = d.cfg.Expected.Adopt(r.spec.ID, s.Method)
-	}
-	return judge(r.spec.Name, s, want, d.step(r.spec), consent.CostOK, "the session")
-}
-
-func (d *Dispatcher) step(a AgentSpec) string {
-	if a.Status != nil && a.Status.Step != "" {
-		return a.Status.Step
-	}
-	return "its own sign-in in the session's container"
+	want := d.expectFor(r.spec, r.box, s.Method)
+	return judge(r.spec.Name, s, want, r.spec.StepIn(r.box), consent.CostOK, "the session")
 }
 
 func (d *Dispatcher) signIn(ctx context.Context, r *run) (SignIn, error) {

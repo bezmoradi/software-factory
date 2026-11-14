@@ -35,8 +35,8 @@ type Resolver interface {
 
 type Config struct {
 	Host     session.Host
-	Probe    []string
 	Dir      string
+	Probe    []string
 	Proxy    string
 	Status   string
 	Side     string
@@ -62,8 +62,8 @@ type Checker struct {
 var _ session.Sandbox = (*Checker)(nil)
 
 func New(cfg Config) (*Checker, error) {
-	if cfg.Host == nil || len(cfg.Probe) == 0 || cfg.Dir == "" {
-		return nil, errors.New("sandbox check: needs agent-host, the probe command and a folder to run it in")
+	if len(cfg.Probe) == 0 || (cfg.Host != nil) != (cfg.Dir != "") {
+		return nil, errors.New("sandbox check: needs the probe command, and a folder to run it in with an agent-host")
 	}
 	for _, a := range []string{cfg.Proxy, cfg.Status} {
 		if _, _, err := net.SplitHostPort(a); err != nil {
@@ -100,6 +100,25 @@ func sortedCopy(in []string) []string {
 }
 
 func (c *Checker) Check(ctx context.Context) level.Observation {
+	if c.cfg.Host != nil {
+		return c.probed(ctx, session.BoxProbe{Host: c.cfg.Host, Dir: c.cfg.Dir})
+	}
+	parts, want := c.status(ctx)
+	parts = append(parts, Uncovered(want.Allow, c.cfg.Deny, c.repoHosts())...)
+	if len(parts) > 0 {
+		return observation(level.CheckFailed, parts)
+	}
+	return level.Observation{By: level.Engine, Event: level.CheckPassed}
+}
+
+func (c *Checker) CheckBox(ctx context.Context, b session.BoxProbe) level.Observation {
+	if b.Host == nil || b.Dir == "" || !b.Subnet.IsValid() || !b.Gateway.IsValid() {
+		return observation(level.CheckNotRun, []string{"the engine has no route to the session's container, so the probe couldn't run in it"})
+	}
+	return c.probed(ctx, b)
+}
+
+func (c *Checker) probed(ctx context.Context, b session.BoxProbe) level.Observation {
 	var failed []string
 	parts, want := c.status(ctx)
 	failed = append(failed, parts...)
@@ -107,10 +126,13 @@ func (c *Checker) Check(ctx context.Context) level.Observation {
 	failed = append(failed, Uncovered(want.Allow, c.cfg.Deny, repos)...)
 	cfg := c.probeConfig(ctx, repos, lasting(want))
 	cfg.Marker = newMarker()
-	results, notRun := c.probe(ctx, cfg)
+	if b.Gateway.IsValid() {
+		cfg.Gateway = b.Gateway.String()
+	}
+	results, notRun := c.probe(ctx, b, cfg)
 	failed = append(failed, results...)
 	if len(failed) == 0 && notRun == "" {
-		failed = append(failed, c.confirm(ctx, cfg)...)
+		failed = append(failed, c.confirm(ctx, cfg, b.Subnet)...)
 	}
 	switch {
 	case len(failed) > 0:
@@ -316,22 +338,22 @@ func (c *Checker) probeConfig(ctx context.Context, repos, allow []string) ProbeC
 }
 
 func Args(cfg ProbeConfig) []string {
-	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker}
+	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
 }
 
-func (c *Checker) probe(ctx context.Context, cfg ProbeConfig) ([]string, string) {
+func (c *Checker) probe(ctx context.Context, b session.BoxProbe, cfg ProbeConfig) ([]string, string) {
 	argv := append(slices.Clone(c.cfg.Probe), Args(cfg)...)
-	res, err := c.cfg.Host.Run(ctx, session.Command{Argv: argv, Dir: c.cfg.Dir, Timeout: probeFor})
+	res, err := b.Host.Run(ctx, session.Command{Argv: argv, Dir: b.Dir, Timeout: probeFor})
 	if err != nil {
 		var h *session.HostError
 		if errors.As(err, &h) && h.Message != "" {
 			return nil, "agent-host didn't run the probe: " + clip(h.Message)
 		}
-		return nil, "agent-host didn't answer, so the probe couldn't run inside the agent container"
+		return nil, "agent-host didn't answer, so the probe couldn't run inside the probed container"
 	}
 	var rep Report
 	if res.Code != 0 || json.Unmarshal([]byte(res.Stdout), &rep) != nil || rep.Version != ReportVersion {
-		return []string{"the probe in the agent container gave no answer the engine could read"}, ""
+		return []string{"the probe gave no answer the engine could read"}, ""
 	}
 	return Judge(Expected(cfg), rep), ""
 }
@@ -340,7 +362,7 @@ func Judge(expected []string, rep Report) []string {
 	byCheck := map[string]Result{}
 	for _, r := range rep.Results {
 		if _, dup := byCheck[r.Check]; dup {
-			return []string{"the probe in the agent container answered one check twice"}
+			return []string{"the probe answered one check twice"}
 		}
 		byCheck[r.Check] = r
 	}
@@ -349,7 +371,7 @@ func Judge(expected []string, rep Report) []string {
 		r, ok := byCheck[want]
 		switch {
 		case !ok:
-			parts = append(parts, "the probe in the agent container didn't answer "+want)
+			parts = append(parts, "the probe didn't answer "+want)
 		case !r.OK:
 			detail := clip(r.Detail)
 			if detail == "" {

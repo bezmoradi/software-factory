@@ -39,6 +39,7 @@ type HomeEntry struct {
 }
 
 type HomeRecord struct {
+	Box     string
 	Entries []HomeEntry
 	At      time.Time
 	Since   time.Time
@@ -68,7 +69,6 @@ type HomeStore interface {
 }
 
 type HomeSettings struct {
-	Reader  HomeReader
 	Store   HomeStore
 	MCP     func() *Command
 	Now     func() time.Time
@@ -145,8 +145,8 @@ func viewOfHome(r HomeRecord, first bool) HomeView {
 	return HomeView{Checked: r.At, Since: r.Since, Changed: slices.Clone(r.Changed), More: r.More, First: first, Problem: r.Problem, Watching: len(r.Entries)}
 }
 
-func (h *HomeSettings) Started() {
-	if h == nil || h.Reader == nil || h.Store == nil {
+func (h *HomeSettings) Started(box string, reader HomeReader, dir string) {
+	if h == nil || reader == nil || h.Store == nil || !ValidBox(box) {
 		return
 	}
 	h.mu.Lock()
@@ -155,12 +155,12 @@ func (h *HomeSettings) Started() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), homeSettingsFor)
 		defer cancel()
-		h.Check(ctx)
+		h.Check(ctx, box, reader, dir)
 	}()
 }
 
-func (h *HomeSettings) Check(ctx context.Context) {
-	if h == nil || h.Reader == nil || h.Store == nil {
+func (h *HomeSettings) Check(ctx context.Context, box string, reader HomeReader, dir string) {
+	if h == nil || reader == nil || h.Store == nil {
 		return
 	}
 	h.run.Lock()
@@ -172,10 +172,17 @@ func (h *HomeSettings) Check(ctx context.Context) {
 	}()
 	var mcp *Command
 	if h.MCP != nil {
-		mcp = h.MCP()
+		if mcp = h.MCP(); mcp != nil {
+			c := *mcp
+			c.Dir = dir
+			mcp = &c
+		}
 	}
 	prev, had, loadErr := h.Store.Load()
-	entries, err := h.Reader.HomeSettings(ctx, mcp)
+	if had && prev.Box != box {
+		had = false
+	}
+	entries, err := reader.HomeSettings(ctx, mcp)
 	now := h.now().UTC()
 	if err == nil {
 		var ok bool
@@ -187,12 +194,12 @@ func (h *HomeSettings) Check(ctx context.Context) {
 		h.warn("home-settings-unread")
 		h.mu.Lock()
 		h.last = viewOfHome(prev, !had)
-		h.last.Problem = "agent-host couldn't list the agents' user settings at the last start: " + hostMessage(err)
+		h.last.Problem = "agent-host couldn't list the agent's user settings in the session's container at the last start: " + hostMessage(err)
 		h.loaded = true
 		h.mu.Unlock()
 		return
 	}
-	next := HomeRecord{Entries: entries, At: now}
+	next := HomeRecord{Box: box, Entries: entries, At: now}
 	first := !had || loadErr != nil
 	if !first {
 		next.Since = prev.At
@@ -220,7 +227,7 @@ func (h *HomeSettings) warn(event string) {
 }
 
 func (h *HomeSettings) View() HomeView {
-	if h == nil || h.Reader == nil || h.Store == nil {
+	if h == nil || h.Store == nil {
 		return HomeView{Problem: "This engine has no agent-host, so it lists no agent settings."}
 	}
 	h.mu.Lock()
@@ -244,9 +251,10 @@ func (d *Dispatcher) UseHomeSettings(h *HomeSettings) {
 	d.mu.Unlock()
 }
 
-func (d *Dispatcher) homeStarted() {
+func (d *Dispatcher) homeStarted(r *run) {
 	d.mu.Lock()
-	h := d.home
+	h, box := d.home, r.box
 	d.mu.Unlock()
-	h.Started()
+	reader, _ := d.hostFor(box).(HomeReader)
+	h.Started(box, reader, BoxFolder(d.cfg.Workspace, box))
 }

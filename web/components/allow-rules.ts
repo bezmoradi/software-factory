@@ -1,7 +1,9 @@
 import { api } from '../api.ts'
 import { button, el, focusedKey, refocus, shown, visible } from '../lib/dom.ts'
+import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
+  box: string
   rule: string
   place: string
   worktree: string
@@ -10,6 +12,7 @@ interface SavedRule {
 }
 
 interface SettingsFile {
+  box: string
   place: string
   worktree: string
   path: string
@@ -18,6 +21,7 @@ interface SettingsFile {
 }
 
 interface RulesView {
+  idle: boolean
   files: SettingsFile[]
   rules: SavedRule[]
 }
@@ -25,7 +29,7 @@ interface RulesView {
 const PLACES: Record<string, string> = {
   clone: 'The clone folder; Claude Code 2.1.322 didn\'t apply a rule from it in a session\'s worktree, but an agent can write it',
   worktree: "A session's worktree, where Claude Code saves a card's \"don't ask again\"",
-  user: "The agents' user settings, which every project's sessions load",
+  user: "The agent's user settings in the session's container, which it loads in every folder",
 }
 
 function text(x: unknown): string {
@@ -44,18 +48,18 @@ function readView(body: unknown): RulesView | null {
     if (!x || typeof x !== 'object') return []
     const r = x as Record<string, unknown>
     if (typeof r.rule !== 'string' || !r.rule) return []
-    return [{ rule: r.rule, place: text(r.place), worktree: text(r.worktree), path: text(r.path), wide: strings(r.wide) }]
+    return [{ box: text(r.box), rule: r.rule, place: text(r.place), worktree: text(r.worktree), path: text(r.path), wide: strings(r.wide) }]
   })
   const files = v.files.flatMap((x): SettingsFile[] => {
     if (!x || typeof x !== 'object') return []
     const f = x as Record<string, unknown>
-    return [{ place: text(f.place), worktree: text(f.worktree), path: text(f.path), count: Number(f.count) || 0, problem: text(f.problem) }]
+    return [{ box: text(f.box), place: text(f.place), worktree: text(f.worktree), path: text(f.path), count: Number(f.count) || 0, problem: text(f.problem) }]
   })
-  return { files, rules }
+  return { idle: v.idle === true, files, rules }
 }
 
-function fileKey(place: string, worktree: string): string {
-  return `${place}:${worktree}`
+function fileKey(box: string, place: string, worktree: string): string {
+  return `${box}:${place}:${worktree}`
 }
 
 class SfAllowRules extends HTMLElement {
@@ -95,10 +99,10 @@ class SfAllowRules extends HTMLElement {
   }
 
   async #remove(r: SavedRule) {
-    this.#busy = `${fileKey(r.place, r.worktree)}:${r.rule}`
+    this.#busy = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
     this.#status.textContent = ''
     this.#paint()
-    const body: Record<string, unknown> = { op: 'remove', repo: this.#repo, place: r.place, rule: r.rule }
+    const body: Record<string, unknown> = { op: 'remove', repo: this.#repo, box: r.box, place: r.place, rule: r.rule }
     if (r.worktree) body.worktree = r.worktree
     if (await this.#call(body)) {
       this.#status.className = 'small ok'
@@ -113,7 +117,7 @@ class SfAllowRules extends HTMLElement {
     const what = el('div')
     what.append(el('code', '', shown(r.rule)))
     for (const why of r.wide) what.append(' ', el('span', 'tag warn', `Wide: ${visible(why)}`))
-    const key = `${fileKey(r.place, r.worktree)}:${r.rule}`
+    const key = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
     const remove = button(this.#busy === key ? 'Removing…' : 'Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
     remove.disabled = this.#busy !== ''
     remove.setAttribute('aria-label', `Remove the rule ${visible(r.rule)} from ${visible(r.path)}`)
@@ -131,13 +135,14 @@ class SfAllowRules extends HTMLElement {
     ]
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', 'Reading the saved rules…'))
+    else if (v.idle) parts.push(el('p', 'small muted', 'No session of this project is running, so no session’s container is there to read. Each session keeps its rules in its own container.'))
     else if (!v.files.length) parts.push(el('p', 'small muted', 'No settings file holds saved rules for this project.'))
     else {
       for (const f of v.files) {
         const section = el('div')
-        section.append(el('p', 'small', `${PLACES[f.place] ?? visible(f.place)}: `), el('code', 'small', visible(f.path)))
+        section.append(el('p', 'small', `${PLACES[f.place] ?? visible(f.place)}, in ${visible(boxContainer(f.box) || 'a session’s container')}: `), el('code', 'small', visible(f.path)))
         if (f.problem) section.append(el('p', 'small warn', visible(f.problem)))
-        const rules = v.rules.filter(r => r.place === f.place && r.worktree === f.worktree)
+        const rules = v.rules.filter(r => r.box === f.box && r.place === f.place && r.worktree === f.worktree)
         if (!rules.length && !f.problem) section.append(el('p', 'small muted', 'No allow rules in this file.'))
         if (rules.length) {
           const list = el('ul', 'list')

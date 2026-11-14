@@ -38,6 +38,7 @@ type sessionJSON struct {
 	LevelReason  string      `json:"levelReason"`
 	LevelDropped bool        `json:"levelDropped"`
 	LevelLost    bool        `json:"levelLost,omitempty"`
+	Sandboxed    bool        `json:"sandboxed"`
 	Review       *reviewJSON `json:"review,omitempty"`
 	Push         *pushJSON   `json:"push,omitempty"`
 	Forge        []forgeJSON `json:"forge,omitempty"`
@@ -55,6 +56,8 @@ type sessionJSON struct {
 	Lineage     *lineageJSON     `json:"lineage,omitempty"`
 	Follow      *pullFollowJSON  `json:"follow,omitempty"`
 	Splits      []splitJSON      `json:"splits,omitempty"`
+	Box         string           `json:"box,omitempty"`
+	SignInWait  bool             `json:"signInWait,omitempty"`
 }
 
 type claimMarkJSON struct {
@@ -174,7 +177,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Verified: s.Verified, Running: s.Running, Live: s.Live, Disputed: s.Disputed, Claims: s.Claims,
 			Outdated: s.Outdated, Controlled: s.Controlled, Mode: s.Mode, Busy: s.Busy, Login: s.Login,
 			Needs: s.Needs, Epoch: s.Epoch, LastSeq: s.LastSeq,
-			Level: string(s.Level), LevelReason: s.LevelReason, LevelDropped: s.LevelDropped, LevelLost: s.LevelLost,
+			Level: string(s.Level), LevelReason: s.LevelReason, LevelDropped: s.LevelDropped, LevelLost: s.LevelLost, Sandboxed: s.Sandboxed,
 			Review: reviewOf(s.Review),
 			Push:   pushOf(s.Push),
 			Forge:  forgeOf(s.Forge),
@@ -189,6 +192,8 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Lineage:     lineageOf(s.Lineage),
 			Follow:      pullFollowOf(s.Follow),
 			Splits:      splitsOf(s.Splits),
+			Box:         s.Box,
+			SignInWait:  s.SignInWait,
 		})
 	}
 	return out

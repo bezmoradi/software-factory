@@ -283,9 +283,8 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		return engineParts{}, err
 	}
 	cfg.Sandbox.Allowlist, cfg.Sandbox.TLS = allow, tc
-	routes := newBoxRoutes(cfg.Workspace, reg, allow, control, logger)
-	agentSide := anyBox{routes: routes}
-	sandbox, err := newSandbox(cfg, agentSide, gitHostsOf(repos))
+	routes := newBoxRoutes(reg, allow, control, logger)
+	sandbox, err := newSandbox(cfg, gitHostsOf(repos))
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -331,7 +330,6 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d = session.NewDispatcher(reg, session.DispatcherConfig{
 		Agents:       agents,
-		AnyHost:      agentSide,
 		Boxes:        helper,
 		BoxStore:     state.NewBoxes(cfg.StateDir),
 		Routes:       routes,
@@ -349,7 +347,6 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Reviews:      reviews,
 		Startup:      files.Startup{},
 		Approvals:    state.NewApprovals(cfg.StateDir),
-		AnySignIns:   agentSide,
 		Expected:     expected,
 		Work:         work,
 		Workflow:     knackpackDir(pins),

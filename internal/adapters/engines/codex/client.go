@@ -54,7 +54,7 @@ const (
 const resumeLost = "Codex couldn't restore its earlier conversation; this is a new one."
 
 func signInHelp() string {
-	return "Codex isn't signed in. Sign in inside the agent container with Codex's own login, then start the session again: " + session.Compose() + " exec -it agent codex login --device-auth"
+	return "Codex isn't signed in. Sign in inside the session's container with Codex's own login, then wake the session again: the session's sign-in panel shows the docker exec command that runs codex login --device-auth there."
 }
 
 var (

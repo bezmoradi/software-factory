@@ -40,6 +40,7 @@ const (
 var RuleWorktreeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type SettingsFile struct {
+	Box      string
 	Place    RulePlace
 	Worktree string
 	Path     string
@@ -48,6 +49,7 @@ type SettingsFile struct {
 }
 
 type AllowRule struct {
+	Box      string
 	Rule     string
 	Place    RulePlace
 	Worktree string
@@ -57,6 +59,7 @@ type AllowRule struct {
 
 type AllowRulesView struct {
 	Repo  string
+	Idle  bool
 	Files []SettingsFile
 	Rules []AllowRule
 }
@@ -68,11 +71,17 @@ type AllowRulesHost interface {
 
 type AllowRulesPage interface {
 	AllowRules(ctx context.Context, repo string) (AllowRulesView, error)
-	RemoveAllowRule(ctx context.Context, repo string, place RulePlace, worktree, rule string) error
+	RemoveAllowRule(ctx context.Context, repo, box string, place RulePlace, worktree, rule string) error
+}
+
+type RuleHost struct {
+	Box  string
+	Name string
+	Host AllowRulesHost
 }
 
 type AllowRules struct {
-	Host  AllowRulesHost
+	Hosts func(repo string) []RuleHost
 	Repos Repositories
 	Audit Audit
 	Now   func() time.Time
@@ -406,7 +415,7 @@ func ValidRuleText(rule string) bool {
 }
 
 func (a *AllowRules) repo(name string) (Repository, error) {
-	if a.Host == nil || a.Repos == nil {
+	if a.Hosts == nil || a.Repos == nil {
 		return Repository{}, explained(conflict("no agent-host"), "This engine has no agent-host, so it can't read the agents' saved rules.")
 	}
 	repos, err := a.Repos.List()
@@ -453,7 +462,7 @@ func checkRuleFiles(files []SettingsFile) ([]SettingsFile, error) {
 				rules = append(rules, r)
 			}
 		}
-		out = append(out, SettingsFile{Place: f.Place, Worktree: f.Worktree, Path: f.Path, Rules: rules, Problem: cleanRuleText(f.Problem, maxRuleProblem)})
+		out = append(out, SettingsFile{Box: f.Box, Place: f.Place, Worktree: f.Worktree, Path: f.Path, Rules: rules, Problem: cleanRuleText(f.Problem, maxRuleProblem)})
 	}
 	return out, nil
 }
@@ -465,27 +474,37 @@ func (a *AllowRules) AllowRules(ctx context.Context, name string) (AllowRulesVie
 	}
 	ctx, cancel := context.WithTimeout(ctx, allowRulesFor)
 	defer cancel()
-	files, err := a.Host.ReadAllowRules(ctx, repo.Name)
-	if err != nil {
-		return AllowRulesView{}, explained(conflict("agent-host"), "agent-host couldn't read the saved rules: "+hostMessage(err))
-	}
-	files, err = checkRuleFiles(files)
-	if err != nil {
-		return AllowRulesView{}, err
-	}
-	v := AllowRulesView{Repo: repo.Name, Files: files, Rules: []AllowRule{}}
-	for _, f := range files {
-		for _, r := range f.Rules {
-			v.Rules = append(v.Rules, AllowRule{Rule: r, Place: f.Place, Worktree: f.Worktree, Path: f.Path, Wide: WideReasons(r)})
+	hosts := a.Hosts(repo.Name)
+	v := AllowRulesView{Repo: repo.Name, Idle: len(hosts) == 0, Files: []SettingsFile{}, Rules: []AllowRule{}}
+	for _, h := range hosts {
+		files, err := h.Host.ReadAllowRules(ctx, repo.Name)
+		if err != nil {
+			return AllowRulesView{}, explained(conflict("agent-host"), "agent-host in "+h.Name+"'s container couldn't read the saved rules: "+hostMessage(err))
+		}
+		files, err = checkRuleFiles(files)
+		if err != nil {
+			return AllowRulesView{}, err
+		}
+		for _, f := range files {
+			f.Box = h.Box
+			v.Files = append(v.Files, f)
+			for _, r := range f.Rules {
+				v.Rules = append(v.Rules, AllowRule{Box: h.Box, Rule: r, Place: f.Place, Worktree: f.Worktree, Path: f.Path, Wide: WideReasons(r)})
+			}
 		}
 	}
 	return v, nil
 }
 
-func (a *AllowRules) RemoveAllowRule(ctx context.Context, name string, place RulePlace, worktree, rule string) error {
+func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, place RulePlace, worktree, rule string) error {
 	repo, err := a.repo(name)
 	if err != nil {
 		return err
+	}
+	hosts := a.Hosts(repo.Name)
+	i := slices.IndexFunc(hosts, func(h RuleHost) bool { return h.Box == box })
+	if !ValidBox(box) || i < 0 {
+		return explained(notFound("box"), "No running session of this project has that container.")
 	}
 	switch {
 	case !ValidRuleText(rule):
@@ -497,7 +516,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name string, place Rul
 	}
 	ctx, cancel := context.WithTimeout(ctx, allowRulesFor)
 	defer cancel()
-	err = a.Host.RemoveAllowRule(ctx, repo.Name, place, worktree, rule)
+	err = hosts[i].Host.RemoveAllowRule(ctx, repo.Name, place, worktree, rule)
 	result := "removed"
 	if err != nil {
 		result = "refused"
@@ -508,7 +527,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name string, place Rul
 			now = a.Now
 		}
 		sum := sha256.Sum256([]byte(rule))
-		where := string(place)
+		where := box + ":" + string(place)
 		if worktree != "" {
 			where += ":" + worktree
 		}
@@ -518,4 +537,24 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name string, place Rul
 		return explained(conflict("not removed"), "The rule wasn't removed: "+hostMessage(err))
 	}
 	return nil
+}
+
+func (d *Dispatcher) RuleHosts(repo string) []RuleHost {
+	d.mu.Lock()
+	type owner struct{ box, name string }
+	var owners []owner
+	for _, r := range d.runs {
+		if r.repo == repo && ValidBox(r.box) && !slices.ContainsFunc(owners, func(o owner) bool { return o.box == r.box }) {
+			owners = append(owners, owner{box: r.box, name: runName(r)})
+		}
+	}
+	d.mu.Unlock()
+	slices.SortFunc(owners, func(a, b owner) int { return strings.Compare(a.box, b.box) })
+	var out []RuleHost
+	for _, o := range owners {
+		if h, ok := d.hostFor(o.box).(AllowRulesHost); ok && d.liveBox(o.box) {
+			out = append(out, RuleHost{Box: o.box, Name: o.name, Host: h})
+		}
+	}
+	return out
 }

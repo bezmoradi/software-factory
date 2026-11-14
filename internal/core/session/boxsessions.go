@@ -50,6 +50,7 @@ type BoxRoutes interface {
 	Up(ctx context.Context, info BoxInfo) error
 	Down(box string)
 	Host(box string) (Host, bool)
+	Info(box string) (BoxInfo, bool)
 }
 
 type BoxFolders interface {
@@ -134,7 +135,59 @@ type CloneReader interface {
 }
 
 type boxBook struct {
-	mu sync.Mutex
+	mu        sync.Mutex
+	stopMu    sync.Mutex
+	unstopped map[string]bool
+}
+
+func (d *Dispatcher) markUnstopped(box string, on bool) {
+	d.boxes.stopMu.Lock()
+	defer d.boxes.stopMu.Unlock()
+	if d.boxes.unstopped == nil {
+		d.boxes.unstopped = map[string]bool{}
+	}
+	if on {
+		d.boxes.unstopped[box] = true
+	} else {
+		delete(d.boxes.unstopped, box)
+	}
+}
+
+func (d *Dispatcher) isUnstopped(box string) bool {
+	d.boxes.stopMu.Lock()
+	defer d.boxes.stopMu.Unlock()
+	return d.boxes.unstopped[box]
+}
+
+func (d *Dispatcher) retryStop(ctx context.Context, box string) bool {
+	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)
+	defer cancel()
+	err := d.cfg.Boxes.Stop(bctx, box)
+	ok := err == nil || errors.Is(err, ErrBoxUnknown)
+	if ok {
+		d.markUnstopped(box, false)
+	}
+	d.cfg.Logger.Info("boxes", "event", "stop-retried", "box", box, "ok", ok)
+	return ok
+}
+
+func (d *Dispatcher) retryStops(ctx context.Context) {
+	if !d.boxed() {
+		return
+	}
+	d.boxes.stopMu.Lock()
+	boxes := make([]string, 0, len(d.boxes.unstopped))
+	for b := range d.boxes.unstopped {
+		boxes = append(boxes, b)
+	}
+	d.boxes.stopMu.Unlock()
+	slices.Sort(boxes)
+	for _, b := range boxes {
+		if d.liveBox(b) {
+			continue
+		}
+		d.retryStop(ctx, b)
+	}
 }
 
 func BoxFolder(workspace, box string) string {
@@ -371,6 +424,9 @@ func (d *Dispatcher) wakeBox(ctx context.Context, box string) error {
 	if d.liveBox(box) {
 		return nil
 	}
+	if d.isUnstopped(box) && !d.retryStop(ctx, box) {
+		return explained(conflict("box not stopped"), "The box helper couldn't stop the session's container after its last stop, so the engine doesn't start the agent in it again. It retries the stop at every sandbox check; try again once the box helper answers.")
+	}
 	if d.cfg.Folders != nil {
 		if err := d.cfg.Folders.Make(box); err != nil {
 			return explained(conflict("workspace"), "The engine couldn't check the session's folders in the workspace.")
@@ -388,10 +444,12 @@ func (d *Dispatcher) stopBox(ctx context.Context, box string) {
 	d.cfg.Routes.Down(box)
 	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)
 	defer cancel()
-	if err := d.cfg.Boxes.Stop(bctx, box); err != nil {
+	if err := d.cfg.Boxes.Stop(bctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {
+		d.markUnstopped(box, true)
 		d.cfg.Logger.Warn("boxes", "event", "not-stopped", "box", box)
 		return
 	}
+	d.markUnstopped(box, false)
 	d.cfg.Logger.Info("boxes", "event", "stopped", "box", box)
 }
 
@@ -430,6 +488,11 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	}
 	if d.cfg.KeyRoutes != nil {
 		d.forgetBoxKeys(box)
+	}
+	d.unwait(box)
+	d.markUnstopped(box, false)
+	if err := d.cfg.Expected.Set(BoxTarget(box), ExpectAny); err != nil && !errors.Is(err, errNoExpectations) {
+		d.cfg.Logger.Warn("boxes", "event", "sign-in-expectation-not-removed", "box", box)
 	}
 	d.forgetBox(box)
 	d.cfg.Logger.Info("boxes", "event", "removed", "box", box)
@@ -474,7 +537,8 @@ func (d *Dispatcher) boxInUse(box string) bool {
 			return true
 		}
 	}
-	return false
+	_, waiting := d.waiting[box]
+	return waiting && d.starting
 }
 
 func (d *Dispatcher) StopLeftovers(ctx context.Context) {
@@ -501,6 +565,21 @@ func (d *Dispatcher) StopLeftovers(ctx context.Context) {
 		}
 	}
 	d.dropPending(true)
+	d.pruneExpectations()
+}
+
+func (d *Dispatcher) pruneExpectations() {
+	records, err := d.loadBoxes()
+	if err != nil || d.cfg.BoxStore == nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, b := range records {
+		known[b.Box] = true
+	}
+	if err := d.cfg.Expected.Prune(func(box string) bool { return known[box] }); err != nil && !errors.Is(err, errNoExpectations) {
+		d.cfg.Logger.Warn("boxes", "event", "sign-in-expectations-not-pruned")
+	}
 }
 
 func (d *Dispatcher) dropPending(schedule bool) {
@@ -615,15 +694,100 @@ func (d *Dispatcher) hostDown(r *run) error {
 	return &HostError{Code: "sign-in", Message: "agent-host there doesn't report sign-ins"}
 }
 
-type boxContext struct{}
-
-func withBox(ctx context.Context, box string) context.Context {
-	return context.WithValue(ctx, boxContext{}, box)
+func markNeeds(r *run, err error) (*Needs, bool) {
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.Needs == nil {
+		return nil, false
+	}
+	e.Needs.Box, e.Needs.Agent, e.Needs.Code = r.box, r.spec.ID, r.spec.codeSignIn()
+	return e.Needs, true
 }
 
-func BoxOf(ctx context.Context) (string, bool) {
-	box, ok := ctx.Value(boxContext{}).(string)
-	return box, ok && ValidBox(box)
+func (d *Dispatcher) holdForAnswer(r *run, q Dispatch, err error) bool {
+	if q.once || !ValidBox(r.box) || !d.liveBox(r.box) {
+		return false
+	}
+	if _, ok := markNeeds(r, err); !ok {
+		return false
+	}
+	d.mu.Lock()
+	first := d.waiting[r.box] == nil
+	d.waiting[r.box] = r
+	d.started = time.Time{}
+	d.mu.Unlock()
+	if first {
+		box := r.box
+		time.AfterFunc(PendingBoxFor, func() { d.dropStillPending(box) })
+	}
+	d.cfg.Logger.Info("boxes", "event", "waiting", "box", r.box)
+	return true
+}
+
+func (d *Dispatcher) unwait(box string) {
+	d.mu.Lock()
+	delete(d.waiting, box)
+	d.mu.Unlock()
+}
+
+func (d *Dispatcher) resume(ctx context.Context, q Dispatch, spec AgentSpec, repo Repository) (Started, error) {
+	if !ValidBox(q.Box) {
+		return Started{}, explained(invalid("box"), "")
+	}
+	d.mu.Lock()
+	r := d.waiting[q.Box]
+	d.mu.Unlock()
+	if r == nil {
+		return Started{}, explained(notFound("box"), "That start isn't waiting any more. Start the session again.")
+	}
+	if r.repoPath != repo.Path || r.spec.ID != spec.ID {
+		return Started{}, explained(conflict("box"), "That session's container waits for another project or agent.")
+	}
+	kept := false
+	defer func() {
+		if !kept {
+			d.dropBox(r.box, true)
+		}
+	}()
+	if !d.liveBox(r.box) {
+		return Started{}, explained(conflict("box stopped"), "The session's container stopped while it waited. Start the session again.")
+	}
+	check, err := d.startCheck(ctx, r.box)
+	if err != nil {
+		return Started{}, err
+	}
+	d.mu.Lock()
+	r.check = check
+	r.group, r.groupKind = q.group, q.groupKind
+	d.mu.Unlock()
+	d.cfg.Logger.Info("boxes", "event", "resumed", "box", r.box)
+	return d.launch(ctx, r, q, &kept)
+}
+
+func (d *Dispatcher) waitInWake(r *run, err error) bool {
+	needs, ok := markNeeds(r, err)
+	if !ok || !d.liveBox(r.box) {
+		return false
+	}
+	d.mu.Lock()
+	r.waitAt = d.reg.now()
+	d.mu.Unlock()
+	if needs.SignIn != nil && !needs.Cost {
+		d.reg.WaitSignIn(r.sid, true)
+	}
+	time.AfterFunc(PendingBoxFor, func() { d.stopWaiting(r) })
+	d.cfg.Logger.Info("boxes", "event", "waiting", "box", r.box)
+	return true
+}
+
+func (d *Dispatcher) stopWaiting(r *run) {
+	d.mu.Lock()
+	stale := !r.running && !r.busy && !r.waitAt.IsZero() && d.reg.now().Sub(r.waitAt) >= PendingBoxFor
+	d.mu.Unlock()
+	if !stale {
+		return
+	}
+	d.reg.WaitSignIn(r.sid, false)
+	d.idleBox(r)
 }
 
 func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {

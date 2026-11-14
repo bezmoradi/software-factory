@@ -28,6 +28,7 @@ type homeEntryJSON struct {
 
 type homeSettingsJSON struct {
 	Version int             `json:"version"`
+	Box     string          `json:"box,omitempty"`
 	At      time.Time       `json:"at"`
 	Since   time.Time       `json:"since"`
 	Entries []homeEntryJSON `json:"entries"`
@@ -50,7 +51,7 @@ func (s HomeSettings) Load() (session.HomeRecord, bool, error) {
 		return session.HomeRecord{}, false, err
 	}
 	var f homeSettingsJSON
-	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Changed) > session.MaxHomeChanged || f.More < 0 {
+	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Changed) > session.MaxHomeChanged || f.More < 0 || f.Box != "" && !session.ValidBox(f.Box) {
 		return session.HomeRecord{}, false, errors.New(homeSettingsFile + " isn't a record this engine reads")
 	}
 	entries := make([]session.HomeEntry, 0, len(f.Entries))
@@ -66,12 +67,12 @@ func (s HomeSettings) Load() (session.HomeRecord, bool, error) {
 			return session.HomeRecord{}, false, errors.New(homeSettingsFile + " holds an entry this engine refuses")
 		}
 	}
-	return session.HomeRecord{Entries: entries, At: f.At, Since: f.Since, Changed: f.Changed, More: f.More}, true, nil
+	return session.HomeRecord{Box: f.Box, Entries: entries, At: f.At, Since: f.Since, Changed: f.Changed, More: f.More}, true, nil
 }
 
 func (s HomeSettings) Save(r session.HomeRecord) error {
 	defer s.lock()()
-	f := homeSettingsJSON{Version: 1, At: r.At, Since: r.Since, Entries: make([]homeEntryJSON, 0, len(r.Entries)), Changed: r.Changed, More: r.More}
+	f := homeSettingsJSON{Version: 1, Box: r.Box, At: r.At, Since: r.Since, Entries: make([]homeEntryJSON, 0, len(r.Entries)), Changed: r.Changed, More: r.More}
 	if f.Changed == nil {
 		f.Changed = []string{}
 	}

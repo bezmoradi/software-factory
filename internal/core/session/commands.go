@@ -11,8 +11,12 @@ var pageBuiltins = map[string]bool{
 	"review": true, "security-review": true, "init": true, "todos": true, "export": true, "release-notes": true,
 }
 
-func commandRefused() string {
-	return "The page sends a skill, a plugin's or MCP server's command, and only the built-in commands that change nothing, such as /compact, /context or /clear. Type any other built-in command in Claude Code itself: " + Compose() + " exec -it agent claude attach <id>."
+func commandRefused(box, id string) string {
+	where := "in Claude Code itself, from the session's ⋯ menu"
+	if ValidBox(box) && shortID.MatchString(id) {
+		where = "in Claude Code itself: " + BoxExec(box) + " claude attach " + id
+	}
+	return "The page sends a skill, a plugin's or MCP server's command, and only the built-in commands that change nothing, such as /compact, /context or /clear. Type any other built-in command " + where + "."
 }
 
 const maxCatalog = 400
@@ -86,4 +90,11 @@ func refusedName(name string, known *catalog) bool {
 		return false
 	}
 	return true
+}
+
+func (r *Registry) commandRefusedLocked(sid string) string {
+	if a := r.admitted[sid]; a != nil {
+		return commandRefused(a.Box, a.ID)
+	}
+	return commandRefused("", "")
 }

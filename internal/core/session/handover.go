@@ -135,7 +135,7 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 		earlier = earlier[len(earlier)-MaxStints:]
 	}
 	started, err := d.Dispatch(ctx, Dispatch{Path: r.repoPath, Agent: spec.ID, Name: r.display, Consent: consent,
-		Continues: &Continuation{SID: sid, Branch: r.branch, Head: head, Earlier: earlier}})
+		Continues: &Continuation{SID: sid, Branch: r.branch, Head: head, Earlier: earlier}, once: true})
 	if started.SID == "" {
 		d.endHanding(r, "")
 		return started, err

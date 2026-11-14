@@ -1,10 +1,10 @@
 import { button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
-import { attachCommand, plural } from '../lib/format.ts'
+import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
 
-const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attachCommand(attach)}` : "This session is read-only on this page, so this can't be answered here.")
-const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attachCommand(attach)}` : '')
+const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attach}` : "This session is read-only on this page, so this can't be answered here.")
+const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attach}` : '')
 
 const subagent = (agentId?: string, agentName?: string) => (agentId ? (agentName ? `Subagent ${shown(agentName)}` : 'A subagent') : '')
 
@@ -265,7 +265,7 @@ class SfPermission extends HTMLElement {
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {
-      choices.append(el('p', 'small muted', attach ? `Too long to show in full here, so allow it in Claude Code itself: ${attachCommand(attach)}` : "The page can't show the whole call, so it can only deny it."))
+      choices.append(el('p', 'small muted', attach ? `Too long to show in full here, so allow it in Claude Code itself: ${attach}` : "The page can't show the whole call, so it can only deny it."))
     } else {
       const yes = button('Yes', 'primary', undefined, 'button', 'yes')
       yes.addEventListener('click', () => reply(this, id, { choice: 'yes' }))
@@ -318,7 +318,7 @@ class SfPlan extends HTMLElement {
       body.append(text)
       this.append(remembered(this.#open, 'plan', true, el('summary', 'small', 'The plan'), body))
     }
-    const where = attach ? `run ${attachCommand(attach)} and answer there` : 'answer in Claude Code itself'
+    const where = attach ? `run ${attach} and answer there` : 'answer in Claude Code itself'
     if (readOnly) return this.append(el('p', 'small muted', `To approve it or ask for changes, ${where}.`))
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: 'What should Claude change?', label: 'What Claude should change in the plan', send: 'Tell Claude what to change', maxLength: 2000, required: true })).ready()
     note.onSend = text => reply(this, id, { choice: 'revise', note: text })

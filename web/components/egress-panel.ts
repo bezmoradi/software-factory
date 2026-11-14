@@ -300,15 +300,13 @@ export function openEgress(post: Post): void {
     gwSay.classList.toggle('bad', bad)
   }
 
-  const keySteps = async (body: (target: 'agents' | 'reviewers') => Record<string, string>, done: string, fallback: string) => {
+  const keySteps = async (body: (target: 'reviewers') => Record<string, string>, done: string, fallback: string) => {
     const sides = gwSides()
-    const failed: string[] = []
-    for (const target of sides) {
-      const a = await call(post, body(target), LOGIN_ROUTE)
-      if (!a.ok) failed.push(`${target === 'agents' ? 'Agents' : 'Reviewers'}: ${text(a.body.message) ? visible(text(a.body.message)) : fallback}`)
-    }
-    if (failed.length) return gwTell(failed, true)
-    gwTell([`${done} for the ${sides.join(' and the ')}.`], false)
+    const sessions = sides.includes('agents') ? ['For Claude Code sessions, paste the gateway’s key in each session’s sign-in panel, since each session runs in its own container.'] : []
+    if (!sides.includes('reviewers')) return gwTell(sessions, false)
+    const a = await call(post, body('reviewers'), LOGIN_ROUTE)
+    if (!a.ok) return gwTell([`Reviewers: ${text(a.body.message) ? visible(text(a.body.message)) : fallback}`, ...sessions], true)
+    gwTell([`${done} for the reviewers.`, ...sessions], false)
   }
 
   const saveGateway = async (clear: boolean) => {

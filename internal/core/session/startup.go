@@ -138,6 +138,9 @@ type Needs struct {
 	Step     string
 	Cost     bool
 	Trust    string
+	Box      string
+	Agent    string
+	Code     bool
 }
 
 type Consent struct {

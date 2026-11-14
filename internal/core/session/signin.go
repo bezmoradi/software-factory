@@ -166,7 +166,56 @@ func (e *Expected) All() map[string]Expect {
 	return out
 }
 
-var errNoExpectations = errors.New("this engine keeps no sign-in expectations")
+var (
+	errNoExpectations   = errors.New("this engine keeps no sign-in expectations")
+	errManyExpectations = errors.New("signin.json holds as many session containers' sign-ins as the engine records")
+)
+
+func (e *Expected) Lookup(key string) (Expect, bool) {
+	if e == nil || e.Store == nil {
+		return ExpectAny, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	all, err := e.Store.Load()
+	if err != nil {
+		return ExpectAny, false
+	}
+	x, ok := all[key]
+	return x, ok && ValidExpect(x)
+}
+
+func (e *Expected) Prune(keep func(box string) bool) error {
+	if e == nil || e.Store == nil {
+		return errNoExpectations
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	all, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	n := len(all)
+	for k := range all {
+		if box, ok := TargetBox(k); ok && !keep(box) {
+			delete(all, k)
+		}
+	}
+	if len(all) == n {
+		return nil
+	}
+	return e.Store.Save(all)
+}
+
+func boxKeys(all map[string]Expect) int {
+	n := 0
+	for k := range all {
+		if _, ok := TargetBox(k); ok {
+			n++
+		}
+	}
+	return n
+}
 
 func (e *Expected) Set(agent string, x Expect) error {
 	if e == nil || e.Store == nil {
@@ -181,7 +230,14 @@ func (e *Expected) Set(agent string, x Expect) error {
 	if all == nil {
 		all = map[string]Expect{}
 	}
+	_, had := all[agent]
+	if _, box := TargetBox(agent); box && x != ExpectAny && !had && boxKeys(all) >= MaxBoxRecords {
+		return errManyExpectations
+	}
 	if x == ExpectAny {
+		if !had {
+			return nil
+		}
 		delete(all, agent)
 	} else {
 		all[agent] = x

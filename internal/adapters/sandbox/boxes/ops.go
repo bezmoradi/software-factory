@@ -344,6 +344,7 @@ func (h *Helper) List(ctx context.Context) ([]session.BoxInfo, error) {
 		vols = &v
 	}
 	m := h.membersOf(ctx)
+	ready := h.runtimeReady(ctx) == nil
 	seen := map[string]bool{}
 	var out []session.BoxInfo
 	for _, c := range list {
@@ -366,7 +367,9 @@ func (h *Helper) List(ctx context.Context) ([]session.BoxInfo, error) {
 			n = nil
 		}
 		seen[box] = true
-		out = append(out, h.infoOf(ci, n, box, vols, m))
+		info := h.infoOf(ci, n, box, vols, m)
+		info.Facts = append(info.Facts, "runtime-ready="+strconv.FormatBool(ready))
+		out = append(out, info)
 	}
 	var vl volumeListJSON
 	if err := h.docker.get(ctx, "/volumes", h.stackFilter(), &vl); err != nil {

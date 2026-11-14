@@ -56,18 +56,35 @@ func (d *Dispatcher) holdGateway() func() {
 	return g.HoldGateway()
 }
 
-func serviceOf(side string) string {
-	if side == SideReviewers {
-		return "reviewer"
+func targetSide(target string) string {
+	if target == LoginReviewers {
+		return SideReviewers
 	}
-	return "agent"
+	return SideAgents
 }
 
-func expectAgentOf(side string) string {
-	if side == SideReviewers {
+func (d *Dispatcher) expectAgentOf(target string) string {
+	if target == LoginReviewers {
 		return ReviewerAgent
 	}
+	if box, ok := TargetBox(target); ok {
+		return BoxTarget(box)
+	}
 	return "claude"
+}
+
+func (d *Dispatcher) containerWords(target string) string {
+	if box, ok := TargetBox(target); ok {
+		return "session's container (" + BoxContainer(box) + ")"
+	}
+	return "reviewer container"
+}
+
+func (d *Dispatcher) runsCheck(target string) string {
+	if box, ok := TargetBox(target); ok {
+		return "docker ps --filter name=" + BoxContainer(box)
+	}
+	return Compose() + " ps reviewer"
 }
 
 func (d *Dispatcher) keyRoutes() (map[string]KeyRoute, bool) {
@@ -84,12 +101,13 @@ func (d *Dispatcher) keyRoutes() (map[string]KeyRoute, bool) {
 	return all, true
 }
 
-func (d *Dispatcher) saveKeyRoute(side string, k KeyRoute) error {
+func (d *Dispatcher) saveKeyRoute(target string, k KeyRoute) error {
 	if d.cfg.KeyRoutes == nil {
 		return nil
 	}
 	all, _ := d.keyRoutes()
-	all[side] = k
+	delete(all, SideAgents)
+	all[target] = k
 	return d.cfg.KeyRoutes.Save(all)
 }
 
@@ -105,8 +123,8 @@ func keyMisrouted(k KeyRoute, known bool, host string, established bool) bool {
 	return k.Gateway != host
 }
 
-func (d *Dispatcher) restoreExpect(side string, k KeyRoute, known bool) {
-	agent := expectAgentOf(side)
+func (d *Dispatcher) restoreExpect(target string, k KeyRoute, known bool) {
+	agent := d.expectAgentOf(target)
 	switch {
 	case known && k.Saved:
 		before := k.Before
@@ -119,26 +137,26 @@ func (d *Dispatcher) restoreExpect(side string, k KeyRoute, known bool) {
 	}
 }
 
-func (d *Dispatcher) removeKeyLocked(ctx context.Context, side string, restore bool) error {
+func (d *Dispatcher) removeKeyLocked(ctx context.Context, target string, restore bool) error {
 	all, readable := d.keyRoutes()
-	k, present := all[side]
-	if err := d.apiKey(ctx, side, "clear", ""); err != nil {
+	k, present := all[target]
+	if err := d.apiKey(ctx, target, "clear", ""); err != nil {
 		return err
 	}
 	if restore {
-		d.restoreExpect(side, k, readable && present)
+		d.restoreExpect(target, k, readable && present)
 	}
-	if err := d.saveKeyRoute(side, KeyRoute{}); err != nil {
-		d.cfg.Logger.Warn("claude api key", "target", side, "event", "record-not-saved")
+	if err := d.saveKeyRoute(target, KeyRoute{}); err != nil {
+		d.cfg.Logger.Warn("claude api key", "target", target, "event", "record-not-saved")
 	}
 	return nil
 }
 
-func (d *Dispatcher) KeyRouted(ctx context.Context, side string) error {
-	if side != SideAgents && side != SideReviewers {
+func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
+	if !ValidLoginTarget(target) {
 		return explained(invalid("target"), "")
 	}
-	if _, ok := d.keyHost(side); !ok {
+	if _, err := d.keyHost(target); err != nil {
 		return nil
 	}
 	release := d.holdGateway()
@@ -146,26 +164,24 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, side string) error {
 	d.keyMu.Lock()
 	defer d.keyMu.Unlock()
 	all, readable := d.keyRoutes()
-	k, present := all[side]
-	host, established := d.gatewayOf(side)
+	k, present := all[target]
+	host, established := d.gatewayOf(targetSide(target))
 	if !keyMisrouted(k, readable && present, host, established) {
 		return nil
 	}
 	kctx, cancel := context.WithTimeout(ctx, keyRouteFor)
 	defer cancel()
-	err := d.removeKeyLocked(kctx, side, true)
-	d.cfg.Logger.Info("claude api key", "target", side, "step", "reconcile", "ok", err == nil)
+	err := d.removeKeyLocked(kctx, target, true)
+	d.cfg.Logger.Info("claude api key", "target", target, "step", "reconcile", "ok", err == nil)
 	if err != nil {
-		return explained(conflict("api key"), "Claude Code in the "+containerOf(side)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+Compose()+" ps "+serviceOf(side)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in dialog removes it too.")
+		return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in panel removes it too.")
 	}
 	return nil
 }
 
 func (d *Dispatcher) ReconcileKeys(ctx context.Context) {
-	for _, side := range []string{SideAgents, SideReviewers} {
-		if err := d.KeyRouted(ctx, side); err != nil {
-			d.cfg.Logger.Warn("claude api key", "target", side, "event", "not-removed", "fix", Compose()+" ps")
-		}
+	if err := d.KeyRouted(ctx, LoginReviewers); err != nil {
+		d.cfg.Logger.Warn("claude api key", "target", LoginReviewers, "event", "not-removed", "fix", Compose()+" ps reviewer")
 	}
 }
 

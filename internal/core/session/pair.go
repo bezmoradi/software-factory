@@ -77,6 +77,7 @@ type PairStart struct {
 	BenchHash string
 	BenchBase string
 	Consent   Consent
+	Box       string
 }
 
 type PairStarted struct {
@@ -89,7 +90,7 @@ type PairsPage interface {
 	MergedPulls(ctx context.Context, path string, page int) (MergedList, error)
 	ReadMerged(ctx context.Context, path string, number int) (MergedView, error)
 	Start(ctx context.Context, q PairStart) (PairStarted, error)
-	Next(ctx context.Context, id string, consent Consent) (Started, error)
+	Next(ctx context.Context, id string, consent Consent, box string) (Started, error)
 	View(id string) (Pair, error)
 	MergedDiff(id string) (ChangeView, error)
 	Keep(id, sid string) error
@@ -297,7 +298,7 @@ func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
 	id := randomHex(8)
 	a := q.Agents[0]
 	started, err := d.Dispatch(ctx, Dispatch{Path: q.Path, Agent: a.Agent, Name: d.memberName(q.Name, a), Model: a.Model, Effort: a.Effort, Type: q.Type, Consent: q.Consent,
-		pinned: pinned, group: id, groupKind: GroupPair})
+		Box: q.Box, pinned: pinned, group: id, groupKind: GroupPair})
 	if err != nil || started.SID == "" {
 		return PairStarted{Started: started}, err
 	}
@@ -328,7 +329,7 @@ func (p *Pairs) find(id string) *Pair {
 	return nil
 }
 
-func (p *Pairs) Next(ctx context.Context, id string, consent Consent) (Started, error) {
+func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string) (Started, error) {
 	p.mu.Lock()
 	pr := p.find(id)
 	switch {
@@ -362,7 +363,7 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent) (Started, 
 		return Started{}, err
 	}
 	started, err := d.Dispatch(ctx, Dispatch{Path: path, Agent: a.Agent, Name: d.memberName(name, a), Model: a.Model, Effort: a.Effort, Type: typ, Consent: consent,
-		pinned: &at, group: id, groupKind: GroupPair})
+		Box: box, pinned: &at, group: id, groupKind: GroupPair})
 	if err != nil || started.SID == "" {
 		return started, err
 	}

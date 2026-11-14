@@ -159,11 +159,12 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 	case "next":
 		id, okID := pairID(body)
 		consent, consented := consentOf(body)
-		if !keysWithin(body, "op", "pair", "approve", "costOk") || !okID || !consented {
+		box, okBox := boxOf(body)
+		if !keysWithin(body, "op", "pair", "approve", "costOk", "box") || !okID || !consented || !okBox {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		started, err := pairs.Next(ctx, id, consent)
+		started, err := pairs.Next(ctx, id, consent, box)
 		s.logger.Info("pair next", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
@@ -252,7 +253,8 @@ func (s *Server) pairStart(ctx context.Context, w http.ResponseWriter, pairs ses
 	consent, consented := consentOf(body)
 	double, hasDouble := body["double"]
 	isDouble, okDouble := double.(bool)
-	if !keysWithin(body, "op", "path", "name", "type", "message", "agents", "double", "benchmark", "approve", "costOk") || !okPath || !okAgents || !okBench || !consented || hasDouble && !okDouble {
+	box, okBox := boxOf(body)
+	if !keysWithin(body, "op", "path", "name", "type", "message", "agents", "double", "benchmark", "approve", "costOk", "box") || !okPath || !okAgents || !okBench || !consented || hasDouble && !okDouble || !okBox {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
@@ -265,7 +267,7 @@ func (s *Server) pairStart(ctx context.Context, w http.ResponseWriter, pairs ses
 		}
 	}
 	started, err := pairs.Start(ctx, session.PairStart{Path: path, Name: str(body["name"], 400), Type: str(body["type"], 40), Message: str(body["message"], 4*session.MaxText+1),
-		Agents: agents, Double: isDouble, Bench: bench, BenchHash: hash, BenchBase: base, Consent: consent})
+		Agents: agents, Double: isDouble, Bench: bench, BenchHash: hash, BenchBase: base, Consent: consent, Box: box})
 	s.logger.Info("pair start", "agents", len(agents), "benchmark", bench > 0, "ok", err == nil)
 	if err != nil {
 		code, p := status(err)

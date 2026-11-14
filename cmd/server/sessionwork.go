@@ -19,7 +19,6 @@ func useSessionWork(base context.Context, srv *page.Server, reg *session.Registr
 		Commands: state.NewProjectCommands(cfg.StateDir), Queues: state.NewQueues(cfg.StateDir),
 		Ports: state.NewPorts(cfg.StateDir), Models: state.NewModels(cfg.StateDir), Lister: codex.Lister{Logger: logger, Version: Version},
 		Audit: state.NewAudit(cfg.StateDir), Note: reg.NoteFor("check"), PortNote: reg.NoteFor("ports"), Base: base, Logger: logger,
-		ProbeDir: cfg.Sandbox.Dir,
 	}
 	if parts.repos != nil {
 		wc.Repos = parts.repos

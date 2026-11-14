@@ -28,13 +28,12 @@ type SandboxConfig struct {
 	Allow     []string
 	Deny      []string
 	Outside   string
-	Dir       string
 	Allowlist *session.Allowlist
 	TLS       *tls.Config
 }
 
 func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
-	sb := SandboxConfig{Proxy: "egress:3128", Status: "egress-control:3129", Outside: DefaultOutsideHost, Dir: cfg.Workspace}
+	sb := SandboxConfig{Proxy: "egress:3128", Status: "egress-control:3129", Outside: DefaultOutsideHost}
 	switch v := getenv("SF_SANDBOX_CHECK"); v {
 	case "", "on":
 		sb.On = cfg.Helper != ""
@@ -65,19 +64,13 @@ func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
 		}
 		sb.KeyFile = filepath.Clean(v)
 	}
-	if v := getenv("SF_AGENT_WORKSPACE"); v != "" {
-		if !filepath.IsAbs(v) {
-			return fmt.Errorf("SF_AGENT_WORKSPACE must be an absolute path in the agent container")
-		}
-		sb.Dir = filepath.Clean(v)
-	}
 	policy, err := egress.NewPolicy(list(getenv("EGRESS_ALLOW")), list(getenv("EGRESS_DENY")))
 	if err != nil {
 		return err
 	}
 	sb.Allow, sb.Deny = policy.Allow(), policy.Deny()
 	if sb.On && cfg.AgentBinary == "" {
-		return fmt.Errorf("the sandbox check runs %s sandbox-probe in the agent container, so SF_AGENT_BINARY can't be off while SF_SANDBOX_CHECK is on", "software-factory")
+		return fmt.Errorf("the sandbox check runs %s sandbox-probe in each session's container, so SF_AGENT_BINARY can't be off while SF_SANDBOX_CHECK is on", "software-factory")
 	}
 	cfg.Sandbox = sb
 	return nil
@@ -94,13 +87,13 @@ func gitHostsOf(repos *session.Repos) func() []string {
 	return repos.GitHosts
 }
 
-func sandboxChecker(cfg PageConfig, host session.Host, hosts func() []string) (session.Sandbox, error) {
+func sandboxChecker(cfg PageConfig, hosts func() []string) (session.Sandbox, error) {
 	if !cfg.Sandbox.On {
 		return nil, nil
 	}
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
-		Host: host, Probe: []string{cfg.AgentBinary, "sandbox-probe"}, Dir: sb.Dir,
+		Probe: []string{cfg.AgentBinary, "sandbox-probe"},
 		Proxy: sb.Proxy, Status: sb.Status, Side: AgentsSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts, Lists: listsOf(sb), TLS: sb.TLS,
 	})
 }

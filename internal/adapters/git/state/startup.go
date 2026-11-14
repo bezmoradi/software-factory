@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	approvalsFile = "approvals.json"
-	signInFile    = "signin.json"
+	approvalsFile        = "approvals.json"
+	signInFile           = "signin.json"
+	maxAgentExpectations = 100
 )
 
 type Approvals struct {
@@ -107,7 +108,7 @@ func (s Expectations) Load() (map[string]session.Expect, error) {
 		return map[string]session.Expect{}, err
 	}
 	var f expectationsJSON
-	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 {
+	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Expect) > session.MaxBoxRecords+maxAgentExpectations {
 		return nil, errors.New("signin.json isn't a sign-in record this engine reads")
 	}
 	out := map[string]session.Expect{}

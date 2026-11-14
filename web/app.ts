@@ -1,5 +1,5 @@
 import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts'
-import { claudeLogin, signInState, type SignInState } from './components/login.ts'
+import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { button, el, emit, fileLink, shown, visible, visibleCommand } from './lib/dom.ts'
@@ -394,7 +394,7 @@ function onEvent(ev: StreamEvent) {
 function applySession(s: Session, ev: SessionEvent) {
   s.lastAt = typeof ev.ts === 'number' && Number.isFinite(ev.ts) && ev.ts > 0 ? Math.min(ev.ts, Date.now()) : Date.now()
   s.view.who = agentWord(s.info.agent)
-  const attach = isClaude(s.info) && /^[0-9a-f]{8}$/.test(s.info.id || '') ? s.info.id : ''
+  const attach = isClaude(s.info) && /^[0-9a-f]{8}$/.test(s.info.id || '') ? attachCommand(s.info.id!, s.info.box ?? '') : ''
   const card = ev.type === 'plan' || ev.type === 'permission' || ev.type === 'ask' ? { ...ev, attach, who: agentWord(s.info.agent) } : ev
   s.view.apply(card, controllable(s))
   switch (ev.type) {
@@ -733,10 +733,10 @@ function paintControl(s: Session) {
     text = i.mode === 'bypassPermissions' ? 'Bypass permissions mode: tools run without asking.' : ''
     action = 'Make it read-only'
   }
-  const id = i.kind === 'background' && /^[0-9a-f]{8}$/.test(i.id || '') ? i.id! : ''
+  const id = i.kind === 'background' && /^[0-9a-f]{8}$/.test(i.id || '') && attachCommand(i.id!, i.box ?? '') ? i.id! : ''
   const menu = byId('session-menu')
   for (const b of menu.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
-    b.textContent = id ? `Copy ${b.dataset.copy === 'attach' ? attachCommand(id) : logsCommand(id)}` : ''
+    b.textContent = id ? `Copy ${b.dataset.copy === 'attach' ? attachCommand(id, i.box ?? '') : logsCommand(id, i.box ?? '')}` : ''
     b.hidden = !id || !isClaude(i)
   }
   const notice = !!action && action !== 'Make it read-only'
@@ -835,10 +835,10 @@ function paintStall(s: Session) {
   if (shown && byId('stall').hidden) byId('stall-said').textContent = `No report from the session for ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`
   byId('stall').hidden = !shown
   if (!shown) return
-  const id = isClaude(s.info) && s.info.kind === 'background' && /^[0-9a-f]{8}$/.test(s.info.id || '') ? s.info.id! : ''
+  const id = isClaude(s.info) && s.info.kind === 'background' && /^[0-9a-f]{8}$/.test(s.info.id || '') && attachCommand(s.info.id!, s.info.box ?? '') ? s.info.id! : ''
   byId('stall-text').textContent = `${agentWord(s.info.agent)} is in its turn and hasn't reported anything for ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}, since ${since}. This rests on the session's own reports, so it's only a hint: it may still be working, such as on a long command. ${id ? 'Attach to look, or stop the turn.' : 'Stop the turn if it seems stuck.'}`
   byId('stall-copy').hidden = !id
-  byId('stall-copy').dataset.command = id ? attachCommand(id) : ''
+  byId('stall-copy').dataset.command = id ? attachCommand(id, s.info.box ?? '') : ''
 }
 
 function forgetSession(sid: string) {
@@ -1960,11 +1960,17 @@ async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<st
   return null
 }
 
-async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>): Promise<{ ok: boolean; body: Record<string, unknown> }> {
+async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false): Promise<{ ok: boolean; body: Record<string, unknown> }> {
   let consent: Consent = {}
   let answer = await reply(await send(consent).catch(() => null))
-  for (let round = 0; !answer.ok && round < 3; round++) {
+  for (let round = 0; !answer.ok && round < 5; round++) {
     const needs = answer.body.needs as Needs | undefined
+    if (resumable && needs?.box) consent = { ...consent, box: needs.box }
+    if (needs?.signIn && needs.box && !needs.cost) {
+      if (!(await boxSignIn(api, needs, name))) break
+      answer = await reply(await send(consent).catch(() => null))
+      continue
+    }
     if (needs?.trust) {
       if (!(await askTrust(needs.trust))) break
       const trusted = await answerTrust(needs.trust)
@@ -2291,7 +2297,7 @@ projects.addEventListener('sf-dispatch', async e => {
   const { path } = detail
   projects.starting(path)
   const name = starterNames.get(detail.agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/dispatch', { ...detail, ...consent }))
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/dispatch', { ...detail, ...consent }), true)
   if (!ok) {
     projects.failed()
     const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
@@ -2308,7 +2314,7 @@ projects.addEventListener('sf-dispatch', async e => {
 })
 async function startSecond(pair: string, agent: string): Promise<string> {
   const name = starterNames.get(agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'next', pair, ...consent }))
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'next', pair, ...consent }), true)
   if (!ok) {
     const text = typeof body.message === 'string' ? body.message : "The second session didn't start."
     toast({ id: `pair:${pair}`, title: "The second session of the pair didn't start", description: `${visible(text)} Start it from the comparison in the first session.`, tone: 'bad', timeout: 0 })
@@ -2323,7 +2329,7 @@ projects.addEventListener('sf-pair', async e => {
   if (both && !(await confirmBoth())) return
   projects.starting(path)
   const name = starterNames.get(detail.agents[0]?.agent ?? '') ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'start', ...detail, ...(both ? { double: true } : {}), ...consent }))
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'start', ...detail, ...(both ? { double: true } : {}), ...consent }), true)
   if (!ok) {
     projects.failed()
     const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."

@@ -87,7 +87,7 @@ type EgressControl interface {
 }
 
 type GatewayKeys interface {
-	ClearKey(ctx context.Context, side string) error
+	ClearSide(ctx context.Context, side string) error
 	RunningOn(side string) []string
 }
 
@@ -649,7 +649,7 @@ func (a *Allowlist) dropKeys(ctx context.Context, next Gateway) error {
 		if gatewayHostFor(was, side) == gatewayHostFor(next, side) {
 			continue
 		}
-		if err := keys.ClearKey(ctx, side); err != nil {
+		if err := keys.ClearSide(ctx, side); err != nil {
 			why := "The gateway wasn't changed. Claude Code would send the key saved in the " + containerOf(side) + " to the new address, and it couldn't be removed first"
 			if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 				why += ": " + e.Message
@@ -666,7 +666,7 @@ func containerOf(side string) string {
 	if side == SideReviewers {
 		return "reviewer container"
 	}
-	return "agent container"
+	return "sessions' containers"
 }
 
 func sides(agents, reviewers bool) string {

@@ -215,11 +215,11 @@ func effortsFor(list []AgentModel, known bool, model string) []string {
 	return CodexFallbackEfforts
 }
 
-func (w *SessionWork) codexChoice(ctx context.Context, model, effort string) error {
+func (w *SessionWork) codexChoice(ctx context.Context, model, effort, box string) error {
 	if model == "" && effort == "" {
 		return nil
 	}
-	list, known := w.CodexModels(ctx)
+	list, known := w.CodexModels(ctx, box)
 	if model != "" && (!known || !slices.ContainsFunc(list, func(m AgentModel) bool { return m.ID == model })) {
 		return explained(invalid("model"), "Codex's model list doesn't offer that model.")
 	}
@@ -251,7 +251,7 @@ func (d *Dispatcher) checkChoice(ctx context.Context, spec AgentSpec, model, eff
 			}
 			return nil
 		}
-		return w.codexChoice(ctx, model, effort)
+		return w.codexChoice(ctx, model, effort, "")
 	}
 	if model != "" || effort != "" {
 		return explained(invalid("model"), "That agent can't be started with that model from the page.")
@@ -259,17 +259,17 @@ func (d *Dispatcher) checkChoice(ctx context.Context, spec AgentSpec, model, eff
 	return nil
 }
 
-func (w *SessionWork) CodexModels(ctx context.Context) ([]AgentModel, bool) {
+func (w *SessionWork) CodexModels(ctx context.Context, box string) ([]AgentModel, bool) {
 	w.mu.Lock()
 	c := w.codex
 	fresh := c.known && w.cfg.Now().Sub(c.at) < modelListFor
-	if fresh || c.probing || w.cfg.Lister == nil || w.d == nil {
+	if fresh || c.probing || w.cfg.Lister == nil || w.d == nil || !w.d.liveBox(box) {
 		w.mu.Unlock()
 		return slices.Clone(c.list), c.known
 	}
 	w.codex.probing = true
 	w.mu.Unlock()
-	list, err := w.probeCodex(ctx)
+	list, err := w.probeCodex(ctx, box)
 	w.mu.Lock()
 	w.codex.probing = false
 	if err == nil && len(list) > 0 {
@@ -283,25 +283,27 @@ func (w *SessionWork) CodexModels(ctx context.Context) ([]AgentModel, bool) {
 	return slices.Clone(c.list), c.known
 }
 
-func (w *SessionWork) probeCodex(ctx context.Context) ([]AgentModel, error) {
+func (w *SessionWork) probeCodex(ctx context.Context, box string) ([]AgentModel, error) {
 	d := w.d
 	spec, ok := findAgent(d.cfg.Agents, "codex")
-	if !ok || !spec.Enabled || d.cfg.AnyHost == nil || w.cfg.ProbeDir == "" {
+	dir := BoxFolder(d.cfg.Workspace, box)
+	if !ok || !spec.Enabled || dir == "" {
 		return nil, errNoModels
 	}
 	if spec = d.installed(spec); !spec.Enabled {
 		return nil, errNoModels
 	}
+	host := d.hostFor(box)
 	pctx, cancel := context.WithTimeout(ctx, modelProbeFor)
 	defer cancel()
-	p, err := d.cfg.AnyHost.Start(pctx, Command{Argv: spec.Command, Dir: w.cfg.ProbeDir, Pass: spec.Pass})
+	p, err := host.Start(pctx, Command{Argv: spec.Command, Dir: dir, Pass: spec.Pass})
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		_ = p.Close()
 		sctx, scancel := context.WithTimeout(context.Background(), stopFor)
-		_ = d.cfg.AnyHost.Stop(sctx, p.ID())
+		_ = host.Stop(sctx, p.ID())
 		scancel()
 	}()
 	list, err := w.cfg.Lister.ListModels(pctx, p)
@@ -370,7 +372,11 @@ func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string
 			return err
 		}
 	case "codex":
-		if err := w.codexChoice(ctx, model, effort); err != nil {
+		box := ""
+		if w.d != nil {
+			box, _ = w.d.SessionBox(sid)
+		}
+		if err := w.codexChoice(ctx, model, effort, box); err != nil {
 			return err
 		}
 		if m, _ := w.SessionModel(sid); model == "" && m.StartModel == "" {
