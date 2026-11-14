@@ -39,7 +39,7 @@ func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostC
 		return fallback
 	}
 	fs := flag.NewFlagSet("agent-host", flag.ContinueOnError)
-	listen := fs.String("listen", env("SF_AGENT_HOST_LISTEN", ":8090"), "control and stdio listen address on the agent network")
+	listen := fs.String("listen", env("SF_AGENT_HOST_LISTEN", "127.0.0.1:8090"), "control and stdio listen address: loopback unless set, and Compose sets :8090 for the container networks")
 	workspace := fs.String("workspace", env("SF_WORKSPACE", ""), "the workspace folder: repositories in repos/, worktrees in worktrees/")
 	agentsBin := fs.String("agents-bin", env("SF_AGENTS_BIN", DefaultAgentsDir+"/bin"), "the installed agents' folder, put first on their PATH, or off")
 	socket := fs.String("plugin-socket", env(agenthost.SocketVariable, agenthost.DefaultSocket), "the plugin's Unix socket, or off")

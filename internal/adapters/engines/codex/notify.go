@@ -678,7 +678,7 @@ func (c *Client) errorLocked(p json.RawMessage) {
 		return
 	}
 	if stringOf(n.Error.CodexErrorInfo) == errorUnauthorized {
-		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp})
+		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp()})
 		return
 	}
 	c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonTurnError, Text: clip(n.Error.Message)})

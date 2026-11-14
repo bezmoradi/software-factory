@@ -560,11 +560,11 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.installer != nil && cfg.Install.AtStart {
 		go func() {
 			if err := parts.installer.InstallMissing(ctx, nil); err != nil {
-				logger.Warn("agent install", "event", "not-installed", "fix", "docker compose exec engine software-factory install-agents")
+				logger.Warn("agent install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
 			}
 			if parts.plugins != nil {
 				if err := parts.plugins.InstallMissing(ctx, nil); err != nil {
-					logger.Warn("plugin install", "event", "not-installed", "fix", "docker compose exec engine software-factory install-agents")
+					logger.Warn("plugin install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
 				}
 			}
 		}()

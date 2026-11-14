@@ -156,7 +156,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, side string) error {
 	err := d.removeKeyLocked(kctx, side, true)
 	d.cfg.Logger.Info("claude api key", "target", side, "step", "reconcile", "ok", err == nil)
 	if err != nil {
-		return explained(conflict("api key"), "Claude Code in the "+containerOf(side)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs (docker compose ps "+serviceOf(side)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in dialog removes it too.")
+		return explained(conflict("api key"), "Claude Code in the "+containerOf(side)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+Compose()+" ps "+serviceOf(side)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in dialog removes it too.")
 	}
 	return nil
 }
@@ -164,7 +164,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, side string) error {
 func (d *Dispatcher) ReconcileKeys(ctx context.Context) {
 	for _, side := range []string{SideAgents, SideReviewers} {
 		if err := d.KeyRouted(ctx, side); err != nil {
-			d.cfg.Logger.Warn("claude api key", "target", side, "event", "not-removed", "fix", "docker compose ps")
+			d.cfg.Logger.Warn("claude api key", "target", side, "event", "not-removed", "fix", Compose()+" ps")
 		}
 	}
 }

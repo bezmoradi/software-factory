@@ -1224,7 +1224,7 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		return explained(conflict("no images"), noImages)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return explained(invalid("command"), commandRefused)
+		return explained(invalid("command"), commandRefused())
 	}
 	if c.mode == "bypassPermissions" && !confirm {
 		return conflict("confirm")

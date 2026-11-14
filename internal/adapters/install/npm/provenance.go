@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 const (
@@ -145,7 +147,7 @@ func (i *Installer) Provenance() []ProvenanceResult {
 }
 
 func checkAgain(id string) string {
-	return "Run docker compose exec engine software-factory install-agents " + id + " to check it without installing it again; the engine also checks it at its next start unless SF_AGENTS_INSTALL is manual."
+	return "Run " + session.Compose() + " exec engine software-factory install-agents " + id + " to check it without installing it again; the engine also checks it at its next start unless SF_AGENTS_INSTALL is manual."
 }
 
 func ProvenanceLine(r ProvenanceResult) string {

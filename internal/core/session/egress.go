@@ -629,7 +629,7 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	sctx, cancel := context.WithTimeout(ctx, egressSetFor)
 	defer cancel()
 	if _, err := a.cfg.Control.Status(sctx); err != nil {
-		return explained(conflict("egress"), "The gateway wasn't changed: egress's control channel doesn't answer, so the engine couldn't let Claude Code reach the gateway. Check that egress runs: docker compose ps egress.")
+		return explained(conflict("egress"), "The gateway wasn't changed: egress's control channel doesn't answer, so the engine couldn't let Claude Code reach the gateway. Check that egress runs: "+Compose()+" ps egress.")
 	}
 	return nil
 }
@@ -684,7 +684,7 @@ func (a *Allowlist) EgressRefusals(ctx context.Context) ([]RefusalView, error) {
 	defer cancel()
 	got, err := a.cfg.Control.Refused(ctx)
 	if err != nil {
-		return nil, explained(conflict("egress"), "egress didn't say what it refused. Check that it runs: docker compose ps egress.")
+		return nil, explained(conflict("egress"), "egress didn't say what it refused. Check that it runs: "+Compose()+" ps egress.")
 	}
 	var repos []string
 	if a.cfg.Repos != nil {

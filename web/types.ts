@@ -586,6 +586,7 @@ export interface HelloEvent {
   stream: string
   sessions: SessionInfo[]
   supervisor?: string
+  compose?: string
 }
 
 export interface SessionsEvent {

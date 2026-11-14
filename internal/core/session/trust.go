@@ -13,7 +13,7 @@ type TrustHost interface {
 }
 
 func notTrusted(repo, path string) *Error {
-	return &Error{Kind: Conflict, Reason: "not trusted", Message: "Claude Code doesn't trust " + repo + " yet. Trust it from the page, or in a terminal: docker compose exec -it -w " + path + " agent claude, then choose Yes, I trust this folder.",
+	return &Error{Kind: Conflict, Reason: "not trusted", Message: "Claude Code doesn't trust " + repo + " yet. Trust it from the page, or in a terminal: " + Compose() + " exec -it -w " + path + " agent claude, then choose Yes, I trust this folder.",
 		Needs: &Needs{Trust: path}}
 }
 

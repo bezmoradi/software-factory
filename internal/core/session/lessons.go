@@ -700,7 +700,7 @@ func (r *Reviews) startProjectRun(ctx context.Context, key string, costOK bool, 
 		r.release(key)
 		return "", err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep, costOK, what); err != nil {
+	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, what); err != nil {
 		r.release(key)
 		return "", err
 	}

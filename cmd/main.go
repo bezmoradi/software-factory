@@ -38,6 +38,7 @@ func run(args []string, logger shared.Logger) error {
 	if err := server.ApplyUmask(os.Getenv); err != nil {
 		return err
 	}
+	server.ApplyComposeProject(os.Getenv, logger)
 	switch role {
 	case "":
 		return server.Serve(ctx, logger)

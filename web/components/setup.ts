@@ -41,7 +41,7 @@ function agentPanel(a: AgentLogin): HTMLElement {
     return panel
   }
   if (a.step.startsWith('docker compose ')) {
-    panel.append(el('p', 'small muted', 'Run this in a terminal, in the Software Factory folder, then open the link it prints and enter the code it shows.'))
+    panel.append(el('p', 'small muted', a.step.startsWith('docker compose -p ') ? 'Run this in a terminal, then open the link it prints and enter the code it shows.' : 'Run this in a terminal, in the Software Factory folder, then open the link it prints and enter the code it shows.'))
     const block = el('div', 'setup-code')
     const copy = button('', 'setup-copy', () => {
       void navigator.clipboard.writeText(a.step).then(() => {

@@ -53,7 +53,9 @@ const (
 
 const resumeLost = "Codex couldn't restore its earlier conversation; this is a new one."
 
-const signInHelp = "Codex isn't signed in. Sign in inside the agent container with Codex's own login, then start the session again: docker compose exec -it agent codex login --device-auth"
+func signInHelp() string {
+	return "Codex isn't signed in. Sign in inside the agent container with Codex's own login, then start the session again: " + session.Compose() + " exec -it agent codex login --device-auth"
+}
 
 var (
 	ErrClosed         = errors.New("codex: session closed")
@@ -259,7 +261,7 @@ func (c *Client) handshake(ctx context.Context, cfg Config, params threadStartPa
 	}
 	if acct.Account == nil && acct.RequiresOpenaiAuth {
 		c.signedOut = true
-		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp})
+		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp()})
 		c.mu.Unlock()
 		c.log.Warn("codex: not signed in")
 		return nil

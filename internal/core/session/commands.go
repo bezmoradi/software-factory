@@ -11,7 +11,9 @@ var pageBuiltins = map[string]bool{
 	"review": true, "security-review": true, "init": true, "todos": true, "export": true, "release-notes": true,
 }
 
-const commandRefused = "The page sends a skill, a plugin's or MCP server's command, and only the built-in commands that change nothing, such as /compact, /context or /clear. Type any other built-in command in Claude Code itself: docker compose exec -it agent claude attach <id>."
+func commandRefused() string {
+	return "The page sends a skill, a plugin's or MCP server's command, and only the built-in commands that change nothing, such as /compact, /context or /clear. Type any other built-in command in Claude Code itself: " + Compose() + " exec -it agent claude attach <id>."
+}
 
 const maxCatalog = 400
 

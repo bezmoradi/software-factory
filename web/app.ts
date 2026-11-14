@@ -5,7 +5,7 @@ import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { button, el, emit, fileLink, shown, visible, visibleCommand } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
-import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, setAgentNames, shortSha } from './lib/format.ts'
+import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
 import { placeMenu, sessionState, warnings } from './components/overview.ts'
@@ -325,6 +325,7 @@ function onEvent(ev: StreamEvent) {
   if (ev.type === 'hello') {
     if ('sid' in ev) return
     state.stream = ev.stream
+    setCompose(ev.compose)
     projectsAt = 0
     void markSignIn()
     void markIdentity()
@@ -1660,7 +1661,7 @@ async function restarted(): Promise<boolean> {
 }
 
 async function connect(): Promise<void> {
-  if (!signedIn()) return signOut('You’re signed out', 'The engine didn’t answer. Check that it’s running (docker compose ps), then press Sign in.')
+  if (!signedIn()) return signOut('You’re signed out', `The engine didn’t answer. Check that it’s running (${composeCommand('ps')}), then press Sign in.`)
   const gen = generation
   let openedAt = 0
   try {

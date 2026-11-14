@@ -159,6 +159,7 @@ type sessionsFrame struct {
 	Stream     string        `json:"stream,omitempty"`
 	Sessions   []sessionJSON `json:"sessions"`
 	Supervisor string        `json:"supervisor"`
+	Compose    string        `json:"compose,omitempty"`
 }
 
 func sessionsJSON(list []session.Info) []sessionJSON {
@@ -236,7 +237,7 @@ func (s *stream) signal() {
 }
 
 func (s *stream) Hello(id string, list []session.Info) bool {
-	return s.push(sessionsFrame{Type: "hello", Stream: id, Sessions: sessionsJSON(list)})
+	return s.push(sessionsFrame{Type: "hello", Stream: id, Sessions: sessionsJSON(list), Compose: session.Compose()})
 }
 
 func (s *stream) Sessions(list []session.Info) bool {

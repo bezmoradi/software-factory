@@ -498,7 +498,7 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep, costOK, "the check"); err != nil {
+	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, "the check"); err != nil {
 		release()
 		return err
 	}

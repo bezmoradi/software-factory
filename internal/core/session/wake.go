@@ -76,7 +76,7 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 		return false, invalid("command")
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return false, explained(invalid("command"), commandRefused)
+		return false, explained(invalid("command"), commandRefused())
 	}
 	if r.lastMode[sid] == "bypassPermissions" && !confirm {
 		return false, conflict("confirm")

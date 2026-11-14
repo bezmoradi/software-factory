@@ -1,0 +1,14 @@
+x-release-image: &release-image
+  image: ghcr.io/bezmoradi/software-factory@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  pull_policy: missing
+
+services:
+  engine:
+    <<: *release-image
+    build: !reset null
+  agent:
+    <<: *release-image
+  reviewer:
+    <<: *release-image
+  egress:
+    <<: *release-image

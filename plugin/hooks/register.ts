@@ -56,6 +56,8 @@ let controlled = false
 let decided = false
 let mode = ''
 let pageOn = false
+let compose = 'docker compose'
+const COMPOSE = /^docker compose( -p [a-z0-9][a-z0-9_-]*)?$/
 let background = false
 let busy = false
 let turnId: string | undefined
@@ -421,6 +423,7 @@ function connect($: EngineInterface): Promise<boolean> {
       }
       void registerImageTool($)
       setPage(info.page === true)
+      compose = typeof info.compose === 'string' && COMPOSE.test(info.compose) ? info.compose : 'docker compose'
       if (typeof info.background === 'boolean') await setBackground($, info.background)
       if (!decided && (info.control === true || typeof info.background === 'boolean')) await setControl($, true, false)
       void flush($)
@@ -900,7 +903,7 @@ export const register: Register = on => {
     }
     await setControl($, true)
     if (!link.secret && !(await connect($))) return { text: `Couldn't reach the Software Factory engine through ${link.sock || 'its socket'}. Check that agent-host is running in this container.` }
-    return { text: pageOn ? 'The Software Factory page that is open can now control this session.' : 'The Software Factory page can now control this session. To open the page, run docker compose exec engine software-factory open and follow the link it prints to the engine’s log.' }
+    return { text: pageOn ? 'The Software Factory page that is open can now control this session.' : `The Software Factory page can now control this session. To open the page, run ${compose} exec engine software-factory open and follow the link it prints to the engine’s log.` }
   })
 
   on('prompt.submit', async ($, e, next) => {

@@ -49,14 +49,25 @@ export function agentWord(agent?: string): string {
   return AGENT_WORDS[agent] ?? agentNames.get(agent) ?? 'The agent'
 }
 
+const COMPOSE = /^docker compose( -p [a-z0-9][a-z0-9_-]*)?$/
+let compose = 'docker compose'
+
+export function setCompose(value: unknown): void {
+  compose = typeof value === 'string' && COMPOSE.test(value) ? value : 'docker compose'
+}
+
+export function composeCommand(rest: string): string {
+  return `${compose} ${rest}`
+}
+
 export function attachCommand(id: string): string {
-  return `docker compose exec -it agent claude attach ${id}`
+  return composeCommand(`exec -it agent claude attach ${id}`)
 }
 
 export function logsCommand(id: string): string {
-  return `docker compose exec agent claude logs ${id}`
+  return composeCommand(`exec agent claude logs ${id}`)
 }
 
 export function signInStep(agent?: string): string {
-  return agent === 'codex' ? 'docker compose exec -it agent codex login --device-auth' : 'docker compose exec -it agent claude, then /login'
+  return composeCommand(agent === 'codex' ? 'exec -it agent codex login --device-auth' : 'exec -it agent claude, then /login')
 }

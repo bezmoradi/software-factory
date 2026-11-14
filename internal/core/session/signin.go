@@ -114,7 +114,9 @@ type Expectations interface {
 
 const ReviewerAgent = "reviewer"
 
-const ReviewerSignInStep = "press Sign Claude Code in under Finish setting up on the Welcome page, or run docker compose exec -it reviewer claude, then /login"
+func ReviewerSignInStep() string {
+	return "press Sign Claude Code in under Finish setting up on the Welcome page, or run " + Compose() + " exec -it reviewer claude, then /login"
+}
 
 const signInFor = 30 * time.Second
 

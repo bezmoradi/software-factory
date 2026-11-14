@@ -37,7 +37,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep, t.CostOK, "the review"); err != nil {
+	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
 		release()
 		r.cfg.Logger.Info("review", "event", "refused", "why", err.Error())
 		return err

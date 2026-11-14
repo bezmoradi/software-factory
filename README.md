@@ -42,6 +42,8 @@ Software Factory runs coding agents (Claude Code and Codex CLI) in a sandboxed c
 ## What you need
 
 - Docker Desktop on macOS or Windows, or Docker Engine 28 or later with the Compose plugin on Linux, on an `amd64` or `arm64` machine. Before Engine 28, other machines on your local network can reach a port published on `127.0.0.1`, such as the page's. The agent and reviewer containers may each use up to 4 GiB of memory, the engine 1 GiB and the proxy 256 MiB.
+- Docker Compose 5.7.1 or later (`docker compose version`) to install a release, since earlier versions don't check the Compose file they download from the registry against the digest `cosign verify` checked. With an older Compose, build from source.
+- [cosign](https://docs.sigstore.dev/cosign/system_config/installation/), to check a release's signature before it runs.
 - A browser on the same computer. The page is published only on `127.0.0.1`.
 - A Claude account for Claude Code: a Claude subscription or an Anthropic API key. Claude Code signs in twice, once in the agents' container and once in the reviewers' container, because every review runs on Claude Code.
 - Optionally, a ChatGPT account or an OpenAI API key for Codex CLI.
@@ -60,7 +62,7 @@ Most settings live on the page. A few are environment variables that Docker Comp
 | `SF_EXTRA_DENY` | empty | Git hosts to refuse besides the built-in ones (GitHub, GitLab, Bitbucket), such as your company's own git server. If an `SF_ALLOW` or `SF_EXTRA_ALLOW` entry covers the host of a project you added, the sandbox check fails until that host is here |
 | `SF_OSV` | empty | `off` stops the engine's daily lookup of the pinned agent versions at OSV, and its lookup of the vulnerability IDs reviews cite ([Privacy](#privacy)) |
 
-Give a variable on the same line, such as `SF_EXTRA_ALLOW=gateway.example.com docker compose up -d`, or `export` it in your shell. Compose reads the variables again on every `up`, so give them each time; a later `up` without them goes back to the defaults. Changing one recreates the engine, which stops the page's sessions until you wake them ([Maintenance](#maintenance) says what a restart keeps).
+Give a variable on the same line, such as `SF_EXTRA_ALLOW=gateway.example.com docker compose up -d`, or `export` it in your shell; with a release's install command, which is two commands, `export` it. Compose reads the variables again on every `up`, so give them each time; a later `up` without them goes back to the defaults. Changing one recreates the engine, which stops the page's sessions until you wake them ([Maintenance](#maintenance) says what a restart keeps).
 
 `SF_ALLOW` and `SF_EXTRA_ALLOW` are starting values. Egress starts with them, and they stay the list for agents and reviewers until you save a change under **Network access** on the page. From then on the engine keeps the list in `egress.json` in its state and sets it in egress at once, without a restart; when egress restarts with its starting list, the engine sets the saved one again. To go back to the variables, move `egress.json` out of the engine's state volume and restart the engine.
 
@@ -101,22 +103,33 @@ A team file can't choose who fills the bug hunter and simplicity checker roles, 
 
 ## Run it with Docker
 
-These steps were checked with Docker Desktop on macOS. They weren't tried on Windows; there, run the commands in a WSL terminal with Docker Desktop's WSL integration turned on.
+These steps were checked with Docker Desktop on macOS; the install from a release was checked there against a local registry, signed with a local key, with Compose 5.2.0, not yet with 5.7.1 or against GHCR. They weren't tried on Windows; there, run the commands in a WSL terminal with Docker Desktop's WSL integration turned on.
 
-1. **Get the code** and go into its folder. Run every later command from this folder:
+1. **Install a release**, from any folder, with Docker Compose 5.7.1 or later. Run this command, on one line, with `<version>` and `<digest>` filled in:
+
+   ```bash
+   docker compose version --short | awk -F. 'NR==1{v=$0;sub(/^v/,"");ok=(($1+0>5)||($1+0==5&&($2+0>7||($2+0==7&&$3+0>=1))))}END{if(!ok){print "Stopped: this install needs Docker Compose 5.7.1 or later, and docker compose version --short gave: " v;exit 1}}' && cosign verify ghcr.io/bezmoradi/software-factory-compose@sha256:<digest> --certificate-identity https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v<version> --certificate-oidc-issuer https://token.actions.githubusercontent.com && docker compose -p software-factory -f oci://ghcr.io/bezmoradi/software-factory-compose@sha256:<digest> up -d --wait -y
+   ```
+
+   Take only those two values from the release's notes on GitHub: the version, and the digest of `ghcr.io/bezmoradi/software-factory-compose`. Anyone who can edit the notes can change them, so don't copy a command from there, and check that the identity reads exactly `https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v<version>` and both repositories `ghcr.io/bezmoradi/…`, as above.
+
+   The command first stops, with one line saying why, unless `docker compose` is 5.7.1 or later. `cosign verify` checks that the Compose file was signed by this repository's release workflow for that exact tag, and `&&` runs Compose only when it was. Compose then downloads that Compose file and checks it against the digest, pulls the image it names by digest, and starts four containers: `engine` (the page, the gate, the only git credential), `agent` (every agent session), `reviewer` (the reviewers) and `egress` (the proxy). `--wait` waits until all four are healthy; `-y` answers Compose's question about the variables it fills in, such as `SF_PORT`. **Running `docker compose -f oci://…` on its own skips the signature check.** The signature covers the engine image and the Compose file, not the agents the engine downloads at first start, which it checks against their pinned integrity hashes and npm provenance. Both packages are public on GHCR, so the download needs no GitHub sign-in.
+
+   Two checks are optional: the same `cosign verify`, with the same identity and issuer, on the image `ghcr.io/bezmoradi/software-factory@sha256:<image digest>`, taking only the image digest from the notes, and its build provenance and SBOMs (linux/amd64 and linux/arm64) with `gh attestation verify oci://ghcr.io/bezmoradi/software-factory@sha256:<image digest> -R bezmoradi/software-factory`, adding `--predicate-type https://spdx.dev/Document/v2.3` for the SBOMs. `gh` must be signed in.
+
+   A release leaves no `compose.yaml` in your folder. The commands the page shows name the stack's Compose project, such as `docker compose -p software-factory exec -it agent codex login --device-auth`, so they work from any folder. In the commands this README gives, add `-p software-factory` after `docker compose`; that's enough for `exec`, `ps`, `logs` and `down`, while `up` and `run` also need the release's `-f oci://…` after it.
+
+   **Or build it from source**, for development, to run code you've read, or with Compose older than 5.7.1. Get the code, go into its folder and run every later command from there:
 
    ```bash
    git clone https://github.com/bezmoradi/software-factory.git
    cd software-factory
-   ```
-
-2. **Build and start it:**
-
-   ```bash
    make up
    ```
 
-   Compose builds the image locally and starts four containers: `engine` (the page, the gate, the only git credential), `agent` (every agent session), `reviewer` (the reviewers) and `egress` (the proxy). `make up` waits until all four are healthy, prints the page's address and opens it in your default browser (on macOS, or on Linux with `xdg-open`). Without `make`, run `docker compose up -d --build --wait` and open the address yourself. The image holds no agent: on first start the engine downloads the pinned releases of Claude Code (2.1.322) and Codex CLI (0.167.1) from npm, and knackpack (0.26.0) and Spec Kit (1.4.0) at pinned commits from GitHub, checks each against the hash pinned in the code, and installs them into the `agents` volume. That takes a few minutes; the page offers an agent once it's installed. If a download failed, run `docker compose exec engine software-factory install-agents` to try again.
+   Compose builds the image locally and starts the same four containers. `make up` waits until all four are healthy, prints the page's address and opens it in your default browser (on macOS, or on Linux with `xdg-open`). Without `make`, run `docker compose up -d --build --wait` and open the address yourself.
+
+2. **Wait for the agents.** The image holds no agent: on first start the engine downloads the pinned releases of Claude Code (2.1.322) and Codex CLI (0.167.1) from npm, and knackpack (0.26.0) and Spec Kit (1.4.0) at pinned commits from GitHub, checks each against the hash pinned in the code, and installs them into the `agents` volume. That takes a few minutes; the page offers an agent once it's installed. If a download failed, run `docker compose exec engine software-factory install-agents` to try again.
 
 3. **Open the page** if `make up` didn't: <http://127.0.0.1:7799>, or the port you set in `SF_PORT`. It signs itself in.
 
@@ -176,6 +189,8 @@ On a Linux computer, `compose.gvisor.yaml` runs the `agent` container under [gVi
 
    To go back, run `make down`, unset `COMPOSE_FILE` and run `make up`.
 
+   With a release, stop it with `docker compose -p software-factory down`, download `compose.gvisor.yaml` from the release's tag (`https://raw.githubusercontent.com/bezmoradi/software-factory/v<version>/compose.gvisor.yaml`), read it, since the release's signature doesn't cover it, and add `-f compose.gvisor.yaml` after the `-f oci://…` of the release's install command. Compose merged the two in a check of the configuration on macOS; a release under gVisor hasn't been started yet.
+
 Limits:
 
 - **Fixed addresses in place of DNS.** gVisor's network stack doesn't reach Docker's embedded DNS server on a Compose network (gVisor's FAQ). The overlay therefore gives `agentnet` the subnet `172.31.253.0/24`, with the engine at `.10`, egress at `.11` and the agent container at `.12`, and writes the names the agent container needs (`egress`, `egress-agents`, `engine-agents`) into its `/etc/hosts`. Set `SF_GVISOR_PREFIX` to other first three numbers, such as `10.99.7`, when that subnet is in use on your computer. Every other name still doesn't resolve in the agent container.
@@ -185,7 +200,7 @@ Limits:
 
 ## A headless browser for screenshots
 
-`compose.browser.yaml` gives the `agent` container an image with Chromium, so an agent working on a UI can take a screenshot of it, and the page shows it to you. The other containers keep the standard image.
+`compose.browser.yaml` gives the `agent` container an image with Chromium, so an agent working on a UI can take a screenshot of it, and the page shows it to you. The other containers keep the standard image. It builds that image from source, so it needs a clone ([Run it with Docker](#run-it-with-docker)); releases don't publish it.
 
 ```bash
 export COMPOSE_FILE=compose.yaml:compose.browser.yaml
@@ -206,7 +221,7 @@ With the gVisor overlay too: `COMPOSE_FILE=compose.yaml:compose.gvisor.yaml:comp
 
 ## Running it
 
-Run the commands below from the repository folder. Each `docker compose exec` that the page shows you, such as a sign-in step, runs there too.
+Run the commands below from the repository folder. The page's own commands, such as a sign-in step, name the stack's Compose project with `-p`, so they run from any folder. After an install from a release, add `-p software-factory` after `docker compose` in the ones below ([Run it with Docker](#run-it-with-docker)).
 
 ### Usage
 
@@ -328,6 +343,22 @@ The footer shows the session's tokens, its cost estimate and its sign-in method.
 **Workspace and disk space** on the Welcome page shows the workspace volume's free space, with a warning when it runs low, and each session's worktree size. It deletes a stopped session whose branch is pushed or on main; a session with commits that aren't pushed can be deleted only from its own menu. **Register of exceptions** lists, read only, the pushes you allowed with a reason, the verdicts you overrode, the flagged files and commits you allowed, the hosts you added to the network allowlist with your reasons, and the allow rules Claude Code saved.
 
 The side panel holds the execution path, the Reviews and Push panels, the issues, pull requests and comments, the intent record, the session's **Changes** (its commits, changed files and diff against the remote's main branch, from committed work only, the diff cut at 1 MiB, with anything shaped like a private key, a token or a password in a URL hidden) and the subagents it ran.
+
+### What works for each agent
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| Start-up approval | Yes, and the page answers Claude Code's trust question once per repository | Yes, for `.codex/`, `.agents/skills/`, `.agents/plugins/` and `.claude-plugin/`. No trust question: Codex marks the folder trusted itself |
+| A card for each permission request | Yes: each permission prompt Claude Code shows becomes a card | Partly: only when Codex asks, which is rare, since it runs with full access and asks only when it wants more permission |
+| The gate's checks on commands and writes: push-shaped commands, cloud hand-offs, commands that can't be undone, protected paths, the Feature hold on edits | Yes, through the plugin | No. Its pushes still go only through the engine's gate |
+| Wake keeps the conversation | Yes, from Claude Code's own session | Yes, by resuming its saved thread, or a new conversation, with a notice, when that is gone |
+| Questions to you | Yes | Partly: from its main thread only, and only in Plan mode or with Codex's `default_mode_request_user_input` feature on |
+| Subagents shown | Yes | Yes, up to 16, those the session's own thread starts |
+| A message sent during a turn | No: it starts its own turn once the running one ends | Yes: it goes into the running turn |
+| Usage limits | Yes, on a subscription: the 5-hour and weekly limits | Yes, on a ChatGPT sign-in |
+| Cost and spending cap | Yes | No: tokens only, so only the time and turn caps apply |
+| Workflow steps | Yes, knackpack's, or Spec Kit's when the team file names it | Yes, Spec Kit's |
+| Sign-in from the page | Yes: the claude.com code, an API key or a gateway | No: `codex login --device-auth` in a terminal |
 
 ### Execution path (with knackpack)
 
@@ -466,6 +497,7 @@ To keep cost down: an agent's push request starts each reviewer at most once per
 ### Limitations
 
 - The model API host an agent must reach also serves its vendor's other products, and an agent can send code to its model API. With the stored login, an agent could start a vendor cloud session that has its own access to your repository. **Don't connect a vendor's cloud agent (Codex cloud, Claude Code on the web and the like) to repositories you gate with Software Factory**: it pushes from the vendor's servers, outside the gate. In a Claude Code session the plugin refuses the commands that hand work to the vendor's cloud (`claude --remote`, `--cloud`, `--teleport`, `remote-control` or `rc`, `claude ultrareview --post`, `codex cloud` and `codex apply`), but only as the agent types them: a script, Makefile or program that runs one gets past, and nothing stops a session started from the vendor's website.
+- Codex sessions run with full access in the agent container and get no per-command cards: Codex asks only when it wants more permission, and none of the gate's checks (push-shaped commands, cloud hand-offs, commands that can't be undone, protected paths, the Feature hold on edits) apply to its commands or writes. Its pushes still go only through the engine's gate. [What works for each agent](#what-works-for-each-agent) compares the two agents.
 - The code under review can address its reviewer, such as with instructions written into the code. Reviewers may read only their review folder, and a reviewer that tries to read elsewhere counts as no verdict; that limit relies on a Claude Code setting not yet checked on a signed-in run. Findings you send to the agent are that reviewer's words, so they can carry such instructions too; the engine marks them as untrusted.
 - Containers don't stop a kernel exploit.
 - Nothing trusted runs a repository's own checks, such as `make check` or its tests, because the engine and the reviewers must never run what an agent wrote. Reviewers only read the code.
@@ -475,7 +507,7 @@ To keep cost down: an agent's push request starts each reviewer at most once per
 - Only Claude Code (Anthropic) and Codex CLI (OpenAI) are offered.
 - A plan made in Claude Code's plan mode can be approved only in Claude Code itself.
 - The page can't start a session in auto or bypass permission mode.
-- After an engine restart, the sessions it started come back Stopped: press **Wake** to continue one, which runs the start checks again. Cards that were waiting for an answer are gone, except issue and pull request cards, which come back, and the conversation continues from what Claude Code saved. A session from before Software Factory recorded its sandbox checks comes back not sandboxed and can't push: start a new session for that work. Pushes of the sessions it restored wait for the first sandbox check after the restart, since nothing checked the agents' container while the engine was down; once that check passes, Push and Allow work again.
+- After an engine restart, the sessions it started come back Stopped: press **Wake** to continue one, which runs the start checks again. Cards that were waiting for an answer are gone, except issue and pull request cards, which come back, and the conversation continues from what the agent saved: Claude Code's session, or Codex's thread, with a new conversation when that is gone. A session from before Software Factory recorded its sandbox checks comes back not sandboxed and can't push: start a new session for that work. Pushes of the sessions it restored wait for the first sandbox check after the restart, since nothing checked the agents' container while the engine was down; once that check passes, Push and Allow work again.
 - Repositories that use SHA-256 object names are refused, and so are pushes carrying Git LFS files. The LFS check reads only the latest commit's `.gitattributes`.
 - A flagged file whose path isn't valid UTF-8 can't be allowed.
 - The Changes diff is cut at 1 MiB, and the flagged-file scan reads at most 1,000 commits and 32 MiB per push, commit messages included; beyond that, the push needs your Allow with a reason. Reviewers get at most the newest 200 commit messages.
@@ -483,18 +515,18 @@ To keep cost down: an agent's push request starts each reviewer at most once per
 
 ## Maintenance
 
-- **Upgrade** with `git pull`, then `make up`. The engine installs the agent versions the new code pins when it starts. Logins, repositories, tokens, reviews and the audit stay; an open page reloads itself and signs in again once the new engine is up.
+- **Upgrade** a release by running the new release's install command. The same project name, `software-factory`, keeps the volumes. From source, upgrade with `git pull`, then `make up`; `make up` and `make down` work only in a clone. The engine installs the agent versions the new code pins when it starts. Logins, repositories, tokens, reviews and the audit stay; an open page reloads itself and signs in again once the new engine is up.
 - **Install the agents again** with `docker compose exec engine software-factory install-agents`, after a failed download.
 - **Sign Claude Code in again** when the page says its login failed: while it isn't signed in, the Welcome page's **Finish setting up** checklist offers **Sign in**; otherwise run `docker compose exec -it agent claude` (or `reviewer`), then `/login`. Codex signs in again with the command in [Run it with Docker](#run-it-with-docker).
 - **Read the engine's log** with `docker compose logs engine`. It holds event kinds only, never prompts, file contents, keys or tokens.
 - **Read the Agents section** on the Welcome page. It shows whether a pinned agent version has a known vulnerability, whether each pinned npm package's build provenance checked out (an agent installed before the engine checked it is checked at the engine's next start, or with `docker compose exec engine software-factory install-agents <id>`, without installing it again), and which of the agents' user-level settings changed since the last session start. That last list comes from agent-host inside the agent container, so it catches changes an honest session or someone else made, not a hostile agent's.
 - **Export the engine's state** with **Export and import** on the Welcome page, then **Export**. The file holds the projects, sessions, review records, settings and the audit, with the name and email agents commit with and every reason you typed, so keep it private. It holds no git host token.
 - **Import it into a new stack** with **Import…** in the same place, while that engine has no projects and no sessions. The engine restarts to finish. Nothing in the file counts: review passes and approvals show but count for nothing until you approve again, and added hosts, check and setup commands, reviewer agent files, automatic sends and each project's review depth come back off until you turn each on again. Sessions come back as history only and can't be woken. Save the git host's token, then press **Clone again** for each project.
-- **Roll back after an update** that changed a store's format: before an engine writes a store in a newer format, it copies the old file to `backup/<old engine version>/` in `engine-state` and keeps the last 3. Stop the stack with `docker compose down`, put the copies back with `docker compose run --rm --no-deps --entrypoint sh engine -c 'cp -p /var/lib/software-factory/backup/<old engine version>/* /var/lib/software-factory/'`, then start the older code with `make up`. Changes made since the update to those stores are lost.
+- **Roll back after an update** that changed a store's format: before an engine writes a store in a newer format, it copies the old file to `backup/<old engine version>/` in `engine-state` and keeps the last 3. Stop the stack with `docker compose down`, put the copies back with `docker compose run --rm --no-deps --entrypoint sh engine -c 'cp -p /var/lib/software-factory/backup/<old engine version>/* /var/lib/software-factory/'`, then start the older code with `make up`, or the older release's install command. After an install from a release, that `run` needs `-p software-factory -f oci://…` with the release's Compose file, and isn't checked yet. Changes made since the update to those stores are lost.
 - **See dropped records** on the Welcome page: when the review records, the audit or another capped store drops its oldest records, a line says how many and since when.
-- **Stop everything and keep the data** with `make down` (or `docker compose down`).
+- **Stop everything and keep the data** with `make down` (or `docker compose down`; after an install from a release, `docker compose -p software-factory down`).
 
-  **Warning:** `docker compose down -v` also deletes the volumes: every repository clone and the sessions' unpushed work, the git host tokens, the agents' and the reviewers' logins, the review records and the audit. It can't be undone.
+  **Warning:** `docker compose down -v` also deletes the volumes: every repository clone and the sessions' unpushed work, the git host tokens, the agents' and the reviewers' logins, the review records and the audit. It can't be undone. It doesn't sign the agents out with their vendors or revoke a key or token: do that first, as [Privacy](#privacy) says under "Removing it".
 
 The data lives in these Compose volumes. Only `engine-state` has an export, and nothing backs up the rest:
 
@@ -551,7 +583,7 @@ The fake agent and reviewer report the sign-in written in `$HOME/.sf-fake-signin
 - uploaded images are kept in memory, so every restart deletes them;
 - the `Dockerfile`, `plugin/` and `configs/claude-code/` are built into the image, which `make dev` uses as the last `make up` built it. A save there prints a reminder: press Ctrl-C, run `make up`, then `make dev` again.
 
-For work on the page alone, `make run` runs the engine on your computer without Docker; it starts no sessions without an agent-host.
+For work on the page alone, `make run` runs the engine on your computer without Docker; it starts no sessions without an agent-host. An agent-host you run outside Docker listens on `127.0.0.1:8090` unless you set `SF_AGENT_HOST_LISTEN`. **Without a key file it answers every route, running commands with `/v1/run` included, to any program that reaches its port,** so widen the address only when the engine runs on another machine or in a container, and give the reviewers' agent-host its key file, as [AGENTS.md](AGENTS.md) says under "Environment variables".
 
 **Making a change.** Changes reach `main` only through a pull request merged by squash:
 
@@ -565,13 +597,20 @@ A pull request that changes the checks themselves (`.github/`, `scripts/`, the `
 
 Software Factory runs on your own computer. Its author runs no server for it and receives none of your data.
 
-- **What leaves your computer:** what each agent sends to its vendor's model API, under your own account: your messages, the code and files it reads, and your uploads. The reviewers send the commit under review to Anthropic's API the same way. The engine talks to your git host to clone, fetch and push, with your token, and at install to the npm registry and GitHub. The proxy refuses the agents and reviewers every other host.
+- **What leaves your computer:** what each agent sends to its vendor's model API, under your own account: your messages, the code and files it reads, and your uploads. The reviewers send the commit under review to Anthropic's API the same way. The engine talks to your git host to clone, fetch and push, with your token, and at install to the npm registry and GitHub. The proxy lets the agents and reviewers reach only the allowed hosts, the defaults and any you added ([Configuration](#configuration)). That limits where they connect, not where your code can end up: an agent that holds an Anthropic API key can have Anthropic's servers connect to a public address of its choice, through the Messages API's [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector), a beta feature.
+- **Codex's usage analytics:** Codex 0.167.1, started as the engine starts it (`codex app-server`, with no flag), sends OpenAI no usage analytics unless its configuration turns them on: `enabled = true` under `[analytics]` in `~/.codex/config.toml` in the agent container, a file any agent there can write. The interactive `codex` command, if you run it in the container, follows Codex's own default, which OpenAI's documentation gives as on, unless that file sets `enabled = false`.
 - **Vulnerability lookups:** shortly after it starts and every 24 hours, the engine asks OSV (`api.osv.dev`) whether the pinned Claude Code and Codex versions or the pinned knackpack commit have a known advisory. It sends those package names, versions and the commit, nothing else; `SF_OSV=off` turns it off. The agent container never reaches OSV.
 - **Cited vulnerability IDs:** when a review's message cites CVE or GHSA IDs, the engine asks OSV about each one (at most 20 per review), by ID, so the review can mark an ID OSV doesn't hold. It sends only the IDs, which tells OSV which IDs a review of your code mentioned. `SF_OSV=off` turns this off too.
 - **Package lookups:** only for a project where you switch on **Look up new packages**, the engine asks npm, PyPI, proxy.golang.org or crates.io about each package a push's manifests add. It sends the package's name (and, for a Go module without a released version, its version), nothing else. The agent container never reaches them for this.
-- **What it keeps, and where:** in Docker volumes on your computer ([Maintenance](#maintenance)): the repositories and the agents' work, the git host tokens, the reviewers' verdicts and final messages (up to 4,000 characters each), the reviewer agent files you add, the audit file and your approvals. The conversations are kept by the agents themselves, in their own containers; the engine keeps sessions in memory only.
+- **What it keeps, and where:** in Docker volumes on your computer ([Maintenance](#maintenance)): the repositories and the agents' work, the git host tokens, the reviewers' verdicts and final messages (up to 4,000 characters each), the reviewer agent files you add, the audit file and your approvals. The conversations are kept by the agents themselves, in their own containers. The engine saves a record of each session it started, such as its agent, branch, work type and your approvals, in `sessions.json` in `engine-state`, but not its conversation.
 - **What it never stores or logs:** any model credential. The agents' logins are the vendors' own files in their containers, which the engine doesn't mount or read, and every process the engine starts gets the model key variables cleared. An API key you paste in the sign-in dialog, or a gateway's key or token under Network access, goes straight to the container it signs in, where Claude Code reads it through its `apiKeyHelper` setting; the engine doesn't keep it, and the page never shows it again. The git host token is never shown, logged or sent to another container. The log holds event kinds only, never keys, sign-in codes, tokens, prompts, tool input or file contents.
-- **Removing it:** delete the token on your git host, then run `docker compose down -v` to delete everything Software Factory stored, the agents' logins included.
+- **Removing it:**
+  1. Sign the agents out with their own commands: `docker compose exec agent codex logout`, `docker compose exec agent claude auth logout` and `docker compose exec reviewer claude auth logout`.
+  2. Revoke an Anthropic API key you pasted at <https://platform.claude.com>, and a gateway's key or token with whoever issued it.
+  3. Delete the token on your git host.
+  4. Run `docker compose down -v` to delete everything Software Factory stored, the agents' logins included.
+
+  After an install from a release, add `-p software-factory` after `docker compose` in these commands. Then also remove the image, `docker image rm ghcr.io/bezmoradi/software-factory@sha256:<image digest>` with the digest from the release's notes, and Compose's cached copy of the release's Compose file, in `~/Library/Caches/docker-compose` on macOS or `~/.cache/docker-compose` on Linux.
 
 Questions go to the repository's [issues](https://github.com/bezmoradi/software-factory/issues).
 

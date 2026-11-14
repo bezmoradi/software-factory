@@ -139,7 +139,7 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep, t.CostOK, a.what); err != nil {
+	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, a.what); err != nil {
 		release()
 		return err
 	}

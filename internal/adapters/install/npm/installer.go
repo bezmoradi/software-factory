@@ -145,9 +145,9 @@ func (i *Installer) Ready(id string) (bool, string) {
 	case running:
 		return false, fmt.Sprintf("The engine is installing %s %s into the agents volume. It shows here once it's done.", a.Name, a.Version)
 	case failed != "":
-		return false, fmt.Sprintf("%s %s isn't installed: %s Run docker compose exec engine software-factory install-agents to try again.", a.Name, a.Version, failed)
+		return false, fmt.Sprintf("%s %s isn't installed: %s Run %s exec engine software-factory install-agents to try again.", a.Name, a.Version, failed, session.Compose())
 	}
-	return false, fmt.Sprintf("%s %s isn't installed yet. Run docker compose exec engine software-factory install-agents.", a.Name, a.Version)
+	return false, fmt.Sprintf("%s %s isn't installed yet. Run %s exec engine software-factory install-agents.", a.Name, a.Version, session.Compose())
 }
 
 func (i *Installer) InstallMissing(ctx context.Context, report func(string)) error {

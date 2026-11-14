@@ -239,7 +239,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("session registered", "side", "agent")
 	out := map[string]any{
-		"secret": got.Secret, "restart": false, "page": got.Page, "push": got.Push, "control": got.Control,
+		"secret": got.Secret, "restart": false, "page": got.Page, "push": got.Push, "control": got.Control, "compose": session.Compose(),
 	}
 	if got.Background != nil {
 		out["background"] = *got.Background
