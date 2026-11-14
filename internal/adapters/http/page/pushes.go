@@ -55,6 +55,8 @@ type pushJSON struct {
 
 	Findings     bool  `json:"findings"`
 	FindingsSent int64 `json:"findingsSent"`
+
+	Extra *pushExtraJSON `json:"extra,omitempty"`
 }
 
 func pushOf(v *session.PushView) *pushJSON {
@@ -64,6 +66,7 @@ func pushOf(v *session.PushView) *pushJSON {
 	out := &pushJSON{Running: v.Running, Result: v.Result, Reason: v.Reason, Card: v.Card, Commit: v.Commit, Branch: v.Branch, Remote: v.Remote,
 		Missing: nonNil(v.Missing), NeedsReason: v.NeedsReason, Expires: millis(v.Expires), At: millis(v.At), Handoff: v.Handoff, Passed: v.Passed, Overridden: v.Overridden,
 		Findings: v.Findings, FindingsSent: millis(v.FindingsSent)}
+	out.Extra = extraOf(v.Extra)
 	if a := v.Audit; a != nil {
 		out.Audit = &pushAuditJSON{Time: millis(a.Time), By: a.By, Result: a.Result, Reason: a.Reason, Commit: a.Commit, Branch: a.Branch,
 			Remote: a.Remote, Missing: nonNil(a.Missing), PersonReason: a.PersonReason}

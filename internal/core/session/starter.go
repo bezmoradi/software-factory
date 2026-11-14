@@ -801,6 +801,9 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	if why := d.reg.halt.automatic(); auto && why != "" {
 		return explained(conflict("halted"), why)
 	}
+	if why := d.automaticHeldIf(auto, sid); why != "" {
+		return explained(conflict("limits"), why)
+	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")

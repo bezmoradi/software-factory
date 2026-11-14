@@ -33,6 +33,7 @@ var notGitHub = map[string]bool{
 
 type API struct {
 	Client *http.Client
+	Expiry func(host, header string)
 }
 
 var _ session.ForgeAPI = API{}
@@ -145,6 +146,7 @@ func (a API) send(ctx context.Context, r session.ForgeRepo, method, path string,
 	if !fromGitHub(resp.Header) {
 		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: bare(r.Host) + " doesn't answer like GitHub's API at " + Base(r.Host) + ", so this tool isn't supported for it"}
 	}
+	a.noteExpiry(r.Host, resp)
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return resp.StatusCode, resp.Header, &session.ForgeError{Status: resp.StatusCode, Message: "GitHub refused the saved token (401: " + describe(resp.StatusCode, data) + "); it may have expired or been revoked, so ask the person to save a new one"}

@@ -114,6 +114,9 @@ func (d *Dispatcher) Restore() int {
 			d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 		}
 	}
+	if d.cfg.Reviews != nil {
+		d.cfg.Reviews.ShowKept(sids)
+	}
 	if len(sids) > 0 {
 		d.cfg.Logger.Info("sessions", "event", "restored", "count", len(sids))
 	}

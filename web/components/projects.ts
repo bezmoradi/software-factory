@@ -1,6 +1,9 @@
 import { button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 import './allow-rules.ts'
+import './project-facts.ts'
+import './caps.ts'
+import './usage.ts'
 import { bySessionOrder, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
 import type { Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 
@@ -71,6 +74,7 @@ class DispatchForm {
   model = el('select', 'textbox')
   kind = el('select', 'textbox')
   expect = el('select', 'textbox')
+  caps = el('sf-caps-fields', 'dispatch-caps')
   start = button('', 'primary small stack', undefined, 'submit')
   idle = el('span', '', 'Start')
   working = el('span', '', 'Starting…')
@@ -130,11 +134,14 @@ class DispatchForm {
     }
     this.agent.addEventListener('change', sync)
     sync()
-    this.form.append(row, note, this.why)
+    this.caps.project = p.name
+    this.form.append(row, this.caps, note, this.why)
     this.form.addEventListener('submit', e => {
       e.preventDefault()
       if (this.start.disabled) return
-      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value })
+      const caps = this.caps.checked()
+      if (caps === 'invalid') return
+      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}) })
     })
   }
 
@@ -166,6 +173,9 @@ class SfProjects extends HTMLElement {
   #sessionsKey = ''
   #expanded = new Map<string, boolean>()
   #rules = new Map<string, HTMLElementTagNameMap['sf-allow-rules']>()
+  #facts = new Map<string, HTMLElementTagNameMap['sf-project-facts']>()
+  #caps = new Map<string, HTMLElementTagNameMap['sf-project-caps']>()
+  #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
   #menuOpen = ''
   #slot: HTMLElement | null = null
   #stale = false
@@ -220,6 +230,7 @@ class SfProjects extends HTMLElement {
     this.#viewKey = key
     this.#view = value
     for (const path of this.#forms.keys()) if (!value.projects.some(p => p.path === path)) this.#forms.delete(path)
+    for (const m of [this.#caps, this.#expiry]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
     this.#render()
   }
 
@@ -392,6 +403,24 @@ class SfProjects extends HTMLElement {
       }
       this.#render()
     }, 'warning')
+    item(this.#facts.has(p.path) ? 'Hide CI workflows and main\'s protection' : 'CI workflows and main\'s protection', () => {
+      if (this.#facts.has(p.path)) this.#facts.delete(p.path)
+      else {
+        const panel = el('sf-project-facts', 'project-rules')
+        panel.repo = p.name
+        this.#facts.set(p.path, panel)
+      }
+      this.#render()
+    }, 'info')
+    item(this.#caps.has(p.path) ? 'Hide caps' : 'Caps', () => {
+      if (this.#caps.has(p.path)) this.#caps.delete(p.path)
+      else {
+        const panel = el('sf-project-caps', 'project-caps')
+        panel.project = p.name
+        this.#caps.set(p.path, panel)
+      }
+      this.#render()
+    }, 'warning')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -475,6 +504,17 @@ class SfProjects extends HTMLElement {
     if (form) li.append(form.form)
     const rules = this.#rules.get(p.path)
     if (rules) li.append(rules)
+    const facts = this.#facts.get(p.path)
+    if (facts) li.append(facts)
+    const caps = this.#caps.get(p.path)
+    if (caps) li.append(caps)
+    let expiry = this.#expiry.get(p.path)
+    if (!expiry) {
+      expiry = el('sf-token-expiry', 'project-expiry')
+      this.#expiry.set(p.path, expiry)
+    }
+    expiry.url = p.url ?? ''
+    li.append(expiry)
     return li
   }
 

@@ -150,6 +150,9 @@ type api struct {
 func (a api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-GitHub-Request-Id", requestID())
 	w.Header().Set("X-GitHub-Media-Type", "github.v3; format=json")
+	if at := tokenExpiry(a.root); at != "" {
+		w.Header().Set("GitHub-Authentication-Token-Expiration", at)
+	}
 	auth := r.Header.Get("Authorization")
 	if auth != "Bearer "+a.token && auth != "token "+a.token {
 		log.Printf("api %s %s refused: no or wrong token", r.Method, r.URL.Path)

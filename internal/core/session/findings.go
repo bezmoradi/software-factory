@@ -203,6 +203,10 @@ func (p *Pushes) autoFindings(sid string) {
 		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "session-sign-in")
 		return
 	}
+	if why := p.automaticHeld(sid); why != "" {
+		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "limits")
+		return
+	}
 	p.mu.Lock()
 	h := p.held[sid]
 	ready := !p.closing && h != nil && h.findings && !h.handoff && h.sent.IsZero() && p.cfg.Now().Before(h.expires)

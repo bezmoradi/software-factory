@@ -79,12 +79,17 @@ func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) 
 			send(w, code, p)
 			return
 		}
+		s.reg.Limits().TokenSaved(info.Host)
 		send(w, http.StatusOK, map[string]any{"ok": true, "host": hostJSON{Host: info.Host, SavedAt: millis(info.SavedAt)}})
 	case "/api/remove-token":
 		f, ok := textFields(w, body, 4096, "host")
 		if !ok {
 			return
 		}
-		reply(w, s.cfg.Repos.RemoveToken(f["host"]), http.StatusOK)
+		err := s.cfg.Repos.RemoveToken(f["host"])
+		if err == nil {
+			s.reg.Limits().TokenSaved(f["host"])
+		}
+		reply(w, err, http.StatusOK)
 	}
 }

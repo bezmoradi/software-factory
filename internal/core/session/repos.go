@@ -76,11 +76,12 @@ type Cloned struct {
 }
 
 type FetchRequest struct {
-	Name   string
-	URL    string
-	Token  string
-	Branch string
-	Have   []string
+	Name    string
+	URL     string
+	Token   string
+	Branch  string
+	Have    []string
+	Present func(sha string) bool
 }
 
 type Fetched struct {
@@ -589,7 +590,11 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 		}
 	}
 	fctx, cancel := context.WithTimeout(ctx, c.cfg.FetchFor)
-	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have})
+	present := func(sha string) bool {
+		_, err := c.cfg.Commits.Commit(path, sha)
+		return err == nil
+	}
+	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have, Present: present})
 	cancel()
 	if err != nil {
 		c.cfg.Logger.Warn("repository", "event", "fetch-failed")

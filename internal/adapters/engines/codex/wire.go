@@ -15,15 +15,16 @@ const (
 )
 
 const (
-	methodInitialize    = "initialize"
-	methodInitialized   = "initialized"
-	methodAccountRead   = "account/read"
-	methodThreadStart   = "thread/start"
-	methodThreadResume  = "thread/resume"
-	methodThreadRead    = "thread/read"
-	methodTurnStart     = "turn/start"
-	methodTurnSteer     = "turn/steer"
-	methodTurnInterrupt = "turn/interrupt"
+	methodInitialize     = "initialize"
+	methodInitialized    = "initialized"
+	methodAccountRead    = "account/read"
+	methodRateLimitsRead = "account/rateLimits/read"
+	methodThreadStart    = "thread/start"
+	methodThreadResume   = "thread/resume"
+	methodThreadRead     = "thread/read"
+	methodTurnStart      = "turn/start"
+	methodTurnSteer      = "turn/steer"
+	methodTurnInterrupt  = "turn/interrupt"
 
 	methodCommandApproval   = "item/commandExecution/requestApproval"
 	methodFileApproval      = "item/fileChange/requestApproval"
@@ -88,7 +89,6 @@ var quietNotifications = map[string]bool{
 	methodMcpProgress:       true,
 	methodTurnDiff:          true,
 	methodAccountUpdated:    true,
-	methodRateLimits:        true,
 	methodMcpStartup:        true,
 	methodWarning:           true,
 	methodConfigWarning:     true,

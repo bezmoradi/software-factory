@@ -18,6 +18,7 @@ interface AddedHost {
   host: string
   expires: number
   uploads: boolean
+  reason?: string
 }
 
 interface GatewayView {
@@ -133,6 +134,11 @@ export function openEgress(post: Post): void {
   hostInput.spellcheck = false
   hostInput.autocomplete = 'off'
   hostInput.placeholder = 'registry.npmjs.org'
+  const reasonInput = el('input', 'textbox')
+  reasonInput.name = 'reason'
+  reasonInput.maxLength = 200
+  reasonInput.autocomplete = 'off'
+  reasonInput.placeholder = 'Why the agents need it (optional)'
   const expiry = el('select', 'textbox')
   for (const [value, words] of [['never', 'No expiry'], ['hour', 'For an hour'], ['day', 'For a day'], ['week', 'For a week']] as const) {
     const o = el('option', '', words)
@@ -189,7 +195,7 @@ export function openEgress(post: Post): void {
     if (!v.added.length) addedList.append(el('li', 'muted', 'No hosts added.'))
     for (const h of v.added) {
       const li = el('li', 'row')
-      li.append(el('code', '', visible(h.host)), el('span', 'small muted', until(h.expires, v.now)))
+      li.append(el('code', '', visible(h.host)), el('span', 'small muted', until(h.expires, v.now)), el('span', 'small', typeof h.reason === 'string' && h.reason ? `“${visible(h.reason)}”` : 'no reason given'))
       if (h.uploads) li.append(el('span', 'tag warn', 'accepts uploads'))
       li.append(el('span', 'spacer'), button('Remove', 'ghost small', () => void remove(h.host)))
       addedList.append(li)
@@ -232,7 +238,8 @@ export function openEgress(post: Post): void {
   const add = async (uploadsOk: boolean) => {
     const host = hostInput.value.trim()
     if (!host) return hostInput.focus()
-    const a = await call(post, uploadsOk ? { op: 'add', host, expires: expiry.value, uploadsOk: true } : { op: 'add', host, expires: expiry.value })
+    const reason = reasonInput.value.trim()
+    const a = await call(post, { op: 'add', host, expires: expiry.value, ...(uploadsOk ? { uploadsOk: true } : {}), ...(reason ? { reason } : {}) })
     if (!a.ok && a.body.error === 'uploads') {
       uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Add anyway', 'ghost small', () => void add(true)), button('Cancel', 'ghost small', () => { uploadWarn.hidden = true }))
       uploadWarn.hidden = false
@@ -241,6 +248,7 @@ export function openEgress(post: Post): void {
     uploadWarn.hidden = true
     if (answer(a, 'The host wasn’t added.')) {
       hostInput.value = ''
+      reasonInput.value = ''
       hint.textContent = ''
       void loadRefusals()
     }
@@ -327,7 +335,9 @@ export function openEgress(post: Post): void {
   hostLabel.append(hostInput)
   const expiryLabel = el('label', 'small', 'Allowed')
   expiryLabel.append(expiry)
-  addForm.append(hostLabel, expiryLabel, button('Add', 'primary small', undefined, 'submit'))
+  const reasonLabel = el('label', 'small', 'Reason')
+  reasonLabel.append(reasonInput)
+  addForm.append(hostLabel, expiryLabel, reasonLabel, button('Add', 'primary small', undefined, 'submit'))
   addForm.addEventListener('submit', e => {
     e.preventDefault()
     void add(false)

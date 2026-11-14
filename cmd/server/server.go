@@ -303,7 +303,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	d = session.NewDispatcher(reg, session.DispatcherConfig{
 		Agents:       agents,
 		Host:         agentSide,
-		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions}},
+		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions, RateWindows: reg.Limits().CodexWindows}},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
 		PluginSocket: cfg.PluginSocket,
@@ -459,6 +459,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return err
 	}
 	srv.UseEgress(parts.egressPage())
+	useChangeFacts(sends, srv, reg, parts, cfg, logger)
 	if parts.dispatcher != nil {
 		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)
 		parts.dispatcher.ReconcileKeys(kctx)
@@ -467,8 +468,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	}
 	reg.DropStrayNotes()
 	parts.useHalt(reg, cfg, logger)
+	parts.useLimits(reg, cfg, logger)
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 	useAgentReports(sends, srv, parts, cfg, logger)
+	useViews(srv, parts, cfg, reg, logger)
 
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()

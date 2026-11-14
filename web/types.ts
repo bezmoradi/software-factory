@@ -35,6 +35,86 @@ export interface SessionInfo {
   signIn?: SignIn
   unbacked?: TurnMarks[]
   stopReason?: string
+  uncommitted?: Uncommitted
+  overlaps?: Overlap[]
+  checks?: AgentCheck[]
+}
+
+export interface Uncommitted {
+  commit: string
+  count: number
+  paths: string[]
+  cut: boolean
+}
+
+export interface Overlap {
+  sid: string
+  name: string
+  paths: string[]
+  more: number
+}
+
+export interface AgentCheck {
+  kind: string
+  command: string
+  ok: boolean
+  at: number
+}
+
+export interface ChangeNote {
+  path: string
+  what: string
+}
+
+export interface FileKind {
+  path: string
+  kind: string
+  target?: string
+}
+
+export interface DependencyChange {
+  ecosystem: string
+  name: string
+  from: string
+  to: string
+  change: 'added' | 'removed' | 'changed'
+  file: string
+  lockfile: boolean
+  looked: boolean
+  found: boolean
+  published: number
+  young: boolean
+  note?: string
+}
+
+export interface WorkflowRun {
+  path: string
+  name: string
+  when: string
+  secrets: string[]
+  idToken: boolean
+  trusted: string[]
+  new: boolean
+  changed: boolean
+  problem?: string
+}
+
+export interface PushExtra {
+  commit: string
+  problems: string[]
+  tests: ChangeNote[]
+  dependencies: DependencyChange[]
+  moreDependencies: number
+  kinds: FileKind[]
+  workflows: WorkflowRun[]
+  workflowsProblem?: string
+  lookup: string
+}
+
+export interface SessionFactsView {
+  uncommitted: Uncommitted | null
+  overlaps: Overlap[]
+  disabled: string
 }
 
 export interface ClaimMark {
@@ -146,6 +226,7 @@ export interface SessionPush {
   overridden?: number
   findings?: boolean
   findingsSent?: number
+  extra?: PushExtra
 }
 
 export interface SessionForge {
@@ -202,6 +283,7 @@ export interface PushPanelView {
   answering: boolean
   flagged?: FlaggedFile[]
   flagsRead?: boolean
+  checks?: AgentCheck[]
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -225,6 +307,20 @@ export interface ReviewRole {
   pluginCommit?: string
   claudeCode?: string
   models?: string[]
+  progress?: ReviewProgress
+  given?: ReviewGiven
+}
+
+export interface ReviewProgress {
+  elapsedMs: number
+  toolCalls: number
+  done: boolean
+}
+
+export interface ReviewGiven {
+  prompt: string
+  flags: string[]
+  files: string[]
 }
 
 export interface SessionReview {
@@ -248,6 +344,14 @@ export interface TestList {
   reason: string
   costUsd?: number
   at: number
+  steps?: WalkStep[]
+}
+
+export interface WalkStep {
+  do: string
+  expect: string
+  input: string
+  done: boolean
 }
 
 export interface ReviewsView {
@@ -340,6 +444,7 @@ export interface Dispatch extends Consent {
   model: string
   mode: string
   type?: string
+  caps?: { money: number; minutes: number; turns: number }
 }
 
 export interface HelloEvent {
@@ -861,10 +966,12 @@ declare global {
     'sf-send-findings': CustomEvent<{ card: string; commit: string }>
     'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean; confirmed?: boolean }>
     'sf-test-list': Event
+    'sf-walkthrough-check': CustomEvent<{ commit: string; step: number; done: boolean; settle: (ok: boolean) => void }>
     'sf-allow-file': CustomEvent<{ path: string; reason: string }>
     'sf-remove-file': CustomEvent<{ path: string }>
     'sf-allow-commit': CustomEvent<{ commit: string; field: string; reason: string }>
     'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
+    'sf-commit-ask': Event
   }
 }

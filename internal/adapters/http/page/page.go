@@ -51,6 +51,9 @@ type Config struct {
 	ReviewerChecks session.ReviewerChecksPage
 	Identity       session.IdentityPage
 	Egress         session.EgressPage
+	Recaps         session.RecapPage
+	WorkspaceView  session.WorkspacePage
+	Exceptions     session.ExceptionsPage
 }
 
 type Server struct {
@@ -66,6 +69,7 @@ type Server struct {
 	lists    fileLists
 	reports  session.AgentReportPage
 	rules    session.AllowRulesPage
+	facts    session.ProjectFactsPage
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -144,8 +148,12 @@ var pageRoutes = map[string]bool{
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
 	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
 	haltRoute:       true,
+	limitsRoute:     true,
 	egressRoute:     true,
 	allowRulesRoute: true, agentReportRoute: true,
+	walkthroughRoute: true,
+	recapRoute:       true, workspaceRoute: true, exceptionsRoute: true,
+	projectFactsRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -265,6 +273,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.testList(w, r, body)
 		return
 	}
+	if r.URL.Path == walkthroughRoute {
+		s.walkthroughCheck(w, r, body)
+		return
+	}
 	if r.URL.Path == reviewerAgentsRoute {
 		s.reviewerAgents(w, body)
 		return
@@ -291,6 +303,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == agentReportRoute {
 		s.agentReport(w, body)
+		return
+	}
+	if r.URL.Path == projectFactsRoute {
+		s.projectFacts(w, r, body)
 		return
 	}
 	if r.URL.Path == loginRoute {
@@ -323,6 +339,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == haltRoute {
 		s.halt(w, body)
+		return
+	}
+	if viewRoutes[r.URL.Path] {
+		s.views(w, r, body)
+		return
+	}
+	if r.URL.Path == limitsRoute {
+		s.limits(w, r, body)
 		return
 	}
 	s.api(w, r.URL.Path, body)

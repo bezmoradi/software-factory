@@ -169,6 +169,7 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 	if checker, ok := host.(session.SignInChecker); ok {
 		rc.SignIns = checker
 	}
+	rc.Walkthroughs = state.NewWalkthroughs(cfg.StateDir)
 	if agentFiles != nil {
 		rc.AgentFiles = agentFiles
 	}

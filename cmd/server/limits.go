@@ -1,0 +1,27 @@
+package server
+
+import (
+	"context"
+
+	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
+	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
+)
+
+func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, logger shared.Logger) {
+	limits := reg.Limits()
+	lc := session.LimitsConfig{Store: state.NewCaps(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger}
+	if d := p.dispatcher; d != nil {
+		lc.Targets, lc.Stop = d.PushTarget, d.Stop
+		lc.Wake = func(ctx context.Context, sid string) error { return d.Wake(ctx, sid, session.Consent{}) }
+	}
+	if p.reviews != nil {
+		lc.Reviewer = p.reviews.SignIn
+		p.reviews.OnRateWindows(limits.Windows)
+	}
+	if p.pushes != nil {
+		p.pushes.UseLimits(limits)
+		lc.Continued = p.pushes.Continued
+	}
+	limits.Use(lc)
+}

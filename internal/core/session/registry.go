@@ -134,6 +134,9 @@ type Info struct {
 	Queued       int
 	Unbacked     []TurnMarks
 	StopReason   string
+	Uncommitted  *Uncommitted
+	Overlaps     []Overlap
+	Checks       []AgentCheck
 }
 
 type conn struct {
@@ -209,6 +212,8 @@ type Registry struct {
 	noteSaved   uint64
 	noteMu      sync.Mutex
 	halt        *Halt
+	worktrees   *worktreeBook
+	limits      *Limits
 }
 
 var (
@@ -254,6 +259,7 @@ func New(version string, now func() time.Time) *Registry {
 		compactions: newLimiter(compactNotes, compactWindow),
 	}
 	r.halt = newHalt(now, r.Notify)
+	r.limits = newLimits(r)
 	return r
 }
 
@@ -566,8 +572,10 @@ func (r *Registry) Report(given string, b Batch) error {
 				continue
 			}
 			c.lastSeq = seq
+			r.limitsSeen(c, kind, ev, now)
 			r.trackTurn(c, kind, ev, seq, now)
 			r.markTurn(c.sid, kind, ev, now)
+			r.noteFacts(c.sid, kind, ev, now)
 			if cardTypes[kind] {
 				fresh := r.freshCard(ev)
 				shown = r.indexCard(c.sid, ev)
@@ -1091,6 +1099,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		if q := r.queued[sid]; q != nil {
 			info.Queued = len(q.msgs)
 		}
+		r.factsInto(sid, &info)
 	}
 	for _, k := range r.cards {
 		if k.sid == sid {
@@ -1171,6 +1180,9 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 	if why := r.halt.turns(); why != "" {
 		return explained(conflict("halted"), why)
 	}
+	if why := r.limitsMessageHeld(sid); why != "" {
+		return explained(conflict("cap"), why)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
@@ -1225,6 +1237,7 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		r.dropNotesLocked(sid)
 	}
 	if commandName(text) == "" {
+		r.limitsMessage(sid)
 		r.startTurnLocked(sid, now)
 	}
 	return nil

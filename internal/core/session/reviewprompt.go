@@ -51,6 +51,7 @@ type reviewGiven struct {
 	asked    bool
 	claims   bool
 	rules    rulesGiven
+	facts    bool
 }
 
 func promptFor(e ReviewEntry, g reviewGiven) string {
@@ -63,6 +64,7 @@ func promptFor(e ReviewEntry, g reviewGiven) string {
 		p += approvedAsk(g.approved)
 	}
 	p += claimsAsk(g.claims)
+	p += changeFactsAsk(g.facts)
 	if g.earlier == "" {
 		return p + readOnly
 	}

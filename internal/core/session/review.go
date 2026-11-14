@@ -106,6 +106,9 @@ type RoleReview struct {
 	PluginCommit string
 	ClaudeCode   string
 	Models       []string
+
+	Progress *ReviewProgress
+	Given    *RunGiven
 }
 
 type ReviewView struct {
@@ -180,6 +183,8 @@ type ReviewsConfig struct {
 	AgentFiles ReviewAgentFiles
 	Logger     shared.Logger
 
+	Walkthroughs Walkthroughs
+
 	PluginCommit string
 	ClaudeCode   string
 }
@@ -198,6 +203,10 @@ type Reviews struct {
 	signIn     *SignIn
 	tests      map[string]TestListView
 	keyGate    func(context.Context) error
+
+	rateHandlers []func(side string, w []RateWindow)
+	testStore    sync.Mutex
+	changeFacts  ChangeBlobs
 }
 
 func (r *Reviews) OnDone(fn func(sid, head string)) {
@@ -257,6 +266,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if err := r.settleChecks(); err != nil {
 		return nil, err
 	}
+	r.loadTests()
 	return r, nil
 }
 
@@ -382,11 +392,13 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	common := append(slices.Clone(scanned), given.rules.files...)
 	givens := make([]reviewGiven, len(plans))
 	extra := map[string][]SnapshotFile{}
+	facts := map[string]bool{}
 	for i, p := range plans {
 		givens[i] = given
 		if _, ok := extra[p.base]; !ok {
-			extra[p.base] = slices.Clone(common)
+			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.Repo, p.base, head)
 		}
+		givens[i].facts = facts[p.base]
 		var f SnapshotFile
 		said := earlierNone
 		if p.since != "" {
@@ -446,6 +458,18 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		}
 	}
 	r.put(entries...)
+	prompts := make([]string, len(entries))
+	for i := range entries {
+		if dirs[plans[i].base] == "" || entries[i].Record.State != review.Running {
+			continue
+		}
+		prompts[i] = promptFor(entries[i], givens[i])
+		if providerFor(r.cfg.AgentFiles, entries[i].Key.Agent) == UploadedProvider {
+			prompts[i] += AgentVerdictAsk
+		}
+		view.Roles[i].Given = givenOf(ReviewArgv(r.cfg.Command, plugin, entries[i].Key.Agent, prompts[i]), plans[i].base, head, extra[plans[i].base])
+	}
+	r.show(t.SID, view.clone())
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for i := range entries {
@@ -453,12 +477,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		if dir == "" || entries[i].Record.State != review.Running {
 			continue
 		}
-		prompt := promptFor(entries[i], givens[i])
-		if providerFor(r.cfg.AgentFiles, entries[i].Key.Agent) == UploadedProvider {
-			prompt += AgentVerdictAsk
-		}
+		prompt := prompts[i]
 		wg.Go(func() {
-			e, why := r.review(ctx, t, entries[i], dir, plugin, prompt)
+			e, why := r.reviewWith(ctx, t, entries[i], dir, plugin, prompt, r.progressShown(t.SID, &mu, &view, i))
 			e = classified(e, why)
 			r.put(e)
 			r.audited(t, e)

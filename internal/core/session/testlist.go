@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +27,7 @@ type TestListView struct {
 	Reason  string
 	CostUSD float64
 	At      time.Time
+	Steps   []WalkStep
 }
 
 func TestListPrompt(base, head, branch string) string {
@@ -33,10 +35,12 @@ func TestListPrompt(base, head, branch string) string {
 	if base == "" {
 		from = "base/ is empty: the branch shares no history with the remote's main branch"
 	}
-	return "Write a manual test list for the change in this folder: the steps a person should try by hand before merging it, each with what they should see, " +
+	return "Write a manual test list for the change in this folder, as a guided walkthrough: the steps a person should try by hand before merging it, " +
 		"most important first, and the risky cases the change could break. It isn't a git repository: head/ holds commit " + head + " of the branch " + branch + ", and " + from + ". " +
 		"change.diff beside them is that change as a unified diff, written by Software Factory. You can read files but not run commands or write files. " +
-		"Give only the numbered list in your reply, with no verdict: this isn't a review, and Software Factory's gate doesn't read it."
+		"Give only the numbered steps in your reply, at most " + strconv.Itoa(MaxWalkSteps) + ", each in this form:\n" + walkForm +
+		"\nFor each sample input use a real value from the change, such as a file name, a command, a field's text or a URL, and write none when the step needs no input. " +
+		"Give no verdict: this isn't a review, and Software Factory's gate doesn't read it."
 }
 
 func TestListArgv(command, plugin, prompt string) []string {
@@ -71,8 +75,10 @@ func (r *Reviews) setTestList(sid string, v TestListView) {
 		r.tests = map[string]TestListView{}
 	}
 	r.tests[sid] = v
+	keptLists(r.tests, sid)
 	view := r.views[sid]
 	r.mu.Unlock()
+	r.saveTests()
 	r.show(sid, view)
 }
 
@@ -166,10 +172,10 @@ func (r *Reviews) writeTestList(t ReviewTarget, base, head, plugin string) TestL
 	argv := TestListArgv(r.cfg.Command, plugin, TestListPrompt(base, head, t.Branch))
 	rctx, cancel := context.WithTimeout(ctx, r.cfg.Timeout+reviewSlack)
 	defer cancel()
-	res, err := r.cfg.Host.Run(rctx, Command{Argv: argv, Dir: dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: r.cfg.Timeout})
+	res, err := r.reviewerRun(rctx, Command{Argv: argv, Dir: dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: r.cfg.Timeout}, nil)
 	switch {
 	case err != nil && ctx.Err() != nil:
-		v.Reason = "the engine stopped before it finished"
+		v.Reason = testListStopped
 		return v
 	case err != nil && rctx.Err() != nil, err == nil && res.TimedOut:
 		v.Reason = fmt.Sprintf("it didn't finish within %d minutes", int(r.cfg.Timeout/time.Minute))
@@ -201,5 +207,6 @@ func (r *Reviews) writeTestList(t ReviewTarget, base, head, plugin string) TestL
 	if text == "" {
 		v.State, v.Reason = TestListFailed, "its reply was empty"
 	}
+	v.Steps = WalkStepsOf(text)
 	return v
 }

@@ -86,6 +86,7 @@ type Config struct {
 	ClientVersion         string
 	Thread                string
 	Logger                shared.Logger
+	RateWindows           func(plan string, w []session.RateWindow)
 }
 
 var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -114,6 +115,9 @@ type Client struct {
 	threadID  string
 	turnID    string
 	signIn    string
+	plan      string
+	rates     rateLimits
+	rateHook  func(plan string, w []session.RateWindow)
 	signedOut bool
 	violated  bool
 	closing   bool
@@ -151,6 +155,7 @@ func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, err
 		replies:   make(chan any, maxReplies),
 		done:      make(chan struct{}),
 		quit:      make(chan struct{}),
+		rateHook:  cfg.RateWindows,
 	}
 	if c.log == nil {
 		c.log = quiet{}
@@ -229,8 +234,16 @@ func (c *Client) handshake(ctx context.Context, cfg Config, params threadStartPa
 	if json.Unmarshal(raw, &acct) != nil {
 		return ErrProtocol
 	}
+	var plan struct {
+		Account *struct {
+			PlanType string `json:"planType"`
+		} `json:"account"`
+	}
 	c.mu.Lock()
 	c.signIn = signInName(acct.Account)
+	if json.Unmarshal(raw, &plan) == nil && plan.Account != nil && c.signIn == SignInChatGPT {
+		c.plan = plan.Account.PlanType
+	}
 	if acct.Account == nil && acct.RequiresOpenaiAuth {
 		c.signedOut = true
 		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp})
@@ -261,6 +274,7 @@ func (c *Client) handshake(ctx context.Context, cfg Config, params threadStartPa
 	c.checkSettingsLocked(ts.ApprovalPolicy, ts.ApprovalsReviewer)
 	c.mu.Unlock()
 	c.log.Info("codex: thread started", "sandbox", sandboxName(ts.Sandbox.Type))
+	c.watchRates()
 	return nil
 }
 
@@ -287,6 +301,7 @@ func (c *Client) resume(ctx context.Context, thread string, params threadStartPa
 	c.checkSettingsLocked(ts.ApprovalPolicy, ts.ApprovalsReviewer)
 	c.mu.Unlock()
 	c.log.Info("codex: thread resumed", "sandbox", sandboxName(ts.Sandbox.Type))
+	c.watchRates()
 	return true, nil
 }
 

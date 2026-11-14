@@ -51,6 +51,7 @@ type AddedHost struct {
 	Name    string
 	Expires time.Time
 	AddedAt time.Time
+	Reason  string
 }
 
 type Gateway struct {
@@ -121,7 +122,7 @@ type RefusalView struct {
 type EgressPage interface {
 	EgressView() (EgressView, error)
 	SetAgentsInUse(ctx context.Context, ids []string) error
-	AddHost(ctx context.Context, name, expiry string, uploadsOk bool) error
+	AddHost(ctx context.Context, name, expiry string, uploadsOk bool, reason string) error
 	RemoveHost(ctx context.Context, name string) error
 	SetGateway(ctx context.Context, rawURL string, agents, reviewers bool) error
 	EgressRefusals(ctx context.Context) ([]RefusalView, error)
@@ -522,9 +523,13 @@ func (a *Allowlist) refuseHost(name string) error {
 	return nil
 }
 
-func (a *Allowlist) AddHost(ctx context.Context, raw, expiry string, uploadsOk bool) error {
+func (a *Allowlist) AddHost(ctx context.Context, raw, expiry string, uploadsOk bool, reason string) error {
 	name := HostName(raw)
 	if err := a.refuseHost(name); err != nil {
+		return err
+	}
+	why, err := CleanHostReason(reason)
+	if err != nil {
 		return err
 	}
 	ttl, ok := expiryChoices[expiry]
@@ -539,11 +544,14 @@ func (a *Allowlist) AddHost(ctx context.Context, raw, expiry string, uploadsOk b
 		return explained(conflict("uploads"), msg)
 	}
 	now := a.cfg.Now()
-	h := AddedHost{Name: name, AddedAt: now.Truncate(time.Second)}
+	h := AddedHost{Name: name, AddedAt: now.Truncate(time.Second), Reason: why}
 	words := "added " + name
 	if ttl > 0 {
 		h.Expires = now.Add(ttl).Truncate(time.Second)
 		words += expiryWords[expiry]
+	}
+	if why != "" {
+		words += ", because: " + why
 	}
 	return a.change(ctx, "added", words, func(s *EgressSettings) error {
 		s.Added = slices.DeleteFunc(s.Added, func(x AddedHost) bool { return x.Name == name })

@@ -1,0 +1,38 @@
+package server
+
+import (
+	"context"
+
+	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/github"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
+	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
+	"github.com/bezmoradi/software-factory/internal/adapters/install/registry"
+	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
+)
+
+func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+	if parts.dispatcher == nil || parts.repos == nil {
+		return
+	}
+	reg.WatchWorktrees(session.WorktreeWatch{Targets: parts.dispatcher.PushTarget, Heads: files.Reviews{}, Reader: files.Worktrees{Workspace: cfg.Workspace},
+		Commits: files.Reader{}, History: files.Reader{}, Main: parts.repos.Main})
+	if parts.reviews != nil {
+		parts.reviews.UseChangeFacts(files.Reader{})
+	}
+	var reader session.ProtectionReader
+	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {
+		reader = github.API{Client: client}
+	} else {
+		logger.Warn("project facts", "event", "no-http-client")
+	}
+	facts := session.NewProjectFacts(session.ProjectFactsConfig{Repos: parts.repos, Workflows: files.Reader{}, Protection: reader,
+		Lookups: state.NewPackageLookups(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger})
+	srv.UseProjectFacts(facts)
+	if parts.pushes != nil {
+		parts.pushes.UseExtras(session.PushExtras{Files: files.Reader{}, Workflows: files.Reader{}, Registry: &registry.Registry{Client: registry.NewClient()},
+			LookupsOn: facts.LookupsOn, Base: base})
+	}
+}

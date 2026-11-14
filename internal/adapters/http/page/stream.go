@@ -48,6 +48,10 @@ type sessionJSON struct {
 	Queued       int         `json:"queued,omitempty"`
 	Unbacked     []turnJSON  `json:"unbacked,omitempty"`
 	StopReason   string      `json:"stopReason,omitempty"`
+
+	Uncommitted *uncommittedJSON `json:"uncommitted,omitempty"`
+	Overlaps    []overlapJSON    `json:"overlaps,omitempty"`
+	Checks      []agentCheckJSON `json:"checks,omitempty"`
 }
 
 type claimMarkJSON struct {
@@ -103,6 +107,9 @@ type roleJSON struct {
 	PluginCommit string   `json:"pluginCommit,omitempty"`
 	ClaudeCode   string   `json:"claudeCode,omitempty"`
 	Models       []string `json:"models,omitempty"`
+
+	Progress *progressJSON `json:"progress,omitempty"`
+	Given    *givenJSON    `json:"given,omitempty"`
 }
 
 type reviewJSON struct {
@@ -128,6 +135,7 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 		out.Roles = append(out.Roles, roleJSON{Role: string(r.Role), Name: r.Name, Agent: r.Agent, State: string(r.State), Verdict: r.Verdict, Message: r.Message, Reason: r.Reason, CostUSD: r.CostUSD, Why: r.Why,
 			Round: r.Round, Limit: r.Limit, Since: r.Since, Incremental: r.Since != "", Previous: r.Previous, Override: r.Override,
 			PluginCommit: r.PluginCommit, ClaudeCode: r.ClaudeCode, Models: r.Models})
+		out.Roles[len(out.Roles)-1].Progress, out.Roles[len(out.Roles)-1].Given = progressOf(r.Progress), givenOf(r.Given)
 	}
 	return out
 }
@@ -159,6 +167,10 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			State:  s.State, Status: s.Status, WaitingFor: s.WaitingFor, Queued: s.Queued,
 			Unbacked:   unbackedOf(s.Unbacked),
 			StopReason: s.StopReason,
+
+			Uncommitted: uncommittedOf(s.Uncommitted),
+			Overlaps:    overlapsOf(s.Overlaps),
+			Checks:      checksOf(s.Checks),
 		})
 	}
 	return out

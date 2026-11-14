@@ -53,7 +53,9 @@ const ReviewRunTimeout = 25 * time.Minute
 
 const KeyHeader = "X-SF-Host-Key"
 
-var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true}
+var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true,
+	reviewRunRoute: true,
+}
 
 type Server struct {
 	cfg   Config
@@ -268,6 +270,7 @@ var routes = map[string]string{
 	allowRulesRoute:        http.MethodPost,
 	removeRuleRoute:        http.MethodPost,
 	homeRoute:              http.MethodPost,
+	reviewRunRoute:         http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -349,6 +352,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, out)
+	case reviewRunRoute:
+		s.reviewRun(w, r)
 	case "/v1/sign-in":
 		var q signInJSON
 		if p := decode(w, r, &q); p != nil {

@@ -103,6 +103,7 @@ type PushView struct {
 
 	Findings     bool
 	FindingsSent time.Time
+	Extra        *PushExtra
 }
 
 func (v PushView) clone() PushView {
@@ -200,6 +201,8 @@ type Pushes struct {
 	saveMu  sync.Mutex
 	wg      sync.WaitGroup
 	halt    atomic.Pointer[Halt]
+	extras  atomic.Pointer[pushExtras]
+	limits  atomic.Pointer[Limits]
 }
 
 var (
@@ -407,6 +410,8 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 				return "", false, "the reviewer container runs on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
 			case ok && e.Reason == "capped":
 				return "", false, "the reviewers reached this project's round limit and still block, so the engine doesn't start them again; stop fixing and summarize their open findings for the person, who decides on the page"
+			case ok && e.Reason == "limits":
+				return "", false, e.Message
 			case ok && e.Reason == "auto-capped":
 				return "", false, "the engine already ran its limit of automatic reviews on this branch; the person starts more from the page"
 			case ok && e.Reason == "reviews":
@@ -664,6 +669,7 @@ func (p *Pushes) showCleared(sid string) {
 }
 
 func (p *Pushes) show(sid string, v PushView) {
+	v.Extra = p.extraFor(sid, v)
 	p.mu.Lock()
 	p.views[sid] = v.clone()
 	p.mu.Unlock()

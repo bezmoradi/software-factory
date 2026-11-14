@@ -54,6 +54,12 @@ export interface ContextBreakdown {
   gridRows: ContextSquare[][]
 }
 
+export interface RateLimit {
+  kind: string
+  percentUsed: number
+  resetsAt: string
+}
+
 export interface SessionUsage {
   context: { tokens: number; breakdown?: ContextBreakdown }
 }
@@ -151,7 +157,7 @@ export interface TurnChunk {
 export interface Events {
   'session.start': [{ source?: string }, unknown]
   'session.end': [{ reason?: string }, unknown]
-  'session.measure': [{ context: { tokens: number } }, unknown]
+  'session.measure': [{ context: { tokens: number }; rateLimits?: RateLimit[]; changed?: string[] }, unknown]
   'session.compact': [
     { agentId?: string; trigger: string },
     { skip: string; tokensBefore?: undefined; tokensAfter?: undefined } | { skip?: undefined; tokensBefore?: number; tokensAfter?: number },

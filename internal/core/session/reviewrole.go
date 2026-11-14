@@ -11,10 +11,14 @@ import (
 )
 
 func (r *Reviews) review(ctx context.Context, t ReviewTarget, e ReviewEntry, dir, plugin, prompt string) (ReviewEntry, string) {
+	return r.reviewWith(ctx, t, e, dir, plugin, prompt, nil)
+}
+
+func (r *Reviews) reviewWith(ctx context.Context, t ReviewTarget, e ReviewEntry, dir, plugin, prompt string, progress func(RunProgress)) (ReviewEntry, string) {
 	argv := ReviewArgv(r.cfg.Command, plugin, e.Key.Agent, prompt)
 	rctx, cancel := context.WithTimeout(ctx, r.cfg.Timeout+reviewSlack)
 	defer cancel()
-	res, err := r.cfg.Host.Run(rctx, Command{Argv: argv, Dir: dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: r.cfg.Timeout})
+	res, err := r.reviewerRun(rctx, Command{Argv: argv, Dir: dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: r.cfg.Timeout}, progress)
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return r.failed(e, stopped), "engine-stopped"

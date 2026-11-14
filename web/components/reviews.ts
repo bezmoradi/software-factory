@@ -1,7 +1,8 @@
 import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
-import type { ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
+import './walkthrough.ts'
+import type { ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
 const STATES: Record<string, [string, string]> = {
@@ -23,6 +24,18 @@ function provenance(role: ReviewRole): string {
     ...(role.models ?? []).map(text),
   ]
   return parts.filter(Boolean).join(' · ')
+}
+
+function duration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`
+  return `${Math.floor(s / 3600)}h ${pad(Math.floor(s / 60) % 60)}m`
+}
+
+function calls(n: number): string {
+  return `${n} tool ${n === 1 ? 'call' : 'calls'}`
 }
 
 function sentence(value: string): string {
@@ -49,9 +62,33 @@ class SfReviews extends HTMLElement {
   #again: HTMLButtonElement | null = null
   #said: HTMLSpanElement | null = null
   #reasons = new Map<string, string>()
+  #opened = new Set<string>()
+  #timer = 0
 
   connectedCallback() {
     if (!this.#button) this.hidden = true
+    this.#ticking()
+  }
+
+  disconnectedCallback() {
+    clearInterval(this.#timer)
+    this.#timer = 0
+  }
+
+  #ticking() {
+    const running = this.isConnected && !!this.querySelector('.review-progress[data-since]')
+    if (running && !this.#timer) this.#timer = window.setInterval(() => this.#tick(), 1000)
+    if (!running && this.#timer) {
+      clearInterval(this.#timer)
+      this.#timer = 0
+    }
+  }
+
+  #tick() {
+    for (const node of this.querySelectorAll<HTMLElement>('.review-progress[data-since]')) {
+      const ms = Number(node.dataset.elapsed) + performance.now() - Number(node.dataset.since)
+      node.textContent = `Running for ${duration(ms)} · ${calls(Number(node.dataset.calls))}`
+    }
   }
 
   set view(value: ReviewsView | null) {
@@ -159,6 +196,7 @@ class SfReviews extends HTMLElement {
     if (typing) this.querySelector<HTMLElement>(`[data-key="${CSS.escape(typing)}"]`)?.focus()
     if (pushFocused) p.focus({ preventScroll: true })
     if (testFocused) document.getElementById('test-list-button')?.focus({ preventScroll: true })
+    this.#ticking()
     const done = r && !r.running ? [failed?.said ?? '', r.roles.map(x => `${x.name}: ${STATES[x.state]?.[0] ?? x.state}`).join(', ')].filter(Boolean).join(' ') : ''
     if (this.#said.textContent !== done) this.#said.textContent = done
   }
@@ -187,7 +225,11 @@ class SfReviews extends HTMLElement {
     box.append(el('p', 'small muted', about))
     if (t.state === 'running') box.append(el('p', 'small muted', 'Writing it in the reviewer container…'))
     if (t.reason) box.append(el('p', `small ${t.state === 'withheld' ? 'warn' : 'bad'}`, sentence(`${t.state === 'withheld' ? 'Not shown' : 'It failed'}: ${text(t.reason)}`)))
-    if (t.state === 'done' && t.text) {
+    if (t.state === 'done' && t.steps?.length) {
+      const walk = el('sf-walkthrough')
+      walk.view = { commit: t.commit, steps: t.steps }
+      box.append(walk, el('p', 'small muted', 'From a reviewer run that read the commit; check each step makes sense before you rely on it.'))
+    } else if (t.state === 'done' && t.text) {
       const pre = el('pre', 'review-message small', text(t.text))
       pre.tabIndex = 0
       pre.setAttribute('aria-label', 'The manual test list')
@@ -207,6 +249,8 @@ class SfReviews extends HTMLElement {
     li.append(row, el('div', 'small muted', [text(role.agent), role.why ? text(role.why) : '', round, cost ? `≈ ${cost} (estimate)` : ''].filter(Boolean).join(' · ')))
     const made = provenance(role)
     if (made) li.append(el('div', 'small muted', made))
+    const progress = this.#progress(role)
+    if (progress) li.append(progress)
     li.append(el('div', 'small muted', role.incremental && role.since ? `Reviewed only what changed since ${shortSha(role.since)}, which its previous round reviewed${role.previous ? ', and was asked to check that round\'s findings' : ''}` : 'Reviewed the whole branch from where it leaves the remote\'s main branch'))
     if (role.verdict) li.append(el('div', `small ${tone}`, text(role.verdict)))
     if (role.reason && !(role.state === 'failed' && role.reason.trim() === said)) li.append(el('div', 'small warn', text(role.reason)))
@@ -221,7 +265,43 @@ class SfReviews extends HTMLElement {
       pre.setAttribute('aria-label', `${text(role.name)}'s final message`)
       li.append(pre)
     }
+    if (role.given) li.append(this.#given(role, role.given))
     return li
+  }
+
+  #progress(role: ReviewRole): HTMLElement | null {
+    const p = role.progress
+    if (role.state === 'running') {
+      const node = el('div', 'small muted review-progress', p ? `Running for ${duration(p.elapsedMs)} · ${calls(p.toolCalls)}` : 'Starting in the reviewer container…')
+      if (p) {
+        node.dataset.elapsed = String(p.elapsedMs)
+        node.dataset.since = String(performance.now())
+        node.dataset.calls = String(p.toolCalls)
+      }
+      return node
+    }
+    return p ? el('div', 'small muted', `Ran for ${duration(p.elapsedMs)} · ${calls(p.toolCalls)}`) : null
+  }
+
+  #given(role: ReviewRole, given: ReviewGiven): HTMLElement {
+    const key = `${role.agent}:${given.prompt.length}:${given.files.join('|')}`
+    const box = el('details', 'review-given small')
+    box.open = this.#opened.has(key)
+    box.addEventListener('toggle', () => {
+      if (box.open) this.#opened.add(key)
+      else this.#opened.delete(key)
+    })
+    box.append(el('summary', '', 'What this review was given'))
+    const prompt = el('pre', 'review-message small', text(given.prompt))
+    prompt.tabIndex = 0
+    prompt.setAttribute('aria-label', `The prompt ${text(role.name)} was given`)
+    const flags = el('pre', 'review-message small', given.flags.map(text).join('\n'))
+    flags.tabIndex = 0
+    flags.setAttribute('aria-label', `The command-line flags ${text(role.name)} ran with`)
+    const files = el('ul', 'small review-files')
+    for (const f of given.files) files.append(el('li', '', text(f)))
+    box.append(el('div', 'small muted', 'The prompt'), prompt, el('div', 'small muted', "Claude Code's flags, in order (no environment values are shown)"), flags, el('div', 'small muted', 'The review folder it read'), files)
+    return box
   }
 
   #override(role: ReviewRole, commit: string, value: ReviewsView): HTMLElement {

@@ -44,6 +44,8 @@ func main() {
 		}
 	case len(os.Args) == 2 && os.Args[1] == "commit":
 		err = errUsage
+	case len(os.Args) > 1 && os.Args[1] == "token-expiry":
+		err = expiryCommand(root, os.Args[1:])
 	default:
 		err = apiCommand(root, os.Args[1:])
 	}

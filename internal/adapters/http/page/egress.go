@@ -11,6 +11,7 @@ import (
 const (
 	egressRoute   = "/api/egress"
 	maxEgressHost = 300
+	maxHostReason = session.MaxHostReason * 4
 	maxEgressURL  = session.MaxGatewayURL + 64
 	maxAgentIDs   = 8
 	maxAgentID    = 32
@@ -47,7 +48,7 @@ func egressViewJSON(v session.EgressView) map[string]any {
 	}
 	added := make([]map[string]any, 0, len(v.Added))
 	for _, h := range v.Added {
-		added = append(added, map[string]any{"host": h.Name, "expires": unixOr(h.Expires), "addedAt": unixOr(h.AddedAt), "uploads": session.UploadHost(h.Name)})
+		added = append(added, map[string]any{"host": h.Name, "expires": unixOr(h.Expires), "addedAt": unixOr(h.AddedAt), "uploads": session.UploadHost(h.Name), "reason": h.Reason})
 	}
 	var gateway any
 	if v.Gateway != nil {
@@ -136,11 +137,20 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 			}
 			uploadsOk = b
 		}
-		if !keysWithin(body, "op", "host", "expires", "uploadsOk") || !okHost || !okExp || len(host) > maxEgressHost || len(expires) > 8 {
+		reason := ""
+		if v, present := body["reason"]; present {
+			t, ok := v.(string)
+			if !ok || len(t) > maxHostReason {
+				refuse(w, http.StatusBadRequest, "fields")
+				return
+			}
+			reason = t
+		}
+		if !keysWithin(body, "op", "host", "expires", "uploadsOk", "reason") || !okHost || !okExp || len(host) > maxEgressHost || len(expires) > 8 {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Egress.AddHost(ctx, host, expires, uploadsOk)
+		err = s.cfg.Egress.AddHost(ctx, host, expires, uploadsOk, reason)
 	case "remove":
 		host, okHost := body["host"].(string)
 		if !keysWithin(body, "op", "host") || !okHost || len(host) > maxEgressHost {

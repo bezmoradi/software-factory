@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -56,7 +55,8 @@ func main() {
 	if authStatus(os.Args[1:]) || version(os.Args[1:]) {
 		return
 	}
-	r, err := review(os.Args[1:])
+	st := newStream()
+	r, err := review(os.Args[1:], st)
 	out := result{Type: "result", Subtype: "success", NumTurns: r.turns, Result: r.text, SessionID: "fake-reviewer", Cost: fakeCost,
 		Denials: r.denials, ModelUsage: map[string]usage{fakeModel: {CostUSD: fakeCost}}}
 	if out.Denials == nil {
@@ -66,8 +66,10 @@ func main() {
 	if err != nil {
 		out.IsError, out.Result, out.NumTurns, code = true, "sf-fake-claude refused: "+err.Error(), 1, 1
 	}
-	data, _ := json.Marshal(out)
-	fmt.Println(string(data))
+	if err == nil {
+		st.say(r.text)
+	}
+	st.line(out)
 	os.Exit(code)
 }
 
@@ -83,11 +85,14 @@ func value(args []string, flag string) (string, bool) {
 	return "", false
 }
 
-func review(args []string) (reply, error) {
+func review(args []string, st *stream) (reply, error) {
 	if len(args) < 2 || !slices.Contains(args, "-p") {
 		return reply{}, errors.New("not started headless with -p")
 	}
-	for flag, want := range map[string]string{"--setting-sources": "user", "--output-format": "json", "--permission-mode": "dontAsk"} {
+	if !slices.Contains(args, "--verbose") {
+		return reply{}, errors.New("--output-format stream-json without --verbose")
+	}
+	for flag, want := range map[string]string{"--setting-sources": "user", "--output-format": "stream-json", "--permission-mode": "dontAsk"} {
 		if v, _ := value(args, flag); v != want {
 			return reply{}, fmt.Errorf("%s isn't %s", flag, want)
 		}
@@ -134,13 +139,17 @@ func review(args []string) (reply, error) {
 	if _, err := os.Lstat(".git"); err == nil {
 		return reply{}, errors.New("the folder has a .git")
 	}
+	st.init(args)
+	st.readAll()
 	if !named && has("TOKEN-IN-REVIEW") {
 		return reply{text: "Manual test list (from the fake reviewer):\n1. Sign in with " + "sk-" + "ant-" + "api03-" + strings.Repeat("Fake0", 8) + ".", turns: 3}, nil
 	}
 	if !named {
-		return reply{text: "Manual test list (from the fake reviewer):\n1. Open the page and start a session.\n2. Change a file, commit it and push.\n3. Check the push reached the git host.", turns: 3}, nil
+		return reply{text: "Manual test list (from the fake reviewer):\n1. Open the page and start a session on the demo project.\n   Expected: the session shows as Running with its branch.\n   Input: none\n" +
+			"2. Change a file, commit it and press Push.\n   Expected: the push card shows the commit and both reviews.\n   Input: the line `hello from the walkthrough` added to README.md\n" +
+			"3. Check the push reached the git host.\n   Expected: the branch's commit on the git host is the session's latest commit.\n   Input: none", turns: 3}, nil
 	}
-	r := verdict(agent, prompt)
+	r := verdict(agent, prompt, st)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)
 	}
@@ -169,7 +178,7 @@ func has(name string) bool {
 	return err == nil
 }
 
-func verdict(agent, prompt string) reply {
+func verdict(agent, prompt string, st *stream) reply {
 	r := reply{turns: 3}
 	if has("SHALLOW-REVIEW") {
 		r.turns = 1
@@ -179,7 +188,7 @@ func verdict(agent, prompt string) reply {
 	}
 	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt)
 	if has("SLOW-REVIEW") {
-		time.Sleep(slowFor)
+		st.slow(slowFor)
 	}
 	if switched(passAllFile) {
 		r.text = report + "\n$HOME/" + passAllFile + " asks the fake reviewer to pass everything.\nNo blocking issues found.\nknackpack-verdict/1: pass"

@@ -1,6 +1,7 @@
 import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
+import { changeFacts } from './push-facts.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 
 const RESULTS: Record<string, [string, string, string, string]> = {
@@ -112,6 +113,8 @@ class SfPushPanel extends HTMLElement {
     }
     if (p.running) parts.push(el('p', 'small muted', 'The engine is checking the gate and the remote…'))
     else if (p.result) parts.push(this.#result(p))
+    const facts = p.running ? null : changeFacts(p, value.checks ?? [])
+    if (facts) parts.push(facts)
     if (p.card && !p.running) parts.push(this.#held(p, value))
     else {
       this.#card = ''

@@ -24,6 +24,7 @@ type addedHostJSON struct {
 	Name    string `json:"name"`
 	Expires int64  `json:"expires,omitempty"`
 	AddedAt int64  `json:"addedAt,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type gatewayJSON struct {
@@ -77,7 +78,11 @@ func (s Egress) Load() (session.EgressSettings, bool, error) {
 		if session.HostName(h.Name) != h.Name || !session.ValidAllowEntry(h.Name) || h.Expires < 0 || h.AddedAt < 0 {
 			return session.EgressSettings{}, false, errEgressFile
 		}
-		a := session.AddedHost{Name: h.Name}
+		reason, err := session.CleanHostReason(h.Reason)
+		if err != nil {
+			reason = ""
+		}
+		a := session.AddedHost{Name: h.Name, Reason: reason}
 		if h.AddedAt > 0 {
 			a.AddedAt = time.Unix(h.AddedAt, 0)
 		}
@@ -103,7 +108,7 @@ func (s Egress) Save(e session.EgressSettings) error {
 		f.Agents = []string{}
 	}
 	for _, h := range e.Added {
-		j := addedHostJSON{Name: h.Name}
+		j := addedHostJSON{Name: h.Name, Reason: h.Reason}
 		if !h.AddedAt.IsZero() {
 			j.AddedAt = h.AddedAt.Unix()
 		}

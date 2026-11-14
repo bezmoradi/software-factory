@@ -59,6 +59,10 @@ func (g gatewayHost) Run(ctx context.Context, c session.Command) (session.RunRes
 	return g.Client.Run(ctx, g.with(c))
 }
 
+func (g gatewayHost) RunStreamed(ctx context.Context, c session.Command, progress func(session.RunProgress)) (session.StreamedRun, error) {
+	return g.Client.RunStreamed(ctx, g.with(c), progress)
+}
+
 func (g gatewayHost) Start(ctx context.Context, c session.Command) (session.Process, error) {
 	return g.Client.Start(ctx, g.with(c))
 }

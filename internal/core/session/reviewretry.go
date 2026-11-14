@@ -88,6 +88,9 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 	if why := d.reg.halt.automatic(); why != "" {
 		return explained(conflict("halted"), why)
 	}
+	if why := d.automaticHeld(sid); why != "" {
+		return explained(conflict("limits"), why)
+	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")

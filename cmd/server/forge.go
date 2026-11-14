@@ -20,7 +20,7 @@ func forges(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 		return nil, err
 	}
 	fc := session.ForgesConfig{
-		API: github.API{Client: client}, Repos: repos, Targets: d.PushTarget, Show: reg.SetForge, Note: reg.NotesFor("forge"),
+		API: github.API{Client: client, Expiry: reg.Limits().TokenExpiry}, Repos: repos, Targets: d.PushTarget, Show: reg.SetForge, Note: reg.NotesFor("forge"),
 		Audit: state.NewAudit(cfg.StateDir), Base: base, Logger: logger, Version: Version,
 		Cards: state.NewForgeCards(cfg.StateDir), Commits: files.Reader{},
 	}

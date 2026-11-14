@@ -20,7 +20,8 @@ func ReviewArgv(command, plugin, agent, prompt string) []string {
 		"--tools=" + strings.Join(ReviewTools, ","),
 		"--allowedTools=" + strings.Join(ReviewAllowed, ","),
 		"--settings=" + reviewSettings,
-		"--output-format", "json",
+		"--output-format", "stream-json",
+		"--verbose",
 		"--no-session-persistence",
 		prompt,
 	}

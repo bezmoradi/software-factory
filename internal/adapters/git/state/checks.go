@@ -25,6 +25,7 @@ var (
 	checkResults = []review.CheckResult{review.CheckRunning, review.CheckPassed, review.CheckFailure, review.CheckWarned, review.CheckUnsettled}
 	checkStates  = []review.State{review.Running, review.Pass, review.Block, review.Unknown, review.Failed}
 	checkBy      = []string{session.ByUpdate, session.ByPage}
+	checkRoles   = append([]review.Role{review.NoRole}, review.Roles...)
 )
 
 type Checks struct {
@@ -85,7 +86,7 @@ func (s Checks) Load() ([]session.ReviewerCheck, error) {
 
 func checkOf(c checkJSON) (session.ReviewerCheck, bool) {
 	result, by := review.CheckResult(c.Result), c.By
-	if !reviewerName.MatchString(c.Agent) || !slices.Contains(review.Roles, review.Role(c.Role)) || !versionText.MatchString(c.ClaudeCode) ||
+	if !reviewerName.MatchString(c.Agent) || !slices.Contains(checkRoles, review.Role(c.Role)) || !versionText.MatchString(c.ClaudeCode) ||
 		!slices.Contains(checkResults, result) || !slices.Contains(checkBy, by) || c.StartedAt.IsZero() {
 		return session.ReviewerCheck{}, false
 	}

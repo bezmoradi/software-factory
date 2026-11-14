@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -21,7 +22,8 @@ func authStatus(args []string) bool {
   "email": "fake.person@example.com",
   "orgId": "00000000-0000-4000-8000-000000000000",
   "orgName": "Example Fake Org",
-  "subscriptionType": "max"`, "Login method: Claude Max account\nOrganization: Example Fake Org\nEmail: fake.person@example.com"
+  "subscriptionType": "max",
+  "planTier": "max_20x"`, "Login method: Claude Max account\nOrganization: Example Fake Org\nEmail: fake.person@example.com"
 	switch mode {
 	case "api-key":
 		method, extra, lines = "api_key", `,
@@ -35,11 +37,19 @@ func authStatus(args []string) bool {
 	if text {
 		fmt.Println(lines)
 	} else {
-		fmt.Printf("{\n  \"loggedIn\": %t,\n  \"authMethod\": %q,\n  \"apiProvider\": \"firstParty\",\n  \"analyticsDisabled\": false,\n  \"projectsDirectory\": \"/home/agent/.claude/projects\",\n  \"configDirectory\": \"/home/agent/.claude\",\n  \"loginExpiresAt\": null%s\n}\n", loggedIn, method, extra)
+		fmt.Printf("{\n  \"loggedIn\": %t,\n  \"authMethod\": %q,\n  \"apiProvider\": \"firstParty\",\n  \"analyticsDisabled\": false,\n  \"projectsDirectory\": \"/home/agent/.claude/projects\",\n  \"configDirectory\": \"/home/agent/.claude\",\n  \"loginExpiresAt\": %s%s\n}\n", loggedIn, method, loginEnds(method), extra)
 	}
 	if !loggedIn {
 		os.Exit(1)
 	}
 	os.Exit(0)
 	return true
+}
+
+func loginEnds(method string) string {
+	data, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".sf-fake-login-ends"))
+	if err != nil || method != "claude.ai" {
+		return "null"
+	}
+	return strconv.Quote(strings.TrimSpace(string(data)))
 }

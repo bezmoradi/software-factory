@@ -45,6 +45,8 @@ type SignIn struct {
 	Method    SignInMethod
 	Endpoint  string
 	CheckedAt time.Time
+	Plan      string
+	ExpiresAt time.Time
 }
 
 func (s SignIn) Costs() bool {

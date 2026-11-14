@@ -24,6 +24,7 @@ import './components/reviewer-agents.ts'
 import './components/reviewer-checks.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
+import './components/session-facts.ts'
 import './components/forge-panel.ts'
 import './components/setup.ts'
 import './components/tabs.ts'
@@ -31,6 +32,12 @@ import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
 import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
 import { setHalt, setHaltSession } from './components/halt.ts'
+import { onNotifyOpen, watchNotify } from './components/notify.ts'
+import './components/recap.ts'
+import { openWorkspace } from './components/workspace.ts'
+import { openExceptions } from './components/exceptions.ts'
+import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
+import { saveSessionCaps } from './components/caps.ts'
 
 interface Session {
   sid: string
@@ -285,6 +292,7 @@ function updateSessions(list: unknown) {
 
 function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
+  if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
     return schedulePaint()
@@ -295,6 +303,7 @@ function onEvent(ev: StreamEvent) {
     projectsAt = 0
     void markSignIn()
     void markIdentity()
+    void loadLimits()
     updateSessions(ev.sessions)
     for (const s of sessions.values()) requestReplay(s, true)
     pruneTabs()
@@ -536,6 +545,7 @@ function waitingOf(s: Session) {
 function paint() {
   const s = current()
   setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
+  setLimitsSession(s?.info.verified ? s.sid : '')
   if (current.key.startsWith('s/') && !openTabs.includes(current.key)) openTabs = [...openTabs, current.key]
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
@@ -627,6 +637,7 @@ function paint() {
     paintSide(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = reviewsOf(s)
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
+    byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
     byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
@@ -636,6 +647,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = null
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = null
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = null
+    byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = null
     byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : 'Welcome') : 'Disconnected'
     byId('title').textContent = state.connected ? '' : state.note
@@ -646,6 +658,8 @@ function paint() {
   }
   byId('account-item').hidden = !state.connected
   if (!state.connected && byId('account').matches(':popover-open')) byId('account').hidePopover()
+  watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0, busy: x.info.busy === true, seq: x.info.lastSeq ?? 0, reviewRunning: x.info.review?.running === true, review: x.info.review ? `${x.info.review.commit}:${(x.info.review.roles ?? []).map(r => r.state).join(',')}` : '' })))
+  byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden)
   document.title = needs ? 'Needs you · Software Factory' : 'Software Factory'
   saveTabs()
 }
@@ -830,7 +844,7 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const push = i.push && Array.isArray(i.push.missing) ? i.push : null
   const gate = state.connected && s.gate?.head ? s.gate : null
   pushOutcome(s)
-  return { push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true }
+  return { push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {
@@ -1168,6 +1182,11 @@ function paintExceptions(s: Session) {
   }
   box.replaceChildren(...parts, ...tips)
   box.hidden = !parts.length && !tips.length
+}
+
+function labelOfSid(sid: string): string {
+  const x = sessions.get(sid)
+  return x ? label(x.info) : ''
 }
 
 function projectOf(cwd: string): Project | null {
@@ -1648,6 +1667,13 @@ byId('conversations').addEventListener('sf-settled', () => {
 })
 byId('reviews').addEventListener('sf-review', e => void startReview(current(), e.detail.all))
 byId('reviews').addEventListener('sf-test-list', () => void startTestList(current()))
+byId('reviews').addEventListener('sf-walkthrough-check', e => void checkStep(current(), e.detail))
+async function checkStep(s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) {
+  if (!s) return d.settle(false)
+  const { ok, body } = await reply(await api('/api/walkthrough-check', { sid: s.sid, commit: d.commit, step: d.step, done: d.done }).catch(() => null))
+  d.settle(ok)
+  if (!ok) toast({ id: `walkthrough:${s.sid}`, title: "The step wasn't checked off.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
+}
 async function setExpect(agent: string, expect: Expect) {
   const { ok, body } = await reply(await api('/api/sign-in-expect', { agent, expect }).catch(() => null))
   if (!ok) toast({ id: `expect:${agent}`, title: "What you expect wasn't saved.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
@@ -1655,6 +1681,7 @@ async function setExpect(agent: string, expect: Expect) {
 }
 byId('reviews').addEventListener('sf-push-request', () => void startPush(current()))
 byId('push-panel').addEventListener('sf-push-answer', e => void answerPush(current(), e.detail))
+byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => send(COMMIT_ASK)))
 byId('forge-panel').addEventListener('sf-forge-answer', e => void answerForge(current(), e.detail))
 byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(current(), '/api/send-findings', e.detail, "The findings weren't sent.", 'The blocking findings were sent to the session. The push stays held.'))
 byId('push-panel').addEventListener('sf-handoff', e => void sessionAsk(current(), '/api/handoff', e.detail, "The push wasn't handed off.", 'The push was denied, and the session was asked for a handoff.'))
@@ -1662,6 +1689,7 @@ byId('push-panel').addEventListener('sf-allow-file', e => void sessionAsk(curren
 byId('push-panel').addEventListener('sf-remove-file', e => void sessionAsk(current(), '/api/flag-remove', e.detail, "The message wasn't sent.", 'The session was asked to remove the file from the branch.'))
 byId('push-panel').addEventListener('sf-allow-commit', e => void sessionAsk(current(), '/api/allow-commit', e.detail, "The commit wasn't allowed.", 'You allowed that field of that commit. Another commit with the same text is flagged again.'))
 byId('push-panel').addEventListener('sf-rewrite-commit', e => void sessionAsk(current(), '/api/commit-rewrite', e.detail, "The message wasn't sent.", 'The session was asked to rewrite the commit.'))
+byId('changes').addEventListener('sf-line-comments', e => void send(e.detail.text).then(ok => e.detail.done(ok), () => e.detail.done(false)))
 byId('reviews').addEventListener('sf-override', e => void sessionAsk(current(), '/api/override', e.detail, "The verdict wasn't overridden.", 'You overrode the verdict for this commit. Press Push to push it.'))
 byId('path').addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
@@ -2053,6 +2081,8 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'login') void claudeLogin(api, () => void markSignIn())
   if (start === 'identity') openIdentity()
   if (start === 'egress') openEgress(api)
+  if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
+  if (start === 'exceptions') openExceptions(api, labelOfSid)
   if (start === 'session' || start === 'add') go('projects')
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
@@ -2085,10 +2115,11 @@ projects.addEventListener('sf-session-action', async e => {
   projects.say(project.path, problem, !!problem)
 })
 projects.addEventListener('sf-dispatch', async e => {
-  const { path } = e.detail
+  const { caps, ...detail } = e.detail
+  const { path } = detail
   projects.starting(path)
-  const name = starterNames.get(e.detail.agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/dispatch', { ...e.detail, ...consent }))
+  const name = starterNames.get(detail.agent) ?? 'The agent'
+  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/dispatch', { ...detail, ...consent }))
   if (!ok) {
     projects.failed()
     const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
@@ -2098,6 +2129,10 @@ projects.addEventListener('sf-dispatch', async e => {
   }
   byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
   projects.started(path, typeof body.id === 'string' ? body.id : '')
+  if (caps && typeof body.sid === 'string') {
+    const problem = await saveSessionCaps(body.sid, caps)
+    if (problem) toast({ id: `caps:${body.sid}`, title: 'The session started without its caps', description: problem, tone: 'warn', timeout: 0 })
+  }
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))
 byId('tabs').addEventListener('sf-move', e => {
@@ -2344,6 +2379,10 @@ byId('stop').addEventListener('click', () => {
   if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
 })
 restoreTabs()
+byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
+onNotifyOpen(sid => {
+  if (sessions.has(sid)) go(`s/${sid}`)
+})
 byId('disconnect').addEventListener('click', async () => {
   if (byId('account').matches(':popover-open')) byId('account').hidePopover()
   await api('/api/disconnect', {}).catch(() => null)

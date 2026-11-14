@@ -337,6 +337,9 @@ sf-push-panel .push-result p.push-line, sf-push-panel .push-missing li { overflo
 sf-reviews .push-said { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 sf-push-panel .push-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
 sf-push-panel .push-card .field-row { flex-wrap: wrap; gap: .35rem; }
+sf-push-panel .push-facts { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
+sf-push-panel .push-facts-part { margin-top: .5rem; }
+sf-push-panel .push-facts code, sf-session-facts code { overflow-wrap: anywhere; }
 sf-push-panel .push-reason { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-push-panel .push-missing { margin: .2rem 0 .4rem; padding-left: 1.1rem; }
 sf-push-panel .flagged { margin: .2rem 0 .4rem; padding-left: 1.1rem; overflow-wrap: anywhere; }
@@ -923,3 +926,61 @@ sf-agent-report > h2 { margin: 0 0 .35rem; font-size: 1.5em; font-weight: 600; l
 sf-agent-report h3 { margin: .75rem 0 .25rem; font-weight: 600; }
 sf-allow-rules { display: block; margin: .5rem 0; padding-inline-start: 2rem; overflow-wrap: anywhere; }
 sf-allow-rules code { overflow-wrap: anywhere; }
+sf-walkthrough { display: block; margin-top: .4rem; }
+sf-walkthrough .walkthrough-steps { margin: .3rem 0 0; padding-inline-start: 0; list-style: none; }
+sf-walkthrough .walkthrough-step { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+sf-walkthrough .walkthrough-step > div.small { padding-inline-start: 1.6rem; }
+sf-walkthrough .walkthrough-row { align-items: flex-start; gap: .5rem; }
+sf-walkthrough .walkthrough-row input { margin: .2rem 0 0; accent-color: var(--accent); flex: none; }
+sf-walkthrough .walkthrough-do { cursor: pointer; }
+sf-reviews .review-given { margin-top: .35rem; }
+sf-reviews .review-given summary { cursor: pointer; }
+sf-reviews .review-files { margin: .2rem 0 0; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
+sf-notify { display: block; margin-top: .6rem; }
+sf-notify .notify-pref { display: flex; align-items: center; gap: .5rem; padding: .2rem .5rem; cursor: pointer; }
+sf-notify p { margin: .25rem .5rem 0; }
+sf-recap { display: block; }
+sf-recap[hidden] { display: none; }
+sf-recap p { margin: 0 0 .3rem; }
+sf-recap .recap-lines { margin: 0 0 .4rem; padding: 0; list-style: none; }
+sf-recap .recap-lines li + li { margin-top: .15rem; }
+sf-recap .recap-time { display: inline-block; min-width: 4.2rem; margin-right: .35rem; color: var(--soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+sf-changes .diff-lines { margin: .3rem 0 .6rem; padding: .3rem 0; max-height: 24rem; overflow: auto; font-family: var(--mono); border: 1px solid var(--line); border-radius: 4px; }
+sf-changes .diff-lines:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: -2px; }
+sf-changes .diff-line { padding: 0 .5rem 0 0; white-space: pre; }
+sf-changes .diff-line[data-row] { cursor: pointer; }
+sf-changes .diff-line[data-row]:hover { background: var(--hover); }
+sf-changes .diff-line.at { background: var(--hover); box-shadow: inset 2px 0 0 var(--focus, var(--accent)); }
+sf-changes .diff-line.added { color: var(--added-ink); }
+sf-changes .diff-line.removed { color: var(--deleted-ink); }
+sf-changes .diff-line:is(.hunk, .meta) { color: var(--soft); }
+sf-changes .diff-no { display: inline-block; min-width: 3.2rem; padding-right: .5rem; text-align: right; color: var(--soft); user-select: none; }
+sf-changes .line-comments { margin: 0 0 .6rem; }
+sf-changes .line-comments .textbox { width: 100%; box-sizing: border-box; resize: vertical; }
+sf-changes .line-comments .row { margin: .3rem 0; }
+sf-changes .line-comment-list li { overflow-wrap: anywhere; }
+dialog.workspace h3, dialog.exceptions h3 { margin: .9rem 0 .3rem; }
+dialog.exceptions h4 { margin: .6rem 0 .2rem; }
+dialog.workspace .list li, dialog.exceptions .list li { overflow-wrap: anywhere; }
+dialog.workspace .row, dialog.exceptions .row { flex-wrap: wrap; gap: .4rem; }
+dialog.exceptions .exception-row p { margin: .15rem 0 0; }
+sf-usage, sf-session-limits, sf-token-expiry, sf-caps-fields, sf-project-caps { display: block; }
+sf-usage { margin-top: 1.5rem; }
+sf-usage .usage-side { margin: .5rem 0 .8rem; }
+sf-usage .usage-side > h3 { margin: 0 0 .3rem; }
+.usage-window { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(5rem, 10rem) minmax(0, auto); gap: .6rem; align-items: center; margin: .2rem 0; font-size: .8125rem; }
+.usage-window > .usage-name { min-width: 0; overflow-wrap: anywhere; }
+.usage-window > meter { inline-size: 100%; }
+.usage-ask { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .2rem 0 .5rem; }
+.usage-ask > p { margin: 0; }
+sf-session-limits { margin: 0 0 1rem; }
+sf-session-limits > .notice > p { margin: 0 0 .4rem; }
+sf-session-limits .field-row { flex-wrap: wrap; }
+sf-session-limits .caps-line { margin: 0 0 .5rem; }
+sf-session-limits .caps-detail { display: block; margin: 0 0 .4rem; overflow-wrap: anywhere; }
+sf-session-limits .caps-edit > summary { cursor: pointer; }
+.caps-fields { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 .2rem; }
+.caps-fields > .textbox { flex: 0 1 9rem; min-width: 0; }
+sf-project-caps { margin: .5rem 0; padding-inline-start: 2rem; }
+sf-project-caps > h3 { margin: 0 0 .25rem; }
+sf-token-expiry > .notice { margin: .5rem 0 0; }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -341,6 +342,12 @@ func scripted(id json.RawMessage, text string) bool {
 		switch key {
 		case "run":
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": value}})
+		case "fail":
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "failed", "rawInput": map[string]any{"command": value}})
+		case "cost":
+			if usd, err := strconv.ParseFloat(value, 64); err == nil {
+				update(map[string]any{"sessionUpdate": "usage_update", "used": 1200, "size": 200000, "cost": map[string]any{"amount": usd, "currency": "USD"}})
+			}
 		case "edit":
 			file := filepath.Join(cwd, filepath.Clean("/"+value))
 			status := "completed"

@@ -510,7 +510,7 @@ func (r Remote) Fetch(ctx context.Context, q session.FetchRequest) (session.Fetc
 	if err != nil {
 		return session.Fetched{}, err
 	}
-	if !slices.Contains(q.Have, head) {
+	if !slices.Contains(q.Have, head) && (q.Present == nil || !q.Present(head)) {
 		if err := k.download(ctx, git, head, q.Have); err != nil {
 			return session.Fetched{}, err
 		}

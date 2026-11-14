@@ -423,6 +423,15 @@ async function loop($: EngineInterface) {
   }
 }
 
+function rateLimitsOf(list: unknown[]): { kind: string; percentUsed: number; resetsAt: string }[] {
+  return list.slice(0, 8).flatMap(x => {
+    const w = obj(x)
+    return typeof w.kind === 'string' && typeof w.percentUsed === 'number' && Number.isFinite(w.percentUsed) && typeof w.resetsAt === 'string'
+      ? [{ kind: clip(w.kind, 40), percentUsed: w.percentUsed, resetsAt: clip(w.resetsAt, 40) }]
+      : []
+  })
+}
+
 function recordMode($: EngineInterface, value: unknown) {
   if (typeof value !== 'string' || !value || value === mode) return
   mode = value
@@ -792,6 +801,7 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     void recordContext($, e.context.tokens)
+    if (Array.isArray(e.rateLimits) && e.changed?.includes('rateLimits')) record($, { type: 'usage', rateLimits: rateLimitsOf(e.rateLimits) })
     return next(e)
   })
 

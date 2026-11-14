@@ -341,15 +341,7 @@ func (c *capped) Write(p []byte) (int, error) {
 }
 
 func (s *Server) run(ctx context.Context, q commandJSON) (runReply, *problem) {
-	timeout := DefaultRunTimeout
-	longest := MaxRunTimeout
-	if s.cfg.Review {
-		longest = ReviewRunTimeout
-	}
-	if q.TimeoutMs > 0 {
-		timeout = min(time.Duration(q.TimeoutMs)*time.Millisecond, longest)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, s.runTimeout(q))
 	defer cancel()
 	cmd, p := s.prepare(ctx, q)
 	if p != nil {

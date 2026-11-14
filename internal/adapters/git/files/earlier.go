@@ -24,6 +24,8 @@ func extraLimit(name string) (string, int) {
 		return session.ApprovedDir, session.MaxApprovedFile
 	case name == session.ClaimsFile:
 		return "", session.MaxClaimsFile
+	case name == session.ChangeFactsFile:
+		return "", session.MaxChangeFacts
 	}
 	return "", -1
 }

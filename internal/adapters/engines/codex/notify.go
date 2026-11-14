@@ -139,6 +139,8 @@ func (c *Client) notification(env envelope) {
 		c.resolvedLocked(p)
 	case methodError:
 		c.errorLocked(p)
+	case methodRateLimits:
+		c.rateLimitsLocked(p)
 	case methodThreadClosed:
 		c.log.Info("codex: thread closed")
 		go c.finish(ReasonThreadClosed)
@@ -197,7 +199,7 @@ func knownMethod(m string) string {
 	switch m {
 	case methodAgentDelta, methodReasoningSummary, methodReasoningText, methodItemStarted, methodItemCompleted,
 		methodPatchUpdated, methodTurnStarted, methodTurnCompleted, methodPlanUpdated, methodTokenUsage,
-		methodSettingsUpdated, methodRequestResolved, methodError, methodThreadClosed, methodThreadStatus:
+		methodSettingsUpdated, methodRequestResolved, methodError, methodThreadClosed, methodThreadStatus, methodRateLimits:
 		return m
 	}
 	return "unknown"

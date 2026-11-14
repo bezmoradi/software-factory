@@ -18,13 +18,17 @@ type testListJSON struct {
 	Reason  string  `json:"reason"`
 	CostUSD float64 `json:"costUsd,omitempty"`
 	At      int64   `json:"at"`
+
+	Steps []walkStepJSON `json:"steps,omitempty"`
 }
 
 func testListOf(v *session.TestListView) *testListJSON {
 	if v == nil {
 		return nil
 	}
-	return &testListJSON{Commit: v.Commit, Branch: v.Branch, State: v.State, Text: v.Text, Reason: v.Reason, CostUSD: v.CostUSD, At: millis(v.At)}
+	out := &testListJSON{Commit: v.Commit, Branch: v.Branch, State: v.State, Text: v.Text, Reason: v.Reason, CostUSD: v.CostUSD, At: millis(v.At)}
+	out.Steps = stepsOf(v.Steps)
+	return out
 }
 
 func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[string]any) {
