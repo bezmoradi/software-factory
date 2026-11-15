@@ -32,9 +32,17 @@ type CheckState struct {
 }
 
 type checks struct {
-	mu   sync.Mutex
-	run  sync.Mutex
-	last CheckState
+	mu     sync.Mutex
+	run    sync.Mutex
+	last   CheckState
+	engine context.Context
+}
+
+func (d *Dispatcher) engineEnded() bool {
+	d.checks.mu.Lock()
+	e := d.checks.engine
+	d.checks.mu.Unlock()
+	return e != nil && e.Err() != nil
 }
 
 func (d *Dispatcher) LastCheck() CheckState {
@@ -51,12 +59,19 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	}
 	d.checks.run.Lock()
 	defer d.checks.run.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, checkFor)
+	if ctx.Err() != nil {
+		return CheckState{Observation: unwaited(), At: d.reg.now()}
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkFor)
 	defer cancel()
-	o := d.cfg.Sandbox.Check(ctx)
+	o := d.cfg.Sandbox.Check(cctx)
 	o.By = level.Engine
 	if o.Event != level.CheckPassed && o.Event != level.CheckFailed {
 		o.Event = level.CheckNotRun
+	}
+	if o.Event != level.CheckPassed && d.engineEnded() {
+		d.cfg.Logger.Info("sandbox check", "event", "not-counted", "why", "engine-stopping")
+		return CheckState{Observation: unwaited(), At: d.reg.now()}
 	}
 	st := CheckState{Observation: o, At: d.reg.now(), Ran: true}
 	d.checks.mu.Lock()
@@ -76,6 +91,10 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 	return st
 }
 
+func unwaited() level.Observation {
+	return level.Observation{By: level.Engine, Event: level.CheckNotRun, Parts: []string{"the engine stopped waiting for it before it finished"}}
+}
+
 func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, error) {
 	if why := d.reg.halt.starts(); why != "" {
 		return CheckState{}, explained(conflict("halted"), why)
@@ -85,6 +104,9 @@ func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, er
 		bctx, cancel := context.WithTimeout(ctx, checkFor)
 		o := d.boxCheck(bctx, box, nil, nil)
 		cancel()
+		if o.Event != level.CheckPassed && ctx.Err() != nil {
+			o = unwaited()
+		}
 		d.cfg.Logger.Info("sandbox check", "box", box, "event", string(o.Event))
 		st = CheckState{Observation: o, At: d.reg.now(), Ran: true}
 	}
@@ -132,6 +154,9 @@ func (d *Dispatcher) Watch(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = CheckEvery
 	}
+	d.checks.mu.Lock()
+	d.checks.engine = ctx
+	d.checks.mu.Unlock()
 	d.round(ctx)
 	t := time.NewTicker(every)
 	defer t.Stop()

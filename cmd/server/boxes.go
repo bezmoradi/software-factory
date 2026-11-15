@@ -32,6 +32,7 @@ type boxEntry struct {
 
 type boxRoutes struct {
 	mu       sync.Mutex
+	sendMu   sync.Mutex
 	hosts    map[string]boxEntry
 	listener *page.BoxListener
 	control  *docker.Control
@@ -101,6 +102,8 @@ func (b *boxRoutes) sendSubnets(ctx context.Context) error {
 	if b.control == nil {
 		return nil
 	}
+	b.sendMu.Lock()
+	defer b.sendMu.Unlock()
 	b.mu.Lock()
 	subnets := b.subnetsLocked()
 	b.mu.Unlock()
@@ -201,6 +204,9 @@ func (b *boxRoutes) watch(ctx context.Context) {
 	h := time.NewTicker(helperEvery)
 	defer h.Stop()
 	b.checkHelper(ctx)
+	if err := b.sendSubnets(ctx); err != nil {
+		b.logger.Warn("boxes", "event", "egress-not-set")
+	}
 	for {
 		select {
 		case <-ctx.Done():

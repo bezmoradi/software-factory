@@ -85,6 +85,7 @@ type Registration struct {
 	Cards      []any
 	Box        string
 	keepPush   string
+	bridged    bool
 }
 
 type Registered struct {
@@ -169,6 +170,7 @@ type conn struct {
 	order      uint64
 	poll       *waiter
 	inbox      []Fields
+	bridged    bool
 }
 
 type admitted struct {
@@ -437,6 +439,7 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 		lastSeq:    g.LastSeq,
 		seen:       now,
 		born:       now,
+		bridged:    g.bridged,
 	}
 	r.conns[c.secret] = c
 	if g.GateKnown {
@@ -632,6 +635,10 @@ func (r *Registry) Report(given string, b Batch) error {
 			frame["sid"] = c.sid
 			frame["epoch"] = c.epoch
 			delete(frame, "away")
+			delete(frame, "reported")
+			if !c.bridged || kind != "prompt" {
+				frame["reported"] = true
+			}
 			if cardTypes[kind] {
 				r.markAway(frame, denied)
 			}
@@ -768,6 +775,13 @@ func (r *Registry) Known(given string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.connOf(given, r.now()) != nil
+}
+
+func (r *Registry) admittedElsewhere(sid, box string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := r.admitted[sid]
+	return a != nil && a.Box != box
 }
 
 func (r *Registry) Admit(sid string, a Admission) {

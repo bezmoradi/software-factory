@@ -52,6 +52,9 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 			main = repos[i].Branch
 		}
 	}
+	if err := d.syncTo(r, main, commit); err != nil {
+		return "", explained(conflict("clone"), "The engine fetched "+main+" at "+shortSHA(commit)+", but couldn't bring it into the session's clone, so it asked the agent nothing: "+clip(err.Error(), 300))
+	}
 	text := main + " is now at " + commit + " as origin/" + main + "; merge it into your branch and resolve conflicts"
 	sent := d.reg.Message(sid, NoteMarker+text, false, nil, nil) == nil
 	if !sent {

@@ -202,6 +202,10 @@ func (w *Workspace) row(s WorkspaceSession, pushed map[string][]string) Workspac
 	return row
 }
 
+func (w *Workspace) BranchState(s WorkspaceSession) (string, string, string) {
+	return w.state(s, w.pushedCommits())
+}
+
 func (w *Workspace) state(s WorkspaceSession, pushed map[string][]string) (string, string, string) {
 	if w.cfg.Heads == nil || w.cfg.History == nil || w.cfg.Main == nil {
 		return "", TreeUnknown, "The engine can't read this session's branch here."

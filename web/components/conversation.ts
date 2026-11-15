@@ -200,7 +200,7 @@ class SfConversation extends HTMLElement {
         while (text.startsWith(NOTE)) {
           const cut = text.indexOf('\n\n')
           const note = cut < 0 ? text.slice(NOTE.length) : text.slice(NOTE.length, cut)
-          this.#timeline!.append(el('li', 'reset small muted', `Software Factory told ${this.who === 'Claude' ? 'Claude Code' : 'the agent'}: ${unspoofed(note)}`))
+          this.#timeline!.append(el('li', 'reset small muted', `${ev.reported ? 'The session reports that ' : ''}Software Factory told ${this.who === 'Claude' ? 'Claude Code' : 'the agent'}: ${unspoofed(note)}`))
           text = cut < 0 ? '' : text.slice(cut + 2)
         }
         if (noted && !text && !ev.images && !ev.files?.length) break
@@ -288,7 +288,7 @@ class SfConversation extends HTMLElement {
         this.#entry('reset small muted').textContent = 'The session ended.'
         break
       case 'notice':
-        if (typeof ev.text === 'string' && ev.text) this.#entry('reset small muted').textContent = shown(ev.text)
+        if (typeof ev.text === 'string' && ev.text) this.#entry('reset small muted').textContent = `${ev.reported ? 'Reported by the session: ' : ''}${shown(ev.text)}`
         break
       case 'compact': {
         if (ev.state === 'start') break

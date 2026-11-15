@@ -103,7 +103,7 @@ func newBridge(reg *Registry, log shared.Logger, sid, cwd, box, version string) 
 func (b *bridge) register() error {
 	got, err := b.reg.Register(Registration{
 		SID: b.sid, Cwd: b.cwd, Version: b.version, Epoch: b.epoch, Protocol: Protocol,
-		LastSeq: b.seq, Controlled: true, GateKnown: false, Cards: b.openCards(), Box: b.box, keepPush: b.push,
+		LastSeq: b.seq, Controlled: true, GateKnown: false, Cards: b.openCards(), Box: b.box, keepPush: b.push, bridged: true,
 	})
 	if err != nil {
 		return err

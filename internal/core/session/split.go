@@ -392,7 +392,7 @@ func (s *Splits) Start(ctx context.Context, sid, card string, consent Consent) (
 	s.starting[sid] = true
 	title, message := c.Title, c.Message
 	s.mu.Unlock()
-	started, err := d.Dispatch(ctx, Dispatch{Path: path, Agent: agent, Name: clipUnits(title, maxName), Type: typ, Consent: consent, group: sid, groupKind: GroupGoal, once: true})
+	started, err := d.Dispatch(ctx, Dispatch{Path: path, Agent: agent, Name: clipUnits(title, maxName), Type: typ, Consent: consent, group: sid, groupKind: GroupGoal, asked: "split:" + sid + ":" + card})
 	s.mu.Lock()
 	delete(s.starting, sid)
 	if c = s.cardLocked(sid, card); c != nil {

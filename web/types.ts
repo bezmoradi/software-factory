@@ -641,6 +641,7 @@ export interface PromptEvent extends Stamped {
   images?: number
   lost?: number
   files?: string[]
+  reported?: boolean
 }
 
 export interface ContextView {
@@ -679,6 +680,7 @@ export interface ToolEvent extends Stamped {
 export interface NoticeEvent extends Stamped {
   type: 'notice'
   text: string
+  reported?: boolean
 }
 
 export interface ToolDoneEvent extends Stamped {

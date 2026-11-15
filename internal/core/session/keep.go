@@ -111,8 +111,9 @@ type Keep struct {
 	cfg   KeepConfig
 	reg   *Registry
 	d     *Dispatcher
-	run   sync.Mutex
+	room  sync.Mutex
 	mu    sync.Mutex
+	runs  map[string]*sync.Mutex
 	busy  map[string]bool
 	again map[string]bool
 	notes map[string]KeepStop
@@ -193,9 +194,23 @@ func (k *Keep) Prune() {
 	}
 }
 
+func (k *Keep) lockFor(sid string) func() {
+	k.mu.Lock()
+	if k.runs == nil {
+		k.runs = map[string]*sync.Mutex{}
+	}
+	m := k.runs[sid]
+	if m == nil {
+		m = &sync.Mutex{}
+		k.runs[sid] = m
+	}
+	k.mu.Unlock()
+	m.Lock()
+	return m.Unlock
+}
+
 func (k *Keep) forget(sid string) {
-	k.run.Lock()
-	defer k.run.Unlock()
+	defer k.lockFor(sid)()
 	if err := k.cfg.Store.Remove(sid); err != nil {
 		k.cfg.Logger.Warn("branch copy", "event", "not-removed")
 	}
@@ -241,8 +256,7 @@ func (k *Keep) note(sid string, why KeepStop) {
 }
 
 func (k *Keep) copyOnce(sid string) {
-	k.run.Lock()
-	defer k.run.Unlock()
+	defer k.lockFor(sid)()
 	t, ok := k.d.PushTarget(sid)
 	if !ok || k.cfg.Heads == nil || k.cfg.Main == nil {
 		return
@@ -320,6 +334,8 @@ func (k *Keep) copyOnce(sid string) {
 		k.stop(sid, &rec, "", KeepFull)
 		return
 	}
+	k.room.Lock()
+	defer k.room.Unlock()
 	used, err := k.cfg.Store.Used()
 	if err != nil {
 		k.cfg.Logger.Warn("branch copy", "event", "usage-unread")
@@ -630,8 +646,7 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 	if !d.boxed() {
 		return KeepView{}, false, explained(conflict("no agent-host"), "This engine has no box helper to recreate the worktree in the session's container.")
 	}
-	k.run.Lock()
-	defer k.run.Unlock()
+	defer k.lockFor(sid)()
 	rec, err := k.cfg.Store.Load(sid)
 	if err != nil {
 		return KeepView{}, false, explained(conflict("copy"), "The engine couldn't read its copy of this session's commits.")

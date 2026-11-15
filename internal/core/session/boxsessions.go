@@ -146,6 +146,9 @@ type boxBook struct {
 	seenMu    sync.Mutex
 	seen      map[string]BoxInfo
 	seenAt    time.Time
+	sweepMu   sync.Mutex
+	swept     bool
+	synced    map[string]string
 }
 
 func (d *Dispatcher) markUnstopped(box string, on bool) {
@@ -409,6 +412,7 @@ func (d *Dispatcher) openBox(ctx context.Context, project, agent string) (string
 func (d *Dispatcher) upBox(ctx context.Context, box string) error {
 	info, err := d.cfg.Boxes.Start(ctx, box)
 	if err != nil {
+		d.markUnstopped(box, true)
 		d.cfg.Logger.Warn("boxes", "event", "not-started", "box", box)
 		return boxError(err)
 	}
@@ -498,8 +502,10 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 			return false
 		}
 	}
+	folders := true
 	if d.cfg.Folders != nil {
 		if err := d.cfg.Folders.Remove(box); err != nil {
+			folders = false
 			d.cfg.Logger.Warn("boxes", "event", "folders-not-removed", "box", box)
 		}
 	}
@@ -511,9 +517,28 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	if err := d.cfg.Expected.Set(BoxTarget(box), ExpectAny); err != nil && !errors.Is(err, errNoExpectations) {
 		d.cfg.Logger.Warn("boxes", "event", "sign-in-expectation-not-removed", "box", box)
 	}
+	d.forgetSynced(box)
+	if !folders {
+		d.pendBox(box)
+		return true
+	}
 	d.forgetBox(box)
 	d.cfg.Logger.Info("boxes", "event", "removed", "box", box)
 	return true
+}
+
+func (d *Dispatcher) pendBox(box string) {
+	err := d.changeBoxes(func(list []BoxRecord) ([]BoxRecord, error) {
+		for i := range list {
+			if list[i].Box == box {
+				list[i].Pending = true
+			}
+		}
+		return list, nil
+	})
+	if err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "not-saved")
+	}
 }
 
 func (d *Dispatcher) forgetBoxKeys(box string) {
@@ -562,27 +587,80 @@ func (d *Dispatcher) StopLeftovers(ctx context.Context) {
 	if !d.boxed() {
 		return
 	}
+	d.sweepLeftovers(ctx)
+	d.dropPending(true)
+	d.pruneExpectations()
+}
+
+func (d *Dispatcher) sweepLeftovers(ctx context.Context) {
+	if !d.boxed() {
+		return
+	}
+	d.boxes.sweepMu.Lock()
+	defer d.boxes.sweepMu.Unlock()
+	if d.boxes.swept {
+		return
+	}
 	list, err := d.cfg.Boxes.List(ctx)
 	if err != nil {
 		d.cfg.Logger.Warn("boxes", "event", "leftovers-not-listed")
-	} else {
-		stopped := 0
-		for _, b := range list {
-			if !ValidBox(b.Box) || d.boxInUse(b.Box) {
-				continue
-			}
-			if b.State == "stopped" {
-				continue
-			}
-			d.stopBox(ctx, b.Box)
+		return
+	}
+	stopped := 0
+	for _, b := range list {
+		if !ValidBox(b.Box) || b.State == "stopped" {
+			continue
+		}
+		if d.stopLeftover(ctx, b.Box) {
 			stopped++
 		}
-		if stopped > 0 {
-			d.cfg.Logger.Info("boxes", "event", "leftovers-stopped", "count", stopped)
+	}
+	d.boxes.swept = true
+	if stopped > 0 {
+		d.cfg.Logger.Info("boxes", "event", "leftovers-stopped", "count", stopped)
+	}
+}
+
+func (d *Dispatcher) stopLeftover(ctx context.Context, box string) bool {
+	d.mu.Lock()
+	var owner *run
+	for _, r := range d.runs {
+		if r.box == box {
+			owner = r
+			break
 		}
 	}
-	d.dropPending(true)
-	d.pruneExpectations()
+	if owner == nil {
+		_, waiting := d.waiting[box]
+		inUse := waiting || d.starting
+		d.mu.Unlock()
+		if inUse {
+			return false
+		}
+		d.stopBox(ctx, box)
+		return true
+	}
+	waits := !owner.waitAt.IsZero() && d.reg.now().Sub(owner.waitAt) < PendingBoxFor
+	if owner.running || owner.busy || waits {
+		d.mu.Unlock()
+		return false
+	}
+	owner.busy = true
+	d.mu.Unlock()
+	defer d.release(owner)
+	d.stopBox(ctx, box)
+	return true
+}
+
+func (d *Dispatcher) named(box string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, r := range d.runs {
+		if r.box == box {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Dispatcher) pruneExpectations() {
@@ -600,6 +678,8 @@ func (d *Dispatcher) pruneExpectations() {
 }
 
 func (d *Dispatcher) dropPending(schedule bool) {
+	d.boxes.sweepMu.Lock()
+	defer d.boxes.sweepMu.Unlock()
 	records, err := d.loadBoxes()
 	if err != nil {
 		d.cfg.Logger.Warn("boxes", "event", "not-read")
@@ -608,6 +688,10 @@ func (d *Dispatcher) dropPending(schedule bool) {
 	now := d.reg.now()
 	for _, b := range records {
 		if !b.Pending || d.boxInUse(b.Box) {
+			continue
+		}
+		if d.named(b.Box) {
+			d.settleBox(b.Box)
 			continue
 		}
 		age := now.Sub(b.Created)
@@ -632,6 +716,10 @@ func (d *Dispatcher) dropStillPending(box string) {
 	if i < 0 || !records[i].Pending || d.boxInUse(box) || d.reg.now().Sub(records[i].Created) < PendingBoxFor {
 		return
 	}
+	if d.named(box) {
+		d.settleBox(box)
+		return
+	}
 	d.cfg.Logger.Info("boxes", "event", "pending-dropped", "box", box)
 	d.dropBox(box, false)
 }
@@ -653,7 +741,7 @@ func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *r
 		q.Branch = r.branch
 	}
 	if from != nil {
-		objects, err := d.carried(from, r.base)
+		objects, err := d.carried(from, r.base, main)
 		if err != nil {
 			return err
 		}
@@ -668,13 +756,20 @@ func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *r
 	return nil
 }
 
-func (d *Dispatcher) carried(from *run, head string) ([]push.Object, error) {
+func (d *Dispatcher) carried(from *run, head, main string) ([]push.Object, error) {
 	if d.cfg.CloneReader == nil {
 		return nil, explained(conflict("no reader"), "This engine can't read the other session's commits.")
 	}
 	d.mu.Lock()
-	clone, base := from.clone, from.base
+	clone, box := from.clone, from.box
+	base := ""
+	if (from.origin == "" || from.origin == OriginMain) && len(from.earlier) == 0 {
+		base = from.base
+	}
 	d.mu.Unlock()
+	d.boxes.stopMu.Lock()
+	synced := d.boxes.synced[box]
+	d.boxes.stopMu.Unlock()
 	if clone == "" {
 		return nil, oldLayout()
 	}
@@ -682,8 +777,10 @@ func (d *Dispatcher) carried(from *run, head string) ([]push.Object, error) {
 		return nil, explained(conflict("from"), "The engine couldn't read commit "+shortSHA(head)+" in the other session's clone.")
 	}
 	have := []string{}
-	if sha1Hex.MatchString(base) && base != head {
-		have = append(have, base)
+	for _, h := range []string{main, synced, base} {
+		if sha1Hex.MatchString(h) && h != head && !slices.Contains(have, h) {
+			have = append(have, h)
+		}
 	}
 	objects, err := d.cfg.CloneReader.ObjectsToSend(clone, head, have)
 	if errors.Is(err, push.ErrTooLarge) {
@@ -721,7 +818,7 @@ func markNeeds(r *run, err error) (*Needs, bool) {
 }
 
 func (d *Dispatcher) holdForAnswer(r *run, q Dispatch, err error) bool {
-	if q.once || !ValidBox(r.box) || !d.liveBox(r.box) {
+	if !ValidBox(r.box) || !d.liveBox(r.box) {
 		return false
 	}
 	if _, ok := markNeeds(r, err); !ok {
@@ -833,67 +930,145 @@ func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {
 }
 
 func (d *Dispatcher) SyncClones(name, branch, commit string) {
-	syncer, ok := d.cfg.Clones.(CloneSyncer)
-	if !ok || !sha1Hex.MatchString(commit) {
+	if _, ok := d.cfg.Clones.(CloneSyncer); !ok || !sha1Hex.MatchString(commit) {
 		return
 	}
 	d.mu.Lock()
-	var boxes []string
+	var runs []*run
 	for _, r := range d.runs {
 		if r.repo == name && r.box != "" && r.clone != "" && !r.history {
-			boxes = append(boxes, r.box)
+			runs = append(runs, r)
 		}
 	}
 	d.mu.Unlock()
-	if len(boxes) == 0 {
-		return
-	}
-	d.syncMu.Lock()
-	defer d.syncMu.Unlock()
 	synced := 0
-	for _, box := range boxes {
-		ctx, cancel := context.WithTimeout(context.Background(), FetchFor)
-		err := syncer.SyncClone(ctx, box, name, branch, commit)
-		cancel()
-		if err != nil {
-			d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", box, "why", clip(err.Error(), 200))
+	for _, r := range runs {
+		d.mu.Lock()
+		free := !r.busy && d.runs[r.sid] == r
+		if free {
+			r.busy = true
+		}
+		d.mu.Unlock()
+		if !free {
 			continue
 		}
-		synced++
+		err := d.syncTo(r, branch, commit)
+		d.release(r)
+		if err == nil {
+			synced++
+		}
 	}
 	if synced > 0 {
 		d.cfg.Logger.Info("session clone", "event", "main-brought", "clones", synced)
 	}
 }
 
-func (d *Dispatcher) syncClone(r *run) {
+func (d *Dispatcher) syncTo(r *run, branch, commit string) error {
 	syncer, ok := d.cfg.Clones.(CloneSyncer)
-	if !ok || d.cfg.Repositories == nil || r.box == "" || r.clone == "" {
-		return
+	if !ok {
+		return errors.New("this engine can't bring main into a session's clone")
+	}
+	d.mu.Lock()
+	box, repo := r.box, r.repo
+	d.mu.Unlock()
+	d.syncMu.Lock()
+	defer d.syncMu.Unlock()
+	if d.syncedAt(box, commit) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), FetchFor)
+	defer cancel()
+	if err := syncer.SyncClone(ctx, box, repo, branch, commit); err != nil {
+		d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", box, "why", clip(err.Error(), 200))
+		return err
+	}
+	d.boxes.stopMu.Lock()
+	if d.boxes.synced == nil {
+		d.boxes.synced = map[string]string{}
+	}
+	d.boxes.synced[box] = commit
+	d.boxes.stopMu.Unlock()
+	return nil
+}
+
+func (d *Dispatcher) syncedAt(box, commit string) bool {
+	d.boxes.stopMu.Lock()
+	last := d.boxes.synced[box]
+	d.boxes.stopMu.Unlock()
+	if last == "" {
+		return false
+	}
+	return last == commit
+}
+
+func (d *Dispatcher) forgetSynced(box string) {
+	d.boxes.stopMu.Lock()
+	delete(d.boxes.synced, box)
+	d.boxes.stopMu.Unlock()
+}
+
+func (d *Dispatcher) mainOf(repo string) (string, string, error) {
+	if d.cfg.Repositories == nil {
+		return "", "", errors.New("this engine has no repositories")
 	}
 	list, err := d.cfg.Repositories.List()
 	if err != nil {
-		return
+		return "", "", err
 	}
-	i := slices.IndexFunc(list, func(p Repository) bool { return p.Name == r.repo })
+	i := slices.IndexFunc(list, func(p Repository) bool { return p.Name == repo })
 	if i < 0 || list[i].Branch == "" {
-		return
+		return "", "", errors.New("the project's main branch isn't recorded")
 	}
 	mains, ok := d.cfg.Repositories.(interface {
 		Main(name string) (string, error)
 	})
 	if !ok {
-		return
+		return "", "", errors.New("this engine can't read the project's main")
 	}
-	commit, err := mains.Main(r.repo)
+	commit, err := mains.Main(repo)
 	if err != nil || !sha1Hex.MatchString(commit) {
+		return "", "", errors.New("the project's main commit isn't recorded")
+	}
+	return list[i].Branch, commit, nil
+}
+
+func (d *Dispatcher) syncClone(r *run) {
+	if _, ok := d.cfg.Clones.(CloneSyncer); !ok || r.box == "" || r.clone == "" {
 		return
 	}
-	d.syncMu.Lock()
-	defer d.syncMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), FetchFor)
-	defer cancel()
-	if err := syncer.SyncClone(ctx, r.box, r.repo, list[i].Branch, commit); err != nil {
-		d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", r.box, "why", clip(err.Error(), 200))
+	for range 2 {
+		branch, commit, err := d.mainOf(r.repo)
+		if err != nil || d.syncTo(r, branch, commit) != nil {
+			return
+		}
+		if _, now, err := d.mainOf(r.repo); err != nil || now == commit {
+			return
+		}
 	}
+}
+
+func (d *Dispatcher) askedBox(q Dispatch) string {
+	if q.asked == "" {
+		return ""
+	}
+	d.mu.Lock()
+	box := ""
+	var stale []string
+	for b, r := range d.waiting {
+		if r.asked != q.asked {
+			continue
+		}
+		if q.Continues != nil && r.base != q.Continues.Head {
+			stale = append(stale, b)
+			delete(d.waiting, b)
+			continue
+		}
+		box = b
+	}
+	d.mu.Unlock()
+	for _, b := range stale {
+		d.cfg.Logger.Info("boxes", "event", "waiting-dropped", "box", b, "why", "branch-moved")
+		d.dropBox(b, true)
+	}
+	return box
 }

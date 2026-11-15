@@ -200,6 +200,8 @@ func (d *Dispatcher) boxCheck(ctx context.Context, box string, listed map[string
 
 func (d *Dispatcher) round(ctx context.Context) {
 	d.retryStops(ctx)
+	d.sweepLeftovers(ctx)
+	d.dropPending(false)
 	var listed map[string]BoxInfo
 	listErr := errors.New("the engine has no box helper")
 	if d.boxed() {
@@ -229,6 +231,9 @@ func (d *Dispatcher) round(ctx context.Context) {
 	for _, t := range targets {
 		wg.Go(func() {
 			o := d.boxCheck(cctx, t.box, listed, listErr)
+			if o.Event != level.CheckPassed && ctx.Err() != nil {
+				return
+			}
 			d.reg.Observe(t.sid, o)
 			if o.Event != level.CheckPassed {
 				d.cfg.Logger.Warn("sandbox check", "box", t.box, "event", string(o.Event))

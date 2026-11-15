@@ -110,50 +110,49 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	if err != nil {
 		return Started{}, err
 	}
-	stand := &run{spec: spec, repo: r.repo, repoPath: r.repoPath, base: head, name: r.name, branch: r.branch, cwd: r.cwd, box: r.box, clone: r.clone, sid: sid, id: r.id, display: r.display, at: r.at, preflight: true}
-	if err := d.admit(ctx, stand, consent); err != nil {
-		return Started{}, err
-	}
-	if running {
-		if err := d.stopRun(ctx, sid, r); err != nil {
-			return Started{}, err
-		}
-		d.waitStopped(r)
-	}
-	d.mu.Lock()
-	still := r.running
-	if !still {
-		r.handing = true
-	}
-	d.mu.Unlock()
-	if still {
-		return Started{}, explained(conflict("running"), "The session didn't stop in time, so it keeps its branch. Try again in a moment.")
-	}
-	head, moved := d.headAfterStop(r, head)
 	earlier := append(slices.Clone(r.earlier), Stint{Agent: r.spec.ID, SID: sid, Name: clip(r.display, maxName), From: r.base, To: head})
 	if len(earlier) > MaxStints {
 		earlier = earlier[len(earlier)-MaxStints:]
 	}
+	d.mu.Lock()
+	r.handing = true
+	d.mu.Unlock()
 	started, err := d.Dispatch(ctx, Dispatch{Path: r.repoPath, Agent: spec.ID, Name: r.display, Consent: consent,
-		Continues: &Continuation{SID: sid, Branch: r.branch, Head: head, Earlier: earlier}, once: true})
-	if started.SID == "" {
+		Continues: &Continuation{SID: sid, Branch: r.branch, Head: head, Earlier: earlier}, asked: "handover:" + sid + ":" + spec.ID})
+	if err != nil || started.SID == "" {
 		d.endHanding(r, "")
 		return started, err
 	}
 	d.endHanding(r, started.SID)
-	d.stopBox(ctx, r.box)
 	d.mu.Lock()
 	r.handedHead = head
+	d.mu.Unlock()
+	d.saveRuns()
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeRun+stopFor)
+	d.mu.Lock()
+	running = r.running
+	d.mu.Unlock()
+	if running {
+		if err := d.stopRun(sctx, sid, r); err != nil {
+			d.cfg.Logger.Warn("handover", "event", "old-not-stopped")
+		}
+		d.waitStopped(r)
+	}
+	d.stopBox(sctx, r.box)
+	cancel()
+	last, moved := d.headAfterStop(r, head)
+	d.mu.Lock()
+	r.handedHead = last
 	d.mu.Unlock()
 	d.saveRuns()
 	d.reg.handedOver(sid, lineageOf(r))
 	if d.cfg.Work != nil {
 		d.cfg.Work.carry(sid, started.SID, spec.Knackpack)
 	}
-	d.reg.NoteFor(noteHandover)(started.SID, d.handoverNote(r, head, moved))
-	d.handoverAudit(r, spec, started.SID, head, moved)
-	d.cfg.Logger.Info("handover", "from", r.spec.ID, "to", spec.ID, "ok", err == nil)
-	return started, err
+	d.reg.NoteFor(noteHandover)(started.SID, d.handoverNote(r, head, last, moved))
+	d.handoverAudit(r, spec, started.SID, head, last, moved)
+	d.cfg.Logger.Info("handover", "from", r.spec.ID, "to", spec.ID, "moved", moved)
+	return started, nil
 }
 
 func (d *Dispatcher) cleanHead(r *run) (string, error) {
@@ -256,28 +255,28 @@ func (w *Work) approvedWords(sid string) string {
 	return strings.Join(parts, ", ")
 }
 
-func (d *Dispatcher) handoverNote(r *run, head string, moved bool) string {
+func (d *Dispatcher) handoverNote(r *run, head, last string, moved bool) string {
 	approved := "nothing yet"
 	if d.cfg.Work != nil {
 		if words := d.cfg.Work.approvedWords(r.sid); words != "" {
 			approved = words
 		}
 	}
-	last := "Its last commit is " + head + "."
+	at := "Its last commit is " + head + "."
 	if moved {
-		last = "Its last commit is " + head + ", which " + r.spec.Name + "'s session committed while it was being stopped."
+		at = "This session starts at its commit " + head + ". " + r.spec.Name + "'s session committed " + last + " while it was being stopped, after this session started; that commit isn't in this clone. It stays in the earlier session's clone, and deleting the earlier session asks the person before it is discarded."
 	}
-	return "This session continues the branch " + r.branch + ", which " + r.spec.Name + " worked on before in another session. " + last + " The person approved " + approved +
+	return "This session continues the branch " + r.branch + ", which " + r.spec.Name + " worked on before in another session. " + at + " The person approved " + approved +
 		"; those approvals carry over, bound to the same text and commit. The earlier conversation isn't passed on: read the branch's commits and files to see where the work stands."
 }
 
-func (d *Dispatcher) handoverAudit(r *run, to AgentSpec, sid, head string, moved bool) {
+func (d *Dispatcher) handoverAudit(r *run, to AgentSpec, sid, head, last string, moved bool) {
 	if d.cfg.Audit == nil {
 		return
 	}
-	stopped := "'s session was stopped and its worktree removed"
+	stopped := "'s session and its container were stopped once the new session had started from " + shortSHA(head)
 	if moved {
-		stopped = "'s session was stopped, committed " + shortSHA(head) + " while it was being stopped, and its worktree removed"
+		stopped += "; it committed " + shortSHA(last) + " while it was being stopped, which only its own clone holds"
 	}
 	e := AuditEntry{Time: d.reg.now(), Session: r.sid, Repository: r.repo, Branch: r.branch, Commit: head, By: ByPage, Kind: AuditHandover, Result: "continued", Agent: to.ID,
 		Reason: "the developer continued this branch with " + to.Name + " in session " + sid + "; " + r.spec.Name + stopped, Missing: []string{}}

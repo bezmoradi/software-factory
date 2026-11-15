@@ -82,6 +82,7 @@ type FetchRequest struct {
 	Branch  string
 	Have    []string
 	Present func(sha string) bool
+	Read    func()
 }
 
 type Fetched struct {
@@ -141,6 +142,15 @@ type Repos struct {
 	hosts    func()
 	removed  []func(ProjectID)
 	fetched  func(name, branch, commit string)
+
+	delivers  map[string]*sync.Mutex
+	fetches   map[string]uint64
+	delivered map[string]fetchDone
+}
+
+type fetchDone struct {
+	seq    uint64
+	commit string
 }
 
 func (c *Repos) OnFetched(f func(name, branch, commit string)) {
@@ -619,6 +629,29 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", explained(conflict("tokens"), "The engine couldn't read its saved tokens.")
 	}
+	var mine uint64
+	read := func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if mine != 0 {
+			return
+		}
+		if c.fetches == nil {
+			c.fetches = map[string]uint64{}
+		}
+		c.fetches[rec.Name]++
+		mine = c.fetches[rec.Name]
+	}
+	c.mu.Lock()
+	if c.delivers == nil {
+		c.delivers = map[string]*sync.Mutex{}
+	}
+	deliver := c.delivers[rec.Name]
+	if deliver == nil {
+		deliver = &sync.Mutex{}
+		c.delivers[rec.Name] = deliver
+	}
+	c.mu.Unlock()
 	path := c.path(rec.Name)
 	var have []string
 	if sha1Hex.MatchString(rec.Commit) {
@@ -631,7 +664,7 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 		_, err := c.cfg.Commits.Commit(path, sha)
 		return err == nil
 	}
-	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have, Present: present})
+	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have, Present: present, Read: read})
 	cancel()
 	if err != nil {
 		c.cfg.Logger.Warn("repository", "event", "fetch-failed")
@@ -643,16 +676,27 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	if _, err := c.cfg.Commits.Commit(path, got.Commit); err != nil {
 		return "", explained(conflict("fetch"), "The fetched commit "+got.Commit[:12]+" couldn't be read back from the clone.")
 	}
-	if got.Commit != rec.Commit {
-		c.mu.Lock()
-		if recs, err := c.cfg.Records.Load(); err == nil {
-			if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name }); j >= 0 {
-				recs[j].Commit = got.Commit
-				_ = c.cfg.Records.Save(recs)
-			}
-		}
+	read()
+	deliver.Lock()
+	defer deliver.Unlock()
+	c.mu.Lock()
+	last := c.delivered[rec.Name]
+	if last.seq > mine {
 		c.mu.Unlock()
+		c.cfg.Logger.Info("repository", "event", "older-fetch-ignored")
+		return last.commit, nil
 	}
+	if c.delivered == nil {
+		c.delivered = map[string]fetchDone{}
+	}
+	c.delivered[rec.Name] = fetchDone{seq: mine, commit: got.Commit}
+	if recs, err := c.cfg.Records.Load(); err == nil {
+		if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name }); j >= 0 && recs[j].Commit != got.Commit {
+			recs[j].Commit = got.Commit
+			_ = c.cfg.Records.Save(recs)
+		}
+	}
+	c.mu.Unlock()
 	c.cfg.Logger.Info("repository", "event", "fetched")
 	c.mu.Lock()
 	fetched := c.fetched

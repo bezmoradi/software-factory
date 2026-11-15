@@ -39,6 +39,7 @@ type SavedRun struct {
 	Group       string
 	GroupKind   string
 	HistoryOnly bool
+	RmDone      bool
 }
 
 type RunStore interface {
@@ -94,6 +95,7 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].HandedTo, out[len(out)-1].HandedHead = r.handedTo, r.handedHead
 		out[len(out)-1].Group, out[len(out)-1].GroupKind = r.group, r.groupKind
 		out[len(out)-1].HistoryOnly = r.history
+		out[len(out)-1].RmDone = r.rmDone
 		out[len(out)-1].Box = r.box
 	}
 	d.mu.Unlock()
@@ -120,6 +122,7 @@ func (d *Dispatcher) Restore() int {
 		d.cfg.Logger.Warn("sessions", "event", "not-read")
 		return 0
 	}
+	handed := d.oneHolder(saved)
 	var sids []string
 	for _, s := range saved {
 		spec, ok := findAgent(d.cfg.Agents, s.Agent)
@@ -136,6 +139,7 @@ func (d *Dispatcher) Restore() int {
 		r.origin, r.earlier, r.handedTo, r.handedHead = s.Origin, slices.Clone(s.Earlier), s.HandedTo, s.HandedHead
 		r.group, r.groupKind = s.Group, s.GroupKind
 		r.history = s.HistoryOnly
+		r.rmDone = s.RmDone
 		if ValidBox(s.Box) && !r.history {
 			r.box, r.clone = s.Box, BoxClone(d.cfg.Workspace, s.Box, s.Repo)
 		}
@@ -174,5 +178,75 @@ func (d *Dispatcher) Restore() int {
 	if len(sids) > 0 {
 		d.cfg.Logger.Info("sessions", "event", "restored", "count", len(sids))
 	}
+	if handed > 0 {
+		d.saveRuns()
+	}
 	return len(sids)
+}
+
+func (d *Dispatcher) restorable(s SavedRun) bool {
+	if _, ok := findAgent(d.cfg.Agents, s.Agent); !ok || !sidPattern.MatchString(s.SID) || !shortID.MatchString(s.ID) {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.runs[s.SID] == nil
+}
+
+func continues(a, b SavedRun) bool {
+	return slices.ContainsFunc(a.Earlier, func(st Stint) bool { return st.SID == b.SID })
+}
+
+func (d *Dispatcher) lastHead(s, holder SavedRun) string {
+	if heads, _ := d.reg.worktreeReaders(); heads != nil {
+		if clone := BoxClone(d.cfg.Workspace, s.Box, s.Repo); clone != "" {
+			if h, err := heads.Head(clone, s.Branch); err == nil && sha1Hex.MatchString(h) {
+				return h
+			}
+		}
+	}
+	for _, st := range holder.Earlier {
+		if st.SID == s.SID && sha1Hex.MatchString(st.To) {
+			return st.To
+		}
+	}
+	return s.Base
+}
+
+func (d *Dispatcher) oneHolder(saved []SavedRun) int {
+	holder := map[string]int{}
+	for i, s := range saved {
+		if s.HandedTo != "" || s.HistoryOnly || !d.restorable(s) {
+			continue
+		}
+		key := s.Repo + "\x00" + s.Branch
+		j, ok := holder[key]
+		if !ok {
+			holder[key] = i
+			continue
+		}
+		h := saved[j]
+		switch {
+		case continues(s, h):
+			holder[key] = i
+		case continues(h, s):
+		case s.StartedAt.After(h.StartedAt) || s.StartedAt.Equal(h.StartedAt) && s.SID > h.SID:
+			holder[key] = i
+		}
+	}
+	n := 0
+	for i := range saved {
+		s := &saved[i]
+		if s.HandedTo != "" || s.HistoryOnly || !d.restorable(*s) {
+			continue
+		}
+		j := holder[s.Repo+"\x00"+s.Branch]
+		if j == i {
+			continue
+		}
+		s.HandedTo, s.HandedHead = saved[j].SID, d.lastHead(*s, saved[j])
+		n++
+		d.cfg.Logger.Warn("sessions", "event", "branch-held-twice", "kept", saved[j].SID)
+	}
+	return n
 }
