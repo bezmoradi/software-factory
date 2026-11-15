@@ -148,7 +148,7 @@ func (d *Dispatcher) DropStrayScreenshots(ctx context.Context, files ScreenshotF
 		for _, name := range names {
 			if ctx.Err() != nil {
 				if logger != nil {
-					logger.Warn("screenshots", "event", "sweep-stopped")
+					shared.For(ctx, logger).Warn("screenshots", "event", "sweep-stopped")
 				}
 				break
 			}
@@ -165,7 +165,7 @@ func (d *Dispatcher) DropStrayScreenshots(ctx context.Context, files ScreenshotF
 		}
 	}
 	if failed > 0 && logger != nil {
-		logger.Warn("screenshots", "event", "strays-not-removed", "entries", failed)
+		shared.For(ctx, logger).Warn("screenshots", "event", "strays-not-removed", "entries", failed)
 	}
 	return dropped
 }

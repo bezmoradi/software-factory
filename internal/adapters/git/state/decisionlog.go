@@ -28,6 +28,7 @@ type decisionEditJSON struct {
 	Text   string    `json:"text,omitempty"`
 	Hidden bool      `json:"hidden,omitempty"`
 	At     time.Time `json:"at"`
+	Owner  string    `json:"owner,omitempty"`
 }
 
 type decisionProjectJSON struct {
@@ -88,6 +89,7 @@ func (s DecisionLog) Load() (map[string][]session.DecisionEdit, error) {
 }
 
 func (s DecisionLog) Save(all map[string][]session.DecisionEdit) error {
+	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := decisionLogJSON{Version: 1, Projects: []decisionProjectJSON{}}
@@ -102,7 +104,7 @@ func (s DecisionLog) Save(all map[string][]session.DecisionEdit) error {
 				skipped++
 				continue
 			}
-			p.Entries = append(p.Entries, decisionEditJSON{ID: e.ID, Added: e.Added, Name: e.Name, Text: e.Text, Hidden: e.Hidden, At: e.At.UTC()})
+			p.Entries = append(p.Entries, decisionEditJSON{Owner: owner, ID: e.ID, Added: e.Added, Name: e.Name, Text: e.Text, Hidden: e.Hidden, At: e.At.UTC()})
 		}
 		f.Projects = append(f.Projects, p)
 	}

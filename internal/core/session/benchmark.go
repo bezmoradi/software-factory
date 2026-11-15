@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -130,7 +132,7 @@ func (p *Pairs) MergedPulls(ctx context.Context, path string, page int) (MergedL
 			out.Pulls = append(out.Pulls, c)
 		}
 	}
-	p.cfg.Logger.Info("merged pulls", "event", "listed", "count", len(out.Pulls))
+	shared.For(ctx, p.cfg.Logger).Info("merged pulls", "event", "listed", "count", len(out.Pulls))
 	return out, nil
 }
 
@@ -174,7 +176,7 @@ func (p *Pairs) readMerged(ctx context.Context, path string, number int) (Merged
 func (p *Pairs) ReadMerged(ctx context.Context, path string, number int) (MergedView, error) {
 	v, _, _, err := p.readMerged(ctx, path, number)
 	if err == nil {
-		p.cfg.Logger.Info("merged pulls", "event", "read", "refused", v.Refused != "")
+		shared.For(ctx, p.cfg.Logger).Info("merged pulls", "event", "read", "refused", v.Refused != "")
 	}
 	return v, err
 }
@@ -204,7 +206,7 @@ func (p *Pairs) benchPoint(ctx context.Context, q PairStart) (startPoint, Benchm
 		return startPoint{}, Benchmark{}, "", err
 	}
 	if err := src.FetchCommit(ctx, repo.Name, v.Pull.Head); err != nil {
-		p.cfg.Logger.Warn("merged pulls", "event", "head-not-fetched")
+		shared.For(ctx, p.cfg.Logger).Warn("merged pulls", "event", "head-not-fetched")
 	}
 	b := Benchmark{Number: v.Pull.Number, Title: v.Pull.Title, URL: v.Pull.URL, Base: v.Pull.Base, Head: v.Pull.Head, Merge: v.Pull.Merge}
 	return startPoint{commit: v.Pull.Base, origin: "the base of merged pull request #" + n}, b, text, nil

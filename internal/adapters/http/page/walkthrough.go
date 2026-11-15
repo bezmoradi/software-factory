@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const walkthroughRoute = "/api/walkthrough-check"
@@ -81,6 +82,6 @@ func (s *Server) walkthroughCheck(w http.ResponseWriter, r *http.Request, body m
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := checker.CheckStep(ctx, sid, commit, int(step), done)
-	s.logger.Info("walkthrough", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("walkthrough", "ok", err == nil)
 	reply(w, err, http.StatusOK)
 }

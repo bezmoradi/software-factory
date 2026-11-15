@@ -12,6 +12,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 var (
@@ -118,6 +120,9 @@ func (c *Checker) confirm(ctx context.Context, cfg ProbeConfig, subnet netip.Pre
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL(c.cfg.TLS, c.cfg.Status, "/refusals/"+cfg.Marker), nil)
 	if err != nil {
 		return []string{"the engine couldn't ask the egress proxy which of the probe's requests it refused"}
+	}
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
 	}
 	resp, err := c.cfg.Client.Do(req)
 	if err != nil {

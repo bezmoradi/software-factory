@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -167,11 +169,11 @@ func (d *Dispatcher) WakeWithMessage(ctx context.Context, sid, text string, conf
 	if err != nil || added {
 		return err
 	}
-	if err := d.Wake(ctx, sid, consent); err != nil {
+	if err := d.wakeFor(ctx, sid, consent, ByPage, "a message the person sent to the stopped session"); err != nil {
 		d.reg.unqueue(sid)
 		return err
 	}
-	d.cfg.Logger.Info("message queued", "event", "woken")
+	shared.For(ctx, d.cfg.Logger).Info("message queued", "event", "woken")
 	return nil
 }
 
@@ -291,7 +293,7 @@ func (d *Dispatcher) refreshBox(ctx context.Context, box, dir string, mine map[s
 			d.mu.Unlock()
 			if gone {
 				d.reg.Ended(row.SessionID, false)
-				d.cfg.Logger.Info("agent session", "event", "stopped-by-itself")
+				shared.For(ctx, d.cfg.Logger).Info("agent session", "event", "stopped-by-itself")
 				go d.idleBox(r)
 			}
 		}

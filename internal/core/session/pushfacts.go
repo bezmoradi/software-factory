@@ -22,7 +22,7 @@ func (p *Pushes) announcePushed(x *pushing, t PushTarget, facts gate.Facts, miss
 	}
 	e := x.entry
 	out := PushedFacts{SID: x.sid, Repository: t.Name, Branch: t.Branch, Commit: e.Commit, Remote: e.Remote, By: e.By, At: e.Time,
-		Allowed: x.answer != nil && x.answer.Allow, Missing: missing}
+		Allowed: x.answer != nil && x.answer.Allow, Missing: missing, Req: e.Req}
 	var entries map[review.Key]ReviewEntry
 	if p.cfg.Reviews != nil {
 		entries, _ = p.cfg.Reviews.Entries()

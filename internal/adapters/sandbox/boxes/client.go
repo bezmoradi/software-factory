@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -29,6 +31,30 @@ type Client struct {
 	addr   string
 	key    string
 	client *http.Client
+	mu     sync.Mutex
+	about  About
+}
+
+var aboutText = regexp.MustCompile(`^[A-Za-z0-9 ._:+()/-]{0,120}$`)
+
+func (c *Client) About() About {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.about
+}
+
+func (c *Client) keepAbout(a *About) {
+	if a == nil {
+		return
+	}
+	for _, v := range []string{a.Docker, a.Image, a.OS, a.OSType, a.Arch, a.Kernel, a.Runtime} {
+		if !aboutText.MatchString(v) {
+			return
+		}
+	}
+	c.mu.Lock()
+	c.about = *a
+	c.mu.Unlock()
 }
 
 var _ session.Boxes = (*Client)(nil)
@@ -172,6 +198,7 @@ func (c *Client) List(ctx context.Context) ([]session.BoxInfo, error) {
 	if json.Unmarshal(data, &l) != nil || l.Version != WireVersion || l.Boxes == nil || len(l.Boxes) > maxBoxes {
 		return nil, fmt.Errorf("%w: its list isn't one the engine reads", session.ErrBoxUnavailable)
 	}
+	c.keepAbout(l.About)
 	out := make([]session.BoxInfo, 0, len(l.Boxes))
 	for _, b := range l.Boxes {
 		info, ok := infoFrom(b)

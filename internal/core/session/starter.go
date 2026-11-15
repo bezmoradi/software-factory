@@ -147,6 +147,7 @@ type run struct {
 	thread     string
 
 	origin     string
+	from       startedFrom
 	earlier    []Stint
 	handedTo   string
 	handedHead string
@@ -353,6 +354,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
 	r.box, r.clone = box, BoxClone(d.cfg.Workspace, box, repo.Name)
 	r.origin, r.earlier = at.origin, at.earlier
+	r.from = startFromOf(q)
 	r.group, r.groupKind, r.asked = q.group, q.groupKind, q.asked
 	if q.Continues != nil {
 		r.branch = q.Continues.Branch
@@ -373,7 +375,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		cwd, err = host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
 	}
 	if err != nil {
-		d.cfg.Logger.Warn("dispatch", "event", "worktree-failed")
+		shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "worktree-failed")
 		return Started{}, explained(conflict("worktree"), "agent-host couldn't create the session's worktree: "+hostMessage(err))
 	}
 	if err := d.checkWorktree(r, cwd); err != nil {
@@ -420,6 +422,7 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 	if err != nil {
 		return Started{SID: r.sid, ID: r.id}, err
 	}
+	d.audited(ctx, r)
 	return Started{SID: r.sid, ID: r.id}, nil
 }
 
@@ -500,7 +503,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 		if dir, err := d.cfg.Workflow(); err == nil {
 			argv = append(argv, "--plugin-dir="+dir)
 		} else {
-			d.cfg.Logger.Warn("dispatch", "event", "workflow-plugin-missing")
+			shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "workflow-plugin-missing")
 		}
 	}
 	if settings := d.claudeSettings(r); settings != "" {
@@ -750,6 +753,10 @@ func (d *Dispatcher) release(r *run) {
 }
 
 func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
+	return d.stopAs(ctx, sid, ByPage, "")
+}
+
+func (d *Dispatcher) stopAs(ctx context.Context, sid, by, why string) error {
 	r, err := d.claim(sid)
 	if err != nil {
 		return err
@@ -762,7 +769,11 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 		_ = d.ConfirmBox(ctx, r.box)
 	}
 	if !d.liveBox(r.box) {
-		return d.stopGone(sid, r)
+		err := d.stopGone(sid, r)
+		if err == nil {
+			d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, stopReason(why, "its container wasn't running"))
+		}
+		return err
 	}
 	err = d.stopRun(ctx, sid, r)
 	var e *Error
@@ -774,9 +785,20 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 	d.stopBox(ctx, r.box)
 	d.reg.WaitSignIn(sid, false)
 	if err != nil && live {
+		d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, stopReason(why, "the agent had already stopped; its container was stopped"))
 		return nil
 	}
+	if err == nil {
+		d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, why)
+	}
 	return err
+}
+
+func stopReason(why, also string) string {
+	if why == "" {
+		return also
+	}
+	return why + "; " + also
 }
 
 func (d *Dispatcher) stopGone(sid string, r *run) error {
@@ -808,7 +830,7 @@ func (d *Dispatcher) stopRun(ctx context.Context, sid string, r *run) error {
 	if r.spec.Method == MethodPlugin {
 		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("stop", r.id), Dir: r.cwd, Timeout: claudeRun})
 		if err != nil || res.Code != 0 {
-			d.cfg.Logger.Warn("agent session", "event", "claude-stop-failed", "box", r.box)
+			shared.For(ctx, d.cfg.Logger).Warn("agent session", "event", "claude-stop-failed", "box", r.box)
 			d.stopBox(ctx, r.box)
 		}
 		d.mu.Lock()
@@ -838,6 +860,14 @@ func (d *Dispatcher) claimWake() error {
 }
 
 func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) error {
+	return d.wakeFor(ctx, sid, consent, ByPage, "")
+}
+
+func (d *Dispatcher) WakeAtReset(ctx context.Context, sid string) error {
+	return d.wakeFor(shared.WithRequest(ctx, shared.NewRequest()), sid, Consent{}, ByReset, "woken at the usage reset the person asked for")
+}
+
+func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, by, why string) error {
 	if err := d.historyOnly(sid); err != nil {
 		return err
 	}
@@ -905,7 +935,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.mu.Lock()
 		d.woken = time.Time{}
 		d.mu.Unlock()
-		d.cfg.Logger.Warn("wake", "event", "identity-not-set")
+		shared.For(ctx, d.cfg.Logger).Warn("wake", "event", "identity-not-set")
 		return explained(conflict("identity"), "agent-host couldn't set the name and email agents commit with in the session's worktree, so the session didn't wake: "+hostMessage(err))
 	}
 	d.homeStarted(r)
@@ -930,6 +960,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.woke(r)
 		d.booted(r)
 		woke = true
+		d.lifecycle(ctx, AuditSessionWake, r, by, ResultWoken, why)
 		return nil
 	}
 	d.mu.Lock()
@@ -939,6 +970,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 	if err == nil {
 		woke = true
 		d.woke(r)
+		d.lifecycle(ctx, AuditSessionWake, r, by, ResultWoken, why)
 	}
 	return err
 }
@@ -975,12 +1007,14 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	held := d.heldOffer(r, given)
 	asideOK := held && given.Flag == "worktree" && r.aside != "" && given.Value == r.aside
 	d.mu.Unlock()
+	chose := held
 	if running {
 		return nil, explained(conflict("running"), "Stop the session before deleting it.")
 	}
 	if r.history || r.box == "" {
 		d.forgetHistory(sid)
 		d.forgetCopy(sid)
+		d.lifecycle(ctx, AuditSessionDelete, r, ByPage, ResultDeleted, "a session kept as history only: its record was forgotten")
 		return nil, nil
 	}
 	if given != nil && !held {
@@ -992,7 +1026,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 		if !errors.As(err, &e) || e.Reason != "box unknown" {
 			return nil, err
 		}
-		d.cfg.Logger.Warn("boxes", "event", "unknown-at-delete", "box", r.box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "unknown-at-delete", "box", r.box)
 		boxGone = true
 	} else {
 		woken = true
@@ -1059,7 +1093,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 			d.setOffer(r, o)
 			return o, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed. Choose to delete it anyway to discard them; the branch "+r.branch+" goes with the session's container, apart from what was pushed.")
 		}
-		d.cfg.Logger.Warn("delete", "event", "worktree-not-removed", "worktree", r.name)
+		shared.For(ctx, d.cfg.Logger).Warn("delete", "event", "worktree-not-removed", "worktree", r.name)
 	}
 	d.mu.Lock()
 	folder := r.aside
@@ -1083,7 +1117,23 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	}
 	d.workForget(sid)
 	d.forgetCopy(sid)
+	d.lifecycle(ctx, AuditSessionDelete, r, ByPage, ResultDeleted, deleteReason(given, chose))
 	return nil, nil
+}
+
+func deleteReason(given *Offer, held bool) string {
+	if given == nil || !held {
+		return ""
+	}
+	switch given.Flag {
+	case "discard":
+		return "the person chose to discard the commits that weren't pushed"
+	case "force":
+		return "the person chose to remove the worktree by force"
+	case "worktree":
+		return "the person chose to delete the worktree with what it held"
+	}
+	return ""
 }
 
 func (d *Dispatcher) rmFinished(r *run) {
@@ -1180,7 +1230,7 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	return d.cfg.Reviews.Start(ctx, rt)
 }
 
-func (d *Dispatcher) Override(_ context.Context, sid, agent, commit, reason string) error {
+func (d *Dispatcher) Override(ctx context.Context, sid, agent, commit, reason string) error {
 	if err := d.historyOnly(sid); err != nil {
 		return err
 	}
@@ -1191,7 +1241,7 @@ func (d *Dispatcher) Override(_ context.Context, sid, agent, commit, reason stri
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has verdicts to override here.")
 	}
-	return d.cfg.Reviews.Override(sid, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch}, agent, commit, reason)
+	return d.cfg.Reviews.Override(sid, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, Req: shared.RequestOf(ctx)}, agent, commit, reason)
 }
 
 func (d *Dispatcher) SessionsOf(repo string) int {
@@ -1257,11 +1307,11 @@ func (d *Dispatcher) signIn(ctx context.Context, r *run) (SignIn, error) {
 	defer cancel()
 	s, err := checker.SignIn(sctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: signInFor}, r.spec.Status.Kind)
 	if err != nil {
-		d.cfg.Logger.Warn("sign-in check", "event", "failed")
+		shared.For(ctx, d.cfg.Logger).Warn("sign-in check", "event", "failed")
 		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check "+r.spec.Name+"'s sign-in, so the session doesn't start: "+hostMessage(err))
 	}
 	s.CheckedAt = d.reg.now()
-	d.cfg.Logger.Info("sign-in check", "agent", r.spec.ID, "method", string(s.Method))
+	shared.For(ctx, d.cfg.Logger).Info("sign-in check", "agent", r.spec.ID, "method", string(s.Method))
 	return s, nil
 }
 

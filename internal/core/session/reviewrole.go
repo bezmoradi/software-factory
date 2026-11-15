@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 func (r *Reviews) reviewWith(ctx context.Context, t ReviewTarget, e ReviewEntry, dir, plugin, prompt string, progress func(RunProgress)) (ReviewEntry, string) {
@@ -124,7 +125,7 @@ func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	pctx, cancel := context.WithTimeout(ctx, reviewCheck)
 	defer cancel()
 	if err := host.PutAgents(pctx, files, r.cfg.AgentFiles.Files()); err != nil {
-		r.cfg.Logger.Warn("review", "event", "agent-files-not-written", "uploaded", len(files))
+		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "agent-files-not-written", "uploaded", len(files))
 		if len(files) > 0 {
 			return clip("the engine couldn't write the uploaded agent file into the reviewer container: "+hostMessage(err), 400)
 		}

@@ -265,6 +265,10 @@ type infoJSON struct {
 	Runtimes            map[string]json.RawMessage `json:"Runtimes"`
 	DefaultRuntime      string                     `json:"DefaultRuntime"`
 	DefaultAddressPools []poolJSON                 `json:"DefaultAddressPools"`
+	OperatingSystem     string                     `json:"OperatingSystem"`
+	OSType              string                     `json:"OSType"`
+	Architecture        string                     `json:"Architecture"`
+	KernelVersion       string                     `json:"KernelVersion"`
 }
 
 type eventJSON struct {

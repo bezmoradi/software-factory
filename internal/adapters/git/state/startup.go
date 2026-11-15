@@ -31,6 +31,7 @@ type approvalJSON struct {
 	Hash       string    `json:"hash"`
 	ApprovedAt time.Time `json:"approvedAt"`
 	Seen       []string  `json:"seen,omitempty"`
+	Owner      string    `json:"owner,omitempty"`
 }
 
 type approvalsJSON struct {
@@ -71,10 +72,11 @@ func (s Approvals) Load() ([]session.Approval, error) {
 }
 
 func (s Approvals) Save(list []session.Approval) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := approvalsJSON{Version: 1, Approvals: make([]approvalJSON, 0, len(list))}
 	for _, a := range list {
-		f.Approvals = append(f.Approvals, approvalJSON{Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt.UTC(), Seen: a.Seen})
+		f.Approvals = append(f.Approvals, approvalJSON{Owner: owner, Repo: a.Repo, Agent: a.Agent, Hash: a.Hash, ApprovedAt: a.ApprovedAt.UTC(), Seen: a.Seen})
 	}
 	return write(s.Dir, approvalsFile, f)
 }
@@ -91,6 +93,7 @@ var _ session.Expectations = Expectations{}
 type expectationsJSON struct {
 	Version int               `json:"version"`
 	Expect  map[string]string `json:"expect"`
+	Owner   string            `json:"owner,omitempty"`
 }
 
 func (s Expectations) lock() func() {
@@ -121,8 +124,9 @@ func (s Expectations) Load() (map[string]session.Expect, error) {
 }
 
 func (s Expectations) Save(all map[string]session.Expect) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
-	f := expectationsJSON{Version: 1, Expect: map[string]string{}}
+	f := expectationsJSON{Owner: owner, Version: 1, Expect: map[string]string{}}
 	for k, v := range all {
 		f.Expect[k] = string(v)
 	}

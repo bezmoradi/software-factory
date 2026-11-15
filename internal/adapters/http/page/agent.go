@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 var cardParam = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -66,7 +67,7 @@ func (s *Server) agentReject(w http.ResponseWriter, r *http.Request, status int,
 }
 
 func (s *Server) agentRefused(r *http.Request, why string) {
-	s.logger.Warn("request refused", boxed(r, "side", "agent", "route", s.agentRoute(r), "why", why)...)
+	shared.For(r.Context(), s.logger).Warn("request refused", boxed(r, "side", "agent", "route", s.agentRoute(r), "why", why)...)
 }
 
 func boxed(r *http.Request, args ...any) []any {
@@ -319,14 +320,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, why := status(err)
 		if code == http.StatusTooManyRequests {
-			s.logger.Warn("registration limited", boxed(r, "side", "agent")...)
+			shared.For(r.Context(), s.logger).Warn("registration limited", boxed(r, "side", "agent")...)
 		} else {
 			s.agentRefused(r, why.Error)
 		}
 		send(w, code, why)
 		return
 	}
-	s.logger.Info("session registered", "side", "agent")
+	shared.For(r.Context(), s.logger).Info("session registered", "side", "agent")
 	out := map[string]any{
 		"secret": got.Secret, "restart": false, "page": got.Page, "push": got.Push, "control": got.Control, "compose": session.Compose(),
 	}

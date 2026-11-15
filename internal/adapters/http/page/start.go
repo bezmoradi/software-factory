@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -166,7 +167,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			Effort:    str(body["effort"], 21),
 			Box:       box,
 		})
-		s.logger.Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -179,7 +180,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			return
 		}
 		err := s.cfg.Starter.Stop(ctx, sid)
-		s.logger.Info("stop-session", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("stop-session", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case "/api/wake":
 		consent, ok := consentOf(body)
@@ -188,7 +189,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			return
 		}
 		err := s.cfg.Starter.Wake(ctx, sid, consent)
-		s.logger.Info("wake", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("wake", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case "/api/remove-session":
 		if !keysWithin(body, "sid", "flag", "value") {
@@ -206,7 +207,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			given = &session.Offer{Flag: f, Value: v}
 		}
 		offer, err := s.cfg.Starter.Remove(ctx, sid, given)
-		s.logger.Info("remove-session", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("remove-session", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			out := map[string]any{"error": p.Error, "message": p.Message, "offer": nil}
@@ -241,7 +242,7 @@ func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := s.cfg.Reviews.Review(ctx, sid, consent.CostOK, every)
-	s.logger.Info("review", "ok", err == nil, "all", every)
+	shared.For(r.Context(), s.logger).Info("review", "ok", err == nil, "all", every)
 	reply(w, err, http.StatusAccepted)
 }
 
@@ -260,6 +261,6 @@ func (s *Server) override(w http.ResponseWriter, r *http.Request, sid string, ok
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := s.cfg.Reviews.Override(ctx, sid, agent, commit, reason)
-	s.logger.Info("override", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("override", "ok", err == nil)
 	reply(w, err, http.StatusOK)
 }

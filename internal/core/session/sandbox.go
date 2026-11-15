@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/level"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -70,14 +71,14 @@ func (d *Dispatcher) check(ctx context.Context) CheckState {
 		o.Event = level.CheckNotRun
 	}
 	if o.Event != level.CheckPassed && d.engineEnded() {
-		d.cfg.Logger.Info("sandbox check", "event", "not-counted", "why", "engine-stopping")
+		shared.For(ctx, d.cfg.Logger).Info("sandbox check", "event", "not-counted", "why", "engine-stopping")
 		return CheckState{Observation: unwaited(), At: d.reg.now()}
 	}
 	st := CheckState{Observation: o, At: d.reg.now(), Ran: true}
 	d.checks.mu.Lock()
 	d.checks.last = st
 	d.checks.mu.Unlock()
-	d.cfg.Logger.Info("sandbox check", "event", string(o.Event))
+	shared.For(ctx, d.cfg.Logger).Info("sandbox check", "event", string(o.Event))
 	if o.Event != level.CheckPassed {
 		d.observeAll(o)
 	}
@@ -107,7 +108,7 @@ func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, er
 		if o.Event != level.CheckPassed && ctx.Err() != nil {
 			o = unwaited()
 		}
-		d.cfg.Logger.Info("sandbox check", "box", box, "event", string(o.Event))
+		shared.For(ctx, d.cfg.Logger).Info("sandbox check", "box", box, "event", string(o.Event))
 		st = CheckState{Observation: o, At: d.reg.now(), Ran: true}
 	}
 	o := st.Observation

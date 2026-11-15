@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const maxSavedCards = 1000
@@ -172,8 +174,8 @@ func (f *Forges) moved(ctx context.Context, t PushTarget, c *forgeCard) bool {
 		v = c.view
 		f.mu.Unlock()
 		f.show(c.sid)
-		f.audit(c.sid, t, v, ByEngine, ForgeHeld, "kept the pull request card waiting, because "+reason+": "+v.Title)
-		f.cfg.Logger.Info("forge", "event", "branch-unread")
+		f.audit(ctx, c.sid, t, v, ByEngine, ForgeHeld, "kept the pull request card waiting, because "+reason+": "+v.Title)
+		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "branch-unread")
 		return true
 	}
 	reason := movedReason(f.cfg.Commits, t.Repo, v.Commit, head)
@@ -182,8 +184,8 @@ func (f *Forges) moved(ctx context.Context, t PushTarget, c *forgeCard) bool {
 	v = c.view
 	f.mu.Unlock()
 	f.show(c.sid)
-	f.audit(c.sid, t, v, ByEngine, ForgeHeld, "asked again before opening the pull request, because "+reason+": "+v.Title)
-	f.cfg.Logger.Info("forge", "event", "branch-moved")
+	f.audit(ctx, c.sid, t, v, ByEngine, ForgeHeld, "asked again before opening the pull request, because "+reason+": "+v.Title)
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "branch-moved")
 	return true
 }
 

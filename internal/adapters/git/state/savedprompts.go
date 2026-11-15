@@ -22,10 +22,11 @@ func NewSavedPrompts(dir string) SavedPrompts { return SavedPrompts{Dir: dir, mu
 var _ session.SavedPromptStore = SavedPrompts{}
 
 type savedPromptJSON struct {
-	ID   string    `json:"id"`
-	Name string    `json:"name"`
-	Text string    `json:"text"`
-	At   time.Time `json:"at"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	Text  string    `json:"text"`
+	At    time.Time `json:"at"`
+	Owner string    `json:"owner,omitempty"`
 }
 
 type promptProjectJSON struct {
@@ -83,6 +84,7 @@ func (s SavedPrompts) Load() (map[string][]session.SavedPrompt, error) {
 }
 
 func (s SavedPrompts) Save(all map[string][]session.SavedPrompt) error {
+	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := savedPromptsJSON{Version: writesVersion(savedPromptsFile), Projects: []promptProjectJSON{}}
@@ -92,7 +94,7 @@ func (s SavedPrompts) Save(all map[string][]session.SavedPrompt) error {
 		}
 		p := promptProjectJSON{Repo: repo, Prompts: []savedPromptJSON{}}
 		for _, x := range list {
-			j := savedPromptJSON{ID: x.ID, Name: x.Name, Text: x.Text, At: x.At.UTC()}
+			j := savedPromptJSON{Owner: owner, ID: x.ID, Name: x.Name, Text: x.Text, At: x.At.UTC()}
 			if promptOK(j) && len(p.Prompts) < session.MaxSavedPrompts {
 				p.Prompts = append(p.Prompts, j)
 			}

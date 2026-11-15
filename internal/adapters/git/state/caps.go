@@ -26,6 +26,7 @@ type capsJSON struct {
 	MoneyUSD float64 `json:"money"`
 	Minutes  int     `json:"minutes"`
 	Turns    int     `json:"turns"`
+	Owner    string  `json:"owner,omitempty"`
 }
 
 type capsUsedJSON struct {
@@ -95,11 +96,12 @@ func (s Caps) Load() (session.CapsState, error) {
 }
 
 func (s Caps) Save(st session.CapsState) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := capsFileJSON{Version: 1, Projects: map[string]capsJSON{}, Sessions: []capsSessionJSON{}, Tokens: map[string]time.Time{}}
 	for name, c := range st.Projects {
 		if len(f.Projects) < session.MaxCapProjects {
-			f.Projects[name] = capsJSON{MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns}
+			f.Projects[name] = capsJSON{Owner: owner, MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns}
 		}
 	}
 	for _, x := range st.Sessions {
@@ -112,7 +114,7 @@ func (s Caps) Save(st session.CapsState) error {
 			cs.ReachedAt = time.Time{}
 		}
 		if x.Own != nil {
-			cs.Own = &capsJSON{MoneyUSD: x.Own.MoneyUSD, Minutes: x.Own.Minutes, Turns: x.Own.Turns}
+			cs.Own = &capsJSON{Owner: owner, MoneyUSD: x.Own.MoneyUSD, Minutes: x.Own.Minutes, Turns: x.Own.Turns}
 		}
 		f.Sessions = append(f.Sessions, cs)
 	}

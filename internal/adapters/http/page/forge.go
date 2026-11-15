@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -86,7 +87,7 @@ func (s *Server) forgeRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.ForgeFor + writeFor))
 	answer := s.cfg.Forge.Request(context.WithoutCancel(r.Context()), sid, session.ForgeKind(kind), title, text)
-	s.logger.Info("forge request", "side", "agent", "kind", kind, "result", answer.Result)
+	shared.For(r.Context(), s.logger).Info("forge request", "side", "agent", "kind", kind, "result", answer.Result)
 	send(w, http.StatusOK, map[string]string{"result": answer.Result, "reason": answer.Reason})
 }
 
@@ -110,7 +111,7 @@ func (s *Server) checksRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.ForgeFor + writeFor))
 	answer := s.cfg.Forge.Checks(context.WithoutCancel(r.Context()), sid)
-	s.logger.Info("checks request", "side", "agent", "result", answer.Result)
+	shared.For(r.Context(), s.logger).Info("checks request", "side", "agent", "result", answer.Result)
 	send(w, http.StatusOK, map[string]string{"result": answer.Result, "reason": answer.Reason})
 }
 

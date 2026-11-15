@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -100,7 +101,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = l.Continue(side, sid, kind)
+		err = l.Continue(r.Context(), side, sid, kind)
 	case "wake":
 		on, okOn := body["on"].(bool)
 		if !keysWithin(body, "op", "sid", "on") || !okSid || !okOn {
@@ -113,7 +114,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		return
 	}
 	if op != "read" {
-		s.logger.Info("limits", "op", op, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("limits", "op", op, "ok", err == nil)
 	}
 	if err != nil {
 		code, p := status(err)

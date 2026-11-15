@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const testListRoute = "/api/test-list"
@@ -46,6 +47,6 @@ func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[strin
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := s.cfg.Reviews.TestList(ctx, sid, consent.CostOK)
-	s.logger.Info("test list", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("test list", "ok", err == nil)
 	reply(w, err, http.StatusAccepted)
 }

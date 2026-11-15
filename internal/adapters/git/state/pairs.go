@@ -63,6 +63,7 @@ type pairJSON struct {
 	Bench   *benchJSON       `json:"benchmark,omitempty"`
 	At      time.Time        `json:"at"`
 	History bool             `json:"historyOnly,omitempty"`
+	Owner   string           `json:"owner,omitempty"`
 }
 
 type pairsJSON struct {
@@ -129,12 +130,13 @@ func (s Pairs) Load() ([]session.Pair, error) {
 }
 
 func (s Pairs) Save(list []session.Pair) error {
+	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := pairsJSON{Version: 1, Pairs: []pairJSON{}}
 	size := 0
 	for _, p := range slices.Backward(list) {
-		j := pairJSON{ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, Kept: p.Kept, At: p.At.UTC(), History: p.History}
+		j := pairJSON{Owner: owner, ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, Kept: p.Kept, At: p.At.UTC(), History: p.History}
 		for _, m := range p.Members {
 			j.Members = append(j.Members, pairMemberJSON{Agent: m.Agent, Model: m.Model, Effort: m.Effort, SID: m.SID})
 		}

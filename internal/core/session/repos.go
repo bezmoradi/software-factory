@@ -667,7 +667,7 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have, Present: present, Read: read})
 	cancel()
 	if err != nil {
-		c.cfg.Logger.Warn("repository", "event", "fetch-failed")
+		shared.For(ctx, c.cfg.Logger).Warn("repository", "event", "fetch-failed")
 		return "", explained(conflict("fetch"), "The engine couldn't fetch the main branch of "+rec.URL+", so no session started: "+clip(err.Error(), 600))
 	}
 	if !sha1Hex.MatchString(got.Commit) || !push.ValidBranch(got.Branch) {
@@ -683,7 +683,7 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	last := c.delivered[rec.Name]
 	if last.seq > mine {
 		c.mu.Unlock()
-		c.cfg.Logger.Info("repository", "event", "older-fetch-ignored")
+		shared.For(ctx, c.cfg.Logger).Info("repository", "event", "older-fetch-ignored")
 		return last.commit, nil
 	}
 	if c.delivered == nil {
@@ -697,7 +697,7 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 		}
 	}
 	c.mu.Unlock()
-	c.cfg.Logger.Info("repository", "event", "fetched")
+	shared.For(ctx, c.cfg.Logger).Info("repository", "event", "fetched")
 	c.mu.Lock()
 	fetched := c.fetched
 	c.mu.Unlock()

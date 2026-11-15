@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const uploadRoute = "/api/upload"
@@ -261,7 +262,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.reg.Upload(sid, kind, name, data)
-	s.logger.Info("upload", "file", kind == "application/octet-stream", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("upload", "file", kind == "application/octet-stream", "ok", err == nil)
 	if err != nil {
 		code, p := status(err)
 		send(w, code, p)
@@ -338,7 +339,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 		ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 		defer cancel()
 		err = waker.WakeWithMessage(ctx, sid, text, confirm, consent)
-		s.logger.Info("message", "woke", true, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("message", "woke", true, "ok", err == nil)
 		if err == nil {
 			send(w, http.StatusAccepted, map[string]bool{"ok": true, "woke": true})
 			return
@@ -348,7 +349,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 		return
 	}
 	if err == nil {
-		s.logger.Info("message sent", "images", len(images), "files", len(files))
+		shared.For(r.Context(), s.logger).Info("message sent", "images", len(images), "files", len(files))
 	}
 	reply(w, err, http.StatusAccepted)
 }

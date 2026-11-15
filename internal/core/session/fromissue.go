@@ -164,7 +164,7 @@ func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (I
 		i.Labels = labels
 		out.Issues = append(out.Issues, i)
 	}
-	s.cfg.Logger.Info("issues", "event", "listed", "count", len(out.Issues))
+	shared.For(ctx, s.cfg.Logger).Info("issues", "event", "listed", "count", len(out.Issues))
 	return out, nil
 }
 
@@ -245,7 +245,7 @@ func (s *IssueStarts) read(ctx context.Context, path string, number int) (IssueV
 func (s *IssueStarts) Read(ctx context.Context, path string, number int) (IssueView, error) {
 	v, _, err := s.read(ctx, path, number)
 	if err == nil {
-		s.cfg.Logger.Info("issues", "event", "read", "refused", v.Refused != "")
+		shared.For(ctx, s.cfg.Logger).Info("issues", "event", "read", "refused", v.Refused != "")
 	}
 	return v, err
 }
@@ -272,11 +272,11 @@ func (d IssueDispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, err
 		return Started{}, err
 	}
 	if v.Refused != "" {
-		d.Issues.cfg.Logger.Info("issues", "event", "start-refused")
+		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused")
 		return Started{}, explained(conflict("issue"), v.Refused+" No session started.")
 	}
 	if v.Hash != q.IssueHash {
-		d.Issues.cfg.Logger.Info("issues", "event", "start-refused-changed")
+		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused-changed")
 		return Started{}, explained(conflict("issue changed"), "The issue changed since you read it; read it again. No session started.")
 	}
 	started, err := d.Dispatcher.Dispatch(ctx, q)

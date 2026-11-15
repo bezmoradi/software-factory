@@ -864,6 +864,7 @@ code.file-ref:focus-visible { outline: 2px solid var(--focus, var(--accent)); ou
 dialog.consent { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100dvh - 3rem); padding: .9rem 1rem; overflow-y: auto; }
 dialog.consent::backdrop { background: rgb(0 0 0 / .45); }
 dialog.consent h2 { margin: 0 0 .5rem; }
+dialog.diagnostics .diagnostics-text { max-height: 50dvh; margin: .5rem 0; padding: .5rem; overflow: auto; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; white-space: pre; }
 dialog.consent .consent-files { margin: .5rem 0; padding: 0; list-style: none; }
 dialog.consent .consent-file + .consent-file { margin-top: .75rem; }
 dialog.consent .consent-content { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); border: 1px solid var(--line); border-radius: 4px; }

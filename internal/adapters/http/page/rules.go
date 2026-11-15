@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -107,7 +108,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 			return
 		}
 		err := rules.RemoveAllowRule(ctx, repo, box, session.RulePlace(place), worktree, rule)
-		s.logger.Info("allow rule remove", "ok", err == nil, "place", place)
+		shared.For(r.Context(), s.logger).Info("allow rule remove", "ok", err == nil, "place", place)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

@@ -60,6 +60,8 @@ type ImportReport struct {
 	LeftOut    []string
 	Projects   int
 	Sessions   int
+
+	FormerPerson string
 }
 
 type DroppedRecords struct {
@@ -131,10 +133,14 @@ func NewBackups(cfg BackupsConfig) *Backups {
 }
 
 func (b *Backups) audit(result, reason string) {
+	b.auditFormer(result, reason, "")
+}
+
+func (b *Backups) auditFormer(result, reason, former string) {
 	if b.cfg.Audit == nil {
 		return
 	}
-	e := AuditEntry{Time: b.cfg.Now(), By: ByPage, Kind: AuditImport, Result: result, Reason: clip(reason, maxReportLine)}
+	e := AuditEntry{Time: b.cfg.Now(), By: ByPage, Kind: AuditImport, Result: result, Reason: clip(reason, maxReportLine), FormerPerson: former}
 	if err := b.cfg.Audit.Append(e); err != nil {
 		b.cfg.Logger.Warn("backup", "event", "audit-not-written")
 	}
@@ -230,7 +236,7 @@ func (b *Backups) Applied(report ImportReport) {
 	if report.State == ImportRefused {
 		reason = report.Why
 	}
-	b.audit(report.State, reason)
+	b.auditFormer(report.State, reason, report.FormerPerson)
 	b.cfg.Logger.Info("backup", "event", "import-"+report.State)
 }
 

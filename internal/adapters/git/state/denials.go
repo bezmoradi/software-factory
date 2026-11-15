@@ -29,6 +29,7 @@ type denialJSON struct {
 	SID     string   `json:"sid"`
 	Commit  string   `json:"commit,omitempty"`
 	Commits []string `json:"commits,omitempty"`
+	Owner   string   `json:"owner,omitempty"`
 }
 
 type deniedJSON struct {
@@ -75,6 +76,7 @@ func (d Denials) Load() (map[string][]string, error) {
 }
 
 func (d Denials) Save(denied map[string][]string) error {
+	owner := ownerIn(d.Dir)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	f := deniedJSON{Version: writesVersion(deniedFile), Denied: make([]denialJSON, 0, len(denied))}
@@ -82,7 +84,7 @@ func (d Denials) Save(denied map[string][]string) error {
 		if len(commits) == 0 {
 			continue
 		}
-		f.Denied = append(f.Denied, denialJSON{SID: sid, Commits: slices.Clone(commits)})
+		f.Denied = append(f.Denied, denialJSON{Owner: owner, SID: sid, Commits: slices.Clone(commits)})
 	}
 	sort.Slice(f.Denied, func(i, j int) bool { return f.Denied[i].SID < f.Denied[j].SID })
 	return write(d.Dir, deniedFile, f)

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -373,6 +375,6 @@ func (s *Server) run(ctx context.Context, q commandJSON) (runReply, *problem) {
 	if err != nil && !errors.As(err, &exitErr) && !errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
 		return runReply{}, fail(http.StatusUnprocessableEntity, "start", "The command couldn't start.")
 	}
-	s.log.Info("agent-host run", "command", filepath.Base(q.Argv[0]), "exit", code)
+	shared.For(ctx, s.log).Info("agent-host run", "command", filepath.Base(q.Argv[0]), "exit", code)
 	return runReply{Code: code, Stdout: string(stdout.buf), Stderr: string(stderr.buf), TimedOut: ctx.Err() != nil}, nil
 }

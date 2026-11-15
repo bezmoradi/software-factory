@@ -676,7 +676,7 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 	}
 	if !repair {
 		if err := k.cfg.Store.RestoreObjects(sid, r.box, r.repo, last); err != nil {
-			k.cfg.Logger.Warn("restore branch", "event", "objects-not-written")
+			shared.For(ctx, k.cfg.Logger).Warn("restore branch", "event", "objects-not-written")
 			return KeepView{}, false, explained(conflict("objects"), "The engine couldn't write its copy's objects into the clone: "+keepSentence(err.Error()))
 		}
 		if _, err := k.cfg.Reader.Commit(r.clone, last); err != nil {
@@ -696,6 +696,7 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 			return KeepView{}, false, explained(conflict("running"), "The session didn't stop in time, so its worktree wasn't touched. Try again in a moment.")
 		}
 		stopped = true
+		d.lifecycle(ctx, AuditSessionStop, r, ByPage, ResultStopped, "stopped to restore its branch from the engine's copy")
 	}
 	if err := d.wakeBox(ctx, r.box); err != nil {
 		return KeepView{}, stopped, err
@@ -713,7 +714,7 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 		if linked {
 			return KeepView{}, stopped, explained(conflict("worktree"), "agent-host couldn't remove the worktree, so the branch wasn't touched: "+keepSentence(hostMessage(err)))
 		}
-		k.cfg.Logger.Warn("restore branch", "event", "broken-worktree-not-cleared", "worktree", r.name)
+		shared.For(ctx, k.cfg.Logger).Warn("restore branch", "event", "broken-worktree-not-cleared", "worktree", r.name)
 	}
 	aside = d.tellAside(r, aside, "while the branch was restored")
 	removed := "removed the session's worktree"
@@ -742,7 +743,7 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 		reason += ", after the engine stopped the idle session"
 	}
 	k.restoreAudit(r, last, "restored", reason)
-	d.cfg.Logger.Info("restore branch", "event", "restored", "stopped", stopped)
+	shared.For(ctx, d.cfg.Logger).Info("restore branch", "event", "restored", "stopped", stopped)
 	k.mu.Lock()
 	clear(k.holds)
 	k.mu.Unlock()
@@ -772,7 +773,7 @@ func (k *Keep) readded(ctx context.Context, sid string, r *run, last string, id 
 		reason += ", after the engine stopped the idle session"
 	}
 	k.restoreAudit(r, last, "restored", reason)
-	d.cfg.Logger.Info("restore branch", "event", "worktree-added-again", "stopped", stopped)
+	shared.For(ctx, d.cfg.Logger).Info("restore branch", "event", "worktree-added-again", "stopped", stopped)
 	k.mu.Lock()
 	clear(k.holds)
 	k.mu.Unlock()

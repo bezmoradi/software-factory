@@ -27,6 +27,7 @@ type haltJSON struct {
 	Since   time.Time `json:"since,omitzero"`
 	AwayAll bool      `json:"awayAll"`
 	Away    []string  `json:"away"`
+	Owner   string    `json:"owner,omitempty"`
 }
 
 func (h Halt) Load() (session.HaltState, error) {
@@ -53,9 +54,10 @@ func (h Halt) Load() (session.HaltState, error) {
 }
 
 func (h Halt) Save(s session.HaltState) error {
+	owner := ownerIn(h.Dir)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	f := haltJSON{Version: 1, Mode: s.Mode, Since: s.Since.UTC(), AwayAll: s.AwayAll, Away: []string{}}
+	f := haltJSON{Owner: owner, Version: 1, Mode: s.Mode, Since: s.Since.UTC(), AwayAll: s.AwayAll, Away: []string{}}
 	for _, sid := range s.Away {
 		if sessionID.MatchString(sid) && len(f.Away) < maxSessions {
 			f.Away = append(f.Away, sid)

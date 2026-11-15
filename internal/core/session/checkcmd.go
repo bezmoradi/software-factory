@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -184,7 +186,7 @@ func (w *SessionWork) runCommand(ctx context.Context, sid, kind, command, cwd st
 		rs.check = &done
 	}
 	w.mu.Unlock()
-	w.cfg.Logger.Info("project command", "kind", kind, "state", done.State)
+	shared.For(ctx, w.cfg.Logger).Info("project command", "kind", kind, "state", done.State)
 	w.changed(sid)
 	return done
 }

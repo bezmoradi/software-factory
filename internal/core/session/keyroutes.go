@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -147,7 +149,7 @@ func (d *Dispatcher) removeKeyLocked(ctx context.Context, target string, restore
 		d.restoreExpect(target, k, readable && present)
 	}
 	if err := d.saveKeyRoute(target, KeyRoute{}); err != nil {
-		d.cfg.Logger.Warn("claude api key", "target", target, "event", "record-not-saved")
+		shared.For(ctx, d.cfg.Logger).Warn("claude api key", "target", target, "event", "record-not-saved")
 	}
 	return nil
 }
@@ -172,7 +174,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	kctx, cancel := context.WithTimeout(ctx, keyRouteFor)
 	defer cancel()
 	err := d.removeKeyLocked(kctx, target, true)
-	d.cfg.Logger.Info("claude api key", "target", target, "step", "reconcile", "ok", err == nil)
+	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "step", "reconcile", "ok", err == nil)
 	if err != nil {
 		return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in panel removes it too.")
 	}
@@ -196,7 +198,7 @@ func (d *Dispatcher) unreachedKey(target string) error {
 
 func (d *Dispatcher) ReconcileKeys(ctx context.Context) {
 	if err := d.KeyRouted(ctx, LoginReviewers); err != nil {
-		d.cfg.Logger.Warn("claude api key", "target", LoginReviewers, "event", "not-removed", "fix", Compose()+" ps reviewer")
+		shared.For(ctx, d.cfg.Logger).Warn("claude api key", "target", LoginReviewers, "event", "not-removed", "fix", Compose()+" ps reviewer")
 	}
 }
 

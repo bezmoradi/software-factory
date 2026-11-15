@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -107,7 +108,7 @@ func (d *Dispatcher) readdWorktree(ctx context.Context, r *run, id CommitIdentit
 		if h, ok := errors.AsType[*HostError](err); ok && h.Code == HostDirty {
 			return "", explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it as it is.")
 		}
-		d.cfg.Logger.Warn("worktree", "event", "not-cleared", "worktree", r.name)
+		shared.For(ctx, d.cfg.Logger).Warn("worktree", "event", "not-cleared", "worktree", r.name)
 	}
 	aside = d.tellAside(r, aside, during)
 	cwd, err := host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
@@ -121,7 +122,7 @@ func (d *Dispatcher) readdWorktree(ctx context.Context, r *run, id CommitIdentit
 	r.cwd = cwd
 	d.mu.Unlock()
 	d.saveRuns()
-	d.cfg.Logger.Info("worktree", "event", "added-again", "worktree", r.name)
+	shared.For(ctx, d.cfg.Logger).Info("worktree", "event", "added-again", "worktree", r.name)
 	return aside, nil
 }
 
@@ -217,7 +218,7 @@ func (d *Dispatcher) retryStop(ctx context.Context, box string) bool {
 	if ok {
 		d.markUnstopped(box, false)
 	}
-	d.cfg.Logger.Info("boxes", "event", "stop-retried", "box", box, "ok", ok)
+	shared.For(ctx, d.cfg.Logger).Info("boxes", "event", "stop-retried", "box", box, "ok", ok)
 	return ok
 }
 
@@ -427,18 +428,18 @@ func (d *Dispatcher) openBox(ctx context.Context, project, agent string) (string
 		return "", explained(conflict("box"), "The engine couldn't make a name for the session's container.")
 	}
 	if err := d.recordBox(box, project, agent); err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "not-recorded")
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-recorded")
 		return "", explained(conflict("state"), "The engine couldn't record the session's container, so no session started.")
 	}
 	if err := d.cfg.Folders.Make(box); err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "folders-not-made", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "folders-not-made", "box", box)
 		d.dropBox(box, false)
 		return "", explained(conflict("workspace"), "The engine couldn't make the session's folders in the workspace, so no session started.")
 	}
 	bctx, cancel := context.WithTimeout(ctx, boxCallFor)
 	defer cancel()
 	if err := d.cfg.Boxes.Create(bctx, box); err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "not-created", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-created", "box", box)
 		d.dropBox(box, false)
 		return "", boxError(err)
 	}
@@ -446,7 +447,7 @@ func (d *Dispatcher) openBox(ctx context.Context, project, agent string) (string
 		d.dropBox(box, false)
 		return "", err
 	}
-	d.cfg.Logger.Info("boxes", "event", "started", "box", box)
+	shared.For(ctx, d.cfg.Logger).Info("boxes", "event", "started", "box", box)
 	return box, nil
 }
 
@@ -454,7 +455,7 @@ func (d *Dispatcher) upBox(ctx context.Context, box string) error {
 	info, err := d.cfg.Boxes.Start(ctx, box)
 	if err != nil {
 		d.markUnstopped(box, true)
-		d.cfg.Logger.Warn("boxes", "event", "not-started", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-started", "box", box)
 		return boxError(err)
 	}
 	if info.Box != box || !info.Agent.IsValid() || !info.Engine.IsValid() || !info.Subnet.IsValid() {
@@ -465,7 +466,7 @@ func (d *Dispatcher) upBox(ctx context.Context, box string) error {
 	if err := d.cfg.Routes.Up(ctx, info); err != nil {
 		d.cfg.Routes.Down(box)
 		_ = d.cfg.Boxes.Stop(context.WithoutCancel(ctx), box)
-		d.cfg.Logger.Warn("boxes", "event", "not-routed", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-routed", "box", box)
 		return explained(conflict("box"), "The engine couldn't reach the session's container: "+clip(err.Error(), 300))
 	}
 	return nil
@@ -504,11 +505,11 @@ func (d *Dispatcher) stopBox(ctx context.Context, box string) {
 	defer cancel()
 	if err := d.cfg.Boxes.Stop(bctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {
 		d.markUnstopped(box, true)
-		d.cfg.Logger.Warn("boxes", "event", "not-stopped", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-stopped", "box", box)
 		return
 	}
 	d.markUnstopped(box, false)
-	d.cfg.Logger.Info("boxes", "event", "stopped", "box", box)
+	shared.For(ctx, d.cfg.Logger).Info("boxes", "event", "stopped", "box", box)
 }
 
 func (d *Dispatcher) clearBox(ctx context.Context, box string) {
@@ -519,11 +520,11 @@ func (d *Dispatcher) clearBox(ctx context.Context, box string) {
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)
 	defer cancel()
 	if err := d.ConfirmBox(cctx, box); err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "workspace-clear-skipped", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "workspace-clear-skipped", "box", box)
 		return
 	}
 	if err := h.ClearWorkspace(cctx, box); err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "workspace-not-cleared", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "workspace-not-cleared", "box", box)
 	}
 }
 
@@ -645,7 +646,7 @@ func (d *Dispatcher) sweepLeftovers(ctx context.Context) {
 	}
 	list, err := d.cfg.Boxes.List(ctx)
 	if err != nil {
-		d.cfg.Logger.Warn("boxes", "event", "leftovers-not-listed")
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "leftovers-not-listed")
 		return
 	}
 	stopped := 0
@@ -659,7 +660,7 @@ func (d *Dispatcher) sweepLeftovers(ctx context.Context) {
 	}
 	d.boxes.swept = true
 	if stopped > 0 {
-		d.cfg.Logger.Info("boxes", "event", "leftovers-stopped", "count", stopped)
+		shared.For(ctx, d.cfg.Logger).Info("boxes", "event", "leftovers-stopped", "count", stopped)
 	}
 }
 
@@ -792,7 +793,7 @@ func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *r
 	cctx, cancel := context.WithTimeout(ctx, CloneFor)
 	defer cancel()
 	if err := d.cfg.Clones.SessionClone(cctx, q); err != nil {
-		d.cfg.Logger.Warn("dispatch", "event", "clone-failed")
+		shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "clone-failed")
 		return explained(conflict("clone"), "The engine couldn't make the session's own clone of "+r.repo+": "+clip(err.Error(), 600))
 	}
 	return nil
@@ -915,7 +916,7 @@ func (d *Dispatcher) resume(ctx context.Context, q Dispatch, spec AgentSpec, rep
 	r.check = check
 	r.group, r.groupKind = q.group, q.groupKind
 	d.mu.Unlock()
-	d.cfg.Logger.Info("boxes", "event", "resumed", "box", r.box)
+	shared.For(ctx, d.cfg.Logger).Info("boxes", "event", "resumed", "box", r.box)
 	return d.launch(ctx, r, q, &kept)
 }
 

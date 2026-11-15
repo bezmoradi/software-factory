@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -24,6 +26,7 @@ const (
 	answerFor     = 10 * time.Second
 	maxReason     = 64
 	MarkerHeader  = "Software-Factory-Probe"
+	RequestHeader = "Software-Factory-Request"
 )
 
 var (
@@ -38,6 +41,7 @@ type ProbeConfig struct {
 	Outside  string
 	Front    string
 	Marker   string
+	Request  string
 	Gateway  string
 	Dial     time.Duration
 }
@@ -192,7 +196,7 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := io.WriteString(conn, connectLine(target, cfg.Marker)); err != nil {
+	if _, err := io.WriteString(conn, connectLine(target, cfg.Marker, cfg.Request)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
@@ -210,10 +214,13 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 	return Result{Detail: fmt.Sprintf("the egress proxy answered %d for %s, not a refusal", resp.StatusCode, target)}
 }
 
-func connectLine(target, marker string) string {
+func connectLine(target, marker, request string) string {
 	line := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
 	if marker != "" {
 		line += MarkerHeader + ": " + marker + "\r\n"
+	}
+	if marker != "" && shared.ValidRequest(request) {
+		line += RequestHeader + ": " + request + "\r\n"
 	}
 	return line + "\r\n"
 }
@@ -239,7 +246,7 @@ func fronted(ctx context.Context, d Dialer, cfg ProbeConfig, name string) Result
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := io.WriteString(conn, connectLine(front, cfg.Marker)); err != nil {
+	if _, err := io.WriteString(conn, connectLine(front, cfg.Marker, cfg.Request)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	br := bufio.NewReader(conn)
@@ -294,6 +301,7 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	front := fs.String("front", "", "an allowed host to send other TLS names through")
 	marker := fs.String("marker", "", "the engine's marker for this run, sent with every request to the proxy")
 	gw := fs.String("gateway", "", "the address of the session network's gateway, which must not answer")
+	request := fs.String("request", "", "the engine's request id for the action that runs this check, sent beside the marker")
 	if err := fs.Parse(args); err != nil {
 		return ProbeConfig{}, err
 	}
@@ -306,13 +314,16 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	if *marker != "" && !markerPattern.MatchString(*marker) {
 		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -marker must be 32 lowercase hex digits")
 	}
+	if *request != "" && !shared.ValidRequest(*request) {
+		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -request must be 16 lowercase hex digits")
+	}
 	if *gw != "" {
 		a, err := netip.ParseAddr(*gw)
 		if err != nil || !a.Is4() {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: -gateway must be an IPv4 address")
 		}
 	}
-	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker, Gateway: *gw}
+	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker, Request: *request, Gateway: *gw}
 	for _, a := range cfg.Addrs {
 		if _, err := netip.ParseAddrPort(a); err != nil {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: %q isn't ip:port", a)

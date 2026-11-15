@@ -150,6 +150,8 @@ type ReviewView struct {
 
 	PlanReview *AsideView
 	Explain    *AsideView
+
+	Req string
 }
 
 func (v ReviewView) clone() ReviewView {
@@ -182,6 +184,8 @@ type ReviewTarget struct {
 
 	TeamRules func(base, head string) TeamRules
 	CloneSync func(main string) string
+
+	Req string
 }
 
 type ReviewStarter interface {
@@ -474,7 +478,7 @@ func (r *Reviews) ApprovalMoved(sid string, at func(commit string) (ApprovalGive
 }
 
 func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin string, view ReviewView, held string, given reviewGiven) {
-	ctx := r.cfg.Base
+	ctx := shared.WithRequest(r.cfg.Base, t.Req)
 	main := given.rules.main
 	if why := r.check(ctx); why != "" {
 		view.Running = false
@@ -484,7 +488,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			view.Roles[i].Reason = "didn't start: " + why
 		}
 		r.show(t.SID, view)
-		r.cfg.Logger.Warn("review", "event", "not-started", "why", "sandbox")
+		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "not-started", "why", "sandbox")
 		return
 	}
 	started := r.cfg.Now()
@@ -511,7 +515,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	if given.rules.main != "" {
 		set, err := r.cfg.Snapshots.Rules(t.Repo, given.rules.main)
 		if err != nil {
-			r.cfg.Logger.Warn("review", "event", "rules-unreadable")
+			shared.For(ctx, r.cfg.Logger).Warn("review", "event", "rules-unreadable")
 		}
 		given.rules = rulesOf(given.rules.main, set, err)
 	}
@@ -558,14 +562,14 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 					r.audited(t, entries[j])
 				}
 			}
-			r.cfg.Logger.Warn("review", "event", "snapshot-failed")
+			shared.For(ctx, r.cfg.Logger).Warn("review", "event", "snapshot-failed")
 			continue
 		}
 		dirs[p.base] = strings.TrimRight(r.cfg.Dir, "/") + "/" + snap.ID
 		written[p.base] = snap
 		defer func() {
 			if err := r.cfg.Snapshots.Remove(snap.ID); err != nil {
-				r.cfg.Logger.Warn("review", "event", "snapshot-not-removed")
+				shared.For(ctx, r.cfg.Logger).Warn("review", "event", "snapshot-not-removed")
 			}
 		}()
 	}
@@ -627,9 +631,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			mu.Unlock()
 			r.show(t.SID, shown)
 			if why != "" {
-				r.cfg.Logger.Warn("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State), "why", why)
+				shared.For(ctx, r.cfg.Logger).Warn("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State), "why", why)
 			} else {
-				r.cfg.Logger.Info("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State))
+				shared.For(ctx, r.cfg.Logger).Info("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State))
 			}
 			r.wg.Go(func() {
 				if c, looked := r.lookUpCited(ctx, e); looked {
@@ -824,7 +828,7 @@ func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 	defer cancel()
 	s, err := r.cfg.SignIns.SignIn(sctx, Command{Argv: []string{r.cfg.Command, "auth", "status"}, Dir: r.cfg.Dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: signInFor}, "claude")
 	if err != nil {
-		r.cfg.Logger.Warn("review sign-in check", "event", "failed")
+		shared.For(ctx, r.cfg.Logger).Warn("review sign-in check", "event", "failed")
 		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check the reviewer container's sign-in, so the review doesn't start: "+hostMessage(err))
 	}
 	s.CheckedAt = r.cfg.Now()
@@ -832,7 +836,7 @@ func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 	r.signIn = &s
 	r.mu.Unlock()
 	r.cfg.ShowSignIn(s)
-	r.cfg.Logger.Info("review sign-in check", "method", string(s.Method))
+	shared.For(ctx, r.cfg.Logger).Info("review sign-in check", "method", string(s.Method))
 	return s, nil
 }
 
@@ -918,11 +922,11 @@ func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason str
 	}
 	if r.cfg.Audit != nil {
 		ae := AuditEntry{Time: r.cfg.Now(), Session: sid, Repository: t.Name, Branch: t.Branch, Commit: head, By: ByPage, Kind: AuditOverride,
-			Result: AuditOverride, Reason: "the developer overrode the verdict \"" + e.Record.Verdict + "\" from " + agent, Reviewer: agent, Verdict: e.Record.Verdict, PersonReason: clean}
+			Result: AuditOverride, Reason: "the developer overrode the verdict \"" + e.Record.Verdict + "\" from " + agent, Reviewer: agent, Verdict: e.Record.Verdict, PersonReason: clean, Req: t.Req}
 		if err := r.cfg.Audit.Append(ae); err != nil {
-			r.cfg.Logger.Warn("review", "event", "audit-not-written")
+			shared.Tagged(r.cfg.Logger, t.Req).Warn("review", "event", "audit-not-written")
 		}
 	}
-	r.cfg.Logger.Info("review", "event", "overridden")
+	shared.Tagged(r.cfg.Logger, t.Req).Info("review", "event", "overridden")
 	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -141,8 +143,8 @@ func (r *Reviews) audited(t ReviewTarget, e ReviewEntry) {
 	}
 	ae := AuditEntry{Time: r.cfg.Now(), Session: t.SID, Repository: t.Name, Branch: t.Branch, Commit: e.Key.Commit, By: by, Kind: AuditReview,
 		Result: string(e.Record.State), Reason: reason, Reviewer: e.Key.Agent, Verdict: e.Record.Verdict,
-		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: slices.Clone(e.Models)}
+		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: slices.Clone(e.Models), Req: t.Req}
 	if err := r.cfg.Audit.Append(ae); err != nil {
-		r.cfg.Logger.Warn("review", "event", "audit-not-written")
+		shared.Tagged(r.cfg.Logger, t.Req).Warn("review", "event", "audit-not-written")
 	}
 }

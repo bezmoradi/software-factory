@@ -16,6 +16,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/level"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -126,6 +127,7 @@ func (c *Checker) probed(ctx context.Context, b session.BoxProbe) level.Observat
 	failed = append(failed, Uncovered(want.Allow, c.cfg.Deny, repos)...)
 	cfg := c.probeConfig(ctx, repos, lasting(want))
 	cfg.Marker = newMarker()
+	cfg.Request = shared.RequestOf(ctx)
 	if b.Gateway.IsValid() {
 		cfg.Gateway = b.Gateway.String()
 	}
@@ -338,7 +340,11 @@ func (c *Checker) probeConfig(ctx context.Context, repos, allow []string) ProbeC
 }
 
 func Args(cfg ProbeConfig) []string {
-	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
+	args := []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
+	if shared.ValidRequest(cfg.Request) {
+		args = append(args, "-request", cfg.Request)
+	}
+	return args
 }
 
 func (c *Checker) probe(ctx context.Context, b session.BoxProbe, cfg ProbeConfig) ([]string, string) {

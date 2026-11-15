@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -143,13 +145,13 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 		return explained(conflict("no change"), "The session's branch has nothing the remote's main branch lacks, so there's nothing to test. Commit the work first.")
 	}
 	r.setTestList(t.SID, TestListView{Commit: head, Branch: t.Branch, State: TestListRunning, At: r.cfg.Now()})
-	r.cfg.Logger.Info("test list", "event", "started")
+	shared.For(ctx, r.cfg.Logger).Info("test list", "event", "started")
 	r.wg.Go(func() {
 		defer release()
 		v := r.writeTestList(t, base, head, plugin)
 		v.At = r.cfg.Now()
 		r.setTestList(t.SID, v)
-		r.cfg.Logger.Info("test list", "event", "finished", "state", v.State)
+		shared.For(ctx, r.cfg.Logger).Info("test list", "event", "finished", "state", v.State)
 	})
 	return nil
 }

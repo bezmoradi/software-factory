@@ -59,6 +59,7 @@ type followSettingsJSON struct {
 	Bots    []string `json:"bots,omitempty"`
 	Auto    bool     `json:"auto,omitempty"`
 	Assign  bool     `json:"assign,omitempty"`
+	Owner   string   `json:"owner,omitempty"`
 }
 
 type prFollowsJSON struct {
@@ -136,6 +137,7 @@ func (s PRFollows) Load() (session.FollowRecord, error) {
 }
 
 func (s PRFollows) Save(rec session.FollowRecord) error {
+	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := prFollowsJSON{Version: 1, Follows: []followJSON{}, Settings: []followSettingsJSON{}}
@@ -153,7 +155,7 @@ func (s PRFollows) Save(rec session.FollowRecord) error {
 		f.Follows = append(f.Follows, j)
 	}
 	for id, v := range rec.Projects {
-		j := followSettingsJSON{Project: id.Name, URL: id.URL, Bots: v.Bots, Auto: v.Auto, Assign: v.Assign}
+		j := followSettingsJSON{Owner: owner, Project: id.Name, URL: id.URL, Bots: v.Bots, Auto: v.Auto, Assign: v.Assign}
 		if _, ok := settingsOf(j); !ok || !validProject(id) || len(f.Settings) >= session.MaxFollowed {
 			continue
 		}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -73,7 +75,7 @@ func (f *Forges) Comments(ctx context.Context, sid string) ForgeReply {
 		}
 		kept = append(kept, c)
 	}
-	f.cfg.Logger.Info("forge", "event", "review-comments", "read", len(report.Comments), "kept", len(kept))
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "review-comments", "read", len(report.Comments), "kept", len(kept))
 	text := ReviewCommentText(login, pr, ft.t.Branch, ft.repo, kept, report.Notes)
 	return ForgeReply{Result: ForgeReady, Reason: strings.ReplaceAll(text, ft.repo.Token, "[token]")}
 }

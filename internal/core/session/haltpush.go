@@ -1,5 +1,7 @@
 package session
 
+import "github.com/bezmoradi/software-factory/internal/core/shared"
+
 func (p *Pushes) UseHalt(h *Halt) {
 	p.halt.Store(h)
 }
@@ -19,9 +21,9 @@ func (p *Pushes) halted(by string) string {
 	return h.pushes(by)
 }
 
-func (p *Pushes) holdForRelease(sid, head string) (string, bool, string) {
-	p.wait(sid, head)
-	p.cfg.Logger.Info("push", "event", "review-held-by-halt")
+func (p *Pushes) holdForRelease(sid, head, req string) (string, bool, string) {
+	p.waitAs(sid, head, req)
+	shared.Tagged(p.cfg.Logger, req).Info("push", "event", "review-held-by-halt")
 	if p.halted(ByReviews) == "" {
 		p.queueReview(sid, head)
 	}

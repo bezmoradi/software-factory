@@ -84,6 +84,7 @@ var stores = map[string]storeRow{
 	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
 	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},
 	identityFile:        {class: classKept, version: 1, place: placeKeepOwn, label: "the name and email agents commit with"},
+	personFile:          {class: classKept, version: 1, label: "the local person's id, which saved records and audit lines carry; the importing engine takes it as its own"},
 	portsFile:           {class: classKept, version: 1, label: "port ranges"},
 	modelsFile:          {class: classKept, version: 1, label: "model choices"},
 	savedPromptsFile:    {class: classKept, version: 1, label: "saved prompts"},
@@ -187,6 +188,8 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewHalt(d).Load)
 	case identityFile:
 		err = loaded(NewIdentity(d).Load)
+	case personFile:
+		_, err = loadPerson(d)
 	case portsFile:
 		err = loaded(NewPorts(d).Load)
 	case modelsFile:

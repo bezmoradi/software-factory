@@ -1,11 +1,14 @@
 package session
 
 import (
+	"context"
 	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -382,7 +385,7 @@ func (p *Pushes) automaticHeld(sid string) string {
 	return l.held(sid, usageWhatSend)
 }
 
-func (l *Limits) Continue(side, sid, kind string) error {
+func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	side = sideOf(side)
 	now := l.now()
 	l.mu.Lock()
@@ -419,11 +422,11 @@ func (l *Limits) Continue(side, sid, kind string) error {
 	lifted := l.liftLocked(side, box, kind)
 	continued := l.cfg.Continued
 	l.mu.Unlock()
-	l.audit(AuditEntry{Session: sid, Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
+	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
 	l.flush(true)
 	if continued != nil {
 		for _, p := range lifted {
-			go continued(p.sid, p.what == usageWhatSend)
+			go continued(shared.WithRequest(context.Background(), shared.RequestOf(ctx)), p.sid, p.what == usageWhatSend)
 		}
 	}
 	return nil
@@ -443,7 +446,8 @@ func (l *Limits) liftLocked(side, box, kind string) []usagePause {
 	return lifted
 }
 
-func (p *Pushes) Continued(sid string, findings bool) {
+func (p *Pushes) Continued(ctx context.Context, sid string, findings bool) {
+	log := shared.For(ctx, p.cfg.Logger)
 	t, ok := p.cfg.Targets(sid)
 	if !ok {
 		return
@@ -463,18 +467,18 @@ func (p *Pushes) Continued(sid string, findings bool) {
 	p.mu.Unlock()
 	switch {
 	case !ready:
-		p.cfg.Logger.Info("push", "event", "continued", "then", "nothing-held")
+		log.Info("push", "event", "continued", "then", "nothing-held")
 	case send:
 		defer p.wg.Done()
-		p.cfg.Logger.Info("push", "event", "continued", "then", "findings")
-		p.autoFindings(sid)
+		log.Info("push", "event", "continued", "then", "findings")
+		p.autoFindings(ctx, sid)
 	case findings:
-		p.cfg.Logger.Info("push", "event", "continued", "then", "held-by-halt")
+		log.Info("push", "event", "continued", "then", "held-by-halt")
 	case halted:
-		p.wait(sid, head)
-		p.cfg.Logger.Info("push", "event", "continued", "then", "held-by-halt")
+		p.waitAs(sid, head, shared.RequestOf(ctx))
+		log.Info("push", "event", "continued", "then", "held-by-halt")
 	default:
-		p.cfg.Logger.Info("push", "event", "continued", "then", "review")
+		log.Info("push", "event", "continued", "then", "review")
 		p.queueReview(sid, head)
 	}
 }

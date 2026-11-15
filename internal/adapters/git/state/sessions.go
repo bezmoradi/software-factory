@@ -79,6 +79,7 @@ type runJSON struct {
 	HistoryOnly bool   `json:"historyOnly,omitempty"`
 	RmDone      bool   `json:"rmDone,omitempty"`
 	Aside       string `json:"aside,omitempty"`
+	Owner       string `json:"owner,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -150,10 +151,11 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 }
 
 func (s Sessions) Save(runs []session.SavedRun) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := sessionsJSON{Version: 1, Sessions: make([]runJSON, 0, len(runs))}
 	for _, r := range runs {
-		f.Sessions = append(f.Sessions, runJSON{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
+		f.Sessions = append(f.Sessions, runJSON{Owner: owner, SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
 			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
 			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})

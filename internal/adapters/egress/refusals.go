@@ -6,10 +6,13 @@ import (
 	"regexp"
 	"slices"
 	"sync"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
 	MarkerHeader  = "Software-Factory-Probe"
+	RequestHeader = "Software-Factory-Request"
 	MaxMarkers    = 8
 	MaxRings      = 32
 	MaxPerMarker  = 256
@@ -99,10 +102,11 @@ func (r *Refusals) Of(mark string) ([]Refusal, int, bool) {
 }
 
 type Marks struct {
-	Book   *Refusals
-	Side   string
-	Seen   *Seen
-	subnet string
+	Book    *Refusals
+	Side    string
+	Seen    *Seen
+	Trusted bool
+	subnet  string
 }
 
 func (m Marks) from(subnet string) Marks {
@@ -119,6 +123,17 @@ func (m Marks) note(mark, target, name, reason string) {
 		return
 	}
 	m.Book.add(mark, Refusal{Side: m.Side, Target: clipTarget(target), Name: clipTarget(name), Reason: reason, Subnet: m.subnet})
+}
+
+func (m Marks) requestTag(req *http.Request, mark string) []any {
+	values := req.Header.Values(RequestHeader)
+	if mark == "" || len(values) != 1 || !shared.ValidRequest(values[0]) {
+		return nil
+	}
+	if m.Trusted {
+		return []any{shared.RequestKey, values[0]}
+	}
+	return []any{"claimed_req", values[0]}
 }
 
 func markOf(req *http.Request) string {

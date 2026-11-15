@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -295,7 +296,7 @@ wait:
 	}
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) && !errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
-		s.log.Warn("agent-host review run", "event", "wait-failed", "command", filepath.Base(q.Argv[0]))
+		shared.For(ctx, s.log).Warn("agent-host review run", "event", "wait-failed", "command", filepath.Base(q.Argv[0]))
 	}
 	scan.mu.Lock()
 	out := endFrame{Type: "end", ElapsedMs: time.Since(started).Milliseconds(), ToolCalls: scan.tools, Code: code, TimedOut: errors.Is(ctx.Err(), context.DeadlineExceeded),
@@ -303,9 +304,9 @@ wait:
 	lost := scan.lost
 	scan.mu.Unlock()
 	if lost {
-		s.log.Warn("agent-host review run", "event", "result-too-large", "command", filepath.Base(q.Argv[0]))
+		shared.For(ctx, s.log).Warn("agent-host review run", "event", "result-too-large", "command", filepath.Base(q.Argv[0]))
 	}
-	s.log.Info("agent-host review run", "command", filepath.Base(q.Argv[0]), "exit", code, "tools", out.ToolCalls)
+	shared.For(ctx, s.log).Info("agent-host review run", "command", filepath.Base(q.Argv[0]), "exit", code, "tools", out.ToolCalls)
 	send(out)
 }
 
@@ -335,6 +336,9 @@ func (c *Client) RunStreamed(ctx context.Context, cmd session.Command, progress 
 	req.Header.Set("Content-Type", "application/json")
 	if c.key != "" {
 		req.Header.Set(KeyHeader, c.key)
+	}
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

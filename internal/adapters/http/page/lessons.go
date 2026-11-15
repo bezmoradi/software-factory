@@ -8,6 +8,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
@@ -155,7 +156,7 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 		ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 		defer cancel()
 		err = lessons.Suggest(ctx, name, consent.CostOK)
-		s.logger.Info("lessons", "op", op, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("lessons", "op", op, "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 		return
 	case "approve":
@@ -176,7 +177,7 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 		return
 	}
 	if op != "read" {
-		s.logger.Info("lessons", "op", op, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("lessons", "op", op, "ok", err == nil)
 	}
 	if err != nil {
 		code, p := status(err)

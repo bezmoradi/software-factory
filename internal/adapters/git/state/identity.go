@@ -23,6 +23,7 @@ type identityFileJSON struct {
 	Version int    `json:"version"`
 	Name    string `json:"name"`
 	Email   string `json:"email"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 func (s Identity) lock() func() {
@@ -51,6 +52,7 @@ func (s Identity) Load() (session.CommitIdentity, error) {
 }
 
 func (s Identity) Save(id session.CommitIdentity) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
-	return write(s.Dir, identityFile, identityFileJSON{Version: 1, Name: id.Name, Email: id.Email})
+	return write(s.Dir, identityFile, identityFileJSON{Owner: owner, Version: 1, Name: id.Name, Email: id.Email})
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -176,7 +177,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 			return
 		}
 		err := s.cfg.Pushes.Push(ctx, sid)
-		s.logger.Info("push", "side", "page", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("push", "side", "page", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case answerRoute:
 		card, okCard := body["card"].(string)
@@ -196,7 +197,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 			return
 		}
 		err := s.cfg.Pushes.Answer(ctx, sid, card, commit, allow, reason)
-		s.logger.Info("push answer", "allow", allow, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("push answer", "allow", allow, "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case handoffRoute:
 		card, okCard := body["card"].(string)
@@ -206,7 +207,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 			return
 		}
 		err := s.cfg.Pushes.Handoff(ctx, sid, card, commit)
-		s.logger.Info("push handoff", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("push handoff", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case findingsRoute:
 		card, okCard := body["card"].(string)
@@ -216,7 +217,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 			return
 		}
 		err := s.cfg.Pushes.SendFindings(ctx, sid, card, commit)
-		s.logger.Info("push findings", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("push findings", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	}
 }

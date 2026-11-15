@@ -8,6 +8,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/gate"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 var writeTools = map[string]bool{"Write": true, "Edit": true, "MultiEdit": true, "NotebookEdit": true}
@@ -48,7 +49,7 @@ func (s *Server) pushRequest(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(pushFor):
 		answer = push.Reply{Decision: push.DecisionHeld, Reason: "the engine is still deciding or pushing this commit; end your turn and don't call factory_push again: Software Factory's page shows the result"}
 	}
-	s.logger.Info("push request", "side", "agent", "result", string(answer.Decision))
+	shared.For(r.Context(), s.logger).Info("push request", "side", "agent", "result", string(answer.Decision))
 	send(w, http.StatusOK, map[string]string{"result": string(answer.Decision), "reason": answer.Reason})
 }
 

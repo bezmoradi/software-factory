@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -76,6 +78,7 @@ type StatusConfig struct {
 	Seen    map[string]*Seen
 	KeyFile string
 	Subnets *Subnets
+	Logger  shared.Logger
 }
 
 func StatusHandler(cfg StatusConfig) http.Handler {
@@ -196,7 +199,52 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 		}
 		writeJSON(w, out)
 	})
-	return mux
+	return traced(mux, cfg.Logger)
+}
+
+type statusAnswer struct {
+	http.ResponseWriter
+	status int
+}
+
+func (a *statusAnswer) WriteHeader(code int) {
+	if a.status == 0 {
+		a.status = code
+	}
+	a.ResponseWriter.WriteHeader(code)
+}
+
+func (a *statusAnswer) Write(b []byte) (int, error) {
+	if a.status == 0 {
+		a.status = http.StatusOK
+	}
+	return a.ResponseWriter.Write(b)
+}
+
+func traced(next http.Handler, logger shared.Logger) http.Handler {
+	if logger == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		values := r.Header.Values(shared.RequestHeader)
+		if len(values) != 1 || !shared.ValidRequest(values[0]) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		a := &statusAnswer{ResponseWriter: w}
+		next.ServeHTTP(a, r)
+		logger.Info("egress control", "route", controlRoute(r.URL.Path), "method", r.Method, "status", a.status, shared.RequestKey, values[0])
+	})
+}
+
+func controlRoute(path string) string {
+	switch {
+	case path == "/status", path == "/allow", path == "/boxes", path == "/refused":
+		return path
+	case strings.HasPrefix(path, "/refusals/"):
+		return "/refusals"
+	}
+	return "other"
 }
 
 func statusOf(s snapshot) status {

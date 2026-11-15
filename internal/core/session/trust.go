@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const trustFor = 90 * time.Second
@@ -58,7 +60,7 @@ func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 	tctx, cancel := context.WithTimeout(ctx, trustFor)
 	defer cancel()
 	err = host.Trust(tctx, Command{Argv: []string{spec.Command[0]}, Dir: clone, Pass: spec.Pass, Timeout: trustFor})
-	d.cfg.Logger.Info("claude trust", "repo", repo.Name, "box", box, "ok", err == nil)
+	shared.For(ctx, d.cfg.Logger).Info("claude trust", "repo", repo.Name, "box", box, "ok", err == nil)
 	if err != nil {
 		return explained(conflict("trust"), hostMessage(err))
 	}

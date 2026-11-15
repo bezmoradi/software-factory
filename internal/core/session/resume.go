@@ -11,6 +11,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -60,8 +61,29 @@ func (p *Pushes) stopping() bool {
 	return p.closing
 }
 
+type waitedFor struct {
+	head string
+	req  string
+}
+
+func (p *Pushes) waitedReq(sid, head string) string {
+	if w, ok := p.waitReq[sid]; ok && w.head == head {
+		return w.req
+	}
+	return ""
+}
+
 func (p *Pushes) wait(sid, head string) {
+	p.waitAs(sid, head, "")
+}
+
+func (p *Pushes) waitAs(sid, head, req string) {
 	p.mu.Lock()
+	if shared.ValidRequest(req) {
+		p.waitReq[sid] = waitedFor{head: head, req: req}
+	} else if w, ok := p.waitReq[sid]; ok && w.head != head {
+		delete(p.waitReq, sid)
+	}
 	if p.resume.since == nil {
 		p.resume.since = map[string]time.Time{}
 	}
@@ -241,10 +263,13 @@ func (p *Pushes) work() {
 
 func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	sid, commit := item.sid, item.commit
+	p.mu.Lock()
+	ctx = shared.WithRequest(ctx, p.waitedReq(sid, commit))
+	p.mu.Unlock()
 	if why := p.stale(sid, commit); why != "" {
 		p.drop(sid, commit)
 		p.saveWaiting()
-		p.cfg.Logger.Info("push resume", "event", "dropped", "why", why)
+		shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "dropped", "why", why)
 		return false
 	}
 	p.mu.Lock()
@@ -273,7 +298,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		}
 	}
 	if !needs {
-		p.cfg.Logger.Info("push resume", "event", "deciding")
+		shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "deciding")
 		p.ReviewDone(sid, commit)
 		return false
 	}
@@ -287,7 +312,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	}
 	err = start(ctx, sid)
 	if err == nil {
-		p.cfg.Logger.Info("push resume", "event", "review-started")
+		shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "review-started")
 		return false
 	}
 	e, ok := errors.AsType[*Error](err)
@@ -303,7 +328,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	if ok {
 		why = e.Reason
 	}
-	p.cfg.Logger.Info("push resume", "event", "review-not-started", "why", why)
+	shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "review-not-started", "why", why)
 	p.ReviewDone(sid, commit)
 	return false
 }

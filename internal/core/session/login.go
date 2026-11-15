@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -179,7 +181,7 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 		host = h
 	}
 	link, err := loginStep(ctx, host, cmd, step, code)
-	d.cfg.Logger.Info("claude login", "target", target, "step", step, "ok", err == nil)
+	shared.For(ctx, d.cfg.Logger).Info("claude login", "target", target, "step", step, "ok", err == nil)
 	if err != nil || step != "code" {
 		return link, nil, err
 	}
@@ -212,7 +214,7 @@ func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn,
 		return nil, explained(invalid("key"), "Paste the key exactly as the Claude Console or your gateway's team gives it: 20 to 512 characters, with no spaces or quotes.")
 	}
 	err := d.sendKey(ctx, target, key)
-	d.cfg.Logger.Info("claude api key", "target", target, "ok", err == nil)
+	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "ok", err == nil)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +252,7 @@ func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
 	d.keyMu.Lock()
 	err := d.removeKeyLocked(ctx, target, true)
 	d.keyMu.Unlock()
-	d.cfg.Logger.Info("claude api key", "target", target, "step", "clear", "ok", err == nil)
+	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "step", "clear", "ok", err == nil)
 	return err
 }
 

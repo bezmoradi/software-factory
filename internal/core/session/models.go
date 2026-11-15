@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -278,7 +279,7 @@ func (w *SessionWork) CodexModels(ctx context.Context, box string) ([]AgentModel
 	c = w.codex
 	w.mu.Unlock()
 	if err != nil {
-		w.cfg.Logger.Info("codex models", "event", "probe-failed")
+		shared.For(ctx, w.cfg.Logger).Info("codex models", "event", "probe-failed")
 	}
 	return slices.Clone(c.list), c.known
 }
@@ -406,7 +407,7 @@ func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string
 	if result == "" {
 		result = "start model"
 	}
-	w.audit(AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: info.Project, By: "page", Kind: AuditModelSwitch, Result: result, Reason: effort})
+	w.audit(AuditEntry{Req: shared.RequestOf(ctx), Time: w.cfg.Now(), Session: sid, Repository: info.Project, By: "page", Kind: AuditModelSwitch, Result: result, Reason: effort})
 	w.changed(sid)
 	return nil
 }

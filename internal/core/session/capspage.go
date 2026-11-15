@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 func formatMinutes(d time.Duration) string {
@@ -303,7 +305,7 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 			return err
 		}
 	}
-	l.audit(AuditEntry{Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapStopped, Reason: "the person pressed Stop at the " + words + ", so the engine stopped the session; it stays at the cap until the person raises it"})
+	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapStopped, Reason: "the person pressed Stop at the " + words + ", so the engine stopped the session; it stays at the cap until the person raises it"})
 	l.flush(true)
 	return nil
 }

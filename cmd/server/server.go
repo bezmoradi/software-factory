@@ -191,6 +191,7 @@ type engineParts struct {
 	identity   *session.Identities
 	allowlist  *session.Allowlist
 	catalogs   *session.Catalogs
+	boxes      session.Boxes
 }
 
 func reachable(b session.Boxes) func(context.Context) error {
@@ -408,7 +409,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -525,7 +526,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return err
 	}
 	shots := useScreenshots(reg, cfg.Workspace, parts.routes, parts.dispatcher, logger)
-	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown()}, reg, logger)
+	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, logger)}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err

@@ -26,6 +26,7 @@ var _ session.LookupStore = PackageLookups{}
 type lookupsJSON struct {
 	Version  int      `json:"version"`
 	Projects []string `json:"projects"`
+	Owner    string   `json:"owner,omitempty"`
 }
 
 var errLookups = errors.New("package-lookups.json isn't a list of projects this engine reads")
@@ -60,6 +61,7 @@ func (s PackageLookups) Load() ([]string, error) {
 }
 
 func (s PackageLookups) Save(list []string) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	if len(list) > session.MaxLookupProjects {
 		return errLookups
@@ -70,5 +72,5 @@ func (s PackageLookups) Save(list []string) error {
 			out = append(out, p)
 		}
 	}
-	return write(s.Dir, lookupsFile, lookupsJSON{Version: 1, Projects: out})
+	return write(s.Dir, lookupsFile, lookupsJSON{Owner: owner, Version: 1, Projects: out})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -94,7 +95,7 @@ func (s *Server) splitRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	answer := splits.Request(sid, tasks)
-	s.logger.Info("split request", "side", "agent", "tasks", len(tasks), "result", answer.Result)
+	shared.For(r.Context(), s.logger).Info("split request", "side", "agent", "tasks", len(tasks), "result", answer.Result)
 	send(w, http.StatusOK, map[string]string{"result": answer.Result, "reason": answer.Reason})
 }
 
@@ -120,7 +121,7 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 			return
 		}
 		err := splits.Edit(sid, card, title, message)
-		s.logger.Info("split edit", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("split edit", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "dismiss":
 		if !keysWithin(body, "op", "sid", "card") {
@@ -128,7 +129,7 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 			return
 		}
 		err := splits.Dismiss(sid, card)
-		s.logger.Info("split dismiss", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("split dismiss", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "start":
 		consent, consented := consentOf(body)
@@ -140,7 +141,7 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 		ctx, cancel := context.WithTimeout(r.Context(), dispatchFor)
 		defer cancel()
 		started, err := splits.Start(ctx, sid, card, consent)
-		s.logger.Info("split start", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("split start", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

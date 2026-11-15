@@ -9,10 +9,14 @@ import (
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
+	if t.Req == "" {
+		t.Req = shared.RequestOf(ctx)
+	}
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
 		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't review it.")
 	}
@@ -39,7 +43,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
 		release()
-		r.cfg.Logger.Info("review", "event", "refused", "why", err.Error())
+		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", err.Error())
 		return err
 	}
 	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
@@ -185,10 +189,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if t.Auto && autoRuns(entries, t.Branch)+len(plans) > MaxAutoRuns {
 		release()
-		r.cfg.Logger.Info("review", "event", "refused", "why", "auto-capped")
+		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", "auto-capped")
 		return explained(conflict("auto-capped"), fmt.Sprintf("The engine already ran %d automatic reviews on this branch, its limit, so it doesn't start more on the agent's request. Press Review to start them yourself.", MaxAutoRuns))
 	}
-	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewer container's sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch)}
+	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewer container's sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch), Req: t.Req}
 	for _, p := range plans {
 		view.Roles = append(view.Roles, RoleReview{Role: p.q.Role, Name: ReviewerName(p.q), Agent: p.q.Agent, State: review.Running, Why: p.q.Why,
 			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != "", Override: p.kept, Run: p.run, Runs: p.runs, Advisory: p.q.Advisory})
@@ -204,9 +208,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		view.Note += " " + notInstalled
 	}
 	r.show(t.SID, view)
-	r.cfg.Logger.Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
+	shared.For(ctx, r.cfg.Logger).Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.wg.Go(func() {
-		r.run(t, head, r.reviewerVersion(r.cfg.Base), plans, plugin, view, held, given)
+		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, view, held, given)
 		release()
 		if r.cfg.Base.Err() == nil {
 			r.finished(t.SID, head)

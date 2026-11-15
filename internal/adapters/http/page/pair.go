@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -165,7 +166,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 			return
 		}
 		started, err := pairs.Next(ctx, id, consent, box)
-		s.logger.Info("pair next", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("pair next", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -203,7 +204,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 			return
 		}
 		err := pairs.Keep(id, sid)
-		s.logger.Info("pair keep", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("pair keep", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine lists and reads merged pull requests, starts paired sessions, and shows or keeps one of a pair, nothing else."})

@@ -57,6 +57,7 @@ type Config struct {
 	WorkspaceView  session.WorkspacePage
 	Exceptions     session.ExceptionsPage
 	HelperDown     func() bool
+	Diagnostics    session.DiagnosticsPage
 }
 
 type Server struct {
@@ -192,6 +193,7 @@ var pageRoutes = map[string]bool{
 	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
 	reviewReplyRoute: true,
+	diagnosticsRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -205,8 +207,8 @@ func (s *Server) pageRoute(r *http.Request) string {
 	return "other"
 }
 
-func (s *Server) reject(w http.ResponseWriter, status int, why string) {
-	s.logger.Warn("request refused", "side", "page", "why", why)
+func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why string) {
+	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", why)
 	refuse(w, status, why)
 }
 
@@ -222,17 +224,17 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	_ = rc.SetWriteDeadline(time.Now().Add(writeFor))
 	_ = rc.SetReadDeadline(time.Now().Add(readFor))
 	if r.Host != s.host {
-		s.reject(w, http.StatusMisdirectedRequest, "host")
+		s.reject(w, r, http.StatusMisdirectedRequest, "host")
 		return
 	}
 	origin, hasOrigin := r.Header["Origin"]
 	if hasOrigin && (len(origin) != 1 || origin[0] != s.origin) {
-		s.reject(w, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin")
 		return
 	}
 	visit := r.Method == http.MethodGet && r.URL.Path == "/" && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
 	if site, ok := r.Header["Sec-Fetch-Site"]; ok && !siteAllowed(site, visit) {
-		s.reject(w, http.StatusForbidden, "site")
+		s.reject(w, r, http.StatusForbidden, "site")
 		return
 	}
 	if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, s.assets.prefix) {
@@ -253,11 +255,11 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		s.reject(w, http.StatusBadRequest, "query")
+		s.reject(w, r, http.StatusBadRequest, "query")
 		return
 	}
 	if r.Method == http.MethodPost && !hasOrigin {
-		s.reject(w, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin")
 		return
 	}
 	if r.URL.Path == signinRoute {
@@ -269,7 +271,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
-		s.reject(w, http.StatusUnauthorized, "token")
+		s.reject(w, r, http.StatusUnauthorized, "token")
 		return
 	}
 	if r.URL.Path == "/api/events" {
@@ -319,6 +321,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == reviewReplyRoute {
 		s.wholeReply(w, body)
+		return
+	}
+	if r.URL.Path == diagnosticsRoute {
+		s.diagnostics(w, r, body)
 		return
 	}
 	if r.URL.Path == walkthroughRoute {
@@ -504,7 +510,7 @@ func (s *Server) allowSignin() bool {
 
 func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 	if !s.allowSignin() {
-		s.reject(w, http.StatusTooManyRequests, "signin-rate")
+		s.reject(w, r, http.StatusTooManyRequests, "signin-rate")
 		return
 	}
 	body, bad := readObject(w, r, MaxPageBody)
@@ -513,12 +519,12 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body) != 0 {
-		s.reject(w, http.StatusBadRequest, "body")
+		s.reject(w, r, http.StatusBadRequest, "body")
 		return
 	}
 	key := s.keys.issue()
 	s.reg.DetachAll()
-	s.logger.Info("page signed in")
+	shared.For(r.Context(), s.logger).Info("page signed in")
 	send(w, http.StatusOK, map[string]any{"token": key})
 }
 
@@ -528,15 +534,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	sink := newStream(MaxStreamQueue)
 	id, err := s.reg.Attach(sink)
 	if err != nil {
-		s.reject(w, http.StatusTooManyRequests, "streams")
+		s.reject(w, r, http.StatusTooManyRequests, "streams")
 		return
 	}
 	defer s.reg.Detach(id)
 	if !s.authorized(r) {
-		s.reject(w, http.StatusUnauthorized, "token")
+		s.reject(w, r, http.StatusUnauthorized, "token")
 		return
 	}
-	s.logger.Info("page stream opened")
+	shared.For(r.Context(), s.logger).Info("page stream opened")
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()

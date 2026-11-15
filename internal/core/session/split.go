@@ -409,6 +409,6 @@ func (s *Splits) Start(ctx context.Context, sid, card string, consent Consent) (
 		return started, err
 	}
 	s.send.send(started.SID, message, "a task's first message")
-	s.cfg.Logger.Info("splits", "event", "started")
+	shared.For(ctx, s.cfg.Logger).Info("splits", "event", "started")
 	return started, nil
 }

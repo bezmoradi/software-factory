@@ -27,6 +27,7 @@ type agentFileJSON struct {
 	URL     string    `json:"url"`
 	Text    []byte    `json:"text"`
 	At      time.Time `json:"at"`
+	Owner   string    `json:"owner,omitempty"`
 }
 
 type agentRoleJSON struct {
@@ -34,6 +35,7 @@ type agentRoleJSON struct {
 	URL     string `json:"url"`
 	Role    string `json:"role"`
 	Name    string `json:"name"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 type reviewerAgentsJSON struct {
@@ -71,14 +73,15 @@ func (s ReviewerAgents) Load() (session.AgentFileState, error) {
 }
 
 func (s ReviewerAgents) Save(st session.AgentFileState) error {
+	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := reviewerAgentsJSON{Version: 1, Files: make([]agentFileJSON, 0, len(st.Files)), Roles: make([]agentRoleJSON, 0, len(st.Roles))}
 	for _, a := range st.Files {
-		f.Files = append(f.Files, agentFileJSON{Project: a.Project, URL: a.URL, Text: []byte(a.Text), At: a.At.UTC()})
+		f.Files = append(f.Files, agentFileJSON{Owner: owner, Project: a.Project, URL: a.URL, Text: []byte(a.Text), At: a.At.UTC()})
 	}
 	for _, r := range st.Roles {
-		f.Roles = append(f.Roles, agentRoleJSON{Project: r.Project, URL: r.URL, Role: string(r.Role), Name: r.Name})
+		f.Roles = append(f.Roles, agentRoleJSON{Owner: owner, Project: r.Project, URL: r.URL, Role: string(r.Role), Name: r.Name})
 	}
 	return write(s.Dir, reviewerAgentsFile, f)
 }

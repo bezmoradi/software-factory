@@ -36,6 +36,7 @@ type reviewJSON struct {
 	Verdict      string    `json:"verdict,omitempty"`
 	Channel      string    `json:"channel,omitempty"`
 	Override     string    `json:"override,omitempty"`
+	Owner        string    `json:"owner,omitempty"`
 	Shaped       string    `json:"shaped,omitempty"`
 	Base         string    `json:"base,omitempty"`
 	Since        string    `json:"since,omitempty"`
@@ -110,7 +111,12 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 
 func (s Reviews) Save(list []session.ReviewEntry) error {
 	f := reviewsJSON{Version: reviewsVersion, Reviews: make([]reviewJSON, 0, len(list))}
+	owner := ownerIn(s.Dir)
 	for _, e := range list {
+		decided := ""
+		if e.Record.Override != "" {
+			decided = owner
+		}
 		run := 0
 		if e.Key.Number() > 1 {
 			run = e.Key.Number()
@@ -119,7 +125,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Run: run, Advisory: e.Record.Advisory, Cited: e.Cited.Looked, NotInOSV: e.Cited.Missing, CitedMore: e.Cited.More, CitedFailed: e.Cited.Failed,
 			Commit: e.Key.Commit, Branch: e.Key.Branch, Agent: e.Key.Agent, Role: string(e.Role),
 			Provider: e.Record.Provider, State: string(e.Record.State), Verdict: e.Record.Verdict,
-			Channel: string(e.Record.Channel), Override: e.Record.Override, Shaped: e.Record.Shaped,
+			Channel: string(e.Record.Channel), Override: e.Record.Override, Owner: decided, Shaped: e.Record.Shaped,
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
 			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts, Approved: e.Approved, Team: e.Team,

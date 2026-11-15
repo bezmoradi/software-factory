@@ -6,6 +6,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/gate"
 	"github.com/bezmoradi/software-factory/internal/core/push"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const ReconcileFor = 20 * time.Second
@@ -47,7 +48,7 @@ func (p *Pushes) Reconcile(ctx context.Context, open AuditOpen) int {
 	}
 	list, err := open.Open()
 	if err != nil {
-		p.cfg.Logger.Warn("push reconcile", "event", "audit-unreadable")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "audit-unreadable")
 		return 0
 	}
 	done := 0
@@ -60,7 +61,7 @@ func (p *Pushes) Reconcile(ctx context.Context, open AuditOpen) int {
 		}
 	}
 	if done > 0 {
-		p.cfg.Logger.Info("push reconcile", "event", "settled", "count", done)
+		shared.For(ctx, p.cfg.Logger).Info("push reconcile", "event", "settled", "count", done)
 	}
 	return done
 }
@@ -69,20 +70,20 @@ func (p *Pushes) reconcile(ctx context.Context, e AuditEntry) bool {
 	url, token, err := p.cfg.Repos.PushTarget(e.Repository)
 	switch {
 	case err != nil:
-		p.cfg.Logger.Warn("push reconcile", "event", "skipped", "why", "project")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "skipped", "why", "project")
 		return false
 	case url != e.Remote || e.Commit == "" || !push.ValidBranch(e.Branch):
-		p.cfg.Logger.Warn("push reconcile", "event", "skipped", "why", "remote")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "skipped", "why", "remote")
 		return false
 	case token == "":
-		p.cfg.Logger.Warn("push reconcile", "event", "skipped", "why", "token")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "skipped", "why", "token")
 		return false
 	}
 	rctx, cancel := context.WithTimeout(ctx, ReconcileFor)
 	remote, err := p.cfg.Pusher.Remote(rctx, push.Target{URL: url, Token: token, Branch: e.Branch})
 	cancel()
 	if err != nil {
-		p.cfg.Logger.Warn("push reconcile", "event", "remote-unreachable")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "remote-unreachable")
 		return false
 	}
 	out := e
@@ -108,7 +109,7 @@ func (p *Pushes) reconcile(ctx context.Context, e AuditEntry) bool {
 	}
 	out.Reason = clipAtWord(out.Reason, maxPushReason)
 	if err := p.cfg.Audit.Append(out); err != nil {
-		p.cfg.Logger.Warn("push reconcile", "event", "audit-not-written")
+		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "audit-not-written")
 		return false
 	}
 	if t, ok := p.cfg.Targets(e.Session); ok && t.Branch == e.Branch {

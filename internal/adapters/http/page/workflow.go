@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
@@ -221,7 +222,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		err := s.cfg.Work.SetType(sid, size)
-		s.logger.Info("work type", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("work type", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/approve-plan", "/api/approve-requirements":
 		hash, okHash := body["hash"].(string)
@@ -231,7 +232,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		err := s.cfg.Work.Approve(sid, path == "/api/approve-plan", hash, text)
-		s.logger.Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/team":
 		repo, okPath := body["path"].(string)
@@ -287,7 +288,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 				return
 			}
 			err := s.cfg.Work.SetProjectOption(repo, op, on)
-			s.logger.Info("project setting", "op", op, "on", on, "ok", err == nil)
+			shared.For(r.Context(), s.logger).Info("project setting", "op", op, "on", on, "ok", err == nil)
 			reply(w, err, http.StatusOK)
 			return
 		case "rounds":
@@ -311,7 +312,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 				return
 			}
 			err := s.cfg.Work.SetAutoFindings(repo, on)
-			s.logger.Info("project setting", "op", op, "ok", err == nil)
+			shared.For(r.Context(), s.logger).Info("project setting", "op", op, "ok", err == nil)
 			reply(w, err, http.StatusOK)
 			return
 		default:
@@ -319,7 +320,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		err := s.cfg.Work.SetProject(repo, op, rounds, kind)
-		s.logger.Info("project setting", "op", op, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("project setting", "op", op, "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	}
 }

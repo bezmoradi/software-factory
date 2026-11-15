@@ -82,7 +82,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	status := &http.Server{
 		Handler: egress.StatusHandler(egress.StatusConfig{
 			Live: live, Books: []*egress.Refusals{agentsBook, reviewersBook},
-			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets,
+			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets, Logger: logger,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -112,7 +112,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	reviewErr := make(chan error, 1)
 	if reviewListener != nil {
 		logger.Info("egress listening for reviewers", "proxy", reviewListener.Addr().String())
-		reviewProxy := egress.New(live.Side(ReviewersSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide, Seen: reviewersSeen})
+		reviewProxy := egress.New(live.Side(ReviewersSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide, Seen: reviewersSeen, Trusted: true})
 		go func() {
 			reviewErr <- reviewProxy.Serve(ctx, reviewListener)
 			cancel()

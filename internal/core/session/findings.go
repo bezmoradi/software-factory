@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
@@ -168,7 +169,7 @@ func (p *Pushes) hasFindings(sid string, t PushTarget, head string) bool {
 	return len(blockingRoles(entries, t.Branch, head, p.requiredAgents(sid, t, head), nil)) > 0
 }
 
-func (p *Pushes) SendFindings(_ context.Context, sid, card, commit string) error {
+func (p *Pushes) SendFindings(ctx context.Context, sid, card, commit string) error {
 	now := p.cfg.Now()
 	p.mu.Lock()
 	h := p.held[sid]
@@ -200,10 +201,10 @@ func (p *Pushes) SendFindings(_ context.Context, sid, card, commit string) error
 	p.busy[sid] = true
 	p.mu.Unlock()
 	defer p.release(sid)
-	return p.sendFindings(sid, h, ByPage)
+	return p.sendFindings(ctx, sid, h, ByPage)
 }
 
-func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
+func (p *Pushes) sendFindings(ctx context.Context, sid string, h *heldPush, by string) error {
 	t, ok := p.cfg.Targets(sid)
 	if !ok || p.cfg.Reviews == nil {
 		return explained(conflict("not started here"), "Only a session this engine started can get its reviewers' findings.")
@@ -220,7 +221,7 @@ func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
 		}
 	}
 	e := AuditEntry{Time: p.cfg.Now(), Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: by,
-		Kind: AuditFindings, Reviewer: strings.Join(agents, ", ")}
+		Kind: AuditFindings, Reviewer: strings.Join(agents, ", "), Req: shared.RequestOf(ctx)}
 	if len(roles) == 0 {
 		return explained(conflict("no findings"), "No reviewer's blocking message is waiting for this commit.")
 	}
@@ -228,7 +229,7 @@ func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
 	if !ok {
 		e.Result, e.Reason = ResultWithheld, "the reviewers' messages held a token-shaped string, so the engine didn't send them"
 		p.record(e)
-		p.cfg.Logger.Warn("push", "event", "findings-withheld")
+		shared.For(ctx, p.cfg.Logger).Warn("push", "event", "findings-withheld")
 		return explained(conflict("withheld"), "The reviewers' messages hold what looks like a token, so the engine didn't send them to the session. Read them on the page instead.")
 	}
 	if p.cfg.Tell == nil {
@@ -237,7 +238,7 @@ func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
 	if err := p.cfg.Tell(sid, text); err != nil {
 		e.Result, e.Reason = ResultNotSent, "the session wasn't running and controlled from the page, so the findings weren't sent"
 		p.record(e)
-		p.cfg.Logger.Info("push", "event", "findings-not-sent")
+		shared.For(ctx, p.cfg.Logger).Info("push", "event", "findings-not-sent")
 		if x, ok := errors.AsType[*Error](err); ok && x.Message != "" {
 			return x
 		}
@@ -254,11 +255,12 @@ func (p *Pushes) sendFindings(sid string, h *heldPush, by string) error {
 		v.FindingsSent = sent
 		p.show(sid, v)
 	}
-	p.cfg.Logger.Info("push", "event", "findings-sent", "by", by, "roles", len(roles))
+	shared.For(ctx, p.cfg.Logger).Info("push", "event", "findings-sent", "by", by, "roles", len(roles))
 	return nil
 }
 
-func (p *Pushes) autoFindings(sid string) {
+func (p *Pushes) autoFindings(ctx context.Context, sid string) {
+	log := shared.For(ctx, p.cfg.Logger)
 	if p.cfg.AutoFindings == nil || p.cfg.ReviewerSignIn == nil || p.cfg.SessionSignIn == nil || p.cfg.Reviews == nil {
 		return
 	}
@@ -268,16 +270,16 @@ func (p *Pushes) autoFindings(sid string) {
 	}
 	reviewer, ok := p.cfg.ReviewerSignIn()
 	if !ok || reviewer.Method != SignInSubscription {
-		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "reviewer-sign-in")
+		log.Info("push", "event", "findings-not-automatic", "why", "reviewer-sign-in")
 		return
 	}
 	agent, ok := p.cfg.SessionSignIn(sid)
 	if !ok || agent.Method != SignInSubscription {
-		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "session-sign-in")
+		log.Info("push", "event", "findings-not-automatic", "why", "session-sign-in")
 		return
 	}
 	if why := p.automaticHeld(sid); why != "" {
-		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "limits")
+		log.Info("push", "event", "findings-not-automatic", "why", "limits")
 		return
 	}
 	p.mu.Lock()
@@ -289,10 +291,10 @@ func (p *Pushes) autoFindings(sid string) {
 	}
 	entries, err := p.cfg.Reviews.Entries()
 	if err != nil || autoRuns(entries, t.Branch)+len(p.requiredAgents(sid, t, h.commit)) > MaxAutoRuns {
-		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "auto-capped")
+		log.Info("push", "event", "findings-not-automatic", "why", "auto-capped")
 		return
 	}
-	if err := p.sendFindings(sid, h, ByEngine); err != nil {
-		p.cfg.Logger.Info("push", "event", "findings-not-automatic", "why", "not-sent")
+	if err := p.sendFindings(ctx, sid, h, ByEngine); err != nil {
+		log.Info("push", "event", "findings-not-automatic", "why", "not-sent")
 	}
 }

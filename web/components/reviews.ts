@@ -191,7 +191,7 @@ class SfReviews extends HTMLElement {
     }
     const failed = r && !value.asking ? failure(r, note) : null
     if (failed) {
-      const p = el('p', 'small bad', failed.said)
+      const p = el('p', 'small bad', r?.req ? `${failed.said} Request id ${text(r.req)}.` : failed.said)
       p.id = 'reviews-failed'
       described.push(p.id)
       parts.push(p)

@@ -22,6 +22,7 @@ type repoJSON struct {
 	Branch  string    `json:"branch"`
 	Commit  string    `json:"commit,omitempty"`
 	AddedAt time.Time `json:"addedAt"`
+	Owner   string    `json:"owner,omitempty"`
 }
 
 type reposJSON struct {
@@ -46,9 +47,10 @@ func (s Repos) Load() ([]session.Record, error) {
 }
 
 func (s Repos) Save(list []session.Record) error {
+	owner := ownerIn(s.Dir)
 	f := reposJSON{Version: 1, Repos: make([]repoJSON, 0, len(list))}
 	for _, r := range list {
-		f.Repos = append(f.Repos, repoJSON{Name: r.Name, URL: r.URL, Branch: r.Branch, Commit: r.Commit, AddedAt: r.AddedAt.UTC()})
+		f.Repos = append(f.Repos, repoJSON{Owner: owner, Name: r.Name, URL: r.URL, Branch: r.Branch, Commit: r.Commit, AddedAt: r.AddedAt.UTC()})
 	}
 	return write(s.Dir, reposFile, f)
 }

@@ -316,7 +316,7 @@ func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
 	p.saveLocked()
 	p.mu.Unlock()
 	p.send.send(started.SID, text, "the pair's first message")
-	p.cfg.Logger.Info("pairs", "event", "started", "agents", len(q.Agents), "benchmark", bench != nil)
+	shared.For(ctx, p.cfg.Logger).Info("pairs", "event", "started", "agents", len(q.Agents), "benchmark", bench != nil)
 	return PairStarted{Started: started, Pair: id, Next: len(q.Agents) == 2}, nil
 }
 
@@ -374,7 +374,7 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string
 	p.saveLocked()
 	p.mu.Unlock()
 	p.send.send(started.SID, text, "the pair's first message")
-	p.cfg.Logger.Info("pairs", "event", "second-started")
+	shared.For(ctx, p.cfg.Logger).Info("pairs", "event", "second-started")
 	return started, nil
 }
 

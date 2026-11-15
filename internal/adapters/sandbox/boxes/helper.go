@@ -55,6 +55,21 @@ type Helper struct {
 	global  sync.Mutex
 	pending map[string]netip.Prefix
 	kick    chan struct{}
+	about   About
+}
+
+type About struct {
+	Docker  string `json:"docker"`
+	Image   string `json:"image"`
+	OS      string `json:"os"`
+	OSType  string `json:"osType"`
+	Arch    string `json:"arch"`
+	Kernel  string `json:"kernel"`
+	Runtime string `json:"runtime"`
+}
+
+func (h *Helper) About() About {
+	return h.about
 }
 
 var _ session.Boxes = (*Helper)(nil)
@@ -119,7 +134,8 @@ func NewHelper(ctx context.Context, hc HelperConfig) (*Helper, error) {
 	h := &Helper{
 		docker: hc.Docker, cfg: hc.Config, self: self.ID, pool: hc.Config.pool(), logger: hc.Logger,
 		locks: newKeyedLocks(), labels: map[string]map[string]string{self.Image: img.Config.Labels}, pending: map[string]netip.Prefix{}, kick: make(chan struct{}, 1),
-		rec: &recipe{project: project, image: self.Image, imageEnv: img.Config.Env, imageLabel: img.Config.Labels, entrypoint: img.Config.Entrypoint, runtime: runtime, cfg: hc.Config},
+		rec:   &recipe{project: project, image: self.Image, imageEnv: img.Config.Env, imageLabel: img.Config.Labels, entrypoint: img.Config.Entrypoint, runtime: runtime, cfg: hc.Config},
+		about: About{Docker: version, Image: self.Image, OS: info.OperatingSystem, OSType: info.OSType, Arch: info.Architecture, Kernel: info.KernelVersion, Runtime: runtime},
 	}
 	if err := h.checkPool(ctx, info); err != nil {
 		return nil, err

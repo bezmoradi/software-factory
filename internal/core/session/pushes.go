@@ -29,6 +29,7 @@ const (
 	ByReviews       = "agent, after reviews"
 	ByEngine        = "engine"
 	ByStart         = "engine, at start"
+	ByReset         = "engine, at reset"
 	AgentReplyFor   = 55 * time.Second
 
 	ResultUpToDate gate.Result = "up-to-date"
@@ -77,6 +78,13 @@ type AuditEntry struct {
 	Path         string
 	Blobs        []string
 	Request      string
+	Req          string
+	Person       string
+	FormerPerson string
+	Box          string
+	From         string
+	FromRef      string
+	Source       string
 	Hash         string
 	Agent        string
 	PluginCommit string
@@ -184,6 +192,7 @@ type heldPush struct {
 
 	findings bool
 	sent     time.Time
+	req      string
 }
 
 type Pushes struct {
@@ -196,6 +205,7 @@ type Pushes struct {
 	capped  map[string]bool
 	views   map[string]PushView
 	waiting map[string]string
+	waitReq map[string]waitedFor
 	again   map[string]bool
 	recheck map[string]string
 	refused map[string][]string
@@ -248,7 +258,7 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 		cfg.Logger = quiet{}
 	}
 	p := &Pushes{cfg: cfg, kind: kind, busy: map[string]bool{}, held: map[string]*heldPush{},
-		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, again: map[string]bool{}, recheck: map[string]string{}, refused: map[string][]string{}, spoken: map[string]string{}}
+		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, waitReq: map[string]waitedFor{}, again: map[string]bool{}, recheck: map[string]string{}, refused: map[string][]string{}, spoken: map[string]string{}}
 	p.loadDenials()
 	p.loadWaiting()
 	return p, nil
@@ -280,7 +290,7 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		p.mu.Unlock()
 		why := "factory_push was called more than " + strconv.Itoa(PushCalls) + " times in " + strconv.Itoa(int(PushWindow/time.Minute)) + " minutes for this session; end your turn and let the person push from the page"
 		if first {
-			p.record(AuditEntry{Time: now, Session: sid, By: ByAgent, Result: string(gate.Refused), Reason: why})
+			p.record(AuditEntry{Time: now, Session: sid, By: ByAgent, Result: string(gate.Refused), Reason: why, Req: shared.RequestOf(ctx)})
 		}
 		return push.Reply{Decision: push.DecisionRefused, Reason: why}
 	}
@@ -320,7 +330,7 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		return reply
 	}
 	if d.NeedsApproval {
-		p.cfg.Logger.Info("push", "event", "review-not-started", "why", "approval")
+		shared.For(ctx, p.cfg.Logger).Info("push", "event", "review-not-started", "why", "approval")
 		reply.Reason = awaitingApproval + reply.Reason
 		return reply
 	}
@@ -416,15 +426,15 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 		return "", false, unfinishedReviews(head, ended)
 	default:
 		if p.halted(ByReviews) != "" {
-			return p.holdForRelease(sid, head)
+			return p.holdForRelease(sid, head, shared.RequestOf(ctx))
 		}
 		if err := start(ctx, sid); err != nil {
 			e, ok := errors.AsType[*Error](err)
 			switch {
 			case ok && e.Reason == "halted":
-				return p.holdForRelease(sid, head)
+				return p.holdForRelease(sid, head, shared.RequestOf(ctx))
 			case ok && e.Reason == "cost":
-				p.cfg.Logger.Info("push", "event", "review-not-started", "why", "cost")
+				shared.For(ctx, p.cfg.Logger).Info("push", "event", "review-not-started", "why", "cost")
 				return "", false, "the reviewer container runs on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
 			case ok && e.Reason == "capped":
 				return "", false, "the reviewers reached this project's round limit and still block, so the engine doesn't start them again; stop fixing and summarize their open findings for the person, who decides on the page"
@@ -433,6 +443,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 			case ok && e.Reason == "auto-capped":
 				return "", false, "the engine already ran its limit of automatic reviews on this branch; the person starts more from the page"
 			case ok && e.Reason == "reviews":
+				p.waitAs(sid, head, shared.RequestOf(ctx))
 				p.queueReview(sid, head)
 				return "", false, "the engine reviews at most " + strconv.Itoa(MaxReviewing) + " sessions at once, so it starts the reviews of commit " + shortSHA(head) + " when one finishes, and pushes it itself if every review passes"
 			case !ok || e.Reason != "reviewing":
@@ -440,15 +451,16 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 			}
 		}
 	}
-	p.wait(sid, head)
+	p.waitAs(sid, head, shared.RequestOf(ctx))
 	return head, true, ""
 }
 
-func (p *Pushes) heldReviewed(sid, head, branch string) {
+func (p *Pushes) heldReviewed(sid, head, branch, req string) {
 	p.wg.Go(func() {
 		defer p.release(sid)
+		log := shared.Tagged(p.cfg.Logger, req)
 		kept := func(why string) {
-			p.cfg.Logger.Info("push", "event", "card-kept", "why", why)
+			log.Info("push", "event", "card-kept", "why", why)
 		}
 		t, ok := p.cfg.Targets(sid)
 		switch {
@@ -468,10 +480,10 @@ func (p *Pushes) heldReviewed(sid, head, branch string) {
 			kept("head-moved")
 			return
 		}
-		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
+		ctx, cancel := context.WithTimeout(shared.WithRequest(p.cfg.Base, req), PushFor)
 		defer cancel()
 		reply, _ := p.decide(ctx, sid, ByReviews, nil, head)
-		p.cfg.Logger.Info("push", "event", "held-reviewed", "then", string(reply.Decision))
+		log.Info("push", "event", "held-reviewed", "then", string(reply.Decision))
 	})
 }
 
@@ -526,16 +538,16 @@ func (p *Pushes) ReviewDone(sid, head string) {
 	if p.waiting[sid] != head {
 		h := p.held[sid]
 		again := h != nil && h.commit == head && p.cfg.Now().Before(h.expires)
-		branch := ""
+		branch, req := "", ""
 		switch {
 		case again && p.busy[sid]:
 			p.recheck[sid], again = head, false
 		case again:
-			p.busy[sid], branch = true, h.branch
+			p.busy[sid], branch, req = true, h.branch, h.req
 		}
 		p.mu.Unlock()
 		if again {
-			p.heldReviewed(sid, head, branch)
+			p.heldReviewed(sid, head, branch, req)
 		}
 		return
 	}
@@ -551,22 +563,24 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		p.mu.Unlock()
 		return
 	}
+	req := p.waitedReq(sid, head)
 	delete(p.waiting, sid)
+	delete(p.waitReq, sid)
 	p.busy[sid] = true
 	p.mu.Unlock()
 	p.wg.Go(func() {
 		defer p.release(sid)
-		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
+		ctx, cancel := context.WithTimeout(shared.WithRequest(p.cfg.Base, req), PushFor)
 		defer cancel()
 		reply, _ := p.decide(ctx, sid, ByReviews, nil, "")
 		p.decided(sid, head, reply)
 		if reply.Decision == push.DecisionHeld {
-			p.autoFindings(sid)
+			p.autoFindings(ctx, sid)
 		}
 	})
 }
 
-func (p *Pushes) Push(_ context.Context, sid string) error {
+func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be pushed from here.")
 	}
@@ -584,7 +598,7 @@ func (p *Pushes) Push(_ context.Context, sid string) error {
 			p.saveDenials()
 		}
 	}
-	p.start(sid, nil)
+	p.start(sid, nil, shared.RequestOf(ctx))
 	return nil
 }
 
@@ -617,7 +631,7 @@ func (p *Pushes) release(sid string) {
 	}
 }
 
-func (p *Pushes) start(sid string, answer *gate.Answer) {
+func (p *Pushes) start(sid string, answer *gate.Answer, req string) {
 	p.mu.Lock()
 	v := p.views[sid]
 	v.Running = true
@@ -626,13 +640,13 @@ func (p *Pushes) start(sid string, answer *gate.Answer) {
 	p.cfg.Show(sid, v.clone())
 	p.wg.Go(func() {
 		defer p.release(sid)
-		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
+		ctx, cancel := context.WithTimeout(shared.WithRequest(p.cfg.Base, req), PushFor)
 		defer cancel()
 		p.decide(ctx, sid, ByPage, answer, "")
 	})
 }
 
-func (p *Pushes) Answer(_ context.Context, sid, card, commit string, allow bool, reason string) error {
+func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow bool, reason string) error {
 	now := p.cfg.Now()
 	p.mu.Lock()
 	h := p.held[sid]
@@ -682,7 +696,7 @@ func (p *Pushes) Answer(_ context.Context, sid, card, commit string, allow bool,
 		}
 		t, _ := p.cfg.Targets(sid)
 		e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
-			Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: clean}
+			Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: clean, Req: shared.RequestOf(ctx)}
 		p.record(e)
 		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(h.missing), At: now, Audit: &e})
 		said := "The person denied the push of commit " + shortSHA7(h.commit) + " to " + h.branch + " on Software Factory's page"
@@ -690,18 +704,18 @@ func (p *Pushes) Answer(_ context.Context, sid, card, commit string, allow bool,
 			said += ": " + clip(clean, maxNoteReason)
 		}
 		p.cfg.Note(sid, said+". Software Factory won't push that commit on your request; commit a fix or ask the person what they want.")
-		p.cfg.Logger.Info("push", "event", "denied")
+		shared.For(ctx, p.cfg.Logger).Info("push", "event", "denied")
 		return nil
 	}
 	p.unrefuseLocked(sid, h.commit)
 	p.busy[sid] = true
 	p.mu.Unlock()
 	p.saveDenials()
-	p.start(sid, answer)
+	p.start(sid, answer, shared.RequestOf(ctx))
 	return nil
 }
 
-func (p *Pushes) Handoff(_ context.Context, sid, card, commit string) error {
+func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	now := p.cfg.Now()
 	p.mu.Lock()
 	h := p.held[sid]
@@ -748,10 +762,10 @@ func (p *Pushes) Handoff(_ context.Context, sid, card, commit string) error {
 	why := "the developer chose Hand off, so the push was denied and the session was asked for a handoff"
 	t, _ := p.cfg.Targets(sid)
 	e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
-		Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: "Hand off"}
+		Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: "Hand off", Req: shared.RequestOf(ctx)}
 	p.record(e)
 	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(h.missing), At: now, Audit: &e})
-	p.cfg.Logger.Info("push", "event", "handoff")
+	shared.For(ctx, p.cfg.Logger).Info("push", "event", "handoff")
 	return nil
 }
 
@@ -850,7 +864,7 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
 	p.mu.Unlock()
 	p.show(x.sid, v)
-	p.cfg.Logger.Info("push", "event", "card-refreshed", "missing", len(missing))
+	shared.Tagged(p.cfg.Logger, x.entry.Req).Info("push", "event", "card-refreshed", "missing", len(missing))
 	return push.Reply{Decision: push.DecisionHeld, Reason: e.Reason}
 }
 
@@ -876,7 +890,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	old := p.held[x.sid]
 	delete(p.held, x.sid)
 	if result == gate.Held && e.Commit != "" && e.Remote != "" {
-		h := &heldPush{card: randomHex(16), commit: e.Commit, branch: e.Branch, remote: e.Remote, missing: slices.Clone(missing), expires: e.Time.Add(AllowFor), handoff: x.handoff, findings: x.findings}
+		h := &heldPush{card: randomHex(16), commit: e.Commit, branch: e.Branch, remote: e.Remote, missing: slices.Clone(missing), expires: e.Time.Add(AllowFor), handoff: x.handoff, findings: x.findings, req: e.Req}
 		if old != nil && old.commit == h.commit && old.branch == h.branch && old.remote == h.remote {
 			h.sent = old.sent
 			if e.Time.Before(old.expires) {
@@ -894,7 +908,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	p.record(e)
 	v.Audit = &e
 	p.show(x.sid, v)
-	p.cfg.Logger.Info("push", "event", string(result), "by", e.By)
+	shared.Tagged(p.cfg.Logger, e.Req).Info("push", "event", string(result), "by", e.By)
 	said := x.said(result, reason, len(missing) > 0)
 	if e.By == ByAgent {
 		p.mu.Lock()
@@ -965,7 +979,7 @@ func reviewWords(passed, overridden int) string {
 }
 
 func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer, card string) (push.Reply, gate.Decision) {
-	x := &pushing{p: p, sid: sid, answer: answer, refresh: card != "", entry: AuditEntry{Time: p.cfg.Now(), Session: sid, By: by, Request: randomHex(16)}}
+	x := &pushing{p: p, sid: sid, answer: answer, refresh: card != "", entry: AuditEntry{Time: p.cfg.Now(), Session: sid, By: by, Request: randomHex(16), Req: shared.RequestOf(ctx)}}
 	refuse := func(why string) (push.Reply, gate.Decision) {
 		return x.end(gate.Refused, why, nil, ""), gate.Decision{Result: gate.Refused, Reason: why}
 	}

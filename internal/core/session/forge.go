@@ -466,8 +466,8 @@ func (f *Forges) Request(ctx context.Context, sid string, kind ForgeKind, title,
 	f.trim(sid)
 	f.mu.Unlock()
 	f.show(sid)
-	f.audit(sid, ft.t, v, ByAgent, ForgeHeld, "asked to open "+kindWord(kind)+": "+title)
-	f.cfg.Logger.Info("forge", "event", "held", "kind", string(kind))
+	f.audit(ctx, sid, ft.t, v, ByAgent, ForgeHeld, "asked to open "+kindWord(kind)+": "+title)
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "held", "kind", string(kind))
 	return ForgeReply{Result: ForgeHeld, Reason: "the " + kindWord(kind) + " waits for the person on Software Factory's page, who approves or denies it; only then does the engine open it on " + ft.repo.Host + ". End your turn and don't call " + tool + " again for it: the result (its number and link, or why not) reaches you with your next message"}
 }
 
@@ -511,17 +511,17 @@ func (f *Forges) show(sid string) {
 	f.saveCards()
 }
 
-func (f *Forges) audit(sid string, t PushTarget, v ForgeView, by, result, reason string) {
+func (f *Forges) audit(ctx context.Context, sid string, t PushTarget, v ForgeView, by, result, reason string) {
 	if f.cfg.Audit == nil {
 		return
 	}
-	e := AuditEntry{Time: f.cfg.Now(), Session: sid, Repository: t.Name, Branch: t.Branch, Remote: v.Host + "/" + v.Repo, By: by, Result: result, Reason: clip(reason, maxForgeReason), Kind: string(v.Kind), Request: v.Card}
+	e := AuditEntry{Time: f.cfg.Now(), Session: sid, Repository: t.Name, Branch: t.Branch, Remote: v.Host + "/" + v.Repo, By: by, Result: result, Reason: clip(reason, maxForgeReason), Kind: string(v.Kind), Request: v.Card, Req: shared.RequestOf(ctx)}
 	if err := f.cfg.Audit.Append(e); err != nil {
 		f.cfg.Logger.Warn("forge", "event", "audit-not-written")
 	}
 }
 
-func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft, confirmed bool) error {
+func (f *Forges) Answer(ctx context.Context, sid, card string, approve, draft, confirmed bool) error {
 	f.mu.Lock()
 	f.trim(sid)
 	var c *forgeCard
@@ -548,7 +548,7 @@ func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft, con
 		return explained(conflict("secret"), "This looks like a secret ("+where+"). Confirm on the card that it isn't one before it goes to the git host.")
 	}
 	if c.view.Kind == ForgeComment {
-		return f.answerCommentUnlocking(sid, c, approve)
+		return f.answerCommentUnlocking(sid, c, approve, shared.RequestOf(ctx))
 	}
 	t, _ := f.cfg.Targets(sid)
 	word := kindWord(c.view.Kind)
@@ -557,14 +557,14 @@ func (f *Forges) Answer(_ context.Context, sid, card string, approve, draft, con
 		v := c.view
 		f.mu.Unlock()
 		f.show(sid)
-		f.audit(sid, t, v, ByPage, ForgeDenied, "denied opening "+word+": "+v.Title)
+		f.audit(ctx, sid, t, v, ByPage, ForgeDenied, "denied opening "+word+": "+v.Title)
 		f.note(sid, "the person denied opening the "+word+" \""+clip(v.Title, 200)+"\" on the page, so the engine didn't open it. Don't ask for it again unless they say so.")
 		f.cfg.Logger.Info("forge", "event", "denied", "kind", string(v.Kind))
 		return nil
 	}
 	c.view.State, c.view.At, c.view.Draft, c.view.Reason = ForgeSending, f.cfg.Now(), approve && draft, ""
 	f.wg.Go(func() {
-		ctx, cancel := context.WithTimeout(f.cfg.Base, ForgeFor)
+		ctx, cancel := context.WithTimeout(shared.CarryRequest(f.cfg.Base, ctx), ForgeFor)
 		defer cancel()
 		f.send(ctx, t, c)
 	})
@@ -622,17 +622,17 @@ func (f *Forges) send(ctx context.Context, t PushTarget, c *forgeCard) {
 	f.show(c.sid)
 	switch {
 	case err != nil:
-		f.audit(c.sid, t, v, ByPage, ForgeFailed, "couldn't open "+word+": "+v.Reason)
+		f.audit(ctx, c.sid, t, v, ByPage, ForgeFailed, "couldn't open "+word+": "+v.Reason)
 		f.note(c.sid, "the person approved the "+word+" \""+clip(v.Title, 200)+"\", but the engine couldn't open it: "+v.Reason+".")
-		f.cfg.Logger.Warn("forge", "event", "failed", "kind", string(v.Kind))
+		shared.For(ctx, f.cfg.Logger).Warn("forge", "event", "failed", "kind", string(v.Kind))
 	case state == ForgeExists:
-		f.audit(c.sid, t, v, ByPage, ForgeExists, "pull request #"+strconv.Itoa(v.Number)+" was already open: "+v.URL)
+		f.audit(ctx, c.sid, t, v, ByPage, ForgeExists, "pull request #"+strconv.Itoa(v.Number)+" was already open: "+v.URL)
 		f.note(c.sid, "pull request #"+strconv.Itoa(v.Number)+" for "+v.Head+" was already open, so the engine didn't open another: "+v.URL)
-		f.cfg.Logger.Info("forge", "event", "exists", "kind", string(v.Kind))
+		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "exists", "kind", string(v.Kind))
 	default:
-		f.audit(c.sid, t, v, ByPage, ForgeOpened, "opened "+word+" #"+strconv.Itoa(v.Number)+openedAs(v, asked)+": "+v.URL)
+		f.audit(ctx, c.sid, t, v, ByPage, ForgeOpened, "opened "+word+" #"+strconv.Itoa(v.Number)+openedAs(v, asked)+": "+v.URL)
 		f.note(c.sid, "the person approved, and the engine opened "+word+" #"+strconv.Itoa(v.Number)+" \""+clip(v.Title, 200)+"\""+openedAs(v, asked)+": "+v.URL)
-		f.cfg.Logger.Info("forge", "event", "opened", "kind", string(v.Kind), "draft", v.Draft)
+		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "opened", "kind", string(v.Kind), "draft", v.Draft)
 		if v.Kind == ForgePull {
 			f.afterOpened(c.sid, repo, v.Head, v.Number)
 		}
@@ -665,6 +665,6 @@ func (f *Forges) Checks(ctx context.Context, sid string) ForgeReply {
 	if err != nil {
 		return refuse(f.clean(ft.repo.Token, "the engine couldn't read the CI results: "+forgeWhy(err, NeedActions)))
 	}
-	f.cfg.Logger.Info("forge", "event", "checks", "runs", len(report.Runs), "statuses", len(report.Statuses))
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "checks", "runs", len(report.Runs), "statuses", len(report.Statuses))
 	return ForgeReply{Result: ForgeReady, Reason: strings.ReplaceAll(CheckText(ft.t.Branch, head, ft.repo, report), ft.repo.Token, "[token]")}
 }

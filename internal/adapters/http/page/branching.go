@@ -8,6 +8,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -127,7 +128,7 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 			return
 		}
 		commit, err := b.BringMain(ctx, sid)
-		s.logger.Info("bring-main", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("bring-main", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -142,7 +143,7 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 			return
 		}
 		started, err := b.Handover(ctx, sid, agent, consent)
-		s.logger.Info("handover", "agent", agent, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("handover", "agent", agent, "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

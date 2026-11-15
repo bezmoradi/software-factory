@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -63,7 +64,7 @@ func (s *Server) keepAPI(w http.ResponseWriter, r *http.Request, body map[string
 		ctx, cancel := context.WithTimeout(r.Context(), restoreFor)
 		defer cancel()
 		v, stopped, err = s.branchCopy.Restore(ctx, sid)
-		s.logger.Info("restore branch", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("restore branch", "ok", err == nil)
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads its copy of a session's commits and restores the branch from it only."})
 		return

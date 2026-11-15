@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const SandboxStopReason = "the sandbox check failed"
@@ -88,15 +90,15 @@ func (d *Dispatcher) stopOne(ctx context.Context, sid, why string) {
 			d.reg.stoppedFor(sid, why)
 			_ = d.reg.Interrupt(sid)
 			sctx, cancel := context.WithTimeout(ctx, claudeRun+stopFor)
-			err := d.Stop(sctx, sid)
+			err := d.stopAs(sctx, sid, ByEngine, why)
 			cancel()
 			if err == nil {
-				d.cfg.Logger.Warn("agent session", "event", "stopped-by-engine", "why", why)
+				shared.For(ctx, d.cfg.Logger).Warn("agent session", "event", "stopped-by-engine", "why", why)
 				d.reg.NoteFor("stopped")(sid, StoppedNote(d.reg.now(), why))
 				return
 			}
 			if e, ok := errors.AsType[*Error](err); !ok || e.Reason != "busy" {
-				d.cfg.Logger.Warn("agent session", "event", "stop-failed", "why", why)
+				shared.For(ctx, d.cfg.Logger).Warn("agent session", "event", "stop-failed", "why", why)
 				return
 			}
 		}

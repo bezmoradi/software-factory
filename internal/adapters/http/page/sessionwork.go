@@ -9,6 +9,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -360,7 +361,7 @@ func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.CheckFor + time.Minute + writeFor))
 	answer := s.work.TurnCheck(context.WithoutCancel(r.Context()), sid, again)
 	if answer.Result != session.CheckNone {
-		s.logger.Info("turn check", "side", "agent", "result", answer.Result, "block", answer.Block)
+		shared.For(r.Context(), s.logger).Info("turn check", "side", "agent", "result", answer.Result, "block", answer.Block)
 	}
 	send(w, http.StatusOK, map[string]any{"result": answer.Result, "block": answer.Block, "text": answer.Text})
 }

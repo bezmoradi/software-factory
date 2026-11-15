@@ -46,6 +46,11 @@ func requestLogger(logger shared.Logger, side string, route func(*http.Request) 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			id := shared.NewRequest()
+			if side == "page" {
+				w.Header().Set(shared.RequestHeader, id)
+			}
+			r = r.WithContext(shared.WithRequest(r.Context(), id))
 			rec := &recorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 			logger.Info("request",
@@ -54,6 +59,7 @@ func requestLogger(logger shared.Logger, side string, route func(*http.Request) 
 				"route", route(r),
 				"status", rec.status,
 				"duration", time.Since(start).Round(time.Millisecond).String(),
+				shared.RequestKey, id,
 			)
 		})
 	}

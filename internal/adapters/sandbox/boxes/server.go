@@ -39,6 +39,7 @@ type ServerConfig struct {
 	KeyFile string
 	Base    context.Context
 	Logger  shared.Logger
+	About   func() About
 }
 
 type server struct {
@@ -60,6 +61,7 @@ type boxJSON struct {
 type listJSON struct {
 	Version string    `json:"version"`
 	Boxes   []boxJSON `json:"boxes"`
+	About   *About    `json:"about,omitempty"`
 }
 
 type answerJSON struct {
@@ -168,6 +170,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var list []session.BoxInfo
 		if list, err = s.cfg.Boxes.List(ctx); err == nil {
 			out := listJSON{Version: WireVersion, Boxes: []boxJSON{}}
+			if s.cfg.About != nil {
+				a := s.cfg.About()
+				out.About = &a
+			}
 			for _, b := range list {
 				out.Boxes = append(out.Boxes, boxOf(b))
 			}

@@ -72,6 +72,7 @@ type projectCommandJSON struct {
 	URL     string `json:"url"`
 	Check   string `json:"check,omitempty"`
 	Setup   string `json:"setup,omitempty"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 type projectCommandsJSON struct {
@@ -103,11 +104,12 @@ func (s ProjectCommands) Load() (map[session.ProjectID]session.ProjectCommands, 
 }
 
 func (s ProjectCommands) Save(all map[session.ProjectID]session.ProjectCommands) error {
+	owner := ownerIn(s.Dir)
 	defer locked(s.mu)()
 	f := projectCommandsJSON{Version: 1, Projects: []projectCommandJSON{}}
 	for id, c := range all {
 		if len(f.Projects) < maxStoredProjects {
-			f.Projects = append(f.Projects, projectCommandJSON{Project: id.Name, URL: id.URL, Check: c.Check, Setup: c.Setup})
+			f.Projects = append(f.Projects, projectCommandJSON{Owner: owner, Project: id.Name, URL: id.URL, Check: c.Check, Setup: c.Setup})
 		}
 	}
 	sort.Slice(f.Projects, func(i, j int) bool {
@@ -236,6 +238,7 @@ type roleModelJSON struct {
 	Role    string `json:"role"`
 	Model   string `json:"model,omitempty"`
 	Effort  string `json:"effort,omitempty"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 type modelsJSON struct {
@@ -269,6 +272,7 @@ func (s Models) Load() (session.ModelState, error) {
 }
 
 func (s Models) Save(st session.ModelState) error {
+	owner := ownerIn(s.Dir)
 	defer locked(s.mu)()
 	f := modelsJSON{Version: 1, Sessions: []sessionModelJSON{}, Roles: []roleModelJSON{}}
 	for sid, m := range st.Sessions {
@@ -278,7 +282,7 @@ func (s Models) Save(st session.ModelState) error {
 	}
 	for _, r := range st.Roles {
 		if len(f.Roles) < maxStoredRoles {
-			f.Roles = append(f.Roles, roleModelJSON{Project: r.Project, URL: r.URL, Role: string(r.Role), Model: r.Model, Effort: r.Effort})
+			f.Roles = append(f.Roles, roleModelJSON{Owner: owner, Project: r.Project, URL: r.URL, Role: string(r.Role), Model: r.Model, Effort: r.Effort})
 		}
 	}
 	sort.Slice(f.Sessions, func(i, j int) bool { return f.Sessions[i].SID < f.Sessions[j].SID })

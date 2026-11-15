@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -134,12 +136,15 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	d.mu.Unlock()
 	if running {
 		if err := d.stopRun(sctx, sid, r); err != nil {
-			d.cfg.Logger.Warn("handover", "event", "old-not-stopped")
+			shared.For(ctx, d.cfg.Logger).Warn("handover", "event", "old-not-stopped")
 		}
 		d.waitStopped(r)
 	}
 	d.stopBox(sctx, r.box)
 	cancel()
+	if running {
+		d.lifecycle(ctx, AuditSessionStop, r, ByPage, ResultStopped, "handed over to session "+started.SID)
+	}
 	last, moved := d.headAfterStop(r, head)
 	d.mu.Lock()
 	r.handedHead = last
@@ -151,7 +156,7 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	}
 	d.reg.NoteFor(noteHandover)(started.SID, d.handoverNote(r, head, last, moved))
 	d.handoverAudit(r, spec, started.SID, head, last, moved)
-	d.cfg.Logger.Info("handover", "from", r.spec.ID, "to", spec.ID, "moved", moved)
+	shared.For(ctx, d.cfg.Logger).Info("handover", "from", r.spec.ID, "to", spec.ID, "moved", moved)
 	return started, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -203,7 +204,7 @@ func (s *Server) projectFacts(w http.ResponseWriter, r *http.Request, body map[s
 			return
 		}
 		err := facts.SetLookups(repo, on)
-		s.logger.Info("package lookup", "on", on, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("package lookup", "on", on, "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

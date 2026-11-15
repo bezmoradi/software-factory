@@ -51,11 +51,12 @@ type importReportJSON struct {
 	LeftOut    []string            `json:"leftOut"`
 	Projects   int                 `json:"projects"`
 	Sessions   int                 `json:"sessions"`
+	Former     string              `json:"formerPerson,omitempty"`
 }
 
 func reportJSONOf(r session.ImportReport) importReportJSON {
 	out := importReportJSON{Version: 1, State: r.State, Why: r.Why, At: r.At.UTC(), Engine: r.Engine, ExportedAt: r.ExportedAt.UTC(),
-		Stores: []importedStoreJSON{}, Off: lines(r.Off), KeptOwn: lines(r.KeptOwn), LeftOut: lines(r.LeftOut), Projects: r.Projects, Sessions: r.Sessions}
+		Stores: []importedStoreJSON{}, Off: lines(r.Off), KeptOwn: lines(r.KeptOwn), LeftOut: lines(r.LeftOut), Projects: r.Projects, Sessions: r.Sessions, Former: r.FormerPerson}
 	for _, s := range r.Stores {
 		out.Stores = append(out.Stores, importedStoreJSON{File: s.File, Class: s.Class, Version: s.Version, Label: s.Label})
 	}
@@ -64,7 +65,7 @@ func reportJSONOf(r session.ImportReport) importReportJSON {
 
 func reportOf(j importReportJSON) session.ImportReport {
 	out := session.ImportReport{State: j.State, Why: text(j.Why), At: j.At, Engine: matching(j.Engine, versionText), ExportedAt: j.ExportedAt,
-		Off: lines(j.Off), KeptOwn: lines(j.KeptOwn), LeftOut: lines(j.LeftOut), Projects: max(j.Projects, 0), Sessions: max(j.Sessions, 0)}
+		Off: lines(j.Off), KeptOwn: lines(j.KeptOwn), LeftOut: lines(j.LeftOut), Projects: max(j.Projects, 0), Sessions: max(j.Sessions, 0), FormerPerson: matching(j.Former, personID)}
 	for _, s := range j.Stores {
 		if len(out.Stores) < maxEntries {
 			out.Stores = append(out.Stores, session.ImportedStore{File: text(s.File), Class: text(s.Class), Version: s.Version, Label: text(s.Label)})
@@ -685,6 +686,12 @@ func apply(dir, out string, report *session.ImportReport) error {
 		}
 		if err := os.Rename(filepath.Join(out, name), filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("%s couldn't be put in place", name)
+		}
+		if name == personFile {
+			if old, now := adoptPerson(dir); old != "" && old != now {
+				report.FormerPerson = old
+				reownKept(dir, old, now)
+			}
 		}
 	}
 	shown := filepath.Join(dir, importedFolder)

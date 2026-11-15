@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -130,8 +132,8 @@ func (f *Forges) PageRequest(ctx context.Context, sid string, kind ForgeKind, ti
 	f.trim(sid)
 	f.mu.Unlock()
 	f.show(sid)
-	f.audit(sid, ft.t, v, ByPage, ForgeHeld, "asked on the page to open "+kindWord(kind)+": "+title)
-	f.cfg.Logger.Info("forge", "event", "held", "kind", string(kind), "from", from)
+	f.audit(ctx, sid, ft.t, v, ByPage, ForgeHeld, "asked on the page to open "+kindWord(kind)+": "+title)
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "held", "kind", string(kind), "from", from)
 	return nil
 }
 
@@ -285,7 +287,7 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	fl.show(sid)
 	fl.auditKind(AuditPRReady, sid, ft.t, ft.repo, ByPage, ResultReady, request, "marked pull request #"+strconv.Itoa(number)+" ready for review: "+ps.URL)
 	fl.cfg.Note(sid, "The person marked pull request #"+strconv.Itoa(number)+" ready for review on the page: "+CleanLine(ps.URL, 300))
-	fl.cfg.Logger.Info("pull follow", "event", "ready")
+	shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "ready")
 	return nil
 }
 

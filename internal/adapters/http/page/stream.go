@@ -158,6 +158,7 @@ type reviewJSON struct {
 
 	PlanReview *asideJSON `json:"planReview,omitempty"`
 	Explain    *asideJSON `json:"explain,omitempty"`
+	Req        string     `json:"req,omitempty"`
 }
 
 func reviewOf(v *session.ReviewView) *reviewJSON {
@@ -166,7 +167,7 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 	}
 	out := &reviewJSON{Commit: v.Commit, Base: v.Base, Branch: v.Branch, Running: v.Running, Note: v.Note, Roles: make([]roleJSON, 0, len(v.Roles)),
 		SignIn: signInOf(v.SignIn), CostUSD: v.CostUSD, SessionCostUSD: v.SessionCostUSD, TestList: testListOf(v.TestList),
-		PlanReview: asideOf(v.PlanReview), Explain: asideOf(v.Explain)}
+		PlanReview: asideOf(v.PlanReview), Explain: asideOf(v.Explain), Req: v.Req}
 	for _, r := range v.Roles {
 		out.Roles = append(out.Roles, roleJSON{Role: string(r.Role), Name: r.Name, Agent: r.Agent, State: string(r.State), Verdict: r.Verdict, Message: r.Message, Reason: r.Reason, CostUSD: r.CostUSD, Why: r.Why,
 			Round: r.Round, Limit: r.Limit, Since: r.Since, Incremental: r.Since != "", Previous: r.Previous, Override: r.Override,

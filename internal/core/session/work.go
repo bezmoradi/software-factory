@@ -1302,7 +1302,7 @@ func (w *Work) ApproveTeam(ctx context.Context, path, sha string) (TeamView, err
 	}
 	w.teamAudit(r.Name, AuditApproveTeam, sha)
 	w.recheckProject(r.Name)
-	w.cfg.Logger.Info("team file approved")
+	shared.For(ctx, w.cfg.Logger).Info("team file approved")
 	return w.teamView(r), nil
 }
 

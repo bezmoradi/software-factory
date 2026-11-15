@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -95,6 +96,9 @@ func readStatusFrom(ctx context.Context, client *http.Client, tc *tls.Config, ad
 	if err != nil {
 		return session.EgressState{}, errPart("the engine couldn't ask the egress proxy for its allowlist")
 	}
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return session.EgressState{}, errPart("the egress proxy's status at " + addr + " didn't answer")
@@ -149,6 +153,9 @@ func (c *Control) do(ctx context.Context, method, path string, body []byte, limi
 		return nil, 0, err
 	}
 	req.Header.Set(ControlKeyHeader, c.key)
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

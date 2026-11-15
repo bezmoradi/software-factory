@@ -24,6 +24,7 @@ type keyRouteJSON struct {
 	Saved   bool   `json:"saved"`
 	Gateway string `json:"gateway,omitempty"`
 	Before  string `json:"before,omitempty"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 type keyRoutesJSON struct {
@@ -74,13 +75,14 @@ func (s KeyRoutes) Load() (map[string]session.KeyRoute, error) {
 }
 
 func (s KeyRoutes) Save(all map[string]session.KeyRoute) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := keyRoutesJSON{Version: 1, Sides: map[string]keyRouteJSON{}}
 	for target, k := range all {
 		if !keyTarget(target) {
 			continue
 		}
-		j := keyRouteJSON{Saved: k.Saved}
+		j := keyRouteJSON{Owner: owner, Saved: k.Saved}
 		if k.Saved {
 			j.Gateway, j.Before = k.Gateway, string(k.Before)
 		}

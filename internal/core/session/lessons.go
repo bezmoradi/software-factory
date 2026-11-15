@@ -490,13 +490,13 @@ func (l *Lessons) Suggest(ctx context.Context, project string, costOK bool) erro
 		return err
 	}
 	l.setRun(project, LessonRun{State: TestListRunning, At: l.cfg.Now(), Given: len(given)})
-	l.cfg.Logger.Info("lessons", "event", "started", "findings", len(given))
+	shared.For(ctx, l.cfg.Logger).Info("lessons", "event", "started", "findings", len(given))
 	r.wg.Go(func() {
 		defer r.release(key)
 		run := l.suggest(project, given, plugin)
 		run.At, run.Given = l.cfg.Now(), len(given)
 		l.setRun(project, run)
-		l.cfg.Logger.Info("lessons", "event", "finished", "state", run.State)
+		shared.For(ctx, l.cfg.Logger).Info("lessons", "event", "finished", "state", run.State)
 	})
 	return nil
 }
@@ -726,7 +726,7 @@ func (r *Reviews) projectRun(ctx context.Context, plugin string, files []Snapsho
 	}
 	defer func() {
 		if err := r.cfg.Snapshots.Remove(snap.ID); err != nil {
-			r.cfg.Logger.Warn("reviewer run", "kind", "lessons", "event", "snapshot-not-removed")
+			shared.For(ctx, r.cfg.Logger).Warn("reviewer run", "kind", "lessons", "event", "snapshot-not-removed")
 		}
 	}()
 	dir := strings.TrimRight(r.cfg.Dir, "/") + "/" + snap.ID
@@ -755,7 +755,7 @@ func (r *Reviews) projectRun(ctx context.Context, plugin string, files []Snapsho
 		return "", out.cost, why
 	}
 	if secretText(text) {
-		r.cfg.Logger.Warn("reviewer run", "kind", "lessons", "event", "withheld", "why", "token-shaped")
+		shared.For(ctx, r.cfg.Logger).Warn("reviewer run", "kind", "lessons", "event", "withheld", "why", "token-shaped")
 		return "", out.cost, withheldRun
 	}
 	if text == "" {

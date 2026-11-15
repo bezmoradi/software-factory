@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -91,7 +92,7 @@ func (r *Reviews) lookUpCited(ctx context.Context, e ReviewEntry) (CitedIDs, boo
 	held, err := l.Held(lctx, ids)
 	if err != nil {
 		out.Failed = clip(err.Error(), 200)
-		r.cfg.Logger.Warn("cited ids", "event", "lookup-failed", "ids", len(ids))
+		shared.For(ctx, r.cfg.Logger).Warn("cited ids", "event", "lookup-failed", "ids", len(ids))
 		return out, true
 	}
 	for _, id := range ids {
@@ -99,7 +100,7 @@ func (r *Reviews) lookUpCited(ctx context.Context, e ReviewEntry) (CitedIDs, boo
 			out.Missing = append(out.Missing, id)
 		}
 	}
-	r.cfg.Logger.Info("cited ids", "event", "looked-up", "ids", len(ids), "missing", len(out.Missing))
+	shared.For(ctx, r.cfg.Logger).Info("cited ids", "event", "looked-up", "ids", len(ids), "missing", len(out.Missing))
 	return out, true
 }
 

@@ -305,10 +305,10 @@ func (a *Allowlist) syncLocked(ctx context.Context) error {
 	err := a.cfg.Control.Set(ctx, l)
 	a.pending = err != nil
 	if err != nil {
-		a.cfg.Logger.Warn("egress allowlist", "event", "not-set")
+		shared.For(ctx, a.cfg.Logger).Warn("egress allowlist", "event", "not-set")
 		return err
 	}
-	a.cfg.Logger.Info("egress allowlist", "event", "set", "agents", len(l.Agents.Allow), "reviewers", len(l.Reviewers.Allow))
+	shared.For(ctx, a.cfg.Logger).Info("egress allowlist", "event", "set", "agents", len(l.Agents.Allow), "reviewers", len(l.Reviewers.Allow))
 	return nil
 }
 
@@ -343,7 +343,7 @@ func (a *Allowlist) Verify(ctx context.Context, side string, read func(context.C
 	if a.syncLocked(ctx) != nil {
 		return want, got, nil
 	}
-	a.cfg.Logger.Info("egress allowlist", "event", "restored", "starting", got.Starting)
+	shared.For(ctx, a.cfg.Logger).Info("egress allowlist", "event", "restored", "starting", got.Starting)
 	if again, err := read(ctx); err == nil {
 		got = again
 	}
@@ -414,7 +414,7 @@ func (a *Allowlist) tend(ctx context.Context) bool {
 	if a.syncLocked(ctx) != nil {
 		return false
 	}
-	a.cfg.Logger.Info("egress allowlist", "event", "restored", "starting", got.Starting)
+	shared.For(ctx, a.cfg.Logger).Info("egress allowlist", "event", "restored", "starting", got.Starting)
 	return true
 }
 

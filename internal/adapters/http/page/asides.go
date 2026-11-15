@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -64,10 +65,10 @@ func (s *Server) aside(w http.ResponseWriter, r *http.Request, body map[string]a
 	var err error
 	if r.URL.Path == planReviewRoute {
 		err = starter.PlanReview(ctx, sid, hash, consent.CostOK)
-		s.logger.Info("plan review", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("plan review", "ok", err == nil)
 	} else {
 		err = starter.Explain(ctx, sid, consent.CostOK)
-		s.logger.Info("explain change", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("explain change", "ok", err == nil)
 	}
 	reply(w, err, http.StatusAccepted)
 }

@@ -469,6 +469,7 @@ export interface SessionReview {
   testList?: TestList
   planReview?: AsideRun
   explain?: AsideRun
+  req?: string
 }
 
 export interface AsideRun {

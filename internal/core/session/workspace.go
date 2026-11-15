@@ -292,7 +292,7 @@ func (w *Workspace) DeleteSession(ctx context.Context, sid string, offer *Offer)
 		delete(w.sizes, s.Box+"/"+s.Tree)
 		w.mu.Unlock()
 		if w.cfg.Logger != nil {
-			w.cfg.Logger.Info("workspace", "event", "session-deleted", "state", row.State)
+			shared.For(ctx, w.cfg.Logger).Info("workspace", "event", "session-deleted", "state", row.State)
 		}
 	}
 	return out, err

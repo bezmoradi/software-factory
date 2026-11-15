@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
@@ -217,7 +218,7 @@ func (fl *Follows) OpenFindings(ctx context.Context, sid, commit string) (int, e
 	}
 	fl.offered[sid] = commit
 	fl.mu.Unlock()
-	fl.cfg.Logger.Info("pull follow", "event", "finding-cards", "made", made, "skipped", skipped)
+	shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "finding-cards", "made", made, "skipped", skipped)
 	if made < len(items)-skipped && last != nil {
 		return made, explained(conflict("partly"), strconv.Itoa(made)+" issue cards wait for you; the rest weren't made: "+errorText(last))
 	}

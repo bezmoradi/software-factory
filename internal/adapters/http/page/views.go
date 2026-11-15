@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -152,7 +153,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 			return
 		}
 		offer, err := s.cfg.WorkspaceView.DeleteSession(ctx, sid, given)
-		s.logger.Info("workspace-delete", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("workspace-delete", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			out := map[string]any{"error": p.Error, "message": p.Message, "offer": nil}

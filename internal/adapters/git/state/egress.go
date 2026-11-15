@@ -25,12 +25,14 @@ type addedHostJSON struct {
 	Expires int64  `json:"expires,omitempty"`
 	AddedAt int64  `json:"addedAt,omitempty"`
 	Reason  string `json:"reason,omitempty"`
+	Owner   string `json:"owner,omitempty"`
 }
 
 type gatewayJSON struct {
 	URL       string `json:"url"`
 	Agents    bool   `json:"agents"`
 	Reviewers bool   `json:"reviewers"`
+	Owner     string `json:"owner,omitempty"`
 }
 
 type egressJSON struct {
@@ -102,13 +104,14 @@ func (s Egress) Load() (session.EgressSettings, bool, error) {
 }
 
 func (s Egress) Save(e session.EgressSettings) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := egressJSON{Version: 1, Agents: e.Agents, Added: make([]addedHostJSON, 0, len(e.Added))}
 	if f.Agents == nil {
 		f.Agents = []string{}
 	}
 	for _, h := range e.Added {
-		j := addedHostJSON{Name: h.Name, Reason: h.Reason}
+		j := addedHostJSON{Owner: owner, Name: h.Name, Reason: h.Reason}
 		if !h.AddedAt.IsZero() {
 			j.AddedAt = h.AddedAt.Unix()
 		}
@@ -118,7 +121,7 @@ func (s Egress) Save(e session.EgressSettings) error {
 		f.Added = append(f.Added, j)
 	}
 	if e.Gateway.URL != "" {
-		f.Gateway = &gatewayJSON{URL: e.Gateway.URL, Agents: e.Gateway.Agents, Reviewers: e.Gateway.Reviewers}
+		f.Gateway = &gatewayJSON{Owner: owner, URL: e.Gateway.URL, Agents: e.Gateway.Agents, Reviewers: e.Gateway.Reviewers}
 	}
 	return write(s.Dir, egressFile, f)
 }

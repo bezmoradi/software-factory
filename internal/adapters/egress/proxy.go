@@ -146,27 +146,28 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	mark := markOf(req)
+	tag := p.marks.requestTag(req, mark)
 	marks := p.marks.from(subnetOf(conn))
 	if req.Method != http.MethodConnect {
 		marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
 		if req.URL != nil {
 			p.marks.saw(logged(req.URL.Hostname()), ReasonMethod)
 		}
-		p.refuse(conn, http.StatusForbidden, ReasonMethod, "")
+		p.refuse(conn, http.StatusForbidden, ReasonMethod, "", tag...)
 		return
 	}
 	host, reason := p.target(req.RequestURI)
 	if reason != "" {
 		requested, _, _ := net.SplitHostPort(req.RequestURI)
 		marks.note(mark, requestedTarget(req.RequestURI), "", reason)
-		p.refuse(conn, http.StatusForbidden, reason, logged(requested))
+		p.refuse(conn, http.StatusForbidden, reason, logged(requested), tag...)
 		return
 	}
 	target := net.JoinHostPort(host, "443")
 	upstream, status, reason := p.connect(ctx, host)
 	if reason != "" {
 		marks.note(mark, target, "", reason)
-		p.refuse(conn, status, reason, host)
+		p.refuse(conn, status, reason, host, tag...)
 		return
 	}
 	defer func() { _ = upstream.Close() }()
@@ -178,13 +179,13 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	hello, name, err := readClientHello(io.MultiReader(pending, conn))
 	if err != nil {
 		marks.note(mark, target, "", helloReason(err))
-		p.refused(subnetOf(conn), helloReason(err), host)
+		p.refused(subnetOf(conn), helloReason(err), host, tag...)
 		return
 	}
 	if normalize(name) != host {
 		marks.note(mark, target, logged(name), ReasonSNIMismatch)
 		p.marks.saw(logged(name), ReasonSNIMismatch)
-		p.logRefused(subnetOf(conn), ReasonSNIMismatch, host, "sni", logged(name))
+		p.logRefused(subnetOf(conn), ReasonSNIMismatch, host, append([]any{"sni", logged(name)}, tag...)...)
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
@@ -195,11 +196,11 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	if !stop() {
 		return
 	}
-	p.logger.Info("egress", "event", "allowed", "host", host)
+	p.logger.Info("egress", append([]any{"event", "allowed", "host", host}, tag...)...)
 	tctx, done := p.track(ctx, host)
 	defer done()
 	end := relay(tctx, conn, upstream, p.limits)
-	p.logger.Info("egress", "event", "closed", "reason", end)
+	p.logger.Info("egress", append([]any{"event", "closed", "reason", end}, tag...)...)
 }
 
 func (p *Proxy) target(authority string) (string, string) {
@@ -251,8 +252,8 @@ func helloReason(err error) string {
 	}
 }
 
-func (p *Proxy) refuse(conn net.Conn, status int, reason, host string) {
-	p.refused(subnetOf(conn), reason, host)
+func (p *Proxy) refuse(conn net.Conn, status int, reason, host string, more ...any) {
+	p.refused(subnetOf(conn), reason, host, more...)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 	body := reason + "\n"
 	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",

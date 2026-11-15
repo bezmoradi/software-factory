@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/level"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -147,7 +148,7 @@ func (d *Dispatcher) ConfirmBox(ctx context.Context, box string) error {
 	}
 	if !routedAt(listed, known) {
 		d.cfg.Routes.Down(box)
-		d.cfg.Logger.Warn("boxes", "event", "stale-route-dropped", "box", box)
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "stale-route-dropped", "box", box)
 		return explained(conflict("box stopped"), "The session's container isn't running at the address the engine had for it, so the engine dropped that route. Wake or start the session again.")
 	}
 	return nil
@@ -236,7 +237,7 @@ func (d *Dispatcher) round(ctx context.Context) {
 			}
 			d.reg.Observe(t.sid, o)
 			if o.Event != level.CheckPassed {
-				d.cfg.Logger.Warn("sandbox check", "box", t.box, "event", string(o.Event))
+				shared.For(ctx, d.cfg.Logger).Warn("sandbox check", "box", t.box, "event", string(o.Event))
 				d.boxFailed(t.sid)
 			}
 		})

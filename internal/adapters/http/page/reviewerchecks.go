@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -100,7 +101,7 @@ func (s *Server) reviewerChecks(w http.ResponseWriter, r *http.Request, body map
 		ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 		defer cancel()
 		err := s.cfg.ReviewerChecks.CheckNow(ctx, agent, consent.CostOK)
-		s.logger.Info("reviewer check", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("reviewer check", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

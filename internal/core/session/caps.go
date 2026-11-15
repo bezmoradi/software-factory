@@ -88,7 +88,7 @@ type LimitsConfig struct {
 	Stop      func(ctx context.Context, sid string) error
 	Wake      func(ctx context.Context, sid string) error
 	Reviewer  func() (SignIn, bool)
-	Continued func(sid string, findings bool)
+	Continued func(ctx context.Context, sid string, findings bool)
 	Logger    shared.Logger
 }
 

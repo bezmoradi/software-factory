@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -171,13 +173,13 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		return explained(conflict("no change"), "The session's branch has nothing the remote's main branch lacks, so there's nothing to explain. Commit the work first.")
 	}
 	r.setAside(t.SID, AsideView{Kind: a.kind, Commit: head, Branch: t.Branch, State: TestListRunning, At: r.cfg.Now(), PlanHash: a.planHash, PlanPath: a.planPath})
-	r.cfg.Logger.Info("reviewer run", "kind", a.kind, "event", "started")
+	shared.For(ctx, r.cfg.Logger).Info("reviewer run", "kind", a.kind, "event", "started")
 	r.wg.Go(func() {
 		defer release()
 		v := r.runAside(t, base, head, plugin, a)
 		v.At = r.cfg.Now()
 		r.setAside(t.SID, v)
-		r.cfg.Logger.Info("reviewer run", "kind", a.kind, "event", "finished", "state", v.State)
+		shared.For(ctx, r.cfg.Logger).Info("reviewer run", "kind", a.kind, "event", "finished", "state", v.State)
 	})
 	return nil
 }

@@ -216,16 +216,33 @@ func (a *answer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (s *Server) logRefused(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := &answer{ResponseWriter: w}
-		next(a, r)
-		if a.why == "" || a.why == "browser" || a.why == "key" || a.why == "process" {
-			return
+		id := engineRequest(r)
+		if id != "" {
+			r = r.WithContext(shared.WithRequest(r.Context(), id))
 		}
+		started := time.Now()
+		next(a, r)
 		path := r.URL.Path
 		if _, known := routes[path]; !known {
 			path = "other"
 		}
-		s.log.Warn("agent-host request refused", "path", path, "status", a.status, "why", a.why)
+		log := shared.Tagged(s.log, id)
+		if a.why == "" || a.why == "browser" || a.why == "key" || a.why == "process" {
+			if id != "" && path != "/healthz" {
+				log.Info("agent-host request", "path", path, "status", a.status, "duration", time.Since(started).Round(time.Millisecond).String())
+			}
+			return
+		}
+		log.Warn("agent-host request refused", "path", path, "status", a.status, "why", a.why)
 	}
+}
+
+func engineRequest(r *http.Request) string {
+	values := r.Header.Values(shared.RequestHeader)
+	if len(values) != 1 || !shared.ValidRequest(values[0]) {
+		return ""
+	}
+	return values[0]
 }
 
 func isJSON(r *http.Request) bool {

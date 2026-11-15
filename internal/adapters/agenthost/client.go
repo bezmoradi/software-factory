@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -118,6 +119,9 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	}
 	if c.key != "" {
 		req.Header.Set(KeyHeader, c.key)
+	}
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

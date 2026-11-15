@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -351,7 +352,7 @@ func (c *Repos) Branches(ctx context.Context, name string) ([]RemoteRef, error) 
 	list, err := src.ListHeads(fctx, rec.URL, token)
 	cancel()
 	if err != nil {
-		c.cfg.Logger.Warn("repository", "event", "heads-failed")
+		shared.For(ctx, c.cfg.Logger).Warn("repository", "event", "heads-failed")
 		return nil, explained(conflict("fetch"), "The engine couldn't list the branches of "+rec.URL+": "+clip(err.Error(), 600))
 	}
 	out := make([]RemoteRef, 0, min(len(list), MaxStartBranches))
@@ -427,7 +428,7 @@ func (c *Repos) fetchHead(ctx context.Context, name, branch, commit string) (str
 		what = "the commit " + shortSHA(commit)
 	}
 	if err != nil {
-		c.cfg.Logger.Warn("repository", "event", "start-fetch-failed")
+		shared.For(ctx, c.cfg.Logger).Warn("repository", "event", "start-fetch-failed")
 		return "", explained(conflict("fetch"), "The engine couldn't fetch "+what+" from "+rec.URL+", so no session started: "+clip(err.Error(), 600))
 	}
 	if !sha1Hex.MatchString(got) || commit != "" && got != commit {
@@ -436,6 +437,6 @@ func (c *Repos) fetchHead(ctx context.Context, name, branch, commit string) (str
 	if !present(got) {
 		return "", explained(conflict("fetch"), "The fetched commit "+got[:12]+" couldn't be read back from the clone.")
 	}
-	c.cfg.Logger.Info("repository", "event", "start-fetched")
+	shared.For(ctx, c.cfg.Logger).Info("repository", "event", "start-fetched")
 	return got, nil
 }

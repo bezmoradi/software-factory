@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 type RulePlace string
@@ -531,7 +533,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, plac
 		if worktree != "" {
 			where += ":" + worktree
 		}
-		_ = a.Audit.Append(AuditEntry{Time: now().UTC(), Repository: repo.Name, By: "page", Kind: AuditRemoveAllowRule, Result: result, Path: where, Hash: hex.EncodeToString(sum[:]), Missing: []string{}})
+		_ = a.Audit.Append(AuditEntry{Req: shared.RequestOf(ctx), Time: now().UTC(), Repository: repo.Name, By: "page", Kind: AuditRemoveAllowRule, Result: result, Path: where, Hash: hex.EncodeToString(sum[:]), Missing: []string{}})
 	}
 	if err != nil {
 		return explained(conflict("not removed"), "The rule wasn't removed: "+hostMessage(err))

@@ -48,6 +48,7 @@ import { agentName, otherAgents, setBranchStarters } from './components/lineage.
 import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
+import { openDiagnostics } from './components/diagnostics.ts'
 import { sendState } from './api.ts'
 
 interface Session {
@@ -95,6 +96,21 @@ interface AuditEntry {
   reason: string
   personReason?: string
   missing?: string[]
+  session?: string
+  branch?: string
+  from?: string
+  fromRef?: string
+  source?: string
+}
+
+const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 'session-wake': 'Session woken', 'session-stop': 'Session stopped', 'session-fork': 'Session forked', 'session-delete': 'Session deleted' }
+const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
+
+function lifecycleLine(e: AuditEntry): string {
+  const what = LIFECYCLE[e.kind] ?? visible(e.kind)
+  const ref = e.from === 'pull-request' ? `${START_FROM[e.from]}${visible(e.fromRef ?? '')}` : e.from && Object.hasOwn(START_FROM, e.from) ? `${START_FROM[e.from]}${e.fromRef ? ` ${visible(e.fromRef)}` : ''}${e.source ? ` ${visible(e.source).slice(0, 8)}` : ''}` : ''
+  const branch = e.kind === 'session-delete' || e.kind === 'session-fork' ? ` (${visible(e.branch ?? '')})` : ''
+  return `${what}${branch}${ref ? ` ${ref}` : ''}`
 }
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
@@ -299,6 +315,7 @@ function updateSessions(list: unknown) {
     else if (info.live && !info.disputed && s.epoch && info.epoch === s.epoch && (info.lastSeq ?? 0) > s.seq) requestReplay(s)
     if (info.live && !was.live && current() === s && byId('hint').textContent?.startsWith('Waking')) say('')
     if (info.live && !was.live) byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`wake:${info.sid}`)
+    if (Boolean(info.running) !== Boolean(was.running)) s.auditSeen++
     if (could !== controllable(s)) s.view.refreshCards(controllable(s))
   }
   for (const s of [...sessions.values()]) {
@@ -1253,6 +1270,14 @@ function paintExceptions(s: Session) {
   const entries = (s.audit?.entries ?? []).filter(e => !(e.kind === 'push' && e.result === 'allowed') && !HIDDEN_RESULTS.includes(e.result)).slice(0, 8)
   const top = Object.entries(s.audit?.refusals ?? {}).filter(([k, n]) => n >= 2 && Object.hasOwn(FRICTION, k)).sort((a, b) => b[1] - a[1]).slice(0, 3)
   const items = entries.map(e => {
+    if (Object.hasOwn(LIFECYCLE, e.kind)) {
+      const li = el('li')
+      const at = el('time', 'history-time', e.time ? when(e.time) : '')
+      if (e.time) at.dateTime = new Date(e.time).toISOString()
+      const by = e.by === 'engine' ? ', by the engine' : e.by === 'engine, at reset' ? ', by the engine at the usage reset' : e.by === 'page' ? ', from the page' : ''
+      li.append(at, `${lifecycleLine(e)}${e.commit ? ` at ${shortSha(e.commit)}` : ''}${by}${e.reason ? `: ${visible(e.reason)}` : ''}`)
+      return li
+    }
     const kind = e.kind === 'push' ? (e.personReason && e.result === 'pushed' ? 'allow-push' : '') : e.kind
     const by = e.by === 'agent' ? ', asked by the agent' : e.by === 'agent, after reviews' ? ', asked by the agent, after its reviews' : e.by === 'page' ? ', from the page' : e.by === 'engine' ? ', by the engine' : e.by === 'engine, at start' ? ', by the engine at start' : ''
     const outcome = kind && Object.hasOwn(OUTCOME, e.result) ? `, ${OUTCOME[e.result]}` : ''
@@ -2319,6 +2344,7 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
   if (start === 'exceptions') openExceptions(api, labelOfSid)
   if (start === 'backup') openBackup(api, sendState)
+  if (start === 'diagnostics') openDiagnostics(api)
   if (start === 'session' || start === 'add') go('projects')
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')

@@ -616,7 +616,7 @@ func (fl *Follows) poll(ctx context.Context, sid string) {
 	}
 	if wait := fl.backoff(ft.repo.Host); wait != "" {
 		fl.setNote(sid, wait)
-		fl.cfg.Logger.Info("pull follow", "event", "backoff")
+		shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "backoff")
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, ForgeFor)
@@ -703,7 +703,7 @@ func (fl *Follows) poll(ctx context.Context, sid string) {
 	}
 	fl.mu.Unlock()
 	fl.show(sid)
-	fl.cfg.Logger.Info("pull follow", "event", "polled", "checks", len(report.Runs)+len(report.Statuses), "comments", len(comments))
+	shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "polled", "checks", len(report.Runs)+len(report.Statuses), "comments", len(comments))
 	fl.auto(sid)
 }
 

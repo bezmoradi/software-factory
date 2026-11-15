@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -61,7 +63,7 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 		d.reg.NoteFor(noteMain)(sid, text)
 	}
 	d.bringMainAudit(r, commit, sent)
-	d.cfg.Logger.Info("bring main", "sent", sent)
+	shared.For(ctx, d.cfg.Logger).Info("bring main", "sent", sent)
 	return commit, nil
 }
 
