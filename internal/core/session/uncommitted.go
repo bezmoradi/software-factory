@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"slices"
 	"sync"
 	"time"
@@ -159,8 +160,8 @@ func readWorktree(w WorktreeWatch, sid, dir string) (Uncommitted, changedSet, bo
 	}
 	if w.Commits != nil && w.History != nil && w.Main != nil {
 		if main, err := w.Main(t.Name); err == nil && main != "" {
-			if base, err := w.History.MergeBase(t.Repo, head, main); err == nil && base != "" && base != head {
-				if list, err := w.Commits.ChangedFiles(t.Repo, base, head); err == nil {
+			if base, err := w.History.MergeBase(context.Background(), t.Repo, head, main); err == nil && base != "" && base != head {
+				if list, err := w.Commits.ChangedFiles(context.Background(), t.Repo, base, head); err == nil {
 					for _, c := range list {
 						if len(set.paths) >= maxChangedPaths {
 							set.cut = true

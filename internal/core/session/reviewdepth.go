@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strconv"
@@ -32,21 +33,21 @@ func (w *Work) depthOf(name string) workflow.Depth {
 	return w.load().Projects[name].Depth
 }
 
-func (w *Work) deepened(t PushTarget, required []workflow.Requirement, base, head string, listed bool) []workflow.Requirement {
+func (w *Work) deepened(ctx context.Context, t PushTarget, required []workflow.Requirement, base, head string, listed bool) []workflow.Requirement {
 	d := w.depthOf(t.Name)
 	if !d.Sized() || head == "" {
 		return workflow.Deepen(required, d, false, "")
 	}
-	above, why := w.above(t.Repo, base, head, listed, d)
+	above, why := w.above(ctx, t.Repo, base, head, listed, d)
 	return workflow.Deepen(required, d, above, why)
 }
 
-func (w *Work) above(repo, base, head string, listed bool, d workflow.Depth) (bool, string) {
+func (w *Work) above(ctx context.Context, repo, base, head string, listed bool, d workflow.Depth) (bool, string) {
 	limit := sizeLimit(HoldSettings{MaxFiles: d.MaxFiles, MaxLines: d.MaxLines})
 	if !listed {
 		return true, "Required by this project above " + limit + ": the engine couldn't count this change"
 	}
-	n := w.sizeOf(repo, base, head)
+	n := w.sizeOf(ctx, repo, base, head)
 	switch {
 	case !n.ok:
 		return true, "Required by this project above " + limit + ": the engine couldn't count this change"
@@ -58,7 +59,7 @@ func (w *Work) above(repo, base, head string, listed bool, d workflow.Depth) (bo
 	return false, ""
 }
 
-func (w *Work) sizeOf(repo, base, head string) changeSize {
+func (w *Work) sizeOf(ctx context.Context, repo, base, head string) changeSize {
 	if w.cfg.Changes == nil {
 		return changeSize{}
 	}
@@ -69,11 +70,11 @@ func (w *Work) sizeOf(repo, base, head string) changeSize {
 	if ok {
 		return n
 	}
-	cs, err := w.cfg.Changes.Changes(repo, base, head)
+	cs, err := w.cfg.Changes.Changes(ctx, repo, base, head)
 	if err != nil {
 		return changeSize{}
 	}
-	n = changeSize{files: len(cs.Files), lines: changedLines(cs.Diff), clipped: cs.Clipped, ok: true}
+	n = changeSize{files: len(cs.Files), lines: changedLines(cs.Diff) + int(min(cs.UndiffedLines, maxCountedLines)), clipped: cs.Clipped || cs.Uncounted, ok: true}
 	w.sizeMu.Lock()
 	if len(w.sizes) >= keptSizes {
 		clear(w.sizes)

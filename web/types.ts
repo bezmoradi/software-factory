@@ -44,6 +44,7 @@ export interface SessionInfo {
   splits?: SplitCard[]
   box?: string
   signInWait?: boolean
+  branch?: string
 }
 
 export interface SplitCard {
@@ -248,6 +249,7 @@ export interface SignIn {
   costs: boolean
   checkedAt?: number
   busy?: boolean
+  stale?: boolean
 }
 
 export interface StartupFile {
@@ -397,6 +399,7 @@ export interface PushPanelView {
   flagged?: FlaggedFile[]
   flagsRead?: boolean
   checks?: AgentCheck[]
+  passedSince?: string[]
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -522,6 +525,18 @@ export interface ReviewsView {
   testAsking?: boolean
 }
 
+export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
+
+export interface ChangeFile {
+  status: 'added' | 'changed' | 'deleted'
+  path: string
+  blob?: string
+  viewed?: boolean
+  stale?: boolean
+  size?: number
+  notDiffed?: 'large' | 'budget' | 'binary' | 'unreadable'
+}
+
 export interface Changes {
   branch: string
   head: string
@@ -530,11 +545,13 @@ export interface Changes {
   baseRef: string
   noBase: boolean
   commits: { sha: string; parents: string[]; time: number; subject: string }[]
-  files: { status: 'added' | 'changed' | 'deleted'; path: string }[]
+  files: ChangeFile[]
   more: boolean
   note: string
   diff?: string
   clipped?: boolean
+  from?: ChangeFrom | ''
+  points?: { reviewed: string; reviewedAt: number; turn: string }
 }
 
 export type OverviewSession = SessionInfo & { waiting: CardEvent[] }
@@ -1112,6 +1129,7 @@ export interface Prefs {
   theme?: string
   scale?: number
   bar?: string
+  keys?: 'on' | 'off'
 }
 
 declare global {

@@ -1,4 +1,4 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, opener, visible } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -115,10 +115,12 @@ const REASONS: Record<string, string> = {
 }
 
 export function openEgress(post: Post): void {
+  const back = opener()
   const d = el('dialog', 'consent egress surface')
   d.setAttribute('aria-label', 'Network access')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const say = el('p', 'small warn')

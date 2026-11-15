@@ -82,6 +82,7 @@ function how(p: SessionPush): string {
 
 class SfPushPanel extends HTMLElement {
   #key = ''
+  #expiry = 0
   #card = ''
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
@@ -94,6 +95,14 @@ class SfPushPanel extends HTMLElement {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
+    clearTimeout(this.#expiry)
+    const ends = value?.push?.result === 'held' ? value.push.expires ?? 0 : 0
+    if (ends > Date.now()) {
+      this.#expiry = window.setTimeout(() => {
+        this.#key = ''
+        this.view = value
+      }, Math.min(ends - Date.now() + 500, 2 ** 31 - 1))
+    }
     const p = value?.push ?? null
     const flagged = (value?.flagged ?? []).filter(f => !f.allowed)
     this.hidden = !p && !flagged.length && value?.flagsRead !== false
@@ -233,10 +242,27 @@ class SfPushPanel extends HTMLElement {
   #held(p: SessionPush, value: PushPanelView): HTMLElement {
     const box = el('div', 'push-card')
     if (p.missing.length) {
+      const passed = new Set(value.passedSince ?? [])
+      if (passed.size) {
+        const lead = `${passed.size === 1 ? 'A review this card lists has' : `${passed.size} reviews this card lists have`} passed since it was made`
+        const live = !!p.expires && p.expires > Date.now()
+        const note = el('p', 'small muted', live ? `${lead}; the engine is checking the push again, so this list is about to change.` : `${lead}, but this card has expired, so nothing checks it again by itself: press Push to check the push again.`)
+        note.setAttribute('role', 'status')
+        box.append(note)
+      }
       box.append(el('p', 'small warn', 'Missing:'))
       const list = el('ul', 'small push-missing')
-      for (const m of p.missing) list.append(el('li', '', text(m)))
+      for (const m of p.missing) {
+        const li = el('li', '', text(m))
+        if (passed.has(m)) li.append(' ', el('span', 'tag ok', 'passed since'))
+        list.append(li)
+      }
       box.append(list)
+    }
+    if (p.expires && p.expires <= Date.now()) {
+      box.append(el('p', 'small warn', `This card expired at ${when(p.expires)}, so Allow and Deny no longer apply to it. Press Push to check the push again.`))
+      if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))
+      return box
     }
     if (p.expires) box.append(el('p', 'small muted', `Allow works until ${when(p.expires)}, once, for this commit only.`))
     if (this.#card !== p.card || !this.#reason) {

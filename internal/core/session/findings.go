@@ -158,7 +158,7 @@ func autoRuns(entries map[review.Key]ReviewEntry, branch string) int {
 	return n
 }
 
-func (p *Pushes) hasFindings(sid string, t PushTarget, head string) bool {
+func (p *Pushes) hasFindings(ctx context.Context, sid string, t PushTarget, head string) bool {
 	if p.cfg.Reviews == nil {
 		return false
 	}
@@ -166,7 +166,7 @@ func (p *Pushes) hasFindings(sid string, t PushTarget, head string) bool {
 	if err != nil {
 		return false
 	}
-	return len(blockingRoles(entries, t.Branch, head, p.requiredAgents(sid, t, head), nil)) > 0
+	return len(blockingRoles(entries, t.Branch, head, p.requiredAgents(ctx, sid, t, head), nil)) > 0
 }
 
 func (p *Pushes) SendFindings(ctx context.Context, sid, card, commit string) error {
@@ -213,7 +213,7 @@ func (p *Pushes) sendFindings(ctx context.Context, sid string, h *heldPush, by s
 	if err != nil {
 		return explained(conflict("records"), "The engine couldn't read its review records.")
 	}
-	roles := blockingRoles(entries, h.branch, h.commit, p.requiredAgents(sid, t, h.commit), func(e ReviewEntry) (string, int) { return p.cfg.Reviews.ReplyOf(sid, e) })
+	roles := blockingRoles(entries, h.branch, h.commit, p.requiredAgents(ctx, sid, t, h.commit), func(e ReviewEntry) (string, int) { return p.cfg.Reviews.ReplyOf(sid, e) })
 	agents := make([]string, 0, len(roles))
 	for _, r := range roles {
 		if !slices.Contains(agents, r.agent) {
@@ -290,7 +290,7 @@ func (p *Pushes) autoFindings(ctx context.Context, sid string) {
 		return
 	}
 	entries, err := p.cfg.Reviews.Entries()
-	if err != nil || autoRuns(entries, t.Branch)+len(p.requiredAgents(sid, t, h.commit)) > MaxAutoRuns {
+	if err != nil || autoRuns(entries, t.Branch)+len(p.requiredAgents(ctx, sid, t, h.commit)) > MaxAutoRuns {
 		log.Info("push", "event", "findings-not-automatic", "why", "auto-capped")
 		return
 	}

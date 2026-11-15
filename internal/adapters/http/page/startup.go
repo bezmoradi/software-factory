@@ -15,13 +15,14 @@ type signInJSON struct {
 	Costs     bool   `json:"costs"`
 	CheckedAt int64  `json:"checkedAt,omitempty"`
 	Busy      bool   `json:"busy,omitempty"`
+	Stale     bool   `json:"stale,omitempty"`
 }
 
 func signInOf(s *session.SignIn) *signInJSON {
 	if s == nil || s.Method == "" {
 		return nil
 	}
-	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt), Busy: s.Busy}
+	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt), Busy: s.Busy, Stale: s.Stale}
 }
 
 type shownFileJSON struct {
@@ -169,6 +170,9 @@ func ReviewerFrame(si session.SignIn) session.Fields {
 	f := session.Fields{"type": "reviewer", "method": string(si.Method), "words": si.Words(), "costs": si.Costs(), "checkedAt": millis(si.CheckedAt)}
 	if si.Endpoint != "" {
 		f["endpoint"] = si.Endpoint
+	}
+	if si.Stale {
+		f["stale"] = true
 	}
 	return f
 }

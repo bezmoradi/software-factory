@@ -1,4 +1,4 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, opener, visible } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -77,10 +77,12 @@ function viewOf(body: Record<string, unknown>): View {
 }
 
 export function openWorkspace(post: Post, labelOf: (sid: string) => string, deleted: (sid: string) => void): void {
+  const back = opener()
   const d = el('dialog', 'consent workspace surface')
   d.setAttribute('aria-label', 'Workspace')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const say = el('p', 'small')

@@ -477,7 +477,7 @@ func (d *Dispatcher) admission(r *run, control bool) Admission {
 		signIn = &s
 	}
 	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn,
-		Lineage: lineageOf(r), Box: r.box}
+		Lineage: lineageOf(r), Box: r.box, Branch: r.branch}
 }
 
 func launched(a Admission) Admission {
@@ -723,6 +723,9 @@ func (d *Dispatcher) ended(r *run, b *bridge, p Process, byEngine bool) {
 	switch {
 	case current && lost:
 		d.lost(r.sid, b.cutTurn())
+	case current && !stopping && !byEngine && r.spec.ID == DevAgentID:
+		d.reg.EndedDone(r.sid)
+		d.cfg.Logger.Info("agent session", "event", "ended", "done", true)
 	case current:
 		d.reg.Ended(r.sid, false)
 		d.cfg.Logger.Info("agent session", "event", "ended")
@@ -1223,7 +1226,10 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	}
 	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK, Auto: auto, Scope: scope}
 	if w := d.cfg.Work; w != nil {
-		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
+		rt.Plan = func(ctx context.Context, base, head string) ([]workflow.Requirement, error) {
+			required := w.Reviewers(ctx, sid, t, base, head)
+			return required, ctx.Err()
+		}
 		rt.Rounds = w.Rounds(sid, t.Name)
 	}
 	d.reviewGiven(&rt, sid, t)

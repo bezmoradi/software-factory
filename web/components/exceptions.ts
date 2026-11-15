@@ -1,4 +1,4 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, opener, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -68,10 +68,12 @@ function until(expires: number, now: number): string {
 }
 
 export function openExceptions(post: Post, labelOf: (sid: string) => string): void {
+  const back = opener()
   const d = el('dialog', 'consent exceptions surface')
   d.setAttribute('aria-label', 'Register of exceptions')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const say = el('p', 'small')

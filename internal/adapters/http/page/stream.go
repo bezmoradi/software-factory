@@ -58,6 +58,7 @@ type sessionJSON struct {
 	Splits      []splitJSON      `json:"splits,omitempty"`
 	Box         string           `json:"box,omitempty"`
 	SignInWait  bool             `json:"signInWait,omitempty"`
+	Branch      string           `json:"branch,omitempty"`
 }
 
 type claimMarkJSON struct {
@@ -218,6 +219,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Splits:      splitsOf(s.Splits),
 			Box:         s.Box,
 			SignInWait:  s.SignInWait,
+			Branch:      s.Branch,
 		})
 	}
 	return out

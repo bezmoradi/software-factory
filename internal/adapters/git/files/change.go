@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,20 +38,47 @@ type side struct {
 	big     bool
 	limit   int
 	load    func() ([]byte, error)
+	size    func() (int64, bool)
+}
+
+func knownSize(sides map[string]side) int64 {
+	var n int64
+	for _, s := range sides {
+		n += s.known()
+	}
+	return n
+}
+
+func (s *side) known() int64 {
+	if s.load == nil || s.size == nil {
+		return 0
+	}
+	n, ok := s.size()
+	if !ok {
+		return 0
+	}
+	return min(n, int64(maxScanned)+1)
 }
 
 func (s *side) fill() error {
 	if s.load == nil {
 		return nil
 	}
+	limit := s.limit
+	if limit == 0 {
+		limit = maxDiffedFile
+	}
+	if s.size != nil {
+		if n, ok := s.size(); ok && n > int64(limit) {
+			s.load = nil
+			s.big = true
+			return nil
+		}
+	}
 	data, err := s.load()
 	s.load = nil
 	if err != nil {
 		return err
-	}
-	limit := s.limit
-	if limit == 0 {
-		limit = maxDiffedFile
 	}
 	if len(data) > limit {
 		s.big = true
@@ -143,7 +171,11 @@ func wholeChange(from changeSides) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	known := knownSize(base) + knownSize(head)
 	var b strings.Builder
+	if known <= maxScanned {
+		b.Grow(int(min(known+known/8+1<<16, 2*maxScanned)))
+	}
 	cut, err := encodeChange(&b, base, head, changeLimits{out: 2 * maxScanned, held: maxScanned, note: "\n[cut: %s]\n", text: true})
 	if err != nil {
 		return "", false, err
@@ -170,11 +202,21 @@ func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits
 	}
 	slices.Sort(paths)
 	var patches []fdiff.FilePatch
+	w := &cappedWriter{w: out, left: limits.out}
+	var err error
 	held := 0
-	full := false
+	full := limits.text && knownSize(base)+knownSize(head) > int64(limits.held)
+	if full {
+		paths = nil
+	}
+files:
 	for _, p := range paths {
 		from, inBase := base[p]
 		to, inHead := head[p]
+		if limits.text && held+int(from.known()+to.known()) > limits.held {
+			full = true
+			break
+		}
 		if err := from.fill(); err != nil {
 			return false, err
 		}
@@ -200,14 +242,32 @@ func encodeChange(out io.Writer, base, head map[string]side, limits changeLimits
 		if inHead {
 			fp.to = &diffFile{path: p, side: to}
 		}
-		fp.binary = !limits.text && ((inBase && (from.big || isBinary(from.content))) || (inHead && (to.big || isBinary(to.content))))
-		if !fp.binary {
+		binary := (inBase && (from.big || isBinary(from.content))) || (inHead && (to.big || isBinary(to.content)))
+		fp.binary = !limits.text && binary
+		switch {
+		case fp.binary:
+		case binary:
+			if inHead && len(to.content) > 0 {
+				if err = writeAdded(w, rawAdded{path: p, content: to.content}); err != nil {
+					break files
+				}
+			}
+			continue
+		default:
 			fp.chunks = chunks(string(from.content), string(to.content))
+		}
+		if limits.text {
+			for _, f := range []*diffFile{fp.from, fp.to} {
+				if f != nil {
+					f.side.content, f.side.big = nil, true
+				}
+			}
 		}
 		patches = append(patches, fp)
 	}
-	w := &cappedWriter{w: out, left: limits.out}
-	err := fdiff.NewUnifiedEncoder(w, fdiff.DefaultContextLines).Encode(&patch{files: patches})
+	if err == nil {
+		err = fdiff.NewUnifiedEncoder(w, fdiff.DefaultContextLines).Encode(&patch{files: patches})
+	}
 	reason := ""
 	switch {
 	case errors.Is(err, errChangeFull):
@@ -265,6 +325,44 @@ func sides(root string, limit int) (map[string]side, error) {
 
 func isBinary(b []byte) bool {
 	return bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0
+}
+
+type rawAdded struct {
+	path    string
+	content []byte
+}
+
+func writeAdded(w io.Writer, a rawAdded) error {
+	quote := func(n string) string {
+		if strings.ContainsFunc(n, unsafeRune) || strings.ContainsAny(n, "\\\"") {
+			return strconv.Quote(n)
+		}
+		return n
+	}
+	from, name := quote("a/"+a.path), quote("b/"+a.path)
+	if _, err := fmt.Fprintf(w, "diff --git %s %s\n+++ %s\n@@ -0,0 +1,%d @@\n", from, name, name, lineCount(a.content)); err != nil {
+		return err
+	}
+	rest := a.content
+	for len(rest) > 0 {
+		line := rest
+		end := bytes.IndexByte(rest, '\n')
+		if end >= 0 {
+			line, rest = rest[:end], rest[end+1:]
+		} else {
+			rest = nil
+		}
+		if _, err := w.Write([]byte{'+'}); err != nil {
+			return err
+		}
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func chunks(from, to string) []fdiff.Chunk {

@@ -1,4 +1,4 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, opener, visible } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -42,10 +42,12 @@ function field(name: string, words: string, type: string, max: number, value: st
 }
 
 export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity) => void): void {
+  const back = opener()
   const d = el('dialog', 'consent identity surface')
   d.setAttribute('aria-label', 'The name and email agents commit with')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const form = el('form', 'identity-form')

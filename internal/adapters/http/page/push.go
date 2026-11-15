@@ -110,7 +110,7 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	advice := gate.Check(tool, input, top, paths, false)
 	held := ""
 	if s.cfg.Work != nil && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
-		held = s.cfg.Work.EditHold(sid, top, paths)
+		held = s.cfg.Work.EditHold(r.Context(), sid, top, paths)
 	}
 	guarded := ""
 	if s.cfg.Work != nil && held == "" && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {

@@ -11,9 +11,9 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func approvedRequirements(work *session.Work) func(sid string) string {
-	return func(sid string) string {
-		v, err := work.View(sid)
+func approvedRequirements(work *session.Work) func(ctx context.Context, sid string) string {
+	return func(ctx context.Context, sid string) string {
+		v, err := work.View(ctx, sid)
 		if err != nil || v.Requirements == nil || !v.Requirements.Approved {
 			return ""
 		}

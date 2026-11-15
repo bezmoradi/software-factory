@@ -41,8 +41,18 @@ function safeLink(v: unknown): string {
 const RECHECK_MS = 15000
 const BUSY = 'All 8 reviewer containers are in use, so the sign-in wasn’t checked again; it checks again shortly.'
 
+function stale(s: SignIn | null, busy = false): boolean {
+  return !!s?.stale && (!!s.busy || busy)
+}
+
+function notCurrent(s: SignIn): string {
+  const before = s.method === 'not-signed-in' ? 'not signed in' : `signed in: ${visible(s.words)}`
+  return `Not current: the sign-in or key changed after the last check${s.checkedAt ? `, checked ${when(s.checkedAt)}` : ''}, which found it ${before}.`
+}
+
 function describe(s: SignIn | null, busy = false): string {
   if (!s) return busy ? `The reviewers are busy. ${BUSY}` : 'Not checked yet.'
+  if (stale(s, busy)) return `${notCurrent(s)} ${BUSY}`
   const said = s.method === 'not-signed-in' ? 'Not signed in.' : `Signed in: ${visible(s.words)}.`
   const at = s.checkedAt ? `${said} Checked ${when(s.checkedAt)}.` : said
   return s.busy || busy ? `${at} ${BUSY}` : at
@@ -76,6 +86,7 @@ class Row {
   private waiting = false
   private starting = 0
   private signIn: SignIn | null = null
+  private current = true
   private readonly post: Post
   private readonly target: string
 
@@ -121,7 +132,7 @@ class Row {
   }
 
   private paint() {
-    const m = this.signIn?.method ?? ''
+    const m = this.current ? this.signIn?.method ?? '' : ''
     this.kinds.items = [
       { id: 'subscription', title: 'Subscription', note: 'Claude Pro, Max or Ultra', state: m === 'subscription' ? 'In use' : '', good: true, panel: this.subscription },
       { id: 'api-key', title: 'API key', note: this.target === 'reviewers' ? 'Claude Console' : 'Claude Console or company gateway', state: PER_USE.includes(m) ? 'In use' : '', good: true, panel: this.apiKey },
@@ -129,13 +140,14 @@ class Row {
   }
 
   pending(s: SignIn) {
-    this.status.textContent = `${describe(s)} Checking again…`
+    this.status.textContent = `${s.stale ? notCurrent(s) : describe(s)} Checking again…`
   }
 
   show(s: SignIn | null, busy = false) {
     this.signIn = s
+    this.current = !stale(s, busy)
     this.status.textContent = describe(s, busy)
-    if (s?.method === 'gateway') this.status.textContent += ` ${GATEWAY_WARNING}.`
+    if (s?.method === 'gateway' && this.current) this.status.textContent += ` ${GATEWAY_WARNING}.`
     this.paint()
   }
 
@@ -217,7 +229,7 @@ export interface SignInState {
 
 function signedIn(v: unknown): boolean | null {
   const s = signInOf(v)
-  return s ? s.method !== 'not-signed-in' : null
+  return s && !s.stale ? s.method !== 'not-signed-in' : null
 }
 
 export async function signInState(post: Post): Promise<SignInState | null> {

@@ -346,7 +346,7 @@ func splitNote(text string) (string, string) {
 
 func scripted(id json.RawMessage, text string) bool {
 	lines := strings.Split(text, "\n")
-	said := false
+	said, done := false, false
 	for _, l := range lines {
 		if strings.HasPrefix(strings.TrimSpace(l), "say:") {
 			said = true
@@ -388,9 +388,15 @@ func scripted(id json.RawMessage, text string) bool {
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
 		case "say":
 			chunk(value + "\n")
+		case "done":
+			done = true
 		}
 	}
 	reply(id, map[string]any{"stopReason": "end_turn"})
+	if done {
+		time.Sleep(300 * time.Millisecond)
+		os.Exit(0)
+	}
 	return true
 }
 

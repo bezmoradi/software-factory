@@ -141,7 +141,7 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		release()
 		return err
 	}
-	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, a.what); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.AdoptChecked(ReviewerAgent, signIn), ReviewerSignInStep(), t.CostOK, a.what); err != nil {
 		release()
 		return err
 	}
@@ -163,7 +163,7 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		}
 		return explained(conflict("fetch"), "The engine couldn't fetch the remote's main branch, so it can't tell what changed.")
 	}
-	base, err := r.cfg.History.MergeBase(t.Repo, head, main)
+	base, err := r.cfg.History.MergeBase(ctx, t.Repo, head, main)
 	if err != nil {
 		release()
 		return explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))

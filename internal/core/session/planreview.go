@@ -30,8 +30,8 @@ func PlanReviewPrompt(clipped bool) func(base, head, branch string) string {
 	}
 }
 
-func (w *Work) PlanText(sid string) (WorkDoc, error) {
-	v, err := w.View(sid)
+func (w *Work) PlanText(ctx context.Context, sid string) (WorkDoc, error) {
+	v, err := w.View(ctx, sid)
 	if err != nil {
 		return WorkDoc{}, err
 	}
@@ -55,7 +55,7 @@ func (d *Dispatcher) PlanReview(ctx context.Context, sid, hash string, costOK bo
 	if d.cfg.Work == nil {
 		return explained(conflict("no workflow"), "This engine has no workflow, so it holds no plan to review.")
 	}
-	plan, err := d.cfg.Work.PlanText(sid)
+	plan, err := d.cfg.Work.PlanText(ctx, sid)
 	if err != nil {
 		return err
 	}

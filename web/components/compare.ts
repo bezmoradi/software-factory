@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, opener, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import { agentName } from './lineage.ts'
@@ -69,10 +69,12 @@ function elapsed(from: number | undefined): string {
 
 export function confirmBoth(): Promise<boolean> {
   return new Promise(resolve => {
+    const back = opener()
     const d = el('dialog', 'consent surface')
     d.setAttribute('aria-label', 'Start both sessions')
     const done = (answer: boolean) => {
       d.close()
+      back()
       d.remove()
       resolve(answer)
     }

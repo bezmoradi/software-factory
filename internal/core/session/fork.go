@@ -165,7 +165,7 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 	case q.Continues != nil:
 		return startPoint{commit: q.Continues.Head, origin: OriginHandover, earlier: slices.Clone(q.Continues.Earlier)}, nil
 	case q.From.SID != "":
-		return d.forkPoint(repo, q.From.SID, q.From.Commit)
+		return d.forkPoint(ctx, repo, q.From.SID, q.From.Commit)
 	case q.From.Branch != "":
 		src, ok := d.sources()
 		if !ok {
@@ -182,7 +182,7 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 	return startPoint{commit: main, origin: OriginMain}, nil
 }
 
-func (d *Dispatcher) forkPoint(repo Repository, sid, commit string) (startPoint, error) {
+func (d *Dispatcher) forkPoint(ctx context.Context, repo Repository, sid, commit string) (startPoint, error) {
 	d.mu.Lock()
 	r := d.runs[sid]
 	var branch, name, path, clone string
@@ -221,7 +221,7 @@ func (d *Dispatcher) forkPoint(repo Repository, sid, commit string) (startPoint,
 	if d.cfg.CloneReader == nil {
 		return startPoint{}, explained(conflict("from"), "This engine can't read the session's commits.")
 	}
-	in, err := d.cfg.CloneReader.IsAncestor(clone, commit, head)
+	in, err := d.cfg.CloneReader.IsAncestor(ctx, clone, commit, head)
 	if errors.Is(err, push.ErrTooLarge) {
 		return startPoint{}, explained(conflict("from"), "The branch of session "+clip(name, maxName)+" has more history than the engine walks, or a commit with more parents than it reads, so the engine couldn't check that commit "+shortSHA(commit)+" is on it, and no session started.")
 	}

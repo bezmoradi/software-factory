@@ -212,7 +212,7 @@ func (p *Pairs) benchPoint(ctx context.Context, q PairStart) (startPoint, Benchm
 	return startPoint{commit: v.Pull.Base, origin: "the base of merged pull request #" + n}, b, text, nil
 }
 
-func (p *Pairs) MergedDiff(id string) (ChangeView, error) {
+func (p *Pairs) MergedDiff(ctx context.Context, id string) (ChangeView, error) {
 	pr, err := p.View(id)
 	if err != nil {
 		return ChangeView{}, err
@@ -224,11 +224,11 @@ func (p *Pairs) MergedDiff(id string) (ChangeView, error) {
 		return ChangeView{}, explained(conflict("changes"), "This engine can't read changes.")
 	}
 	b := pr.Bench
-	base, err := p.cfg.History.MergeBase(pr.Path, b.Base, b.Head)
+	base, err := p.cfg.History.MergeBase(ctx, pr.Path, b.Base, b.Head)
 	if err != nil || base == "" {
 		return ChangeView{}, explained(conflict("merged"), "The engine couldn't read the merged pull request's commits in the clone. Its head, "+shortSHA(b.Head)+", may not have been fetched.")
 	}
-	cs, err := p.cfg.Changes.Changes(pr.Path, base, b.Head)
+	cs, err := p.cfg.Changes.Changes(ctx, pr.Path, base, b.Head)
 	if err != nil {
 		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the merged change: "+err.Error(), maxOutput))
 	}

@@ -91,6 +91,7 @@ var stores = map[string]storeRow{
 	decisionLogFile:     {class: classKept, version: 1, label: "the person's edits to the decision log"},
 	walkthroughsFile:    {class: classKept, version: 1, label: "manual test lists"},
 	recapSeenFile:       {class: classKept, version: 1, label: "recap marks"},
+	viewedFile:          {class: classKept, version: 1, label: "files marked viewed in the Changes view"},
 	dropsFile:           {class: classKept, version: 1, place: placeKeepOwn, label: "counts of dropped records"},
 	prefsFile:           {class: classKept, limit: maxPrefsFile, place: placeKeepOwn, label: "the page's preferences"},
 	auditFile:           {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit"},
@@ -200,6 +201,8 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewWalkthroughs(d).Load)
 	case recapSeenFile:
 		err = loaded(NewRecapSeen(d).Load)
+	case viewedFile:
+		err = loaded(NewViewed(d).Load)
 	case decisionLogFile:
 		err = loaded(NewDecisionLog(d).Load)
 	case pairsFile:

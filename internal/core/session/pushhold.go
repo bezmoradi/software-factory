@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -27,7 +28,7 @@ func (h HoldSettings) Valid() bool {
 	return h.MaxFiles >= 0 && h.MaxFiles <= MaxHoldFiles && h.MaxLines >= 0 && h.MaxLines <= MaxHoldLines
 }
 
-func (p *Pushes) holdItems(t PushTarget, h HoldSettings, entries map[review.Key]ReviewEntry, required []workflow.Requirement, head, main string) []string {
+func (p *Pushes) holdItems(ctx context.Context, t PushTarget, h HoldSettings, entries map[review.Key]ReviewEntry, required []workflow.Requirement, head, main string) []string {
 	if !h.On() {
 		return nil
 	}
@@ -43,7 +44,7 @@ func (p *Pushes) holdItems(t PushTarget, h HoldSettings, entries map[review.Key]
 	if h.MaxFiles <= 0 && h.MaxLines <= 0 {
 		return out
 	}
-	files, lines, clipped, ok := p.changeSize(t, head, main)
+	files, lines, clipped, ok := p.changeSize(ctx, t, head, main)
 	limit := sizeLimit(h)
 	switch {
 	case !ok:
@@ -69,27 +70,33 @@ func sizeLimit(h HoldSettings) string {
 	return strings.Join(parts, " or ")
 }
 
-func (p *Pushes) changeSize(t PushTarget, head, main string) (int, int, bool, bool) {
+func (p *Pushes) changeSize(ctx context.Context, t PushTarget, head, main string) (int, int, bool, bool) {
 	base := ""
 	if main != "" {
 		var err error
-		if base, err = p.cfg.History.MergeBase(t.Repo, head, main); err != nil {
+		if base, err = p.cfg.History.MergeBase(ctx, t.Repo, head, main); err != nil {
 			return 0, 0, false, false
 		}
 	}
-	cs, err := p.cfg.Changes.Changes(t.Repo, base, head)
+	cs, err := p.cfg.Changes.Changes(ctx, t.Repo, base, head)
 	if err != nil {
 		return 0, 0, false, false
 	}
-	return len(cs.Files), changedLines(cs.Diff), cs.Clipped, true
+	return len(cs.Files), changedLines(cs.Diff) + int(min(cs.UndiffedLines, maxCountedLines)), cs.Clipped || cs.Uncounted, true
 }
+
+const maxCountedLines = 1 << 40
 
 func changedLines(diff string) int {
 	n := 0
+	inHunk := false
 	for line := range strings.SplitSeq(diff, "\n") {
 		switch {
-		case strings.HasPrefix(line, "+++ b/"), strings.HasPrefix(line, "--- a/"), line == "+++ /dev/null", line == "--- /dev/null":
-		case strings.HasPrefix(line, "+"), strings.HasPrefix(line, "-"):
+		case strings.HasPrefix(line, "diff --git "):
+			inHunk = false
+		case strings.HasPrefix(line, "@@ "):
+			inHunk = true
+		case inHunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")):
 			n++
 		}
 	}

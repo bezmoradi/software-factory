@@ -2,6 +2,7 @@ package files
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"path"
@@ -18,10 +19,10 @@ const (
 
 var _ session.PushContents = Reader{}
 
-func (Reader) Pushed(repoPath, base, head string, reviewed []string, budget int64) (session.PushedSet, error) {
+func (Reader) Pushed(ctx context.Context, repoPath, base, head string, reviewed []string, budget int64) (session.PushedSet, error) {
 	return with(repoPath, func(r *repo) (session.PushedSet, error) {
 		out := session.PushedSet{Complete: true, Attributes: map[string][]byte{}}
-		commits, err := newCommits(r, head, base)
+		commits, err := newCommits(ctx, r, head, base)
 		if err != nil {
 			return out, err
 		}
@@ -45,6 +46,9 @@ func (Reader) Pushed(repoPath, base, head string, reviewed []string, budget int6
 		dirs := map[string]bool{"": true}
 		left := budget
 		for _, commit := range slices.Backward(commits) {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
 			pc, size, err := pushedCommit(r, commit.SHA)
 			if err != nil {
 				return out, err
@@ -136,8 +140,8 @@ func heldIn(r *repo, trees []string, ch push.Change) (bool, error) {
 	return false, nil
 }
 
-func newCommits(r *repo, head, base string) ([]push.Commit, error) {
-	have, err := reachable(r, base, maxMergeWalk)
+func newCommits(ctx context.Context, r *repo, head, base string) ([]push.Commit, error) {
+	have, err := reachable(ctx, r, base, maxMergeWalk)
 	if err != nil {
 		return nil, err
 	}

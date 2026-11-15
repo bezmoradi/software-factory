@@ -117,7 +117,10 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 	}
 	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, Auto: true, Scope: ScopeRetry}
 	if w := d.cfg.Work; w != nil {
-		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
+		rt.Plan = func(ctx context.Context, base, head string) ([]workflow.Requirement, error) {
+			required := w.Reviewers(ctx, sid, t, base, head)
+			return required, ctx.Err()
+		}
 		rt.Rounds = w.Rounds(sid, t.Name)
 	}
 	d.reviewGiven(&rt, sid, t)

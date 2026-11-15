@@ -432,6 +432,7 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 		Pusher: gitpush.Pusher{Reader: files.Reader{}, Client: client}, Heads: files.Reviews{}, History: files.Reader{}, Changes: files.Reader{},
 		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
 		Tell: tellSession(reg), Note: reg.NoteFor("push"), Denials: state.NewDenials(cfg.StateDir), Waiting: state.NewWaiting(cfg.StateDir),
+		TurnBase: reg.TurnBase, Branch: files.Reader{},
 	}
 	if work != nil {
 		pc.Work = work

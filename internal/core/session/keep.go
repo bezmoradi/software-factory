@@ -86,7 +86,7 @@ type KeepStore interface {
 
 type KeepReader interface {
 	ObjectsToSend(repo, commit string, remoteHas []string) ([]push.Object, error)
-	IsAncestor(repo, ancestor, commit string) (bool, error)
+	IsAncestor(ctx context.Context, repo, ancestor, commit string) (bool, error)
 	Commit(repo, sha string) (push.Commit, error)
 }
 
@@ -564,7 +564,7 @@ func (k *Keep) holdsCommit(repo, last, head string) bool {
 	if ok {
 		return held
 	}
-	in, err := k.cfg.Reader.IsAncestor(repo, last, head)
+	in, err := k.cfg.Reader.IsAncestor(context.Background(), repo, last, head)
 	held = err == nil && in
 	k.mu.Lock()
 	if len(k.holds) >= maxKeepHolds {

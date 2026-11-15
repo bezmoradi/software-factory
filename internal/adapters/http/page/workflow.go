@@ -200,15 +200,15 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	sid := str(body["sid"], 80)
 	switch path {
 	case allowFileRoute, flagRemoveRoute:
-		s.flag(w, path, sid, body)
+		s.flag(r.Context(), w, path, sid, body)
 	case allowCommitRoute, commitRewriteRoute:
-		s.commitFlag(w, path, sid, body)
+		s.commitFlag(r.Context(), w, path, sid, body)
 	case "/api/gate":
 		if !keysWithin(body, "sid") || sid == "" {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		v, err := s.cfg.Work.View(sid)
+		v, err := s.cfg.Work.View(r.Context(), sid)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -221,7 +221,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.cfg.Work.SetType(sid, size)
+		err := s.cfg.Work.SetType(r.Context(), sid, size)
 		shared.For(r.Context(), s.logger).Info("work type", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/approve-plan", "/api/approve-requirements":
@@ -231,7 +231,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.cfg.Work.Approve(sid, path == "/api/approve-plan", hash, text)
+		err := s.cfg.Work.Approve(r.Context(), sid, path == "/api/approve-plan", hash, text)
 		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/team":
@@ -319,7 +319,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine keeps a project's review rounds, default work type, automatic findings, pull request comments and push hold only."})
 			return
 		}
-		err := s.cfg.Work.SetProject(repo, op, rounds, kind)
+		err := s.cfg.Work.SetProject(r.Context(), repo, op, rounds, kind)
 		shared.For(r.Context(), s.logger).Info("project setting", "op", op, "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	}

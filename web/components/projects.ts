@@ -340,10 +340,45 @@ class SfProjects extends HTMLElement {
     return (a instanceof HTMLSelectElement && this.contains(a)) || !!this.querySelector('.menu:popover-open')
   }
 
-  reveal(path: string) {
+  showPanel(path: string, which: 'rules' | 'team') {
+    const p = this.#view.projects.find(x => x.path === path)
+    if (!p) return
+    if (which === 'rules' && !this.#rules.has(path)) {
+      const panel = el('sf-allow-rules', 'project-rules')
+      panel.repo = p.name
+      this.#rules.set(path, panel)
+    }
+    if (which === 'team' && !this.#team.has(path)) {
+      const panel = el('sf-team-rules', 'project-rules')
+      panel.path = p.path
+      this.#team.set(path, panel)
+    }
+    this.reveal(path)
+    const panel = which === 'rules' ? this.#rules.get(path) : this.#team.get(path)
+    panel?.scrollIntoView({ block: 'nearest' })
+    if (panel) {
+      panel.tabIndex = -1
+      panel.focus()
+    }
+  }
+
+  startIn(path: string) {
+    if (!this.#view.projects.some(x => x.path === path)) return
+    this.#expanded.set(path, true)
+    if (this.#forms.has(path)) {
+      this.#render()
+      this.#forms.get(path)?.name.focus()
+      return
+    }
+    this.#open(path)
+  }
+
+  reveal(path: string, focus = false) {
     this.#expanded.set(path, true)
     this.#render()
-    this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:toggle`)}"]`)?.scrollIntoView({ block: 'nearest' })
+    const row = ['toggle', 'count', 'new', 'more'].map(a => this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:${a}`)}"]`)).find(Boolean)
+    row?.scrollIntoView({ block: 'nearest' })
+    if (focus) row?.focus({ preventScroll: true })
   }
 
   #projectName(path: string): string {

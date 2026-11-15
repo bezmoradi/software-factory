@@ -43,4 +43,9 @@ func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.
 		ex.Rules = &session.AllowRules{Hosts: d.RuleHosts, Repos: parts.repos, Audit: audit}
 	}
 	srv.UseViews(recaps, ws, session.NewExceptions(ex))
+	vc := session.ViewedConfig{Store: state.NewViewed(cfg.StateDir), Targets: d.PushTarget, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Logger: logger}
+	if parts.repos != nil {
+		vc.Main = parts.repos.Main
+	}
+	srv.UseViewed(session.NewViewed(vc))
 }

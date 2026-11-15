@@ -48,6 +48,7 @@ type SignIn struct {
 	Plan      string
 	ExpiresAt time.Time
 	Busy      bool
+	Stale     bool
 }
 
 func (s SignIn) Costs() bool {
@@ -128,8 +129,9 @@ type SignInStatus struct {
 }
 
 type Expected struct {
-	Store Expectations
-	mu    sync.Mutex
+	Store   Expectations
+	mu      sync.Mutex
+	cleared map[string]time.Time
 }
 
 func (e *Expected) Of(agent string) Expect {
@@ -236,6 +238,10 @@ func (e *Expected) Set(agent string, x Expect) error {
 		return errManyExpectations
 	}
 	if x == ExpectAny {
+		if e.cleared == nil {
+			e.cleared = map[string]time.Time{}
+		}
+		e.cleared[agent] = time.Now()
 		if !had {
 			return nil
 		}
@@ -244,6 +250,18 @@ func (e *Expected) Set(agent string, x Expect) error {
 		all[agent] = x
 	}
 	return e.Store.Save(all)
+}
+
+func (e *Expected) AdoptChecked(agent string, s SignIn) Expect {
+	if e != nil {
+		e.mu.Lock()
+		at, ok := e.cleared[agent]
+		e.mu.Unlock()
+		if ok && !s.CheckedAt.After(at) {
+			return e.Of(agent)
+		}
+	}
+	return e.Adopt(agent, s.Method)
 }
 
 func (e *Expected) Adopt(agent string, m SignInMethod) Expect {

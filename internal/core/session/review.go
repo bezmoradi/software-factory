@@ -175,15 +175,15 @@ type ReviewTarget struct {
 	Name   string
 	Branch string
 	CostOK bool
-	Plan   func(base, head string) []workflow.Requirement
+	Plan   func(ctx context.Context, base, head string) ([]workflow.Requirement, error)
 	Rounds int
 	Auto   bool
 	Scope  ReviewScope
 
-	Approved func(head, main string) ApprovedText
+	Approved func(ctx context.Context, head, main string) (ApprovedText, error)
 	Claims   string
 
-	TeamRules func(base, head string) TeamRules
+	TeamRules func(ctx context.Context, base, head string) (TeamRules, error)
 	CloneSync func(main string) string
 
 	Req string
@@ -621,9 +621,11 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			r.learned(t, e)
 			if t.Approved != nil {
 				ticket := r.approvalTicket()
-				now := t.Approved(head, main).Given()
-				now.Team = given.team.Digest()
-				r.approvalIs(t.SID, head, ticket, now)
+				if a, err := t.Approved(ctx, head, main); err == nil {
+					now := a.Given()
+					now.Team = given.team.Digest()
+					r.approvalIs(t.SID, head, ticket, now)
+				}
 			}
 			mu.Lock()
 			entries[i] = e
@@ -910,7 +912,7 @@ func (r *Reviews) KnownSignIn(ctx context.Context) (SignIn, error) {
 	fresh, err := r.CheckSignIn(ctx)
 	if err != nil && isBusy(err) && s != nil {
 		kept := *s
-		kept.Busy = true
+		kept.Busy, kept.Stale = true, stale
 		return kept, nil
 	}
 	return fresh, err
@@ -926,7 +928,16 @@ func (r *Reviews) SignInChanged() {
 	r.mu.Lock()
 	r.signStale = true
 	r.signGen++
+	var shown *SignIn
+	if r.signIn != nil {
+		s := *r.signIn
+		s.Stale = true
+		shown = &s
+	}
 	r.mu.Unlock()
+	if shown != nil {
+		r.cfg.ShowSignIn(*shown)
+	}
 }
 
 func (r *Reviews) SignIn() (SignIn, bool) {
@@ -935,7 +946,9 @@ func (r *Reviews) SignIn() (SignIn, bool) {
 	if r.signIn == nil {
 		return SignIn{}, false
 	}
-	return *r.signIn, true
+	s := *r.signIn
+	s.Stale = r.signStale
+	return s, true
 }
 
 func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason string) error {

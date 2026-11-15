@@ -2,14 +2,14 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { button, el, emit, fileLink, repoPath, shown, visible, visibleCommand } from './lib/dom.ts'
+import { button, el, emit, fileLink, repoPath, settleFocus, shown, visible, visibleCommand } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
-import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, setAgentNames, setCompose, shortSha } from './lib/format.ts'
+import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
 import { placeMenu, sessionState, warnings } from './components/overview.ts'
-import type { AgentInfo, Catalog, CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
+import type { AgentInfo, Catalog, CardHost, CatalogEntry, ChangeFrom, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
@@ -37,7 +37,9 @@ import './components/tabs.ts'
 import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
 import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
-import { setHalt, setHaltSession } from './components/halt.ts'
+import { openAway, setHalt, setHaltSession } from './components/halt.ts'
+import { isMac, openPalette, openShortcuts, paletteKey, typing, type PaletteItem } from './components/palette.ts'
+import './components/rules.ts'
 import { onNotifyOpen, watchNotify } from './components/notify.ts'
 import './components/recap.ts'
 import { openWorkspace } from './components/workspace.ts'
@@ -73,6 +75,8 @@ interface Session {
   changes: Changes | null
   changesKey: string
   changesAt: number
+  compare: { from: ChangeFrom; commit: string }
+  forkStart: Started
   busy: boolean
   step: Step
   compacting: string
@@ -212,12 +216,13 @@ function ensure(sid: string): Session {
   view.hidden = true
   view.scroller = scroller
   byId('conversations').append(view)
-  s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, step: '', compacting: '', changes: null, changesKey: '', changesAt: 0, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
+  s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, step: '', compacting: '', changes: null, forkStart: null, changesKey: '', changesAt: 0, compare: { from: 'fork', commit: '' }, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
   sessions.set(sid, s)
   return s
 }
 
 function startedOf(s: Session): Started {
+  if (s.changes && s.changes.from && s.changes.from !== 'fork') return s.forkStart
   return !s.changes ? null : s.changes.noBase ? 'nobase' : s.changes.commits.length > 0
 }
 
@@ -287,6 +292,15 @@ function sleeping(s: Session | null) {
 
 function current(): Session | null {
   return current.key.startsWith('s/') ? sessions.get(current.key.slice(2)) || null : null
+}
+
+function changesSession(): Session | null {
+  return current.key.startsWith('c:') ? sessions.get(current.key.slice(2)) || null : current()
+}
+
+function openChanges(s: Session) {
+  go(`c:${s.sid}`)
+  requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff())
 }
 current.key = 'overview'
 
@@ -359,7 +373,7 @@ function onEvent(ev: StreamEvent) {
   }
   if (ev.type === 'reviewer') {
     if (typeof ev.method === 'string' && typeof ev.words === 'string') {
-      reviewer = { expect: reviewer?.expect ?? 'any', signIn: { method: ev.method, words: ev.words, endpoint: typeof ev.endpoint === 'string' ? ev.endpoint : undefined, costs: ev.costs === true, checkedAt: ev.checkedAt } }
+      reviewer = { expect: reviewer?.expect ?? 'any', signIn: { method: ev.method, words: ev.words, endpoint: typeof ev.endpoint === 'string' ? ev.endpoint : undefined, costs: ev.costs === true, checkedAt: ev.checkedAt, stale: ev.stale === true } }
       schedulePaint()
     }
     return
@@ -527,6 +541,7 @@ function go(key: string) {
   const view = current()?.view
   scroller.scrollTop = view?.pinned ? scroller.scrollHeight : scrolls.get(key) ?? (key.startsWith('s/') ? scroller.scrollHeight : 0)
   paintJump()
+  settleFocus()
 }
 
 const TABS_KEY = 'sf-tabs'
@@ -549,7 +564,7 @@ function saveCheckpoints() {
     sessionStorage.setItem(SAVED_KEY, JSON.stringify(Object.fromEntries(checkpointed)))
   } catch {}
 }
-const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|f:[\w-]{1,100}:\/[^\0]{0,4000})$/
+const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
 
 function saveTabs() {
   try {
@@ -563,15 +578,19 @@ function restoreTabs() {
     saved = JSON.parse(sessionStorage.getItem(TABS_KEY) || 'null')
   } catch {}
   const tabs = Array.isArray(saved?.tabs) ? [...new Set((saved.tabs as unknown[]).filter((k): k is string => typeof k === 'string' && TAB_KEY.test(k)))].slice(0, 50) : []
-  for (const k of tabs) if (k.startsWith('f:')) files.set(k, { path: k.slice(k.indexOf(':', 2) + 1) })
+  for (const k of tabs) {
+    if (!k.startsWith('f:')) continue
+    const { path, commit } = fileKey(k)
+    files.set(k, { path, ...(commit ? { commit } : {}) })
+  }
   openTabs = ['overview', ...tabs]
   const active = typeof saved?.active === 'string' && openTabs.includes(saved.active) ? saved.active : 'overview'
   current.key = active
-  recent = active === 'overview' ? [] : [active]
+  recent = [active, ...[...openTabs].reverse().filter(k => k !== active && k !== 'overview')].filter(k => k !== 'overview')
 }
 
 function pruneTabs() {
-  const sidOf = (k: string) => (k.startsWith('s/') ? k.slice(2) : k.startsWith('f:') ? k.slice(2, k.indexOf(':', 2)) : '')
+  const sidOf = (k: string) => (k.startsWith('s/') || k.startsWith('c:') ? k.slice(2) : k.startsWith('f:') ? k.slice(2, k.indexOf(':', 2)) : '')
   for (const k of openTabs) if (sidOf(k) && !sessions.has(sidOf(k))) closeTab(k)
   if (current.key.startsWith('f:') && !files.get(current.key)?.text) loadFile(current.key)
 }
@@ -583,7 +602,8 @@ function closeTab(key: string) {
   recent = recent.filter(k => k !== key && openTabs.includes(k))
   scrolls.delete(key)
   dropDraft(key)
-  if (key === current.key) go(recent[0] || 'overview')
+  const owner = key.startsWith('c:') ? `s/${key.slice(2)}` : key.startsWith('f:') ? `s/${key.slice(2, key.indexOf(':', 2))}` : ''
+  if (key === current.key) go(owner && openTabs.includes(owner) ? owner : recent[0] || 'overview')
   else paint()
 }
 
@@ -608,7 +628,8 @@ function paint() {
   byId('projects').hidden = current.key !== 'projects'
   byId('docs').hidden = current.key !== 'docs'
   byId('file').hidden = !current.key.startsWith('f:')
-  document.body.classList.toggle('editor', current.key.startsWith('f:'))
+  paintChangesTab()
+  document.body.classList.toggle('editor', current.key.startsWith('f:') || current.key.startsWith('c:'))
   document.body.dataset.view = current.key === 'projects' || current.key === 'docs' ? current.key : ''
   byId<HTMLElementTagNameMap['sf-file']>('file').view = files.get(current.key) ?? null
   const sessionTab = (k: string) => k.startsWith('s/') && openTabs.includes(k)
@@ -644,6 +665,10 @@ function paint() {
       if (k === 'overview') return { id: k, label: 'Welcome', closable: false, need: needs && !!s }
       if (k === 'projects' || k === 'docs') return { id: k, label: k === 'docs' ? 'Docs' : 'Projects', closable: true, need: false }
       if (k.startsWith('f:')) return { id: k, label: visible(fileLabel(k)), title: files.get(k)?.path ?? '', closable: true, need: false }
+      if (k.startsWith('c:')) {
+        const c = sessions.get(k.slice(2))
+        return { id: k, label: `Changes: ${c ? visible(label(c.info)) : 'session'}`, title: c?.info.cwd || '', closable: true, need: false }
+      }
       const x = sessions.get(k.slice(2))
       return { id: k, label: x ? visible(label(x.info)) : 'Session', title: x?.info.cwd || '', closable: true, need: !!x && !!waitingOf(x).length }
     }),
@@ -698,12 +723,14 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-compare']>('compare').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => ({ sid: x.sid, info: x.info, cost: x.cost, total: x.total })), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
-    byId<HTMLElementTagNameMap['sf-changes']>('changes').forkable = forkable(s)
-    byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
+    const rulesProject = projectFor(s)
+    byId<HTMLElementTagNameMap['sf-rules']>('rules').view = state.connected && s.info.verified ? { sid: s.sid, name: label(s.info), claude: isClaude(s.info), repo: rulesProject?.name ?? s.info.project ?? '', path: rulesProject?.path ?? '', box: s.info.box ?? '' } : null
+    paintChangesCard(s)
     void loadChanges(s)
     void loadGate(s)
   } else {
-    byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = null
+    byId('changes-card').hidden = true
+    byId<HTMLElementTagNameMap['sf-rules']>('rules').view = null
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = null
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
@@ -715,7 +742,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
     byId<HTMLElementTagNameMap['sf-split']>('split').view = null
     byId<HTMLElementTagNameMap['sf-compare']>('compare').view = null
-    byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : 'Welcome') : 'Disconnected'
+    byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : current.key.startsWith('c:') ? 'Changes' : 'Welcome') : 'Disconnected'
     byId('title').textContent = state.connected ? '' : state.note
     byId('usage').textContent = ''
     byId('stop').hidden = true
@@ -730,6 +757,27 @@ function paint() {
   saveTabs()
 }
 
+function paintChangesCard(s: Session) {
+  const c = s.changes
+  byId('changes-card').hidden = !c
+  if (!c) return
+  const more = c.more ? ' or more' : ''
+  const viewed = c.files.filter(f => f.viewed).length
+  byId('changes-summary').textContent = `${c.commits.length}${more} ${plural(c.commits.length, 'commit')}, ${c.files.length}${more} ${plural(c.files.length, 'file')} changed${c.files.length ? `, ${viewed} viewed` : ''}.`
+}
+
+function paintChangesTab() {
+  const view = byId<HTMLElementTagNameMap['sf-changes']>('changes')
+  const s = current.key.startsWith('c:') ? sessions.get(current.key.slice(2)) ?? null : null
+  if (!s) {
+    view.changes = null
+    return
+  }
+  view.forkable = forkable(s)
+  view.changes = s.changes
+  void loadChanges(s)
+}
+
 function paintControl(s: Session) {
   const i = s.info
   const button = byId('control-button')
@@ -741,7 +789,10 @@ function paintControl(s: Session) {
     text = `${claims.length ? `Claimed by ${claims.length} connections: ${claims.join(', ')}. ` : 'Two connections claim to be this session. '}This page sends it nothing while they disagree. One of them may be a program pretending to be it.`
     action = 'End both connections'
   } else if (!i.verified) text = 'Read-only: this engine didn’t start this session, so the page only shows what it reports.'
-  else if (sleeping(s)) {
+  else if (!i.running && i.state === 'done') {
+    text = 'This session is done: its agent finished its work and ended by itself. A message wakes it again.'
+    if (sleeping(s) && !i.controlled) action = 'Wake it'
+  } else if (sleeping(s)) {
     if (!i.controlled) {
       text = 'This background session is stopped.'
       action = 'Wake it'
@@ -936,7 +987,10 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const push = i.push && Array.isArray(i.push.missing) ? i.push : null
   const gate = state.connected && s.gate?.head ? s.gate : null
   pushOutcome(s)
-  return { push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
+  const review = i.review
+  const passed = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles.filter(r => r.state === 'pass').map(r => r.agent) : []
+  const passedSince = push ? push.missing.filter(m => passed.some(agent => m.startsWith(`a review by ${agent} `))) : []
+  return { passedSince, push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {
@@ -1457,17 +1511,41 @@ async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<
   return { ok: !!res && res.ok, body }
 }
 
-async function loadChanges(s: Session) {
-  const key = `${s.gate?.head ?? ''}:${s.gate?.branch ?? ''}:${working(s)}:${s.info.review?.commit ?? ''}:${s.info.review?.running ?? ''}:${s.info.push?.at ?? ''}`
-  if (!state.connected || s.changesKey === key) return
-  if (Date.now() - s.changesAt < 5000) return void setTimeout(schedulePaint, 5100 - (Date.now() - s.changesAt))
+async function loadChanges(s: Session, force = false) {
+  const key = `${s.gate?.head ?? ''}:${s.gate?.branch ?? ''}:${working(s)}:${s.info.review?.commit ?? ''}:${s.info.review?.running ?? ''}:${s.info.push?.at ?? ''}:${s.compare.from}:${s.compare.commit}`
+  if (!state.connected || (s.changesKey === key && !force)) return
+  if (!force && Date.now() - s.changesAt < 5000) return void setTimeout(schedulePaint, 5100 - (Date.now() - s.changesAt))
   s.changesAt = Date.now()
-  const res = await api('/api/changes', { sid: s.sid }).catch(() => null)
+  const asked = { ...s.compare }
+  const res = await api('/api/changes', asked.from === 'fork' ? { sid: s.sid } : asked.from === 'commit' ? { sid: s.sid, from: 'commit', commit: asked.commit } : { sid: s.sid, from: asked.from }).catch(() => null)
+  if (asked.from !== s.compare.from || asked.commit !== s.compare.commit) return
+  if (res && res.status === 409 && asked.from !== 'fork') {
+    const said = (await res.json().catch(() => null)) as { message?: unknown } | null
+    toast({ id: `changes:${s.sid}`, title: 'That comparison isn’t available.', description: typeof said?.message === 'string' ? visible(said.message) : 'The Changes view went back to where the branch leaves main.', tone: 'warn' })
+    s.compare = { from: 'fork', commit: '' }
+    s.changesKey = ''
+    return loadChanges(s, true)
+  }
   const body = res && res.ok ? ((await res.json().catch(() => null)) as { changes?: Changes | null } | null) : null
   if (body) s.changesKey = key
   else setTimeout(schedulePaint, 5100)
   s.changes = body?.changes ?? null
-  if (current() === s) byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
+  if (s.changes && (!s.changes.from || s.changes.from === 'fork')) s.forkStart = startedOf(s)
+  if (changesSession() === s) schedulePaint()
+}
+
+async function markViewed(s: Session | null, d: { path: string; blob: string; viewed: boolean }) {
+  if (!s) return
+  const flip = (on: boolean) => {
+    if (!s.changes) return
+    s.changes = { ...s.changes, files: s.changes.files.map(f => (f.path === d.path && f.blob === d.blob ? { ...f, viewed: on, stale: on ? false : f.stale } : f)) }
+    if (changesSession() === s) byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
+  }
+  flip(d.viewed)
+  const { ok, body } = await reply(await api('/api/viewed', { sid: s.sid, ...d }).catch(() => null))
+  if (ok) return
+  flip(!d.viewed)
+  toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
 function say(message: string) {
@@ -1840,7 +1918,18 @@ byId('push-panel').addEventListener('sf-allow-file', e => void sessionAsk(curren
 byId('push-panel').addEventListener('sf-remove-file', e => void sessionAsk(current(), '/api/flag-remove', e.detail, "The message wasn't sent.", 'The session was asked to remove the file from the branch.'))
 byId('push-panel').addEventListener('sf-allow-commit', e => void sessionAsk(current(), '/api/allow-commit', e.detail, "The commit wasn't allowed.", 'You allowed that field of that commit. Another commit with the same text is flagged again.'))
 byId('push-panel').addEventListener('sf-rewrite-commit', e => void sessionAsk(current(), '/api/commit-rewrite', e.detail, "The message wasn't sent.", 'The session was asked to rewrite the commit.'))
-byId('changes').addEventListener('sf-line-comments', e => void send(e.detail.text).then(ok => e.detail.done(ok), () => e.detail.done(false)))
+byId('changes').addEventListener('sf-line-comments', e => void send(e.detail.text, [], changesSession()).then(ok => e.detail.done(ok), () => e.detail.done(false)))
+byId('changes').addEventListener('sf-compare-point', e => {
+  const s = changesSession()
+  if (!s) return
+  s.compare = { from: e.detail.from, commit: e.detail.from === 'commit' ? e.detail.commit : '' }
+  void loadChanges(s, true)
+})
+byId('changes').addEventListener('sf-viewed', e => void markViewed(changesSession(), e.detail))
+byId('changes-open').addEventListener('click', () => {
+  const s = current()
+  if (s) openChanges(s)
+})
 byId('reviews').addEventListener('sf-override', e => void sessionAsk(current(), '/api/override', e.detail, "The verdict wasn't overridden.", 'You overrode the verdict for this commit. Press Push to push it.'))
 byId('path').addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
@@ -2138,7 +2227,7 @@ byId('menu-fork').addEventListener('click', () => {
   projects.fork(p.path, s.sid)
 })
 byId('changes').addEventListener('sf-fork-commit', e => {
-  const s = current()
+  const s = changesSession()
   const p = s && forkable(s) && projectFor(s)
   if (!s || !p) return
   go('projects')
@@ -2250,7 +2339,7 @@ document.addEventListener('click', followView)
 document.addEventListener('auxclick', followView)
 byId('tabs').addEventListener('sf-open', e => go(e.detail.id))
 document.body.addEventListener('sf-file', e => {
-  const s = current()
+  const s = changesSession()
   if (s) openFile(s.sid, e.detail.path, typeof e.detail.commit === 'string' && COMMIT.test(e.detail.commit) ? e.detail.commit : '', typeof e.detail.line === 'number' && Number.isInteger(e.detail.line) && e.detail.line > 0 ? e.detail.line : 0)
 })
 byId('file').addEventListener('sf-reload', () => {
@@ -2517,7 +2606,7 @@ byId('side-back').addEventListener('click', () => {
 })
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || e.defaultPrevented || !document.body.classList.contains('side-full')) return
-  if (e.target instanceof HTMLElement && e.target.closest('[popover], select')) return
+  if (e.target instanceof HTMLElement && e.target.closest('[popover], select, dialog')) return
   setSide(false)
   byId('side-open').focus()
 })
@@ -2562,7 +2651,7 @@ byId('jump-start').addEventListener('click', () => jump('start'))
 byId('jump-latest').addEventListener('click', () => jump('latest'))
 document.addEventListener('keydown', e => {
   if ((e.key !== 'Home' && e.key !== 'End') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !current.key.startsWith('s/')) return
-  if (e.defaultPrevented || (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable], [popover], [role="tablist"]'))) return
+  if (e.defaultPrevented || (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable], [popover], [role="tablist"], dialog'))) return
   if (e.target instanceof HTMLElement && e.target !== document.body && e.target.scrollHeight > e.target.clientHeight + 1) return
   e.preventDefault()
   jump(e.key === 'Home' ? 'start' : 'latest')
@@ -2682,6 +2771,136 @@ byId('composer').addEventListener('submit', async e => {
 byId('stop').addEventListener('click', () => {
   const s = current()
   if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
+})
+byId('rules').addEventListener('sf-rules-open', e => {
+  const s = current()
+  const p = s ? projectFor(s) : null
+  if (e.detail.to === 'egress') return openEgress(api)
+  if (e.detail.to === 'away') return openAway(true)
+  if (e.detail.to === 'exceptions') return openExceptions(api, labelOfSid)
+  if (e.detail.to === 'team') {
+    if (!s) return
+    const focusTeam = () => {
+      byId('team-row').hidden = false
+      byId('team-open').focus()
+    }
+    if (teamShown && teamFor === s.sid) return focusTeam()
+    void teamOp('read').then(focusTeam)
+    return
+  }
+  if (!p) return void toast({ title: 'Add this project first.', description: 'Saved allow rules are listed per project, under Projects.', tone: 'bad' })
+  go('projects')
+  projects.showPanel(p.path, 'rules')
+})
+
+function openSessionPanel(which: 'changes' | 'rules') {
+  const s = current()
+  if (which === 'changes' && s) return openChanges(s)
+  setSide(true)
+  if (!document.body.classList.contains('side-full') && !document.body.classList.contains('wide')) {
+    byId('side-toggle').setAttribute('aria-expanded', 'true')
+    byId('side').classList.add('open')
+  }
+  requestAnimationFrame(() => {
+    if (which === 'changes') byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff()
+    else byId<HTMLElementTagNameMap['sf-rules']>('rules').open()
+  })
+}
+
+function sessionActions(s: Session): PaletteItem[] {
+  const name = visible(label(s.info))
+  const group = `This session: ${name}`
+  const offline = !state.connected ? 'the page isn’t connected to the engine' : ''
+  const rv = reviewsOf(s)
+  const noReview = !rv ? 'reviews and pushes run for a session this engine started in a project of your list' : rv.disabled
+  const out: PaletteItem[] = []
+  out.push({ id: 'wake', group, label: 'Wake the session', detail: 'Asks for any sign-in or cost confirmation, as Wake does', off: offline || (!sleeping(s) ? 'it isn’t a stopped Claude Code background session' : ''), run: () => void wakeSession(s) })
+  out.push({ id: 'turn', group, label: 'Stop the turn', off: offline || (byId('stop').hidden ? 'no turn is running that this page controls' : ''), run: () => byId('stop').click() })
+  const manageBox = byId('manage')
+  const manageButton = byId<HTMLButtonElement>('manage-button')
+  const stopping = manageButton.dataset.action !== 'remove'
+  out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || (manageBox.hidden ? 'only a Claude Code background session this engine started is stopped or deleted here' : manageButton.disabled ? 'it is already being stopped or deleted' : ''), run: () => {
+    for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
+    manageButton.click()
+    manageButton.focus()
+  } })
+  out.push({ id: 'review', group, label: 'Review', detail: 'Runs the required reviewers, asking for cost confirmation when the sign-in is per use', off: offline || noReview || (s.info.review?.running || reviewAsking.has(s.sid) ? 'a review is running' : ''), run: () => void startReview(s, false) })
+  out.push({ id: 'push', group, label: 'Push', detail: 'The gate checks the reviews first; a held push waits on its card', off: offline || noReview || (rv?.pushing ? 'a push is being decided' : rv?.pushed ? 'the latest commit is already pushed' : ''), run: () => void startPush(s) })
+  out.push({ id: 'changes', group, label: 'Open Changes', detail: 'The diff, its comparison points and viewed marks', off: !s.changes ? 'the engine hasn’t sent this session’s changes yet' : '', run: () => openSessionPanel('changes') })
+  out.push({ id: 'rules', group, label: 'What this session may and may not do', off: !s.info.verified ? 'only a session this engine started has this view' : '', run: () => openSessionPanel('rules') })
+  return out
+}
+
+function paletteItems(): PaletteItem[] {
+  const items: PaletteItem[] = []
+  const s = current()
+  if (s) items.push(...sessionActions(s))
+  for (const x of [...sessions.values()].sort((a, b) => (b.info.startedAt || 0) - (a.info.startedAt || 0))) {
+    const st = sessionState({ ...x.info, busy: working(x), needs: waitingOf(x).length })
+    items.push({ id: `s:${x.sid}`, group: 'Sessions', label: visible(label(x.info)), detail: [st.word, x.info.project, x.info.lineage?.branch].filter(Boolean).map(t => visible(String(t))).join(' · '), run: () => go(`s/${x.sid}`) })
+  }
+  for (const p of projectList) {
+    items.push({ id: `p:${p.path}`, group: 'Projects', label: visible(p.name), detail: 'Open the project', run: () => {
+      go('projects')
+      projects.reveal(p.path, true)
+    } })
+    items.push({ id: `start:${p.path}`, group: 'Projects', label: `Start a session in ${visible(p.name)}`, detail: 'Opens the new-session form', off: !state.connected ? 'the page isn’t connected to the engine' : '', run: () => {
+      go('projects')
+      projects.startIn(p.path)
+    } })
+  }
+  const panel = (id: string, title: string, run: () => void, off = '') => items.push({ id, group: 'Views and panels', label: title, off, run })
+  const needsEngine = !state.connected ? 'the page isn’t connected to the engine' : ''
+  panel('v:welcome', 'Welcome', () => go('overview'))
+  panel('v:search', 'Search and filter sessions', () => {
+    go('overview')
+    byId<HTMLElementTagNameMap['sf-overview']>('overview').focusSearch()
+  })
+  panel('v:projects', 'Projects', () => go('projects'))
+  panel('v:docs', 'Docs', () => openDocs(''))
+  panel('v:egress', 'Network access', () => openEgress(api), needsEngine)
+  panel('v:workspace', 'Workspace and disk space', () => openWorkspace(api, labelOfSid, forgetSession), needsEngine)
+  panel('v:exceptions', 'Register of exceptions', () => openExceptions(api, labelOfSid), needsEngine)
+  panel('v:backup', 'Export and import', () => openBackup(api, sendState), needsEngine)
+  panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(api), needsEngine)
+  panel('v:identity', 'Name and email for commits', () => openIdentity(), needsEngine)
+  panel('v:away', 'Away mode', () => openAway(), needsEngine)
+  panel('v:prefs', 'Appearance', () => byId('prefs').showPopover())
+  panel('v:keys', 'Keyboard shortcuts', () => showShortcuts())
+  return items
+}
+
+function showShortcuts() {
+  const root = document.documentElement
+  openShortcuts(root.dataset.keys !== 'off', on => {
+    root.dataset.keys = on ? 'on' : 'off'
+    void api('/api/prefs', { keys: root.dataset.keys }).catch(() => null)
+  })
+}
+
+const paletteButton = byId('palette-open')
+if (isMac) {
+  paletteButton.setAttribute('aria-keyshortcuts', 'Meta+K')
+  paletteButton.title = 'Command palette (⌘K)'
+}
+paletteButton.addEventListener('click', () => openPalette(paletteItems))
+byId('shortcuts-open').addEventListener('click', () => {
+  byId('prefs').hidePopover()
+  showShortcuts()
+})
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented || e.isComposing) return
+  const modal = document.querySelector('dialog[open]:not(.palette)')
+  if (paletteKey(e)) {
+    if (modal) return
+    e.preventDefault()
+    openPalette(paletteItems)
+    return
+  }
+  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey || modal || document.querySelector('dialog.palette[open]')) return
+  if (document.documentElement.dataset.keys === 'off' || typing(e.target)) return
+  e.preventDefault()
+  showShortcuts()
 })
 restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api

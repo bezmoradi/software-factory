@@ -178,7 +178,7 @@ func (f *Forges) moved(ctx context.Context, t PushTarget, c *forgeCard) bool {
 		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "branch-unread")
 		return true
 	}
-	reason := movedReason(f.cfg.Commits, t.Repo, v.Commit, head)
+	reason := movedReason(ctx, f.cfg.Commits, t.Repo, v.Commit, head)
 	f.mu.Lock()
 	c.view.State, c.view.Commit, c.view.Reason, c.view.Draft, c.view.At = ForgeWaiting, head, reason, false, f.cfg.Now()
 	v = c.view
@@ -189,12 +189,12 @@ func (f *Forges) moved(ctx context.Context, t PushTarget, c *forgeCard) bool {
 	return true
 }
 
-func movedReason(commits ChangeReader, repo, from, to string) string {
+func movedReason(ctx context.Context, commits ChangeReader, repo, from, to string) string {
 	tail := "; read it again, and approve once more to open it at " + shortSHA7(to)
 	if commits == nil {
 		return "the branch moved since this was written" + tail
 	}
-	set, err := commits.Changes(repo, from, to)
+	set, err := commits.Changes(ctx, repo, from, to)
 	if err != nil {
 		return "the branch moved since this was written, to a commit the engine can't compare with the one it was written for" + tail
 	}

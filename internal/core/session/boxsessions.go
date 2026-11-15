@@ -171,7 +171,7 @@ func (d *Dispatcher) wakeWorktree(ctx context.Context, r *run, id CommitIdentity
 type CloneReader interface {
 	ObjectsToSend(repo, commit string, remoteHas []string) ([]push.Object, error)
 	Commit(path, sha string) (push.Commit, error)
-	IsAncestor(repo, ancestor, commit string) (bool, error)
+	IsAncestor(ctx context.Context, repo, ancestor, commit string) (bool, error)
 }
 
 type boxBook struct {

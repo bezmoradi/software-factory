@@ -1,4 +1,4 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, opener, visible } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Send = (file: Blob) => Promise<Response>
@@ -143,10 +143,12 @@ function fileName(res: Response): string {
 }
 
 export function openBackup(post: Post, send: Send): void {
+  const back = opener()
   const d = el('dialog', 'consent backup surface')
   d.setAttribute('aria-label', 'Export and import')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const say = el('p', 'small')

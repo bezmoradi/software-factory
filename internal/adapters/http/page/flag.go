@@ -1,6 +1,7 @@
 package page
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 
@@ -42,7 +43,7 @@ func flagsJSON(list []session.FlagView) []flagJSON {
 	return out
 }
 
-func (s *Server) flag(w http.ResponseWriter, route, sid string, body map[string]any) {
+func (s *Server) flag(ctx context.Context, w http.ResponseWriter, route, sid string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if sid == "" || !okPath || path == "" || len(path) > maxFlagPath {
 		refuse(w, http.StatusBadRequest, "fields")
@@ -56,20 +57,20 @@ func (s *Server) flag(w http.ResponseWriter, route, sid string, body map[string]
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Work.AllowFile(sid, path, reason)
+		err = s.cfg.Work.AllowFile(ctx, sid, path, reason)
 		s.logger.Info("flagged file", "op", "allow", "ok", err == nil)
 	default:
 		if !keysWithin(body, "sid", "path") {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Work.AskRemove(sid, path)
+		err = s.cfg.Work.AskRemove(ctx, sid, path)
 		s.logger.Info("flagged file", "op", "ask-remove", "ok", err == nil)
 	}
 	reply(w, err, http.StatusOK)
 }
 
-func (s *Server) commitFlag(w http.ResponseWriter, route, sid string, body map[string]any) {
+func (s *Server) commitFlag(ctx context.Context, w http.ResponseWriter, route, sid string, body map[string]any) {
 	commit, okCommit := body["commit"].(string)
 	field, okField := body["field"].(string)
 	if sid == "" || !okCommit || !flagCommit.MatchString(commit) || !okField || session.FieldWords[session.CommitField(field)] == "" {
@@ -84,14 +85,14 @@ func (s *Server) commitFlag(w http.ResponseWriter, route, sid string, body map[s
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Work.AllowCommit(sid, commit, session.CommitField(field), reason)
+		err = s.cfg.Work.AllowCommit(ctx, sid, commit, session.CommitField(field), reason)
 		s.logger.Info("flagged commit", "op", "allow", "ok", err == nil)
 	default:
 		if !keysWithin(body, "sid", "commit", "field") {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Work.AskRewrite(sid, commit, session.CommitField(field))
+		err = s.cfg.Work.AskRewrite(ctx, sid, commit, session.CommitField(field))
 		s.logger.Info("flagged commit", "op", "ask-rewrite", "ok", err == nil)
 	}
 	reply(w, err, http.StatusOK)

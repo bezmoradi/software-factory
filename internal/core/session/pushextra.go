@@ -24,7 +24,7 @@ type BlobData struct {
 }
 
 type ChangeBlobs interface {
-	ChangedFiles(repo, from, to string) ([]push.Change, error)
+	ChangedFiles(ctx context.Context, repo, from, to string) ([]push.Change, error)
 	Blobs(repo string, shas []string, limit, budget int64) (map[string]BlobData, error)
 }
 
@@ -138,7 +138,7 @@ func (p *Pushes) computeExtra(b *pushExtras, sid, head string) *PushExtra {
 	}
 	base := ""
 	if main != "" {
-		if base, err = p.cfg.History.MergeBase(t.Repo, head, main); err != nil {
+		if base, err = p.cfg.History.MergeBase(context.Background(), t.Repo, head, main); err != nil {
 			out.Problems = append(out.Problems, clip("the engine couldn't find where the branch leaves the main branch: "+err.Error(), 300))
 			return out
 		}

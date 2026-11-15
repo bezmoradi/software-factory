@@ -1,4 +1,4 @@
-import { button, el } from '../lib/dom.ts'
+import { button, el, opener } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -22,10 +22,12 @@ function save(text: string) {
 }
 
 export function openDiagnostics(post: Post): void {
+  const back = opener()
   const d = el('dialog', 'consent diagnostics surface')
   d.setAttribute('aria-label', 'Diagnostics')
   const close = () => {
     d.close()
+    back()
     d.remove()
   }
   const say = el('p', 'small')

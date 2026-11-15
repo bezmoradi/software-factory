@@ -115,7 +115,7 @@ func (s *Server) checksRequest(w http.ResponseWriter, r *http.Request) {
 	send(w, http.StatusOK, map[string]string{"result": answer.Result, "reason": answer.Reason})
 }
 
-func (s *Server) forgeAnswer(w http.ResponseWriter, body map[string]any) {
+func (s *Server) forgeAnswer(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Forge == nil {
 		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no git host API set up."})
 		return
@@ -135,7 +135,7 @@ func (s *Server) forgeAnswer(w http.ResponseWriter, body map[string]any) {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
-	err := s.cfg.Forge.Answer(context.Background(), sid, card, approve, draft, confirmed)
+	err := s.cfg.Forge.Answer(context.WithoutCancel(r.Context()), sid, card, approve, draft, confirmed)
 	s.logger.Info("forge answer", "approve", approve, "draft", draft, "confirmed", confirmed, "ok", err == nil)
 	reply(w, err, http.StatusAccepted)
 }

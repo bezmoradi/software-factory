@@ -135,6 +135,8 @@ type ChangeView struct {
 	Head   string
 	Base   string
 	Main   string
+	From   ChangeFrom
+	Points ChangePoints
 	ChangeSet
 }
 
@@ -143,7 +145,7 @@ type PushStarter interface {
 	Answer(ctx context.Context, sid, card, commit string, allow bool, reason string) error
 	Handoff(ctx context.Context, sid, card, commit string) error
 	SendFindings(ctx context.Context, sid, card, commit string) error
-	Changes(sid string) (ChangeView, error)
+	Changes(ctx context.Context, sid string, at ChangePoint) (ChangeView, error)
 }
 
 type PushesConfig struct {
@@ -174,10 +176,12 @@ type PushesConfig struct {
 	ReviewerSignIn func() (SignIn, bool)
 	SessionSignIn  func(sid string) (SignIn, bool)
 	AutoFindings   func(project string) bool
+	TurnBase       func(sid string) string
+	Branch         BranchWalker
 }
 
 type PushWork interface {
-	PushFacts(sid string, t PushTarget, head, main string) (WorkFacts, bool)
+	PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool)
 	HandoffText(sid string) string
 }
 
@@ -390,7 +394,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	if err != nil {
 		return "", false, ""
 	}
-	entries, required, err := p.entriesAt(sid, t, head)
+	entries, required, err := p.entriesAt(ctx, sid, t, head)
 	if err != nil {
 		return "", false, ""
 	}
@@ -487,8 +491,8 @@ func (p *Pushes) heldReviewed(sid, head, branch, req string) {
 	})
 }
 
-func (p *Pushes) requiredAgents(sid string, t PushTarget, head string) []string {
-	list := p.requiredOf(sid, t, head)
+func (p *Pushes) requiredAgents(ctx context.Context, sid string, t PushTarget, head string) []string {
+	list := p.requiredOf(ctx, sid, t, head)
 	out := make([]string, 0, len(list))
 	for _, q := range list {
 		out = append(out, q.Agent)
@@ -496,25 +500,25 @@ func (p *Pushes) requiredAgents(sid string, t PushTarget, head string) []string 
 	return out
 }
 
-func (p *Pushes) requiredOf(sid string, t PushTarget, head string) []workflow.Requirement {
-	required, _ := p.requiredNow(sid, t, head)
+func (p *Pushes) requiredOf(ctx context.Context, sid string, t PushTarget, head string) []workflow.Requirement {
+	required, _ := p.requiredNow(ctx, sid, t, head)
 	return required
 }
 
-func (p *Pushes) entriesAt(sid string, t PushTarget, head string) (map[review.Key]ReviewEntry, []workflow.Requirement, error) {
+func (p *Pushes) entriesAt(ctx context.Context, sid string, t PushTarget, head string) (map[review.Key]ReviewEntry, []workflow.Requirement, error) {
 	entries, err := p.cfg.Reviews.Entries()
 	if err != nil {
 		return nil, nil, err
 	}
-	required, approval := p.requiredNow(sid, t, head)
+	required, approval := p.requiredNow(ctx, sid, t, head)
 	approval.hold(entries, t.Branch, head)
 	return entries, required, nil
 }
 
-func (p *Pushes) requiredNow(sid string, t PushTarget, head string) ([]workflow.Requirement, ApprovalGiven) {
+func (p *Pushes) requiredNow(ctx context.Context, sid string, t PushTarget, head string) ([]workflow.Requirement, ApprovalGiven) {
 	if p.cfg.Work != nil {
 		main, _ := p.cfg.Repos.Main(t.Name)
-		if wf, ok := p.cfg.Work.PushFacts(sid, t, head, main); ok {
+		if wf, ok := p.cfg.Work.PushFacts(ctx, sid, t, head, main); ok {
 			return slices.Clone(wf.Required), wf.Approval
 		}
 	}
@@ -1053,7 +1057,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 			return refuse(CloneBehind(fetched, now.SyncWhy) + "; the engine checks a push against the main it fetched, so it pushed nothing; push again")
 		}
 	}
-	facts, refusal, err := p.facts(sid, t, head, main, remote.Main, by)
+	facts, refusal, err := p.facts(ctx, sid, t, head, main, remote.Main, by)
 	if err != nil {
 		return refuse(err.Error())
 	}
@@ -1108,9 +1112,9 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		p.announcePushed(x, t, facts, len(d.Missing))
 		return out, d
 	case d.Result == gate.Held:
-		x.findings = !x.handoff && p.hasFindings(sid, t, head)
+		x.findings = !x.handoff && p.hasFindings(ctx, sid, t, head)
 		x.unmet = d.Unmet
-		return x.end(gate.Held, note+p.afterReviews(by, sid, t, head)+d.Reason, d.Missing, ""), d
+		return x.end(gate.Held, note+p.afterReviews(ctx, by, sid, t, head)+d.Reason, d.Missing, ""), d
 	case d.Result == gate.Denied:
 		person := ""
 		if answer != nil {
@@ -1121,14 +1125,14 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	return x.end(gate.Refused, d.Reason, d.Missing, ""), d
 }
 
-func (p *Pushes) facts(sid string, t PushTarget, head, main, mainName, by string) (gate.Facts, string, error) {
+func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main, mainName, by string) (gate.Facts, string, error) {
 	f := gate.Facts{Type: p.kind, Main: mainName, Now: p.cfg.Now(), Offers: map[string]review.Offer{}, Reviews: map[review.Key]review.Record{}, Capped: map[string]int{}}
 	if lv, ok := p.cfg.Level(sid); ok {
 		f.Level = lv
 	}
 	wf, worked := WorkFacts{}, false
 	if p.cfg.Work != nil {
-		wf, worked = p.cfg.Work.PushFacts(sid, t, head, main)
+		wf, worked = p.cfg.Work.PushFacts(ctx, sid, t, head, main)
 	}
 	limit := DefaultRounds
 	if p.cfg.Work != nil && !worked {
@@ -1171,19 +1175,19 @@ func (p *Pushes) facts(sid string, t PushTarget, head, main, mainName, by string
 			f.Capped[q.Agent] = rd.Count
 		}
 		for _, e := range runsOf(entries, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}) {
-			if why := coverProblem(p.cfg.History, t.Repo, e.Coverage(), head, main); why != "" {
+			if why := coverProblem(ctx, p.cfg.History, t.Repo, e.Coverage(), head, main); why != "" {
 				f.Items = append(f.Items, "a review by "+q.Agent+" of what would be pushed: review again, the remote's main moved ("+why+")")
 				break
 			}
 		}
 	}
 	if by != ByPage && worked {
-		f.Items = append(f.Items, p.holdItems(t, wf.Hold, entries, f.Required, head, main)...)
+		f.Items = append(f.Items, p.holdItems(ctx, t, wf.Hold, entries, f.Required, head, main)...)
 	}
 	return f, wf.Refusal, nil
 }
 
-func (p *Pushes) Changes(sid string) (ChangeView, error) {
+func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (ChangeView, error) {
 	t, ok := p.cfg.Targets(sid)
 	if !ok {
 		return ChangeView{}, explained(conflict("not started here"), "Only a session this engine started has a changes view here.")
@@ -1196,15 +1200,24 @@ func (p *Pushes) Changes(sid string) (ChangeView, error) {
 	if err != nil {
 		return ChangeView{}, explained(conflict("records"), "The engine couldn't read the repository's record.")
 	}
-	base := ""
+	fork := ""
 	if main != "" {
-		if base, err = p.cfg.History.MergeBase(t.Repo, head, main); err != nil {
+		if fork, err = p.cfg.History.MergeBase(ctx, t.Repo, head, main); err != nil {
 			return ChangeView{}, explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the main branch: "+err.Error(), maxOutput))
 		}
 	}
-	cs, err := p.cfg.Changes.Changes(t.Repo, base, head)
+	branch, err := p.branchWalk(ctx, t, head, fork)
+	if err != nil {
+		return ChangeView{}, err
+	}
+	points := p.changePoints(sid, t, head, branch)
+	base, err := changeBase(fork, at, points, branch)
+	if err != nil {
+		return ChangeView{}, err
+	}
+	cs, err := p.cfg.Changes.Changes(ctx, t.Repo, base, head)
 	if err != nil {
 		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the change: "+err.Error(), maxOutput))
 	}
-	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, ChangeSet: maskChanges(cs)}, nil
+	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, From: at.From, Points: points, ChangeSet: maskChanges(cs)}, nil
 }

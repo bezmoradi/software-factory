@@ -186,7 +186,7 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	}
 	title := ""
 	if fl.cfg.Approved != nil {
-		title = requirementsTitle(fl.cfg.Approved(sid))
+		title = requirementsTitle(fl.cfg.Approved(ctx, sid))
 	}
 	var commits []string
 	more := false
@@ -194,7 +194,7 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	if fl.cfg.MainCommit != nil && f.cfg.Commits != nil && commitSHA.MatchString(head) {
 		if m, err := fl.cfg.MainCommit(t.Name); err == nil && commitSHA.MatchString(m) {
 			base = m
-			if set, err := f.cfg.Commits.Changes(t.Repo, m, head); err == nil {
+			if set, err := f.cfg.Commits.Changes(ctx, t.Repo, m, head); err == nil {
 				more = set.More || len(set.Commits) > maxPullCommits
 				for i, c := range set.Commits {
 					if i >= maxPullCommits {

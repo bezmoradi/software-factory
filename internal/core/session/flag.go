@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"path"
 	"regexp"
 	"slices"
@@ -106,7 +107,7 @@ type PushedSet struct {
 }
 
 type PushContents interface {
-	Pushed(repo, base, head string, reviewed []string, budget int64) (PushedSet, error)
+	Pushed(ctx context.Context, repo, base, head string, reviewed []string, budget int64) (PushedSet, error)
 }
 
 type Flag struct {
@@ -336,6 +337,12 @@ func maskChanges(cs ChangeSet) ChangeSet {
 		changed[i] = f
 	}
 	cs.Files = changed
+	skipped := make([]NotDiffed, len(cs.NotDiffed))
+	for i, n := range cs.NotDiffed {
+		n.Path = maskLines(n.Path, true)
+		skipped[i] = n
+	}
+	cs.NotDiffed = skipped
 	cs.Diff = maskDiff(cs.Diff)
 	return cs
 }

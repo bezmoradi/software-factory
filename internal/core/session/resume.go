@@ -279,7 +279,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		return false
 	}
 	t, _ := p.cfg.Targets(sid)
-	entries, required, err := p.entriesAt(sid, t, commit)
+	entries, required, err := p.entriesAt(ctx, sid, t, commit)
 	if err != nil {
 		return p.cfg.Now().Before(item.until)
 	}
@@ -359,11 +359,11 @@ func unfinishedReviews(head string, ended []ReviewEntry) string {
 	return strings.Join(append(parts, held...), "; ")
 }
 
-func (p *Pushes) afterReviews(by, sid string, t PushTarget, head string) string {
+func (p *Pushes) afterReviews(ctx context.Context, by, sid string, t PushTarget, head string) string {
 	if by != ByReviews || p.cfg.Reviews == nil {
 		return ""
 	}
-	entries, required, err := p.entriesAt(sid, t, head)
+	entries, required, err := p.entriesAt(ctx, sid, t, head)
 	if err != nil {
 		return ""
 	}

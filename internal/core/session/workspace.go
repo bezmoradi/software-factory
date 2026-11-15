@@ -221,7 +221,7 @@ func (w *Workspace) state(s WorkspaceSession, pushed map[string][]string) (strin
 		return "", TreeUnknown, "The engine couldn't read the branch " + s.Branch + "."
 	}
 	if main, err := w.cfg.Main(s.Repo); err == nil && main != "" {
-		if in, err := w.cfg.History.IsAncestor(s.Path, head, main); err == nil && in {
+		if in, err := w.cfg.History.IsAncestor(context.Background(), s.Path, head, main); err == nil && in {
 			return head, TreeMerged, ""
 		}
 	}
@@ -229,7 +229,7 @@ func (w *Workspace) state(s WorkspaceSession, pushed map[string][]string) (strin
 		if c == head {
 			return head, TreePushed, ""
 		}
-		if in, err := w.cfg.History.IsAncestor(s.Path, head, c); err == nil && in {
+		if in, err := w.cfg.History.IsAncestor(context.Background(), s.Path, head, c); err == nil && in {
 			return head, TreePushed, ""
 		}
 	}

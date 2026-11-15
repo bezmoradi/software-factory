@@ -1,6 +1,7 @@
 package files
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -164,7 +165,7 @@ func (v Reviews) write(sides func(dir string) error, change func(dir string) (st
 
 func writeCommits(repoPath, dir, base, head string) (string, error) {
 	text, err := with(repoPath, func(r *repo) (string, error) {
-		commits, err := newCommits(r, head, base)
+		commits, err := newCommits(context.Background(), r, head, base)
 		if err != nil {
 			return "", err
 		}

@@ -1,7 +1,10 @@
 package files
 
 import (
+	"bytes"
 	"container/heap"
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,6 +20,8 @@ const (
 	maxPageDiff  = 1 << 20
 	maxPageHeld  = 8 << 20
 	pageNoteHead = "\n[Software Factory: the diff "
+	pageWork     = 256 << 20
+	pageHash     = 64 << 20
 )
 
 const (
@@ -28,15 +33,25 @@ const (
 var (
 	_ session.History      = Reader{}
 	_ session.ChangeReader = Reader{}
+	_ session.BranchWalker = Reader{}
 )
 
-func (Reader) MergeBase(path, a, b string) (string, error) {
+const walkCheck = 256
+
+func walked(ctx context.Context, n int) error {
+	if n%walkCheck != 0 {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func (Reader) MergeBase(ctx context.Context, path, a, b string) (string, error) {
 	return with(path, func(r *repo) (string, error) {
-		return mergeBase(r, a, b)
+		return mergeBase(ctx, r, a, b)
 	})
 }
 
-func mergeBase(r *repo, a, b string) (string, error) {
+func mergeBase(ctx context.Context, r *repo, a, b string) (string, error) {
 	if a == b {
 		if _, err := r.commit(a); err != nil {
 			return "", err
@@ -78,7 +93,10 @@ func mergeBase(r *repo, a, b string) (string, error) {
 		return false
 	}
 	found := ""
-	for queue.Len() > 0 && live() {
+	for n := 1; queue.Len() > 0 && live(); n++ {
+		if err := walked(ctx, n); err != nil {
+			return "", err
+		}
 		q := heap.Pop(&queue).(queued)
 		f := flags[q.sha]
 		if f&(sideA|sideB) == sideA|sideB && f&stale == 0 {
@@ -101,7 +119,7 @@ func mergeBase(r *repo, a, b string) (string, error) {
 	return found, nil
 }
 
-func (Reader) Changes(path, base, head string) (session.ChangeSet, error) {
+func (Reader) Changes(ctx context.Context, path, base, head string) (session.ChangeSet, error) {
 	return with(path, func(r *repo) (session.ChangeSet, error) {
 		var out session.ChangeSet
 		hc, err := r.commit(head)
@@ -116,22 +134,26 @@ func (Reader) Changes(path, base, head string) (session.ChangeSet, error) {
 			}
 			left = bc.Tree
 		}
-		if out.Commits, out.More, err = log(r, head, base); err != nil {
+		if out.Commits, out.More, err = log(ctx, r, head, base); err != nil {
 			return out, err
 		}
-		d := differ{r: r}
+		d := differ{r: r, ctx: ctx}
 		if err := d.trees(left, hc.Tree, "", 0); err != nil {
 			return out, err
 		}
 		sortChanges(d.out)
 		out.Files = d.out
-		from, to := map[string]side{}, map[string]side{}
-		for _, c := range d.out {
-			if c.OldSHA != "" {
-				from[c.Path] = blobSide(r, c.OldMode, c.OldSHA)
-			}
-			if c.NewSHA != "" {
-				to[c.Path] = blobSide(r, c.NewMode, c.NewSHA)
+		from, to, skipped, undiffed, err := pageSides(ctx, r, d.out)
+		if err != nil {
+			return out, err
+		}
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		out.NotDiffed, out.UndiffedLines = skipped, undiffed
+		for _, n := range skipped {
+			if n.Why != session.NotDiffedBinary {
+				out.Uncounted = true
 			}
 		}
 		var b strings.Builder
@@ -142,6 +164,9 @@ func (Reader) Changes(path, base, head string) (session.ChangeSet, error) {
 		out.Diff, out.Clipped = b.String(), clipped
 		if clipped {
 			out.Diff = wholeLines(out.Diff)
+		}
+		if err := ctx.Err(); err != nil {
+			return session.ChangeSet{}, err
 		}
 		return out, nil
 	})
@@ -159,14 +184,17 @@ func wholeLines(diff string) string {
 	return kept + diff[at:]
 }
 
-func reachable(r *repo, base string, limit int) (map[string]bool, error) {
+func reachable(ctx context.Context, r *repo, base string, limit int) (map[string]bool, error) {
 	have := map[string]bool{}
 	if base == "" {
 		return have, nil
 	}
 	have[base] = true
 	queue := []string{base}
-	for len(queue) > 0 {
+	for n := 1; len(queue) > 0; n++ {
+		if err := walked(ctx, n); err != nil {
+			return nil, err
+		}
 		sha := queue[0]
 		queue = queue[1:]
 		c, err := r.commit(sha)
@@ -183,8 +211,8 @@ func reachable(r *repo, base string, limit int) (map[string]bool, error) {
 	return have, nil
 }
 
-func log(r *repo, head, base string) ([]push.Commit, bool, error) {
-	have, err := reachable(r, base, maxMergeWalk)
+func log(ctx context.Context, r *repo, head, base string) ([]push.Commit, bool, error) {
+	have, err := reachable(ctx, r, base, maxMergeWalk)
 	if err != nil {
 		return nil, false, err
 	}
@@ -248,5 +276,165 @@ func blobSide(r *repo, mode push.Mode, sha string) side {
 		return s
 	}
 	s.load = func() ([]byte, error) { return r.blob(sha) }
+	s.size = func() (int64, bool) {
+		p, err := r.store.probe(sha)
+		return p.size, err == nil
+	}
 	return s
+}
+
+func (Reader) BranchCommits(ctx context.Context, path, head, stop string, limit int) (map[string]bool, bool, error) {
+	type walkedSet struct {
+		seen     map[string]bool
+		complete bool
+	}
+	w, err := with(path, func(r *repo) (walkedSet, error) {
+		seen := map[string]bool{head: true}
+		queue := []string{head}
+		for n := 0; len(queue) > 0; n++ {
+			if err := walked(ctx, n); err != nil {
+				return walkedSet{}, err
+			}
+			sha := queue[0]
+			queue = queue[1:]
+			if sha == stop {
+				continue
+			}
+			c, err := r.commit(sha)
+			if err != nil {
+				return walkedSet{}, err
+			}
+			for _, p := range c.Parents {
+				if seen[p] {
+					continue
+				}
+				if len(seen) >= limit {
+					return walkedSet{seen: seen}, nil
+				}
+				seen[p] = true
+				queue = append(queue, p)
+			}
+		}
+		return walkedSet{seen: seen, complete: true}, nil
+	})
+	return w.seen, w.complete, err
+}
+
+func pageSides(ctx context.Context, r *repo, changes []push.Change) (map[string]side, map[string]side, []session.NotDiffed, int64, error) {
+	from, to := map[string]side{}, map[string]side{}
+	var skipped []session.NotDiffed
+	var undiffed int64
+	left := int64(maxPageHeld)
+	inter := int64(pageWork)
+	hashLeft := int64(pageHash)
+	for _, c := range changes {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, 0, err
+		}
+		why, size, tally := "", int64(0), int64(0)
+		mark := func(next string) {
+			if notDiffedRank[next] > notDiffedRank[why] {
+				why = next
+			}
+		}
+		load := func(mode push.Mode, sha string) (side, error) {
+			if mode == push.ModeSubmodule {
+				tally++
+				return blobSide(r, mode, sha), nil
+			}
+			s := side{mode: fileMode(mode), big: true}
+			p, err := r.store.probe(sha)
+			if err := ctx.Err(); err != nil {
+				return s, err
+			}
+			if err != nil {
+				mark(session.NotDiffedUnreadable)
+				return s, nil
+			}
+			size = max(size, p.size)
+			switch {
+			case p.size > maxDiffedFile && p.whole && p.kind == kindBlob && p.size <= maxObject && p.size <= hashLeft && isBinary(p.head):
+				hashLeft -= p.size
+				binary, lines, err := r.store.verifiedBinary(ctx, sha, p)
+				switch {
+				case err != nil:
+					return s, err
+				case !binary:
+					mark(session.NotDiffedLarge)
+				default:
+					tally += lines
+					mark(session.NotDiffedBinary)
+				}
+				return s, nil
+			case p.size > maxDiffedFile:
+				mark(session.NotDiffedLarge)
+				return s, nil
+			case p.size > left:
+				mark(session.NotDiffedBudget)
+				return s, nil
+			}
+			data, err := r.blobWithin(sha, maxDiffedFile, cacheEntry, &inter)
+			if over, ok := errors.AsType[objectLimit](err); ok {
+				if over.final {
+					size = max(size, over.size)
+				}
+				if over.budget {
+					mark(session.NotDiffedBudget)
+				} else {
+					mark(session.NotDiffedLarge)
+				}
+				return s, nil
+			}
+			if err := ctx.Err(); err != nil {
+				return s, err
+			}
+			if err != nil {
+				mark(session.NotDiffedUnreadable)
+				return s, nil
+			}
+			left -= int64(len(data))
+			s.big, s.content = false, data
+			tally += lineCount(data)
+			if isBinary(data) {
+				mark(session.NotDiffedBinary)
+			}
+			return s, nil
+		}
+		if c.OldSHA != "" {
+			s, err := load(c.OldMode, c.OldSHA)
+			if err != nil {
+				return nil, nil, nil, 0, err
+			}
+			from[c.Path] = s
+		}
+		if c.NewSHA != "" {
+			s, err := load(c.NewMode, c.NewSHA)
+			if err != nil {
+				return nil, nil, nil, 0, err
+			}
+			to[c.Path] = s
+		}
+		if why == session.NotDiffedBinary {
+			undiffed += tally
+		}
+		if why != "" {
+			skipped = append(skipped, session.NotDiffed{Path: c.Path, Size: size, Why: why})
+		}
+	}
+	return from, to, skipped, undiffed, nil
+}
+
+var notDiffedRank = map[string]int{
+	session.NotDiffedBinary:     1,
+	session.NotDiffedBudget:     2,
+	session.NotDiffedLarge:      3,
+	session.NotDiffedUnreadable: 4,
+}
+
+func lineCount(data []byte) int64 {
+	n := int64(bytes.Count(data, []byte{'\n'}))
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		n++
+	}
+	return n
 }

@@ -208,6 +208,12 @@ func (r *repo) heldTree(sha string) ([]entry, func(), error) {
 	return list, release, nil
 }
 
+func (r *repo) blobWithin(sha string, limit, baseLimit int64, inter *int64) ([]byte, error) {
+	r.store.cap, r.store.baseCap, r.store.inter = limit, baseLimit, inter
+	defer func() { r.store.cap, r.store.baseCap, r.store.inter = 0, 0, nil }()
+	return r.blob(sha)
+}
+
 func (r *repo) blob(sha string) ([]byte, error) {
 	o, err := r.store.read(sha)
 	if err != nil {

@@ -1,4 +1,4 @@
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, opener, unspoofed, visible } from '../lib/dom.ts'
 import { scrolledText } from './cards.ts'
 import { shortSha } from '../lib/format.ts'
 import type { Needs, SignIn, StartupApproval, StartupFile, StartupMark } from '../types.ts'
@@ -75,10 +75,12 @@ function instructionSection(a: StartupApproval): Node[] {
 
 function dialog(title: string, parts: Node[], yes: string, tone: 'primary' | 'danger'): Promise<boolean> {
   return new Promise(resolve => {
+    const back = opener()
     const d = el('dialog', 'consent surface')
     d.setAttribute('aria-label', title)
     const done = (answer: boolean) => {
       d.close()
+      back()
       d.remove()
       resolve(answer)
     }

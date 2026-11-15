@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"regexp"
 	"slices"
 	"strconv"
@@ -29,7 +30,7 @@ type ApprovedDoc struct {
 }
 
 func (w *Work) ApprovedDocs(sid string) []ApprovedDoc {
-	v, err := w.View(sid)
+	v, err := w.View(context.Background(), sid)
 	if err != nil {
 		return nil
 	}

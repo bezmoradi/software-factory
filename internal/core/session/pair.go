@@ -92,7 +92,7 @@ type PairsPage interface {
 	Start(ctx context.Context, q PairStart) (PairStarted, error)
 	Next(ctx context.Context, id string, consent Consent, box string) (Started, error)
 	View(id string) (Pair, error)
-	MergedDiff(id string) (ChangeView, error)
+	MergedDiff(ctx context.Context, id string) (ChangeView, error)
 	Keep(id, sid string) error
 }
 

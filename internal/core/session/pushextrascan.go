@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"maps"
 	"path"
@@ -65,7 +66,7 @@ func isTestPath(p string) bool { return testPath.MatchString(p) }
 
 func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
 	var out changeScan
-	list, err := files.ChangedFiles(repo, base, head)
+	list, err := files.ChangedFiles(context.Background(), repo, base, head)
 	if err != nil {
 		out.problems = append(out.problems, clip("the engine couldn't list the change's files: "+err.Error(), 300))
 		return out

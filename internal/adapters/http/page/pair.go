@@ -189,13 +189,13 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 			send(w, http.StatusOK, pairOf(p))
 			return
 		}
-		v, err := pairs.MergedDiff(id)
+		v, err := pairs.MergedDiff(ctx, id)
 		if err != nil {
 			code, pr := status(err)
 			send(w, code, pr)
 			return
 		}
-		send(w, http.StatusOK, map[string]any{"changes": changesOf(v)})
+		send(w, http.StatusOK, map[string]any{"changes": changesOf(v, nil)})
 	case "keep":
 		id, okID := pairID(body)
 		sid, okSID := body["sid"].(string)

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"path"
 	"regexp"
 	"slices"
@@ -90,12 +91,16 @@ func (w *Work) givenOf(g gathered) ApprovalGiven {
 	return out
 }
 
-func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) ApprovedText {
+func (w *Work) ApprovedFor(ctx context.Context, sid string, t PushTarget, head, main string) (ApprovedText, error) {
 	ws, ok := w.session(sid)
 	if !ok {
-		return ApprovedText{}
+		return ApprovedText{}, ctx.Err()
 	}
-	return w.approvedOf(w.gather(sid, ws, t, head, main))
+	a := w.approvedOf(w.gather(ctx, sid, ws, t, head, main))
+	if err := ctx.Err(); err != nil {
+		return ApprovedText{}, err
+	}
+	return a, nil
 }
 
 func (w *Work) approvedOf(g gathered) ApprovedText {
@@ -240,8 +245,12 @@ func (b *bridge) lastMessage() string {
 func (d *Dispatcher) reviewGiven(rt *ReviewTarget, sid string, t PushTarget) {
 	rt.CloneSync = d.cloneSync(sid)
 	if w := d.cfg.Work; w != nil {
-		rt.Approved = func(head, main string) ApprovedText { return w.ApprovedFor(sid, t, head, main) }
-		rt.TeamRules = func(base, head string) TeamRules { return w.TeamRulesFor(sid, t, base, head) }
+		rt.Approved = func(ctx context.Context, head, main string) (ApprovedText, error) {
+			return w.ApprovedFor(ctx, sid, t, head, main)
+		}
+		rt.TeamRules = func(ctx context.Context, base, head string) (TeamRules, error) {
+			return w.TeamRulesFor(ctx, sid, t, base, head)
+		}
 	}
 	if d.reg != nil {
 		rt.Claims = d.reg.lastMessage(sid)

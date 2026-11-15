@@ -67,6 +67,7 @@ type Admission struct {
 	Mode      string
 	Lineage   *Lineage
 	Box       string
+	Branch    string
 }
 
 type Registration struct {
@@ -149,6 +150,7 @@ type Info struct {
 	Splits       []SplitView
 	Box          string
 	SignInWait   bool
+	Branch       string
 }
 
 type conn struct {
@@ -188,6 +190,7 @@ type admitted struct {
 	lastMessage  string
 	turnSince    time.Time
 	stopReason   string
+	doneItself   bool
 }
 
 type replay struct {
@@ -799,6 +802,7 @@ func (r *Registry) Admit(sid string, a Admission) {
 	}
 	known.Admission = a
 	known.stopReason = ""
+	known.doneItself = false
 	r.dropOtherBoxes(sid, a.Box)
 	if !known.running && len(known.observations) > 0 {
 		known.observe(level.Observation{By: level.Engine, Event: level.ProcessStarted})
@@ -1020,6 +1024,15 @@ func (r *Registry) Level(sid string) (level.Result, bool) {
 	return level.Of(a.observations), true
 }
 
+func (r *Registry) EndedDone(sid string) {
+	r.mu.Lock()
+	if a := r.admitted[sid]; a != nil {
+		a.doneItself = true
+	}
+	r.mu.Unlock()
+	r.Ended(sid, false)
+}
+
 func (r *Registry) Ended(sid string, lost bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1200,7 +1213,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
 		info.Lineage = a.Lineage
-		info.Box, info.SignInWait = a.Box, a.waitSignIn && !a.running
+		info.Box, info.SignInWait, info.Branch = a.Box, a.waitSignIn && !a.running, a.Branch
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1236,6 +1249,8 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor
+		} else if a.doneItself && !a.running {
+			info.State = "done"
 		}
 		if q := r.queued[sid]; q != nil {
 			info.Queued = len(q.msgs)

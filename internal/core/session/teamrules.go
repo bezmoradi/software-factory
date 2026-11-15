@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,21 +41,24 @@ func (w *Work) sessionSetup(sid, name string) workflow.Setup {
 	return w.setupFor(ws.repo, ws.claude).setup
 }
 
-func (w *Work) TeamRulesFor(sid string, t PushTarget, base, head string) TeamRules {
+func (w *Work) TeamRulesFor(ctx context.Context, sid string, t PushTarget, base, head string) (TeamRules, error) {
 	setup := w.sessionSetup(sid, t.Name)
 	if !slices.ContainsFunc(setup.FileRules, func(r workflow.FileRule) bool { return r.Instruction != "" }) {
-		return TeamRules{}
+		return TeamRules{}, ctx.Err()
 	}
-	changes, err := w.cfg.Files.ChangedFiles(t.Repo, base, head)
+	changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, base, head)
+	if cerr := ctx.Err(); cerr != nil {
+		return TeamRules{}, cerr
+	}
 	if err != nil {
-		return TeamRules{}
+		return TeamRules{}, nil
 	}
 	paths := make([]string, 0, len(changes))
 	for _, c := range changes {
 		paths = append(paths, c.Path)
 	}
 	main, _ := w.cfg.Repos.Main(t.Name)
-	return teamRulesOf(setup.FileRules, paths, main)
+	return teamRulesOf(setup.FileRules, paths, main), nil
 }
 
 func teamRulesOf(rules []workflow.FileRule, paths []string, main string) TeamRules {

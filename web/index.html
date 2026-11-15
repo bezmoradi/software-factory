@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="solarized-dark" data-scale="100" data-bar="left">
+<html lang="en" data-theme="solarized-dark" data-scale="100" data-bar="left" data-keys="on">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,6 +19,7 @@
   <strong id="state">Connecting…</strong>
   <span class="muted" id="title"></span>
   <span class="spacer"></span>
+  <button type="button" class="ghost small palette-open" id="palette-open" aria-keyshortcuts="Control+K" title="Command palette (Ctrl+K)"><sf-icon class="icon" name="search"></sf-icon><span class="palette-open-text">Commands</span></button>
   <sf-halt id="halt"></sf-halt>
 </header>
 <sf-halt-banner id="halt-banner" hidden></sf-halt-banner>
@@ -50,6 +51,7 @@
     <span class="stepper"><button type="button" class="ghost" id="scale-down" aria-label="Smaller text">−</button><output id="scale-value" aria-live="polite"></output><button type="button" class="ghost" id="scale-up" aria-label="Larger text">+</button></span>
   </div>
   <sf-notify id="notify"></sf-notify>
+  <button type="button" class="ghost small shortcuts-open" id="shortcuts-open">Keyboard shortcuts</button>
 </div>
 
 <div id="account" class="prefs menu surface" popover>
@@ -101,6 +103,7 @@
 <sf-projects id="projects"></sf-projects>
 <sf-docs id="docs" hidden></sf-docs>
 <sf-file id="file" hidden></sf-file>
+<sf-changes id="changes" class="changes-tab" hidden></sf-changes>
 </main>
 
 <div class="layout" id="live-view" hidden>
@@ -143,7 +146,8 @@
     <sf-split id="split" hidden></sf-split>
     <sf-pull-follow id="pull-follow" hidden></sf-pull-follow>
     <sf-intent id="intent" hidden></sf-intent>
-    <sf-changes id="changes" hidden></sf-changes>
+    <section id="changes-card" class="changes-card" hidden><h2 class="label">Changes</h2><p class="small muted" id="changes-summary"></p><button type="button" class="ghost small" id="changes-open">Open Changes</button></section>
+    <sf-rules id="rules" hidden></sf-rules>
     <section id="agents-section">
       <h2 class="label">Agents</h2>
       <ul id="agents" class="list"><li class="muted">None yet.</li></ul>

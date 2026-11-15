@@ -92,6 +92,17 @@ type commitJSON struct {
 type fileJSON struct {
 	Status string `json:"status"`
 	Path   string `json:"path"`
+	Blob   string `json:"blob"`
+	Viewed bool   `json:"viewed"`
+	Stale  bool   `json:"stale"`
+	Size   int64  `json:"size,omitempty"`
+	Skip   string `json:"notDiffed,omitempty"`
+}
+
+type pointsJSON struct {
+	Reviewed   string `json:"reviewed"`
+	ReviewedAt int64  `json:"reviewedAt"`
+	Turn       string `json:"turn"`
 }
 
 type changesJSON struct {
@@ -107,6 +118,8 @@ type changesJSON struct {
 	Note     string       `json:"note"`
 	Diff     string       `json:"diff"`
 	Clipped  bool         `json:"clipped"`
+	From     string       `json:"from"`
+	Points   pointsJSON   `json:"points"`
 }
 
 func subject(message string) string {
@@ -114,10 +127,17 @@ func subject(message string) string {
 	return clip(strings.TrimSpace(first), maxSubject)
 }
 
-func changesOf(v session.ChangeView) changesJSON {
+func changesOf(v session.ChangeView, viewed map[string]string) changesJSON {
 	out := changesJSON{Branch: v.Branch, Head: v.Head, Worktree: "linked", Base: v.Base, NoBase: v.Base == "", More: v.More, Diff: v.Diff, Clipped: v.Clipped,
-		Commits: make([]commitJSON, 0, len(v.Commits)), Files: make([]fileJSON, 0, len(v.Files))}
+		Commits: make([]commitJSON, 0, len(v.Commits)), Files: make([]fileJSON, 0, len(v.Files)), From: string(v.From),
+		Points: pointsJSON{Reviewed: v.Points.Reviewed, ReviewedAt: millis(v.Points.ReviewedAt), Turn: v.Points.Turn}}
 	switch {
+	case v.From == session.FromReviewed && v.Base != "":
+		out.BaseRef = "the last reviewed commit (" + v.Base[:12] + ")"
+	case v.From == session.FromTurn && v.Base != "":
+		out.BaseRef = "the commit before the turn the session last reported starting (" + v.Base[:12] + ")"
+	case v.From == session.FromCommit && v.Base != "":
+		out.BaseRef = "the chosen commit " + v.Base[:12]
 	case v.Base == "" && v.Main == "":
 		out.Note = "The engine hasn't fetched the remote's main branch yet, so everything on the branch is shown as new."
 	case v.Base == "":
@@ -132,15 +152,24 @@ func changesOf(v session.ChangeView) changesJSON {
 	for _, c := range v.Commits {
 		out.Commits = append(out.Commits, commitJSON{SHA: c.SHA, Parents: nonNil(c.Parents), Time: millis(c.Committed), Subject: subject(c.Message)})
 	}
+	skipped := map[string]session.NotDiffed{}
+	for _, n := range v.NotDiffed {
+		skipped[n.Path] = n
+	}
 	for _, f := range v.Files {
-		status := "changed"
+		status, blob := "changed", f.NewSHA
 		switch f.Status {
 		case push.Added:
 			status = "added"
 		case push.Deleted:
-			status = "deleted"
+			status, blob = "deleted", f.OldSHA
 		}
-		out.Files = append(out.Files, fileJSON{Status: status, Path: f.Path})
+		if !commitHex.MatchString(blob) {
+			blob = ""
+		}
+		mark, marked := viewed[f.Path]
+		n := skipped[f.Path]
+		out.Files = append(out.Files, fileJSON{Status: status, Path: f.Path, Blob: blob, Viewed: marked && blob != "" && mark == blob, Stale: marked && mark != blob, Size: n.Size, Skip: n.Why})
 	}
 	return out
 }
@@ -160,17 +189,20 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 	defer cancel()
 	switch r.URL.Path {
 	case "/api/changes":
-		if !keysWithin(body, "sid") {
+		from, okFrom := optionalString(body, "from")
+		commit, okCommit := optionalString(body, "commit")
+		at, okAt := session.ChangePointOf(from, commit)
+		if !keysWithin(body, "sid", "from", "commit") || !okFrom || !okCommit || !okAt {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		v, err := s.cfg.Pushes.Changes(sid)
+		v, err := s.cfg.Pushes.Changes(ctx, sid, at)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusOK, map[string]any{"changes": changesOf(v)})
+		send(w, http.StatusOK, map[string]any{"changes": changesOf(v, s.viewedMarks(sid))})
 	case pushPageRoute:
 		if !keysWithin(body, "sid") {
 			refuse(w, http.StatusBadRequest, "fields")

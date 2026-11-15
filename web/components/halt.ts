@@ -42,6 +42,18 @@ export function setHalt(raw: unknown): void {
   paintAll()
 }
 
+export function haltView(): HaltView {
+  return { ...view, away: [...view.away] }
+}
+
+export function openAway(forSession = false): void {
+  const menu = document.getElementById('halt-away')
+  if (!menu) return
+  if (!menu.matches(':popover-open')) menu.showPopover()
+  const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]
+  ;(forSession ? items[items.length - 1] : items[0])?.focus()
+}
+
 export function setHaltSession(s: HaltSession | null): void {
   if (s?.sid === session?.sid && s?.name === session?.name) return
   session = s && SID.test(s.sid) ? s : null

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"path"
 	"slices"
 	"strings"
@@ -23,7 +24,7 @@ type TurnFiles interface {
 }
 
 type ClaimCommits interface {
-	ChangedFiles(repo, from, to string) ([]push.Change, error)
+	ChangedFiles(ctx context.Context, repo, from, to string) ([]push.Change, error)
 }
 
 type ClaimChecks struct {
@@ -256,6 +257,16 @@ func readTurnHead(sid string, h *turnHead, checks ClaimChecks) {
 	}
 }
 
+func (r *Registry) TurnBase(sid string) string {
+	r.mu.Lock()
+	var h *turnHead
+	if a := r.admitted[sid]; a != nil && a.turnLog != nil {
+		h = a.turnLog.head
+	}
+	r.mu.Unlock()
+	return h.wait()
+}
+
 func (h *turnHead) wait() string {
 	if h == nil {
 		return ""
@@ -399,7 +410,7 @@ func (r *Registry) checkFiles(t endedTurn, files []claim, checks ClaimChecks) ([
 	}
 	var committed []push.Change
 	if head != start {
-		if committed, err = checks.Commits.ChangedFiles(target.Repo, start, head); err != nil {
+		if committed, err = checks.Commits.ChangedFiles(context.Background(), target.Repo, start, head); err != nil {
 			return nil, unchecked()
 		}
 	}

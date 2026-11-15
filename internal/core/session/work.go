@@ -36,7 +36,7 @@ var (
 )
 
 type WorkFiles interface {
-	ChangedFiles(repo, from, to string) ([]push.Change, error)
+	ChangedFiles(ctx context.Context, repo, from, to string) ([]push.Change, error)
 	ReadFile(repo, commit, path string) (push.File, error)
 }
 
@@ -244,22 +244,22 @@ type WorkFacts struct {
 }
 
 type WorkPage interface {
-	View(sid string) (GateView, error)
-	SetType(sid, id string) error
-	Approve(sid string, plan bool, hash, text string) error
+	View(ctx context.Context, sid string) (GateView, error)
+	SetType(ctx context.Context, sid, id string) error
+	Approve(ctx context.Context, sid string, plan bool, hash, text string) error
 	Team(ctx context.Context, path string) (TeamView, error)
 	ApproveTeam(ctx context.Context, path, sha string) (TeamView, error)
 	ForgetTeam(path string) (TeamView, error)
 	Project(name string) ProjectInfo
-	SetProject(path, op string, rounds int, kind string) error
+	SetProject(ctx context.Context, path, op string, rounds int, kind string) error
 	SetAutoFindings(path string, on bool) error
 	SetProjectOption(path, op string, on bool) error
 	SetHold(path string, h HoldSettings) error
-	AllowFile(sid, path, reason string) error
-	AskRemove(sid, path string) error
-	AllowCommit(sid, commit string, field CommitField, reason string) error
-	AskRewrite(sid, commit string, field CommitField) error
-	EditHold(sid, top string, paths []string) string
+	AllowFile(ctx context.Context, sid, path, reason string) error
+	AskRemove(ctx context.Context, sid, path string) error
+	AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error
+	AskRewrite(ctx context.Context, sid, commit string, field CommitField) error
+	EditHold(ctx context.Context, sid, top string, paths []string) string
 	Guarded(sid, top string, paths []string) string
 	ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error)
 }
@@ -540,7 +540,7 @@ func (w *Work) session(sid string) (workSession, bool) {
 	return c, true
 }
 
-func (w *Work) SetType(sid, id string) error {
+func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	ws, ok := w.session(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
@@ -554,7 +554,7 @@ func (w *Work) SetType(sid, id string) error {
 	}
 	w.mu.Unlock()
 	w.persist(sid)
-	w.RecheckApproval(sid)
+	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("work type", "type", id)
 	return nil
 }
@@ -711,7 +711,7 @@ type gathered struct {
 	flagsRead bool
 }
 
-func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main string) gathered {
+func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
 	g := gathered{ws: ws, t: t, head: head, main: main}
 	g.setup = w.setupFor(ws.repo, ws.claude)
 	g.adapter = g.setup.setup.Adapter
@@ -723,7 +723,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	g.chosen = kind
 	if head != "" {
 		if main != "" {
-			base, err := w.cfg.History.MergeBase(t.Repo, head, main)
+			base, err := w.cfg.History.MergeBase(ctx, t.Repo, head, main)
 			if err != nil {
 				g.note = "the engine couldn't find where the branch leaves the main branch"
 			}
@@ -735,7 +735,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 			g.listed = true
 		}
 		if g.listed {
-			changes, err := w.cfg.Files.ChangedFiles(t.Repo, g.base, head)
+			changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, g.base, head)
 			if err != nil {
 				g.listed = false
 				g.note = "the engine's reader couldn't compare the branch with the main branch"
@@ -772,11 +772,11 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	if g.eff.Profile() == workflow.Feature && g.planOk {
 		g.planBase = ws.plan.Commit
 		if head != "" && head != g.planBase {
-			in, err := w.cfg.History.IsAncestor(t.Repo, g.planBase, head)
+			in, err := w.cfg.History.IsAncestor(ctx, t.Repo, g.planBase, head)
 			g.built = err == nil && in
 		}
 	}
-	g.required = w.deepened(t, workflow.Required(g.setup.setup, g.eff, g.files), g.base, head, g.listed)
+	g.required = w.deepened(ctx, t, workflow.Required(g.setup.setup, g.eff, g.files), g.base, head, g.listed)
 	planFile := ""
 	if g.docs.plan != nil {
 		planFile = g.docs.plan.Path
@@ -786,7 +786,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	var flagged []workflow.Flag
 	if head != "" {
 		if g.listed {
-			g.scan = w.scanOf(t.Repo, g.base, head, w.reviewedOn(t.Branch, head))
+			g.scan = w.scanOf(ctx, t.Repo, g.base, head, w.reviewedOn(t.Branch, head))
 		}
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
@@ -814,12 +814,12 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	return g
 }
 
-func (w *Work) PushFacts(sid string, t PushTarget, head, main string) (WorkFacts, bool) {
+func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool) {
 	ws, ok := w.session(sid)
 	if !ok {
 		return WorkFacts{}, false
 	}
-	g := w.gather(sid, ws, t, head, main)
+	g := w.gather(ctx, sid, ws, t, head, main)
 	hold, err := w.holdOf(t.Name)
 	items := g.items
 	if err != nil {
@@ -846,7 +846,7 @@ func lfsRefusal(paths []string) string {
 	return "this push carries files the commit's .gitattributes give to Git LFS (" + strings.Join(shown, ", ") + more + "), and the engine's push sends git objects only, so the remote would get LFS pointers without their content; take those files out of Git LFS in .gitattributes, or push this work another way"
 }
 
-func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow.Requirement {
+func (w *Work) Reviewers(ctx context.Context, sid string, t PushTarget, base, head string) []workflow.Requirement {
 	ws, ok := w.session(sid)
 	if !ok {
 		ws = workSession{repo: t.Name, claude: true, typeID: DefaultWorkType}
@@ -856,13 +856,13 @@ func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
 	}
-	changes, err := w.cfg.Files.ChangedFiles(t.Repo, base, head)
+	changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, base, head)
 	var files []string
 	for _, c := range changes {
 		files = append(files, c.Path)
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
-	required := w.notInstalled(w.deepened(t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
+	required := w.notInstalled(w.deepened(ctx, t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
 	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
@@ -873,7 +873,7 @@ func ReviewerName(q workflow.Requirement) string {
 	return strings.TrimPrefix(q.Agent, "knackpack:")
 }
 
-func (w *Work) current(sid string) (gathered, error) {
+func (w *Work) current(ctx context.Context, sid string) (gathered, error) {
 	ws, ok := w.session(sid)
 	if !ok {
 		return gathered{}, explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
@@ -888,12 +888,12 @@ func (w *Work) current(sid string) (gathered, error) {
 		head, headError = "", "the engine couldn't read the session's branch "+t.Branch
 	}
 	main, _ := w.cfg.Repos.Main(t.Name)
-	g := w.gather(sid, ws, t, head, main)
+	g := w.gather(ctx, sid, ws, t, head, main)
 	g.headError = headError
 	return g, nil
 }
 
-func (w *Work) facts(g gathered) workflow.Facts {
+func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	f := workflow.Facts{Profile: g.chosen.Profile(), Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
 		UsesArtifacts: g.docs.held, PlanCommand: workflow.Adapters[g.adapter].Commands[workflow.Plan]}
 	if g.docs.req != nil {
@@ -917,7 +917,7 @@ func (w *Work) facts(g gathered) workflow.Facts {
 		if f.ReqBaseline != "" && g.head != "" {
 			if f.ReqBaseline == g.head {
 				f.ArtifactsOnly = true
-			} else if changes, err := w.cfg.Files.ChangedFiles(g.t.Repo, f.ReqBaseline, g.head); err == nil {
+			} else if changes, err := w.cfg.Files.ChangedFiles(ctx, g.t.Repo, f.ReqBaseline, g.head); err == nil {
 				paths := make([]string, 0, len(changes))
 				for _, c := range changes {
 					paths = append(paths, c.Path)
@@ -929,11 +929,11 @@ func (w *Work) facts(g gathered) workflow.Facts {
 	return f
 }
 
-func (w *Work) Approve(sid string, plan bool, hash, text string) error {
+func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text string) error {
 	if !sha256Hex.MatchString(hash) || textHash(text) != hash {
 		return explained(invalid("hash"), "The text the page showed doesn't match its hash. Reload the page and read it again.")
 	}
-	g, err := w.current(sid)
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -959,7 +959,7 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	case g.head == "":
 		return explained(conflict("head"), "The "+what+" weren't approved: the engine couldn't read the session's branch.")
 	}
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	kind := workflow.ApproveRequirements
 	if plan {
 		kind = workflow.ApprovePlan
@@ -983,7 +983,7 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	w.mu.Unlock()
 	w.persist(sid)
 	w.approved(sid, g.t, g.head, plan, hash)
-	w.RecheckApproval(sid)
+	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("approved", "what", what)
 	if next := nextStep(g, plan); next != "" && w.cfg.Tell != nil {
 		if err := w.cfg.Tell(sid, next); err != nil {
@@ -994,12 +994,16 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 }
 
 func (w *Work) RecheckApproval(sid string) {
+	w.recheckApproval(context.Background(), sid)
+}
+
+func (w *Work) recheckApproval(ctx context.Context, sid string) {
 	if w.cfg.ApprovalMoved != nil {
-		w.cfg.ApprovalMoved(sid, func(commit string) (ApprovalGiven, bool) { return w.approvalAt(sid, commit) })
+		w.cfg.ApprovalMoved(sid, func(commit string) (ApprovalGiven, bool) { return w.approvalAt(ctx, sid, commit) })
 	}
 }
 
-func (w *Work) approvalAt(sid, commit string) (ApprovalGiven, bool) {
+func (w *Work) approvalAt(ctx context.Context, sid, commit string) (ApprovalGiven, bool) {
 	t, ok := w.cfg.Targets(sid)
 	if !ok {
 		return ApprovalGiven{}, false
@@ -1009,18 +1013,18 @@ func (w *Work) approvalAt(sid, commit string) (ApprovalGiven, bool) {
 		return ApprovalGiven{}, false
 	}
 	main, _ := w.cfg.Repos.Main(t.Name)
-	return w.givenOf(w.gather(sid, ws, t, commit, main)), true
+	return w.givenOf(w.gather(ctx, sid, ws, t, commit, main)), true
 }
 
-func (w *Work) EditHold(sid, top string, paths []string) string {
+func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) string {
 	if top == "" {
 		return ""
 	}
-	g, err := w.current(sid)
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return ""
 	}
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	for _, p := range paths {
 		rel, err := filepath.Rel(top, p)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
@@ -1123,8 +1127,8 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	return out, missing
 }
 
-func (w *Work) View(sid string) (GateView, error) {
-	g, err := w.current(sid)
+func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return GateView{}, err
 	}
@@ -1195,7 +1199,7 @@ func (w *Work) View(sid string) (GateView, error) {
 	}
 	v.Missing = append(v.Missing, missing...)
 	v.Allowed = len(v.Missing) == 0
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	v.Waiting = workflow.ImplementWait(workflow.Build{Profile: g.eff.Profile(), Head: g.head != "", PlanOk: g.planOk,
 		Built: g.built, Commits: len(g.files), CommitsRead: g.listed, NoBase: g.main == ""})
 	v.Holds = map[string]string{
@@ -1301,12 +1305,13 @@ func (w *Work) ApproveTeam(ctx context.Context, path, sha string) (TeamView, err
 		return TeamView{}, err
 	}
 	w.teamAudit(r.Name, AuditApproveTeam, sha)
-	w.recheckProject(r.Name)
+	w.recheckProject(ctx, r.Name)
 	shared.For(ctx, w.cfg.Logger).Info("team file approved")
 	return w.teamView(r), nil
 }
 
 func (w *Work) ForgetTeam(path string) (TeamView, error) {
+	ctx := context.Background()
 	r, err := w.repoByPath(path)
 	if err != nil {
 		return TeamView{}, err
@@ -1321,7 +1326,7 @@ func (w *Work) ForgetTeam(path string) (TeamView, error) {
 	}
 	if forgotten != "" {
 		w.teamAudit(r.Name, AuditForgetTeam, forgotten)
-		w.recheckProject(r.Name)
+		w.recheckProject(ctx, r.Name)
 	}
 	w.cfg.Logger.Info("team file forgotten")
 	return w.teamView(r), nil
@@ -1354,7 +1359,7 @@ func (w *Work) Project(name string) ProjectInfo {
 	return out
 }
 
-func (w *Work) SetProject(path, op string, rounds int, kind string) error {
+func (w *Work) SetProject(ctx context.Context, path, op string, rounds int, kind string) error {
 	r, err := w.repoByPath(path)
 	if err != nil {
 		return err
@@ -1386,12 +1391,12 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 		return err
 	}
 	if op == "type" {
-		w.recheckProject(r.Name)
+		w.recheckProject(ctx, r.Name)
 	}
 	return nil
 }
 
-func (w *Work) recheckProject(name string) {
+func (w *Work) recheckProject(ctx context.Context, name string) {
 	w.mu.Lock()
 	var sids []string
 	for sid, s := range w.sessions {
@@ -1401,7 +1406,7 @@ func (w *Work) recheckProject(name string) {
 	}
 	w.mu.Unlock()
 	for _, sid := range sids {
-		w.RecheckApproval(sid)
+		w.recheckApproval(ctx, sid)
 	}
 }
 
@@ -1432,7 +1437,7 @@ func (w *Work) reviewedOn(branch, head string) []string {
 	return out[:min(len(out), maxReviewedTrees)]
 }
 
-func (w *Work) scanOf(repo, base, head string, reviewed []string) scanned {
+func (w *Work) scanOf(ctx context.Context, repo, base, head string, reviewed []string) scanned {
 	if w.cfg.Contents == nil {
 		return scanned{}
 	}
@@ -1442,7 +1447,7 @@ func (w *Work) scanOf(repo, base, head string, reviewed []string) scanned {
 	if c, ok := w.scans[key]; ok {
 		return c
 	}
-	set, err := w.cfg.Contents.Pushed(repo, base, head, reviewed, FlagBudget)
+	set, err := w.cfg.Contents.Pushed(ctx, repo, base, head, reviewed, FlagBudget)
 	if err != nil {
 		w.cfg.Logger.Warn("flag scan", "event", "unreadable")
 		return scanned{}
@@ -1457,8 +1462,8 @@ func (w *Work) scanOf(repo, base, head string, reviewed []string) scanned {
 	return out
 }
 
-func (w *Work) flagged(sid, path string) (gathered, Flag, error) {
-	g, err := w.current(sid)
+func (w *Work) flagged(ctx context.Context, sid, path string) (gathered, Flag, error) {
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return g, Flag{}, err
 	}
@@ -1470,8 +1475,8 @@ func (w *Work) flagged(sid, path string) (gathered, Flag, error) {
 	return g, Flag{}, explained(conflict("not flagged"), "That file isn't flagged on this branch any more.")
 }
 
-func (w *Work) flaggedCommit(sid, commit string, field CommitField) (gathered, Flag, error) {
-	g, err := w.current(sid)
+func (w *Work) flaggedCommit(ctx context.Context, sid, commit string, field CommitField) (gathered, Flag, error) {
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return g, Flag{}, err
 	}
@@ -1504,12 +1509,12 @@ func (w *Work) allow(sid string, f Flag) error {
 	return nil
 }
 
-func (w *Work) AllowFile(sid, path, reason string) error {
+func (w *Work) AllowFile(ctx context.Context, sid, path, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
 		return explained(invalid("reason"), "Allowing a flagged file needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
 	}
-	g, f, err := w.flagged(sid, path)
+	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
@@ -1531,11 +1536,11 @@ func (w *Work) AllowFile(sid, path, reason string) error {
 	return nil
 }
 
-func (w *Work) AskRemove(sid, path string) error {
+func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 	if w.cfg.Tell == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message.")
 	}
-	_, f, err := w.flagged(sid, path)
+	_, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
@@ -1552,12 +1557,12 @@ func (w *Work) AskRemove(sid, path string) error {
 	return nil
 }
 
-func (w *Work) AllowCommit(sid, commit string, field CommitField, reason string) error {
+func (w *Work) AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
 		return explained(invalid("reason"), "Allowing a flagged commit needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
 	}
-	g, f, err := w.flaggedCommit(sid, commit, field)
+	g, f, err := w.flaggedCommit(ctx, sid, commit, field)
 	if err != nil {
 		return err
 	}
@@ -1576,11 +1581,11 @@ func (w *Work) AllowCommit(sid, commit string, field CommitField, reason string)
 	return nil
 }
 
-func (w *Work) AskRewrite(sid, commit string, field CommitField) error {
+func (w *Work) AskRewrite(ctx context.Context, sid, commit string, field CommitField) error {
 	if w.cfg.Tell == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message.")
 	}
-	_, f, err := w.flaggedCommit(sid, commit, field)
+	_, f, err := w.flaggedCommit(ctx, sid, commit, field)
 	if err != nil {
 		return err
 	}

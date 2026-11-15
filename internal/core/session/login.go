@@ -496,7 +496,7 @@ func (d *Dispatcher) LoginState(ctx context.Context, target string) (LoginState,
 		if err == nil {
 			out.Reviewers = &s
 			if !s.Busy {
-				out.ReviewersExpect = d.cfg.Expected.Adopt(ReviewerAgent, s.Method)
+				out.ReviewersExpect = d.cfg.Expected.AdoptChecked(ReviewerAgent, s)
 			}
 		}
 	}

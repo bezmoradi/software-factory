@@ -59,7 +59,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 			return explained(conflict("clone"), clip(keepSentence(strings.ToUpper(why[:1])+why[1:])+" No review started, since the reviewers would read the branch against an older main. Try again in a moment.", maxOutput))
 		}
 	}
-	base, err := r.cfg.History.MergeBase(t.Repo, head, main)
+	base, err := r.cfg.History.MergeBase(ctx, t.Repo, head, main)
 	if err != nil {
 		release()
 		return explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
@@ -70,7 +70,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	var required []workflow.Requirement
 	if t.Plan != nil {
-		required = t.Plan(base, head)
+		if required, err = t.Plan(ctx, base, head); err != nil {
+			release()
+			return planStopped()
+		}
 	} else {
 		for _, role := range r.roles() {
 			required = append(required, workflow.Requirement{Agent: r.cfg.Agents[role], Role: role})
@@ -88,10 +91,16 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	given := reviewGiven{asked: t.Approved != nil, rules: rulesGiven{main: main}}
 	ticket := r.approvalTicket()
 	if t.Approved != nil {
-		given.approved = t.Approved(head, main)
+		if given.approved, err = t.Approved(ctx, head, main); err != nil {
+			release()
+			return planStopped()
+		}
 	}
 	if t.TeamRules != nil {
-		given.team = t.TeamRules(base, head)
+		if given.team, err = t.TeamRules(ctx, base, head); err != nil {
+			release()
+			return planStopped()
+		}
 	}
 	approval := given.approved.Given()
 	approval.Team = given.team.Digest()
@@ -145,7 +154,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 					p.round = rd.Count
 				}
 			}
-			if prev, previous := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory, approval); prev != nil {
+			if prev, previous := r.incremental(ctx, t, entries, q.Agent, head, main, key.Number(), q.Advisory, approval); prev != nil {
 				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), previous
 			}
 			p.overridden = acceptedRound(entries, t.Branch, q.Agent, q.Advisory)
@@ -190,10 +199,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return err
 	}
-	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.AdoptChecked(ReviewerAgent, signIn), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
 		release()
 		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", err.Error())
 		return err
+	}
+	if ctx.Err() != nil {
+		release()
+		return planStopped()
 	}
 	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewers' sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch), Req: t.Req}
 	for _, p := range plans {
@@ -253,7 +266,7 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool, approval ApprovalGiven) (*ReviewEntry, string) {
+func (r *Reviews) incremental(ctx context.Context, t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool, approval ApprovalGiven) (*ReviewEntry, string) {
 	prev := previousRound(entries, t.Branch, agent, head, run, advisory)
 	if prev == nil || prev.Record.Shaped != "" || approval.differs(*prev) {
 		return nil, ""
@@ -263,17 +276,17 @@ func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry
 	if prev.Record.State == review.Block && (previous == "" || cut > 0 || unsure) {
 		return nil, ""
 	}
-	in, err := r.cfg.History.IsAncestor(t.Repo, prev.Key.Commit, head)
+	in, err := r.cfg.History.IsAncestor(ctx, t.Repo, prev.Key.Commit, head)
 	if err != nil || !in {
 		return nil, ""
 	}
-	if coverProblem(r.cfg.History, t.Repo, prev.Coverage(), head, main) != "" {
+	if coverProblem(ctx, r.cfg.History, t.Repo, prev.Coverage(), head, main) != "" {
 		return nil, ""
 	}
 	return prev, previous
 }
 
-func coverProblem(h History, repo, base, head, main string) string {
+func coverProblem(ctx context.Context, h History, repo, base, head, main string) string {
 	if base == "" {
 		return ""
 	}
@@ -284,7 +297,7 @@ func coverProblem(h History, repo, base, head, main string) string {
 		if base == c.commit {
 			continue
 		}
-		in, err := h.IsAncestor(repo, base, c.commit)
+		in, err := h.IsAncestor(ctx, repo, base, c.commit)
 		if err != nil {
 			return "the engine couldn't check that the review's base " + shortSHA(base) + " is in " + c.name
 		}
@@ -293,4 +306,8 @@ func coverProblem(h History, repo, base, head, main string) string {
 		}
 	}
 	return ""
+}
+
+func planStopped() error {
+	return explained(conflict("stopped"), "No review started: the request ended while the engine planned it. Press Review again.")
 }

@@ -175,7 +175,7 @@ type FollowsConfig struct {
 	Note       func(sid, text string)
 	Audit      Audit
 	MainCommit func(name string) (string, error)
-	Approved   func(sid string) string
+	Approved   func(ctx context.Context, sid string) string
 	Reviews    func() (map[review.Key]ReviewEntry, error)
 	Replies    func(sid string, e ReviewEntry) (string, int)
 	Now        func() time.Time
