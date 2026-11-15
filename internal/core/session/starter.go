@@ -184,6 +184,7 @@ type Dispatcher struct {
 	branchCopy *Keep
 	boxes      boxBook
 	waiting    map[string]*run
+	syncMu     sync.Mutex
 }
 
 var (
@@ -834,6 +835,7 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 			d.reg.WaitSignIn(sid, false)
 		}
 	}()
+	d.syncClone(r)
 	if err := d.wakeWorktree(ctx, r, id); err != nil {
 		d.mu.Lock()
 		d.woken = time.Time{}

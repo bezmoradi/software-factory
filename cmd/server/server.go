@@ -371,6 +371,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace, OpenTree: files.OpenTree}})
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
+		repos.OnFetched(d.SyncClones)
 		repos.OnHosts(func() { d.Recheck(base) })
 	}
 	pushes, err := pusher(sends, cfg, reg, d, repos, reviews, work, agentFiles, logger)

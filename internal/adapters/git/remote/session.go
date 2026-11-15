@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -134,7 +135,9 @@ func buildClone(ctx context.Context, tmp, base *os.Root, q session.CloneSpec) er
 	head := q.Head + "\n"
 	files := []struct{ name, data string }{{"config", sessionConfig}}
 	if q.MainBranch != "" && push.ValidBranch(q.MainBranch) && sha1Pattern.MatchString(q.Main) {
-		files = append(files, struct{ name, data string }{"refs/heads/" + q.MainBranch, q.Main + "\n"})
+		for _, ref := range baseRefs(q.MainBranch) {
+			files = append(files, struct{ name, data string }{ref, q.Main + "\n"})
+		}
 		head = "ref: refs/heads/" + q.MainBranch + "\n"
 	}
 	if q.Branch != "" && q.Branch != q.MainBranch {
@@ -231,6 +234,16 @@ func sealed(root *os.Root, name, sum string, from int64) bool {
 }
 
 func shareFile(base, git *os.Root, src, dst *os.File, name string) error {
+	at := "objects/pack/" + name
+	if have, err := git.Lstat(at); err == nil {
+		want, werr := base.Lstat(at)
+		if werr == nil && have.Mode().IsRegular() && os.SameFile(have, want) {
+			return nil
+		}
+		if err := git.Remove(at); err != nil {
+			return errors.New("a pack in the session's clone stands where the engine's pack goes and can't be replaced")
+		}
+	}
 	if err := linkAt(src, dst, name); err == nil {
 		return nil
 	}
@@ -281,6 +294,176 @@ func carryObjects(git *os.Root, objects []push.Object, head string) error {
 	}
 	if err := storePack(git, &buf, head); err != nil {
 		return errors.New("the other session's commits couldn't be written into the session's clone: " + err.Error())
+	}
+	return nil
+}
+
+func baseRefs(branch string) []string {
+	return []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch}
+}
+
+var _ session.CloneSyncer = Remote{}
+
+func (r Remote) SyncClone(ctx context.Context, box, repo, mainBranch, main string) error {
+	switch {
+	case !session.ValidBox(box), !repoName.MatchString(repo), strings.Contains(repo, ".."):
+		return errors.New("check: the session's clone isn't one the engine keeps")
+	case !push.ValidBranch(mainBranch) || !sha1Pattern.MatchString(main):
+		return errors.New("check: the main branch or commit isn't one the engine writes")
+	case r.OpenBox == nil:
+		return errors.New("check: the engine can't open the session's folder")
+	}
+	base, done, err := r.baseGit(repo)
+	if err != nil {
+		return stepError("base", err)
+	}
+	defer done()
+	root, err := r.OpenBox(r.Workspace, box)
+	if err != nil {
+		return stepError("box", err)
+	}
+	defer func() { _ = root.Close() }()
+	var steps []*os.Root
+	defer func() {
+		for _, s := range steps {
+			_ = s.Close()
+		}
+	}()
+	at := root
+	for i, name := range []string{"repos", repo, ".git", "objects", "pack"} {
+		next, err := plainStep(at, name, i < 3)
+		if errors.Is(err, fs.ErrNotExist) && i < 2 {
+			return nil
+		}
+		if err != nil {
+			return stepError("open", err)
+		}
+		steps = append(steps, next)
+		at = next
+	}
+	git := steps[2]
+	if err := sharePacks(ctx, base, git); err != nil {
+		return stepError("packs", err)
+	}
+	if err := writeRefs(git, baseRefs(mainBranch), main); err != nil {
+		return stepError("refs", err)
+	}
+	return nil
+}
+
+func stepError(step string, err error) error {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		err = pe.Err
+	} else if le, ok := errors.AsType[*os.LinkError](err); ok {
+		err = le.Err
+	}
+	return errors.New(step + ": " + err.Error())
+}
+
+type refUpdate struct {
+	name, tmp string
+	old       []byte
+	had       bool
+}
+
+func writeRefs(git *os.Root, refs []string, commit string) error {
+	data := []byte(commit + "\n")
+	var ups []refUpdate
+	clean := func() {
+		for _, u := range ups {
+			_ = git.Remove(u.tmp)
+		}
+	}
+	for _, ref := range refs {
+		if err := plainRefFolders(git, ref); err != nil {
+			clean()
+			return err
+		}
+		u := refUpdate{name: ref, tmp: path.Join(path.Dir(ref), ".sf-"+random())}
+		if info, err := git.Lstat(ref); err == nil && info.Mode().IsRegular() {
+			if old, err := git.ReadFile(ref); err == nil && len(old) <= 4096 {
+				u.old, u.had = old, true
+			}
+		}
+		if err := writeTemp(git, u.tmp, data); err != nil {
+			clean()
+			return err
+		}
+		ups = append(ups, u)
+	}
+	for i, u := range ups {
+		if err := git.Rename(u.tmp, u.name); err != nil {
+			for _, back := range ups[:i] {
+				if back.had {
+					_ = writeMode(git, back.name, back.old, 0o775, cloneFileMode)
+				} else {
+					_ = git.Remove(back.name)
+				}
+			}
+			for _, rest := range ups[i:] {
+				_ = git.Remove(rest.tmp)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func writeTemp(git *os.Root, name string, data []byte) error {
+	f, err := git.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, cloneFileMode)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Chmod(cloneFileMode)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = git.Remove(name)
+	}
+	return err
+}
+
+func plainStep(parent *os.Root, name string, owned bool) (*os.Root, error) {
+	seen, err := parent.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !seen.IsDir() || seen.Mode()&fs.ModeSymlink != 0 || owned && !ownedByMe(seen) {
+		return nil, errors.New(name + " isn't the engine's own plain folder")
+	}
+	root, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(seen, opened) {
+		_ = root.Close()
+		return nil, errors.New(name + " changed while it was opened")
+	}
+	return root, nil
+}
+
+func plainRefFolders(git *os.Root, ref string) error {
+	parts := strings.Split(ref, "/")
+	for i := 1; i < len(parts); i++ {
+		d := strings.Join(parts[:i], "/")
+		info, err := git.Lstat(d)
+		if errors.Is(err, fs.ErrNotExist) {
+			if err := git.Mkdir(d, cloneDirMode.Perm()); err != nil {
+				return errors.New("the session clone's " + d + " folder couldn't be made")
+			}
+			if err := git.Chmod(d, cloneDirMode); err != nil {
+				return errors.New("the session clone's " + d + " folder couldn't be shared with its container")
+			}
+			continue
+		}
+		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+			return errors.New("the session clone's " + d + " isn't a plain folder")
+		}
 	}
 	return nil
 }

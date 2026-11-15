@@ -355,7 +355,7 @@ func writeFile(root *os.Root, name string, data []byte) error {
 
 func writeMode(root *os.Root, name string, data []byte, dirMode, mode os.FileMode) error {
 	dir := path.Dir(name)
-	if err := root.MkdirAll(dir, dirMode); err != nil {
+	if err := root.MkdirAll(dir, dirMode.Perm()); err != nil {
 		return err
 	}
 	tmp := path.Join(dir, ".sf-"+random())

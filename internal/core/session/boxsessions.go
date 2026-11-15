@@ -69,6 +69,10 @@ type CloneSpec struct {
 	Objects    []push.Object
 }
 
+type CloneSyncer interface {
+	SyncClone(ctx context.Context, box, repo, mainBranch, main string) error
+}
+
 type SessionClones interface {
 	SessionClone(ctx context.Context, q CloneSpec) error
 }
@@ -826,4 +830,70 @@ func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {
 		return nil, oldLayout()
 	}
 	return r, nil
+}
+
+func (d *Dispatcher) SyncClones(name, branch, commit string) {
+	syncer, ok := d.cfg.Clones.(CloneSyncer)
+	if !ok || !sha1Hex.MatchString(commit) {
+		return
+	}
+	d.mu.Lock()
+	var boxes []string
+	for _, r := range d.runs {
+		if r.repo == name && r.box != "" && r.clone != "" && !r.history {
+			boxes = append(boxes, r.box)
+		}
+	}
+	d.mu.Unlock()
+	if len(boxes) == 0 {
+		return
+	}
+	d.syncMu.Lock()
+	defer d.syncMu.Unlock()
+	synced := 0
+	for _, box := range boxes {
+		ctx, cancel := context.WithTimeout(context.Background(), FetchFor)
+		err := syncer.SyncClone(ctx, box, name, branch, commit)
+		cancel()
+		if err != nil {
+			d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", box, "why", clip(err.Error(), 200))
+			continue
+		}
+		synced++
+	}
+	if synced > 0 {
+		d.cfg.Logger.Info("session clone", "event", "main-brought", "clones", synced)
+	}
+}
+
+func (d *Dispatcher) syncClone(r *run) {
+	syncer, ok := d.cfg.Clones.(CloneSyncer)
+	if !ok || d.cfg.Repositories == nil || r.box == "" || r.clone == "" {
+		return
+	}
+	list, err := d.cfg.Repositories.List()
+	if err != nil {
+		return
+	}
+	i := slices.IndexFunc(list, func(p Repository) bool { return p.Name == r.repo })
+	if i < 0 || list[i].Branch == "" {
+		return
+	}
+	mains, ok := d.cfg.Repositories.(interface {
+		Main(name string) (string, error)
+	})
+	if !ok {
+		return
+	}
+	commit, err := mains.Main(r.repo)
+	if err != nil || !sha1Hex.MatchString(commit) {
+		return
+	}
+	d.syncMu.Lock()
+	defer d.syncMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), FetchFor)
+	defer cancel()
+	if err := syncer.SyncClone(ctx, r.box, r.repo, list[i].Branch, commit); err != nil {
+		d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", r.box, "why", clip(err.Error(), 200))
+	}
 }

@@ -140,6 +140,13 @@ type Repos struct {
 	sessions func(name string) int
 	hosts    func()
 	removed  []func(ProjectID)
+	fetched  func(name, branch, commit string)
+}
+
+func (c *Repos) OnFetched(f func(name, branch, commit string)) {
+	c.mu.Lock()
+	c.fetched = f
+	c.mu.Unlock()
 }
 
 func (c *Repos) UseSessions(count func(name string) int) {
@@ -647,6 +654,12 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 		c.mu.Unlock()
 	}
 	c.cfg.Logger.Info("repository", "event", "fetched")
+	c.mu.Lock()
+	fetched := c.fetched
+	c.mu.Unlock()
+	if fetched != nil {
+		fetched(rec.Name, got.Branch, got.Commit)
+	}
 	return got.Commit, nil
 }
 
