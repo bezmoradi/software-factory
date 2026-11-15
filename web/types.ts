@@ -407,6 +407,7 @@ export interface ReviewRole {
   state: ReviewRoleState
   verdict: string
   message: string
+  hasFull?: boolean
   reason: string
   costUsd?: number
   why?: string
@@ -492,6 +493,7 @@ export interface WalkStep {
 }
 
 export interface ReviewsView {
+  sid?: string
   review: SessionReview | null
   disabled: string
   asking: boolean

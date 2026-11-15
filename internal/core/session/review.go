@@ -21,6 +21,8 @@ const (
 	ReviewProvider = "knackpack@knackpack"
 	MaxReviewing   = 2
 	maxReviewText  = 4000
+	MaxFullReply   = 64 << 10
+	MaxEarlierFile = MaxFullReply + 16<<10
 	clippedMiddle  = "[Software Factory: the middle of the reply is left out.]"
 	keptRecords    = 500
 	reviewCheck    = 90 * time.Second
@@ -59,11 +61,21 @@ type ReviewEntry struct {
 	AutoAttempts int
 	Cited        CitedIDs
 	Approved     string
+	Team         string
+	Reply        string
+	ReplyClipped bool
 }
 
 type ReviewRecords interface {
 	Load() ([]ReviewEntry, error)
 	Save([]ReviewEntry) error
+}
+
+type ReviewReplies interface {
+	Put(sid string, e ReviewEntry) error
+	Get(sid string, k review.Key, started time.Time) (string, bool, bool)
+	Keep(keys []review.Key) error
+	Forget(sid string) error
 }
 
 type Snapshot struct {
@@ -98,6 +110,7 @@ type RoleReview struct {
 	State    review.State
 	Verdict  string
 	Message  string
+	HasFull  bool
 	Reason   string
 	CostUSD  float64
 	Why      string
@@ -119,6 +132,7 @@ type RoleReview struct {
 	Given    *RunGiven
 	started  time.Time
 	approved string
+	team     string
 }
 
 type ReviewView struct {
@@ -180,6 +194,7 @@ type ReviewsConfig struct {
 	Sandbox    Sandbox
 	Snapshots  Snapshots
 	Records    ReviewRecords
+	Replies    ReviewReplies
 	Checks     ReviewerChecks
 	Minimum    review.Minimum
 	Plugins    PluginSource
@@ -405,8 +420,8 @@ func (r *Reviews) asideLocked(sid string, v ReviewView) ReviewView {
 		return v
 	}
 	for i, role := range v.Roles {
-		if a.given.setsAside(role.State, role.Advisory, role.approved) {
-			v.Roles[i].State, v.Roles[i].Reason = review.Unknown, approvalHeldWhy
+		if why := a.given.setsAside(role.State, role.Advisory, role.approved, role.team); why != "" {
+			v.Roles[i].State, v.Roles[i].Reason = review.Unknown, why
 		}
 	}
 	return v
@@ -476,7 +491,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
 			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
-			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest}
+			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest()}
 	}
 	r.put(entries...)
 	r.mu.Lock()
@@ -593,11 +608,14 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			e, why := r.reviewWith(ctx, t, entries[i], dir, plugin, prompt, r.progressShown(t.SID, &mu, &view, i))
 			e = classified(e, why)
 			r.put(e)
+			r.keepReply(t.SID, e)
 			r.audited(t, e)
 			r.learned(t, e)
 			if t.Approved != nil {
 				ticket := r.approvalTicket()
-				r.approvalIs(t.SID, head, ticket, t.Approved(head, main).Given())
+				now := t.Approved(head, main).Given()
+				now.Team = given.team.Digest()
+				r.approvalIs(t.SID, head, ticket, now)
 			}
 			mu.Lock()
 			entries[i] = e
@@ -660,12 +678,13 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.State = e.Record.State
 	v.Verdict = e.Record.Verdict
 	v.Message = e.Message
+	v.HasFull = e.Clipped && e.Reply != ""
 	v.Reason = e.Reason
 	v.CostUSD = e.CostUSD
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
 	v.Cited = e.Cited.clone()
 	v.started = e.StartedAt
-	v.approved = e.Approved
+	v.approved, v.team = e.Approved, e.Team
 	return v
 }
 
@@ -695,6 +714,60 @@ func (r *Reviews) put(entries ...ReviewEntry) {
 	list = keptBranches(list, keptRecords)
 	if err := r.cfg.Records.Save(list); err != nil {
 		r.cfg.Logger.Warn("review", "event", "records-not-saved")
+	}
+	if r.cfg.Replies != nil {
+		keys := make([]review.Key, 0, len(list))
+		for _, e := range list {
+			keys = append(keys, e.Key)
+		}
+		if err := r.cfg.Replies.Keep(keys); err != nil {
+			r.cfg.Logger.Warn("review", "event", "replies-not-swept")
+		}
+	}
+}
+
+func (r *Reviews) keepReply(sid string, e ReviewEntry) {
+	if r.cfg.Replies == nil {
+		return
+	}
+	r.store.Lock()
+	defer r.store.Unlock()
+	if err := r.cfg.Replies.Put(sid, e); err != nil {
+		r.cfg.Logger.Warn("review", "event", "reply-not-saved")
+	}
+}
+
+func (r *Reviews) withReply(sid string, e ReviewEntry) ReviewEntry {
+	if e.Reply != "" || e.Message == "" || r.cfg.Replies == nil {
+		return e
+	}
+	if text, clipped, ok := r.cfg.Replies.Get(sid, e.Key, e.StartedAt); ok {
+		e.Reply, e.ReplyClipped = text, clipped
+	}
+	return e
+}
+
+func (r *Reviews) ReplyOf(sid string, e ReviewEntry) (string, int) {
+	e = r.withReply(sid, e)
+	switch {
+	case e.Reply == "" && e.Clipped:
+		return e.Message, maxReviewText
+	case e.Reply == "":
+		return e.Message, 0
+	case e.ReplyClipped:
+		return e.Reply, MaxFullReply
+	}
+	return e.Reply, 0
+}
+
+func (r *Reviews) ForgetReplies(sid string) {
+	if r.cfg.Replies == nil {
+		return
+	}
+	r.store.Lock()
+	defer r.store.Unlock()
+	if err := r.cfg.Replies.Forget(sid); err != nil {
+		r.cfg.Logger.Warn("review", "event", "replies-not-removed")
 	}
 }
 

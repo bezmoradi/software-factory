@@ -100,6 +100,7 @@ type roleJSON struct {
 	State       string  `json:"state"`
 	Verdict     string  `json:"verdict"`
 	Message     string  `json:"message"`
+	HasFull     bool    `json:"hasFull,omitempty"`
 	Reason      string  `json:"reason"`
 	CostUSD     float64 `json:"costUsd,omitempty"`
 	Why         string  `json:"why,omitempty"`
@@ -153,6 +154,7 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 		out.Roles[len(out.Roles)-1].Progress, out.Roles[len(out.Roles)-1].Given = progressOf(r.Progress), givenOf(r.Given)
 		out.Roles[len(out.Roles)-1].Run, out.Roles[len(out.Roles)-1].Runs, out.Roles[len(out.Roles)-1].Advisory = r.Run, r.Runs, r.Advisory
 		out.Roles[len(out.Roles)-1].Cited = citedOf(r.Cited)
+		out.Roles[len(out.Roles)-1].HasFull = r.HasFull
 	}
 	return out
 }

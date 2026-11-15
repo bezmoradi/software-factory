@@ -211,7 +211,7 @@ func verdict(agent, prompt string, st *stream) reply {
 	if has("READ-OUTSIDE") {
 		r.denials = []denial{{ToolName: "Read", ToolUseID: "fake", ToolInput: map[string]any{"file_path": "/home/reviewer/.claude/.credentials.json"}}}
 	}
-	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt)
+	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
 	if has("SLOW-REVIEW") {
 		st.slow(slowFor)
 	}

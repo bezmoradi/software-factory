@@ -67,3 +67,25 @@ func lessonsReply() reply {
 	}
 	return reply{text: out.String(), turns: 2}
 }
+
+const (
+	longReportKiB = 30
+	maxReportKiB  = 200
+)
+
+func longReport() string {
+	data, err := os.ReadFile(filepath.Join("head", "LONG-REPORT"))
+	if err != nil {
+		return ""
+	}
+	kib, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || kib < 1 || kib > maxReportKiB {
+		kib = longReportKiB
+	}
+	var b strings.Builder
+	b.WriteString("\n## Notes from head/LONG-REPORT\n\n")
+	for n := 1; b.Len() < kib<<10; n++ {
+		b.WriteString("- Note " + strconv.Itoa(n) + ": head/LONG-REPORT asks the fake reviewer for a long report, so this line only fills it.\n")
+	}
+	return b.String()
+}

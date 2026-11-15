@@ -945,6 +945,7 @@ sf-walkthrough .walkthrough-row { align-items: flex-start; gap: .5rem; }
 sf-walkthrough .walkthrough-row input { margin: .2rem 0 0; accent-color: var(--accent); flex: none; }
 sf-walkthrough .walkthrough-do { cursor: pointer; }
 sf-reviews .review-given { margin-top: .35rem; }
+sf-reviews .review-full { max-height: 32rem; }
 sf-reviews .review-given summary { cursor: pointer; }
 sf-reviews .review-files { margin: .2rem 0 0; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
 sf-notify { display: block; margin-top: .6rem; }

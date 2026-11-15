@@ -9,8 +9,6 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
-const maxEarlier = 64 << 10
-
 var (
 	earlierPath  = regexp.MustCompile(`^earlier/[a-z0-9-]{1,100}\.md$`)
 	approvedPath = regexp.MustCompile(`^approved/[a-z0-9-]{1,40}\.md$`)
@@ -19,7 +17,7 @@ var (
 func extraLimit(name string) (string, int) {
 	switch {
 	case earlierPath.MatchString(name):
-		return "earlier", maxEarlier
+		return "earlier", session.MaxEarlierFile
 	case approvedPath.MatchString(name):
 		return session.ApprovedDir, session.MaxApprovedFile
 	case name == session.ClaimsFile:

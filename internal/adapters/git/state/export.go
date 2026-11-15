@@ -100,6 +100,7 @@ var stores = map[string]storeRow{
 	stampFile:           {class: classOut, label: "which engine last ran here"},
 	importReportFile:    {class: classOut, label: "this engine's own last import"},
 	KeepFolder:          {class: classOut, label: "the engine's copies of session commits are never exported"},
+	repliesFolder:       {class: classOut, label: "reviewers' whole replies stay with the engine that ran them; each review record keeps its 4,000-character summary"},
 	backupFolder:        {class: classOut, label: "this engine's copies from before a format change"},
 	stagingFolder:       {class: classOut, label: "an import this engine hasn't applied"},
 }

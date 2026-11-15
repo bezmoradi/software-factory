@@ -97,7 +97,11 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	if t.Approved != nil {
 		given.approved = t.Approved(head, main)
 	}
+	if t.TeamRules != nil {
+		given.team = t.TeamRules(base, head)
+	}
 	approval := given.approved.Given()
+	approval.Team = given.team.Digest()
 	approval.hold(entries, t.Branch, head)
 	r.approvalIs(t.SID, head, ticket, approval)
 	limit := roundLimit(t.Rounds)
@@ -110,7 +114,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		var open []review.Key
 		for _, key := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
 			if e, ok := entries[key]; ok && t.Scope.skips(e) && e.Record.Advisory == q.Advisory {
-				f := finishedRole(q, e, rd.Count, limit)
+				f := finishedRole(q, r.withReply(t.SID, e), rd.Count, limit)
 				f.Run, f.Runs, f.Advisory = key.Number(), q.RunCount(), q.Advisory
 				finished = append(finished, f)
 				if e.Record.Channel == review.Checking {
@@ -143,8 +147,8 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 					p.round = rd.Count
 				}
 			}
-			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory, approval); prev != nil {
-				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
+			if prev, previous := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory, approval); prev != nil {
+				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), previous
 			}
 			p.overridden = acceptedRound(entries, t.Branch, q.Agent, q.Advisory)
 			plans = append(plans, p)
@@ -183,9 +187,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		view.Note += " " + held
 	}
 	r.show(t.SID, view)
-	if t.TeamRules != nil {
-		given.team = t.TeamRules(base, head)
-	}
 	r.cfg.Logger.Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.wg.Go(func() {
 		r.run(t, head, r.reviewerVersion(r.cfg.Base), plans, plugin, view, held, given)
@@ -228,22 +229,24 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool, approval ApprovalGiven) *ReviewEntry {
+func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool, approval ApprovalGiven) (*ReviewEntry, string) {
 	prev := previousRound(entries, t.Branch, agent, head, run, advisory)
-	if prev == nil || prev.Record.Shaped != "" || approval.Steps && prev.Approved != approval.Digest {
-		return nil
+	if prev == nil || prev.Record.Shaped != "" || approval.differs(*prev) {
+		return nil, ""
 	}
-	if prev.Record.State == review.Block && (prev.Message == "" || prev.Clipped || len(prev.Message) >= maxReviewText-4) {
-		return nil
+	previous, cut := r.ReplyOf(t.SID, *prev)
+	unsure := previous == prev.Message && len(previous) >= maxReviewText-4
+	if prev.Record.State == review.Block && (previous == "" || cut > 0 || unsure) {
+		return nil, ""
 	}
 	in, err := r.cfg.History.IsAncestor(t.Repo, prev.Key.Commit, head)
 	if err != nil || !in {
-		return nil
+		return nil, ""
 	}
 	if coverProblem(r.cfg.History, t.Repo, prev.Coverage(), head, main) != "" {
-		return nil
+		return nil, ""
 	}
-	return prev
+	return prev, previous
 }
 
 func coverProblem(h History, repo, base, head, main string) string {

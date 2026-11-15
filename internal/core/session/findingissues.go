@@ -123,7 +123,11 @@ func (fl *Follows) findingsAt(sid string) (PushTarget, string, []FindingItem, er
 	for _, k := range keys {
 		e := entries[k]
 		name := ReviewerName(workflow.Requirement{Agent: k.Agent, Role: e.Role})
-		for _, it := range NonBlockingFindings(e.Message) {
+		text := e.Message
+		if fl.cfg.Replies != nil {
+			text, _ = fl.cfg.Replies(sid, e)
+		}
+		for _, it := range NonBlockingFindings(text) {
 			it.Reviewer, it.Agent = CleanLine(name, 100), CleanLine(k.Agent, 120)
 			if len(items) < maxFindingItems {
 				items = append(items, it)

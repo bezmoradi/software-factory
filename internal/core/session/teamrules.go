@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -41,30 +42,47 @@ func (w *Work) sessionSetup(sid, name string) workflow.Setup {
 
 func (w *Work) TeamRulesFor(sid string, t PushTarget, base, head string) TeamRules {
 	setup := w.sessionSetup(sid, t.Name)
-	var withText []workflow.FileRule
-	for _, r := range setup.FileRules {
-		if r.Instruction != "" {
-			withText = append(withText, r)
-		}
-	}
-	if len(withText) == 0 {
+	if !slices.ContainsFunc(setup.FileRules, func(r workflow.FileRule) bool { return r.Instruction != "" }) {
 		return TeamRules{}
 	}
 	changes, err := w.cfg.Files.ChangedFiles(t.Repo, base, head)
 	if err != nil {
 		return TeamRules{}
 	}
+	paths := make([]string, 0, len(changes))
+	for _, c := range changes {
+		paths = append(paths, c.Path)
+	}
 	main, _ := w.cfg.Repos.Main(t.Name)
+	return teamRulesOf(setup.FileRules, paths, main)
+}
+
+func teamRulesOf(rules []workflow.FileRule, paths []string, main string) TeamRules {
 	out := TeamRules{Main: main}
-	for _, r := range withText {
-		for _, c := range changes {
-			if workflow.PathMatches(r.Pattern, c.Path, false) {
-				out.Rules = append(out.Rules, TeamRule{Pattern: r.Pattern, Instruction: r.Instruction})
-				break
-			}
+	for _, r := range rules {
+		if r.Instruction == "" {
+			continue
+		}
+		if slices.ContainsFunc(paths, func(p string) bool { return workflow.PathMatches(r.Pattern, p, false) }) {
+			out.Rules = append(out.Rules, TeamRule{Pattern: r.Pattern, Instruction: r.Instruction})
 		}
 	}
+	if len(out.Rules) == 0 {
+		return TeamRules{}
+	}
 	return out
+}
+
+func (t TeamRules) Digest() string {
+	if len(t.Rules) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(t.Rules))
+	for _, r := range t.Rules {
+		lines = append(lines, strconv.Quote(r.Pattern)+" "+strconv.Quote(r.Instruction))
+	}
+	slices.Sort(lines)
+	return textHash(strings.Join(lines, "\n"))
 }
 
 func (w *Work) Guarded(sid, top string, paths []string) string {

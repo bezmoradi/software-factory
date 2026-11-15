@@ -239,10 +239,14 @@ func (r *Reviews) learned(t ReviewTarget, e ReviewEntry) {
 	r.mu.Lock()
 	l := r.lessons
 	r.mu.Unlock()
-	if l == nil || t.Name == "" || e.Record.State != review.Block || e.Record.Advisory || e.Message == "" || secretText(e.Message) {
+	if l == nil || t.Name == "" || e.Record.State != review.Block || e.Record.Advisory || e.Message == "" {
 		return
 	}
-	items := BlockingFindings(e.Message)
+	text, _ := r.ReplyOf(t.SID, e)
+	if secretText(text) {
+		return
+	}
+	items := BlockingFindings(text)
 	if len(items) == 0 {
 		return
 	}

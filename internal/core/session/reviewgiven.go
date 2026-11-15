@@ -32,6 +32,7 @@ type ApprovedText struct {
 type ApprovalGiven struct {
 	Steps  bool
 	Digest string
+	Team   string
 }
 
 func (a ApprovedText) Given() ApprovalGiven {
@@ -42,25 +43,52 @@ func (a ApprovedText) Given() ApprovalGiven {
 	return out
 }
 
-func (a ApprovalGiven) holds(e ReviewEntry) bool {
-	return a.setsAside(e.Record.State, e.Record.Advisory, e.Approved)
+func (a ApprovalGiven) heldWhy(e ReviewEntry) string {
+	return a.setsAside(e.Record.State, e.Record.Advisory, e.Approved, e.Team)
 }
 
-func (a ApprovalGiven) setsAside(state review.State, advisory bool, approved string) bool {
-	return a.Steps && state == review.Pass && !advisory && approved != a.Digest
+func (a ApprovalGiven) setsAside(state review.State, advisory bool, approved, team string) string {
+	switch {
+	case state != review.Pass || advisory:
+		return ""
+	case a.Steps && approved != a.Digest:
+		return approvalHeldWhy
+	case team != a.Team:
+		return teamHeldWhy
+	}
+	return ""
+}
+
+func (a ApprovalGiven) differs(e ReviewEntry) bool {
+	return a.Steps && e.Approved != a.Digest || e.Team != a.Team
 }
 
 func (a ApprovalGiven) hold(entries map[review.Key]ReviewEntry, branch, head string) {
 	for k, e := range entries {
-		if k.Branch != branch || k.Commit != head || !a.holds(e) {
+		if k.Branch != branch || k.Commit != head {
 			continue
 		}
-		e.Record.State, e.Record.Channel, e.Record.Held, e.Reason = review.Unknown, review.ApprovalChanged, approvalHeldWhy, approvalHeldWhy
+		why := a.heldWhy(e)
+		if why == "" {
+			continue
+		}
+		e.Record.State, e.Record.Channel, e.Record.Held, e.Reason = review.Unknown, review.ApprovalChanged, why, why
 		entries[k] = e
 	}
 }
 
-const approvalHeldWhy = "it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+const (
+	approvalHeldWhy = "it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+	teamHeldWhy     = "the team rules changed since it reviewed: the per-path rules of the approved " + TeamFile + " that apply to this change aren't the ones it was given, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+)
+
+func (w *Work) givenOf(g gathered) ApprovalGiven {
+	out := w.approvedOf(g).Given()
+	if g.listed {
+		out.Team = teamRulesOf(g.setup.setup.FileRules, g.files, g.main).Digest()
+	}
+	return out
+}
 
 func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) ApprovedText {
 	ws, ok := w.session(sid)

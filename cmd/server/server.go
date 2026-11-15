@@ -402,6 +402,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	if reviews != nil {
 		d.OnRemoved(reviews.Forget)
+		d.OnRemoved(reviews.ForgetReplies)
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
@@ -529,6 +530,9 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	}
 	srv.UseEgress(parts.egressPage())
 	srv.UseBranching(parts.branching())
+	if parts.reviewing() != nil {
+		srv.UseWholeReplies(parts.dispatcher)
+	}
 	useChangeFacts(sends, srv, reg, parts, cfg, logger)
 	if parts.dispatcher != nil {
 		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)

@@ -39,7 +39,7 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 		fc.Approved = approvedRequirements(parts.work)
 	}
 	if parts.reviews != nil {
-		fc.Reviews = parts.reviews.Entries
+		fc.Reviews, fc.Replies = parts.reviews.Entries, parts.reviews.ReplyOf
 	}
 	follows, err := session.NewFollows(fc)
 	if err != nil {

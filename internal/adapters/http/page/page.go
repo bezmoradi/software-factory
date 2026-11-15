@@ -79,6 +79,7 @@ type Server struct {
 	issues    session.IssuesPage
 	work      *session.SessionWork
 	metrics   session.MetricsPage
+	replies   session.WholeReplies
 	decisions session.DecisionLogPage
 
 	branchCopy session.KeepPage
@@ -190,6 +191,7 @@ var pageRoutes = map[string]bool{
 	pairRoute: true, splitPageRoute: true,
 	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
+	reviewReplyRoute: true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -313,6 +315,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == testListRoute {
 		s.testList(w, r, body)
+		return
+	}
+	if r.URL.Path == reviewReplyRoute {
+		s.wholeReply(w, body)
 		return
 	}
 	if r.URL.Path == walkthroughRoute {

@@ -56,6 +56,7 @@ type PushRepos interface {
 
 type ReviewEntries interface {
 	Entries() (map[review.Key]ReviewEntry, error)
+	ReplyOf(sid string, e ReviewEntry) (string, int)
 }
 
 type AuditEntry struct {

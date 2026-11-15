@@ -817,7 +817,7 @@ func (w *Work) PushFacts(sid string, t PushTarget, head, main string) (WorkFacts
 		items = append(slices.Clone(items), workUnreadItem)
 	}
 	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold,
-		Approval: w.approvedOf(g).Given()}, true
+		Approval: w.givenOf(g)}, true
 }
 
 const workUnreadItem = "project settings the engine can read: it couldn't read them (work.json), so it can't tell this project's push hold, review rounds or work type"
@@ -995,11 +995,12 @@ func (w *Work) approvalAt(sid, commit string) (ApprovalGiven, bool) {
 	if !ok {
 		return ApprovalGiven{}, false
 	}
-	if _, ok := w.session(sid); !ok {
+	ws, ok := w.session(sid)
+	if !ok {
 		return ApprovalGiven{}, false
 	}
 	main, _ := w.cfg.Repos.Main(t.Name)
-	return w.ApprovedFor(sid, t, commit, main).Given(), true
+	return w.givenOf(w.gather(sid, ws, t, commit, main)), true
 }
 
 func (w *Work) EditHold(sid, top string, paths []string) string {
@@ -1054,7 +1055,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	if w.cfg.Reviews != nil {
 		entries, _ = w.cfg.Reviews.Entries()
 	}
-	w.approvedOf(g).Given().hold(entries, g.t.Branch, g.head)
+	w.givenOf(g).hold(entries, g.t.Branch, g.head)
 	records := map[review.Key]review.Record{}
 	for k, e := range entries {
 		records[k] = e.Record
@@ -1070,7 +1071,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 		if e, complete, ok := pooledEntry(entries, k, q.RunCount()); ok {
 			r.State, r.Verdict, r.Override, r.Since = string(e.Record.State), e.Record.Verdict, e.Record.Override, e.Since
 			if e.Record.Channel == review.ApprovalChanged && e.Record.State == review.Unknown {
-				r.SetAside = approvalHeldWhy
+				r.SetAside = e.Record.Held
 			}
 			if !complete && e.Record.State == review.Pass {
 				r.State = "none"

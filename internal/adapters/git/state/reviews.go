@@ -64,6 +64,7 @@ type reviewJSON struct {
 	CitedMore    int       `json:"citedMore,omitempty"`
 	CitedFailed  string    `json:"citedFailed,omitempty"`
 	Approved     string    `json:"approved,omitempty"`
+	Team         string    `json:"team,omitempty"`
 }
 
 type reviewsJSON struct {
@@ -101,7 +102,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 			Clipped: r.Clipped, Auto: r.Auto, PluginCommit: matching(r.PluginCommit, commitID), ClaudeCode: matching(r.ClaudeCode, versionText),
 			Models: matchingAll(r.Models, modelName, maxModels), RunModel: r.RunModel, RunEffort: r.RunEffort, Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
 			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1), AutoAttempts: inRange(r.AutoAttempts, 0, maxAttempt),
-			Approved: matching(r.Approved, approvalDigest),
+			Approved: matching(r.Approved, approvalDigest), Team: matching(r.Team, approvalDigest),
 		})
 	}
 	return out, nil
@@ -121,7 +122,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Channel: string(e.Record.Channel), Override: e.Record.Override, Shaped: e.Record.Shaped,
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
-			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts, Approved: e.Approved,
+			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts, Approved: e.Approved, Team: e.Team,
 		})
 	}
 	gone := reviewsGone(s.Dir, list)

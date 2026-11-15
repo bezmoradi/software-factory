@@ -1,3 +1,4 @@
+import { api } from '../api.ts'
 import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
@@ -67,6 +68,23 @@ function failure(r: SessionReview, note: string): { said: string; shared: string
   return { said: `${what}${shared ? `: ${sentence(text(shared))}` : '.'} ${next}`, shared }
 }
 
+interface WholeReport {
+  text: string
+  clipped: boolean
+}
+
+async function wholeReport(ask: { sid: string; agent: string; commit: string; run: number }): Promise<WholeReport | string> {
+  try {
+    const res = await api('/api/review-reply', ask)
+    const body: unknown = await res.json().catch(() => null)
+    const got = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+    if (res.ok && typeof got.text === 'string' && typeof got.clipped === 'boolean') return { text: got.text, clipped: got.clipped }
+    return typeof got.message === 'string' && got.message ? got.message : `the engine answered ${res.status}`
+  } catch {
+    return 'the engine didn\'t answer'
+  }
+}
+
 class SfReviews extends HTMLElement {
   #key = ''
   #button: HTMLButtonElement | null = null
@@ -75,6 +93,7 @@ class SfReviews extends HTMLElement {
   #said: HTMLSpanElement | null = null
   #reasons = new Map<string, string>()
   #opened = new Set<string>()
+  #wholes = new Map<string, Promise<WholeReport | string>>()
   #timer = 0
 
   connectedCallback() {
@@ -320,6 +339,7 @@ class SfReviews extends HTMLElement {
       pre.setAttribute('aria-label', `${runName(role)}'s final message`)
       li.append(pre)
     }
+    if (role.hasFull) li.append(this.#full(role, value))
     if (role.cited?.looked.length) li.append(cited(role.cited))
     if (role.given) li.append(this.#given(role, role.given))
     return li
@@ -337,6 +357,42 @@ class SfReviews extends HTMLElement {
       return node
     }
     return p ? el('div', 'small muted', `Ran for ${duration(p.elapsedMs)} · ${calls(p.toolCalls)}`) : null
+  }
+
+  #full(role: ReviewRole, value: ReviewsView): HTMLElement {
+    const ask = { sid: value.sid ?? '', agent: role.agent, commit: value.review?.commit ?? '', run: role.run ?? 1 }
+    const key = `full:${ask.sid}:${ask.commit}:${ask.agent}:${ask.run}:${role.message}`
+    const box = el('details', 'review-given small')
+    const body = el('div')
+    const fill = () => {
+      body.replaceChildren(el('div', 'small muted', 'Reading the whole report…'))
+      let asked = this.#wholes.get(key)
+      if (!asked) {
+        asked = wholeReport(ask)
+        this.#wholes.set(key, asked)
+      }
+      void asked.then(got => {
+        if (typeof got === 'string') {
+          this.#wholes.delete(key)
+          body.replaceChildren(el('div', 'small warn', `The whole report couldn't be read: ${sentence(text(got))}`))
+          return
+        }
+        const pre = el('pre', 'review-message review-full small', text(got.text))
+        pre.tabIndex = 0
+        pre.setAttribute('aria-label', `${runName(role)}'s whole report`)
+        body.replaceChildren(el('div', 'small muted', got.clipped ? 'The reply was longer than 64 KiB: the engine kept its start and its closing knackpack-findings and knackpack-verdict lines. The message above is its summary.' : 'The message above is its summary: its start and its closing lines.'), pre)
+      })
+    }
+    box.open = this.#opened.has(key)
+    box.addEventListener('toggle', () => {
+      if (box.open) {
+        this.#opened.add(key)
+        fill()
+      } else this.#opened.delete(key)
+    })
+    box.append(el('summary', '', 'The whole report'), body)
+    if (box.open) fill()
+    return box
   }
 
   #given(role: ReviewRole, given: ReviewGiven): HTMLElement {

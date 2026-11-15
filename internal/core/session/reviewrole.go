@@ -48,7 +48,8 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 		return e, "token-in-reply"
 	}
 	text := strings.TrimSpace(out.text)
-	e.Message, e.Clipped = keptReply(text)
+	e.Message, e.Clipped = keptReply(text, maxReviewText)
+	e.Reply, e.ReplyClipped = keptReply(text, MaxFullReply)
 	if out.failed || res.Code != 0 {
 		why := "Claude Code reported an error"
 		if out.subtype != "" && out.subtype != "success" {
@@ -130,8 +131,8 @@ func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	return ""
 }
 
-func keptReply(text string) (string, bool) {
-	if len(text) <= maxReviewText {
+func keptReply(text string, limit int) (string, bool) {
+	if len(text) <= limit {
 		return text, false
 	}
 	lines := strings.Split(text, "\n")
@@ -148,8 +149,8 @@ func keptReply(text string) (string, bool) {
 		ending = append([]string{clip(l, 200)}, ending...)
 	}
 	if len(ending) == 0 {
-		return clip(text, maxReviewText), true
+		return clip(text, limit), true
 	}
 	tail := "\n" + clippedMiddle + "\n" + strings.Join(ending, "\n")
-	return strings.TrimSpace(clip(text, maxReviewText-len(tail))) + tail, true
+	return strings.TrimSpace(clip(text, limit-len(tail))) + tail, true
 }
