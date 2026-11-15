@@ -170,6 +170,7 @@ func (d *Dispatcher) wakeWorktree(ctx context.Context, r *run, id CommitIdentity
 type CloneReader interface {
 	ObjectsToSend(repo, commit string, remoteHas []string) ([]push.Object, error)
 	Commit(path, sha string) (push.Commit, error)
+	IsAncestor(repo, ancestor, commit string) (bool, error)
 }
 
 type boxBook struct {
@@ -558,6 +559,7 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 		d.cfg.Logger.Warn("boxes", "event", "sign-in-expectation-not-removed", "box", box)
 	}
 	d.forgetSynced(box)
+	d.forgetHome(box)
 	if !folders {
 		d.pendBox(box)
 		return true

@@ -126,12 +126,20 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	send(w, http.StatusOK, allowRulesOf(v))
 }
 
+type homeReportJSON struct {
+	Problem  string         `json:"problem,omitempty"`
+	Sessions []homeViewJSON `json:"sessions"`
+}
+
 type homeViewJSON struct {
+	SID      string   `json:"sid"`
+	Session  string   `json:"session"`
 	Checked  int64    `json:"checkedAt"`
 	Since    int64    `json:"sinceAt"`
 	Changed  []string `json:"changed"`
 	More     int      `json:"more"`
 	First    bool     `json:"first"`
+	Dropped  bool     `json:"dropped"`
 	Running  bool     `json:"running"`
 	Problem  string   `json:"problem,omitempty"`
 	Watching int      `json:"watching"`
@@ -176,18 +184,20 @@ type advisoriesJSON struct {
 }
 
 type agentReportJSON struct {
-	Settings   homeViewJSON    `json:"settings"`
+	Settings   homeReportJSON  `json:"settings"`
 	Pins       []pinJSON       `json:"pins"`
 	Plugins    []pluginPinJSON `json:"plugins"`
 	Advisories advisoriesJSON  `json:"advisories"`
 }
 
 func agentReportOf(v session.AgentReport) agentReportJSON {
-	h := v.Home
 	out := agentReportJSON{
-		Settings: homeViewJSON{Checked: millis(h.Checked), Since: millis(h.Since), Changed: nonNil(h.Changed), More: h.More, First: h.First, Running: h.Running, Problem: h.Problem, Watching: h.Watching},
+		Settings: homeReportJSON{Problem: v.Home.Problem, Sessions: []homeViewJSON{}},
 		Pins:     []pinJSON{}, Plugins: []pluginPinJSON{},
 		Advisories: advisoriesJSON{Checked: millis(v.Advisories.Checked), Off: v.Advisories.Off, Problem: v.Advisories.Problem, Found: []advisoryJSON{}, More: v.Advisories.More, Sent: nonNil(v.Advisories.Sent)},
+	}
+	for _, h := range v.Home.Sessions {
+		out.Settings.Sessions = append(out.Settings.Sessions, homeViewJSON{SID: h.SID, Session: h.Session, Checked: millis(h.Checked), Since: millis(h.Since), Changed: nonNil(h.Changed), More: h.More, First: h.First, Dropped: h.Dropped, Running: h.Running, Problem: h.Problem, Watching: h.Watching})
 	}
 	for _, p := range v.Pins {
 		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note})

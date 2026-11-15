@@ -159,25 +159,34 @@ func wholeLines(diff string) string {
 	return kept + diff[at:]
 }
 
-func log(r *repo, head, base string) ([]push.Commit, bool, error) {
+func reachable(r *repo, base string, limit int) (map[string]bool, error) {
 	have := map[string]bool{}
-	if base != "" {
-		seen := 0
-		queue := []string{base}
-		for len(queue) > 0 && seen < maxMergeWalk {
-			sha := queue[0]
-			queue = queue[1:]
-			if have[sha] {
-				continue
-			}
-			have[sha] = true
-			seen++
-			c, err := r.commit(sha)
-			if err != nil {
-				return nil, false, err
-			}
-			queue = append(queue, c.Parents...)
+	if base == "" {
+		return have, nil
+	}
+	have[base] = true
+	queue := []string{base}
+	for len(queue) > 0 {
+		sha := queue[0]
+		queue = queue[1:]
+		c, err := r.commit(sha)
+		if err != nil {
+			return nil, err
 		}
+		for _, p := range c.Parents {
+			if !have[p] && len(have) < limit {
+				have[p] = true
+				queue = append(queue, p)
+			}
+		}
+	}
+	return have, nil
+}
+
+func log(r *repo, head, base string) ([]push.Commit, bool, error) {
+	have, err := reachable(r, base, maxMergeWalk)
+	if err != nil {
+		return nil, false, err
 	}
 	var out []push.Commit
 	var queue byTime

@@ -2,11 +2,14 @@ import { api, signedIn } from '../api.ts'
 import { el, visible } from '../lib/dom.ts'
 
 interface SettingsReport {
+  sid: string
+  session: string
   checkedAt: number
   sinceAt: number
   changed: string[]
   more: number
   first: boolean
+  dropped: boolean
   running: boolean
   problem: string
   watching: number
@@ -39,7 +42,7 @@ interface Advisory {
 }
 
 interface Report {
-  settings: SettingsReport
+  settings: { problem: string; sessions: SettingsReport[] }
   pins: Pin[]
   plugins: PluginPin[]
   advisories: { checkedAt: number; off: boolean; problem: string; found: Advisory[]; more: number; sent: string[] }
@@ -70,7 +73,10 @@ function readReport(body: unknown): Report | null {
   const s = record(v.settings)
   const a = record(v.advisories)
   return {
-    settings: { checkedAt: Number(s.checkedAt) || 0, sinceAt: Number(s.sinceAt) || 0, changed: strings(s.changed), more: Number(s.more) || 0, first: s.first === true, running: s.running === true, problem: text(s.problem), watching: Number(s.watching) || 0 },
+    settings: {
+      problem: text(s.problem),
+      sessions: list(s.sessions, h => ({ sid: text(h.sid), session: text(h.session), checkedAt: Number(h.checkedAt) || 0, sinceAt: Number(h.sinceAt) || 0, changed: strings(h.changed), more: Number(h.more) || 0, first: h.first === true, dropped: h.dropped === true, running: h.running === true, problem: text(h.problem), watching: Number(h.watching) || 0 })),
+    },
     pins: list(v.pins, p => ({ name: text(p.name), package: text(p.package), version: text(p.version), state: text(p.state), repository: text(p.repository), workflow: text(p.workflow), ref: text(p.ref), commit: text(p.commit), note: text(p.note) })),
     plugins: list(v.plugins, p => ({ name: text(p.name), version: text(p.version), commit: text(p.commit) })),
     advisories: {
@@ -121,11 +127,21 @@ class SfAgentReport extends HTMLElement {
     if (this.isConnected) this.#timer = window.setTimeout(() => void this.#load(), POLL_MS)
   }
 
-  #settings(s: SettingsReport): HTMLElement[] {
+  #settings(r: Report['settings']): HTMLElement[] {
     const out: HTMLElement[] = [el('h3', 'small', "The agents' user settings")]
+    if (r.problem) out.push(el('p', 'small warn', visible(r.problem)))
+    else if (!r.sessions.length) out.push(el('p', 'small muted', 'No session is running. Each running session shows here with what changed in its own container since that session last started or woke.'))
+    for (const s of r.sessions) out.push(el('h4', 'small', `Session ${visible(s.session || s.sid)}`), ...this.#session(s))
+    out.push(el('p', 'small muted', "At each start agent-host lists and hashes the agents' user-level settings in that session's container (Claude Code's settings, agents, skills, commands, hooks and instructions, user MCP servers as claude mcp list prints them, Codex's config, git config, shell start-up files and auto-memory folders), and the engine compares the list with that container's list from its last start. This is an agent report from inside the session's container: it catches changes made by an honest session or a third party, not by a hostile agent, which can change agent-host's answer too. It never reads Claude Code's account file or a sign-in file, and it compares ~/.npmrc and ~/.ssh by size and time only."))
+    return out
+  }
+
+  #session(s: SettingsReport): HTMLElement[] {
+    const out: HTMLElement[] = []
     if (s.problem) out.push(el('p', 'small warn', visible(s.problem)))
-    if (!s.checkedAt) out.push(el('p', 'small muted', s.running ? 'Listing them now…' : 'Not listed yet: the engine lists them at each session start or wake.'))
-    else if (s.first) out.push(el('p', 'small muted', `Listed at the first start, ${when(s.checkedAt)}: ${s.watching} files and servers. The next start shows what changed.`))
+    if (!s.checkedAt) out.push(el('p', 'small muted', s.running ? 'Listing them now…' : "Not listed yet: the engine lists them at this session's next start or wake."))
+    else if (s.first && s.dropped) out.push(el('p', 'small warn', `Listed at ${when(s.checkedAt)}: ${s.watching} ${s.watching === 1 ? 'file or server' : 'files and servers'}. The list from this container's previous start was dropped because the engine's record of these lists was full, so what changed since then can't be shown. The next start shows what changed after this one.`))
+    else if (s.first) out.push(el('p', 'small muted', `Listed at this container's first start, ${when(s.checkedAt)}: ${s.watching} ${s.watching === 1 ? 'file or server' : 'files and servers'}. The next start shows what changed.`))
     else if (s.changed.length) {
       out.push(el('p', 'small warn', `Changed since the last start (${when(s.sinceAt)}), seen at ${when(s.checkedAt)}:`))
       const ul = el('ul', 'list small')
@@ -133,7 +149,6 @@ class SfAgentReport extends HTMLElement {
       if (s.more) ul.append(el('li', 'muted', `and ${s.more} more`))
       out.push(ul)
     } else out.push(el('p', 'small ok', `No change since the last start (${when(s.sinceAt)}), seen at ${when(s.checkedAt)}.`))
-    out.push(el('p', 'small muted', "At each start agent-host lists and hashes the agents' user-level settings (Claude Code's settings, agents, skills, commands, hooks and instructions, user MCP servers as claude mcp list prints them, Codex's config, git config, shell start-up files and auto-memory folders). This is an agent report from inside the agent container: it catches changes made by an honest session or a third party, not by a hostile agent, which can change agent-host's answer too. It never reads Claude Code's account file or a sign-in file, and it compares ~/.npmrc and ~/.ssh by size and time only."))
     return out
   }
 

@@ -137,22 +137,9 @@ func heldIn(r *repo, trees []string, ch push.Change) (bool, error) {
 }
 
 func newCommits(r *repo, head, base string) ([]push.Commit, error) {
-	have := map[string]bool{}
-	if base != "" {
-		queue := []string{base}
-		for len(queue) > 0 && len(have) < maxMergeWalk {
-			sha := queue[0]
-			queue = queue[1:]
-			if have[sha] {
-				continue
-			}
-			have[sha] = true
-			c, err := r.commit(sha)
-			if err != nil {
-				return nil, err
-			}
-			queue = append(queue, c.Parents...)
-		}
+	have, err := reachable(r, base, maxMergeWalk)
+	if err != nil {
+		return nil, err
 	}
 	var out []push.Commit
 	queued := map[string]bool{head: true}

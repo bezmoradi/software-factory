@@ -26,7 +26,7 @@ export class StartFromField {
   said = el('p', 'small muted')
   #loading = option('', 'Loading branches and pull requests…')
 
-  constructor(path: string, main: string, sessions: SessionInfo[], fork: string) {
+  constructor(path: string, main: string, sessions: SessionInfo[], fork: string, forkAt = '') {
     const id = `start-from-${++serial}`
     this.select.id = id
     this.select.name = 'from'
@@ -40,9 +40,16 @@ export class StartFromField {
       for (const s of own) group.append(option(`sid:${s.sid}`, `Session ${visible(label(s))}${s.lineage?.handedTo ? ' (handed over)' : ''}`))
       this.select.append(group)
     }
+    const at = own.find(s => s.sid === fork)
+    if (at && SHA.test(forkAt)) {
+      const group = el('optgroup')
+      group.label = 'A commit of a session'
+      group.append(option(`sid:${fork}:${forkAt}`, `Session ${visible(label(at))} at commit ${shortSha(forkAt)}`))
+      this.select.append(group)
+    }
     this.#loading.disabled = true
     this.select.append(this.#loading)
-    if (fork && own.some(s => s.sid === fork)) this.select.value = `sid:${fork}`
+    if (at) this.select.value = SHA.test(forkAt) ? `sid:${fork}:${forkAt}` : `sid:${fork}`
     this.box.append(name, this.select, this.said)
     this.#explain()
     this.select.addEventListener('change', () => this.#explain())
@@ -82,7 +89,8 @@ export class StartFromField {
 
   value(): StartFrom | undefined {
     const v = this.select.value
-    if (v.startsWith('sid:')) return { sid: v.slice(4) }
+    const sid = /^sid:([^:]+)(?::([0-9a-f]{40}))?$/.exec(v)
+    if (sid) return sid[2] ? { sid: sid[1], commit: sid[2] } : { sid: sid[1] }
     const at = /^(branch|pull):([0-9a-f]{40}):(.+)$/.exec(v)
     if (!at) return undefined
     const [, kind, commit, rest] = at

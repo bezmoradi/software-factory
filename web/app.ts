@@ -681,6 +681,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-compare']>('compare').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => ({ sid: x.sid, info: x.info, cost: x.cost, total: x.total })), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
+    byId<HTMLElementTagNameMap['sf-changes']>('changes').forkable = forkable(s)
     byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
     void loadChanges(s)
     void loadGate(s)
@@ -2026,7 +2027,11 @@ function paintBranchMenu(s: Session) {
     }
   }
   byId('menu-bring-main').hidden = !(owned && s.info.running && s.info.live && s.info.controlled)
-  byId('menu-fork').hidden = !(state.connected && s.info.verified && s.info.kind === 'background' && !!s.info.project)
+  byId('menu-fork').hidden = !forkable(s)
+}
+
+function forkable(s: Session): boolean {
+  return !!(state.connected && s.info.verified && s.info.kind === 'background' && s.info.project)
 }
 
 async function handOver(s: Session, agent: string) {
@@ -2066,6 +2071,13 @@ byId('menu-fork').addEventListener('click', () => {
   if (!s || !p) return
   go('projects')
   projects.fork(p.path, s.sid)
+})
+byId('changes').addEventListener('sf-fork-commit', e => {
+  const s = current()
+  const p = s && forkable(s) && projectFor(s)
+  if (!s || !p) return
+  go('projects')
+  projects.fork(p.path, s.sid, e.detail.sha)
 })
 byId('lineage').addEventListener('sf-handover', e => {
   const s = sessions.get(e.detail.sid)

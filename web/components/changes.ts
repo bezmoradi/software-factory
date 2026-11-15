@@ -1,4 +1,4 @@
-import { button, el, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
+import { button, el, emit, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import type { Changes } from '../types.ts'
 
@@ -82,6 +82,8 @@ function commentMessage(comments: LineComment[]): string {
 class SfChanges extends HTMLElement {
   #open = new Map<string, boolean>()
   #key = ''
+  #value: Changes | null = null
+  #forkable = false
   #branch = ''
   #rows: DiffRow[] = []
   #diff = ''
@@ -235,10 +237,17 @@ class SfChanges extends HTMLElement {
     this.#lines.replaceChildren(...nodes)
   }
 
+  set forkable(on: boolean) {
+    if (on === this.#forkable) return
+    this.#forkable = on
+    this.changes = this.#value
+  }
+
   set changes(value: Changes | null) {
-    const key = JSON.stringify(value)
+    const key = JSON.stringify([value, this.#forkable])
     if (key === this.#key) return
     this.#key = key
+    this.#value = value
     const focused = focusedKey(this)
     this.hidden = !value
     if (!value) {
@@ -262,6 +271,11 @@ class SfChanges extends HTMLElement {
     group('commits', `${value.commits.length}${more} ${plural(value.commits.length, 'commit')}`, value.commits.map(c => {
       const li = el('li', 'small')
       li.append(el('code', '', shortSha(c.sha)), ' ', visible(c.subject))
+      if (this.#forkable && /^[0-9a-f]{40}$/.test(c.sha)) {
+        const fork = button('Fork from here', 'ghost small', () => emit(this, 'sf-fork-commit', { sha: c.sha }), 'button', `fork:${c.sha}`)
+        fork.setAttribute('aria-label', `Fork from commit ${shortSha(c.sha)}: start a new session at it`)
+        li.append(' ', fork)
+      }
       return li
     }), true)
     group('files', `${value.files.length}${more} ${plural(value.files.length, 'file')} changed`, value.files.map(f => {
@@ -300,5 +314,6 @@ declare global {
   }
   interface HTMLElementEventMap {
     'sf-line-comments': CustomEvent<{ text: string; done: (ok: boolean) => void }>
+    'sf-fork-commit': CustomEvent<{ sha: string }>
   }
 }

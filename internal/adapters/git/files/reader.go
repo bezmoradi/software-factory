@@ -3,6 +3,7 @@ package files
 import (
 	"bytes"
 	"container/heap"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -50,7 +51,7 @@ func (Reader) IsAncestor(path, ancestor, commit string) (bool, error) {
 		if _, err := r.commit(ancestor); err != nil {
 			return false, err
 		}
-		seen := map[string]bool{}
+		queued := map[string]bool{commit: true}
 		queue := []string{commit}
 		for len(queue) > 0 {
 			sha := queue[0]
@@ -58,18 +59,23 @@ func (Reader) IsAncestor(path, ancestor, commit string) (bool, error) {
 			if sha == ancestor {
 				return true, nil
 			}
-			if seen[sha] {
-				continue
-			}
-			seen[sha] = true
-			if len(seen) > maxCommits {
-				return false, fmt.Errorf("%w: more than %d commits to walk", push.ErrTooLarge, maxCommits)
-			}
 			c, err := r.commit(sha)
+			if errors.Is(err, push.ErrNotFound) {
+				return false, fmt.Errorf("%w: commit %s, reached from %s, isn't in the repository: %w", push.ErrCorrupt, sha, commit, err)
+			}
 			if err != nil {
 				return false, err
 			}
-			queue = append(queue, c.Parents...)
+			for _, p := range c.Parents {
+				if queued[p] {
+					continue
+				}
+				if len(queued) >= maxCommits {
+					return false, fmt.Errorf("%w: more than %d commits to walk", push.ErrTooLarge, maxCommits)
+				}
+				queued[p] = true
+				queue = append(queue, p)
+			}
 		}
 		return false, nil
 	})

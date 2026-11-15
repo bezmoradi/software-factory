@@ -97,7 +97,7 @@ class DispatchForm {
   pair: PairField
   bench: BenchmarkField
 
-  constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '') {
+  constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '', forkAt = '') {
     const path = p.path
     this.form.autocomplete = 'off'
     this.working.className = 'off'
@@ -157,7 +157,7 @@ class DispatchForm {
     this.agent.addEventListener('change', sync)
     sync()
     this.caps.project = p.name
-    this.from = new StartFromField(path, p.branch ?? '', sessions, fork)
+    this.from = new StartFromField(path, p.branch ?? '', sessions, fork, forkAt)
     this.issue.path = path
     this.pair = new PairField(list, MODELS)
     this.bench = new BenchmarkField(path)
@@ -665,20 +665,20 @@ class SfProjects extends HTMLElement {
     return li
   }
 
-  fork(path: string, sid: string) {
+  fork(path: string, sid: string, commit = '') {
     this.#forms.delete(path)
     this.#expanded.set(path, true)
-    this.#open(path, sid)
+    this.#open(path, sid, commit)
     this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:toggle`)}"]`)?.scrollIntoView({ block: 'nearest' })
   }
 
-  #open(path: string, fork = '') {
+  #open(path: string, fork = '', forkAt = '') {
     const p = this.#view.projects.find(x => x.path === path)
     if (!p) return
     const form = new DispatchForm(p, this.#view.starters ?? [], () => {
       this.#forms.delete(path)
       this.#render()
-    }, this.#sessionsIn(path), fork)
+    }, this.#sessionsIn(path), fork, forkAt)
     form.busy(this.#busy)
     this.#forms.set(path, form)
     if (this.#message.path === path) this.#message = { path: '', text: '', bad: false }

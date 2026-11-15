@@ -140,7 +140,7 @@ func (l *Limits) Frame() Fields {
 	}
 	expiry := []any{}
 	for _, e := range l.expiriesLocked(now) {
-		expiry = append(expiry, Fields{"what": e.what, "side": e.side, "label": sideWords[e.side], "host": e.host, "from": ms(e.from), "until": ms(e.until)})
+		expiry = append(expiry, Fields{"what": e.what, "side": e.side, "label": signInEndingWords[e.side], "host": e.host, "from": ms(e.from), "until": ms(e.until)})
 	}
 	slices.SortFunc(expiry, func(a, b any) int {
 		return int(a.(Fields)["until"].(float64)/1000) - int(b.(Fields)["until"].(float64)/1000)

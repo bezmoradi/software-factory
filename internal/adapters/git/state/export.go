@@ -79,7 +79,7 @@ var stores = map[string]storeRow{
 	forgeCardsFile:      {class: classDropped, version: 1, label: "waiting issue and pull request cards"},
 	queuesFile:          {class: classDropped, version: 1, label: "queued messages"},
 	notesFile:           {class: classDropped, version: 1, label: "notes waiting for agents"},
-	homeSettingsFile:    {class: classDropped, version: 1, label: "the baseline of the agents' user settings"},
+	homeSettingsFile:    {class: classDropped, version: 2, label: "the baseline of the agents' user settings"},
 	capsFile:            {class: classKept, version: 1, label: "caps"},
 	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
 	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},

@@ -41,7 +41,7 @@ type AdvisoryView struct {
 }
 
 type AgentReport struct {
-	Home       HomeView
+	Home       HomeReport
 	Pins       []PinProvenance
 	Plugins    []PinnedPlugin
 	Advisories AdvisoryView

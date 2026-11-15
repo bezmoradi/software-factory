@@ -84,7 +84,12 @@ func startFromOf(v any, present bool) (session.StartFrom, bool) {
 	_, hasSid := m["sid"]
 	if hasSid {
 		sid, isText := m["sid"].(string)
-		return session.StartFrom{SID: sid}, len(m) == 1 && isText && sid != "" && len(sid) <= 80
+		ok := isText && sid != "" && len(sid) <= 80
+		if raw, has := m["commit"]; has {
+			commit, isCommit := raw.(string)
+			return session.StartFrom{SID: sid, Commit: commit}, ok && len(m) == 2 && isCommit && commitHex.MatchString(commit)
+		}
+		return session.StartFrom{SID: sid}, ok && len(m) == 1
 	}
 	commit, isCommit := m["commit"].(string)
 	if len(m) != 2 || !isCommit || !commitHex.MatchString(commit) {

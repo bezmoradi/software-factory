@@ -136,8 +136,10 @@ func checkStartFrom(q Dispatch) error {
 		return explained(invalid("from"), "That isn't a session of this engine.")
 	case (q.From.Branch != "" || q.From.Pull != 0) && !sha1Hex.MatchString(q.From.Commit):
 		return explained(invalid("from"), "Choose the branch or pull request again: the start needs the commit the page showed.")
-	case q.From.Commit != "" && q.From.Branch == "" && q.From.Pull == 0:
-		return explained(invalid("from"), "A commit goes only with a branch or a pull request.")
+	case q.From.SID != "" && q.From.Commit != "" && !sha1Hex.MatchString(q.From.Commit):
+		return explained(invalid("from"), "That isn't a commit: choose one of the session's commits again.")
+	case q.From.Commit != "" && q.From.Branch == "" && q.From.Pull == 0 && q.From.SID == "":
+		return explained(invalid("from"), "A commit goes only with a branch, a pull request or a session.")
 	case q.Continues != nil && (!sessionBranch.MatchString(q.Continues.Branch) || !sha1Hex.MatchString(q.Continues.Head) || len(q.Continues.Earlier) > MaxStints):
 		return explained(invalid("continues"), "That branch can't be continued here.")
 	}
@@ -162,7 +164,7 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 	case q.Continues != nil:
 		return startPoint{commit: q.Continues.Head, origin: OriginHandover, earlier: slices.Clone(q.Continues.Earlier)}, nil
 	case q.From.SID != "":
-		return d.forkPoint(repo, q.From.SID)
+		return d.forkPoint(repo, q.From.SID, q.From.Commit)
 	case q.From.Branch != "":
 		src, ok := d.sources()
 		if !ok {
@@ -179,7 +181,7 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 	return startPoint{commit: main, origin: OriginMain}, nil
 }
 
-func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) {
+func (d *Dispatcher) forkPoint(repo Repository, sid, commit string) (startPoint, error) {
 	d.mu.Lock()
 	r := d.runs[sid]
 	var branch, name, path, clone string
@@ -205,10 +207,33 @@ func (d *Dispatcher) forkPoint(repo Repository, sid string) (startPoint, error) 
 		return startPoint{}, explained(conflict("from"), "This engine can't read the session's branch.")
 	}
 	head, err := heads.Head(clone, branch)
+	if errors.Is(err, push.ErrTooLarge) {
+		return startPoint{}, explained(conflict("from"), "The engine couldn't read the branch of session "+clip(name, maxName)+": it ends in a commit larger than the engine reads or with more parents than it reads, or its clone is over another of the engine's size limits, so no session started.")
+	}
 	if err != nil || !sha1Hex.MatchString(head) {
 		return startPoint{}, explained(conflict("from"), "The engine couldn't read the branch of that session.")
 	}
-	return startPoint{commit: head, origin: "a commit of session " + clip(name, maxName)}, nil
+	origin := "a commit of session " + clip(name, maxName)
+	if commit == "" || commit == head {
+		return startPoint{commit: head, origin: origin}, nil
+	}
+	if d.cfg.CloneReader == nil {
+		return startPoint{}, explained(conflict("from"), "This engine can't read the session's commits.")
+	}
+	in, err := d.cfg.CloneReader.IsAncestor(clone, commit, head)
+	if errors.Is(err, push.ErrTooLarge) {
+		return startPoint{}, explained(conflict("from"), "The branch of session "+clip(name, maxName)+" has more history than the engine walks, or a commit with more parents than it reads, so the engine couldn't check that commit "+shortSHA(commit)+" is on it, and no session started.")
+	}
+	if errors.Is(err, push.ErrNotFound) && !errors.Is(err, push.ErrCorrupt) {
+		in, err = false, nil
+	}
+	if err != nil {
+		return startPoint{}, explained(conflict("from"), "The engine couldn't read the history of session "+clip(name, maxName)+" to check that commit "+shortSHA(commit)+" is on its branch, so no session started.")
+	}
+	if !in {
+		return startPoint{}, explained(conflict("from"), "Commit "+shortSHA(commit)+" isn't on the branch of session "+clip(name, maxName)+", so no session started. Choose one of the commits that session's Changes list shows.")
+	}
+	return startPoint{commit: commit, origin: origin}, nil
 }
 
 func (d *Dispatcher) pullPoint(ctx context.Context, repo Repository, number int, shown string) (startPoint, error) {
