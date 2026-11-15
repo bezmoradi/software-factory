@@ -43,6 +43,9 @@ type PushTarget struct {
 	Name    string
 	Branch  string
 	Project string
+
+	SyncFailed string
+	SyncWhy    string
 }
 
 type PushRepos interface {
@@ -967,6 +970,9 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		}
 		if fetched != main {
 			return refuse("the remote's main branch moved while the engine checked it; push again")
+		}
+		if now, ok := p.cfg.Targets(sid); ok && now.SyncFailed != "" && now.SyncFailed == fetched {
+			return refuse(CloneBehind(fetched, now.SyncWhy) + "; the engine checks a push against the main it fetched, so it pushed nothing; push again")
 		}
 	}
 	facts, refusal, err := p.facts(sid, t, head, main, remote.Main, by)

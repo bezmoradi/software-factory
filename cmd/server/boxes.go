@@ -47,7 +47,19 @@ type boxRoutes struct {
 var _ session.BoxRoutes = (*boxRoutes)(nil)
 
 func newBoxRoutes(reg *session.Registry, allow *session.Allowlist, control *docker.Control, pool []netip.Prefix, ping func(context.Context) error, logger shared.Logger) *boxRoutes {
-	return &boxRoutes{hosts: map[string]boxEntry{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
+	b := &boxRoutes{hosts: map[string]boxEntry{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
+	if allow != nil {
+		allow.OnRestart(func() { go b.resend() })
+	}
+	return b
+}
+
+func (b *boxRoutes) resend() {
+	if err := b.sendSubnets(context.Background()); err != nil {
+		b.logger.Warn("boxes", "event", "egress-not-set", "why", "egress-restarted")
+		return
+	}
+	b.logger.Info("boxes", "event", "egress-boxes-resent")
 }
 
 func (b *boxRoutes) helperDown() bool {

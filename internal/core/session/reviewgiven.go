@@ -161,6 +161,7 @@ func (b *bridge) lastMessage() string {
 }
 
 func (d *Dispatcher) reviewGiven(rt *ReviewTarget, sid string, t PushTarget) {
+	rt.CloneSync = d.cloneSync(sid)
 	if w := d.cfg.Work; w != nil {
 		rt.Approved = func(head, main string) ApprovedText { return w.ApprovedFor(sid, t, head, main) }
 		rt.TeamRules = func(base, head string) TeamRules { return w.TeamRulesFor(sid, t, base, head) }

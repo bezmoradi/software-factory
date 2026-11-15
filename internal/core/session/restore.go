@@ -40,6 +40,7 @@ type SavedRun struct {
 	GroupKind   string
 	HistoryOnly bool
 	RmDone      bool
+	Aside       string
 }
 
 type RunStore interface {
@@ -96,6 +97,7 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].Group, out[len(out)-1].GroupKind = r.group, r.groupKind
 		out[len(out)-1].HistoryOnly = r.history
 		out[len(out)-1].RmDone = r.rmDone
+		out[len(out)-1].Aside = r.aside
 		out[len(out)-1].Box = r.box
 	}
 	d.mu.Unlock()
@@ -140,6 +142,7 @@ func (d *Dispatcher) Restore() int {
 		r.group, r.groupKind = s.Group, s.GroupKind
 		r.history = s.HistoryOnly
 		r.rmDone = s.RmDone
+		r.aside = s.Aside
 		if ValidBox(s.Box) && !r.history {
 			r.box, r.clone = s.Box, BoxClone(d.cfg.Workspace, s.Box, s.Repo)
 		}

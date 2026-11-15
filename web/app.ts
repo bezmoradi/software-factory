@@ -364,6 +364,11 @@ function onEvent(ev: StreamEvent) {
     toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with new versions.`, description: visible(ev.text), tone: 'info', timeout: 0 })
     return
   }
+  if (ev.type === 'worktree-aside') {
+    const known = sessions.get(ev.sid)
+    toast({ id: `aside:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'}'s worktree was moved aside.`, description: visible(ev.text), tone: 'warn', timeout: 0 })
+    return
+  }
   if (ev.type === 'dropped') {
     const known = sessions.get(ev.sid)
     const what = ev.count && ev.count > 1 ? `The ${ev.count} messages` : 'The message'

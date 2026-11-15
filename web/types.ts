@@ -622,6 +622,12 @@ export interface VersionsEvent {
   text: string
 }
 
+export interface AsideEvent {
+  type: 'worktree-aside'
+  sid: string
+  text: string
+}
+
 export interface SupervisorEvent {
   type: 'supervisor'
   state: string
@@ -1026,7 +1032,7 @@ export interface ReviewerEvent extends SignIn {
   type: 'reviewer'
 }
 
-export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | VersionsEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
+export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | VersionsEvent | AsideEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
 
 export interface SessionGrant {
   token: string

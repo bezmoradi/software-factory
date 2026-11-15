@@ -184,8 +184,14 @@ func (c *Client) SetIdentity(ctx context.Context, repo, name string, id session.
 	return c.call(ctx, http.MethodPost, identityRoute, worktreeJSON{Repo: repo, Name: name, Identity: q}, nil)
 }
 
-func (c *Client) RemoveWorktree(ctx context.Context, repo, name string, force bool) error {
-	return c.call(ctx, http.MethodPost, "/v1/worktrees/remove", worktreeJSON{Repo: repo, Name: name, Force: force}, nil)
+func (c *Client) RemoveWorktree(ctx context.Context, repo, name string, force bool) (string, error) {
+	var out struct {
+		SetAside string `json:"setAside"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/worktrees/remove", worktreeJSON{Repo: repo, Name: name, Force: force}, &out); err != nil {
+		return "", err
+	}
+	return out.SetAside, nil
 }
 
 func (c *Client) Run(ctx context.Context, cmd session.Command) (session.RunResult, error) {

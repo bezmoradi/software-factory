@@ -20,9 +20,12 @@ const (
 	OldLayoutReason = "This session ran in the old shared container; start a new session."
 )
 
+const AsideFrame = "worktree-aside"
+
 var (
-	maxBoxesSet = regexp.MustCompile(`SF_MAX_BOXES=([0-9]{1,4})`)
-	clonePath   = regexp.MustCompile(`^/.+?/` + BoxesFolder + `/[0-9a-f]{16}/repos/([A-Za-z0-9][A-Za-z0-9._-]{0,99})$`)
+	asidePattern = regexp.MustCompile(`^worktrees/\.broken-sf-[0-9a-f]{8}-[0-9a-f]{16}$`)
+	maxBoxesSet  = regexp.MustCompile(`SF_MAX_BOXES=([0-9]{1,4})`)
+	clonePath    = regexp.MustCompile(`^/.+?/` + BoxesFolder + `/[0-9a-f]{16}/repos/([A-Za-z0-9][A-Za-z0-9._-]{0,99})$`)
 )
 
 func CloneProject(p string) (string, bool) {
@@ -97,27 +100,57 @@ func (d *Dispatcher) worktreeLinked(r *run) (bool, error) {
 	return l.Linked(clone, cwd)
 }
 
-func (d *Dispatcher) readdWorktree(ctx context.Context, r *run, id CommitIdentity) error {
+func (d *Dispatcher) readdWorktree(ctx context.Context, r *run, id CommitIdentity, during string) (string, error) {
 	host := d.host(r)
-	if err := host.RemoveWorktree(ctx, r.repo, r.name, false); err != nil {
+	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, false)
+	if err != nil {
 		if h, ok := errors.AsType[*HostError](err); ok && h.Code == HostDirty {
-			return explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it as it is.")
+			return "", explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it as it is.")
 		}
 		d.cfg.Logger.Warn("worktree", "event", "not-cleared", "worktree", r.name)
 	}
+	aside = d.tellAside(r, aside, during)
 	cwd, err := host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
 	if err != nil {
-		return explained(conflict("worktree"), "agent-host couldn't add the session's worktree again: "+hostMessage(err))
+		return aside, explained(conflict("worktree"), "agent-host couldn't add the session's worktree again: "+hostMessage(err))
 	}
 	if err := d.checkWorktree(r, cwd); err != nil {
-		return err
+		return aside, err
 	}
 	d.mu.Lock()
 	r.cwd = cwd
 	d.mu.Unlock()
 	d.saveRuns()
 	d.cfg.Logger.Info("worktree", "event", "added-again", "worktree", r.name)
-	return nil
+	return aside, nil
+}
+
+func asideFolder(name, got string) string {
+	if got == "" {
+		return ""
+	}
+	if asidePattern.MatchString(got) && got[len("worktrees/.broken-"):len(got)-17] == name {
+		return got
+	}
+	return "a folder whose name agent-host gave wrongly"
+}
+
+func AsideNotice(name, folder, during string) string {
+	return "agent-host found the worktree " + name + " broken " + during + " and moved it, with its files, to " + folder + " in the session's folder, so files that weren't committed are there."
+}
+
+func (d *Dispatcher) tellAside(r *run, got, during string) string {
+	folder := asideFolder(r.name, got)
+	if folder == "" {
+		return ""
+	}
+	d.cfg.Logger.Info("worktree", "event", "set-aside", "worktree", r.name)
+	d.mu.Lock()
+	r.aside = folder
+	d.mu.Unlock()
+	d.saveRuns()
+	d.reg.Notify(Fields{"type": AsideFrame, "sid": r.sid, "text": AsideNotice(r.name, folder, during)})
+	return folder
 }
 
 func (d *Dispatcher) wakeWorktree(ctx context.Context, r *run, id CommitIdentity) error {
@@ -128,7 +161,7 @@ func (d *Dispatcher) wakeWorktree(ctx context.Context, r *run, id CommitIdentity
 	if linked {
 		return nil
 	}
-	if err := d.readdWorktree(ctx, r, id); err != nil {
+	if _, err := d.readdWorktree(ctx, r, id, "while the session woke"); err != nil {
 		return explained(conflict("worktree"), "The session's worktree is missing or broken, and agent-host couldn't add it again on its branch, so the session didn't wake: "+clip(errText(err), 600)+" If the engine holds a copy of the branch, press Restore branch.")
 	}
 	return nil
@@ -149,6 +182,11 @@ type boxBook struct {
 	sweepMu   sync.Mutex
 	swept     bool
 	synced    map[string]string
+	unsynced  map[string]syncFailure
+}
+
+type syncFailure struct {
+	commit, why string
 }
 
 func (d *Dispatcher) markUnstopped(box string, on bool) {
@@ -237,10 +275,12 @@ func (h downHost) AddExistingWorktree(context.Context, string, string, string, C
 	return "", h.err
 }
 func (h downHost) SetIdentity(context.Context, string, string, CommitIdentity) error { return h.err }
-func (h downHost) RemoveWorktree(context.Context, string, string, bool) error        { return h.err }
-func (h downHost) Run(context.Context, Command) (RunResult, error)                   { return RunResult{}, h.err }
-func (h downHost) Start(context.Context, Command) (Process, error)                   { return nil, h.err }
-func (h downHost) Stop(context.Context, string) error                                { return h.err }
+func (h downHost) RemoveWorktree(context.Context, string, string, bool) (string, error) {
+	return "", h.err
+}
+func (h downHost) Run(context.Context, Command) (RunResult, error) { return RunResult{}, h.err }
+func (h downHost) Start(context.Context, Command) (Process, error) { return nil, h.err }
+func (h downHost) Stop(context.Context, string) error              { return h.err }
 
 func (d *Dispatcher) boxed() bool {
 	return d.cfg.Boxes != nil && d.cfg.Routes != nil && d.cfg.Workspace != ""
@@ -980,6 +1020,12 @@ func (d *Dispatcher) syncTo(r *run, branch, commit string) error {
 	defer cancel()
 	if err := syncer.SyncClone(ctx, box, repo, branch, commit); err != nil {
 		d.cfg.Logger.Warn("session clone", "event", "main-not-brought", "box", box, "why", clip(err.Error(), 200))
+		d.boxes.stopMu.Lock()
+		if d.boxes.unsynced == nil {
+			d.boxes.unsynced = map[string]syncFailure{}
+		}
+		d.boxes.unsynced[box] = syncFailure{commit: commit, why: CleanLine(err.Error(), 300)}
+		d.boxes.stopMu.Unlock()
 		return err
 	}
 	d.boxes.stopMu.Lock()
@@ -987,8 +1033,30 @@ func (d *Dispatcher) syncTo(r *run, branch, commit string) error {
 		d.boxes.synced = map[string]string{}
 	}
 	d.boxes.synced[box] = commit
+	delete(d.boxes.unsynced, box)
 	d.boxes.stopMu.Unlock()
 	return nil
+}
+
+func (d *Dispatcher) unsyncedAt(box string) (string, string) {
+	d.boxes.stopMu.Lock()
+	defer d.boxes.stopMu.Unlock()
+	f := d.boxes.unsynced[box]
+	return f.commit, f.why
+}
+
+func CloneBehind(main, why string) string {
+	return "the engine fetched the remote's main branch at " + shortSHA(main) + ", but couldn't bring it into the session's clone: " + why
+}
+
+func (d *Dispatcher) cloneSync(sid string) func(main string) string {
+	return func(main string) string {
+		t, ok := d.PushTarget(sid)
+		if !ok || t.SyncFailed == "" || t.SyncFailed != main {
+			return ""
+		}
+		return CloneBehind(main, t.SyncWhy)
+	}
 }
 
 func (d *Dispatcher) syncedAt(box, commit string) bool {
@@ -1004,6 +1072,7 @@ func (d *Dispatcher) syncedAt(box, commit string) bool {
 func (d *Dispatcher) forgetSynced(box string) {
 	d.boxes.stopMu.Lock()
 	delete(d.boxes.synced, box)
+	delete(d.boxes.unsynced, box)
 	d.boxes.stopMu.Unlock()
 }
 

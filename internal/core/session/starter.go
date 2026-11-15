@@ -160,6 +160,7 @@ type run struct {
 	history   bool
 	asked     string
 	waitAt    time.Time
+	aside     string
 }
 
 type Dispatcher struct {
@@ -972,6 +973,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	d.mu.Lock()
 	running := r.running
 	held := d.heldOffer(r, given)
+	asideOK := held && given.Flag == "worktree" && r.aside != "" && given.Value == r.aside
 	d.mu.Unlock()
 	if running {
 		return nil, explained(conflict("running"), "Stop the session before deleting it.")
@@ -1048,7 +1050,9 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 		held = false
 	}
 	force := held && given.Flag == "worktree"
-	if err := host.RemoveWorktree(ctx, r.repo, r.name, force); err != nil && !boxGone {
+	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, force)
+	d.tellAside(r, aside, "while the session was being deleted")
+	if err != nil && !boxGone {
 		var h *HostError
 		if errors.As(err, &h) && h.Code == HostDirty {
 			o := &Offer{Flag: "worktree", Value: r.name}
@@ -1056,6 +1060,14 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 			return o, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed. Choose to delete it anyway to discard them; the branch "+r.branch+" goes with the session's container, apart from what was pushed.")
 		}
 		d.cfg.Logger.Warn("delete", "event", "worktree-not-removed", "worktree", r.name)
+	}
+	d.mu.Lock()
+	folder := r.aside
+	d.mu.Unlock()
+	if folder != "" && !asideOK {
+		o := &Offer{Flag: "worktree", Value: folder}
+		d.setOffer(r, o)
+		return o, explained(conflict("set aside"), "agent-host found the worktree "+r.name+" broken and moved it, with its files, to "+folder+" in the session's folder, so files that weren't committed are there. Deleting the session removes that folder too. Choose to delete it anyway, or wake the session first to look at them.")
 	}
 	if !d.dropBox(r.box, true) {
 		return nil, explained(conflict("box"), "The engine removed the worktree, but the box helper couldn't remove the session's container and home. Try Delete again.")
@@ -1201,7 +1213,8 @@ func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) {
 	if r == nil || r.handedTo != "" || r.handing || r.box == "" || r.clone == "" {
 		return PushTarget{}, false
 	}
-	return PushTarget{SID: sid, Repo: r.clone, Name: r.repo, Branch: r.branch, Project: r.repoPath}, true
+	failed, why := d.unsyncedAt(r.box)
+	return PushTarget{SID: sid, Repo: r.clone, Name: r.repo, Branch: r.branch, Project: r.repoPath, SyncFailed: failed, SyncWhy: why}, true
 }
 
 type quiet struct{}

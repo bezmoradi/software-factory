@@ -22,6 +22,7 @@ const (
 	maxDisplay   = 80
 	maxPath      = 1000
 	maxRelPath   = 4096
+	maxAside     = 200
 )
 
 var (
@@ -77,6 +78,7 @@ type runJSON struct {
 	GroupKind   string `json:"groupKind,omitempty"`
 	HistoryOnly bool   `json:"historyOnly,omitempty"`
 	RmDone      bool   `json:"rmDone,omitempty"`
+	Aside       string `json:"aside,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -134,6 +136,9 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 		v.InTurnSince = r.InTurnSince
 		v.HistoryOnly = r.HistoryOnly
 		v.RmDone = r.RmDone
+		if cleanText(r.Aside, maxAside) {
+			v.Aside = r.Aside
+		}
 		if session.ValidBox(r.Box) {
 			v.Box = r.Box
 		}
@@ -157,6 +162,9 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
 		f.Sessions[len(f.Sessions)-1].RmDone = r.RmDone
+		if cleanText(r.Aside, maxAside) {
+			f.Sessions[len(f.Sessions)-1].Aside = r.Aside
+		}
 		if session.ValidBox(r.Box) {
 			f.Sessions[len(f.Sessions)-1].Box = r.Box
 		}

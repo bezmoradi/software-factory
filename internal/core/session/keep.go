@@ -705,7 +705,8 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 		return k.readded(ctx, sid, r, last, id, stopped)
 	}
 	host := d.host(r)
-	if err := host.RemoveWorktree(ctx, r.repo, r.name, false); err != nil {
+	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, false)
+	if err != nil {
 		if h, ok := errors.AsType[*HostError](err); ok && h.Code == HostDirty {
 			return KeepView{}, stopped, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it and the branch as they are. Wake the session and ask the agent to commit or discard them, then restore again.")
 		}
@@ -714,24 +715,29 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 		}
 		k.cfg.Logger.Warn("restore branch", "event", "broken-worktree-not-cleared", "worktree", r.name)
 	}
+	aside = d.tellAside(r, aside, "while the branch was restored")
+	removed := "removed the session's worktree"
+	if aside != "" {
+		removed = "moved the session's worktree aside to " + aside
+	}
 	werr := k.cfg.Store.WriteBranch(r.box, r.repo, r.branch, last)
 	if werr != nil {
-		k.restoreAudit(r, last, "failed", "the engine couldn't write the branch "+r.branch+" into the clone after agent-host removed the worktree: "+werr.Error())
-		return KeepView{}, stopped, explained(conflict("branch"), "agent-host removed the worktree, but the engine couldn't write the branch "+r.branch+": "+keepSentence(werr.Error())+" Press Restore branch again.")
+		k.restoreAudit(r, last, "failed", "the engine couldn't write the branch "+r.branch+" into the clone after agent-host "+removed+": "+werr.Error())
+		return KeepView{}, stopped, explained(conflict("branch"), "agent-host "+removed+", but the engine couldn't write the branch "+r.branch+": "+keepSentence(werr.Error())+" Press Restore branch again.")
 	}
 	cwd, err := host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
 	if err == nil {
 		err = d.checkWorktree(r, cwd)
 	}
 	if err != nil {
-		k.restoreAudit(r, last, "failed", "the branch "+r.branch+" is back at "+shortSHA(last)+", but agent-host couldn't add its worktree again")
+		k.restoreAudit(r, last, "failed", "the branch "+r.branch+" is back at "+shortSHA(last)+" after agent-host "+removed+", but agent-host couldn't add its worktree again")
 		return KeepView{}, stopped, explained(conflict("worktree"), "The branch "+r.branch+" is back at "+shortSHA(last)+", but agent-host couldn't add its worktree again: "+keepSentence(hostMessage(err))+" Press Restore branch again.")
 	}
 	d.mu.Lock()
 	r.cwd = cwd
 	d.mu.Unlock()
 	d.saveRuns()
-	reason := "the person restored the branch " + r.branch + " from the engine's copy at " + shortSHA(last) + "; agent-host removed the session's worktree and added it again at that commit"
+	reason := "the person restored the branch " + r.branch + " from the engine's copy at " + shortSHA(last) + "; agent-host " + removed + " and added it again at that commit"
 	if stopped {
 		reason += ", after the engine stopped the idle session"
 	}
@@ -748,15 +754,20 @@ func (k *Keep) Restore(ctx context.Context, sid string) (KeepView, bool, error) 
 
 func (k *Keep) readded(ctx context.Context, sid string, r *run, last string, id CommitIdentity, stopped bool) (KeepView, bool, error) {
 	d := k.d
-	if err := d.readdWorktree(ctx, r, id); err != nil {
-		k.restoreAudit(r, last, "failed", "the branch "+r.branch+" already held "+shortSHA(last)+", but the session's worktree, missing or broken, couldn't be added again")
+	aside, err := d.readdWorktree(ctx, r, id, "while the branch was restored")
+	moved := ""
+	if aside != "" {
+		moved = "; agent-host moved the broken worktree aside to " + aside
+	}
+	if err != nil {
+		k.restoreAudit(r, last, "failed", "the branch "+r.branch+" already held "+shortSHA(last)+", but the session's worktree, missing or broken, couldn't be added again"+moved)
 		var e *Error
 		if errors.As(err, &e) && e.Reason == "dirty" {
 			return KeepView{}, stopped, err
 		}
 		return KeepView{}, stopped, explained(conflict("worktree"), keepSentence(errText(err))+" Press Restore branch again.")
 	}
-	reason := "the branch " + r.branch + " already held the engine's last copied commit " + shortSHA(last) + "; the session's worktree was missing or broken, and agent-host added it again at that branch"
+	reason := "the branch " + r.branch + " already held the engine's last copied commit " + shortSHA(last) + "; the session's worktree was missing or broken, and agent-host added it again at that branch" + moved
 	if stopped {
 		reason += ", after the engine stopped the idle session"
 	}

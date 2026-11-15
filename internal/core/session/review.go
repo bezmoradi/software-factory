@@ -164,6 +164,7 @@ type ReviewTarget struct {
 	Claims   string
 
 	TeamRules func(base, head string) TeamRules
+	CloneSync func(main string) string
 }
 
 type ReviewStarter interface {

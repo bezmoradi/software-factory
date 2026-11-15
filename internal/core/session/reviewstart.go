@@ -60,6 +60,12 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		}
 		return explained(conflict("fetch"), "The engine couldn't fetch the remote's main branch, so it can't tell what to review.")
 	}
+	if t.CloneSync != nil {
+		if why := t.CloneSync(main); why != "" {
+			release()
+			return explained(conflict("clone"), clip(keepSentence(strings.ToUpper(why[:1])+why[1:])+" No review started, since the reviewers would read the branch against an older main. Try again in a moment.", maxOutput))
+		}
+	}
 	base, err := r.cfg.History.MergeBase(t.Repo, head, main)
 	if err != nil {
 		release()

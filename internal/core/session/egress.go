@@ -150,6 +150,28 @@ type Allowlist struct {
 	pending  bool
 	keys     GatewayKeys
 	gwMu     sync.Mutex
+	sawStart bool
+	onStart  []func()
+}
+
+func (a *Allowlist) OnRestart(f func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.onStart = append(a.onStart, f)
+}
+
+func (a *Allowlist) restarted() {
+	a.mu.Lock()
+	saw := a.sawStart
+	a.sawStart = false
+	fs := a.onStart
+	a.mu.Unlock()
+	if !saw {
+		return
+	}
+	for _, f := range fs {
+		f()
+	}
 }
 
 var (
@@ -313,8 +335,9 @@ func (a *Allowlist) Verify(ctx context.Context, side string, read func(context.C
 	if err != nil {
 		return EgressList{}, EgressState{}, err
 	}
+	a.sawStart = a.sawStart || got.Starting
 	want := a.wantLocked(side)
-	if SameList(want, got.Lists.Side(side)) || !got.Starting && !a.pending {
+	if !got.Starting && (SameList(want, got.Lists.Side(side)) || !a.pending) {
 		return want, got, nil
 	}
 	if a.syncLocked(ctx) != nil {
@@ -353,6 +376,7 @@ func (a *Allowlist) Watch(ctx context.Context, every time.Duration) {
 	if f := a.changed(); a.tend(ctx) && f != nil {
 		f()
 	}
+	a.restarted()
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -363,6 +387,7 @@ func (a *Allowlist) Watch(ctx context.Context, every time.Duration) {
 			if f := a.changed(); a.tend(ctx) && f != nil {
 				f()
 			}
+			a.restarted()
 		}
 	}
 }
@@ -377,11 +402,12 @@ func (a *Allowlist) tend(ctx context.Context) bool {
 	sctx, cancel := context.WithTimeout(ctx, egressSetFor)
 	got, err := a.cfg.Control.Status(sctx)
 	cancel()
+	a.sawStart = a.sawStart || err == nil && got.Starting
 	if err != nil || !got.Starting && !a.pending {
 		return false
 	}
 	l := a.lists()
-	if SameList(l.Agents, got.Lists.Agents) && SameList(l.Reviewers, got.Lists.Reviewers) {
+	if !got.Starting && SameList(l.Agents, got.Lists.Agents) && SameList(l.Reviewers, got.Lists.Reviewers) {
 		a.pending = false
 		return false
 	}
