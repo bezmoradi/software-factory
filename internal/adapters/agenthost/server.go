@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -44,16 +45,19 @@ type Config struct {
 	Git          string
 	MaxProcesses int
 	Review       bool
-	KeyFile      string
 	Environ      []string
 	Logger       shared.Logger
 }
 
 const ReviewRunTimeout = 25 * time.Minute
 
-const KeyHeader = "X-SF-Host-Key"
+const (
+	KeyHeader = "X-SF-Host-Key"
+	KeyRoute  = "/v1/key"
+	keyDigits = 64
+)
 
-var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true,
+var reviewRoutes = map[string]bool{"/healthz": true, KeyRoute: true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true,
 	reviewRunRoute: true,
 }
 
@@ -71,6 +75,7 @@ type Server struct {
 	boot     string
 	rulesMu  sync.Mutex
 	commands int
+	key      []byte
 }
 
 type commandJSON struct {
@@ -278,6 +283,7 @@ var routes = map[string]string{
 	"/v1/processes":        "",
 	"/v1/processes/stop":   http.MethodPost,
 	"/v1/run":              http.MethodPost,
+	KeyRoute:               http.MethodPost,
 	"/v1/sign-in":          http.MethodPost,
 	"/v1/login":            http.MethodPost,
 	"/v1/api-key":          http.MethodPost,
@@ -296,13 +302,49 @@ var routes = map[string]string{
 }
 
 func (s *Server) keyed(r *http.Request) bool {
-	data, err := os.ReadFile(s.cfg.KeyFile)
-	key := strings.TrimSpace(string(data))
-	if err != nil || len(key) < 32 {
+	values := r.Header.Values(KeyHeader)
+	s.mu.Lock()
+	want := s.key
+	s.mu.Unlock()
+	if want == nil || len(values) != 1 {
 		return false
 	}
+	sum := sha256.Sum256([]byte(values[0]))
+	return subtle.ConstantTimeCompare(sum[:], want) == 1
+}
+
+func (s *Server) takeKey(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Review {
+		refuse(w, fail(http.StatusNotFound, "route", ""))
+		return
+	}
 	values := r.Header.Values(KeyHeader)
-	return len(values) == 1 && subtle.ConstantTimeCompare([]byte(values[0]), []byte(key)) == 1
+	if len(values) != 1 || len(values[0]) != keyDigits || !hexDigits(values[0]) {
+		refuse(w, fail(http.StatusBadRequest, "key", "The key is 64 hexadecimal digits in one header."))
+		return
+	}
+	if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
+		refuse(w, fail(http.StatusBadRequest, "body", "This route takes no body."))
+		return
+	}
+	sum := sha256.Sum256([]byte(values[0]))
+	s.mu.Lock()
+	taken := s.key != nil
+	if !taken {
+		s.key = sum[:]
+	}
+	s.mu.Unlock()
+	if taken {
+		s.log.Warn("agent-host request refused", "why", "key-taken")
+		refuse(w, fail(http.StatusConflict, "key-taken", "This agent-host already has its key."))
+		return
+	}
+	send(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func hexDigits(v string) bool {
+	_, err := hex.DecodeString(v)
+	return err == nil && strings.ToLower(v) == v
 }
 
 func (s *Server) Handler() http.Handler {
@@ -319,7 +361,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if ok && s.cfg.Review && !reviewRoutes[r.URL.Path] {
 		ok = false
 	}
-	if ok && s.cfg.KeyFile != "" && r.URL.Path != "/healthz" && !s.keyed(r) {
+	if ok && s.cfg.Review && r.URL.Path != "/healthz" && r.URL.Path != KeyRoute && !s.keyed(r) {
 		s.log.Warn("agent-host request refused", "why", "key")
 		refuse(w, fail(http.StatusUnauthorized, "key", ""))
 		return
@@ -350,6 +392,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/healthz":
 		send(w, http.StatusOK, map[string]string{"status": "ok"})
+	case KeyRoute:
+		s.takeKey(w, r)
 	case "/v1/processes/stop":
 		var q stopJSON
 		if p := decode(w, r, &q); p != nil {
@@ -420,7 +464,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			refuse(w, p)
 			return
 		}
-		if p := s.apiKeyStep(q); p != nil {
+		if p := s.apiKeyStep(r.Context(), q); p != nil {
 			refuse(w, p)
 			return
 		}
@@ -431,7 +475,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			refuse(w, p)
 			return
 		}
-		if p := s.agentsStep(q); p != nil {
+		if p := s.agentsStep(r.Context(), q); p != nil {
 			refuse(w, p)
 			return
 		}

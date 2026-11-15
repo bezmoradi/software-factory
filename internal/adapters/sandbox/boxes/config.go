@@ -20,30 +20,31 @@ const (
 )
 
 type Config struct {
-	Memory   int64
-	NanoCPUs int64
-	MaxBoxes int
-	Runtime  string
-	Ranges   []netip.Prefix
-	SweepDry bool
-	Live     bool
+	Memory         int64
+	NanoCPUs       int64
+	ReviewerMemory int64
+	ReviewerCPUs   int64
+	MaxBoxes       int
+	Runtime        string
+	Ranges         []netip.Prefix
+	SweepDry       bool
+	Live           bool
 }
 
 func ParseConfig(getenv func(string) string) (Config, error) {
-	cfg := Config{Memory: DefaultMemory, NanoCPUs: DefaultNanoCPUs}
-	if v := strings.TrimSpace(getenv("SF_BOX_MEMORY")); v != "" {
-		m, err := parseBytes(v)
-		if err != nil || m < 256<<20 || m > 256<<30 {
-			return Config{}, fmt.Errorf("SF_BOX_MEMORY must be a size from 256m to 256g, such as 2g, got %q", v)
-		}
-		cfg.Memory = m
+	cfg := Config{}
+	var err error
+	if cfg.Memory, err = memoryOf(getenv, "SF_BOX_MEMORY"); err != nil {
+		return Config{}, err
 	}
-	if v := strings.TrimSpace(getenv("SF_BOX_CPUS")); v != "" {
-		c, err := strconv.ParseFloat(v, 64)
-		if err != nil || math.IsNaN(c) || c < 0.1 || c > 256 {
-			return Config{}, fmt.Errorf("SF_BOX_CPUS must be a number of CPUs from 0.1 to 256, such as 2, got %q", v)
-		}
-		cfg.NanoCPUs = int64(math.Round(c * 1e9))
+	if cfg.NanoCPUs, err = cpusOf(getenv, "SF_BOX_CPUS"); err != nil {
+		return Config{}, err
+	}
+	if cfg.ReviewerMemory, err = memoryOf(getenv, "SF_REVIEWER_MEMORY"); err != nil {
+		return Config{}, err
+	}
+	if cfg.ReviewerCPUs, err = cpusOf(getenv, "SF_REVIEWER_CPUS"); err != nil {
+		return Config{}, err
 	}
 	if v := strings.TrimSpace(getenv("SF_MAX_BOXES")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -77,6 +78,30 @@ func ParseConfig(getenv func(string) string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func memoryOf(getenv func(string) string, key string) (int64, error) {
+	v := strings.TrimSpace(getenv(key))
+	if v == "" {
+		return DefaultMemory, nil
+	}
+	m, err := parseBytes(v)
+	if err != nil || m < 256<<20 || m > 256<<30 {
+		return 0, fmt.Errorf("%s must be a size from 256m to 256g, such as 2g, got %q", key, v)
+	}
+	return m, nil
+}
+
+func cpusOf(getenv func(string) string, key string) (int64, error) {
+	v := strings.TrimSpace(getenv(key))
+	if v == "" {
+		return DefaultNanoCPUs, nil
+	}
+	c, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(c) || c < 0.1 || c > 256 {
+		return 0, fmt.Errorf("%s must be a number of CPUs from 0.1 to 256, such as 2, got %q", key, v)
+	}
+	return int64(math.Round(c * 1e9)), nil
 }
 
 func ParseSubnets(getenv func(string) string) ([]netip.Prefix, error) {

@@ -103,7 +103,7 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't run reviews.")
 	}
 	if why := d.reg.halt.automatic(); why != "" {
 		return explained(conflict("halted"), why)

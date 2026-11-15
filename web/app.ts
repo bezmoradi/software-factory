@@ -1030,7 +1030,7 @@ async function startReview(s: Session | null, all: boolean) {
   let consent: Consent = {}
   let answer = await reply(await api('/api/review', asked).catch(() => null))
   for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewer container's Claude Code", 'the review')
+    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the review')
     if (!more?.costOk) break
     consent = { costOk: true }
     answer = await reply(await api('/api/review', { ...asked, ...consent }).catch(() => null))
@@ -1051,7 +1051,7 @@ async function startTestList(s: Session | null) {
   schedulePaint()
   let answer = await reply(await api('/api/test-list', { sid: s.sid }).catch(() => null))
   for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewer container's Claude Code", 'the manual test list')
+    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the manual test list')
     if (!more?.costOk) break
     answer = await reply(await api('/api/test-list', { sid: s.sid, costOk: true }).catch(() => null))
   }
@@ -1070,7 +1070,7 @@ async function startAside(s: Session | null, route: string, asking: Set<string>,
   schedulePaint()
   let answer = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
   for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewer container's Claude Code", what)
+    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", what)
     if (!more?.costOk) break
     answer = await reply(await api(route, { sid: s.sid, ...body, costOk: true }).catch(() => null))
   }
@@ -2338,7 +2338,7 @@ byId('welcome').addEventListener('click', e => {
   if (walk) return openDocs(walk.dataset.doc!, { view: 'overview', label: 'Welcome' })
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
-  if (start === 'login') void claudeLogin(api, () => void markSignIn())
+  if (start === 'login') void claudeLogin(api, () => void markSignIn(), reviewer?.signIn ?? null)
   if (start === 'identity') openIdentity()
   if (start === 'egress') openEgress(api)
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)

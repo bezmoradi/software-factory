@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -31,7 +32,7 @@ type agentsJSON struct {
 	Keep  []string       `json:"keep"`
 }
 
-func (s *Server) agentsStep(q agentsJSON) *problem {
+func (s *Server) agentsStep(ctx context.Context, q agentsJSON) *problem {
 	if !s.cfg.Review {
 		return fail(http.StatusNotFound, "route", "")
 	}
@@ -78,7 +79,7 @@ func (s *Server) agentsStep(q agentsJSON) *problem {
 	if err != nil {
 		return fail(http.StatusConflict, "agent-file", "An earlier agent file couldn't be removed from the container.")
 	}
-	s.log.Info("agent files", "written", len(q.Files), "removed", removed)
+	shared.For(ctx, s.log).Info("agent files", "written", len(q.Files), "removed", removed)
 	return nil
 }
 

@@ -93,7 +93,7 @@ func ServeHelper(ctx context.Context, args []string, logger shared.Logger) error
 		return fmt.Errorf("box-helper: listen: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           boxes.Handler(boxes.ServerConfig{Boxes: helper, KeyFile: cfg.KeyFile, Base: ctx, Logger: logger, About: helper.About}),
+		Handler:           boxes.Handler(boxes.ServerConfig{Boxes: helper, Reviewers: helper, KeyFile: cfg.KeyFile, Base: ctx, Logger: logger, About: helper.About}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      4 * time.Minute,

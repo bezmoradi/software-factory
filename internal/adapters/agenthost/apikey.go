@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -37,7 +38,7 @@ func keyHelper(path string) string {
 	return "cat '" + path + "'"
 }
 
-func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
+func (s *Server) apiKeyStep(ctx context.Context, q apiKeyJSON) *problem {
 	if p := s.sameBox(q.Box); p != nil {
 		return p
 	}
@@ -62,7 +63,7 @@ func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
 		if next != nil && writePrivate(settings, next, 0o700) != nil {
 			return fail(http.StatusConflict, "settings", helperMessage(nil))
 		}
-		s.log.Info("api key", "step", "set")
+		shared.For(ctx, s.log).Info("api key", "step", "set")
 		return nil
 	case "clear":
 		if q.Key != "" {
@@ -78,7 +79,7 @@ func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
 		if err := os.Remove(keyPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fail(http.StatusConflict, "key-file", "The saved key couldn't be removed from the container.")
 		}
-		s.log.Info("api key", "step", "clear")
+		shared.For(ctx, s.log).Info("api key", "step", "clear")
 		return nil
 	}
 	return fail(http.StatusBadRequest, "step", "")

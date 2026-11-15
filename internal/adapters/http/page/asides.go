@@ -38,7 +38,7 @@ func asideOf(v *session.AsideView) *asideJSON {
 func (s *Server) aside(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	starter, ok := s.cfg.Reviews.(session.AsideStarter)
 	if s.cfg.Reviews == nil || !ok {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it can't review a plan or explain a change."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't review a plan or explain a change."})
 		return
 	}
 	sid, okSID := body["sid"].(string)

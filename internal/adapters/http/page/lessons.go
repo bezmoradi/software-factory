@@ -48,7 +48,7 @@ func (s *Server) lessonsAPI(w http.ResponseWriter, r *http.Request, body map[str
 	switch r.URL.Path {
 	case lessonsRoute:
 		if lessons == nil {
-			send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it suggests no instruction lines."})
+			send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it suggests no instruction lines."})
 			return
 		}
 		s.lessonsOp(w, r, lessons, op, body)

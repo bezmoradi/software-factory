@@ -202,7 +202,7 @@ func keptLists(tests map[string]TestListView, keep string) {
 
 func (d *Dispatcher) CheckStep(_ context.Context, sid, commit string, step int, done bool) error {
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it keeps no walkthroughs.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it keeps no walkthroughs.")
 	}
 	if _, ok := d.PushTarget(sid); !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a walkthrough here.")

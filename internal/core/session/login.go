@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -34,6 +36,69 @@ type LoginState struct {
 	AgentsExpect    Expect
 	ReviewersExpect Expect
 	Each            []AgentLogin
+	ReviewersBusy   bool
+}
+
+const StepWait = 10 * time.Second
+
+type stepWaitKey struct{}
+
+func WithStepWait(ctx context.Context, wait time.Duration) context.Context {
+	return context.WithValue(ctx, stepWaitKey{}, time.Now().Add(wait))
+}
+
+func StepDeadline(ctx context.Context) (time.Time, bool) {
+	t, ok := ctx.Value(stepWaitKey{}).(time.Time)
+	return t, ok
+}
+
+type keyLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *keyLock) c() chan struct{} {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	return l.ch
+}
+
+func (l *keyLock) Lock()   { l.c() <- struct{}{} }
+func (l *keyLock) Unlock() { <-l.c() }
+
+func (l *keyLock) lockBy(ctx context.Context) bool {
+	select {
+	case l.c() <- struct{}{}:
+		return true
+	default:
+	}
+	d, ok := StepDeadline(ctx)
+	if !ok {
+		l.Lock()
+		return true
+	}
+	t := time.NewTimer(time.Until(d))
+	defer t.Stop()
+	select {
+	case l.c() <- struct{}{}:
+		return true
+	case <-t.C:
+	case <-ctx.Done():
+	}
+	return false
+}
+
+func keyStepBusy() *Error {
+	return explained(limited("reviews"), "Another sign-in or key step for the reviewers is still running, so this one didn't start. Try again in a moment.")
+}
+
+func stepCtx(ctx context.Context, target string) context.Context {
+	if target != LoginReviewers {
+		return ctx
+	}
+	if _, set := StepDeadline(ctx); set {
+		return ctx
+	}
+	return WithStepWait(ctx, StepWait)
 }
 
 type AgentLogin struct {
@@ -48,7 +113,10 @@ func BoxTarget(box string) string { return boxTarget + box }
 
 func TargetBox(target string) (string, bool) {
 	box, ok := strings.CutPrefix(target, boxTarget)
-	return box, ok && ValidBox(box)
+	if !ok || !ValidBox(box) {
+		return "", false
+	}
+	return box, true
 }
 
 func ValidLoginTarget(target string) bool {
@@ -97,6 +165,9 @@ func loginStep(ctx context.Context, host LoginHost, cmd Command, step, code stri
 	lctx, cancel := context.WithTimeout(ctx, loginFor)
 	defer cancel()
 	link, err := host.Login(lctx, cmd, step, code)
+	if busy := reviewersBusy(err); busy != nil {
+		return "", busy
+	}
 	if err != nil {
 		return "", explained(conflict("login"), hostMessage(err))
 	}
@@ -157,11 +228,13 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 	switch target {
 	case LoginReviewers:
 		if d.cfg.Reviews == nil {
-			return "", nil, explained(conflict("login"), "This engine has no reviewer container.")
+			return "", nil, explained(conflict("login"), "This engine runs no reviewer containers.")
 		}
+		ctx = stepCtx(ctx, target)
+		d.cfg.Reviews.signInChanging()
 		h, ok := d.cfg.Reviews.cfg.Host.(LoginHost)
 		if !ok {
-			return "", nil, explained(conflict("login"), "This engine can't sign Claude Code in to the reviewer container.")
+			return "", nil, explained(conflict("login"), "This engine can't sign Claude Code in for the reviewers.")
 		}
 		cmd = d.cfg.Reviews.loginCommand()
 		host = h
@@ -182,16 +255,37 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 	}
 	link, err := loginStep(ctx, host, cmd, step, code)
 	shared.For(ctx, d.cfg.Logger).Info("claude login", "target", target, "step", step, "ok", err == nil)
+	if target == LoginReviewers && step == "code" && !isBusy(err) {
+		d.cfg.Reviews.SignInChanged()
+	}
 	if err != nil || step != "code" {
 		return link, nil, err
 	}
-	d.keyMu.Lock()
-	err = d.removeKeyLocked(ctx, target, false)
+	cctx := ctx
+	if target == LoginReviewers {
+		cctx = WithStepWait(ctx, signInFor)
+	}
+	if !d.keyMu.lockBy(cctx) {
+		return "", nil, signedInKeyKept()
+	}
+	err = d.removeKeyLocked(cctx, target, false)
 	d.keyMu.Unlock()
+	if isBusy(err) {
+		return "", nil, signedInKeyKept()
+	}
 	if err != nil {
 		return "", nil, err
 	}
 	return "", d.finished(ctx, target, ExpectSubscription), nil
+}
+
+func isBusy(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	return ok && e.Kind == Limited && e.Reason == "reviews"
+}
+
+func signedInKeyKept() *Error {
+	return explained(limited("reviews"), "Claude Code signed the reviewers in, but every reviewer container stayed busy, so the engine couldn't remove the API key saved before, which Claude Code still prefers. Press Remove key once a review finishes.")
 }
 
 func ValidAPIKey(key string) bool {
@@ -213,6 +307,7 @@ func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn,
 	if !ValidAPIKey(key) {
 		return nil, explained(invalid("key"), "Paste the key exactly as the Claude Console or your gateway's team gives it: 20 to 512 characters, with no spaces or quotes.")
 	}
+	ctx = stepCtx(ctx, target)
 	err := d.sendKey(ctx, target, key)
 	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "ok", err == nil)
 	if err != nil {
@@ -228,7 +323,9 @@ func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
 	side := targetSide(target)
 	release := d.holdGateway()
 	defer release()
-	d.keyMu.Lock()
+	if !d.keyMu.lockBy(ctx) {
+		return keyStepBusy()
+	}
 	defer d.keyMu.Unlock()
 	host, established := d.gatewayOf(side)
 	if !established {
@@ -249,7 +346,10 @@ func (d *Dispatcher) ClearKey(ctx context.Context, target string) error {
 	if _, err := d.keyHost(ctx, target); err != nil {
 		return err
 	}
-	d.keyMu.Lock()
+	ctx = stepCtx(ctx, target)
+	if !d.keyMu.lockBy(ctx) {
+		return keyStepBusy()
+	}
 	err := d.removeKeyLocked(ctx, target, true)
 	d.keyMu.Unlock()
 	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "step", "clear", "ok", err == nil)
@@ -293,7 +393,7 @@ func (d *Dispatcher) keyHost(ctx context.Context, target string) (KeyHost, error
 				return host, nil
 			}
 		}
-		return nil, explained(conflict("login"), "This engine can't reach the reviewer container, so it can't change Claude Code's API key there.")
+		return nil, explained(conflict("login"), "This engine can't start a reviewer container, so it can't change the reviewers' API key.")
 	}
 	b, err := d.boxLogin(ctx, target)
 	if err != nil {
@@ -311,22 +411,54 @@ func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error
 	if err != nil {
 		return err
 	}
+	reviewers := target == LoginReviewers && d.cfg.Reviews != nil
+	if reviewers {
+		d.cfg.Reviews.signInChanging()
+	}
 	kctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
 	box, _ := TargetBox(target)
-	if err := host.APIKey(kctx, box, step, key); err != nil {
+	err = host.APIKey(kctx, box, step, key)
+	busy := reviewersBusy(err)
+	if reviewers && busy == nil {
+		d.cfg.Reviews.SignInChanged()
+	}
+	if busy != nil {
+		return busy
+	}
+	if err != nil {
 		return explained(conflict("login"), hostMessage(err))
 	}
 	return nil
 }
 
+func (d *Dispatcher) reviewersChecked(ctx context.Context) *SignIn {
+	r := d.cfg.Reviews
+	base := shared.WithRequest(r.cfg.Base, shared.RequestOf(ctx))
+	cctx, cancel := context.WithTimeout(WithStepWait(base, signInFor), signInFor)
+	got := make(chan *SignIn, 1)
+	r.wg.Go(func() {
+		defer cancel()
+		if s, err := r.CheckSignIn(cctx); err == nil {
+			got <- &s
+			return
+		}
+		got <- nil
+	})
+	t := time.NewTimer(StepWait)
+	defer t.Stop()
+	select {
+	case s := <-got:
+		return s
+	case <-t.C:
+		return nil
+	}
+}
+
 func (d *Dispatcher) finished(ctx context.Context, target string, kind Expect) *SignIn {
 	if target == LoginReviewers {
 		_ = d.cfg.Expected.Set(ReviewerAgent, kind)
-		if s, err := d.cfg.Reviews.CheckSignIn(ctx); err == nil {
-			return &s
-		}
-		return nil
+		return d.reviewersChecked(ctx)
 	}
 	b, err := d.boxLogin(ctx, target)
 	if err != nil {
@@ -359,9 +491,13 @@ func (d *Dispatcher) LoginState(ctx context.Context, target string) (LoginState,
 		return out, nil
 	}
 	if d.cfg.Reviews != nil {
-		if s, err := d.cfg.Reviews.CheckSignIn(ctx); err == nil {
+		s, err := d.cfg.Reviews.KnownSignIn(ctx)
+		out.ReviewersBusy = isBusy(err) || s.Busy
+		if err == nil {
 			out.Reviewers = &s
-			out.ReviewersExpect = d.cfg.Expected.Adopt(ReviewerAgent, s.Method)
+			if !s.Busy {
+				out.ReviewersExpect = d.cfg.Expected.Adopt(ReviewerAgent, s.Method)
+			}
 		}
 	}
 	for _, a := range d.cfg.Agents {

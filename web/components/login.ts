@@ -3,6 +3,7 @@ import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
 import { icon } from './icon.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
+import { when } from './usage.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -37,9 +38,14 @@ function safeLink(v: unknown): string {
   }
 }
 
-function describe(s: SignIn | null): string {
-  if (!s) return 'Not checked yet.'
-  return s.method === 'not-signed-in' ? 'Not signed in.' : `Signed in: ${visible(s.words)}.`
+const RECHECK_MS = 15000
+const BUSY = 'All 8 reviewer containers are in use, so the sign-in wasn’t checked again; it checks again shortly.'
+
+function describe(s: SignIn | null, busy = false): string {
+  if (!s) return busy ? `The reviewers are busy. ${BUSY}` : 'Not checked yet.'
+  const said = s.method === 'not-signed-in' ? 'Not signed in.' : `Signed in: ${visible(s.words)}.`
+  const at = s.checkedAt ? `${said} Checked ${when(s.checkedAt)}.` : said
+  return s.busy || busy ? `${at} ${BUSY}` : at
 }
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
@@ -77,6 +83,7 @@ class Row {
     this.post = post
     this.target = target
     this.say.setAttribute('role', 'status')
+    this.status.setAttribute('role', 'status')
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
     this.unready()
@@ -92,7 +99,7 @@ class Row {
     const [keyLabel, key] = field('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', true)
     this.key = key
     this.apiKey.append(
-      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewer container'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
+      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
       this.form(keyLabel, () => void this.finishKey()),
     )
     this.kinds.addEventListener('sf-expand', e => {
@@ -121,9 +128,13 @@ class Row {
     ]
   }
 
-  show(s: SignIn | null) {
+  pending(s: SignIn) {
+    this.status.textContent = `${describe(s)} Checking again…`
+  }
+
+  show(s: SignIn | null, busy = false) {
     this.signIn = s
-    this.status.textContent = describe(s)
+    this.status.textContent = describe(s, busy)
     if (s?.method === 'gateway') this.status.textContent += ` ${GATEWAY_WARNING}.`
     this.paint()
   }
@@ -223,20 +234,28 @@ export async function signInState(post: Post): Promise<SignInState | null> {
   return { agents, reviewers: a.body.reviewer === true ? signedIn(a.body.reviewers) : true }
 }
 
-export async function claudeLogin(post: Post, closed?: () => void): Promise<void> {
+export async function claudeLogin(post: Post, closed?: () => void, known?: SignIn | null): Promise<void> {
   const d = el('dialog', 'consent login surface')
   d.setAttribute('aria-label', 'Sign Claude Code in for the reviewers')
   const reviewers = new Row(post, 'reviewers', 'Claude Code for the reviewers')
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  let open = true
+  let again = 0
   const close = () => {
+    open = false
+    clearTimeout(again)
     reviewers.cancel()
     d.close()
     d.remove()
     closed?.()
+    if (opener?.isConnected) opener.focus()
   }
   const actions = el('div', 'row consent-actions')
   actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
+  const heading = el('h2', 'label', 'Sign Claude Code in for the reviewers')
+  heading.tabIndex = -1
   d.append(
-    el('h2', 'label', 'Sign Claude Code in for the reviewers'),
+    heading,
     el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
     reviewers.node,
     actions,
@@ -247,9 +266,17 @@ export async function claudeLogin(post: Post, closed?: () => void): Promise<void
   })
   document.body.append(d)
   d.showModal()
-  const a = await call(post, { step: 'status' })
-  if (a.body.reviewer === true) reviewers.show(signInOf(a.body.reviewers))
-  else reviewers.node.remove()
+  heading.focus()
+  if (known) reviewers.pending(known)
+  const refresh = async (): Promise<void> => {
+    const a = await call(post, { step: 'status' })
+    if (!open) return
+    if (a.body.reviewer !== true) return void reviewers.node.remove()
+    const busy = a.body.reviewersBusy === true
+    reviewers.show(signInOf(a.body.reviewers), busy)
+    if (busy) again = window.setTimeout(() => void refresh(), RECHECK_MS)
+  }
+  await refresh()
 }
 
 function commandBlock(command: string): HTMLElement {

@@ -24,8 +24,8 @@ jq -e -s 'length == 1 and (.[0] | type) == "object"' "$config" >/dev/null 2>&1 |
 	exit 1
 }
 if ! problems=$(jq -r --arg image "$image" '
-  def services: ["egress", "engine", "helper", "reviewer"];
-  def users: {"egress": "egress", "engine": "engine", "helper": "10005:10005", "reviewer": "reviewer"};
+  def services: ["egress", "engine", "helper"];
+  def users: {"egress": "egress", "engine": "engine", "helper": "10005:10005"};
   def servicekeys: ["cap_drop", "command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "init", "logging", "mem_limit", "networks", "pids_limit", "ports", "pull_policy", "read_only", "restart", "security_opt", "stop_grace_period", "tmpfs", "user", "volumes"];
   def topkeys: ["name", "networks", "services", "volumes"];
   def bindopt: (.o // "" | tostring | split(",") | map(gsub("^\\s+|\\s+$"; "")) | any(. == "bind" or . == "rbind"));
@@ -68,4 +68,4 @@ if [ -n "$problems" ]; then
 	printf '%s\n' "$problems" | sed 's/^/release-check: /' >&2
 	exit 1
 fi
-echo "release-check: $config runs $image in exactly egress, engine, helper and reviewer, every one with only the keys, user and hardening the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default networks and volumes named for the project, volumes that keep data with only a name, no SF_BOX_LIVE and the helper on helpernet alone"
+echo "release-check: $config runs $image in exactly egress, engine and helper, every one with only the keys, user and hardening the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default networks and volumes named for the project, volumes that keep data with only a name, no SF_BOX_LIVE and the helper on helpernet alone"

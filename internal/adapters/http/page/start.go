@@ -223,7 +223,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 
 func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Reviews == nil {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it can't run reviews."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't run reviews."})
 		return
 	}
 	sid, ok := body["sid"].(string)

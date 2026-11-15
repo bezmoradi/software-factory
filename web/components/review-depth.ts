@@ -134,7 +134,7 @@ class SfReviewDepth extends HTMLElement {
     if (v.advisoryRuns) parts.push(`plus ${v.advisoryRuns} advisory ${v.advisoryRuns === 1 ? 'run' : 'runs'}`)
     let said = parts.join(', ')
     if (v.aboveRuns) said += `; a change above the size takes ${v.aboveRuns} required ${v.aboveRuns === 1 ? 'run' : 'runs'}`
-    this.#summary.textContent = `${said}, plus any the changed files call for. Each one is a run in the reviewer container.`
+    this.#summary.textContent = `${said}, plus any the changed files call for. Each one is a run in a reviewer container of its own.`
     this.#runs.replaceChildren()
     v.agents.forEach((agent, i) => {
       const s = runSelect(`depth-run-${this.#n}-${i}`, v.runs[agent] ?? 1, max)

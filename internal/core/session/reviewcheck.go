@@ -22,6 +22,7 @@ const (
 	versionRetry    = 2 * time.Second
 	maxChain        = 50
 	checkSnapFailed = "the engine couldn't write the check's snapshot: "
+	checkRuns       = 2
 )
 
 var reviewVersionText = regexp.MustCompile(`^[0-9A-Za-z.+-]{1,40}$`)
@@ -116,6 +117,10 @@ func (r *Reviews) reviewerVersion(ctx context.Context) string {
 		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "version-unread")
 	}
 	r.mu.Lock()
+	if v != r.claude {
+		r.signStale = true
+		r.signGen++
+	}
 	r.claude = v
 	r.mu.Unlock()
 	return v
@@ -248,7 +253,7 @@ func (r *Reviews) passHeld(e ReviewEntry, checks []ReviewerCheck, checked bool) 
 	c, ok := holdingCheck(checks, e.Key.Agent, v)
 	switch {
 	case v.ClaudeCode == "":
-		return review.Unchecked, "the reviewer container's Claude Code version couldn't be read when the review started, so no check can cover the pass and it doesn't count; it runs again when the agent next asks to push or the person presses Review"
+		return review.Unchecked, "the reviewers' Claude Code version couldn't be read when the review started, so no check can cover the pass and it doesn't count; it runs again when the agent next asks to push or the person presses Review"
 	case !ok:
 		return review.Unchecked, "the engine hasn't checked this reviewer since an update (" + v.Words() + "), so the pass doesn't count yet; it runs again, with a check after it, when the agent next asks to push or the person presses Review"
 	case c.Result == review.CheckRunning:
@@ -349,9 +354,11 @@ func (r *Reviews) ensureCheck(ctx context.Context, d dueCheck, plugin string) (R
 		if running == nil {
 			done := make(chan struct{})
 			r.checking[d.agent] = done
+			r.running[reviewerCheckKey+d.agent] = checkRuns
 			r.mu.Unlock()
 			c := r.runCheck(ctx, d.agent, d.role, d.versions, plugin, ByUpdate)
 			r.mu.Lock()
+			delete(r.running, reviewerCheckKey+d.agent)
 			delete(r.checking, d.agent)
 			close(done)
 			r.mu.Unlock()
@@ -516,11 +523,16 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		r.mu.Unlock()
 		return explained(conflict("checking"), "A check of this reviewer is running. Wait for it to finish.")
 	}
+	if err := r.holdRunsLocked(reviewerCheckKey+agent, checkRuns); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	done := make(chan struct{})
 	r.checking[agent] = done
 	r.mu.Unlock()
 	release := func() {
 		r.mu.Lock()
+		delete(r.running, reviewerCheckKey+agent)
 		delete(r.checking, agent)
 		close(done)
 		r.mu.Unlock()
@@ -530,7 +542,7 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, "the check"); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, "the check"); err != nil {
 		release()
 		return err
 	}
@@ -539,14 +551,15 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
-	v := review.Versions{ClaudeCode: r.reviewerVersion(ctx), Plugin: r.pluginFor(agent)}
-	if last := latestOf(checks, agent); last != nil {
-		v.Model, v.Effort = last.Versions.Model, last.Versions.Effort
-	}
+	last := latestOf(checks, agent)
 	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "asked", "role", string(role))
 	r.wg.Go(func() {
 		defer release()
-		base := r.cfg.Base
+		base := shared.WithRequest(r.cfg.Base, shared.RequestOf(ctx))
+		v := review.Versions{ClaudeCode: r.reviewerVersion(base), Plugin: r.pluginFor(agent)}
+		if last != nil {
+			v.Model, v.Effort = last.Versions.Model, last.Versions.Effort
+		}
 		if why := r.check(base); why != "" {
 			now := r.cfg.Now()
 			r.saveCheck(ReviewerCheck{Agent: agent, Role: role, Versions: v, Result: review.CheckUnsettled, By: ByPage, StartedAt: now, EndedAt: now,

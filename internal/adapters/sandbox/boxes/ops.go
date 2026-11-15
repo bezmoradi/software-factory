@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -27,20 +28,20 @@ func badBox(box string) error {
 	return refuse(http.StatusBadRequest, ReasonInput, "a box is 16 lowercase hexadecimal digits")
 }
 
-func (h *Helper) logResult(action, box, recipe string, err error) {
+func (h *Helper) logResult(ctx context.Context, action, box, recipe string, err error) {
 	fields := []any{"action", action, "box", box}
 	if recipe != "" {
 		fields = append(fields, "recipe", recipe)
 	}
 	if err == nil {
-		h.logger.Info("box", append(fields, "outcome", "ok")...)
+		shared.For(ctx, h.logger).Info("box", append(fields, "outcome", "ok")...)
 		return
 	}
 	reason, message := ReasonDocker, oneLine(err.Error())
 	if r, ok := errors.AsType[*Refusal](err); ok {
 		reason = r.Reason
 	}
-	h.logger.Warn("box", append(fields, "outcome", "refused", "reason", reason, "message", message)...)
+	shared.For(ctx, h.logger).Warn("box", append(fields, "outcome", "refused", "reason", reason, "message", message)...)
 }
 
 func (h *Helper) Create(ctx context.Context, box string) error {
@@ -50,7 +51,7 @@ func (h *Helper) Create(ctx context.Context, box string) error {
 	unlock := h.locks.lock(box)
 	defer unlock()
 	err := h.create(ctx, box)
-	h.logResult("create", box, "", err)
+	h.logResult(ctx, "create", box, "", err)
 	return err
 }
 
@@ -77,7 +78,7 @@ func (h *Helper) Start(ctx context.Context, box string) (session.BoxInfo, error)
 	unlock := h.locks.lock(box)
 	defer unlock()
 	info, err := h.start(ctx, box)
-	h.logResult("start", box, info.Recipe, err)
+	h.logResult(ctx, "start", box, info.Recipe, err)
 	return info, err
 }
 
@@ -134,77 +135,118 @@ func (h *Helper) start(ctx context.Context, box string) (session.BoxInfo, error)
 	return h.build(ctx, box, subnet, vols, engine, egress)
 }
 
+type plan struct {
+	what    string
+	name    string
+	labels  map[string]string
+	subnet  netip.Prefix
+	want    recipeView
+	body    containerCreateJSON
+	inspect func(containerInspectJSON) recipeView
+	read    func(context.Context) (*networkInspectJSON, error)
+	owned   func(*networkInspectJSON) []string
+	refused func(*Refusal, error) error
+}
+
 func (h *Helper) build(ctx context.Context, box string, subnet netip.Prefix, vols stackVolumes, engine, egress string) (session.BoxInfo, error) {
-	want := h.rec.expectedView(box, subnet, vols)
-	recipe := hashOf(want)
-	n, err := h.makeNetwork(ctx, box, subnet)
+	p := plan{
+		what: "box", name: containerName(h.rec.project, box), labels: h.rec.labels(box), subnet: subnet,
+		want: h.rec.expectedView(box, subnet, vols), body: h.rec.create(box, subnet, vols),
+		inspect: func(ci containerInspectJSON) recipeView { return h.rec.inspectedView(ci, box, subnet) },
+		read:    func(ctx context.Context) (*networkInspectJSON, error) { return h.boxNetwork(ctx, box) },
+		owned: func(n *networkInspectJSON) []string {
+			if got, ok := ownedName(h.rec.project, boxPrefix, n.Name, n.Labels); !ok || got != box {
+				return []string{"name or labels"}
+			}
+			return nil
+		},
+		refused: func(fallback *Refusal, err error) error { return folderOr(fallback, err, box) },
+	}
+	ready, n, recipe, err := h.assemble(ctx, p, engine, egress)
 	if err != nil {
 		return session.BoxInfo{Box: box, Recipe: recipe}, err
 	}
+	return h.infoOf(ready, n, box, &vols, h.membersOf(ctx)), nil
+}
+
+func (h *Helper) assemble(ctx context.Context, p plan, engine, egress string) (containerInspectJSON, *networkInspectJSON, string, error) {
+	recipe := hashOf(p.want)
+	subnet := p.subnet
+	n, err := h.makeNetworkFor(ctx, p.name, p.labels, subnet, func(n *networkInspectJSON) []string { return append(p.owned(n), shapeProblems(n, subnet)...) })
+	if err != nil {
+		return containerInspectJSON{}, nil, recipe, err
+	}
 	made := ""
-	fail := func(e error) (session.BoxInfo, error) {
+	fail := func(e error) (containerInspectJSON, *networkInspectJSON, string, error) {
 		r, ok := errors.AsType[*Refusal](e)
 		if !ok {
 			r = refuse(http.StatusBadGateway, ReasonDocker, "%s", oneLine(e.Error()))
 		}
 		out := *r
 		out.Message += h.dropBuilt(ctx, made, n)
-		return session.BoxInfo{Box: box, Recipe: recipe}, &out
+		return containerInspectJSON{}, nil, recipe, &out
 	}
+	what := "the " + p.what + "'s"
 	if err := h.attach(ctx, n.ID, engine, engineOf(subnet)); err != nil {
-		return fail(dockerFailed("connect the engine to the box's network at "+engineOf(subnet).String(), err))
+		return fail(dockerFailed("connect the engine to "+what+" network at "+engineOf(subnet).String(), err))
 	}
 	if err := h.attach(ctx, n.ID, egress, egressOf(subnet)); err != nil {
-		return fail(dockerFailed("connect egress to the box's network at "+egressOf(subnet).String(), err))
+		return fail(dockerFailed("connect egress to "+what+" network at "+egressOf(subnet).String(), err))
 	}
-	body := h.rec.create(box, subnet, vols)
+	body := p.body
 	body.Labels[LabelRecipe] = recipe
-	name := containerName(h.rec.project, box)
 	var created createdJSON
-	if err := h.docker.post(ctx, "/containers/create", url.Values{"name": {name}}, body, &created); err != nil {
+	if err := h.docker.post(ctx, "/containers/create", url.Values{"name": {p.name}}, body, &created); err != nil {
 		var de *DockerError
 		if errors.As(err, &de) && de.Code == http.StatusConflict {
-			return fail(refuse(http.StatusConflict, ReasonNamed, "a container named %s already exists, so the helper makes no box with that name", name))
+			return fail(refuse(http.StatusConflict, ReasonNamed, "a container named %s already exists, so the helper makes no %s with that name", p.name, p.what))
 		}
-		return fail(folderOr(dockerFailed("make the box's container", err), err, box))
+		return fail(p.refused(dockerFailed("make "+what+" container", err), err))
 	}
 	made = created.ID
 	if len(created.Warnings) > 0 {
-		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "Docker made the box's container with warnings (%s)", oneLine(strings.Join(created.Warnings, "; "))))
+		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "Docker made %s container with warnings (%s)", what, oneLine(strings.Join(created.Warnings, "; "))))
 	}
 	var got containerInspectJSON
 	if err := h.docker.get(ctx, "/containers/"+pathPart(created.ID)+"/json", nil, &got); err != nil {
-		return fail(dockerFailed("inspect the box's container", err))
+		return fail(dockerFailed("inspect "+what+" container", err))
 	}
-	diffs := differences(want, h.rec.inspectedView(got, box, subnet))
+	diffs := differences(p.want, p.inspect(got))
 	if len(got.HostConfig.Ulimits) > 0 {
 		diffs = append(diffs, "Ulimits")
 	}
 	if len(diffs) > 0 || got.Config.Labels[LabelRecipe] != recipe {
-		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "the box's container as Docker made it differs from the recipe in %s", strings.Join(diffs, ", ")))
+		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "%s container as Docker made it differs from the recipe in %s", capital(what), strings.Join(diffs, ", ")))
 	}
 	if err := h.docker.post(ctx, "/containers/"+pathPart(created.ID)+"/start", nil, nil, nil); err != nil {
-		return fail(folderOr(dockerFailed("start the box's container", err), err, box))
+		return fail(p.refused(dockerFailed("start "+what+" container", err), err))
 	}
 	if _, err := h.waitHealthy(ctx, created.ID); err != nil {
 		return fail(err)
 	}
 	var ready containerInspectJSON
 	if err := h.docker.get(ctx, "/containers/"+pathPart(created.ID)+"/json", nil, &ready); err != nil {
-		return fail(dockerFailed("inspect the box's container after it started", err))
+		return fail(dockerFailed("inspect "+what+" container after it started", err))
 	}
-	if diffs := differences(want, h.rec.inspectedView(ready, box, subnet)); len(diffs) > 0 || ready.Config.Labels[LabelRecipe] != recipe {
-		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "the box's container changed while it started and now differs from the recipe in %s", strings.Join(diffs, ", ")))
+	if diffs := differences(p.want, p.inspect(ready)); len(diffs) > 0 || ready.Config.Labels[LabelRecipe] != recipe {
+		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "%s container changed while it started and now differs from the recipe in %s", capital(what), strings.Join(diffs, ", ")))
 	}
-	fresh, err := h.boxNetwork(ctx, box)
+	fresh, err := p.read(ctx)
 	if err != nil || fresh == nil || fresh.ID != n.ID {
-		return fail(refuse(http.StatusInternalServerError, ReasonNetwork, "the box's network changed or went away while the box started"))
+		return fail(refuse(http.StatusInternalServerError, ReasonNetwork, "%s network changed or went away while it started", capital(what)))
 	}
 	n = fresh
-	if problems := append(networkProblems(n, h.rec.project, box, subnet), memberProblems(n, engine, egress, created.ID, subnet)...); len(problems) > 0 {
-		return fail(refuse(http.StatusInternalServerError, ReasonNetwork, "the box's network changed while the box started (%s)", strings.Join(problems, ", ")))
+	if problems := append(append(p.owned(n), shapeProblems(n, subnet)...), memberProblems(n, engine, egress, created.ID, subnet)...); len(problems) > 0 {
+		return fail(refuse(http.StatusInternalServerError, ReasonNetwork, "%s network changed while it started (%s)", capital(what), strings.Join(problems, ", ")))
 	}
-	return h.infoOf(ready, n, box, &vols, h.membersOf(ctx)), nil
+	return ready, n, recipe, nil
+}
+
+func capital(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func memberProblems(n *networkInspectJSON, engine, egress, box string, subnet netip.Prefix) []string {
@@ -307,7 +349,7 @@ func (h *Helper) Stop(ctx context.Context, box string) error {
 	unlock := h.locks.lock(box)
 	defer unlock()
 	recipe, err := h.teardown(ctx, box)
-	h.logResult("stop", box, recipe, err)
+	h.logResult(ctx, "stop", box, recipe, err)
 	return err
 }
 
@@ -318,7 +360,7 @@ func (h *Helper) Remove(ctx context.Context, box string) error {
 	unlock := h.locks.lock(box)
 	defer unlock()
 	recipe, err := h.remove(ctx, box)
-	h.logResult("remove", box, recipe, err)
+	h.logResult(ctx, "remove", box, recipe, err)
 	return err
 }
 

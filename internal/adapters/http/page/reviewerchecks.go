@@ -76,7 +76,7 @@ func checkRunOf(r session.CheckRunResult) checkRunJSON {
 
 func (s *Server) reviewerChecks(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.ReviewerChecks == nil {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it runs no reviewer checks."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it runs no reviewer checks."})
 		return
 	}
 	op, ok := body["op"].(string)

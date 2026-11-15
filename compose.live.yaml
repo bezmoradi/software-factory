@@ -13,8 +13,6 @@ services:
     <<: *live
     environment:
       SF_AGENT_BINARY: /opt/sf-dev/bin/software-factory
-  reviewer:
-    <<: *live
   egress:
     <<: *live
   helper:

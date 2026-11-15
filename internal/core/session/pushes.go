@@ -435,7 +435,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 				return p.holdForRelease(sid, head, shared.RequestOf(ctx))
 			case ok && e.Reason == "cost":
 				shared.For(ctx, p.cfg.Logger).Info("push", "event", "review-not-started", "why", "cost")
-				return "", false, "the reviewer container runs on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
+				return "", false, "the reviewers run on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
 			case ok && e.Reason == "capped":
 				return "", false, "the reviewers reached this project's round limit and still block, so the engine doesn't start them again; stop fixing and summarize their open findings for the person, who decides on the page"
 			case ok && e.Reason == "limits":
@@ -445,7 +445,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 			case ok && e.Reason == "reviews":
 				p.waitAs(sid, head, shared.RequestOf(ctx))
 				p.queueReview(sid, head)
-				return "", false, "the engine reviews at most " + strconv.Itoa(MaxReviewing) + " sessions at once, so it starts the reviews of commit " + shortSHA(head) + " when one finishes, and pushes it itself if every review passes"
+				return "", false, "the engine runs at most " + strconv.Itoa(MaxReviewerRuns) + " reviewer runs at once, so it starts the reviews of commit " + shortSHA(head) + " when one finishes, and pushes it itself if every review passes"
 			case !ok || e.Reason != "reviewing":
 				return "", false, ""
 			}

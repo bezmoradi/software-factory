@@ -30,7 +30,6 @@ type AgentHostConfig struct {
 	Git          string
 	MaxProcesses int
 	Review       bool
-	KeyFile      string
 }
 
 func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostConfig, error) {
@@ -48,8 +47,7 @@ func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostC
 	engine := fs.String("engine", env("SF_ENGINE_AGENT_ADDRESS", "engine:8081"), "the engine's agent listener, host:port")
 	git := fs.String("git", env("SF_GIT", "git"), "the git program for worktrees")
 	maxProcs := fs.String("max-processes", env("SF_AGENT_HOST_MAX_PROCESSES", strconv.Itoa(agenthost.DefaultMaxProcs)), "most agent processes at once")
-	mode := fs.String("mode", env("SF_AGENT_HOST_MODE", "agent"), "agent, or review in the reviewer container")
-	keyFile := fs.String("key-file", env("SF_AGENT_HOST_KEY_FILE", ""), "a file holding the key every request but /healthz must carry, written by the engine; empty for none")
+	mode := fs.String("mode", env("SF_AGENT_HOST_MODE", "agent"), "agent, or review in a reviewer container, which takes its key once from the engine")
 	if err := fs.Parse(args); err != nil {
 		return AgentHostConfig{}, err
 	}
@@ -80,12 +78,6 @@ func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostC
 		}
 		cfg.AgentsBin = filepath.Clean(*agentsBin)
 	}
-	if *keyFile != "" {
-		if !filepath.IsAbs(*keyFile) {
-			return AgentHostConfig{}, errors.New("agent-host: -key-file must be an absolute path")
-		}
-		cfg.KeyFile = filepath.Clean(*keyFile)
-	}
 	if *socket != "off" && !cfg.Review {
 		if !filepath.IsAbs(*socket) || len(*socket) > agenthost.MaxSocketPath {
 			return AgentHostConfig{}, fmt.Errorf("agent-host: the plugin socket must be an absolute path of at most %d bytes, or off", agenthost.MaxSocketPath)
@@ -108,7 +100,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 	}
 	host, err := agenthost.New(agenthost.Config{
 		Workspace: cfg.Workspace, AgentsBin: cfg.AgentsBin, PluginSocket: cfg.PluginSocket, Git: cfg.Git, MaxProcesses: cfg.MaxProcesses,
-		Review: cfg.Review, KeyFile: cfg.KeyFile, Environ: os.Environ(), Logger: logger,
+		Review: cfg.Review, Environ: os.Environ(), Logger: logger,
 	})
 	if err != nil {
 		return err

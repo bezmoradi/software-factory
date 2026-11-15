@@ -170,7 +170,7 @@ jobs:
           sh scripts/release-compose.sh "$IMAGE" "$IMAGE_DIGEST" "$RUNNER_TEMP/release/compose.release.yaml"
           docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" config --format json > "$RUNNER_TEMP/local.json"
           if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/local.json"; then
-            echo "::error::The Compose file to publish isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
+            echo "::error::The Compose file to publish isn't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
       - name: Sign the image
@@ -198,7 +198,7 @@ jobs:
           printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
           (cd "$RUNNER_TEMP/empty" && docker compose -f "oci://$COMPOSE_ARTIFACT@$digest" config --format json) > "$RUNNER_TEMP/published.json"
           if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/published.json"; then
-            echo "::error::$COMPOSE_ARTIFACT@$digest, read back, isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
+            echo "::error::$COMPOSE_ARTIFACT@$digest, read back, isn't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
           identity="https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION"

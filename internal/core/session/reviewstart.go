@@ -21,30 +21,19 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't review it.")
 	}
 	r.mu.Lock()
-	if r.running[t.SID] {
+	if _, busy := r.running[t.SID]; busy {
 		r.mu.Unlock()
 		return explained(conflict("reviewing"), "A review of this session is running. Wait for it to finish.")
 	}
-	if len(r.running) >= MaxReviewing {
+	if err := r.holdLocked(t.SID); err != nil {
 		r.mu.Unlock()
-		return explained(limited("reviews"), fmt.Sprintf("The engine reviews at most %d sessions at once. Wait for one to finish.", MaxReviewing))
+		return err
 	}
-	r.running[t.SID] = true
 	r.mu.Unlock()
 	release := func() {
 		r.mu.Lock()
 		delete(r.running, t.SID)
 		r.mu.Unlock()
-	}
-	signIn, err := r.CheckSignIn(ctx)
-	if err != nil {
-		release()
-		return err
-	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
-		release()
-		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", err.Error())
-		return err
 	}
 	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
 	if err != nil {
@@ -192,7 +181,21 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", "auto-capped")
 		return explained(conflict("auto-capped"), fmt.Sprintf("The engine already ran %d automatic reviews on this branch, its limit, so it doesn't start more on the agent's request. Press Review to start them yourself.", MaxAutoRuns))
 	}
-	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewer container's sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch), Req: t.Req}
+	if !r.growRuns(t.SID, len(plans)) {
+		release()
+		return explained(limited("reviews"), fmt.Sprintf("This review needs %d reviewer runs, and with the runs already going the engine would pass its limit of %d at once. Wait for one to finish.", len(plans), MaxReviewerRuns))
+	}
+	signIn, err := r.CheckSignIn(ctx)
+	if err != nil {
+		release()
+		return err
+	}
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the review"); err != nil {
+		release()
+		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", err.Error())
+		return err
+	}
+	view := ReviewView{Commit: head, Base: base, Branch: t.Branch, Running: true, Note: "Checking the reviewers' sandbox…", SignIn: &signIn, SessionCostUSD: r.branchCost(t.Branch), Req: t.Req}
 	for _, p := range plans {
 		view.Roles = append(view.Roles, RoleReview{Role: p.q.Role, Name: ReviewerName(p.q), Agent: p.q.Agent, State: review.Running, Why: p.q.Why,
 			Round: p.round, Limit: limit, Since: p.since, Previous: p.previous != "", Override: p.kept, Run: p.run, Runs: p.runs, Advisory: p.q.Advisory})

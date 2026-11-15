@@ -493,7 +493,7 @@ func (l *Lessons) Suggest(ctx context.Context, project string, costOK bool) erro
 	shared.For(ctx, l.cfg.Logger).Info("lessons", "event", "started", "findings", len(given))
 	r.wg.Go(func() {
 		defer r.release(key)
-		run := l.suggest(project, given, plugin)
+		run := l.suggest(shared.WithRequest(r.cfg.Base, shared.RequestOf(ctx)), project, given, plugin)
 		run.At, run.Given = l.cfg.Now(), len(given)
 		l.setRun(project, run)
 		shared.For(ctx, l.cfg.Logger).Info("lessons", "event", "finished", "state", run.State)
@@ -501,10 +501,9 @@ func (l *Lessons) Suggest(ctx context.Context, project string, costOK bool) erro
 	return nil
 }
 
-func (l *Lessons) suggest(project string, given []LessonFinding, plugin string) LessonRun {
+func (l *Lessons) suggest(ctx context.Context, project string, given []LessonFinding, plugin string) LessonRun {
 	r := l.cfg.Reviews
 	run := LessonRun{State: TestListFailed}
-	ctx := r.cfg.Base
 	var comments []PullComment
 	read := l.cfg.Comments
 	if read == nil {
@@ -689,22 +688,21 @@ func (r *Reviews) release(key string) {
 
 func (r *Reviews) startProjectRun(ctx context.Context, key string, costOK bool, what string) (string, error) {
 	r.mu.Lock()
-	if r.running[key] {
+	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
 		return "", explained(conflict("writing"), "A run for "+what+" is going. Wait for it to finish.")
 	}
-	if len(r.running) >= MaxReviewing {
+	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
-		return "", explained(limited("reviews"), fmt.Sprintf("The reviewer container runs at most %d reviews or other reviewer runs at once. Wait for one to finish.", MaxReviewing))
+		return "", err
 	}
-	r.running[key] = true
 	r.mu.Unlock()
 	signIn, err := r.CheckSignIn(ctx)
 	if err != nil {
 		r.release(key)
 		return "", err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, what); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), costOK, what); err != nil {
 		r.release(key)
 		return "", err
 	}

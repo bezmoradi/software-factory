@@ -79,14 +79,14 @@ func (d *Dispatcher) containerWords(target string) string {
 	if box, ok := TargetBox(target); ok {
 		return "session's container (" + BoxContainer(box) + ")"
 	}
-	return "reviewer container"
+	return "reviewer containers"
 }
 
 func (d *Dispatcher) runsCheck(target string) string {
 	if box, ok := TargetBox(target); ok {
 		return "docker ps --filter name=" + BoxContainer(box)
 	}
-	return Compose() + " ps reviewer"
+	return Compose() + " ps helper"
 }
 
 func (d *Dispatcher) keyRoutes() (map[string]KeyRoute, bool) {
@@ -267,7 +267,9 @@ func (r *Reviews) busy() []string {
 		out = append(out, k)
 	}
 	for agent := range r.checking {
-		out = append(out, reviewerCheckKey+agent)
+		if _, held := r.running[reviewerCheckKey+agent]; !held {
+			out = append(out, reviewerCheckKey+agent)
+		}
 	}
 	return out
 }

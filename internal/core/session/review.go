@@ -17,17 +17,18 @@ import (
 )
 
 const (
-	ReviewFor      = 20 * time.Minute
-	ReviewProvider = "knackpack@knackpack"
-	MaxReviewing   = 2
-	maxReviewText  = 4000
-	MaxFullReply   = 64 << 10
-	MaxEarlierFile = MaxFullReply + 16<<10
-	clippedMiddle  = "[Software Factory: the middle of the reply is left out.]"
-	keptRecords    = 500
-	reviewCheck    = 90 * time.Second
-	reviewSlack    = 30 * time.Second
-	stopped        = "the engine stopped before this review finished"
+	ReviewFor       = 20 * time.Minute
+	ReviewProvider  = "knackpack@knackpack"
+	MaxReviewerRuns = 8
+	SignInKeptFor   = 10 * time.Minute
+	maxReviewText   = 4000
+	MaxFullReply    = 64 << 10
+	MaxEarlierFile  = MaxFullReply + 16<<10
+	clippedMiddle   = "[Software Factory: the middle of the reply is left out.]"
+	keptRecords     = 500
+	reviewCheck     = 90 * time.Second
+	reviewSlack     = 30 * time.Second
+	stopped         = "the engine stopped before this review finished"
 )
 
 var DefaultReviewers = map[review.Role]string{
@@ -229,7 +230,7 @@ type ReviewsConfig struct {
 type Reviews struct {
 	cfg        ReviewsConfig
 	mu         sync.Mutex
-	running    map[string]bool
+	running    map[string]int
 	views      map[string]ReviewView
 	approvals  map[string]viewApproval
 	approvalAt uint64
@@ -240,6 +241,8 @@ type Reviews struct {
 	wg         sync.WaitGroup
 	done       func(sid, head string)
 	signIn     *SignIn
+	signStale  bool
+	signGen    uint64
 	tests      map[string]TestListView
 	keyGate    func(context.Context) error
 
@@ -305,7 +308,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]bool{}, views: map[string]ReviewView{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
 		return nil, err
 	}
@@ -644,6 +647,11 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		})
 	}
 	wg.Wait()
+	r.mu.Lock()
+	if _, held := r.running[t.SID]; held {
+		r.running[t.SID] = 0
+	}
+	r.mu.Unlock()
 	if due := r.checksDue(entries); len(due) > 0 {
 		view.Note = strings.TrimSpace(held + " Checking the reviewer after an update: it reviews a change with a planted defect and a clean one, the same way as this review.")
 		r.show(t.SID, view.clone())
@@ -656,9 +664,48 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	r.show(t.SID, shown)
 }
 
+func (r *Reviews) heldLocked() int {
+	n := 0
+	for _, runs := range r.running {
+		n += runs
+	}
+	return n
+}
+
+func (r *Reviews) holdLocked(key string) error {
+	return r.holdRunsLocked(key, 1)
+}
+
+func (r *Reviews) holdRunsLocked(key string, runs int) error {
+	held := r.heldLocked()
+	if held >= MaxReviewerRuns || held > 0 && held+runs > MaxReviewerRuns {
+		return explained(limited("reviews"), fmt.Sprintf("The engine runs at most %d reviewer runs at once, each in a reviewer container of its own. Wait for one to finish.", MaxReviewerRuns))
+	}
+	r.running[key] = runs
+	return nil
+}
+
+func (r *Reviews) growRuns(key string, runs int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	others := r.heldLocked() - r.running[key]
+	if others > 0 && others+runs > MaxReviewerRuns {
+		return false
+	}
+	r.running[key] = max(runs, 1)
+	return true
+}
+
+func requestOr(ctx context.Context, req string) string {
+	if req != "" {
+		return req
+	}
+	return shared.RequestOf(ctx)
+}
+
 func (r *Reviews) check(ctx context.Context) string {
 	if r.cfg.Sandbox == nil {
-		return "this engine has no sandbox check for the reviewer container"
+		return "this engine has no sandbox check for the reviewer containers"
 	}
 	if why := r.keyRouted(ctx); why != "" {
 		return why
@@ -669,9 +716,9 @@ func (r *Reviews) check(ctx context.Context) string {
 	if o.Event == level.CheckPassed {
 		return ""
 	}
-	why := "the reviewer container's sandbox check failed"
+	why := "the reviewers' sandbox check of egress failed"
 	if o.Event != level.CheckFailed {
-		why = "the reviewer container's sandbox check couldn't run"
+		why = "the reviewers' sandbox check of egress couldn't run"
 	}
 	if len(o.Parts) > 0 {
 		why += ": " + strings.Join(o.Parts, "; ")
@@ -822,22 +869,64 @@ func (r *Reviews) branchCost(branch string) float64 {
 
 func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 	if r.cfg.SignIns == nil {
-		return SignIn{}, explained(conflict("no sign-in check"), "This engine can't check the reviewer container's sign-in, so it doesn't start reviews.")
+		return SignIn{}, explained(conflict("no sign-in check"), "This engine can't check the reviewers' sign-in, so it doesn't start reviews.")
 	}
+	started := r.cfg.Now()
+	r.mu.Lock()
+	gen := r.signGen
+	r.mu.Unlock()
 	sctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
 	s, err := r.cfg.SignIns.SignIn(sctx, Command{Argv: []string{r.cfg.Command, "auth", "status"}, Dir: r.cfg.Dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: signInFor}, "claude")
+	if busy := reviewersBusy(err); busy != nil {
+		return SignIn{}, busy
+	}
 	if err != nil {
 		shared.For(ctx, r.cfg.Logger).Warn("review sign-in check", "event", "failed")
-		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check the reviewer container's sign-in, so the review doesn't start: "+hostMessage(err))
+		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check the reviewers' sign-in, so the review doesn't start: "+hostMessage(err))
 	}
-	s.CheckedAt = r.cfg.Now()
+	s.CheckedAt = started
 	r.mu.Lock()
-	r.signIn = &s
+	current := r.signGen == gen
+	if current {
+		r.signIn = &s
+		r.signStale = false
+	}
 	r.mu.Unlock()
-	r.cfg.ShowSignIn(s)
-	shared.For(ctx, r.cfg.Logger).Info("review sign-in check", "method", string(s.Method))
+	if current {
+		r.cfg.ShowSignIn(s)
+	}
+	shared.For(ctx, r.cfg.Logger).Info("review sign-in check", "method", string(s.Method), "kept", current)
 	return s, nil
+}
+
+func (r *Reviews) KnownSignIn(ctx context.Context) (SignIn, error) {
+	r.mu.Lock()
+	s, stale := r.signIn, r.signStale
+	r.mu.Unlock()
+	if s != nil && !stale && r.cfg.Now().Sub(s.CheckedAt) < SignInKeptFor {
+		return *s, nil
+	}
+	fresh, err := r.CheckSignIn(ctx)
+	if err != nil && isBusy(err) && s != nil {
+		kept := *s
+		kept.Busy = true
+		return kept, nil
+	}
+	return fresh, err
+}
+
+func (r *Reviews) signInChanging() {
+	r.mu.Lock()
+	r.signGen++
+	r.mu.Unlock()
+}
+
+func (r *Reviews) SignInChanged() {
+	r.mu.Lock()
+	r.signStale = true
+	r.signGen++
+	r.mu.Unlock()
 }
 
 func (r *Reviews) SignIn() (SignIn, bool) {

@@ -113,7 +113,10 @@ func (r *recipe) labels(box string) map[string]string {
 }
 
 func (r *recipe) containerLabels(box string) map[string]string {
-	out := r.labels(box)
+	return r.blanked(r.labels(box))
+}
+
+func (r *recipe) blanked(out map[string]string) map[string]string {
 	for k := range r.imageLabel {
 		if strings.HasPrefix(k, composeLabels) {
 			out[k] = ""
@@ -237,8 +240,12 @@ type generic struct {
 }
 
 func (r *recipe) genericFor(box string, subnet netip.Prefix) generic {
+	return genericOf(subnet, networkName(r.project, box), "{network}", homeName(r.project, box), "{home}", box, "{box}")
+}
+
+func genericOf(subnet netip.Prefix, pairs ...string) generic {
 	return generic{
-		names:   strings.NewReplacer(networkName(r.project, box), "{network}", homeName(r.project, box), "{home}", box, "{box}"),
+		names:   strings.NewReplacer(pairs...),
 		engine:  engineOf(subnet).String(),
 		egress:  egressOf(subnet).String(),
 		agent:   agentOf(subnet).String(),
@@ -302,11 +309,15 @@ func (g generic) logOf(cfg map[string]string) map[string]string {
 }
 
 func (r *recipe) labelsWanted(box string) map[string]string {
+	return r.wanted(r.containerLabels(box))
+}
+
+func (r *recipe) wanted(labels map[string]string) map[string]string {
 	out := maps.Clone(r.imageLabel)
 	if out == nil {
 		out = map[string]string{}
 	}
-	maps.Copy(out, r.containerLabels(box))
+	maps.Copy(out, labels)
 	return out
 }
 
@@ -379,8 +390,10 @@ func mergeEnv(image, ours []string) []string {
 }
 
 func (r *recipe) expectedView(box string, subnet netip.Prefix, vols stackVolumes) recipeView {
-	c := r.create(box, subnet, vols)
-	g := r.genericFor(box, subnet)
+	return r.viewOf(r.create(box, subnet, vols), r.labelsWanted(box), r.genericFor(box, subnet), subnet)
+}
+
+func (r *recipe) viewOf(c containerCreateJSON, labels map[string]string, g generic, subnet netip.Prefix) recipeView {
 	entry := r.entrypoint
 	if c.Entrypoint != nil {
 		entry = c.Entrypoint
@@ -394,7 +407,7 @@ func (r *recipe) expectedView(box string, subnet netip.Prefix, vols stackVolumes
 	return recipeView{
 		Image: c.Image, User: c.User, Entrypoint: slices.Clone(entry), Cmd: c.Cmd,
 		Env:    g.all(mergeEnv(r.imageEnv, c.Env), g.name),
-		Labels: labelsView(r.labelsWanted(box), g), Health: c.Healthcheck,
+		Labels: labelsView(labels, g), Health: c.Healthcheck,
 		Init: h.Init, ReadonlyRootfs: h.ReadonlyRootfs, CapDrop: h.CapDrop, Privileged: h.Privileged, SecurityOpt: h.SecurityOpt,
 		OomScoreAdj: h.OomScoreAdj, Memory: h.Memory, MemorySwap: h.MemorySwap, NanoCPUs: h.NanoCPUs, PidsLimit: h.PidsLimit,
 		Restart: h.RestartPolicy, LogType: h.LogConfig.Type, LogConfig: g.logOf(h.LogConfig.Config),
@@ -414,7 +427,10 @@ func labelsView(labels map[string]string, g generic) map[string]string {
 }
 
 func (r *recipe) inspectedView(ci containerInspectJSON, box string, subnet netip.Prefix) recipeView {
-	g := r.genericFor(box, subnet)
+	return inspectedIn(ci, r.genericFor(box, subnet), networkName(r.project, box))
+}
+
+func inspectedIn(ci containerInspectJSON, g generic, own string) recipeView {
 	h := ci.HostConfig
 	var points []pointView
 	for _, p := range ci.Mounts {
@@ -426,7 +442,7 @@ func (r *recipe) inspectedView(ci containerInspectJSON, box string, subnet netip
 	address := ""
 	for name, ep := range ci.NetworkSettings.Networks {
 		networks = append(networks, g.name(name))
-		if name != networkName(r.project, box) {
+		if name != own {
 			continue
 		}
 		if ep.IPAMConfig != nil {

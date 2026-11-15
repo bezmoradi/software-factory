@@ -192,6 +192,8 @@ type engineParts struct {
 	allowlist  *session.Allowlist
 	catalogs   *session.Catalogs
 	boxes      session.Boxes
+
+	reviewerHosts *reviewerHosts
 }
 
 func reachable(b session.Boxes) func(context.Context) error {
@@ -328,7 +330,8 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if err != nil {
 		return engineParts{}, err
 	}
-	reviews, err := reviewer(base, cfg, reg, source, repos, expected, agentFiles, logger)
+	makers, _ := helper.(boxes.ReviewerMaker)
+	reviews, reviewerHosts, err := reviewer(base, cfg, reg, source, repos, expected, agentFiles, makers, routes, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -378,7 +381,12 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Logger:       logger,
 	})
 	if allow != nil {
-		allow.OnChange(func() { d.Recheck(base) })
+		allow.OnChange(func() {
+			if reviews != nil {
+				reviews.SignInChanged()
+			}
+			d.Recheck(base)
+		})
 		allow.UseKeys(d)
 		d.UseGateways(allow)
 	}
@@ -409,7 +417,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -577,7 +585,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 			_ = pageLn.Close()
 			return fmt.Errorf("agent listener: %w", err)
 		}
-		agentLn = page.NewBoxListener(ln, dropCounter(logger, "agent-listener"))
+		agentLn = page.NewBoxListener(ln, dropCounter(logger, "agent-listener", "a session container's"))
 		if parts.routes != nil {
 			parts.routes.useListener(agentLn)
 		}
@@ -626,11 +634,26 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		}
 		go parts.dispatcher.WatchStates(ctx, session.StatesEvery)
 	}
+	if parts.reviewerHosts != nil {
+		go parts.reviewerHosts.watch(ctx)
+	}
 	if parts.reviews != nil {
 		go func() {
-			sctx, cancel := context.WithTimeout(ctx, time.Minute)
-			defer cancel()
-			_, _ = parts.reviews.CheckSignIn(sctx)
+			for range reviewerSignInTries {
+				sctx, cancel := context.WithTimeout(ctx, time.Minute)
+				_, err := parts.reviews.CheckSignIn(sctx)
+				cancel()
+				if err == nil || ctx.Err() != nil {
+					return
+				}
+				t := time.NewTimer(reviewerSweepWait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return
+				case <-t.C:
+				}
+			}
 		}()
 	}
 	if parts.installer != nil && cfg.Install.AtStart {
@@ -651,7 +674,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if helperAddress == "" {
 		helperAddress = "off"
 	}
-	reviewerHost := cfg.Review.Host
+	reviewerHost := "helper"
 	if parts.reviews == nil {
 		reviewerHost = "off"
 	}

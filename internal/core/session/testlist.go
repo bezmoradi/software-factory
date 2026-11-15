@@ -58,7 +58,7 @@ func (d *Dispatcher) TestList(ctx context.Context, sid string, costOK bool) erro
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't write a manual test list.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't write a manual test list.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
@@ -88,20 +88,20 @@ func (r *Reviews) setTestList(sid string, v TestListView) {
 }
 
 func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
+	t.Req = requestOr(ctx, t.Req)
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
 		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't write a test list for it.")
 	}
 	key := testListKey + t.SID
 	r.mu.Lock()
-	if r.running[key] {
+	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
 		return explained(conflict("writing"), "A manual test list for this session is being written. Wait for it to finish.")
 	}
-	if len(r.running) >= MaxReviewing {
+	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
-		return explained(limited("reviews"), fmt.Sprintf("The reviewer container runs at most %d reviews or test lists at once. Wait for one to finish.", MaxReviewing))
+		return err
 	}
-	r.running[key] = true
 	r.mu.Unlock()
 	release := func() {
 		r.mu.Lock()
@@ -113,7 +113,7 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the manual test list"); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, "the manual test list"); err != nil {
 		release()
 		return err
 	}
@@ -158,7 +158,7 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 
 func (r *Reviews) writeTestList(t ReviewTarget, base, head, plugin string) TestListView {
 	v := TestListView{Commit: head, Branch: t.Branch, State: TestListFailed}
-	ctx := r.cfg.Base
+	ctx := shared.WithRequest(r.cfg.Base, t.Req)
 	if why := r.check(ctx); why != "" {
 		v.Reason = "it didn't start: " + why
 		return v

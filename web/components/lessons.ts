@@ -112,7 +112,7 @@ class SfLessons extends HTMLElement {
     }
     if (body.op === 'suggest') {
       this.#said.className = 'small muted'
-      this.#said.textContent = 'The run started in the reviewer container. Its lines show here when it ends.'
+      this.#said.textContent = 'The run started in a reviewer container. Its lines show here when it ends.'
       return this.#call({ op: 'read', name: project })
     }
     const v: unknown = await res.json().catch(() => null)
@@ -150,7 +150,7 @@ class SfLessons extends HTMLElement {
         void this.#call({ op: 'suggest', name: this.#project })
       })
       b.setAttribute('aria-disabled', String(running))
-      b.title = 'Starts a run in the reviewer container, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
+      b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)
     }
     if (run && run.state !== 'running') {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,8 +51,9 @@ type refusalJSON struct {
 }
 
 type boxesJSON struct {
-	Version string   `json:"version"`
-	Subnets []string `json:"subnets"`
+	Version   string   `json:"version"`
+	Subnets   []string `json:"subnets"`
+	Reviewers []string `json:"reviewers"`
 }
 
 type refusalsJSON struct {
@@ -73,12 +75,25 @@ type refusedJSON struct {
 }
 
 type StatusConfig struct {
-	Live    *Live
-	Books   []*Refusals
-	Seen    map[string]*Seen
-	KeyFile string
-	Subnets *Subnets
-	Logger  shared.Logger
+	Live      *Live
+	Books     []*Refusals
+	Seen      map[string]*Seen
+	KeyFile   string
+	Subnets   *Subnets
+	Reviewers *Subnets
+	Logger    shared.Logger
+}
+
+func prefixesOf(raw []string) ([]netip.Prefix, bool) {
+	out := make([]netip.Prefix, 0, len(raw))
+	for _, r := range raw {
+		p, err := netip.ParsePrefix(r)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, p)
+	}
+	return out, true
 }
 
 func StatusHandler(cfg StatusConfig) http.Handler {
@@ -150,7 +165,7 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 		if !keyed(w, r, cfg.KeyFile) {
 			return
 		}
-		if cfg.Subnets == nil {
+		if cfg.Subnets == nil || cfg.Reviewers == nil {
 			http.Error(w, "egress takes no box subnets", http.StatusNotFound)
 			return
 		}
@@ -166,24 +181,37 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 		var q boxesJSON
 		dec := json.NewDecoder(bytes.NewReader(data))
 		dec.DisallowUnknownFields()
-		if dec.Decode(&q) != nil || q.Version != Version || q.Subnets == nil || len(q.Subnets) > MaxSubnets {
+		if dec.Decode(&q) != nil || q.Version != Version || q.Subnets == nil || q.Reviewers == nil || len(q.Subnets) > MaxSubnets || len(q.Reviewers) > MaxSubnets {
 			http.Error(w, "the subnets aren't ones egress reads", http.StatusBadRequest)
 			return
 		}
-		list := make([]netip.Prefix, 0, len(q.Subnets))
-		for _, raw := range q.Subnets {
-			p, err := netip.ParsePrefix(raw)
-			if err != nil {
-				http.Error(w, "a subnet isn't one egress reads", http.StatusBadRequest)
+		boxes, ok := prefixesOf(q.Subnets)
+		reviewers, rok := prefixesOf(q.Reviewers)
+		if !ok || !rok {
+			http.Error(w, "a subnet isn't one egress reads", http.StatusBadRequest)
+			return
+		}
+		for _, p := range reviewers {
+			if slices.ContainsFunc(boxes, p.Overlaps) {
+				http.Error(w, "a subnet is both a session container's and a reviewer container's", http.StatusBadRequest)
 				return
 			}
-			list = append(list, p)
 		}
-		if err := cfg.Subnets.Replace(list); err != nil {
+		for _, check := range []error{cfg.Subnets.Check(boxes), cfg.Reviewers.Check(reviewers)} {
+			if check != nil {
+				http.Error(w, check.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if err := cfg.Subnets.Replace(boxes); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, boxesJSON{Version: Version, Subnets: q.Subnets})
+		if err := cfg.Reviewers.Replace(reviewers); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, boxesJSON{Version: Version, Subnets: q.Subnets, Reviewers: q.Reviewers})
 	})
 	mux.HandleFunc("GET /refused", func(w http.ResponseWriter, r *http.Request) {
 		if !keyed(w, r, cfg.KeyFile) {

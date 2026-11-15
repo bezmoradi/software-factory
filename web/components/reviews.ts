@@ -145,7 +145,7 @@ class SfReviews extends HTMLElement {
       emit(this, 'sf-review', { all: false })
     })
     b.setAttribute('aria-disabled', String(off))
-    b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in the reviewer container, compared with what the remote\'s main branch lacks'
+    b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in a reviewer container each, compared with what the remote\'s main branch lacks'
     const decided = (state: string) => state === 'pass' || state === 'block' || state === 'overridden'
     const verdicts = !r?.running && ((value.gate ?? []).some(x => decided(x.state)) || (!!r && (!value.head || value.head === r.commit) && r.roles.some(x => decided(x.state))))
     const again = verdicts ? button('Run all again', 'small', () => {
@@ -154,7 +154,7 @@ class SfReviews extends HTMLElement {
     }) : null
     if (again) {
       again.setAttribute('aria-disabled', String(off))
-      again.title = 'Runs every required reviewer on the latest commit again, those that already passed or blocked it included, for fresh verdicts: each one is a run in the reviewer container'
+      again.title = 'Runs every required reviewer on the latest commit again, those that already passed or blocked it included, for fresh verdicts: each one is a run in a reviewer container of its own'
     }
     const pushOff = value.pushing || !!value.disabled
     const p = button(value.pushing ? 'Pushing…' : 'Push', 'small', () => {
@@ -201,12 +201,12 @@ class SfReviews extends HTMLElement {
     if (who) {
       const si = r?.signIn ?? who.signIn
       const said = !si ? "The reviewers' sign-in hasn't been checked yet."
-        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in under Finish setting up on the Welcome page.'
+        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in under Start on the Welcome page.'
         : `The reviewers are signed in with ${text(si.words)}${si.costs ? '. Reviews cost money; the page asks first, and the engine starts none by itself' : ''}.`
       parts.push(el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said))
     }
     if (value.planned?.length) {
-      parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in the reviewer container, except one that already passed or blocked it:`))
+      parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in a reviewer container of its own, except one that already passed or blocked it:`))
       const list = el('ul', 'small planned')
       for (const x of value.planned) {
         const li = el('li', '', `${text(x.name)} (${text(x.agent)})${x.why ? `: ${text(x.why)}` : ''}`)
@@ -279,7 +279,7 @@ class SfReviews extends HTMLElement {
     const t = this.#explainState.run
     return asideBox({
       id: 'explain-button', title: 'Explain this change', start: 'Explain this change', busy: 'Explaining…', label: 'The explanation of the change',
-      hint: "Asks Claude Code in the reviewer container, with read-only tools, to explain the session branch's change against the remote's main branch. It isn't a review: the push gate and the agent never see it",
+      hint: "Asks Claude Code in a reviewer container of its own, with read-only tools, to explain the session branch's change against the remote's main branch. It isn't a review: the push gate and the agent never see it",
       intro: 'On request, a reviewer run explains what the branch changes and where to look closely. It costs one run, and nothing reads it but you.',
       run: t, asking: this.#explainState.asking, disabled: !!value.disabled,
       stale: t && value.head && value.head !== t.commit ? ", which isn't the branch's latest commit any more" : '',
@@ -298,7 +298,7 @@ class SfReviews extends HTMLElement {
     })
     b.id = 'test-list-button'
     b.setAttribute('aria-disabled', String(off))
-    b.title = 'Asks Claude Code in the reviewer container, with read-only tools, for steps to try by hand on this session branch\'s latest commit. It isn\'t a review: the push gate and the agent never see it'
+    b.title = 'Asks Claude Code in a reviewer container of its own, with read-only tools, for steps to try by hand on this session branch\'s latest commit. It isn\'t a review: the push gate and the agent never see it'
     const head = el('div', 'row test-list-head')
     head.append(el('span', 'small', 'Manual test list'), el('span', 'spacer'), b)
     box.append(head)
@@ -309,7 +309,7 @@ class SfReviews extends HTMLElement {
     const cost = money(t.costUsd)
     const about = `For commit ${shortSha(t.commit)} on ${text(t.branch)}${value.head && value.head !== t.commit ? ', which isn\'t the branch\'s latest commit any more' : ''}${cost ? `; ≈ ${cost}, Claude Code's own estimate` : ''}.`
     box.append(el('p', 'small muted', about))
-    if (t.state === 'running') box.append(el('p', 'small muted', 'Writing it in the reviewer container…'))
+    if (t.state === 'running') box.append(el('p', 'small muted', 'Writing it in a reviewer container…'))
     if (t.reason) box.append(el('p', `small ${t.state === 'withheld' ? 'warn' : 'bad'}`, sentence(`${t.state === 'withheld' ? 'Not shown' : 'It failed'}: ${text(t.reason)}`)))
     if (t.state === 'done' && t.steps?.length) {
       const walk = el('sf-walkthrough')
@@ -384,7 +384,7 @@ class SfReviews extends HTMLElement {
   #progress(role: ReviewRole): HTMLElement | null {
     const p = role.progress
     if (role.state === 'running') {
-      const node = el('div', 'small muted review-progress', p ? `Running for ${duration(p.elapsedMs)} · ${calls(p.toolCalls)}` : 'Starting in the reviewer container…')
+      const node = el('div', 'small muted review-progress', p ? `Running for ${duration(p.elapsedMs)} · ${calls(p.toolCalls)}` : 'Starting its reviewer container…')
       if (p) {
         node.dataset.elapsed = String(p.elapsedMs)
         node.dataset.since = String(performance.now())

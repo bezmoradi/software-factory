@@ -224,11 +224,11 @@ class SfReviewerChecks extends HTMLElement {
     const off = target.disabled || this.#busy !== ''
     const help = el('div', 'small muted')
     help.append(
-      el('p', '', 'After the reviewer container\'s Claude Code, a role\'s plugin or agent file, or its model or effort changes, the engine checks that role, run with the role\'s own model and effort, before its next pass counts: it reviews a change with a planted defect, which it must block (the simplicity checker may instead report it as a finding, as knackpack\'s slop reviewer does with code that costs upkeep), and a clean change, which it should pass. A role that passes the defect without reporting it stops counting until a later check passes; a role that blocks the clean change only gets a warning; a check with no verdict leaves passes counting until you press Check now, which checks again with the model and effort of the latest check shown. Each run\'s reply is kept, under the result.'),
+      el('p', '', 'After the reviewers\' Claude Code, a role\'s plugin or agent file, or its model or effort changes, the engine checks that role, run with the role\'s own model and effort, before its next pass counts: it reviews a change with a planted defect, which it must block (the simplicity checker may instead report it as a finding, as knackpack\'s slop reviewer does with code that costs upkeep), and a clean change, which it should pass. A role that passes the defect without reporting it stops counting until a later check passes; a role that blocks the clean change only gets a warning; a check with no verdict leaves passes counting until you press Check now, which checks again with the model and effort of the latest check shown. Each run\'s reply is kept, under the result.'),
     )
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer checks'), help]
     if (v) {
-      const facts = [`The reviewer container runs Claude Code ${visible(v.claudeCode) || '(not read yet)'}`]
+      const facts = [`The reviewer containers run Claude Code ${visible(v.claudeCode) || '(not read yet)'}`]
       if (v.plugin) facts.push(`knackpack ${visible(short(v.plugin))}`)
       const min = [v.minimum.claudeCode ? `Claude Code ${visible(v.minimum.claudeCode)}` : '', v.minimum.plugin ? `knackpack ${visible(short(v.minimum.plugin))}` : ''].filter(Boolean)
       parts.push(el('p', 'small muted', `${facts.join(', ')}. ${min.length ? `Passes by an older reviewer than ${min.join(' and ')} don't count.` : 'This engine sets no minimum reviewer version.'}`))

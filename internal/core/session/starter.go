@@ -176,7 +176,7 @@ type Dispatcher struct {
 	approvalMu sync.Mutex
 	saveMu     sync.Mutex
 	home       *HomeSettings
-	keyMu      sync.Mutex
+	keyMu      keyLock
 	gateways   GatewayRoutes
 
 	forges *Forges
@@ -1209,7 +1209,7 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't run reviews.")
 	}
 	if why := d.reg.halt.automatic(); auto && why != "" {
 		return explained(conflict("halted"), why)
@@ -1235,7 +1235,7 @@ func (d *Dispatcher) Override(ctx context.Context, sid, agent, commit, reason st
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it has no verdicts to override.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it has no verdicts to override.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {

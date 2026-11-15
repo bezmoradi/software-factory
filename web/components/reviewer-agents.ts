@@ -160,7 +160,7 @@ class SfReviewerAgents extends HTMLElement {
     help.id = 'reviewer-agent-help'
     help.append(
       el('p', '', `A Claude Code agent file (.md) of your own can fill the bug hunter or simplicity checker role in place of knackpack's agent. Its front matter may hold only name, description, model and tools, with tools any of ${tools}. The engine refuses mcpServers, hooks, permissionMode, skills and every other key, and says why.`),
-      el('p', '', 'The body is your own instructions. They run in the trusted reviewer container, with read-only tools, on the code under review, so write them as you would a reviewer you trust. The engine writes the file into that container for each review, never from the repository.'),
+      el('p', '', 'The body is your own instructions. They run in a trusted reviewer container, with read-only tools, on the code under review, so write them as you would a reviewer you trust. The engine writes the file into that container for each review, never from the repository.'),
       el('p', '', 'Its reply must end with a line of its own, Verdict: pass or Verdict: block. A last line knackpack-verdict/1: pass or knackpack-verdict/1: block counts too. Anything else counts as no verdict, and a push still needs every required role passing.'),
     )
     const label = el('label', 'small', 'Add an agent file')

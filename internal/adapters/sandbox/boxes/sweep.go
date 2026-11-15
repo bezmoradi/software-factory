@@ -26,6 +26,9 @@ func (h *Helper) Sweep(ctx context.Context) error {
 				h.sweepRenamed(ctx, twin, name, c)
 				continue
 			}
+			if _, reviewer := reviewerLabelled(h.rec.project, c.Labels); reviewer {
+				continue
+			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "container", "name", name, "reason", "it carries the stack's label without every one of the helper's labels and names")
 			continue
 		}
@@ -40,7 +43,7 @@ func (h *Helper) Sweep(ctx context.Context) error {
 		unlock := h.locks.lock(box)
 		err := h.dropContainer(ctx, c.ID)
 		unlock()
-		h.logResult("sweep_container", box, c.Labels[LabelRecipe], err)
+		h.logResult(ctx, "sweep_container", box, c.Labels[LabelRecipe], err)
 	}
 	var nets []networkInspectJSON
 	if err := h.docker.get(ctx, "/networks", h.stackFilter(), &nets); err != nil {
@@ -49,6 +52,9 @@ func (h *Helper) Sweep(ctx context.Context) error {
 	for _, n := range nets {
 		box, ok := ownedName(h.rec.project, boxPrefix, n.Name, n.Labels)
 		if !ok {
+			if _, reviewer := ownedReviewer(h.rec.project, n.Name, n.Labels); reviewer {
+				continue
+			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "network", "name", n.Name, "reason", "it carries the stack's label without every one of the helper's labels and names")
 			continue
 		}
@@ -65,13 +71,14 @@ func (h *Helper) Sweep(ctx context.Context) error {
 			err = h.dropNetwork(ctx, fresh)
 		}
 		unlock()
-		h.logResult("sweep_network", box, "", err)
+		h.logResult(ctx, "sweep_network", box, "", err)
 	}
 	if v, err := h.stackVolume(ctx, volumeWork); err == nil {
 		if found, err := h.strays(ctx, v); err == nil && len(found) > 0 {
 			h.logger.Warn("box sweep", "event", "workspace_shared", "containers", len(found), "names", strings.Join(found, ","), "fix", "remove them, such as an earlier version's agent container (docker compose up -d --remove-orphans); no session starts until they are gone")
 		}
 	}
+	h.SweepReviewers(ctx, h.cfg.SweepDry)
 	h.Reconnect(ctx)
 	return nil
 }
@@ -84,7 +91,7 @@ func (h *Helper) sweepRenamed(ctx context.Context, box, name string, c container
 	unlock := h.locks.lock(box)
 	err := h.dropContainer(ctx, c.ID)
 	unlock()
-	h.logResult("sweep_renamed", box, "", err)
+	h.logResult(ctx, "sweep_renamed", box, "", err)
 }
 
 func (h *Helper) runningBoxes(ctx context.Context) []string {
@@ -111,6 +118,7 @@ func (h *Helper) Reconnect(ctx context.Context) {
 	if m.engine == "" && m.egress == "" {
 		return
 	}
+	h.reconnectReviewers(ctx, m)
 	for _, box := range h.runningBoxes(ctx) {
 		unlock := h.locks.lock(box)
 		n, err := h.boxNetwork(ctx, box)
@@ -118,12 +126,12 @@ func (h *Helper) Reconnect(ctx context.Context) {
 			if subnet, ok := boxSubnet(n); ok {
 				if m.engine != "" {
 					if err := h.ensure(ctx, n, m.engine, engineOf(subnet)); err != nil {
-						h.logResult("reconnect_engine", box, "", err)
+						h.logResult(ctx, "reconnect_engine", box, "", err)
 					}
 				}
 				if m.egress != "" {
 					if err := h.ensure(ctx, n, m.egress, egressOf(subnet)); err != nil {
-						h.logResult("reconnect_egress", box, "", err)
+						h.logResult(ctx, "reconnect_egress", box, "", err)
 					}
 				}
 			}
@@ -209,6 +217,7 @@ func (h *Helper) StopAll(ctx context.Context) {
 			}
 		})
 	}
+	wg.Go(func() { h.SweepReviewers(ctx, false) })
 	wg.Wait()
 	h.logger.Info("box helper", "event", "stopped_every_box", "boxes", len(boxes))
 }

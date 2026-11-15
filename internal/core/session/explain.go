@@ -71,7 +71,7 @@ func (d *Dispatcher) Explain(ctx context.Context, sid string, costOK bool) error
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't explain a change.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't explain a change.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
@@ -116,20 +116,20 @@ func (r *Reviews) setAside(sid string, v AsideView) {
 }
 
 func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) error {
+	t.Req = requestOr(ctx, t.Req)
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
 		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't write "+a.what+".")
 	}
 	key := a.kind + ":" + t.SID
 	r.mu.Lock()
-	if r.running[key] {
+	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
 		return explained(conflict("writing"), a.busy+" Wait for it to finish.")
 	}
-	if len(r.running) >= MaxReviewing {
+	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
-		return explained(limited("reviews"), fmt.Sprintf("The reviewer container runs at most %d reviews or other reviewer runs at once. Wait for one to finish.", MaxReviewing))
+		return err
 	}
-	r.running[key] = true
 	r.mu.Unlock()
 	release := func() {
 		r.mu.Lock()
@@ -141,7 +141,7 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		release()
 		return err
 	}
-	if err := judge("The reviewer container's Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, a.what); err != nil {
+	if err := judge("The reviewers' Claude Code", signIn, r.cfg.Expected.Adopt(ReviewerAgent, signIn.Method), ReviewerSignInStep(), t.CostOK, a.what); err != nil {
 		release()
 		return err
 	}
@@ -186,7 +186,7 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 
 func (r *Reviews) runAside(t ReviewTarget, base, head, plugin string, a asideRun) AsideView {
 	v := AsideView{Kind: a.kind, Commit: head, Branch: t.Branch, State: TestListFailed, PlanHash: a.planHash, PlanPath: a.planPath}
-	ctx := r.cfg.Base
+	ctx := shared.WithRequest(r.cfg.Base, t.Req)
 	if why := r.check(ctx); why != "" {
 		v.Reason = "it didn't start: " + why
 		return v

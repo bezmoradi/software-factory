@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 type signInJSON struct {
@@ -152,7 +153,7 @@ func (s *Server) signIn(ctx context.Context, q signInJSON) (signInReply, *proble
 	default:
 		return signInReply{}, fail(http.StatusBadRequest, "kind", "")
 	}
-	s.log.Info("agent-host sign-in", "kind", q.Kind, "method", string(res.Method))
+	shared.For(ctx, s.log).Info("agent-host sign-in", "kind", q.Kind, "method", string(res.Method))
 	return signInReply{Method: string(res.Method), Endpoint: res.Endpoint, Plan: res.Plan, ExpiresAt: expiryText(res.ExpiresAt)}, nil
 }
 

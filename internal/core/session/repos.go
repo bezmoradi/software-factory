@@ -141,7 +141,7 @@ type Repos struct {
 	sessions func(name string) int
 	hosts    func()
 	removed  []func(ProjectID)
-	fetched  func(name, branch, commit string)
+	fetched  func(ctx context.Context, name, branch, commit string)
 
 	delivers  map[string]*sync.Mutex
 	fetches   map[string]uint64
@@ -153,7 +153,7 @@ type fetchDone struct {
 	commit string
 }
 
-func (c *Repos) OnFetched(f func(name, branch, commit string)) {
+func (c *Repos) OnFetched(f func(ctx context.Context, name, branch, commit string)) {
 	c.mu.Lock()
 	c.fetched = f
 	c.mu.Unlock()
@@ -702,7 +702,7 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	fetched := c.fetched
 	c.mu.Unlock()
 	if fetched != nil {
-		fetched(rec.Name, got.Branch, got.Commit)
+		fetched(ctx, rec.Name, got.Branch, got.Commit)
 	}
 	return got.Commit, nil
 }

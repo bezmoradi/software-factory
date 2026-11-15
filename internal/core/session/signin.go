@@ -47,6 +47,7 @@ type SignIn struct {
 	CheckedAt time.Time
 	Plan      string
 	ExpiresAt time.Time
+	Busy      bool
 }
 
 func (s SignIn) Costs() bool {
@@ -115,7 +116,7 @@ type Expectations interface {
 const ReviewerAgent = "reviewer"
 
 func ReviewerSignInStep() string {
-	return "press Sign Claude Code in under Finish setting up on the Welcome page, or run " + Compose() + " exec -it reviewer claude, then /login"
+	return "open Reviewers' sign-in under Start on the Welcome page"
 }
 
 const signInFor = 30 * time.Second

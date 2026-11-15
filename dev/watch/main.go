@@ -25,7 +25,7 @@ const (
 var (
 	compose  = []string{"compose", "-f", "compose.yaml", "-f", "compose.live.yaml"}
 	images   = []string{"software-factory:local", "software-factory:dev"}
-	live     = []string{"engine", "reviewer", "egress"}
+	live     = []string{"engine", "egress"}
 	roots    = []string{"cmd", "configs", "internal", "tools", "web", "go.mod", "go.sum", "README.md", "compose.yaml", "plugin", "Dockerfile"}
 	skipDirs = map[string]bool{"node_modules": true, "dist": true, ".git": true}
 	watched  = map[string]bool{".go": true, ".ts": true, ".css": true, ".html": true, ".svg": true, ".json": true, ".md": true, ".mod": true, ".sum": true, ".yaml": true}
@@ -109,7 +109,7 @@ func run(ctx context.Context) error {
 		if pageOnly {
 			say("Only the page changed, so only the engine was restarted. The page reloads itself once it reconnects.")
 		} else {
-			say("Restarted the engine, the reviewer and egress with the new code; each session's container runs it from its next start or wake. The page reloads itself once it reconnects.")
+			say("Restarted the engine and egress with the new code; each session's container runs it from its next start or wake, and each reviewer container from its start. The page reloads itself once it reconnects.")
 		}
 	}
 }

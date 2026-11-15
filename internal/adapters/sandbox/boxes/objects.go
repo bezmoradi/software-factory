@@ -374,13 +374,12 @@ func (h *Helper) teardown(ctx context.Context, box string) (string, error) {
 	return recipe, nil
 }
 
-func (h *Helper) makeNetwork(ctx context.Context, box string, subnet netip.Prefix) (*networkInspectJSON, error) {
-	name := networkName(h.rec.project, box)
+func (h *Helper) makeNetworkFor(ctx context.Context, name string, labels map[string]string, subnet netip.Prefix, problemsOf func(*networkInspectJSON) []string) (*networkInspectJSON, error) {
 	body := networkCreateJSON{
 		Name: name, Driver: "bridge", Internal: true, EnableIPv6: false,
 		IPAM:    ipamJSON{Driver: "default", Config: []ipamConfigJSON{{Subnet: subnet.String()}}},
 		Options: map[string]string{gatewayModeKey: gatewayIsolate},
-		Labels:  h.rec.labels(box),
+		Labels:  labels,
 	}
 	var created struct {
 		ID string `json:"Id"`
@@ -388,18 +387,18 @@ func (h *Helper) makeNetwork(ctx context.Context, box string, subnet netip.Prefi
 	if err := h.docker.post(ctx, "/networks/create", nil, body, &created); err != nil {
 		var de *DockerError
 		if errors.As(err, &de) && de.Code == http.StatusConflict {
-			return nil, refuse(http.StatusConflict, ReasonNamed, "a network named %s already exists, so the helper makes no box with that name", name)
+			return nil, refuse(http.StatusConflict, ReasonNamed, "a network named %s already exists, so the helper makes none with that name", name)
 		}
-		return nil, dockerFailed("make the box's network "+name+" on "+subnet.String(), err)
+		return nil, dockerFailed("make the network "+name+" on "+subnet.String(), err)
 	}
 	var n networkInspectJSON
 	if err := h.docker.get(ctx, "/networks/"+pathPart(created.ID), nil, &n); err != nil {
-		r := dockerFailed("inspect the box's network "+name, err)
+		r := dockerFailed("inspect the network "+name, err)
 		r.Message += h.dropMade(ctx, created.ID, nil)
 		return nil, r
 	}
-	if problems := networkProblems(&n, h.rec.project, box, subnet); len(problems) > 0 {
-		r := refuse(http.StatusInternalServerError, ReasonNetwork, "Docker made the box's network %s differently from the recipe (%s)", name, strings.Join(problems, ", "))
+	if problems := problemsOf(&n); len(problems) > 0 {
+		r := refuse(http.StatusInternalServerError, ReasonNetwork, "Docker made the network %s differently from the recipe (%s)", name, strings.Join(problems, ", "))
 		r.Message += h.dropMade(ctx, created.ID, &n)
 		return nil, r
 	}
@@ -426,6 +425,11 @@ func networkProblems(n *networkInspectJSON, project, box string, subnet netip.Pr
 	if got, ok := ownedName(project, boxPrefix, n.Name, n.Labels); !ok || got != box {
 		out = append(out, "name or labels")
 	}
+	return append(out, shapeProblems(n, subnet)...)
+}
+
+func shapeProblems(n *networkInspectJSON, subnet netip.Prefix) []string {
+	var out []string
 	if n.Driver != "bridge" {
 		out = append(out, "driver "+n.Driver)
 	}
@@ -490,13 +494,19 @@ func (h *Helper) reserve(ctx context.Context, box string) (netip.Prefix, func(),
 			return netip.Prefix{}, nil, err
 		}
 		for b := range h.pending {
-			live[b] = true
+			if session.ValidBox(b) {
+				live[b] = true
+			}
 		}
 		delete(live, box)
 		if len(live) >= h.cfg.MaxBoxes {
 			return netip.Prefix{}, nil, refuse(http.StatusConflict, ReasonLimit, "%d session containers are running or starting, the most this stack runs at once (SF_MAX_BOXES=%d); stop one first", len(live), h.cfg.MaxBoxes)
 		}
 	}
+	return h.pickLocked(ctx, box, "session container")
+}
+
+func (h *Helper) pickLocked(ctx context.Context, key, what string) (netip.Prefix, func(), error) {
 	used, err := h.usedSubnets(ctx)
 	if err != nil {
 		return netip.Prefix{}, nil, err
@@ -509,14 +519,14 @@ func (h *Helper) reserve(ctx context.Context, box string) (netip.Prefix, func(),
 		if !free {
 			continue
 		}
-		h.pending[box] = cand
+		h.pending[key] = cand
 		return cand, func() {
 			h.global.Lock()
-			delete(h.pending, box)
+			delete(h.pending, key)
 			h.global.Unlock()
 		}, nil
 	}
-	return netip.Prefix{}, nil, refuse(http.StatusServiceUnavailable, ReasonPool, "no /28 network in SF_BOX_SUBNETS (%s) is free for another session container", prefixes(h.cfg.Ranges))
+	return netip.Prefix{}, nil, refuse(http.StatusServiceUnavailable, ReasonPool, "no /28 network in SF_BOX_SUBNETS (%s) is free for another %s", prefixes(h.cfg.Ranges), what)
 }
 
 func (h *Helper) waitHealthy(ctx context.Context, id string) (containerInspectJSON, error) {

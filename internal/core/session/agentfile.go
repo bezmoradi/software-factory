@@ -35,8 +35,8 @@ var (
 var agentFileKeys = []string{"name", "description", "model", "tools"}
 
 var refusedAgentKeys = map[string]string{
-	"mcpServers":     "it starts MCP servers, programs that would run in the trusted reviewer container",
-	"hooks":          "it runs commands in the trusted reviewer container",
+	"mcpServers":     "it starts MCP servers, programs that would run in a trusted reviewer container",
+	"hooks":          "it runs commands in a trusted reviewer container",
 	"permissionMode": "it changes what the reviewer may do without asking",
 	"skills":         "it loads skills, whose instructions and scripts reviews don't allow",
 }

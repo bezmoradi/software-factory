@@ -84,6 +84,13 @@ func (c *Client) WithKey(key string) *Client {
 	return c
 }
 
+func (c *Client) GiveKey(ctx context.Context) error {
+	if len(c.key) != keyDigits {
+		return &session.HostError{Code: "key", Message: "the engine has no key to give this agent-host"}
+	}
+	return c.call(ctx, http.MethodPost, KeyRoute, nil, nil)
+}
+
 func hostError(status int, body []byte) error {
 	var p problemJSON
 	if json.Unmarshal(body, &p) != nil || p.Error == "" {

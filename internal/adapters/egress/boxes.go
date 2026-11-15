@@ -34,11 +34,10 @@ func (s *Subnets) inPool(p netip.Prefix) bool {
 	return false
 }
 
-func (s *Subnets) Replace(list []netip.Prefix) error {
+func (s *Subnets) Check(list []netip.Prefix) error {
 	if len(list) > MaxSubnets {
 		return errors.New("egress: more subnets than egress takes")
 	}
-	next := make(map[netip.Prefix]bool, len(list))
 	for _, p := range list {
 		if !p.IsValid() || !p.Addr().Is4() || p.Bits() != subnetBits || p.Masked() != p {
 			return errors.New("egress: a subnet isn't a /28 network address")
@@ -46,6 +45,16 @@ func (s *Subnets) Replace(list []netip.Prefix) error {
 		if !s.inPool(p) {
 			return errors.New("egress: a subnet is outside SF_BOX_SUBNETS")
 		}
+	}
+	return nil
+}
+
+func (s *Subnets) Replace(list []netip.Prefix) error {
+	if err := s.Check(list); err != nil {
+		return err
+	}
+	next := make(map[netip.Prefix]bool, len(list))
+	for _, p := range list {
 		next[p] = true
 	}
 	s.mu.Lock()

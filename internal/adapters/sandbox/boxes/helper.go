@@ -146,7 +146,7 @@ func NewHelper(ctx context.Context, hc HelperConfig) (*Helper, error) {
 		}
 	}
 	h.logger.Info("box helper ready", "project", project, "image", self.Image, "docker", version, "api", APIVersion,
-		"memory", hc.Config.Memory, "nano_cpus", hc.Config.NanoCPUs, "max_boxes", hc.Config.MaxBoxes, "runtime", runtime,
+		"memory", hc.Config.Memory, "nano_cpus", hc.Config.NanoCPUs, "reviewer_memory", hc.Config.ReviewerMemory, "reviewer_nano_cpus", hc.Config.ReviewerCPUs, "max_boxes", hc.Config.MaxBoxes, "runtime", runtime,
 		"subnets", prefixes(hc.Config.Ranges), "sweep_dry", hc.Config.SweepDry, "live", hc.Config.Live)
 	return h, nil
 }
@@ -215,7 +215,10 @@ func stackBoxNetwork(n networkInspectJSON) bool {
 	if !session.ValidComposeProject(project) {
 		return false
 	}
-	_, ok := ownedName(project, boxPrefix, n.Name, n.Labels)
+	if _, ok := ownedName(project, boxPrefix, n.Name, n.Labels); ok {
+		return true
+	}
+	_, ok := ownedReviewer(project, n.Name, n.Labels)
 	return ok
 }
 

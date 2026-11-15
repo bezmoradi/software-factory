@@ -42,7 +42,7 @@ class SfSetup extends HTMLElement {
       {
         title: 'Sign the reviewers in',
         done: v.signIn.reviewers === true,
-        why: 'Every push waits for reviews, which run on Claude Code in the reviewers’ own container, signed in separately from the agents.',
+        why: 'Every push waits for reviews, which run on Claude Code in short-lived reviewer containers of their own, signed in separately from the agents.',
         action: 'Sign Claude Code in',
         start: 'login',
       },

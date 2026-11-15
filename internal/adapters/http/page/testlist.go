@@ -34,7 +34,7 @@ func testListOf(v *session.TestListView) *testListJSON {
 
 func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Reviews == nil {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it can't write a manual test list."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't write a manual test list."})
 		return
 	}
 	sid, ok := body["sid"].(string)

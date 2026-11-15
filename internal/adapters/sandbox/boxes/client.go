@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -91,6 +92,9 @@ func (c *Client) do(ctx context.Context, method, path string, limit int64, wait 
 		return nil, fmt.Errorf("%w: %w", session.ErrBoxUnavailable, err)
 	}
 	req.Header.Set(KeyHeader, c.key)
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w at %s", session.ErrBoxUnavailable, c.addr)
@@ -248,4 +252,65 @@ func infoFrom(b boxJSON) (session.BoxInfo, bool) {
 	}
 	info.Subnet, info.Host = subnet, b.Host
 	return info, true
+}
+
+var _ ReviewerMaker = (*Client)(nil)
+
+func reviewerPath(run, snapshot string) (string, error) {
+	if !session.ValidBox(run) || (snapshot != "" && !session.ValidBox(snapshot)) {
+		return "", fmt.Errorf("%w: a reviewer run and its snapshot are 16 lowercase hexadecimal digits each", session.ErrBoxRefused)
+	}
+	if snapshot == "" {
+		return "/v1/reviewers/" + run, nil
+	}
+	return "/v1/reviewers/" + run + "/" + snapshot, nil
+}
+
+func (c *Client) StartReviewer(ctx context.Context, run, snapshot string) (session.BoxInfo, error) {
+	p, err := reviewerPath(run, snapshot)
+	if err != nil {
+		return session.BoxInfo{}, err
+	}
+	data, err := c.do(ctx, http.MethodPut, p, maxBoxAnswer, startFor+30*time.Second)
+	if err != nil {
+		return session.BoxInfo{}, err
+	}
+	var a answerJSON
+	if json.Unmarshal(data, &a) != nil || a.Version != WireVersion || a.Box == nil {
+		return session.BoxInfo{}, fmt.Errorf("%w: its answer isn't one the engine reads", session.ErrBoxUnavailable)
+	}
+	info, ok := infoFrom(*a.Box)
+	if !ok || info.Box != run || !info.Agent.IsValid() {
+		return session.BoxInfo{}, fmt.Errorf("%w: its answer isn't one the engine reads", session.ErrBoxUnavailable)
+	}
+	return info, nil
+}
+
+func (c *Client) RemoveReviewer(ctx context.Context, run string) error {
+	p, err := reviewerPath(run, "")
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, http.MethodDelete, p, maxBoxAnswer, otherFor+30*time.Second)
+	return err
+}
+
+func (c *Client) ListReviewers(ctx context.Context) ([]session.BoxInfo, error) {
+	data, err := c.do(ctx, http.MethodGet, "/v1/reviewers", maxListAnswer, otherFor+30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	var l reviewersJSON
+	if json.Unmarshal(data, &l) != nil || l.Version != WireVersion || l.Reviewers == nil || len(l.Reviewers) > maxBoxes {
+		return nil, fmt.Errorf("%w: its list of reviewer containers isn't one the engine reads", session.ErrBoxUnavailable)
+	}
+	out := make([]session.BoxInfo, 0, len(l.Reviewers))
+	for _, b := range l.Reviewers {
+		info, ok := infoFrom(b)
+		if !ok {
+			return nil, fmt.Errorf("%w: its list of reviewer containers isn't one the engine reads", session.ErrBoxUnavailable)
+		}
+		out = append(out, info)
+	}
+	return out, nil
 }

@@ -34,6 +34,7 @@ type boxRoutes struct {
 	mu       sync.Mutex
 	sendMu   sync.Mutex
 	hosts    map[string]boxEntry
+	reviews  map[string]netip.Prefix
 	listener *page.BoxListener
 	control  *docker.Control
 	reg      *session.Registry
@@ -47,7 +48,7 @@ type boxRoutes struct {
 var _ session.BoxRoutes = (*boxRoutes)(nil)
 
 func newBoxRoutes(reg *session.Registry, allow *session.Allowlist, control *docker.Control, pool []netip.Prefix, ping func(context.Context) error, logger shared.Logger) *boxRoutes {
-	b := &boxRoutes{hosts: map[string]boxEntry{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
+	b := &boxRoutes{hosts: map[string]boxEntry{}, reviews: map[string]netip.Prefix{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
 	if allow != nil {
 		allow.OnRestart(func() { go b.resend() })
 	}
@@ -110,6 +111,59 @@ func (b *boxRoutes) subnetsLocked() []netip.Prefix {
 	return out
 }
 
+func (b *boxRoutes) reviewSubnetsLocked() []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(b.reviews))
+	for _, p := range b.reviews {
+		out = append(out, p)
+	}
+	slices.SortFunc(out, func(x, y netip.Prefix) int { return x.Addr().Compare(y.Addr()) })
+	return out
+}
+
+func (b *boxRoutes) reviewerUp(ctx context.Context, run string, subnet netip.Prefix) error {
+	if !boxes.InPool(b.pool, subnet) {
+		b.logger.Warn("reviewers", "event", "subnet-outside-pool", "run", run)
+		return errors.New("the box helper put the reviewer container on " + subnet.String() + ", outside SF_BOX_SUBNETS, so the engine doesn't use it")
+	}
+	b.mu.Lock()
+	var stale []string
+	for box, e := range b.hosts {
+		if e.info.Subnet.Overlaps(subnet) {
+			stale = append(stale, box)
+		}
+	}
+	for r, p := range b.reviews {
+		if r != run && p.Overlaps(subnet) {
+			delete(b.reviews, r)
+		}
+	}
+	b.reviews[run] = subnet
+	b.mu.Unlock()
+	slices.Sort(stale)
+	for _, box := range stale {
+		b.logger.Warn("boxes", "event", "stale-route-evicted", "box", box, "by", run)
+		b.Down(box)
+	}
+	if err := b.sendSubnets(ctx); err != nil {
+		b.logger.Warn("reviewers", "event", "egress-not-set", "run", run)
+		return errors.New("egress didn't take the reviewer container's network: " + err.Error())
+	}
+	return nil
+}
+
+func (b *boxRoutes) reviewerDown(ctx context.Context, run string) {
+	b.mu.Lock()
+	_, had := b.reviews[run]
+	delete(b.reviews, run)
+	b.mu.Unlock()
+	if !had {
+		return
+	}
+	if err := b.sendSubnets(context.WithoutCancel(ctx)); err != nil {
+		shared.For(ctx, b.logger).Warn("reviewers", "event", "egress-not-set", "run", run)
+	}
+}
+
 func (b *boxRoutes) sendSubnets(ctx context.Context) error {
 	if b.control == nil {
 		return nil
@@ -117,11 +171,11 @@ func (b *boxRoutes) sendSubnets(ctx context.Context) error {
 	b.sendMu.Lock()
 	defer b.sendMu.Unlock()
 	b.mu.Lock()
-	subnets := b.subnetsLocked()
+	subnets, reviews := b.subnetsLocked(), b.reviewSubnetsLocked()
 	b.mu.Unlock()
 	sctx, cancel := context.WithTimeout(ctx, subnetsFor)
 	defer cancel()
-	return b.control.SetBoxes(sctx, subnets)
+	return b.control.SetBoxes(sctx, subnets, reviews)
 }
 
 func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
@@ -141,6 +195,11 @@ func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
 	for box, e := range b.hosts {
 		if box != info.Box && (e.info.Subnet.Overlaps(info.Subnet) || e.info.Agent == info.Agent) {
 			stale = append(stale, box)
+		}
+	}
+	for run, p := range b.reviews {
+		if p.Overlaps(info.Subnet) {
+			delete(b.reviews, run)
 		}
 	}
 	b.mu.Unlock()
@@ -227,7 +286,7 @@ func (b *boxRoutes) watch(ctx context.Context) {
 			b.checkHelper(ctx)
 		case <-t.C:
 			b.mu.Lock()
-			n := len(b.hosts)
+			n := len(b.hosts) + len(b.reviews)
 			b.mu.Unlock()
 			if n > 0 {
 				if err := b.sendSubnets(ctx); err != nil {

@@ -30,16 +30,20 @@ const (
 	routeBox       = "box"
 	routeStart     = "start"
 	routeStop      = "stop"
+	routeReviewers = "reviewers"
+	routeReviewer  = "reviewer"
+	routeReview    = "review"
 	actionStartSeg = "start"
 	actionStopSeg  = "stop"
 )
 
 type ServerConfig struct {
-	Boxes   session.Boxes
-	KeyFile string
-	Base    context.Context
-	Logger  shared.Logger
-	About   func() About
+	Boxes     session.Boxes
+	Reviewers ReviewerMaker
+	KeyFile   string
+	Base      context.Context
+	Logger    shared.Logger
+	About     func() About
 }
 
 type server struct {
@@ -56,6 +60,11 @@ type boxJSON struct {
 	Gateway string   `json:"gateway"`
 	Subnet  string   `json:"subnet"`
 	Facts   []string `json:"facts"`
+}
+
+type reviewersJSON struct {
+	Version   string    `json:"version"`
+	Reviewers []boxJSON `json:"reviewers"`
 }
 
 type listJSON struct {
@@ -82,31 +91,53 @@ func Handler(cfg ServerConfig) http.Handler {
 	return &server{cfg: cfg}
 }
 
-func route(path string) (string, string, bool) {
+type routed struct {
+	name, id, snapshot string
+}
+
+func route(path string) (routed, bool) {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	switch {
 	case len(parts) == 1 && parts[0] == "healthz":
-		return routeHealth, "", true
-	case len(parts) < 2 || parts[0] != "v1" || parts[1] != "boxes":
-		return "", "", false
+		return routed{name: routeHealth}, true
+	case len(parts) < 2 || parts[0] != "v1":
+		return routed{}, false
+	case parts[1] == "reviewers":
+		return reviewerRoute(parts[2:])
+	case parts[1] != "boxes":
+		return routed{}, false
 	case len(parts) == 2:
-		return routeList, "", true
+		return routed{name: routeList}, true
 	case len(parts) == 3:
-		return routeBox, parts[2], true
+		return routed{name: routeBox, id: parts[2]}, true
 	case len(parts) == 4 && parts[3] == actionStartSeg:
-		return routeStart, parts[2], true
+		return routed{name: routeStart, id: parts[2]}, true
 	case len(parts) == 4 && parts[3] == actionStopSeg:
-		return routeStop, parts[2], true
+		return routed{name: routeStop, id: parts[2]}, true
 	}
-	return "", "", false
+	return routed{}, false
+}
+
+func reviewerRoute(rest []string) (routed, bool) {
+	switch len(rest) {
+	case 0:
+		return routed{name: routeReviewers}, true
+	case 1:
+		return routed{name: routeReviewer, id: rest[0]}, true
+	case 2:
+		return routed{name: routeReview, id: rest[0], snapshot: rest[1]}, true
+	}
+	return routed{}, false
 }
 
 func allowed(r string) []string {
 	switch r {
-	case routeHealth, routeList:
+	case routeHealth, routeList, routeReviewers:
 		return []string{http.MethodGet}
-	case routeBox:
+	case routeBox, routeReviewer:
 		return []string{http.MethodPut, http.MethodDelete}
+	case routeReview:
+		return []string{http.MethodPut}
 	}
 	return []string{http.MethodPost}
 }
@@ -127,7 +158,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.refuse(w, r, refuse(http.StatusRequestHeaderFieldsTooLarge, ReasonTooLarge, "the request is larger than the box helper reads (1 KiB)"))
 		return
 	}
-	name, box, ok := route(r.URL.Path)
+	rt, ok := route(r.URL.Path)
+	name, box := rt.name, rt.id
 	if !ok || r.URL.RawPath != "" {
 		s.refuse(w, r, refuse(http.StatusNotFound, ReasonRoute, "the box helper has no such route"))
 		return
@@ -154,6 +186,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.refuse(w, r, refusal)
 		return
 	}
+	base := s.cfg.Base
+	if ids := r.Header.Values(shared.RequestHeader); len(ids) == 1 {
+		base = shared.WithRequest(base, ids[0])
+	}
+	switch name {
+	case routeReviewers, routeReviewer, routeReview:
+		s.reviewers(base, w, r, rt)
+		return
+	}
 	if name != routeList && !session.ValidBox(box) {
 		s.refuse(w, r, refuse(http.StatusBadRequest, ReasonInput, "a box is 16 lowercase hexadecimal digits"))
 		return
@@ -162,7 +203,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if name == routeStart {
 		limit = startFor
 	}
-	ctx, cancel := context.WithTimeout(s.cfg.Base, limit)
+	ctx, cancel := context.WithTimeout(base, limit)
 	defer cancel()
 	var err error
 	switch {
@@ -203,11 +244,61 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.failed(w, r, err)
+}
+
+func (s *server) failed(w http.ResponseWriter, r *http.Request, err error) {
 	var rf *Refusal
 	if !errors.As(err, &rf) {
 		rf = refuse(http.StatusBadGateway, ReasonDocker, "%s", oneLine(err.Error()))
 	}
 	s.refuse(w, r, rf)
+}
+
+func (s *server) reviewers(base context.Context, w http.ResponseWriter, r *http.Request, rt routed) {
+	if s.cfg.Reviewers == nil {
+		s.refuse(w, r, refuse(http.StatusNotFound, ReasonRoute, "the box helper has no such route"))
+		return
+	}
+	if rt.name != routeReviewers {
+		if err := badRun(rt.id, rt.snapshot); err != nil {
+			s.failed(w, r, err)
+			return
+		}
+	}
+	limit := otherFor
+	if r.Method == http.MethodPut {
+		limit = startFor
+	}
+	ctx, cancel := context.WithTimeout(base, limit)
+	defer cancel()
+	switch {
+	case rt.name == routeReviewers:
+		list, err := s.cfg.Reviewers.ListReviewers(ctx)
+		if err != nil {
+			s.failed(w, r, err)
+			return
+		}
+		out := reviewersJSON{Version: WireVersion, Reviewers: []boxJSON{}}
+		for _, b := range list {
+			out.Reviewers = append(out.Reviewers, boxOf(b))
+		}
+		writeJSON(w, http.StatusOK, out)
+	case r.Method == http.MethodDelete:
+		if err := s.cfg.Reviewers.RemoveReviewer(ctx, rt.id); err != nil {
+			s.failed(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		info, err := s.cfg.Reviewers.StartReviewer(ctx, rt.id, rt.snapshot)
+		if err != nil {
+			s.failed(w, r, err)
+			return
+		}
+		b := boxOf(info)
+		writeJSON(w, http.StatusOK, answerJSON{Version: WireVersion, Box: &b})
+	}
 }
 
 func hasBody(w http.ResponseWriter, r *http.Request) bool {

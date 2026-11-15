@@ -11,7 +11,5 @@ services:
     group_add: !reset []
     volumes: !override
       - helper-key:/run/sf-helper:ro
-  reviewer:
-    <<: *release-image
   egress:
     <<: *release-image

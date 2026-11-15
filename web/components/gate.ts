@@ -74,7 +74,7 @@ class SfApproval extends HTMLElement {
     const stale = t && t.planHash && t.planHash !== v.hash ? ', of an earlier version of the plan' : ''
     return asideBox({
       id: 'plan-review-button', title: 'Second opinion on the plan', start: 'Review this plan', busy: 'Reviewing the plan…', label: 'The review of the plan',
-      hint: 'Asks Claude Code in the reviewer container, with read-only tools, to review this version of the plan against the code. It approves nothing and changes no gate state',
+      hint: 'Asks Claude Code in a reviewer container of its own, with read-only tools, to review this version of the plan against the code. It approves nothing and changes no gate state',
       intro: 'Before you approve, a reviewer run can read the plan against the code and list what looks wrong or missing. It costs one run, and nothing reads it but you.',
       run: t, asking: this.#planState.asking, disabled: v.disabled, stale,
       press: () => emit(this, 'sf-plan-review', { hash: v.hash }),

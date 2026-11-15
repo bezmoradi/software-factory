@@ -8,17 +8,40 @@ import (
 	"strings"
 )
 
+const (
+	ReviewerSandbox   = "sandbox"
+	ReviewerContainer = "reviewer-container"
+	ReviewersBusy     = "reviewers-busy"
+)
+
+type SlotRefusal interface {
+	error
+	ReviewersBusy() bool
+}
+
+func reviewersBusy(err error) *Error {
+	if b, ok := errors.AsType[SlotRefusal](err); ok && b.ReviewersBusy() {
+		return explained(limited("reviews"), clip(b.Error(), maxOutput))
+	}
+	return nil
+}
+
 func reviewHostProblem(err error) (string, string) {
+	if b, ok := errors.AsType[SlotRefusal](err); ok && b.ReviewersBusy() {
+		return clip(b.Error(), maxOutput), ReviewersBusy
+	}
 	h, ok := errors.AsType[*HostError](err)
 	if !ok {
-		return "the engine couldn't reach the reviewer container (" + clip(err.Error(), 200) + "); check that it's running", "host-unreachable"
+		return "the engine couldn't reach the run's reviewer container (" + clip(err.Error(), 200) + "); check that it's running", "host-unreachable"
 	}
 	code := clip(h.Code, 40)
 	switch code {
 	case "argv", "env", "body":
-		return "the reviewer container refused the engine's request as malformed, a Software Factory bug rather than a problem with your change (" + hostMessage(err) + ")", "host-refused:" + code
+		return "the run's reviewer container refused the engine's request as malformed, a Software Factory bug rather than a problem with your change (" + hostMessage(err) + ")", "host-refused:" + code
+	case ReviewerSandbox, ReviewerContainer:
+		return hostMessage(err), code
 	}
-	return "the reviewer container refused to run it (" + hostMessage(err) + ")", "host-refused:" + code
+	return "the run's reviewer container refused to run it (" + hostMessage(err) + ")", "host-refused:" + code
 }
 
 type result struct {

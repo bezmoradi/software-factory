@@ -191,14 +191,18 @@ func (c *Control) Set(ctx context.Context, lists session.EgressLists) error {
 }
 
 type boxesJSON struct {
-	Version string   `json:"version"`
-	Subnets []string `json:"subnets"`
+	Version   string   `json:"version"`
+	Subnets   []string `json:"subnets"`
+	Reviewers []string `json:"reviewers"`
 }
 
-func (c *Control) SetBoxes(ctx context.Context, subnets []netip.Prefix) error {
-	q := boxesJSON{Version: StatusVersion, Subnets: make([]string, 0, len(subnets))}
+func (c *Control) SetBoxes(ctx context.Context, subnets, reviewers []netip.Prefix) error {
+	q := boxesJSON{Version: StatusVersion, Subnets: make([]string, 0, len(subnets)), Reviewers: make([]string, 0, len(reviewers))}
 	for _, p := range subnets {
 		q.Subnets = append(q.Subnets, p.String())
+	}
+	for _, p := range reviewers {
+		q.Reviewers = append(q.Reviewers, p.String())
 	}
 	body, err := json.Marshal(q)
 	if err != nil {

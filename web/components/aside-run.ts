@@ -50,7 +50,7 @@ export function asideBox(o: AsideBox): HTMLElement {
   }
   const cost = money(t.costUsd)
   box.append(el('p', 'small muted', `For commit ${shortSha(t.commit)} on ${text(t.branch)}${o.stale}${cost ? `; ≈ ${cost}, Claude Code's own estimate` : ''}.`))
-  if (t.state === 'running') box.append(el('p', 'small muted', 'Running in the reviewer container…'))
+  if (t.state === 'running') box.append(el('p', 'small muted', 'Running in a reviewer container…'))
   if (t.reason) box.append(el('p', `small ${t.state === 'withheld' ? 'warn' : 'bad'}`, sentence(`${t.state === 'withheld' ? 'Not shown' : 'It failed'}: ${text(t.reason)}`)))
   if (t.state === 'done' && t.text) {
     const body = el('div', 'reply aside-run-text')

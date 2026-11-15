@@ -690,7 +690,7 @@ func (a *Allowlist) dropKeys(ctx context.Context, next Gateway) error {
 
 func containerOf(side string) string {
 	if side == SideReviewers {
-		return "reviewer container"
+		return "reviewer containers"
 	}
 	return "sessions' containers"
 }

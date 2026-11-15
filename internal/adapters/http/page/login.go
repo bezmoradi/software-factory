@@ -21,6 +21,7 @@ type loginStateJSON struct {
 	AgentsExpect    string           `json:"agentsExpect"`
 	ReviewersExpect string           `json:"reviewersExpect"`
 	Each            []agentLoginJSON `json:"each"`
+	ReviewersBusy   bool             `json:"reviewersBusy,omitempty"`
 }
 
 type agentLoginJSON struct {
@@ -102,7 +103,7 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		for _, a := range st.Each {
 			each = append(each, agentLoginJSON{ID: a.ID, Name: a.Name, Step: a.Step, Code: a.Code, SignIn: signInOf(a.SignIn)})
 		}
-		send(w, http.StatusOK, loginStateJSON{Box: st.Box, Agents: signInOf(st.Agents), Reviewers: signInOf(st.Reviewers), Reviewer: s.cfg.Reviews != nil, AgentsExpect: string(st.AgentsExpect), ReviewersExpect: string(st.ReviewersExpect), Each: each})
+		send(w, http.StatusOK, loginStateJSON{Box: st.Box, Agents: signInOf(st.Agents), Reviewers: signInOf(st.Reviewers), Reviewer: s.cfg.Reviews != nil, AgentsExpect: string(st.AgentsExpect), ReviewersExpect: string(st.ReviewersExpect), Each: each, ReviewersBusy: st.ReviewersBusy})
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2*time.Minute + writeFor))

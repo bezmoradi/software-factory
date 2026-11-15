@@ -118,7 +118,7 @@ func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	host, ok := r.cfg.Host.(AgentFileHost)
 	if !ok {
 		if len(files) > 0 {
-			return "this engine can't write agent files into the reviewer container"
+			return "this engine can't write agent files into the reviewers' agents folder"
 		}
 		return ""
 	}
@@ -127,7 +127,7 @@ func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	if err := host.PutAgents(pctx, files, r.cfg.AgentFiles.Files()); err != nil {
 		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "agent-files-not-written", "uploaded", len(files))
 		if len(files) > 0 {
-			return clip("the engine couldn't write the uploaded agent file into the reviewer container: "+hostMessage(err), 400)
+			return clip("the engine couldn't write the uploaded agent file into the reviewers' agents folder: "+hostMessage(err), 400)
 		}
 	}
 	return ""

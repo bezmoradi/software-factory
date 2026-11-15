@@ -14,13 +14,14 @@ type signInJSON struct {
 	Endpoint  string `json:"endpoint,omitempty"`
 	Costs     bool   `json:"costs"`
 	CheckedAt int64  `json:"checkedAt,omitempty"`
+	Busy      bool   `json:"busy,omitempty"`
 }
 
 func signInOf(s *session.SignIn) *signInJSON {
 	if s == nil || s.Method == "" {
 		return nil
 	}
-	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt)}
+	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt), Busy: s.Busy}
 }
 
 type shownFileJSON struct {

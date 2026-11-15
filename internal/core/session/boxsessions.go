@@ -972,7 +972,7 @@ func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {
 	return r, nil
 }
 
-func (d *Dispatcher) SyncClones(name, branch, commit string) {
+func (d *Dispatcher) SyncClones(ctx context.Context, name, branch, commit string) {
 	if _, ok := d.cfg.Clones.(CloneSyncer); !ok || !sha1Hex.MatchString(commit) {
 		return
 	}
@@ -1002,7 +1002,7 @@ func (d *Dispatcher) SyncClones(name, branch, commit string) {
 		}
 	}
 	if synced > 0 {
-		d.cfg.Logger.Info("session clone", "event", "main-brought", "clones", synced)
+		shared.For(ctx, d.cfg.Logger).Info("session clone", "event", "main-brought", "clones", synced)
 	}
 }
 

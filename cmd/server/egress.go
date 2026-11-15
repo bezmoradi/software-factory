@@ -78,11 +78,11 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	agentsBook, reviewersBook := egress.NewRefusals(), egress.NewRefusals()
 	agentsSeen, reviewersSeen := egress.NewSeen(), egress.NewSeen()
 	live := egress.NewLive(policy, AgentsSide, ReviewersSide)
-	subnets := egress.NewSubnets(cfg.Pool)
+	subnets, reviewers := egress.NewSubnets(cfg.Pool), egress.NewSubnets(cfg.Pool)
 	status := &http.Server{
 		Handler: egress.StatusHandler(egress.StatusConfig{
 			Live: live, Books: []*egress.Refusals{agentsBook, reviewersBook},
-			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets, Logger: logger,
+			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets, Reviewers: reviewers, Logger: logger,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -114,14 +114,14 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 		logger.Info("egress listening for reviewers", "proxy", reviewListener.Addr().String())
 		reviewProxy := egress.New(live.Side(ReviewersSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, ReviewersSide}, egress.Marks{Book: reviewersBook, Side: ReviewersSide, Seen: reviewersSeen, Trusted: true})
 		go func() {
-			reviewErr <- reviewProxy.Serve(ctx, reviewListener)
+			reviewErr <- reviewProxy.Serve(ctx, egress.AllowSubnets(reviewListener, reviewers, dropCounter(logger, "reviewers", "a reviewer container's")))
 			cancel()
 		}()
 	} else {
 		reviewErr <- nil
 	}
 	proxy := egress.New(live.Side(AgentsSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide, Seen: agentsSeen})
-	proxyErr := proxy.Serve(ctx, egress.AllowSubnets(proxyListener, subnets, dropCounter(logger, "agents")))
+	proxyErr := proxy.Serve(ctx, egress.AllowSubnets(proxyListener, subnets, dropCounter(logger, "agents", "a session container's")))
 	cancel()
 	if err := <-reviewErr; err != nil && proxyErr == nil {
 		proxyErr = err
@@ -145,7 +145,7 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 	}
 	fs := flag.NewFlagSet("egress", flag.ContinueOnError)
 	listen := fs.String("listen", env("EGRESS_LISTEN", ":3130"), "the agents' proxy listen address; it answers only the session containers' subnets the engine sets")
-	reviewListen := fs.String("review-listen", env("EGRESS_REVIEW_LISTEN", ""), "a second proxy address with its own connection limit, for the reviewers; empty for none")
+	reviewListen := fs.String("review-listen", env("EGRESS_REVIEW_LISTEN", ""), "a second proxy address with its own connection limit, for the reviewers; it answers only the reviewer containers' subnets the engine sets; empty for none")
 	statusListen := fs.String("status-listen", env("EGRESS_STATUS_LISTEN", ":3129"), "status endpoint listen address")
 	keyFile := fs.String("control-key-file", env("EGRESS_CONTROL_KEY_FILE", ""), "a file holding the SHA-256 of the engine's control key; empty for no control channel")
 	allow := fs.String("allow", env("EGRESS_ALLOW", ""), "comma-separated allowed hosts; a leading dot allows subdomains only")
@@ -194,7 +194,7 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 	}, nil
 }
 
-func dropCounter(logger shared.Logger, side string) func() {
+func dropCounter(logger shared.Logger, side, whose string) func() {
 	var mu sync.Mutex
 	n := 0
 	return func() {
@@ -203,7 +203,7 @@ func dropCounter(logger shared.Logger, side string) func() {
 		count := n
 		mu.Unlock()
 		if count == 1 || count%dropLogEvery == 0 {
-			logger.Warn("egress", "event", "dropped", "why", "not a session container's subnet", "side", side, "count", count)
+			logger.Warn("egress", "event", "dropped", "why", "not "+whose+" subnet", "side", side, "count", count)
 		}
 	}
 }

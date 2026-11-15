@@ -9,8 +9,6 @@ services:
     build:
       context: .
       target: dev
-  reviewer:
-    image: software-factory:dev
   engine:
     environment:
       <<: *dev-deny

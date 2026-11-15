@@ -66,7 +66,7 @@ func givenOf(g *session.RunGiven) *givenJSON {
 func (s *Server) walkthroughCheck(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	checker, ok := s.cfg.Reviews.(session.WalkthroughChecker)
 	if s.cfg.Reviews == nil || !ok {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it keeps no walkthroughs."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it keeps no walkthroughs."})
 		return
 	}
 	sid, okSid := body["sid"].(string)

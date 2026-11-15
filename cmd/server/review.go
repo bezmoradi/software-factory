@@ -2,28 +2,26 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
+	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/docker"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 type ReviewConfig struct {
-	Host   string
 	Dir    string
 	SeenAs string
 	Proxy  string
@@ -31,13 +29,7 @@ type ReviewConfig struct {
 }
 
 func parseReview(cfg *PageConfig, getenv func(string) string) error {
-	rc := ReviewConfig{Proxy: "egress-review:3128"}
-	if v := getenv("SF_REVIEWER_HOST"); v != "" && v != "off" {
-		if _, _, err := net.SplitHostPort(v); err != nil {
-			return fmt.Errorf("SF_REVIEWER_HOST must be host:port or off, got %q", v)
-		}
-		rc.Host = v
-	}
+	rc := ReviewConfig{Proxy: "egress-review:3128", SeenAs: boxes.ReviewsAt}
 	if v := getenv("SF_REVIEWER_PROXY"); v != "" {
 		if _, _, err := net.SplitHostPort(v); err != nil {
 			return fmt.Errorf("SF_REVIEWER_PROXY must be host:port, got %q", v)
@@ -47,7 +39,7 @@ func parseReview(cfg *PageConfig, getenv func(string) string) error {
 	for _, p := range []struct {
 		key    string
 		target *string
-	}{{"SF_REVIEWS", &rc.Dir}, {"SF_REVIEWER_REVIEWS", &rc.SeenAs}, {"SF_DEV_REVIEWER", &rc.Dev}} {
+	}{{"SF_REVIEWS", &rc.Dir}, {"SF_DEV_REVIEWER", &rc.Dev}} {
 		v := getenv(p.key)
 		if v == "" {
 			continue
@@ -57,14 +49,8 @@ func parseReview(cfg *PageConfig, getenv func(string) string) error {
 		}
 		*p.target = filepath.Clean(v)
 	}
-	if rc.Host != "" && rc.Dir == "" {
-		return errors.New("set SF_REVIEWS, the engine's path to the reviews volume, when SF_REVIEWER_HOST is set")
-	}
-	if rc.SeenAs == "" {
-		rc.SeenAs = rc.Dir
-	}
-	if rc.Host != "" && cfg.Install.Dir == "" {
-		return errors.New("reviews run knackpack from the agents volume, so SF_AGENTS_DIR can't be off while SF_REVIEWER_HOST is set")
+	if rc.Dir != "" && cfg.Install.Dir == "" {
+		return errors.New("reviews run knackpack from the agents volume, so SF_AGENTS_DIR can't be off while SF_REVIEWS is set")
 	}
 	cfg.Review = rc
 	return nil
@@ -77,13 +63,13 @@ func plugins(cfg InstallConfig, logger shared.Logger) (*npm.Plugins, error) {
 	return npm.NewPlugins(npm.PluginConfig{Dir: cfg.Dir, Fetch: remote.Remote{}, Trees: files.Reader{}, Logger: logger})
 }
 
-func reviewSandbox(cfg PageConfig, host session.Host, hosts func() []string) (session.Sandbox, error) {
+func reviewSandbox(cfg PageConfig, hosts func() []string) (session.Sandbox, error) {
 	if !cfg.Sandbox.On {
 		return nil, nil
 	}
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
-		Host: host, Probe: []string{cfg.AgentBinary, "sandbox-probe"}, Dir: cfg.Review.SeenAs,
+		Probe: []string{cfg.AgentBinary, "sandbox-probe"},
 		Proxy: cfg.Review.Proxy, Status: sb.Status, Side: ReviewersSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts, Lists: listsOf(sb), TLS: sb.TLS,
 	})
 }
@@ -109,53 +95,29 @@ func (p engineParts) reviewerAgentsPage() session.ReviewerAgentsPage {
 	return p.agentFiles
 }
 
-func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, repos *session.Repos, expected *session.Expected, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Reviews, error) {
-	if cfg.Review.Host == "" || source == nil || repos == nil {
-		return nil, nil
+func reviewer(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, repos *session.Repos, expected *session.Expected, agentFiles *session.ReviewerAgents, makers boxes.ReviewerMaker, routes *boxRoutes, logger shared.Logger) (*session.Reviews, *reviewerHosts, error) {
+	if cfg.Review.Dir == "" || makers == nil || routes == nil || source == nil || repos == nil {
+		return nil, nil, nil
 	}
-	client, err := agenthost.NewClientFor(cfg.Review.Host, agenthost.ReviewRunTimeout)
+	if err := os.Remove(filepath.Join(cfg.Review.Dir, oldHostKeyFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logger.Warn("review", "event", "old-key-not-removed", "file", oldHostKeyFile)
+	}
+	hosts := newReviewerHosts(makers, routes, cfg.Sandbox.Allowlist, cfg.Review.Dev, logger)
+	sb, err := reviewSandbox(cfg, gitHostsOf(repos))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	key, err := writeHostKey(cfg.Review.Dir)
+	hosts.sandbox = sb
+	reviews, err := reviewsWith(base, cfg, reg, source, hosts, sb, repos, expected, agentFiles, logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	client.WithKey(key)
-	return reviewsWith(base, cfg, reg, source, withGateway(client, cfg.Sandbox.Allowlist, session.SideReviewers, cfg.Review.Dev), repos, gitHostsOf(repos), expected, agentFiles, logger)
+	return reviews, hosts, nil
 }
 
-const hostKeyFile = ".agent-host-key"
+const oldHostKeyFile = ".agent-host-key"
 
-func writeHostKey(dir string) (string, error) {
-	if dir == "" {
-		return "", nil
-	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	key := hex.EncodeToString(b)
-	tmp := filepath.Join(dir, hostKeyFile+".new")
-	if err := os.WriteFile(tmp, []byte(key+"\n"), 0o644); err != nil {
-		return "", fmt.Errorf("review: write the reviewer's key: %w", err)
-	}
-	if err := os.Chmod(tmp, 0o644); err != nil {
-		return "", fmt.Errorf("review: write the reviewer's key: %w", err)
-	}
-	if err := os.Rename(tmp, filepath.Join(dir, hostKeyFile)); err != nil {
-		return "", fmt.Errorf("review: write the reviewer's key: %w", err)
-	}
-	return key, nil
-}
-
-var newReviewSandbox = reviewSandbox
-
-func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, host session.Host, mains session.Mains, hosts func() []string, expected *session.Expected, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Reviews, error) {
-	sb, err := newReviewSandbox(cfg, host, hosts)
-	if err != nil {
-		return nil, err
-	}
+func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, source session.PluginSource, host session.Host, sb session.Sandbox, mains session.Mains, expected *session.Expected, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Reviews, error) {
 	command := "claude"
 	if cfg.Review.Dev != "" {
 		command = cfg.Review.Dev

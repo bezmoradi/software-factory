@@ -35,7 +35,6 @@ services:
       SF_PUBLIC_PORT: ${SF_PORT:-7799}
       SF_PAGE_NAME: engine-page
       SF_AGENT_ADDRESS: 0.0.0.0:8081
-      SF_REVIEWER_HOST: reviewer:8090
       SF_REVIEWS: /reviews
       SF_REVIEWER_PROXY: egress-review:3128
       SF_EGRESS_PROXY: egress:3130
@@ -53,7 +52,6 @@ services:
         published: "${SF_PORT:-7799}"
         host_ip: 127.0.0.1
     networks:
-      reviewnet: {}
       controlnet: {}
       helpernet: {}
       outside:
@@ -77,52 +75,11 @@ services:
         restart: true
       egress:
         condition: service_healthy
-      reviewer:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 20s
-      retries: 3
-
-  reviewer:
-    <<: [*image, *hardening]
-    user: reviewer
-    command: ["agent-host", "-mode", "review"]
-    environment:
-      HOME: /home/reviewer
-      SF_WORKSPACE: /reviews
-      SF_AGENT_HOST_LISTEN: ":8090"
-      SF_AGENT_HOST_KEY_FILE: /reviews/.agent-host-key
-      HTTPS_PROXY: http://egress-review:3128
-      HTTP_PROXY: http://egress-review:3128
-      https_proxy: http://egress-review:3128
-      http_proxy: http://egress-review:3128
-      NO_PROXY: localhost,127.0.0.1,::1
-      no_proxy: localhost,127.0.0.1,::1
-      DISABLE_AUTOUPDATER: "1"
-    networks:
-      reviewnet:
-        aliases: [reviewer]
-    volumes:
-      - reviews:/reviews:ro
-      - type: volume
-        source: agents
-        target: /opt/software-factory/agents
-        read_only: true
-        volume:
-          nocopy: true
-      - reviewer-home:/home/reviewer
-    tmpfs:
-      - /tmp:size=1g,mode=1777
-    mem_limit: 4g
-    pids_limit: 2048
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8090/healthz"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
       retries: 3
 
   helper:
@@ -136,6 +93,8 @@ services:
       SF_HELPER_KEY_FILE: /run/sf-helper/key
       SF_BOX_MEMORY: ${SF_BOX_MEMORY:-}
       SF_BOX_CPUS: ${SF_BOX_CPUS:-}
+      SF_REVIEWER_MEMORY: ${SF_REVIEWER_MEMORY:-}
+      SF_REVIEWER_CPUS: ${SF_REVIEWER_CPUS:-}
       SF_MAX_BOXES: ${SF_MAX_BOXES:-}
       SF_BOX_RUNTIME: ${SF_BOX_RUNTIME:-}
       SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
@@ -163,15 +122,13 @@ services:
     environment:
       <<: *egress-lists
       EGRESS_LISTEN: 0.0.0.0:3130
-      EGRESS_REVIEW_LISTEN: egress-review:3128
+      EGRESS_REVIEW_LISTEN: 0.0.0.0:3128
       EGRESS_STATUS_LISTEN: egress-control:3129
       EGRESS_CONTROL_KEY_FILE: /run/sf-egress/control-key
       SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
     volumes:
       - egress-key:/run/sf-egress:ro
     networks:
-      reviewnet:
-        aliases: [egress-review]
       controlnet:
         aliases: [egress-control]
       outside: {}
@@ -185,8 +142,6 @@ services:
       retries: 3
 
 networks:
-  reviewnet:
-    internal: true
   controlnet:
     internal: true
   helpernet:
@@ -198,7 +153,6 @@ volumes:
   workspace:
   agents:
   reviews:
-  reviewer-home:
   uploads:
     driver: local
     driver_opts:

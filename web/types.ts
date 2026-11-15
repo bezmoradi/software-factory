@@ -247,6 +247,7 @@ export interface SignIn {
   endpoint?: string
   costs: boolean
   checkedAt?: number
+  busy?: boolean
 }
 
 export interface StartupFile {

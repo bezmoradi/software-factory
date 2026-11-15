@@ -36,7 +36,7 @@ var windowWords = map[string]string{
 	"seven_day_overage_included": "weekly Fable limit", "overage": "usage credit limit", "spend_limit": "spending limit",
 }
 
-var sideWords = map[string]string{SideAgents: "Claude Code in this session's container", SideReviewers: "Claude Code in the reviewer container", SideCodex: "Codex"}
+var sideWords = map[string]string{SideAgents: "Claude Code in this session's container", SideReviewers: "Claude Code for the reviewers", SideCodex: "Codex"}
 
 var signInEndingWords = map[string]string{SideAgents: "Claude Code in a session's container", SideReviewers: sideWords[SideReviewers]}
 
