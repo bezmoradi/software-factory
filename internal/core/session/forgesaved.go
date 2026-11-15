@@ -162,8 +162,19 @@ func (f *Forges) moved(ctx context.Context, t PushTarget, c *forgeCard) bool {
 		return false
 	}
 	head, err := f.cfg.API.Branch(ctx, repo, v.Head)
-	if err != nil || head == v.Commit || !commitSHA.MatchString(head) {
+	if err == nil && head == v.Commit {
 		return false
+	}
+	if err != nil || !commitSHA.MatchString(head) {
+		reason := "the engine couldn't read the branch on the host to check that it is still at the commit you approved, so it opened nothing; press the button again to try once more"
+		f.mu.Lock()
+		c.view.State, c.view.Reason, c.view.At = ForgeWaiting, reason, f.cfg.Now()
+		v = c.view
+		f.mu.Unlock()
+		f.show(c.sid)
+		f.audit(c.sid, t, v, ByEngine, ForgeHeld, "kept the pull request card waiting, because "+reason+": "+v.Title)
+		f.cfg.Logger.Info("forge", "event", "branch-unread")
+		return true
 	}
 	reason := movedReason(f.cfg.Commits, t.Repo, v.Commit, head)
 	f.mu.Lock()

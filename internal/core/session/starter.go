@@ -185,6 +185,8 @@ type Dispatcher struct {
 	boxes      boxBook
 	waiting    map[string]*run
 	syncMu     sync.Mutex
+	runsUnread bool
+	removed    []func(sid string)
 }
 
 var (
@@ -276,6 +278,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	}
 	if !d.boxed() || d.cfg.Repositories == nil {
 		return Started{}, explained(conflict("no agent-host"), "This engine has no box helper to start sessions' containers in.")
+	}
+	if err := d.runsReadable(); err != nil {
+		return Started{}, err
 	}
 	if err := checkStartFrom(q); err != nil {
 		return Started{}, err

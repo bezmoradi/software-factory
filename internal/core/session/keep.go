@@ -177,6 +177,10 @@ func (d *Dispatcher) hasRun(sid string) bool {
 }
 
 func (k *Keep) Prune() {
+	if k.d.RunsUnread() {
+		k.cfg.Logger.Warn("branch copy", "event", "not-pruned", "why", "sessions-unread")
+		return
+	}
 	sids, err := k.cfg.Store.Sessions()
 	if err != nil {
 		k.cfg.Logger.Warn("branch copy", "event", "unlisted")

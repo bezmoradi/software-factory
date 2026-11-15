@@ -188,13 +188,12 @@ type Pushes struct {
 	mu      sync.Mutex
 	busy    map[string]bool
 	held    map[string]*heldPush
-	denied  map[string]*gate.Answer
 	calls   *limiter
 	capped  map[string]bool
 	views   map[string]PushView
 	waiting map[string]string
 	again   map[string]bool
-	refused map[string]string
+	refused map[string][]string
 	spoken  map[string]string
 	pushed  func(PushedFacts)
 	closing bool
@@ -204,6 +203,8 @@ type Pushes struct {
 	halt    atomic.Pointer[Halt]
 	extras  atomic.Pointer[pushExtras]
 	limits  atomic.Pointer[Limits]
+
+	denialsUnread bool
 }
 
 var (
@@ -241,8 +242,8 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	p := &Pushes{cfg: cfg, kind: kind, busy: map[string]bool{}, held: map[string]*heldPush{}, denied: map[string]*gate.Answer{},
-		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, again: map[string]bool{}, refused: map[string]string{}, spoken: map[string]string{}}
+	p := &Pushes{cfg: cfg, kind: kind, busy: map[string]bool{}, held: map[string]*heldPush{},
+		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, again: map[string]bool{}, refused: map[string][]string{}, spoken: map[string]string{}}
 	p.loadDenials()
 	p.loadWaiting()
 	return p, nil
@@ -288,23 +289,20 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		return push.Reply{Decision: push.DecisionRefused, Reason: "a push of this session is being decided now; end your turn and let the person see the result on the page"}
 	}
 	p.busy[sid] = true
-	var answer *gate.Answer
-	if d := p.denied[sid]; d != nil {
-		answer = d
-		delete(p.denied, sid)
-	}
+	unread := p.denialsUnread
 	p.wg.Add(1)
 	p.mu.Unlock()
 	defer p.wg.Done()
 	defer p.release(sid)
-	if answer == nil {
-		if reply, ok := p.stillDenied(sid, now); ok {
-			return reply
-		}
+	if unread {
+		return p.heldUnread(sid, ByAgent, now)
+	}
+	if reply, ok := p.stillDenied(sid, now); ok {
+		return reply
 	}
 	ctx, cancel := context.WithTimeout(ctx, PushFor)
 	defer cancel()
-	reply, d := p.decide(ctx, sid, ByAgent, answer)
+	reply, d := p.decide(ctx, sid, ByAgent, nil)
 	p.mu.Lock()
 	said := p.spoken[sid]
 	delete(p.spoken, sid)
@@ -313,7 +311,7 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		said = ""
 	}
 	p.cfg.Note(sid, said)
-	if reply.Decision != push.DecisionHeld || answer != nil {
+	if reply.Decision != push.DecisionHeld {
 		return reply
 	}
 	if d.NeedsApproval {
@@ -343,7 +341,7 @@ func (p *Pushes) stillDenied(sid string, now time.Time) (push.Reply, bool) {
 		return push.Reply{}, false
 	}
 	p.mu.Lock()
-	denied := p.refused[sid] == head
+	denied := p.refusedLocked(sid, head)
 	p.mu.Unlock()
 	if !denied {
 		return push.Reply{}, false
@@ -351,6 +349,18 @@ func (p *Pushes) stillDenied(sid string, now time.Time) (push.Reply, bool) {
 	why := "the person denied commit " + shortSHA(head) + " on the page, so the engine doesn't push it on your request; end your turn, and commit a fix or tell the person what changed: they can push from the page"
 	p.record(AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: t.Branch, Commit: head, By: ByAgent, Result: string(gate.Denied), Reason: why})
 	return push.Reply{Decision: push.DecisionDenied, Reason: why}, true
+}
+
+func (p *Pushes) heldUnread(sid, by string, now time.Time) push.Reply {
+	t, ok := p.cfg.Targets(sid)
+	e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: t.Branch, By: by, Result: string(gate.Held), Reason: denialsUnreadWhy}
+	if head, err := p.cfg.Heads.Head(t.Repo, t.Branch); ok && err == nil {
+		e.Commit = head
+	}
+	p.record(e)
+	p.show(sid, PushView{Result: string(gate.Held), Reason: denialsUnreadWhy, Commit: e.Commit, Branch: t.Branch, At: now, Audit: &e})
+	p.cfg.Logger.Info("push", "event", "held-denials-unread", "by", by)
+	return push.Reply{Decision: push.DecisionHeld, Reason: denialsUnreadWhy}
 }
 
 func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, string) {
@@ -370,7 +380,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 		return "", false, ""
 	}
 	p.mu.Lock()
-	refused := p.refused[sid] == head
+	refused := p.refusedLocked(sid, head)
 	p.mu.Unlock()
 	if refused {
 		return "", false, "the person denied commit " + shortSHA(head) + " on the page, so the engine won't push it on its own; tell the person what changed, or commit a fix, which they can push from the page"
@@ -458,8 +468,15 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		return
 	}
 	p.mu.Lock()
-	if p.closing || p.waiting[sid] != head || p.refused[sid] == head {
+	if p.closing || p.waiting[sid] != head || p.refusedLocked(sid, head) {
 		p.mu.Unlock()
+		return
+	}
+	if p.denialsUnread {
+		delete(p.waiting, sid)
+		p.mu.Unlock()
+		p.saveWaiting()
+		p.heldUnread(sid, ByReviews, p.cfg.Now())
 		return
 	}
 	if p.busy[sid] {
@@ -492,11 +509,14 @@ func (p *Pushes) Push(_ context.Context, sid string) error {
 	if err := p.claim(sid); err != nil {
 		return err
 	}
-	p.mu.Lock()
-	delete(p.denied, sid)
-	delete(p.refused, sid)
-	p.mu.Unlock()
-	p.saveDenials()
+	if t, ok := p.cfg.Targets(sid); ok {
+		if head, err := p.cfg.Heads.Head(t.Repo, t.Branch); err == nil {
+			p.mu.Lock()
+			p.unrefuseLocked(sid, head)
+			p.mu.Unlock()
+			p.saveDenials()
+		}
+	}
 	p.start(sid, nil)
 	return nil
 }
@@ -579,8 +599,7 @@ func (p *Pushes) Answer(_ context.Context, sid, card, commit string, allow bool,
 	delete(p.held, sid)
 	answer := &gate.Answer{Allow: allow, Reason: clean, Commit: h.commit, Branch: h.branch, Remote: h.remote, Expires: h.expires}
 	if !allow {
-		p.denied[sid] = answer
-		p.refused[sid] = h.commit
+		p.refuseLocked(sid, h.commit)
 		delete(p.waiting, sid)
 		p.mu.Unlock()
 		p.saveDenials()
@@ -602,7 +621,7 @@ func (p *Pushes) Answer(_ context.Context, sid, card, commit string, allow bool,
 		p.cfg.Logger.Info("push", "event", "denied")
 		return nil
 	}
-	delete(p.refused, sid)
+	p.unrefuseLocked(sid, h.commit)
 	p.busy[sid] = true
 	p.mu.Unlock()
 	p.saveDenials()
@@ -649,8 +668,7 @@ func (p *Pushes) Handoff(_ context.Context, sid, card, commit string) error {
 	if p.held[sid] == h {
 		delete(p.held, sid)
 	}
-	p.denied[sid] = &gate.Answer{Allow: false, Reason: "Hand off", Commit: h.commit, Branch: h.branch, Remote: h.remote, Expires: h.expires}
-	p.refused[sid] = h.commit
+	p.refuseLocked(sid, h.commit)
 	delete(p.waiting, sid)
 	p.mu.Unlock()
 	p.saveDenials()
@@ -859,6 +877,19 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return refuse("the engine couldn't read the session's branch " + t.Branch + ": " + err.Error())
 	}
 	x.entry.Commit = head
+	p.mu.Lock()
+	unread, denied := p.denialsUnread && by != ByPage, p.refusedLocked(sid, head)
+	p.mu.Unlock()
+	switch {
+	case unread:
+		return x.end(gate.Held, denialsUnreadWhy, nil, ""), gate.Decision{Result: gate.Held, Reason: denialsUnreadWhy}
+	case denied && by == ByPage:
+		why := "the branch moved to commit " + shortSHA(head) + ", which the person denied, so the engine pushed nothing; press Push to push that commit anyway"
+		return x.end(gate.Denied, why, nil, ""), gate.Decision{Result: gate.Denied, Reason: why}
+	case denied:
+		why := "the person denied commit " + shortSHA(head) + " on the page, so the engine doesn't push it on its own; commit a fix or tell the person what changed: they can push from the page"
+		return x.end(gate.Denied, why, nil, ""), gate.Decision{Result: gate.Denied, Reason: why}
+	}
 	target := push.Target{URL: url, Token: token, Branch: t.Branch}
 	remote, err := p.cfg.Pusher.Remote(ctx, target)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
@@ -102,6 +103,10 @@ func dotGit(name string) bool {
 	return n == ".git" || n == "git~1"
 }
 
+func unsafeRune(r rune) bool {
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
+}
+
 func fold(p string) string {
 	return strings.ToLower(p)
 }
@@ -119,7 +124,7 @@ func (p *plan) walk(tree, prefix string, depth int) error {
 		if dotGit(e.name) {
 			return unsafe("the tree has a .git entry at %s", short(prefix+e.name))
 		}
-		if !utf8.ValidString(e.name) || strings.ContainsAny(e.name, "\\") {
+		if !utf8.ValidString(e.name) || strings.ContainsAny(e.name, "\\") || strings.ContainsFunc(e.name, unsafeRune) {
 			return unsafe("the tree has a name the snapshot can't hold at %s", short(prefix+e.name))
 		}
 		path, err := p.r.join(prefix, e.name)

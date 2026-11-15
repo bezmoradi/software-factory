@@ -146,7 +146,7 @@ func (l *Limits) Frame() Fields {
 		}
 		paused = append(paused, Fields{"sid": p.sid, "side": p.side, "kind": p.kind, "what": p.what, "at": ms(p.at)})
 	}
-	unread := l.cfg.Store != nil && !l.loaded
+	unread := l.unreadLocked()
 	return Fields{"type": "limits", "meter": meter, "sessions": sessions, "projects": projects, "expiry": expiry, "paused": paused, "unread": unread}
 }
 

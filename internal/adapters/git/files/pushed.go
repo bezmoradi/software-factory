@@ -18,7 +18,7 @@ const (
 
 var _ session.PushContents = Reader{}
 
-func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedSet, error) {
+func (Reader) Pushed(repoPath, base, head string, reviewed []string, budget int64) (session.PushedSet, error) {
 	return with(repoPath, func(r *repo) (session.PushedSet, error) {
 		out := session.PushedSet{Complete: true, Attributes: map[string][]byte{}}
 		commits, err := newCommits(r, head, base)
@@ -27,6 +27,19 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 		}
 		if len(commits) > maxScanCommits {
 			commits, out.Complete = commits[:maxScanCommits], false
+		}
+		hc, err := r.commit(head)
+		if err != nil {
+			return out, err
+		}
+		read := []string{hc.Tree}
+		for _, sha := range append([]string{base}, reviewed...) {
+			if sha == "" {
+				continue
+			}
+			if c, err := r.commit(sha); err == nil {
+				read = append(read, c.Tree)
+			}
 		}
 		seen := map[string]bool{}
 		dirs := map[string]bool{"": true}
@@ -49,7 +62,7 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 				return out, err
 			}
 			for _, ch := range found {
-				key := ch.Path + "\x00" + ch.NewSHA
+				key := ch.Path + "\x00" + ch.NewSHA + "\x00" + string(ch.NewMode)
 				if seen[key] {
 					continue
 				}
@@ -61,6 +74,9 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 					dirs[d] = true
 				}
 				f := session.PushedFile{Path: ch.Path, SHA: ch.NewSHA, Mode: ch.NewMode}
+				if f.Reviewed, err = heldIn(r, read, ch); err != nil {
+					return out, err
+				}
 				if ch.NewMode == push.ModeSubmodule {
 					out.Files = append(out.Files, f)
 					continue
@@ -80,10 +96,6 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 				}
 				out.Files = append(out.Files, f)
 			}
-		}
-		hc, err := r.commit(head)
-		if err != nil {
-			return out, err
 		}
 		for d := range dirs {
 			name := ".gitattributes"
@@ -109,6 +121,19 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 		}
 		return out, nil
 	})
+}
+
+func heldIn(r *repo, trees []string, ch push.Change) (bool, error) {
+	for _, tree := range trees {
+		at, err := lookup(r.tree, tree, ch.Path)
+		if err != nil {
+			return false, err
+		}
+		if at != nil && at.sha == ch.NewSHA && at.mode == ch.NewMode {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func newCommits(r *repo, head, base string) ([]push.Commit, error) {

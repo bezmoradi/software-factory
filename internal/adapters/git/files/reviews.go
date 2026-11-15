@@ -37,18 +37,33 @@ func (v Reviews) Head(repo, branch string) (string, error) {
 	return sha, nil
 }
 
-func (v Reviews) Write(repo, base, head string, extra []session.SnapshotFile) (session.Snapshot, error) {
+func (v Reviews) Write(repoPath, base, head string, extra []session.SnapshotFile) (session.Snapshot, error) {
 	return v.write(func(dir string) error {
 		for _, side := range []struct{ name, commit string }{{"base", base}, {"head", head}} {
 			if side.commit == "" && side.name == "base" {
 				continue
 			}
-			if err := (Reader{}).WriteTree(repo, side.commit, filepath.Join(dir, side.name)); err != nil {
+			if err := (Reader{}).WriteTree(repoPath, side.commit, filepath.Join(dir, side.name)); err != nil {
 				return fmt.Errorf("%s: %w", side.name, err)
 			}
 		}
 		return nil
-	}, func(dir string) (string, error) { return writeCommits(repo, dir, base, head) }, extra)
+	}, func(dir string) (string, bool, error) {
+		c, err := with(repoPath, func(r *repo) (madeChange, error) {
+			from, err := treeSides(r, base, head)
+			if err != nil {
+				return madeChange{}, fmt.Errorf("the review's change.diff can't be written: %s", cause(err))
+			}
+			added, tooLarge, err := changeFiles(dir, from)
+			return madeChange{added: added, tooLarge: tooLarge}, err
+		})
+		return c.added, c.tooLarge, err
+	}, func(dir string) (string, error) { return writeCommits(repoPath, dir, base, head) }, extra)
+}
+
+type madeChange struct {
+	added    string
+	tooLarge bool
 }
 
 func (v Reviews) WriteMade(base, head []session.SnapshotFile, commits string) (session.Snapshot, error) {
@@ -62,6 +77,8 @@ func (v Reviews) WriteMade(base, head []session.SnapshotFile, commits string) (s
 			}
 		}
 		return nil
+	}, func(dir string) (string, bool, error) {
+		return changeFiles(dir, folderSides(dir))
 	}, func(dir string) (string, error) {
 		return commits, writeNew(filepath.Join(dir, session.CommitsFile), commits)
 	}, nil)
@@ -95,7 +112,7 @@ func writeMade(dest string, files []session.SnapshotFile) error {
 	return nil
 }
 
-func (v Reviews) write(sides func(dir string) error, listCommits func(dir string) (string, error), extra []session.SnapshotFile) (session.Snapshot, error) {
+func (v Reviews) write(sides func(dir string) error, change func(dir string) (string, bool, error), listCommits func(dir string) (string, error), extra []session.SnapshotFile) (session.Snapshot, error) {
 	if !filepath.IsAbs(v.Dir) {
 		return session.Snapshot{}, errors.New("the reviews folder isn't an absolute path")
 	}
@@ -120,12 +137,9 @@ func (v Reviews) write(sides func(dir string) error, listCommits func(dir string
 	if err := sides(dir); err != nil {
 		return session.Snapshot{}, err
 	}
-	if err := writeChange(dir); err != nil {
-		return session.Snapshot{}, fmt.Errorf("the review's change.diff can't be written: %s", cause(err))
-	}
-	added, tooLarge, err := wholeChange(dir)
+	added, tooLarge, err := change(dir)
 	if err != nil {
-		return session.Snapshot{}, fmt.Errorf("the review's change can't be read in full: %s", cause(err))
+		return session.Snapshot{}, err
 	}
 	commits, err := listCommits(dir)
 	if err != nil {

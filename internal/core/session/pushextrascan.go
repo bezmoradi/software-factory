@@ -120,6 +120,7 @@ func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
 	var deps []DependencyChange
 	for _, c := range list {
 		if c.NewMode == push.ModeSubmodule || c.OldMode == push.ModeSubmodule {
+			out.kinds = append(out.kinds, pointerMove(c))
 			continue
 		}
 		out.kinds = append(out.kinds, kindsOf(c, blobs)...)
@@ -154,6 +155,17 @@ func isBinaryText(s string) bool {
 		s = s[:binarySniff]
 	}
 	return strings.IndexByte(s, 0) >= 0
+}
+
+func pointerMove(c push.Change) FileKind {
+	was, now := c.OldMode == push.ModeSubmodule, c.NewMode == push.ModeSubmodule
+	switch {
+	case was && now:
+		return FileKind{Path: c.Path, Kind: "submodule pointer moved from commit " + c.OldSHA + " to commit " + c.NewSHA}
+	case now:
+		return FileKind{Path: c.Path, Kind: "submodule pointer added at commit " + c.NewSHA}
+	}
+	return FileKind{Path: c.Path, Kind: "submodule pointer removed; it was at commit " + c.OldSHA}
 }
 
 func kindsOf(c push.Change, blobs map[string]BlobData) []FileKind {

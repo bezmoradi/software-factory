@@ -46,6 +46,31 @@ type RunStore interface {
 	Save([]SavedRun) error
 }
 
+const runsUnreadWhy = "The engine couldn't read its record of sessions (sessions.json) when it started, so it starts no new session: a new one would replace that record and leave every earlier session without it. Fix the file in the engine's state folder and restart the engine."
+
+func (d *Dispatcher) OnRemoved(fn func(sid string)) {
+	d.mu.Lock()
+	d.removed = append(d.removed, fn)
+	d.mu.Unlock()
+}
+
+func (d *Dispatcher) Known(sid string) bool { return d.hasRun(sid) }
+
+func (d *Dispatcher) RunsUnread() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.runsUnread
+}
+
+func (d *Dispatcher) runsReadable() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.runsUnread {
+		return explained(conflict("sessions unread"), runsUnreadWhy)
+	}
+	return nil
+}
+
 func (d *Dispatcher) saveRuns() {
 	if d.cfg.Runs == nil {
 		return
@@ -53,6 +78,11 @@ func (d *Dispatcher) saveRuns() {
 	d.saveMu.Lock()
 	defer d.saveMu.Unlock()
 	d.mu.Lock()
+	if d.runsUnread {
+		d.mu.Unlock()
+		d.cfg.Logger.Warn("sessions", "event", "not-saved", "why", "unread")
+		return
+	}
 	out := make([]SavedRun, 0, len(d.runs))
 	for sid, r := range d.runs {
 		out = append(out, SavedRun{SID: sid, ID: r.id, Agent: r.spec.ID, Repo: r.repo, RepoPath: r.repoPath, Base: r.base, Name: r.name,
@@ -84,6 +114,9 @@ func (d *Dispatcher) Restore() int {
 	}
 	saved, err := d.cfg.Runs.Load()
 	if err != nil {
+		d.mu.Lock()
+		d.runsUnread = true
+		d.mu.Unlock()
 		d.cfg.Logger.Warn("sessions", "event", "not-read")
 		return 0
 	}

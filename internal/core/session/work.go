@@ -282,6 +282,11 @@ func textHash(s string) string {
 }
 
 func (w *Work) load() WorkState {
+	st, _ := w.read()
+	return st
+}
+
+func (w *Work) read() (WorkState, error) {
 	w.store.Lock()
 	defer w.store.Unlock()
 	st, err := w.cfg.Store.Load()
@@ -297,7 +302,7 @@ func (w *Work) load() WorkState {
 	if st.Sessions == nil {
 		st.Sessions = map[string]SavedWork{}
 	}
-	return st
+	return st, err
 }
 
 func (w *Work) change(fn func(*WorkState) error) error {
@@ -766,7 +771,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	var flagged []workflow.Flag
 	if head != "" {
 		if g.listed {
-			g.scan = w.scanOf(t.Repo, g.base, head)
+			g.scan = w.scanOf(t.Repo, g.base, head, w.reviewedOn(t.Branch, head))
 		}
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
@@ -801,8 +806,15 @@ func (w *Work) PushFacts(sid string, t PushTarget, head, main string) (WorkFacts
 		return WorkFacts{}, false
 	}
 	g := w.gather(sid, ws, t, head, main)
-	return WorkFacts{Type: g.eff, Required: g.required, Items: g.items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: w.holdOf(t.Name)}, true
+	hold, err := w.holdOf(t.Name)
+	items := g.items
+	if err != nil {
+		items = append(slices.Clone(items), workUnreadItem)
+	}
+	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold}, true
 }
+
+const workUnreadItem = "project settings the engine can read: it couldn't read them (work.json), so it can't tell this project's push hold, review rounds or work type"
 
 func lfsRefusal(paths []string) string {
 	if len(paths) == 0 {
@@ -1315,17 +1327,44 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 	})
 }
 
-func (w *Work) scanOf(repo, base, head string) scanned {
+func (w *Work) reviewedOn(branch, head string) []string {
+	if w.cfg.Reviews == nil {
+		return nil
+	}
+	entries, err := w.cfg.Reviews.Entries()
+	if err != nil {
+		return nil
+	}
+	latest := map[string]time.Time{}
+	for k, e := range entries {
+		if k.Branch != branch || k.Commit == head || e.Record.State != review.Pass && e.Record.State != review.Block {
+			continue
+		}
+		if at, ok := latest[k.Commit]; !ok || e.StartedAt.After(at) {
+			latest[k.Commit] = e.StartedAt
+		}
+	}
+	out := slices.Collect(maps.Keys(latest))
+	slices.SortFunc(out, func(a, b string) int {
+		if c := latest[b].Compare(latest[a]); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return out[:min(len(out), maxReviewedTrees)]
+}
+
+func (w *Work) scanOf(repo, base, head string, reviewed []string) scanned {
 	if w.cfg.Contents == nil {
 		return scanned{}
 	}
-	key := repo + "\x00" + base + "\x00" + head
+	key := repo + "\x00" + base + "\x00" + head + "\x00" + strings.Join(reviewed, ",")
 	w.scanMu.Lock()
 	defer w.scanMu.Unlock()
 	if c, ok := w.scans[key]; ok {
 		return c
 	}
-	set, err := w.cfg.Contents.Pushed(repo, base, head, FlagBudget)
+	set, err := w.cfg.Contents.Pushed(repo, base, head, reviewed, FlagBudget)
 	if err != nil {
 		w.cfg.Logger.Warn("flag scan", "event", "unreadable")
 		return scanned{}

@@ -17,6 +17,8 @@ const (
 	maxFlagVersions = 20
 	maxFlagged      = 200
 	keptScans       = 16
+
+	maxReviewedTrees = 32
 )
 
 type FlagKind string
@@ -27,6 +29,7 @@ const (
 	FlagSecret   FlagKind = "secret"
 	FlagPassword FlagKind = "password"
 	FlagEncoding FlagKind = "encoding"
+	FlagUnread   FlagKind = "unreviewed"
 )
 
 type CommitField string
@@ -60,16 +63,18 @@ var (
 		FlagSecret:   "it contains what looks like a private key or an access token",
 		FlagPassword: "it contains what looks like a password in a URL",
 		FlagEncoding: "it uses a text encoding other than UTF-8, which the engine can't scan for secrets",
+		FlagUnread:   "a commit the push sends holds a version of it that neither the branch's head, a reviewed commit nor the main branch holds, so no reviewer read that version",
 	}
 	secretPathWhy = "its path holds what looks like an access token"
 )
 
 type PushedFile struct {
-	Path string
-	SHA  string
-	Mode push.Mode
-	Size int64
-	Data []byte
+	Path     string
+	SHA      string
+	Mode     push.Mode
+	Size     int64
+	Data     []byte
+	Reviewed bool
 }
 
 type PushedCommit struct {
@@ -101,7 +106,7 @@ type PushedSet struct {
 }
 
 type PushContents interface {
-	Pushed(repo, base, head string, budget int64) (PushedSet, error)
+	Pushed(repo, base, head string, reviewed []string, budget int64) (PushedSet, error)
 }
 
 type Flag struct {
@@ -194,6 +199,8 @@ func flagOf(f PushedFile) (FlagKind, string, bool) {
 	switch {
 	case secretText(f.Path):
 		return FlagSecret, secretPathWhy, true
+	case f.Mode == push.ModeSubmodule && !f.Reviewed:
+		return FlagUnread, flagWhy[FlagUnread], true
 	case f.Mode == push.ModeSubmodule || f.Mode == push.ModeFolder:
 		return "", "", false
 	case secretName(f.Path):
@@ -204,6 +211,8 @@ func flagOf(f PushedFile) (FlagKind, string, bool) {
 		return FlagSecret, flagWhy[FlagSecret], true
 	case f.Data != nil && flagURL.Match(f.Data):
 		return FlagPassword, flagWhy[FlagPassword], true
+	case !f.Reviewed:
+		return FlagUnread, flagWhy[FlagUnread], true
 	}
 	return "", "", false
 }

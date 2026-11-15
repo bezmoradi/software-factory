@@ -336,6 +336,12 @@ func (d *Dispatcher) workForget(sid string) {
 	if w := d.workOf(); w != nil {
 		w.Forget(sid)
 	}
+	d.mu.Lock()
+	hooks := slices.Clone(d.removed)
+	d.mu.Unlock()
+	for _, fn := range hooks {
+		fn(sid)
+	}
 }
 
 type SessionWorkView struct {

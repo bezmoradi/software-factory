@@ -273,6 +273,9 @@ func (l *Limits) held(sid, what string) string {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.unreadLocked() {
+		return capsUnreadHeld
+	}
 	if s := l.sessions[sid]; s != nil && s.reached != "" {
 		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until the person raises the cap on the page; the person can still press Review"
 	}
@@ -383,7 +386,7 @@ func (p *Pushes) Continued(sid string, findings bool) {
 	halted := p.halted(ByReviews) != ""
 	p.mu.Lock()
 	h := p.held[sid]
-	ready := !p.closing && h != nil && h.commit == head && h.branch == t.Branch && p.refused[sid] != head
+	ready := !p.closing && h != nil && h.commit == head && h.branch == t.Branch && !p.refusedLocked(sid, head)
 	send := ready && findings && !halted
 	if send {
 		p.wg.Add(1)

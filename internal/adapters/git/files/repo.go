@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 const (
@@ -331,11 +333,18 @@ func validSHA(s string) bool {
 	return true
 }
 
+var lineBreaks = strings.NewReplacer("\n", "⟨U+000A⟩", "\t", "⟨U+0009⟩")
+
 func short(s string) string {
-	if len(s) > 80 {
-		return s[:80]
+	s = session.Escape([]byte(lineBreaks.Replace(s)))
+	if len(s) <= 80 {
+		return s
 	}
-	return s
+	cut := 80
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func perWorktree(name string) bool {

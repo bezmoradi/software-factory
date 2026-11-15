@@ -258,7 +258,7 @@ class SfUsage extends HTMLElement {
       parts.push(box)
     }
     for (const e of view.expiry) if (e.what === 'sign-in') parts.push(el('p', 'notice warn small', expiryText(e)))
-    if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so caps saved earlier aren't in effect and changes aren't saved. Fix or remove the file, then restart the engine."))
+    if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so it counts every session as at its cap: it refuses messages, starts no automatic review, and saves no change. Fix or remove the file, then restart the engine."))
     if (this.#said.textContent) parts.push(this.#said)
     if (parts.length && view.meter.length) parts.unshift(el('h2', 'label', 'Usage limits'))
     this.hidden = !parts.length

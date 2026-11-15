@@ -35,7 +35,7 @@ func (r *Reviews) withChangeFacts(files []SnapshotFile, repo, base, head string)
 		b.WriteString("\n")
 	}
 	if len(scan.kinds) > 0 {
-		b.WriteString("## File kinds change.diff doesn't show\n\n")
+		b.WriteString("## File kinds and submodule pointers\n\n")
 		for _, k := range scan.kinds {
 			line := "- " + CleanLine(k.Path, 300) + ": " + k.Kind
 			if k.Target != "" {
@@ -58,5 +58,5 @@ func changeFactsAsk(given bool) string {
 	if !given {
 		return ""
 	}
-	return " " + ChangeFactsFile + " in this folder lists what Software Factory's engine counted in the change: removed tests, new skip markers, fewer assertions, new lint or type-check suppressions, fewer logging calls, changed files that a person or CI runs later, and binary files, symbolic links and newly executable files. Treat each as a hint to check, not as a finding."
+	return " " + ChangeFactsFile + " in this folder lists what Software Factory's engine counted in the change: removed tests, new skip markers, fewer assertions, new lint or type-check suppressions, fewer logging calls, changed files that a person or CI runs later, binary files, symbolic links, newly executable files and submodule pointers that moved. Treat each as a hint to check, not as a finding."
 }

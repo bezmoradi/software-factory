@@ -81,7 +81,7 @@ var stores = map[string]storeRow{
 	notesFile:           {class: classDropped, version: 1, label: "notes waiting for agents"},
 	homeSettingsFile:    {class: classDropped, version: 1, label: "the baseline of the agents' user settings"},
 	capsFile:            {class: classKept, version: 1, label: "caps"},
-	deniedFile:          {class: classKept, version: 1, label: "denied commits"},
+	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
 	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},
 	identityFile:        {class: classKept, version: 1, place: placeKeepOwn, label: "the name and email agents commit with"},
 	portsFile:           {class: classKept, version: 1, label: "port ranges"},

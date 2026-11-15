@@ -60,12 +60,70 @@ func (s *side) fill() error {
 	return nil
 }
 
-func writeChange(dir string) error {
-	base, err := sides(filepath.Join(dir, "base"), maxDiffedFile)
-	if err != nil {
-		return err
+type changeSides func(limit int) (base, head map[string]side, err error)
+
+func folderSides(dir string) changeSides {
+	return func(limit int) (map[string]side, map[string]side, error) {
+		base, err := sides(filepath.Join(dir, "base"), limit)
+		if err != nil {
+			return nil, nil, err
+		}
+		head, err := sides(filepath.Join(dir, "head"), limit)
+		if err != nil {
+			return nil, nil, err
+		}
+		return base, head, nil
 	}
-	head, err := sides(filepath.Join(dir, "head"), maxDiffedFile)
+}
+
+func treeSides(r *repo, base, head string) (changeSides, error) {
+	hc, err := r.commit(head)
+	if err != nil {
+		return nil, err
+	}
+	left := ""
+	if base != "" {
+		bc, err := r.commit(base)
+		if err != nil {
+			return nil, err
+		}
+		left = bc.Tree
+	}
+	d := differ{r: r}
+	if err := d.trees(left, hc.Tree, "", 0); err != nil {
+		return nil, err
+	}
+	return func(limit int) (map[string]side, map[string]side, error) {
+		from, to := map[string]side{}, map[string]side{}
+		for _, c := range d.out {
+			if c.OldSHA != "" {
+				s := blobSide(r, c.OldMode, c.OldSHA)
+				s.limit = limit
+				from[c.Path] = s
+			}
+			if c.NewSHA != "" {
+				s := blobSide(r, c.NewMode, c.NewSHA)
+				s.limit = limit
+				to[c.Path] = s
+			}
+		}
+		return from, to, nil
+	}, nil
+}
+
+func changeFiles(dir string, from changeSides) (string, bool, error) {
+	if err := writeChange(dir, from); err != nil {
+		return "", false, fmt.Errorf("the review's change.diff can't be written: %s", cause(err))
+	}
+	added, tooLarge, err := wholeChange(from)
+	if err != nil {
+		return "", false, fmt.Errorf("the review's change can't be read in full: %s", cause(err))
+	}
+	return added, tooLarge, nil
+}
+
+func writeChange(dir string, from changeSides) error {
+	base, head, err := from(maxDiffedFile)
 	if err != nil {
 		return err
 	}
@@ -80,12 +138,8 @@ func writeChange(dir string) error {
 	return err
 }
 
-func wholeChange(dir string) (string, bool, error) {
-	base, err := sides(filepath.Join(dir, "base"), maxScanned)
-	if err != nil {
-		return "", false, err
-	}
-	head, err := sides(filepath.Join(dir, "head"), maxScanned)
+func wholeChange(from changeSides) (string, bool, error) {
+	base, head, err := from(maxScanned)
 	if err != nil {
 		return "", false, err
 	}

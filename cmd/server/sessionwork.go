@@ -27,10 +27,12 @@ func useSessionWork(base context.Context, srv *page.Server, reg *session.Registr
 	if parts.repos != nil {
 		parts.repos.OnRemoved(w.ForgetProject)
 	}
-	w.PrunePorts(func(sid string) bool {
-		_, ok := d.PushTarget(sid)
-		return ok
-	})
+	if !d.RunsUnread() {
+		w.PrunePorts(func(sid string) bool {
+			_, ok := d.PushTarget(sid)
+			return ok
+		})
+	}
 	if parts.reviews != nil {
 		parts.reviews.UseRoleModels(w.RoleModel)
 	}

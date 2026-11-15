@@ -26,7 +26,6 @@ const (
 var (
 	devVersions = map[string]int{}
 
-	onDisk   sync.Map
 	stampsMu sync.Mutex
 	earlier  = map[string]string{}
 	copyMu   sync.Mutex
@@ -83,23 +82,20 @@ func keepOlder(dir, name string) error {
 	if !ok || row.version == 0 {
 		return nil
 	}
-	key := dir + "\x00" + name
-	if v, seen := onDisk.Load(key); seen && v.(int) >= row.version {
-		return nil
-	}
 	data, err := read(dir, name)
 	if err != nil {
 		return nil
 	}
 	have, versioned := formatOf(data)
+	if data != nil && versioned && have > row.version {
+		return fmt.Errorf("%s holds format %d, newer than the %d this engine writes, so this engine leaves it as it is", name, have, row.version)
+	}
 	if data == nil || !versioned || have >= row.version {
-		onDisk.Store(key, row.version)
 		return nil
 	}
 	if err := copyOld(dir, name, data); err != nil {
 		return fmt.Errorf("%s holds format %d and this engine writes %d, but its copy for a rollback couldn't be made, so it wasn't changed: %w", name, have, row.version, err)
 	}
-	onDisk.Store(key, row.version)
 	return nil
 }
 

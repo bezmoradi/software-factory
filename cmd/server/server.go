@@ -383,6 +383,9 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		return engineParts{}, err
 	}
 	commentAfterPush(pushes, forged)
+	if pushes != nil {
+		d.OnRemoved(pushes.ForgetDenials)
+	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
 	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
@@ -515,8 +518,13 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		parts.dispatcher.ReconcileKeys(kctx)
 		cancelKeys()
 		parts.dispatcher.Restore()
+		if parts.pushes != nil && !parts.dispatcher.RunsUnread() {
+			parts.pushes.PruneDenials(parts.dispatcher.Known)
+		}
 	}
-	reg.DropStrayNotes()
+	if parts.dispatcher == nil || !parts.dispatcher.RunsUnread() {
+		reg.DropStrayNotes()
+	}
 	parts.useHalt(reg, cfg, logger)
 	parts.useLimits(reg, cfg, logger)
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))

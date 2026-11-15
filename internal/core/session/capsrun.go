@@ -53,6 +53,9 @@ func (r *Registry) limitsMessage(sid string) {
 func (l *Limits) beforeTurn(sid, project string) string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.unreadLocked() {
+		return capsUnreadTurn
+	}
 	s := l.sessions[sid]
 	if s == nil {
 		if !l.projects[project].Any() {

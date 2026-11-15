@@ -168,7 +168,7 @@ func (p *Pushes) stale(sid, commit string) string {
 		return "moved"
 	}
 	p.mu.Lock()
-	denied := p.refused[sid] == commit
+	denied := p.refusedLocked(sid, commit)
 	p.mu.Unlock()
 	if denied {
 		return "denied"

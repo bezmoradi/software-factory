@@ -228,6 +228,15 @@ func (l *Limits) stateLocked() CapsState {
 	return st
 }
 
+const (
+	capsUnreadTurn = "The engine couldn't read its caps (caps.json), so it counts every cap as reached and doesn't pass on new messages. Fix the file in the engine's state folder and restart the engine."
+	capsUnreadHeld = "the engine couldn't read its caps (caps.json), so it counts every cap as reached and starts no automatic review and no automatic Send findings; the person can still press Review"
+)
+
+func (l *Limits) unreadLocked() bool {
+	return l.cfg.Store != nil && !l.loaded
+}
+
 func (l *Limits) save() error {
 	l.saveMu.Lock()
 	defer l.saveMu.Unlock()
