@@ -10,7 +10,8 @@ import (
 
 const (
 	MarkerHeader  = "Software-Factory-Probe"
-	MaxMarkers    = 32
+	MaxMarkers    = 8
+	MaxRings      = 32
 	MaxPerMarker  = 256
 	maxTargetSize = 300
 )
@@ -31,13 +32,31 @@ type marked struct {
 }
 
 type Refusals struct {
-	mu      sync.Mutex
-	byMark  map[string]*marked
-	markers []string
+	mu     sync.Mutex
+	byMark map[string]*marked
+	rings  map[string][]string
+	order  []string
 }
 
 func NewRefusals() *Refusals {
-	return &Refusals{byMark: map[string]*marked{}}
+	return &Refusals{byMark: map[string]*marked{}, rings: map[string][]string{}}
+}
+
+func (r *Refusals) touch(ring string) {
+	if i := slices.Index(r.order, ring); i >= 0 {
+		r.order = slices.Delete(r.order, i, i+1)
+	}
+	r.order = append(r.order, ring)
+}
+
+func (r *Refusals) dropRing(ring string) {
+	for _, mark := range r.rings[ring] {
+		delete(r.byMark, mark)
+	}
+	delete(r.rings, ring)
+	if i := slices.Index(r.order, ring); i >= 0 {
+		r.order = slices.Delete(r.order, i, i+1)
+	}
 }
 
 func (r *Refusals) add(mark string, f Refusal) {
@@ -46,16 +65,22 @@ func (r *Refusals) add(mark string, f Refusal) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	ring := f.Subnet
 	m := r.byMark[mark]
 	if m == nil {
-		if len(r.markers) >= MaxMarkers {
-			delete(r.byMark, r.markers[0])
-			r.markers = slices.Delete(r.markers, 0, 1)
+		if _, known := r.rings[ring]; !known && len(r.rings) >= MaxRings && len(r.order) > 0 {
+			r.dropRing(r.order[0])
+		}
+		markers := r.rings[ring]
+		if len(markers) >= MaxMarkers {
+			delete(r.byMark, markers[0])
+			markers = slices.Delete(markers, 0, 1)
 		}
 		m = &marked{}
 		r.byMark[mark] = m
-		r.markers = append(r.markers, mark)
+		r.rings[ring] = append(markers, mark)
 	}
+	r.touch(ring)
 	if len(m.refusals) >= MaxPerMarker {
 		m.dropped++
 		return

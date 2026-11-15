@@ -96,6 +96,11 @@ func (c *Client) do(ctx context.Context, method, path string, limit int64, wait 
 	return nil, fmt.Errorf("%w (%s): %s", session.ErrBoxRefused, clipMessage(e.Reason), msg)
 }
 
+func (c *Client) Reachable(ctx context.Context) error {
+	_, err := c.do(ctx, http.MethodGet, "/healthz", maxBoxAnswer, 5*time.Second)
+	return err
+}
+
 func clipMessage(s string) string {
 	s = oneLine(s)
 	if len(s) > 400 {

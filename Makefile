@@ -3,7 +3,13 @@ run:
 	@go run ./cmd/main.go
 
 up:
-	docker compose up -d --build --wait
+	docker compose build
+	@gid="$${SF_DOCKER_GID:-}"; \
+	if [ -z "$$gid" ]; then \
+		gid="$$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true -v "$${SF_DOCKER_SOCKET:-/var/run/docker.sock}:/s:ro" --entrypoint stat software-factory:local -c %g /s)" || exit 1; \
+		echo "SF_DOCKER_GID=$$gid, the group that owns Docker's socket as containers see it"; \
+	fi; \
+	SF_DOCKER_GID="$$gid" docker compose up -d --wait --remove-orphans
 	@url="http://$$(docker compose port engine 8080)"; echo "Software Factory is ready: $$url"; \
 	if [ "$$(uname)" = Darwin ]; then open "$$url"; \
 	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$url" >/dev/null 2>&1 || true; fi

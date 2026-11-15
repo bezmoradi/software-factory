@@ -8,18 +8,30 @@ import (
 )
 
 const (
-	MaxSubnets = 4096
-	subnetBits = 28
+	MaxSubnets     = 4096
+	MaxSubnetConns = 64
+	subnetBits     = 28
+	agentOffset    = 4
 )
 
 type Subnets struct {
-	mu   sync.RWMutex
-	live map[netip.Prefix]bool
-	set  bool
+	mu    sync.Mutex
+	pool  []netip.Prefix
+	live  map[netip.Prefix]bool
+	conns map[netip.Prefix]map[*subnetConn]struct{}
 }
 
-func NewSubnets() *Subnets {
-	return &Subnets{live: map[netip.Prefix]bool{}}
+func NewSubnets(pool []netip.Prefix) *Subnets {
+	return &Subnets{pool: pool, live: map[netip.Prefix]bool{}, conns: map[netip.Prefix]map[*subnetConn]struct{}{}}
+}
+
+func (s *Subnets) inPool(p netip.Prefix) bool {
+	for _, r := range s.pool {
+		if r.Bits() <= p.Bits() && r.Contains(p.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Subnets) Replace(list []netip.Prefix) error {
@@ -31,17 +43,33 @@ func (s *Subnets) Replace(list []netip.Prefix) error {
 		if !p.IsValid() || !p.Addr().Is4() || p.Bits() != subnetBits || p.Masked() != p {
 			return errors.New("egress: a subnet isn't a /28 network address")
 		}
+		if !s.inPool(p) {
+			return errors.New("egress: a subnet is outside SF_BOX_SUBNETS")
+		}
 		next[p] = true
 	}
 	s.mu.Lock()
-	s.live, s.set = next, true
+	var closing []*subnetConn
+	for p, set := range s.conns {
+		if next[p] {
+			continue
+		}
+		for c := range set {
+			closing = append(closing, c)
+		}
+		delete(s.conns, p)
+	}
+	s.live = next
 	s.mu.Unlock()
+	for _, c := range closing {
+		_ = c.Conn.Close()
+	}
 	return nil
 }
 
 func (s *Subnets) List() []netip.Prefix {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([]netip.Prefix, 0, len(s.live))
 	for p := range s.live {
 		out = append(out, p)
@@ -49,26 +77,69 @@ func (s *Subnets) List() []netip.Prefix {
 	return out
 }
 
-func (s *Subnets) of(local, remote netip.Addr) (netip.Prefix, bool) {
+func agentAt(p netip.Prefix) netip.Addr {
+	a := p.Addr()
+	for range agentOffset {
+		a = a.Next()
+	}
+	return a
+}
+
+func (s *Subnets) admit(c net.Conn) (*subnetConn, bool) {
+	local, remote := tcpAddr(c.LocalAddr()), tcpAddr(c.RemoteAddr())
 	if !local.Is4() || !remote.Is4() {
-		return netip.Prefix{}, false
+		return nil, false
 	}
 	p, err := remote.Prefix(subnetBits)
-	if err != nil {
-		return netip.Prefix{}, false
+	if err != nil || remote != agentAt(p) || !p.Contains(local) || local == remote {
+		return nil, false
 	}
-	s.mu.RLock()
-	ok := s.live[p]
-	s.mu.RUnlock()
-	return p, ok && p.Contains(local) && local != remote
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.live[p] || len(s.conns[p]) >= MaxSubnetConns {
+		return nil, false
+	}
+	sc := &subnetConn{Conn: c, subnet: p.String(), prefix: p, owner: s}
+	if s.conns[p] == nil {
+		s.conns[p] = map[*subnetConn]struct{}{}
+	}
+	s.conns[p][sc] = struct{}{}
+	return sc, true
+}
+
+func (s *Subnets) forget(c *subnetConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if set := s.conns[c.prefix]; set != nil {
+		delete(set, c)
+		if len(set) == 0 {
+			delete(s.conns, c.prefix)
+		}
+	}
 }
 
 type subnetConn struct {
 	net.Conn
 	subnet string
+	prefix netip.Prefix
+	owner  *Subnets
+	once   sync.Once
 }
 
-func (c subnetConn) Subnet() string { return c.subnet }
+func (c *subnetConn) Subnet() string { return c.subnet }
+
+func (c *subnetConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { c.owner.forget(c) })
+	return err
+}
+
+func (c *subnetConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return nil
+}
 
 type subnetListener struct {
 	net.Listener
@@ -95,8 +166,8 @@ func (l *subnetListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if p, ok := l.subnets.of(tcpAddr(c.LocalAddr()), tcpAddr(c.RemoteAddr())); ok {
-			return subnetConn{Conn: c, subnet: p.String()}, nil
+		if sc, ok := l.subnets.admit(c); ok {
+			return sc, nil
 		}
 		_ = c.Close()
 		if l.onDrop != nil {

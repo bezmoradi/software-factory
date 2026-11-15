@@ -157,7 +157,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 		return explained(invalid("target"), "")
 	}
 	if _, err := d.keyHost(ctx, target); err != nil {
-		return nil
+		return d.unreachedKey(target)
 	}
 	release := d.holdGateway()
 	defer release()
@@ -177,6 +177,21 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 		return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in panel removes it too.")
 	}
 	return nil
+}
+
+func (d *Dispatcher) unreachedKey(target string) error {
+	release := d.holdGateway()
+	defer release()
+	d.keyMu.Lock()
+	defer d.keyMu.Unlock()
+	all, readable := d.keyRoutes()
+	k, present := all[target]
+	host, established := d.gatewayOf(targetSide(target))
+	if readable && (!present || !k.Saved || !keyMisrouted(k, true, host, established)) {
+		return nil
+	}
+	d.cfg.Logger.Info("claude api key", "target", target, "step", "reconcile", "ok", false, "why", "unreachable")
+	return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address has changed, and the engine can't reach that container to remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again.")
 }
 
 func (d *Dispatcher) ReconcileKeys(ctx context.Context) {

@@ -18,6 +18,7 @@ type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 const PROTOCOL = 1
 const RING_BYTES = 2 * 1024 * 1024
 const SEND_BYTES = 1024 * 1024
+const SEND_EVENTS = 2000
 const KEEP_EVENTS = 2000
 const KEPT_SESSIONS = 50
 const CONTEXT_WARN = 400000
@@ -49,6 +50,8 @@ let ringBytes = 0
 let outbox: Entry[] = []
 let acked = 0
 let flushing = false
+let holdUntil = 0
+let backoff = 0
 let posting: Promise<void> = Promise.resolve()
 let text: { turnId: string; text: string } | null = null
 let textQueued = false
@@ -264,7 +267,7 @@ function chunks(list: Entry[]): Ev[][] {
   let bytes = 0
   for (const x of list) {
     const last = out[out.length - 1]
-    if (!last || bytes + x.size > SEND_BYTES) {
+    if (!last || bytes + x.size > SEND_BYTES || last.length >= SEND_EVENTS) {
       out.push([x.ev])
       bytes = x.size
     } else {
@@ -281,8 +284,23 @@ function exclusive(work: () => Promise<void>): Promise<void> {
   return next
 }
 
+function retryDelay(text: string): number {
+  const hint = parsed(text)?.retryAfter
+  if (typeof hint === 'number' && Number.isFinite(hint)) return Math.min(Math.max(hint, 1), 30) * 1000
+  backoff = Math.min(backoff ? backoff * 2 : 1000, 30000)
+  return backoff
+}
+
+function holdFlush($: EngineInterface, ms: number) {
+  holdUntil = Date.now() + ms
+  void $.clock.sleep(ms).then(() => {
+    holdUntil = 0
+    void flush($)
+  })
+}
+
 function flush($: EngineInterface): Promise<void> | undefined {
-  if (flushing || !link.secret) return
+  if (flushing || !link.secret || Date.now() < holdUntil) return
   flushing = true
   return exclusive(async () => {
     try {
@@ -291,12 +309,16 @@ function flush($: EngineInterface): Promise<void> | undefined {
         const sent = outbox.slice(0, batch.length)
         outbox = outbox.slice(batch.length)
         const r = await engine($, '/events', { events: batch }).catch(() => null)
-        if (!r || r.status === 409 || r.status === 401) {
+        if (!r || r.status === 409 || r.status === 401 || r.status === 429 || r.status >= 500) {
           outbox = [...sent, ...outbox].slice(-KEEP_EVENTS)
           if (r?.status === 401) link.secret = ''
+          if (r && (r.status === 429 || r.status >= 500)) holdFlush($, retryDelay(r.text))
           break
         }
-        if (r.status === 200) for (const e of batch) if (typeof e.seq === 'number' && e.seq > acked) acked = e.seq
+        if (r.status === 200) {
+          backoff = 0
+          for (const e of batch) if (typeof e.seq === 'number' && e.seq > acked) acked = e.seq
+        }
       }
     } finally {
       flushing = false

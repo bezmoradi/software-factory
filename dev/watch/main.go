@@ -241,11 +241,14 @@ func start(ctx context.Context, first, engineOnly bool) error {
 				break
 			}
 		}
+		if err := socketGroup(ctx); err != nil {
+			return err
+		}
 	}
 	if err := copyBinary(ctx); err != nil {
 		return err
 	}
-	args := append(append([]string{}, compose...), "up", "-d", "--wait", "--force-recreate")
+	args := append(append([]string{}, compose...), "up", "-d", "--wait", "--force-recreate", "--remove-orphans")
 	switch {
 	case engineOnly:
 		args = append(args, "--no-deps", "engine")
@@ -268,6 +271,23 @@ func start(ctx context.Context, first, engineOnly bool) error {
 		say("Letting the restart finish before stopping, so no container is left half-recreated…")
 		return <-done
 	}
+}
+
+func socketGroup(ctx context.Context) error {
+	if os.Getenv("SF_DOCKER_GID") != "" {
+		return nil
+	}
+	socket := os.Getenv("SF_DOCKER_SOCKET")
+	if socket == "" {
+		socket = "/var/run/docker.sock"
+	}
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-v", socket+":/s:ro", "--entrypoint", "stat", images[0], "-c", "%g", "/s").Output()
+	gid := strings.TrimSpace(string(out))
+	if err != nil || gid == "" || strings.Trim(gid, "0123456789") != "" {
+		return errors.New("the group that owns Docker's socket couldn't be read: set SF_DOCKER_GID to it, then run make dev again")
+	}
+	say("SF_DOCKER_GID=%s, the group that owns Docker's socket as containers see it.", gid)
+	return os.Setenv("SF_DOCKER_GID", gid)
 }
 
 func copyBinary(ctx context.Context) error {

@@ -1303,6 +1303,7 @@ async function loadProjects(force = false) {
   const res = await api('/api/projects', {}).catch(() => null)
   const body = res && res.ok ? ((await res.json().catch(() => null)) as ProjectsView | null) : null
   if (body) byId<HTMLElementTagNameMap['sf-projects']>('projects').view = body
+  if (body) byId('helper-notice').hidden = body.helper !== 'unreachable'
   if (body) {
     reviewer = body.reviewer ?? null
     starterNames = new Map((body.starters ?? []).map(a => [a.id, a.name]))

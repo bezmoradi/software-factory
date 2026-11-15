@@ -53,6 +53,8 @@ type hostCreateJSON struct {
 	Tmpfs          map[string]string `json:"Tmpfs"`
 	Runtime        string            `json:"Runtime,omitempty"`
 	CgroupnsMode   string            `json:"CgroupnsMode"`
+	IpcMode        string            `json:"IpcMode"`
+	ShmSize        int64             `json:"ShmSize"`
 }
 
 type endpointCreateJSON struct {
@@ -115,10 +117,16 @@ type hostInspectJSON struct {
 	MaskedPaths       []string                   `json:"MaskedPaths"`
 	ReadonlyPaths     []string                   `json:"ReadonlyPaths"`
 	IpcMode           string                     `json:"IpcMode"`
+	ShmSize           int64                      `json:"ShmSize"`
+	OomKillDisable    *bool                      `json:"OomKillDisable"`
+	DNS               []string                   `json:"Dns"`
+	DNSOptions        []string                   `json:"DnsOptions"`
+	DNSSearch         []string                   `json:"DnsSearch"`
 	PidMode           string                     `json:"PidMode"`
 	UsernsMode        string                     `json:"UsernsMode"`
 	UTSMode           string                     `json:"UTSMode"`
 	CgroupParent      string                     `json:"CgroupParent"`
+	Ulimits           []json.RawMessage          `json:"Ulimits"`
 }
 
 type mountPointJSON struct {
@@ -126,20 +134,26 @@ type mountPointJSON struct {
 	Name        string `json:"Name"`
 	Source      string `json:"Source"`
 	Destination string `json:"Destination"`
+	Driver      string `json:"Driver"`
+	Propagation string `json:"Propagation"`
 	RW          bool   `json:"RW"`
 }
 
 type endpointJSON struct {
-	IPAMConfig *ipamAddressJSON `json:"IPAMConfig"`
-	IPAddress  string           `json:"IPAddress"`
-	NetworkID  string           `json:"NetworkID"`
+	IPAMConfig *ipamAddressJSON  `json:"IPAMConfig"`
+	IPAddress  string            `json:"IPAddress"`
+	NetworkID  string            `json:"NetworkID"`
+	Aliases    []string          `json:"Aliases"`
+	DriverOpts map[string]string `json:"DriverOpts"`
 }
 
 type containerInspectJSON struct {
-	ID    string `json:"Id"`
-	Name  string `json:"Name"`
-	Image string `json:"Image"`
-	State struct {
+	ID              string   `json:"Id"`
+	Name            string   `json:"Name"`
+	Image           string   `json:"Image"`
+	AppArmorProfile string   `json:"AppArmorProfile"`
+	ExecIDs         []string `json:"ExecIDs"`
+	State           struct {
 		Status  string `json:"Status"`
 		Running bool   `json:"Running"`
 		Health  *struct {
@@ -226,9 +240,10 @@ type networkDisconnectJSON struct {
 }
 
 type volumeJSON struct {
-	Name   string            `json:"Name"`
-	Driver string            `json:"Driver"`
-	Labels map[string]string `json:"Labels"`
+	Name    string            `json:"Name"`
+	Driver  string            `json:"Driver"`
+	Labels  map[string]string `json:"Labels"`
+	Options map[string]string `json:"Options"`
 }
 
 type volumeCreateJSON struct {

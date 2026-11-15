@@ -572,6 +572,7 @@ export interface ProjectsView {
   repos?: boolean
   starters?: Starter[]
   reviewer?: ReviewerView | null
+  helper?: string
 }
 
 export interface Dispatch extends Consent {

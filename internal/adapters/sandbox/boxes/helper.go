@@ -178,7 +178,7 @@ func (h *Helper) checkPool(ctx context.Context, info infoJSON) error {
 		return fmt.Errorf("the box helper can't list Docker's networks: %w", err)
 	}
 	for _, n := range nets {
-		_, ours := ownedName(h.rec.project, boxPrefix, n.Name, n.Labels)
+		ours := stackBoxNetwork(n)
 		for _, s := range subnetsOf(n) {
 			for _, r := range h.cfg.Ranges {
 				if !r.Overlaps(s) {
@@ -192,6 +192,15 @@ func (h *Helper) checkPool(ctx context.Context, info infoJSON) error {
 		}
 	}
 	return nil
+}
+
+func stackBoxNetwork(n networkInspectJSON) bool {
+	project := n.Labels[LabelStack]
+	if !session.ValidComposeProject(project) {
+		return false
+	}
+	_, ok := ownedName(project, boxPrefix, n.Name, n.Labels)
+	return ok
 }
 
 func subnetsOf(n networkInspectJSON) []netip.Prefix {

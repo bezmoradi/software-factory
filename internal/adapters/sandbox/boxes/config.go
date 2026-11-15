@@ -59,11 +59,7 @@ func ParseConfig(getenv func(string) string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("SF_BOX_RUNTIME must be unset or %s, got %q", RuntimeGVisor, v)
 	}
-	subnets := strings.TrimSpace(getenv("SF_BOX_SUBNETS"))
-	if subnets == "" {
-		subnets = DefaultSubnets
-	}
-	ranges, err := parseRanges(subnets)
+	ranges, err := ParseSubnets(getenv)
 	if err != nil {
 		return Config{}, err
 	}
@@ -81,6 +77,26 @@ func ParseConfig(getenv func(string) string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func ParseSubnets(getenv func(string) string) ([]netip.Prefix, error) {
+	subnets := strings.TrimSpace(getenv("SF_BOX_SUBNETS"))
+	if subnets == "" {
+		subnets = DefaultSubnets
+	}
+	return parseRanges(subnets)
+}
+
+func InPool(ranges []netip.Prefix, subnet netip.Prefix) bool {
+	if !subnet.IsValid() || subnet.Bits() != boxBits {
+		return false
+	}
+	for _, r := range ranges {
+		if r.Contains(subnet.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseBytes(s string) (int64, error) {

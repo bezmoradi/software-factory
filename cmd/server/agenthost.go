@@ -5,11 +5,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/net/netutil"
@@ -134,7 +136,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 		go func() { errs <- agenthost.ServeRelay(ctx, sock, relay) }()
 	}
 	srv := &http.Server{
-		Handler:           host.Handler(),
+		Handler:           bodyDeadline(host.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 		MaxHeaderBytes:    16 << 10,
@@ -174,4 +176,31 @@ func ServeMCP(ctx context.Context, args []string) error {
 	}
 	ask := agenthost.SocketAsker(socket, os.Getenv("SF_PUSH_TOKEN"))
 	return agenthost.NewMCP(ask, Version, os.Stdout).Screenshots(os.Getenv(session.ScreenshotsVariable)).Serve(ctx, os.Stdin)
+}
+
+const bodyFor = 30 * time.Second
+
+func bodyDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Body != http.NoBody {
+			rc := http.NewResponseController(w)
+			_ = rc.SetReadDeadline(time.Now().Add(bodyFor))
+			r.Body = &deadlineBody{ReadCloser: r.Body, rc: rc}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type deadlineBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	once sync.Once
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.once.Do(func() { _ = b.rc.SetReadDeadline(time.Time{}) })
+	}
+	return n, err
 }

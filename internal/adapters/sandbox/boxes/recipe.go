@@ -37,6 +37,15 @@ const (
 	noProxy        = "localhost,127.0.0.1,::1"
 	boxOOMScore    = 500
 	boxPids        = 2048
+	boxShm         = 64 << 20
+	ipcPrivate     = "private"
+	apparmorOff    = "unconfined"
+	volumeDriver   = "local"
+)
+
+var (
+	dockerMasked   = []string{"/proc/acpi", "/proc/asound", "/proc/kcore", "/proc/keys", "/proc/latency_stats", "/proc/sched_debug", "/proc/scsi", "/proc/timer_list", "/proc/timer_stats", "/sys/firmware"}
+	dockerReadonly = []string{"/proc/bus", "/proc/fs", "/proc/irq", "/proc/sys", "/proc/sysrq-trigger"}
 )
 
 type stackVolumes struct {
@@ -103,6 +112,16 @@ func (r *recipe) labels(box string) map[string]string {
 	return map[string]string{LabelStack: r.project, LabelBox: box}
 }
 
+func (r *recipe) containerLabels(box string) map[string]string {
+	out := r.labels(box)
+	for k := range r.imageLabel {
+		if strings.HasPrefix(k, composeLabels) {
+			out[k] = ""
+		}
+	}
+	return out
+}
+
 func (r *recipe) create(box string, subnet netip.Prefix, vols stackVolumes) containerCreateJSON {
 	net := networkName(r.project, box)
 	c := containerCreateJSON{
@@ -110,7 +129,7 @@ func (r *recipe) create(box string, subnet netip.Prefix, vols stackVolumes) cont
 		User:        boxUser,
 		Cmd:         []string{"agent-host"},
 		Env:         boxEnv(box),
-		Labels:      r.labels(box),
+		Labels:      r.containerLabels(box),
 		Healthcheck: boxHealth(),
 		HostConfig: hostCreateJSON{
 			Init:           true,
@@ -129,6 +148,8 @@ func (r *recipe) create(box string, subnet netip.Prefix, vols stackVolumes) cont
 			Mounts:         r.mounts(box, vols),
 			Tmpfs:          map[string]string{"/tmp": "size=1g,mode=1777", "/run/sf": "size=1m,mode=0700,uid=10002,gid=10000"},
 			CgroupnsMode:   "private",
+			IpcMode:        ipcPrivate,
+			ShmSize:        boxShm,
 		},
 	}
 	if r.cfg.Runtime != "" {
@@ -147,58 +168,66 @@ type mountView struct {
 }
 
 type pointView struct {
-	Type, Name, Destination string
-	RW                      bool
+	Type, Name, Destination, Driver, Propagation string
+	RW                                           bool
 }
 
 type recipeView struct {
-	Image          string
-	User           string
-	Entrypoint     []string
-	Cmd            []string
-	Env            []string
-	Labels         map[string]string
-	Health         healthJSON
-	Init           bool
-	ReadonlyRootfs bool
-	CapAdd         []string
-	CapDrop        []string
-	Privileged     bool
-	SecurityOpt    []string
-	MaskedEmptied  bool
-	ReadonlyEmpty  bool
-	OomScoreAdj    int
-	Memory         int64
-	MemorySwap     int64
-	NanoCPUs       int64
-	PidsLimit      int64
-	Restart        restartJSON
-	LogType        string
-	LogConfig      map[string]string
-	ExtraHosts     []string
-	NetworkMode    string
-	Networks       []string
-	Address        string
-	Mounts         []mountView
-	Points         []pointView
-	Tmpfs          map[string]string
-	Runtime        string
-	CgroupnsMode   string
-	SharedIPC      bool
-	PidMode        string
-	UsernsMode     string
-	UTSMode        string
-	CgroupParent   string
-	Binds          []string
-	VolumesFrom    []string
-	Links          []string
-	Devices        int
-	DeviceRequests int
-	DeviceRules    []string
-	GroupAdd       []string
-	Sysctls        map[string]string
-	PortBindings   int
-	PublishAll     bool
+	Image           string
+	User            string
+	Entrypoint      []string
+	Cmd             []string
+	Env             []string
+	Labels          map[string]string
+	Health          healthJSON
+	Init            bool
+	ReadonlyRootfs  bool
+	CapAdd          []string
+	CapDrop         []string
+	Privileged      bool
+	SecurityOpt     []string
+	AppArmorOff     bool
+	MaskedMissing   []string
+	ReadonlyMissing []string
+	OomScoreAdj     int
+	OomKillOff      bool
+	Memory          int64
+	MemorySwap      int64
+	NanoCPUs        int64
+	PidsLimit       int64
+	Restart         restartJSON
+	LogType         string
+	LogConfig       map[string]string
+	ExtraHosts      []string
+	NetworkMode     string
+	Networks        []string
+	Address         string
+	OtherAliases    []string
+	EndpointOpts    map[string]string
+	Mounts          []mountView
+	Points          []pointView
+	Tmpfs           map[string]string
+	Runtime         string
+	CgroupnsMode    string
+	IpcMode         string
+	ShmSize         int64
+	DNS             []string
+	DNSOptions      []string
+	DNSSearch       []string
+	PidMode         string
+	UsernsMode      string
+	UTSMode         string
+	CgroupParent    string
+	Binds           []string
+	VolumesFrom     []string
+	Links           []string
+	Devices         int
+	DeviceRequests  int
+	DeviceRules     []string
+	GroupAdd        []string
+	Sysctls         map[string]string
+	PortBindings    int
+	PublishAll      bool
 }
 
 type generic struct {
@@ -277,7 +306,7 @@ func (r *recipe) labelsWanted(box string) map[string]string {
 	if out == nil {
 		out = map[string]string{}
 	}
-	maps.Copy(out, r.labels(box))
+	maps.Copy(out, r.containerLabels(box))
 	return out
 }
 
@@ -285,6 +314,15 @@ func withoutRecipe(labels map[string]string) map[string]string {
 	out := maps.Clone(labels)
 	delete(out, LabelRecipe)
 	return out
+}
+
+func composeBlank(labels map[string]string) bool {
+	for k, v := range labels {
+		if strings.HasPrefix(k, composeLabels) && v != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func composeMatches(labels, image map[string]string) bool {
@@ -296,6 +334,31 @@ func composeMatches(labels, image map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func otherAliases(aliases []string, id, name string) []string {
+	short := id
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	var out []string
+	for _, a := range aliases {
+		if a != short && a != id && a != name {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func missingFrom(got, want []string) []string {
+	var out []string
+	for _, p := range want {
+		if !slices.Contains(got, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func mergeEnv(image, ours []string) []string {
@@ -324,7 +387,7 @@ func (r *recipe) expectedView(box string, subnet netip.Prefix, vols stackVolumes
 	}
 	var points []pointView
 	for _, m := range c.HostConfig.Mounts {
-		points = append(points, pointView{Type: m.Type, Name: g.name(m.Source), Destination: g.name(m.Target), RW: !m.ReadOnly})
+		points = append(points, pointView{Type: m.Type, Name: g.name(m.Source), Destination: g.name(m.Target), Driver: volumeDriver, RW: !m.ReadOnly})
 	}
 	slices.SortFunc(points, func(a, b pointView) int { return strings.Compare(a.Destination, b.Destination) })
 	h := c.HostConfig
@@ -338,6 +401,7 @@ func (r *recipe) expectedView(box string, subnet netip.Prefix, vols stackVolumes
 		ExtraHosts: g.all(h.ExtraHosts, g.host), NetworkMode: g.name(h.NetworkMode),
 		Networks: []string{g.name(h.NetworkMode)}, Address: g.address(agentOf(subnet).String()),
 		Mounts: g.mountsOf(h.Mounts), Points: points, Tmpfs: h.Tmpfs, Runtime: r.runtime, CgroupnsMode: h.CgroupnsMode,
+		IpcMode: h.IpcMode, ShmSize: h.ShmSize,
 	}
 }
 
@@ -354,15 +418,23 @@ func (r *recipe) inspectedView(ci containerInspectJSON, box string, subnet netip
 	h := ci.HostConfig
 	var points []pointView
 	for _, p := range ci.Mounts {
-		points = append(points, pointView{Type: p.Type, Name: g.name(p.Name), Destination: g.name(p.Destination), RW: p.RW})
+		points = append(points, pointView{Type: p.Type, Name: g.name(p.Name), Destination: g.name(p.Destination), Driver: p.Driver, Propagation: p.Propagation, RW: p.RW})
 	}
 	slices.SortFunc(points, func(a, b pointView) int { return strings.Compare(a.Destination, b.Destination) })
-	var networks []string
+	var networks, aliases []string
+	var opts map[string]string
 	address := ""
 	for name, ep := range ci.NetworkSettings.Networks {
 		networks = append(networks, g.name(name))
-		if ep.IPAMConfig != nil && name == networkName(r.project, box) {
+		if name != networkName(r.project, box) {
+			continue
+		}
+		if ep.IPAMConfig != nil {
 			address = g.address(ep.IPAMConfig.IPv4Address)
+		}
+		aliases = otherAliases(ep.Aliases, ci.ID, strings.TrimPrefix(ci.Name, "/"))
+		if len(ep.DriverOpts) > 0 {
+			opts = ep.DriverOpts
 		}
 	}
 	slices.Sort(networks)
@@ -371,13 +443,16 @@ func (r *recipe) inspectedView(ci containerInspectJSON, box string, subnet netip
 		Env:            g.all(ci.Config.Env, g.name),
 		Labels:         labelsView(withoutRecipe(ci.Config.Labels), g),
 		ReadonlyRootfs: h.ReadonlyRootfs, CapAdd: nonEmpty(h.CapAdd), CapDrop: h.CapDrop, Privileged: h.Privileged, SecurityOpt: h.SecurityOpt,
-		MaskedEmptied: h.MaskedPaths != nil && len(h.MaskedPaths) == 0, ReadonlyEmpty: h.ReadonlyPaths != nil && len(h.ReadonlyPaths) == 0,
-		OomScoreAdj: h.OomScoreAdj, Memory: h.Memory, MemorySwap: h.MemorySwap, NanoCPUs: h.NanoCPUs,
+		AppArmorOff:   ci.AppArmorProfile == apparmorOff,
+		MaskedMissing: missingFrom(h.MaskedPaths, dockerMasked), ReadonlyMissing: missingFrom(h.ReadonlyPaths, dockerReadonly),
+		OomScoreAdj: h.OomScoreAdj, OomKillOff: h.OomKillDisable != nil && *h.OomKillDisable, Memory: h.Memory, MemorySwap: h.MemorySwap, NanoCPUs: h.NanoCPUs,
 		Restart: h.RestartPolicy, LogType: h.LogConfig.Type, LogConfig: g.logOf(h.LogConfig.Config),
 		ExtraHosts: g.all(h.ExtraHosts, g.host), NetworkMode: g.name(h.NetworkMode), Networks: networks, Address: address,
+		OtherAliases: aliases, EndpointOpts: opts,
 		Mounts: g.mountsOf(h.Mounts), Points: points, Tmpfs: h.Tmpfs, Runtime: h.Runtime, CgroupnsMode: h.CgroupnsMode,
-		SharedIPC: h.IpcMode == "host" || strings.HasPrefix(h.IpcMode, "container:"),
-		PidMode:   h.PidMode, UsernsMode: h.UsernsMode, UTSMode: h.UTSMode, CgroupParent: h.CgroupParent,
+		IpcMode: h.IpcMode, ShmSize: h.ShmSize,
+		DNS: nonEmpty(h.DNS), DNSOptions: nonEmpty(h.DNSOptions), DNSSearch: nonEmpty(h.DNSSearch),
+		PidMode: h.PidMode, UsernsMode: h.UsernsMode, UTSMode: h.UTSMode, CgroupParent: h.CgroupParent,
 		Binds: nonEmpty(h.Binds), VolumesFrom: nonEmpty(h.VolumesFrom), Links: nonEmpty(h.Links),
 		Devices: len(h.Devices), DeviceRequests: len(h.DeviceRequests), DeviceRules: nonEmpty(h.DeviceCgroupRules), GroupAdd: nonEmpty(h.GroupAdd),
 		PortBindings: len(h.PortBindings), PublishAll: h.PublishAllPorts,

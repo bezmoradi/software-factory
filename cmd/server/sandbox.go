@@ -64,6 +64,9 @@ func parseSandbox(cfg *PageConfig, getenv func(string) string) error {
 		}
 		sb.KeyFile = filepath.Clean(v)
 	}
+	if cfg.Helper != "" && sb.KeyFile == "" {
+		return errors.New("SF_HELPER is set and SF_EGRESS_KEY_FILE isn't: the engine tells egress each session container's network over its control channel, and without one egress drops every session's traffic, so the engine doesn't start: set SF_EGRESS_KEY_FILE, as compose.yaml does, or unset SF_HELPER")
+	}
 	policy, err := egress.NewPolicy(list(getenv("EGRESS_ALLOW")), list(getenv("EGRESS_DENY")))
 	if err != nil {
 		return err

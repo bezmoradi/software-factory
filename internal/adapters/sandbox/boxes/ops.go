@@ -15,7 +15,10 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
-const cleanupFor = 90 * time.Second
+const (
+	cleanupFor   = 90 * time.Second
+	stateRenamed = "renamed"
+)
 
 func badBox(box string) error {
 	if session.ValidBox(box) {
@@ -88,6 +91,12 @@ func (h *Helper) start(ctx context.Context, box string) (session.BoxInfo, error)
 	}
 	vols, err := h.stackVolumes(ctx)
 	if err != nil {
+		return session.BoxInfo{}, err
+	}
+	if err := h.dropTwins(ctx, box); err != nil {
+		return session.BoxInfo{}, err
+	}
+	if err := h.noStrays(ctx, vols.Workspace); err != nil {
 		return session.BoxInfo{}, err
 	}
 	ci, err := h.boxContainer(ctx, box)
@@ -167,7 +176,11 @@ func (h *Helper) build(ctx context.Context, box string, subnet netip.Prefix, vol
 	if err := h.docker.get(ctx, "/containers/"+pathPart(created.ID)+"/json", nil, &got); err != nil {
 		return fail(dockerFailed("inspect the box's container", err))
 	}
-	if diffs := differences(want, h.rec.inspectedView(got, box, subnet)); len(diffs) > 0 || got.Config.Labels[LabelRecipe] != recipe {
+	diffs := differences(want, h.rec.inspectedView(got, box, subnet))
+	if len(got.HostConfig.Ulimits) > 0 {
+		diffs = append(diffs, "Ulimits")
+	}
+	if len(diffs) > 0 || got.Config.Labels[LabelRecipe] != recipe {
 		return fail(refuse(http.StatusInternalServerError, ReasonRecipe, "the box's container as Docker made it differs from the recipe in %s", strings.Join(diffs, ", ")))
 	}
 	if err := h.docker.post(ctx, "/containers/"+pathPart(created.ID)+"/start", nil, nil, nil); err != nil {
@@ -281,7 +294,7 @@ func (h *Helper) reuse(ctx context.Context, box string, ci *containerInspectJSON
 		return session.BoxInfo{}, false
 	}
 	fresh, err := h.boxNetwork(ctx, box)
-	if err != nil || fresh == nil {
+	if err != nil || fresh == nil || len(memberProblems(fresh, m.engine, m.egress, ci.ID, subnet)) > 0 {
 		return session.BoxInfo{}, false
 	}
 	return h.infoOf(*ci, fresh, box, &vols, m), true
@@ -346,13 +359,20 @@ func (h *Helper) List(ctx context.Context) ([]session.BoxInfo, error) {
 	m := h.membersOf(ctx)
 	ready := h.runtimeReady(ctx) == nil
 	seen := map[string]bool{}
+	twins := map[string][]string{}
 	var out []session.BoxInfo
 	for _, c := range list {
 		if len(c.Names) == 0 {
 			continue
 		}
 		box, ok := h.ownsContainer(ctx, c.Names[0], c.ImageID, c.Labels)
-		if !ok || seen[box] {
+		if !ok {
+			if twin, renamed := renamedBox(h.rec.project, c); renamed {
+				twins[twin] = append(twins[twin], oneLine(strings.TrimPrefix(c.Names[0], "/"))+":"+oneLine(c.State))
+			}
+			continue
+		}
+		if seen[box] {
 			continue
 		}
 		var ci containerInspectJSON
@@ -383,8 +403,30 @@ func (h *Helper) List(ctx context.Context) ([]session.BoxInfo, error) {
 		seen[box] = true
 		out = append(out, session.BoxInfo{Box: box, State: "stopped"})
 	}
+	for i := range out {
+		if names := twins[out[i].Box]; len(names) > 0 {
+			if out[i].State == "stopped" {
+				out[i].State = stateRenamed
+			}
+			out[i].Facts = append(out[i].Facts, renamedFact(names))
+		}
+	}
+	for box, names := range twins {
+		if !seen[box] {
+			out = append(out, session.BoxInfo{Box: box, State: stateRenamed, Facts: []string{renamedFact(names)}})
+		}
+	}
 	slices.SortFunc(out, func(a, b session.BoxInfo) int { return strings.Compare(a.Box, b.Box) })
 	return out, nil
+}
+
+func renamedFact(names []string) string {
+	slices.Sort(names)
+	fact := "renamed=" + strings.Join(names, ",")
+	if len(fact) > maxFact {
+		fact = fact[:maxFact]
+	}
+	return fact
 }
 
 func stateOf(ci containerInspectJSON) string {
@@ -437,6 +479,7 @@ func (h *Helper) infoOf(ci containerInspectJSON, n *networkInspectJSON, box stri
 		"cap-drop=" + listOrNone(h0.CapDrop),
 		"privileged=" + strconv.FormatBool(h0.Privileged),
 		"security-opt=" + listOrNone(h0.SecurityOpt),
+		"execs=" + strconv.Itoa(len(ci.ExecIDs)),
 	}
 	if ci.State.Health != nil {
 		facts = append(facts, "health="+ci.State.Health.Status)
@@ -457,6 +500,7 @@ func (h *Helper) infoOf(ci containerInspectJSON, n *networkInspectJSON, box stri
 			"gateway-mode="+n.Options[gatewayModeKey],
 			"engine-connected="+strconv.FormatBool(connectedAt(n, m.engine, engineOf(subnet))),
 			"egress-connected="+strconv.FormatBool(connectedAt(n, m.egress, egressOf(subnet))),
+			"members-only="+strconv.FormatBool(m.engine != "" && m.egress != "" && len(memberProblems(n, m.engine, m.egress, ci.ID, subnet)) == 0),
 		)
 	} else {
 		facts = append(facts, "network=missing")

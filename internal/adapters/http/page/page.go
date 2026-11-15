@@ -56,6 +56,7 @@ type Config struct {
 	Recaps         session.RecapPage
 	WorkspaceView  session.WorkspacePage
 	Exceptions     session.ExceptionsPage
+	HelperDown     func() bool
 }
 
 type Server struct {
@@ -89,6 +90,9 @@ type Server struct {
 
 	lessons session.LessonsPage
 	depth   session.ReviewDepthPage
+
+	inflight *oneAtATime
+	decodes  chan struct{}
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -106,13 +110,15 @@ func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, erro
 	}
 	host := "127.0.0.1:" + strconv.Itoa(cfg.PublicPort)
 	return &Server{
-		cfg:    cfg,
-		reg:    reg,
-		logger: logger,
-		keys:   newKeys(cfg.Now),
-		assets: loadAssets(cfg.StateDir),
-		host:   host,
-		origin: "http://" + host,
+		cfg:      cfg,
+		reg:      reg,
+		logger:   logger,
+		keys:     newKeys(cfg.Now),
+		assets:   loadAssets(cfg.StateDir),
+		host:     host,
+		origin:   "http://" + host,
+		inflight: newOneAtATime(),
+		decodes:  make(chan struct{}, MaxDecodes),
 	}, nil
 }
 
@@ -212,9 +218,7 @@ func siteAllowed(site []string, visit bool) bool {
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(writeFor))
-	if r.Method == http.MethodPost {
-		_ = rc.SetReadDeadline(time.Now().Add(readFor))
-	}
+	_ = rc.SetReadDeadline(time.Now().Add(readFor))
 	if r.Host != s.host {
 		s.reject(w, http.StatusMisdirectedRequest, "host")
 		return
@@ -513,6 +517,8 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
 	sink := newStream(MaxStreamQueue)
 	id, err := s.reg.Attach(sink)
 	if err != nil {
@@ -520,8 +526,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.reg.Detach(id)
+	if !s.authorized(r) {
+		s.reject(w, http.StatusUnauthorized, "token")
+		return
+	}
 	s.logger.Info("page stream opened")
-	rc := http.NewResponseController(w)
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()

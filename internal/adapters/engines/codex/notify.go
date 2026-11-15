@@ -277,6 +277,32 @@ func (c *Client) keepItemsLocked(keep func(*item) bool) {
 		}
 	}
 	c.items = kept
+	c.held = 0
+	for _, v := range kept {
+		c.held += len(v.streamed) + changesSize(v.changes)
+	}
+}
+
+func changesSize(list []fileChange) int {
+	n := 0
+	for _, ch := range list {
+		n += len(ch.Path) + len(ch.Kind) + len(ch.Diff)
+		if ch.MovePath != nil {
+			n += len(*ch.MovePath)
+		}
+	}
+	return n
+}
+
+func (c *Client) holdTextLocked(it *item, more string) {
+	if !it.untracked && len(it.streamed)+len(more) <= maxTracked && c.held+len(more) <= maxHeld {
+		it.streamed = append(it.streamed, more...)
+		c.held += len(more)
+		return
+	}
+	c.held -= len(it.streamed)
+	it.untracked = true
+	it.streamed = nil
 }
 
 func (c *Client) deltaLocked(p json.RawMessage, kind int, typ agent.EventType) {
@@ -289,12 +315,7 @@ func (c *Client) deltaLocked(p json.RawMessage, kind int, typ agent.EventType) {
 	}
 	it := c.trackLocked(n.ItemID, kind, "")
 	it.sawDelta = true
-	if !it.untracked && len(it.streamed)+len(n.Delta) <= maxTracked {
-		it.streamed = append(it.streamed, n.Delta...)
-	} else {
-		it.untracked = true
-		it.streamed = nil
-	}
+	c.holdTextLocked(it, n.Delta)
 	c.emitLocked(agent.Event{Type: typ, Text: n.Delta})
 }
 
@@ -311,7 +332,7 @@ func (c *Client) finalTextLocked(id, text string, kind int, typ agent.EventType)
 		it = c.trackLocked(id, kind, "")
 	}
 	it.sawDelta = true
-	it.streamed = append(it.streamed, rest...)
+	c.holdTextLocked(it, rest)
 	if rest != "" {
 		c.emitLocked(agent.Event{Type: typ, Text: rest})
 	}
@@ -495,8 +516,14 @@ func (c *Client) fileItemLocked(x threadItem, completed bool, sub string) {
 }
 
 func (c *Client) setChangesLocked(it *item, changes []fileChange, ok bool) {
-	it.changes = changes
-	it.tooBig = !ok
+	c.held -= changesSize(it.changes)
+	size := changesSize(changes)
+	if c.held+size > maxHeld {
+		it.changes, it.tooBig = nil, true
+	} else {
+		it.changes, it.tooBig = changes, !ok
+		c.held += size
+	}
 	it.version++
 }
 

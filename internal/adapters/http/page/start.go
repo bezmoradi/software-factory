@@ -49,6 +49,9 @@ type projectJSON struct {
 
 func (s *Server) projects(w http.ResponseWriter) {
 	out := map[string]any{"projects": []any{}, "cloning": []any{}, "hosts": []any{}, "repos": s.cfg.Repos != nil, "starters": []any{}, "reviewer": nil}
+	if s.cfg.HelperDown != nil && s.cfg.HelperDown() {
+		out["helper"] = "unreachable"
+	}
 	if s.cfg.Repos == nil {
 		send(w, http.StatusOK, out)
 		return

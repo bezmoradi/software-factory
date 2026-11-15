@@ -63,7 +63,27 @@ func (r *Registry) endTurnLocked(a *admitted) {
 }
 
 func (r *Registry) turnChangedLocked() {
-	if r.turned != nil {
-		go r.turned()
+	if r.turned == nil {
+		return
+	}
+	if r.turnSaving {
+		r.turnAgain = true
+		return
+	}
+	r.turnSaving = true
+	go r.saveTurns(r.turned)
+}
+
+func (r *Registry) saveTurns(save func()) {
+	for {
+		save()
+		r.mu.Lock()
+		if !r.turnAgain {
+			r.turnSaving = false
+			r.mu.Unlock()
+			return
+		}
+		r.turnAgain = false
+		r.mu.Unlock()
 	}
 }

@@ -43,6 +43,8 @@ const (
 
 const (
 	maxQueued  = 4096
+	maxQueuedB = 64 << 20
+	maxHeld    = 64 << 20
 	maxPending = 32
 	maxItems   = 2048
 	maxReplies = 256
@@ -130,6 +132,8 @@ type Client struct {
 	overflow  bool
 	unknown   int
 	queue     []agent.Event
+	queuedB   int
+	held      int
 
 	wake    chan struct{}
 	events  chan agent.Event
@@ -687,7 +691,8 @@ func (c *Client) emitLocked(ev agent.Event) {
 	if c.overflow || c.ended {
 		return
 	}
-	if len(c.queue) >= maxQueued {
+	size := eventSize(ev)
+	if len(c.queue) >= maxQueued || c.queuedB+size > maxQueuedB {
 		c.overflow = true
 		c.queue = append(c.queue, agent.Event{Type: agent.Failed, Reason: ReasonOverflow})
 		c.signalLocked()
@@ -696,7 +701,33 @@ func (c *Client) emitLocked(ev agent.Event) {
 		return
 	}
 	c.queue = append(c.queue, ev)
+	c.queuedB += size
 	c.signalLocked()
+}
+
+func eventSize(ev agent.Event) int {
+	n := len(ev.Text) + len(ev.Reason) + len(ev.Mode) + len(ev.Agent)
+	if ev.Tool != nil {
+		n += toolSize(*ev.Tool)
+	}
+	if ev.Request != nil {
+		n += len(ev.Request.ID) + toolSize(ev.Request.Tool)
+		for _, o := range ev.Request.Options {
+			n += len(o.ID) + len(o.Kind) + len(o.Name)
+		}
+		n += 64 * len(ev.Request.Questions)
+	}
+	for _, cmd := range ev.Commands {
+		n += len(cmd.Name) + len(cmd.Description)
+	}
+	for _, a := range ev.Agents {
+		n += len(a.ID) + len(a.Name) + len(a.Status)
+	}
+	return n
+}
+
+func toolSize(t agent.Tool) int {
+	return len(t.ID) + len(t.Title) + len(t.Kind) + len(t.Status) + len(t.Input)
 }
 
 func (c *Client) signalLocked() {
@@ -726,6 +757,7 @@ func (c *Client) pump() {
 		ev := c.queue[0]
 		c.queue[0] = agent.Event{}
 		c.queue = c.queue[1:]
+		c.queuedB = max(0, c.queuedB-eventSize(ev))
 		c.mu.Unlock()
 		select {
 		case c.events <- ev:

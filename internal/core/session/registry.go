@@ -33,6 +33,8 @@ const (
 	NewClaimShown    = 30 * time.Second
 	MaxConns         = 400
 	MaxStrangerConns = 100
+	MaxBoxStrangers  = 20
+	BoxRegistrations = 10
 	MaxStreams       = 2
 	MaxInbox         = 200
 	MaxText          = 20000
@@ -208,6 +210,7 @@ type Registry struct {
 	replays     map[string]*replay
 	registerAll *limiter
 	registerOne *limiter
+	registerBox *limiter
 	shown       []Info
 	order       uint64
 	uploads     *uploadBook
@@ -219,6 +222,8 @@ type Registry struct {
 	claimChecks *ClaimChecks
 	claimSerial uint64
 	turned      func()
+	turnSaving  bool
+	turnAgain   bool
 	compacted   func(sid string, queued bool)
 	compactions *limiter
 	noteStore   NoteStore
@@ -269,6 +274,7 @@ func New(version string, now func() time.Time) *Registry {
 		replays:     map[string]*replay{},
 		registerAll: newLimiter(20, time.Minute),
 		registerOne: newLimiter(3, time.Minute),
+		registerBox: newLimiter(BoxRegistrations, time.Minute),
 		uploads:     newUploadBook(),
 		queued:      map[string]*queue{},
 		states:      map[string]AgentState{},
@@ -372,17 +378,23 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 	if a != nil && a.Box != g.Box {
 		return Registered{}, unauthorized()
 	}
-	if (a == nil || !a.running) && !r.registerAll.allow("all", now) {
+	if !r.registerBox.allow(g.Box, now) {
+		return Registered{}, limited("register")
+	}
+	stranger := a == nil
+	if stranger && !r.registerAll.allow("all", now) {
 		return Registered{}, limited("register")
 	}
 	if !r.registerOne.allow(g.SID, now) {
 		return Registered{}, limited("register")
 	}
-	stranger := a == nil
-	if len(r.conns) >= MaxConns || stranger && r.strangerConns() >= MaxStrangerConns {
+	crowded := func() bool {
+		return len(r.conns) >= MaxConns || stranger && (r.strangerConns() >= MaxStrangerConns || r.boxStrangers(g.Box) >= MaxBoxStrangers)
+	}
+	if crowded() {
 		r.sweep(now)
 	}
-	if len(r.conns) >= MaxConns || stranger && r.strangerConns() >= MaxStrangerConns {
+	if crowded() {
 		return Registered{}, full("connections")
 	}
 	for s, old := range r.conns {
@@ -1468,6 +1480,16 @@ func (r *Registry) strangerConns() int {
 	n := 0
 	for _, c := range r.conns {
 		if r.admitted[c.sid] == nil {
+			n++
+		}
+	}
+	return n
+}
+
+func (r *Registry) boxStrangers(box string) int {
+	n := 0
+	for _, c := range r.conns {
+		if c.box == box && r.admitted[c.sid] == nil {
 			n++
 		}
 	}

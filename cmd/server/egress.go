@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/egress"
+	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
@@ -38,6 +40,7 @@ type EgressConfig struct {
 	KeyFile      string
 	Allow        []string
 	Deny         []string
+	Pool         []netip.Prefix
 	Limits       egress.Limits
 }
 
@@ -75,7 +78,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	agentsBook, reviewersBook := egress.NewRefusals(), egress.NewRefusals()
 	agentsSeen, reviewersSeen := egress.NewSeen(), egress.NewSeen()
 	live := egress.NewLive(policy, AgentsSide, ReviewersSide)
-	subnets := egress.NewSubnets()
+	subnets := egress.NewSubnets(cfg.Pool)
 	status := &http.Server{
 		Handler: egress.StatusHandler(egress.StatusConfig{
 			Live: live, Books: []*egress.Refusals{agentsBook, reviewersBook},
@@ -169,6 +172,10 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 	if err != nil {
 		return EgressConfig{}, err
 	}
+	pool, err := boxes.ParseSubnets(getenv)
+	if err != nil {
+		return EgressConfig{}, fmt.Errorf("egress: %w", err)
+	}
 	return EgressConfig{
 		Listen:       *listen,
 		ReviewListen: *reviewListen,
@@ -176,6 +183,7 @@ func ParseEgressConfig(args []string, getenv func(string) string) (EgressConfig,
 		KeyFile:      *keyFile,
 		Allow:        list(*allow),
 		Deny:         list(*deny),
+		Pool:         pool,
 		Limits: egress.Limits{
 			MaxConns: conns,
 			Idle:     idleTimeout,

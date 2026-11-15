@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +22,10 @@ func (h *Helper) Sweep(ctx context.Context) error {
 		}
 		box, ok := h.ownsContainer(ctx, name, c.ImageID, c.Labels)
 		if !ok {
+			if twin, renamed := renamedBox(h.rec.project, c); renamed {
+				h.sweepRenamed(ctx, twin, name, c)
+				continue
+			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "container", "name", name, "reason", "it carries the stack's label without every one of the helper's labels and names")
 			continue
 		}
@@ -62,8 +67,24 @@ func (h *Helper) Sweep(ctx context.Context) error {
 		unlock()
 		h.logResult("sweep_network", box, "", err)
 	}
+	if v, err := h.stackVolume(ctx, volumeWork); err == nil {
+		if found, err := h.strays(ctx, v); err == nil && len(found) > 0 {
+			h.logger.Warn("box sweep", "event", "workspace_shared", "containers", len(found), "names", strings.Join(found, ","), "fix", "remove them, such as an earlier version's agent container (docker compose up -d --remove-orphans); no session starts until they are gone")
+		}
+	}
 	h.Reconnect(ctx)
 	return nil
+}
+
+func (h *Helper) sweepRenamed(ctx context.Context, box, name string, c containerListJSON) {
+	if h.cfg.SweepDry {
+		h.logger.Info("box sweep", "event", "would_remove", "kind", "renamed_container", "name", name, "box", box, "state", c.State)
+		return
+	}
+	unlock := h.locks.lock(box)
+	err := h.dropContainer(ctx, c.ID)
+	unlock()
+	h.logResult("sweep_renamed", box, "", err)
 }
 
 func (h *Helper) runningBoxes(ctx context.Context) []string {
@@ -164,6 +185,9 @@ func (h *Helper) StopAll(ctx context.Context) {
 				if box, ok := h.ownsContainer(ctx, c.Names[0], c.ImageID, c.Labels); ok {
 					boxes[box] = true
 				}
+			}
+			if box, renamed := renamedBox(h.rec.project, c); renamed {
+				boxes[box] = true
 			}
 		}
 	} else {

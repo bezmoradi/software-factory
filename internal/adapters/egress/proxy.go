@@ -44,6 +44,7 @@ type Proxy struct {
 	slots    chan struct{}
 	mu       sync.Mutex
 	tunnels  map[*tunnel]struct{}
+	logs     *logGate
 }
 
 type tunnel struct {
@@ -65,6 +66,7 @@ func New(policy Source, limits Limits, resolver Resolver, dialer Dialer, logger 
 		marks:    marks,
 		slots:    make(chan struct{}, max(limits.MaxConns, 0)),
 		tunnels:  map[*tunnel]struct{}{},
+		logs:     newLogGate(),
 	}
 }
 
@@ -125,8 +127,9 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 				p.handle(ctx, conn)
 			})
 		default:
+			subnet := subnetOf(conn)
 			_ = conn.Close()
-			p.refused(ReasonLimit, "")
+			p.refused(subnet, ReasonLimit, "")
 		}
 	}
 }
@@ -175,13 +178,13 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	hello, name, err := readClientHello(io.MultiReader(pending, conn))
 	if err != nil {
 		marks.note(mark, target, "", helloReason(err))
-		p.refused(helloReason(err), host)
+		p.refused(subnetOf(conn), helloReason(err), host)
 		return
 	}
 	if normalize(name) != host {
 		marks.note(mark, target, logged(name), ReasonSNIMismatch)
 		p.marks.saw(logged(name), ReasonSNIMismatch)
-		p.logRefused(ReasonSNIMismatch, host, "sni", logged(name))
+		p.logRefused(subnetOf(conn), ReasonSNIMismatch, host, "sni", logged(name))
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
@@ -249,24 +252,76 @@ func helloReason(err error) string {
 }
 
 func (p *Proxy) refuse(conn net.Conn, status int, reason, host string) {
-	p.refused(reason, host)
+	p.refused(subnetOf(conn), reason, host)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 	body := reason + "\n"
 	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), len(body), body)
 }
 
-func (p *Proxy) refused(reason, host string, more ...any) {
+func (p *Proxy) refused(subnet, reason, host string, more ...any) {
 	p.marks.saw(host, reason)
-	p.logRefused(reason, host, more...)
+	p.logRefused(subnet, reason, host, more...)
 }
 
-func (p *Proxy) logRefused(reason, host string, more ...any) {
+func (p *Proxy) logRefused(subnet, reason, host string, more ...any) {
+	ok, skipped := p.logs.allow(subnet, time.Now())
+	if !ok {
+		return
+	}
 	args := []any{"event", "refused", "reason", reason}
 	if host != "" {
 		args = append(args, "host", host)
 	}
+	if skipped > 0 {
+		args = append(args, "unlogged_before", skipped)
+	}
 	p.logger.Warn("egress", append(args, more...)...)
+}
+
+const (
+	logWindow  = time.Minute
+	logsPerKey = 20
+	maxLogKeys = 256
+)
+
+type logCount struct {
+	start   time.Time
+	logged  int
+	skipped int
+}
+
+type logGate struct {
+	mu   sync.Mutex
+	keys map[string]*logCount
+}
+
+func newLogGate() *logGate {
+	return &logGate{keys: map[string]*logCount{}}
+}
+
+func (g *logGate) allow(key string, now time.Time) (bool, int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	c := g.keys[key]
+	if c == nil {
+		if len(g.keys) >= maxLogKeys {
+			clear(g.keys)
+		}
+		c = &logCount{start: now}
+		g.keys[key] = c
+	}
+	if now.Sub(c.start) >= logWindow {
+		c.start, c.logged = now, 0
+	}
+	if c.logged >= logsPerKey {
+		c.skipped++
+		return false, 0
+	}
+	c.logged++
+	skipped := c.skipped
+	c.skipped = 0
+	return true, skipped
 }
 
 func logged(host string) string {

@@ -73,7 +73,7 @@ services:
     stop_grace_period: 45s
     depends_on:
       helper:
-        condition: service_healthy
+        condition: service_started
         restart: true
       egress:
         condition: service_healthy
@@ -166,6 +166,7 @@ services:
       EGRESS_REVIEW_LISTEN: egress-review:3128
       EGRESS_STATUS_LISTEN: egress-control:3129
       EGRESS_CONTROL_KEY_FILE: /run/sf-egress/control-key
+      SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
     volumes:
       - egress-key:/run/sf-egress:ro
     networks:

@@ -57,7 +57,8 @@ if ! problems=$(jq -r --arg image "$image" '
       | (keys[] | select(among(["name", "driver", "driver_opts"]) | not) | "the volume \($v) sets \(.)"),
         (if (.driver // "local") != "local" then "the volume \($v) has the driver \(.driver), not local" else empty end),
         (if .name != "\($project)_\($v)" then "the volume \($v) is named \(.name // "nothing"), not \($project)_\($v)" else empty end),
-        (.driver_opts // empty | select(bindopt or ((has("device") or has("type")) and (tmpfsopts | not)) or (keys - ["type", "device", "o"] | length > 0)) | "the volume \($v) has driver_opts other than a tmpfs")),
+        (.driver_opts // empty | select(bindopt or ((has("device") or has("type")) and (tmpfsopts | not)) or (keys - ["type", "device", "o"] | length > 0)) | "the volume \($v) has driver_opts other than a tmpfs"),
+        (if ($v | among(["uploads", "egress-key", "helper-key"]) | not) and (keys != ["name"]) then "the volume \($v) keeps data, so the release allows it only a name, and it sets \(keys - ["name"] | join(", "))" else empty end)),
     (if [.. | (strings, (objects | keys[]))] | any(test("SF_BOX_LIVE")) then "SF_BOX_LIVE appears in the configuration" else empty end)
 ' "$config"); then
 	echo "release-check: jq couldn't check $config, so it doesn't pass" >&2
@@ -67,4 +68,4 @@ if [ -n "$problems" ]; then
 	printf '%s\n' "$problems" | sed 's/^/release-check: /' >&2
 	exit 1
 fi
-echo "release-check: $config runs $image in exactly egress, engine, helper and reviewer, every one with only the keys, user and hardening the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default networks and volumes named for the project, no SF_BOX_LIVE and the helper on helpernet alone"
+echo "release-check: $config runs $image in exactly egress, engine, helper and reviewer, every one with only the keys, user and hardening the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default networks and volumes named for the project, volumes that keep data with only a name, no SF_BOX_LIVE and the helper on helpernet alone"

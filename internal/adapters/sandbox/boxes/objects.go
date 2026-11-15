@@ -9,12 +9,17 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 const (
 	ReasonVolume    = "volume"
+	ReasonShared    = "shared"
 	labelConfigHash = "com.docker.compose.config-hash"
 	labelNumber     = "com.docker.compose.container-number"
+	uploadsOptions  = "size=320m,uid=10001,gid=10000,mode=0710"
+	maxNamed        = 5
 )
 
 func (h *Helper) projectFilter(extra ...string) url.Values {
@@ -78,19 +83,128 @@ func (h *Helper) stackVolume(ctx context.Context, name string) (string, error) {
 	if err := h.docker.get(ctx, "/volumes", h.projectFilter(labelVolume+"="+name), &list); err != nil {
 		return "", dockerFailed("list the stack's volumes", err)
 	}
-	var found []string
+	var found []volumeJSON
 	for _, v := range list.Volumes {
 		if v.Labels[labelProject] == h.rec.project && v.Labels[labelVolume] == name {
-			found = append(found, v.Name)
+			found = append(found, v)
 		}
 	}
 	switch len(found) {
 	case 0:
 		return "", refuse(http.StatusConflict, ReasonVolume, "the stack has no %s volume", name)
 	case 1:
-		return found[0], nil
+		if !volumeShaped(name, found[0]) {
+			return "", refuse(http.StatusConflict, ReasonVolume, "the stack's %s volume %s isn't made the way compose.yaml makes it (driver %s, options %s), so the box helper mounts it in no session", name, found[0].Name, oneLine(found[0].Driver), optionsOf(found[0].Options))
+		}
+		return found[0].Name, nil
 	}
 	return "", refuse(http.StatusConflict, ReasonVolume, "the stack has %d volumes labelled %s, and the box helper uses only one", len(found), name)
+}
+
+func volumeShaped(name string, v volumeJSON) bool {
+	if v.Driver != volumeDriver {
+		return false
+	}
+	if name != volumeUploads {
+		return len(v.Options) == 0
+	}
+	return len(v.Options) == 3 && v.Options["type"] == "tmpfs" && v.Options["device"] == "tmpfs" && v.Options["o"] == uploadsOptions
+}
+
+func optionsOf(opts map[string]string) string {
+	if len(opts) == 0 {
+		return "none"
+	}
+	var out []string
+	for k, v := range opts {
+		out = append(out, k+"="+v)
+	}
+	slices.Sort(out)
+	return oneLine(strings.Join(out, " "))
+}
+
+func (h *Helper) strays(ctx context.Context, workspace string) ([]string, error) {
+	var list []containerListJSON
+	if err := h.docker.get(ctx, "/containers/json", filters(map[string][]string{"volume": {workspace}}), &list); err != nil {
+		return nil, dockerFailed("list the containers that mount the workspace volume", err)
+	}
+	var out []string
+	for _, c := range list {
+		name := ""
+		if len(c.Names) > 0 {
+			name = c.Names[0]
+		}
+		if composeMade(c.Labels, h.rec.project, engineService) {
+			continue
+		}
+		if _, ok := h.ownsContainer(ctx, name, c.ImageID, c.Labels); ok {
+			continue
+		}
+		if _, renamed := renamedBox(h.rec.project, c); renamed {
+			continue
+		}
+		out = append(out, oneLine(strings.TrimPrefix(name, "/")))
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (h *Helper) noStrays(ctx context.Context, workspace string) error {
+	found, err := h.strays(ctx, workspace)
+	if err != nil || len(found) == 0 {
+		return err
+	}
+	shown := found
+	if len(shown) > maxNamed {
+		shown = shown[:maxNamed]
+	}
+	return refuse(http.StatusConflict, ReasonShared, "%d other containers mount the stack's workspace volume (%s), where every session's clone lives, so the box helper starts no session until they are gone: remove them, such as the shared agent container an earlier version ran (docker compose up -d --remove-orphans, or docker rm -f with its name)", len(found), strings.Join(shown, ", "))
+}
+
+func (h *Helper) twins(ctx context.Context, box string) ([]containerListJSON, error) {
+	var list []containerListJSON
+	q := filters(map[string][]string{"label": {LabelStack + "=" + h.rec.project, LabelBox + "=" + box}})
+	if err := h.docker.get(ctx, "/containers/json", url.Values{"all": {"true"}, "filters": q["filters"]}, &list); err != nil {
+		return nil, dockerFailed("list the containers labelled as the box "+box, err)
+	}
+	want := "/" + containerName(h.rec.project, box)
+	var out []containerListJSON
+	for _, c := range list {
+		if c.Labels[LabelStack] != h.rec.project || c.Labels[LabelBox] != box {
+			continue
+		}
+		if len(c.Names) == 1 && c.Names[0] == want {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (h *Helper) dropTwins(ctx context.Context, box string) error {
+	list, err := h.twins(ctx, box)
+	if err != nil {
+		return err
+	}
+	for _, c := range list {
+		name := ""
+		if len(c.Names) > 0 {
+			name = oneLine(c.Names[0])
+		}
+		if err := h.dropContainer(ctx, c.ID); err != nil {
+			return err
+		}
+		h.logger.Warn("box", "action", "remove_renamed", "box", box, "name", name, "outcome", "ok")
+	}
+	return nil
+}
+
+func renamedBox(project string, c containerListJSON) (string, bool) {
+	box := c.Labels[LabelBox]
+	if c.Labels[LabelStack] != project || !session.ValidBox(box) {
+		return "", false
+	}
+	return box, len(c.Names) != 1 || c.Names[0] != "/"+containerName(project, box)
 }
 
 func (h *Helper) stackVolumes(ctx context.Context) (stackVolumes, error) {
@@ -133,7 +247,7 @@ func (h *Helper) ownsContainer(ctx context.Context, name, image string, labels m
 	if !ok || !validRecipeLabel(labels[LabelRecipe]) {
 		return "", false
 	}
-	if composeMatches(labels, nil) {
+	if composeBlank(labels) {
 		return box, true
 	}
 	il, ok := h.imageLabels(ctx, image)
@@ -247,6 +361,9 @@ func (h *Helper) teardown(ctx context.Context, box string) (string, error) {
 			return recipe, err
 		}
 	}
+	if err := h.dropTwins(ctx, box); err != nil {
+		return recipe, err
+	}
 	n, err := h.boxNetwork(ctx, box)
 	if err != nil {
 		return recipe, err
@@ -351,7 +468,9 @@ func (h *Helper) liveBoxes(ctx context.Context) (map[string]bool, error) {
 		}
 		box, ok := h.ownsContainer(ctx, c.Names[0], c.ImageID, c.Labels)
 		if !ok {
-			continue
+			if box, ok = renamedBox(h.rec.project, c); !ok {
+				continue
+			}
 		}
 		switch c.State {
 		case "exited", "dead", "removing":

@@ -12,6 +12,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
+	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/docker"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -20,6 +21,8 @@ import (
 const (
 	subnetsFor   = 10 * time.Second
 	subnetsEvery = 30 * time.Second
+	helperFor    = 5 * time.Second
+	helperEvery  = 10 * time.Second
 )
 
 type boxEntry struct {
@@ -35,12 +38,41 @@ type boxRoutes struct {
 	reg      *session.Registry
 	allow    *session.Allowlist
 	logger   shared.Logger
+	pool     []netip.Prefix
+	ping     func(context.Context) error
+	down     bool
 }
 
 var _ session.BoxRoutes = (*boxRoutes)(nil)
 
-func newBoxRoutes(reg *session.Registry, allow *session.Allowlist, control *docker.Control, logger shared.Logger) *boxRoutes {
-	return &boxRoutes{hosts: map[string]boxEntry{}, reg: reg, allow: allow, control: control, logger: logger}
+func newBoxRoutes(reg *session.Registry, allow *session.Allowlist, control *docker.Control, pool []netip.Prefix, ping func(context.Context) error, logger shared.Logger) *boxRoutes {
+	return &boxRoutes{hosts: map[string]boxEntry{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
+}
+
+func (b *boxRoutes) helperDown() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.down
+}
+
+func (b *boxRoutes) checkHelper(ctx context.Context) {
+	if b.ping == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, helperFor)
+	err := b.ping(pctx)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	down := err != nil
+	b.mu.Lock()
+	was := b.down
+	b.down = down
+	b.mu.Unlock()
+	if down != was {
+		b.logger.Info("boxes", "event", "helper-reachable", "ok", !down)
+	}
 }
 
 func (b *boxRoutes) useListener(l *page.BoxListener) {
@@ -80,6 +112,10 @@ func (b *boxRoutes) sendSubnets(ctx context.Context) error {
 func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
 	if !session.ValidBox(info.Box) || info.Host == "" {
 		return errors.New("the box helper's answer names no agent-host")
+	}
+	if !boxes.InPool(b.pool, info.Subnet) {
+		b.logger.Warn("boxes", "event", "subnet-outside-pool", "box", info.Box)
+		return errors.New("the box helper put the session's container on " + info.Subnet.String() + ", outside SF_BOX_SUBNETS, so the engine doesn't route to it")
 	}
 	client, err := agenthost.NewClient(info.Host)
 	if err != nil {
@@ -162,10 +198,15 @@ func (b *boxRoutes) Info(box string) (session.BoxInfo, bool) {
 func (b *boxRoutes) watch(ctx context.Context) {
 	t := time.NewTicker(subnetsEvery)
 	defer t.Stop()
+	h := time.NewTicker(helperEvery)
+	defer h.Stop()
+	b.checkHelper(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-h.C:
+			b.checkHelper(ctx)
 		case <-t.C:
 			b.mu.Lock()
 			n := len(b.hosts)

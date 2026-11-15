@@ -94,6 +94,8 @@ func (c *countedConn) Close() error {
 
 func (c *countedConn) Unwrap() net.Conn { return c.Conn }
 
+const BoxConns = 64
+
 type boxPair struct {
 	box   string
 	agent netip.Addr
@@ -176,7 +178,7 @@ func (l *BoxListener) Accept() (net.Conn, error) {
 		remote, okR := addrOf(c.RemoteAddr())
 		l.mu.Lock()
 		p, known := l.pairs[local]
-		if okL && okR && known && p.agent == remote {
+		if okL && okR && known && p.agent == remote && len(l.conns[p.box]) < BoxConns {
 			bc := &boxConn{Conn: c, box: p.box, l: l}
 			if l.conns[p.box] == nil {
 				l.conns[p.box] = map[*boxConn]struct{}{}
