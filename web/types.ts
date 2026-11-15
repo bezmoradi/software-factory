@@ -784,7 +784,7 @@ export interface EndedEvent extends Stamped {
   type: 'ended'
 }
 
-export type ReviewState = 'none' | 'running' | 'stale' | 'pass' | 'block' | 'overridden' | 'unknown' | 'failed' | 'unclean' | 'untrusted'
+export type ReviewState = 'none' | 'running' | 'stale' | 'pass' | 'block' | 'overridden' | 'unknown' | 'failed' | 'unclean' | 'untrusted' | 'not-installed'
 
 export interface Reviewer {
   type: string

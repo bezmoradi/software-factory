@@ -187,6 +187,9 @@ func decide(r Request, f Facts) Decision {
 		}
 	}
 	for _, q := range f.Required {
+		if q.Missing {
+			continue
+		}
 		var offer *review.Offer
 		if o, ok := f.Offers[q.Agent]; ok {
 			offer = &o

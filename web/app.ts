@@ -882,7 +882,7 @@ function reviewsOf(s: Session): ReviewsView | null {
   if (!i.verified || !i.project) return null
   const review = i.review && Array.isArray(i.review.roles) && i.review.commit ? i.review : null
   const gate = s.gate
-  const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.map(r => ({ name: r.name, agent: r.type, why: r.why ?? '', summary: typeof r.summary === 'string' ? r.summary : '' })) : []
+  const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.filter(r => r.state !== 'not-installed').map(r => ({ name: r.name, agent: r.type, why: r.why ?? '', summary: typeof r.summary === 'string' ? r.summary : '' })) : []
   const unpicked = gate?.chosen === false
   const disabled = !state.connected ? 'Reviews start once the page is connected again.'
     : unpicked ? 'Pick a work type first: it decides which reviews run.'

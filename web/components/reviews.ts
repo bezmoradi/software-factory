@@ -181,6 +181,14 @@ class SfReviews extends HTMLElement {
       described.push(p.id)
       parts.push(p)
     }
+    const absent = (value.gate ?? []).filter(g => g.state === 'not-installed').map(g => text(g.type))
+    const absentNote = absent.length ? `No plugin installed in the reviewer image provides ${absent.join(' or ')}, so the engine doesn't start ${absent.length === 1 ? 'that review' : 'those reviews'} and the push stays held.` : ''
+    if (absentNote && !text(note).includes(absentNote)) {
+      const p = el('p', 'small warn', absentNote)
+      p.id = 'reviews-absent'
+      described.push(p.id)
+      parts.push(p)
+    }
     const failed = r && !value.asking ? failure(r, note) : null
     if (failed) {
       const p = el('p', 'small bad', failed.said)

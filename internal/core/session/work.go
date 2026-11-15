@@ -802,11 +802,10 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile, TasksWritten: g.docs.tasks,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
 	})
-	if installed := w.cfg.Installed(); len(installed) > 0 {
-		for _, q := range g.required {
-			if q.Role == "" && !slices.Contains(installed, q.Agent) {
-				g.items = append(g.items, "a review by "+q.Agent+", which no plugin installed in the reviewer image provides")
-			}
+	g.required = w.notInstalled(g.required)
+	for _, q := range g.required {
+		if q.Missing {
+			g.items = append(g.items, "a review by "+q.Agent+", which no plugin installed in the reviewer image provides")
 		}
 	}
 	for _, p := range g.setup.problems {
@@ -863,12 +862,7 @@ func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow
 		files = append(files, c.Path)
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
-	required := w.deepened(t, workflow.Required(setup.setup, eff, files), base, head, err == nil)
-	if installed := w.cfg.Installed(); len(installed) > 0 {
-		for i, q := range required {
-			required[i].Missing = q.Role == "" && !slices.Contains(installed, q.Agent)
-		}
-	}
+	required := w.notInstalled(w.deepened(t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
 	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
@@ -1065,6 +1059,19 @@ func nextStep(g gathered, plan bool) string {
 	return ""
 }
 
+const WorkNotInstalled = "not-installed"
+
+func (w *Work) notInstalled(list []workflow.Requirement) []workflow.Requirement {
+	installed := w.cfg.Installed()
+	if len(installed) == 0 {
+		return list
+	}
+	for i, q := range list {
+		list[i].Missing = q.Role == "" && !slices.Contains(installed, q.Agent)
+	}
+	return list
+}
+
 func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	var entries map[review.Key]ReviewEntry
 	if w.cfg.Reviews != nil {
@@ -1099,7 +1106,10 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 				}
 			}
 		}
-		if g.head != "" {
+		if q.Missing {
+			r.State = WorkNotInstalled
+		}
+		if g.head != "" && !q.Missing {
 			offer := offerFor(w.cfg.RoleAgents, q.Agent)
 			if why, _ := review.Pooled(records, k, q.RunCount(), &offer); why != "" {
 				if r.Capped {

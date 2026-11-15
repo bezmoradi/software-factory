@@ -6,6 +6,7 @@ const NOTES: Record<string, [string, string] | undefined> & { none: [string, str
   running: ['Reviewing…', 'muted'],
   stale: ['Reviewed an earlier commit: press Review again', 'warn'],
   failed: ["Didn't finish: it counts as not passed. Press Review again", 'bad'],
+  'not-installed': ["Not installed: no plugin in the reviewer image provides this reviewer, so Review doesn't run it and the push stays held", 'warn'],
 }
 const UNKNOWN = "Finished, but its reply had no verdict the engine recognizes"
 
