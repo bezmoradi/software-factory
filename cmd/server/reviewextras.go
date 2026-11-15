@@ -19,7 +19,7 @@ func citedLookup(getenv func(string) string, cfg PageConfig, logger shared.Logge
 	}
 	dev := getenv("SF_DEV_OSV")
 	if dev == "" {
-		return osv.Cited{Client: osv.NewClient(), API: osv.DefaultAPI}, nil
+		return osv.Cited{Client: osvClient(), API: osv.DefaultAPI}, nil
 	}
 	u, err := url.Parse(dev)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

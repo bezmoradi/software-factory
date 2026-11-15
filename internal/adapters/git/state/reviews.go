@@ -54,6 +54,7 @@ type reviewJSON struct {
 	Denied       []string  `json:"denied,omitempty"`
 	Failure      string    `json:"failure,omitempty"`
 	Attempt      int       `json:"attempt,omitempty"`
+	AutoAttempts int       `json:"autoAttempts,omitempty"`
 	Run          int       `json:"run,omitempty"`
 	Advisory     bool      `json:"advisory,omitempty"`
 	Cited        []string  `json:"cited,omitempty"`
@@ -96,7 +97,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 			Base:  r.Base, Since: r.Since, Covers: r.Covers, Message: r.Message, Reason: r.Reason, CostUSD: max(r.CostUSD, 0), StartedAt: r.StartedAt, EndedAt: r.EndedAt,
 			Clipped: r.Clipped, Auto: r.Auto, PluginCommit: matching(r.PluginCommit, commitID), ClaudeCode: matching(r.ClaudeCode, versionText),
 			Models: matchingAll(r.Models, modelName, maxModels), RunModel: r.RunModel, RunEffort: r.RunEffort, Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
-			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1),
+			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1), AutoAttempts: inRange(r.AutoAttempts, 0, maxAttempt),
 		})
 	}
 	return out, nil
@@ -116,7 +117,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Channel: string(e.Record.Channel), Override: e.Record.Override, Shaped: e.Record.Shaped,
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
-			Failure: e.Failure, Attempt: laterAttempt(e.Attempt),
+			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts,
 		})
 	}
 	gone := reviewsGone(s.Dir, list)

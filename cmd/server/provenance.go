@@ -94,7 +94,7 @@ type advisories struct {
 }
 
 func watchAdvisories(ctx context.Context, getenv func(string) string, logger shared.Logger) *advisories {
-	a := &advisories{client: osv.NewClient(), api: osv.DefaultAPI, qs: advisoryQueries(getenv, logger), logger: logger}
+	a := &advisories{client: osvClient(), api: osv.DefaultAPI, qs: advisoryQueries(getenv, logger), logger: logger}
 	for _, q := range a.qs {
 		a.view.Sent = append(a.view.Sent, q.Sent())
 	}
@@ -197,6 +197,22 @@ func useAgentReports(base context.Context, srv *page.Server, parts engineParts, 
 	srv.UseAgentReports(report, rules)
 }
 
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if first := via[0].URL; req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refused a redirect from %s to another host or scheme", first.Host)
+	}
+	return nil
+}
+
+func osvClient() *http.Client {
+	c := osv.NewClient()
+	c.CheckRedirect = sameOriginRedirect
+	return c
+}
+
 func CheckPins(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("check-pins", flag.ContinueOnError)
 	registry := fs.String("registry", npm.DefaultRegistry, "the npm registry to read attestations from")
@@ -205,7 +221,7 @@ func CheckPins(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	say := func(format string, a ...any) { _, _ = fmt.Fprintf(out, format+"\n", a...) }
-	client := &http.Client{Timeout: time.Minute, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 15 * time.Second}).DialContext}}
+	client := &http.Client{Timeout: time.Minute, CheckRedirect: sameOriginRedirect, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 15 * time.Second}).DialContext}}
 	if *file != "" {
 		return checkSaved(*file, fs.Args(), say)
 	}
@@ -245,7 +261,7 @@ func CheckPins(ctx context.Context, args []string, out io.Writer) error {
 		sent = append(sent, q.Sent())
 	}
 	say("Asking OSV (%s) about: %s.", osv.DefaultAPI, strings.Join(sent, ", "))
-	found, more, err := osv.Lookup(ctx, osv.NewClient(), osv.DefaultAPI, qs)
+	found, more, err := osv.Lookup(ctx, osvClient(), osv.DefaultAPI, qs)
 	switch {
 	case err != nil:
 		say("OSV: %s.", err)

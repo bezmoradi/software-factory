@@ -22,7 +22,6 @@ const (
 	MaxReviewing   = 2
 	maxReviewText  = 4000
 	clippedMiddle  = "[Software Factory: the middle of the reply is left out.]"
-	MaxReviewArg   = 8 << 10
 	keptRecords    = 500
 	reviewCheck    = 90 * time.Second
 	reviewSlack    = 30 * time.Second
@@ -57,6 +56,7 @@ type ReviewEntry struct {
 	Denied       []string
 	Failure      string
 	Attempt      int
+	AutoAttempts int
 	Cited        CitedIDs
 }
 
@@ -116,6 +116,7 @@ type RoleReview struct {
 
 	Progress *ReviewProgress
 	Given    *RunGiven
+	started  time.Time
 }
 
 type ReviewView struct {
@@ -224,7 +225,7 @@ type Reviews struct {
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice
 	cited      CitedLookup
-	citedNow   map[review.Key]CitedIDs
+	citedNow   map[review.Key]citedRun
 	lessons    *Lessons
 	comments   func(ctx context.Context, project string) ([]PullComment, []string)
 }
@@ -393,7 +394,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
 			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
-			Attempt: p.attempt}
+			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto)}
 	}
 	r.put(entries...)
 	r.mu.Lock()
@@ -527,8 +528,8 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			}
 			r.wg.Go(func() {
 				if c, looked := r.lookUpCited(ctx, e); looked {
-					r.markCited(e.Key, c)
-					r.noteCited(t.SID, e.Key, c)
+					r.markCited(e.Key, e.StartedAt, c)
+					r.noteCited(t.SID, e.Key, e.StartedAt, c)
 				}
 			})
 		})
@@ -577,6 +578,7 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.CostUSD = e.CostUSD
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
 	v.Cited = e.Cited.clone()
+	v.started = e.StartedAt
 	return v
 }
 

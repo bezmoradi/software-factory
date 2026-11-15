@@ -1,6 +1,6 @@
 import { api } from '../api.ts'
 import { button, el, visible } from '../lib/dom.ts'
-import { day, limitsCall, limitsNow, limitsSession, watchLimits, when, windowLine } from './usage.ts'
+import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
 const KINDS: { kind: 'money' | 'time' | 'turns'; key: keyof CapsValues; label: string; unit: string; step: string; max: number }[] = [
@@ -210,14 +210,23 @@ class SfSessionLimits extends HTMLElement {
     if (s?.stuck) parts.push(this.#stuck(sid, s))
     if (s?.caps && capsSet(s.caps)) parts.push(this.#caps(s))
     if (s?.signInUntil) parts.push(el('p', 'notice warn small', `This agent's claude.ai sign-in ends between ${day(s.signInFrom)} and ${day(s.signInUntil)}. Renewing it doesn't move those dates: sign in again before then (Finish setting up on the Welcome page).`))
+    let pausedShown = false
     for (const p of v.paused) {
       if (p.sid !== sid) continue
-      const w = v.meter.find(m => m.side === p.side)?.windows.find(x => x.kind === p.kind)
+      const w = meterFor(p.side, sid)?.windows.find(x => x.kind === p.kind)
       if (!w) continue
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call({ op: 'continue', side: p.side, kind: p.kind })))
+      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind))))
       parts.push(box)
+      pausedShown = true
       break
+    }
+    const own = sid ? v.meter.find(m => m.sid === sid) : undefined
+    const near = pausedShown ? undefined : own?.windows.find(w => w.near)
+    if (own && near) {
+      const box = el('div', 'notice warn small')
+      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind))))
+      parts.push(box)
     }
     if (s?.wakeAt) {
       const box = el('div', 'notice small')

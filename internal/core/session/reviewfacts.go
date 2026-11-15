@@ -60,20 +60,23 @@ func instructionRead(tool string, v any) bool {
 			break
 		}
 	}
-	if pattern, _ := in["pattern"].(string); tool == "Glob" && pattern != "" && pattern != target && !strings.HasPrefix(pattern, "/") && !strings.HasPrefix(pattern, "~") {
-		target = strings.TrimSuffix(target, "/") + "/" + pattern
+	pattern, _ := in["pattern"].(string)
+	if tool != "Glob" || pattern == "" {
+		return instructionPath(target)
 	}
-	if instructionPath(target) {
-		return true
+	base := ""
+	if target != pattern {
+		base = strings.TrimSuffix(target, "/") + "/"
 	}
-	if tool != "Glob" {
-		return false
-	}
-	targets, ok := braceExpansions(target)
+	alternatives, ok := braceExpansions(pattern)
 	if !ok {
 		return false
 	}
-	for _, t := range targets {
+	for _, a := range alternatives {
+		t := a
+		if !strings.HasPrefix(a, "/") && !strings.HasPrefix(a, "~") {
+			t = base + a
+		}
 		if !instructionPath(t) {
 			return false
 		}

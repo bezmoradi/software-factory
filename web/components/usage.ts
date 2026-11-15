@@ -10,6 +10,7 @@ export interface CapsValues {
 export interface RateWindowView {
   kind: string
   name: string
+  short: string
   utilization: number
   resetsAt: number
   status: string
@@ -19,6 +20,7 @@ export interface RateWindowView {
 
 export interface MeterSide {
   side: string
+  sid: string
   label: string
   plan: string
   windows: RateWindowView[]
@@ -96,13 +98,14 @@ function capsOf(x: unknown): CapsValues {
 export function limitsOf(raw: unknown): LimitsView | null {
   const r = rec(raw)
   if (r.type !== 'limits' && !Array.isArray(r.meter)) return null
-  const meter = list(r.meter, 8).map((m): MeterSide => {
+  const meter = list(r.meter, 1001).map((m): MeterSide => {
     const s = rec(m)
+    const sid = text(s.sid, 40)
     return {
-      side: text(s.side, 40), label: text(s.label), plan: text(s.plan, 40),
+      side: text(s.side, 40), sid: SID.test(sid) ? sid : '', label: text(s.label), plan: text(s.plan, 40),
       windows: list(s.windows, 8).map((w): RateWindowView => {
         const x = rec(w)
-        return { kind: text(x.kind, 60), name: text(x.name), utilization: num(x.utilization, 10), resetsAt: num(x.resetsAt, 1e15), status: text(x.status, 40), near: x.near === true, continued: x.continued === true }
+        return { kind: text(x.kind, 60), name: text(x.name), short: text(x.short), utilization: num(x.utilization, 10), resetsAt: num(x.resetsAt, 1e15), status: text(x.status, 40), near: x.near === true, continued: x.continued === true }
       }),
     }
   })
@@ -151,6 +154,14 @@ export function setLimits(raw: unknown): void {
 
 export function limitsNow(): LimitsView {
   return view
+}
+
+export function meterFor(side: string, sid: string): MeterSide | undefined {
+  return view.meter.find(m => m.side === side && m.sid === (side === 'reviewers' ? '' : sid))
+}
+
+export function continueBody(side: string, sid: string, kind: string): Record<string, unknown> {
+  return side === 'reviewers' ? { op: 'continue', side, kind } : { op: 'continue', side, sid, kind }
 }
 
 export function limitsSession(): string {
@@ -243,6 +254,7 @@ class SfUsage extends HTMLElement {
   paint() {
     const parts: Node[] = []
     for (const m of view.meter) {
+      if (m.sid) continue
       const box = el('section', 'usage-side')
       const head = el('h3', 'label', visible(m.label))
       if (m.plan) head.append(el('span', 'muted small', ` · plan ${visible(m.plan)}`))
@@ -260,14 +272,48 @@ class SfUsage extends HTMLElement {
     for (const e of view.expiry) if (e.what === 'sign-in') parts.push(el('p', 'notice warn small', expiryText(e)))
     if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so it counts every session as at its cap: it refuses messages, starts no automatic review, and saves no change. Fix or remove the file, then restart the engine."))
     if (this.#said.textContent) parts.push(this.#said)
-    if (parts.length && view.meter.length) parts.unshift(el('h2', 'label', 'Usage limits'))
+    if (parts.length && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
     this.hidden = !parts.length
     this.replaceChildren(...parts)
   }
 
   async #continue(side: string, kind: string) {
-    this.#said.textContent = await limitsCall({ op: 'continue', side, kind })
+    this.#said.textContent = await limitsCall(continueBody(side, '', kind))
     this.paint()
+  }
+}
+
+class SfUsageLine extends HTMLElement {
+  #sid = ''
+  #stop = () => {}
+
+  set sid(value: string) {
+    this.#sid = SID.test(value) ? value : ''
+    this.paint()
+  }
+
+  connectedCallback() {
+    this.#stop = watchLimits(this)
+    this.paint()
+  }
+
+  disconnectedCallback() {
+    this.#stop()
+  }
+
+  paint() {
+    const m = this.#sid ? view.meter.find(x => x.sid === this.#sid) : undefined
+    const windows = m?.windows ?? []
+    this.hidden = !windows.length
+    if (!m || !windows.length) {
+      this.replaceChildren()
+      return
+    }
+    const near = windows.some(w => w.near)
+    const said = windows.map(w => `${visible(w.short || w.name)} ${Math.round(w.utilization * 100)}%${w.status === 'rejected' ? ' used up' : ''}`).join(' · ')
+    const line = el('span', near ? 'warn' : 'secondary', `${visible(m.label)}: ${said}${near ? ' · automatic work paused, open the session to answer' : ''}`)
+    this.title = windows.map(w => `${visible(w.name)}: ${Math.round(w.utilization * 100)}% used${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`).join('\n')
+    this.replaceChildren(line)
   }
 }
 
@@ -301,11 +347,13 @@ class SfTokenExpiry extends HTMLElement {
 }
 
 customElements.define('sf-usage', SfUsage)
+customElements.define('sf-usage-line', SfUsageLine)
 customElements.define('sf-token-expiry', SfTokenExpiry)
 
 declare global {
   interface HTMLElementTagNameMap {
     'sf-usage': SfUsage
+    'sf-usage-line': SfUsageLine
     'sf-token-expiry': SfTokenExpiry
   }
 }

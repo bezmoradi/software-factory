@@ -110,18 +110,23 @@ func (r *Reviews) citedOnto(v *ReviewView) {
 	v.Roles = slices.Clone(v.Roles)
 	for i, role := range v.Roles {
 		k := review.Key{Commit: v.Commit, Branch: v.Branch, Agent: role.Agent}.AtRun(role.Run)
-		if c, ok := r.citedNow[k]; ok && len(role.Cited.Looked) == 0 && role.State != review.Running {
-			v.Roles[i].Cited = c.clone()
+		if c, ok := r.citedNow[k]; ok && c.started.Equal(role.started) && len(role.Cited.Looked) == 0 && role.State != review.Running {
+			v.Roles[i].Cited = c.ids.clone()
 		}
 	}
 }
 
-func (r *Reviews) noteCited(sid string, k review.Key, c CitedIDs) {
+type citedRun struct {
+	started time.Time
+	ids     CitedIDs
+}
+
+func (r *Reviews) noteCited(sid string, k review.Key, started time.Time, c CitedIDs) {
 	r.mu.Lock()
 	if r.citedNow == nil || len(r.citedNow) >= keptCited {
-		r.citedNow = map[review.Key]CitedIDs{}
+		r.citedNow = map[review.Key]citedRun{}
 	}
-	r.citedNow[k] = c.clone()
+	r.citedNow[k] = citedRun{started: started, ids: c.clone()}
 	v, ok := r.views[sid]
 	r.mu.Unlock()
 	if ok && v.Commit == k.Commit && v.Branch == k.Branch {
@@ -129,7 +134,7 @@ func (r *Reviews) noteCited(sid string, k review.Key, c CitedIDs) {
 	}
 }
 
-func (r *Reviews) markCited(k review.Key, c CitedIDs) {
+func (r *Reviews) markCited(k review.Key, started time.Time, c CitedIDs) {
 	r.store.Lock()
 	defer r.store.Unlock()
 	list, err := r.cfg.Records.Load()
@@ -137,7 +142,7 @@ func (r *Reviews) markCited(k review.Key, c CitedIDs) {
 		r.cfg.Logger.Warn("review", "event", "records-unreadable")
 		return
 	}
-	i := slices.IndexFunc(list, func(x ReviewEntry) bool { return x.Key == k })
+	i := slices.IndexFunc(list, func(x ReviewEntry) bool { return x.Key == k && x.StartedAt.Equal(started) })
 	if i < 0 {
 		return
 	}

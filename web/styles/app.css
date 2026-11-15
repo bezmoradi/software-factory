@@ -525,6 +525,7 @@ sf-toasts { position: fixed; top: 2.5rem; left: 50%; z-index: 5; display: flex; 
 .sessions .name { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .35rem; min-width: 0; overflow: hidden; white-space: nowrap; }
 .sessions .name .title { flex: 0 1 auto; min-width: min(6rem, 100%); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .sessions .name .tag { flex: none; }
+.sessions .name .usage-line { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: .75rem; }
 .session-table .sessions .name { font-size: inherit; font-weight: inherit; line-height: inherit; }
 .sessions .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions .when, .sessions-head .when { white-space: nowrap; text-align: end; }

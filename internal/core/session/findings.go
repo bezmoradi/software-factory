@@ -89,8 +89,8 @@ func findingsText(commit, branch string, roles []blockingRole) (string, bool) {
 func autoRuns(entries map[review.Key]ReviewEntry, branch string) int {
 	n := 0
 	for k, e := range entries {
-		if k.Branch == branch && e.Auto {
-			n += attemptOf(e)
+		if k.Branch == branch {
+			n += autoAttemptsOf(e)
 		}
 	}
 	return n

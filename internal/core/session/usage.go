@@ -41,9 +41,21 @@ type meterSide struct {
 	at      time.Time
 }
 
+type meterKey struct {
+	side string
+	box  string
+}
+
+type usageAck struct {
+	side string
+	box  string
+	kind string
+}
+
 type usagePause struct {
 	sid  string
 	side string
+	box  string
 	kind string
 	what string
 	at   time.Time
@@ -89,19 +101,28 @@ func cleanWindows(in []RateWindow, now time.Time) []RateWindow {
 	return out
 }
 
+func (l *Limits) meterLocked(side, box string) *meterSide {
+	k := meterKey{side: side, box: box}
+	m := l.meter[k]
+	if m == nil {
+		m = &meterSide{}
+		l.meter[k] = m
+	}
+	return m
+}
+
 func (l *Limits) Windows(side string, w []RateWindow) {
-	side = sideOf(side)
-	if side == "" {
+	if sideOf(side) != SideReviewers {
 		return
 	}
+	l.boxWindows(SideReviewers, "", w)
+}
+
+func (l *Limits) boxWindows(side, box string, w []RateWindow) {
 	now := l.now()
 	clean := cleanWindows(w, now)
 	l.mu.Lock()
-	m := l.meter[side]
-	if m == nil {
-		m = &meterSide{}
-		l.meter[side] = m
-	}
+	m := l.meterLocked(side, box)
 	m.windows, m.at = clean, now
 	l.mu.Unlock()
 }
@@ -110,11 +131,7 @@ func (l *Limits) CodexWindows(plan string, w []RateWindow) {
 	now := l.now()
 	clean := cleanWindows(w, now)
 	l.mu.Lock()
-	m := l.meter[SideCodex]
-	if m == nil {
-		m = &meterSide{}
-		l.meter[SideCodex] = m
-	}
+	m := l.meterLocked(SideCodex, "")
 	if p := CleanPlan(plan); p != "" {
 		m.plan = p
 	}
@@ -122,6 +139,31 @@ func (l *Limits) CodexWindows(plan string, w []RateWindow) {
 		m.windows, m.at = clean, now
 	}
 	l.mu.Unlock()
+}
+
+func meterOf(k limitsSession) (string, string) {
+	side := agentSide(k.agent)
+	if side != SideAgents {
+		return side, ""
+	}
+	return side, k.box
+}
+
+func (l *Limits) dropGoneBoxesLocked() {
+	boxes := map[string]bool{}
+	for _, k := range l.known {
+		boxes[k.box] = true
+	}
+	for k := range l.meter {
+		if k.box != "" && !boxes[k.box] {
+			delete(l.meter, k)
+		}
+	}
+	for k := range l.acks {
+		if k.box != "" && !boxes[k.box] {
+			delete(l.acks, k)
+		}
+	}
 }
 
 func pluginWindows(raw any, now time.Time) []RateWindow {
@@ -150,23 +192,28 @@ func pluginWindows(raw any, now time.Time) []RateWindow {
 	return cleanWindows(out, now)
 }
 
-func (l *Limits) sideShownLocked(side string, now time.Time) bool {
+func (l *Limits) sideShownLocked(side, box string) bool {
 	switch side {
 	case SideAgents:
-		s := l.latestClaudeLocked()
+		s := l.boxSignInLocked(box, "claude")
 		return s == nil || s.Method == SignInSubscription
 	case SideReviewers:
 		return l.reviewerSignIn == nil || l.reviewerSignIn.Method == SignInSubscription
 	case SideCodex:
-		var last *SignIn
-		for _, k := range l.known {
-			if k.agent == "codex" && k.signIn != nil && (last == nil || k.signIn.CheckedAt.After(last.CheckedAt)) {
-				last = k.signIn
-			}
-		}
-		return last == nil || last.Method == SignInSubscription
+		s := l.boxSignInLocked(box, "codex")
+		return s == nil || s.Method == SignInSubscription
 	}
 	return true
+}
+
+func (l *Limits) boxSignInLocked(box, agent string) *SignIn {
+	var last *SignIn
+	for _, k := range l.known {
+		if (box == "" || k.box == box) && k.agent == agent && k.signIn != nil && (last == nil || k.signIn.CheckedAt.After(last.CheckedAt)) {
+			last = k.signIn
+		}
+	}
+	return last
 }
 
 func (l *Limits) latestClaudeLocked() *SignIn {
@@ -182,10 +229,10 @@ func (l *Limits) latestClaudeLocked() *SignIn {
 	return out
 }
 
-func (l *Limits) planLocked(side string) string {
+func (l *Limits) planLocked(side, box string) string {
 	switch side {
 	case SideAgents:
-		if s := l.latestClaudeLocked(); s != nil {
+		if s := l.boxSignInLocked(box, "claude"); s != nil {
 			return s.Plan
 		}
 	case SideReviewers:
@@ -193,15 +240,15 @@ func (l *Limits) planLocked(side string) string {
 			return l.reviewerSignIn.Plan
 		}
 	}
-	if m := l.meter[side]; m != nil {
+	if m := l.meter[meterKey{side: side, box: box}]; m != nil {
 		return m.plan
 	}
 	return ""
 }
 
-func (l *Limits) windowsLocked(side string, now time.Time) []RateWindow {
-	m := l.meter[side]
-	if m == nil || !l.sideShownLocked(side, now) {
+func (l *Limits) windowsLocked(side, box string, now time.Time) []RateWindow {
+	m := l.meter[meterKey{side: side, box: box}]
+	if m == nil || !l.sideShownLocked(side, box) {
 		return nil
 	}
 	out := make([]RateWindow, 0, len(m.windows))
@@ -214,14 +261,12 @@ func (l *Limits) windowsLocked(side string, now time.Time) []RateWindow {
 	return out
 }
 
-func ackKey(side, kind string) string { return side + "\x00" + kind }
-
-func (l *Limits) nearLocked(side string, now time.Time) (RateWindow, bool) {
-	for _, w := range l.windowsLocked(side, now) {
+func (l *Limits) nearLocked(side, box string, now time.Time) (RateWindow, bool) {
+	for _, w := range l.windowsLocked(side, box, now) {
 		if w.Utilization < UsageNear && w.Status != StatusRejected {
 			continue
 		}
-		if at, ok := l.acks[ackKey(side, w.Kind)]; ok && at.Equal(w.ResetsAt) {
+		if at, ok := l.acks[usageAck{side: side, box: box, kind: w.Kind}]; ok && at.Equal(w.ResetsAt) {
 			continue
 		}
 		return w, true
@@ -242,6 +287,10 @@ func agentSide(agent string) string {
 }
 
 func windowName(side string, w RateWindow) string {
+	return sideWords[side] + "'s " + windowShort(w)
+}
+
+func windowShort(w RateWindow) string {
 	name := windowWords[w.Kind]
 	if name == "" {
 		base, mins, ok := cutMinutes(w.Kind)
@@ -252,7 +301,7 @@ func windowName(side string, w RateWindow) string {
 			name = w.Kind + " limit"
 		}
 	}
-	return sideWords[side] + "'s " + name
+	return name
 }
 
 func cutMinutes(kind string) (string, int, bool) {
@@ -279,17 +328,17 @@ func (l *Limits) held(sid, what string) string {
 	if s := l.sessions[sid]; s != nil && s.reached != "" {
 		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until the person raises the cap on the page; the person can still press Review"
 	}
-	sides := []string{SideReviewers}
-	if side := agentSide(l.known[sid].agent); side != "" {
-		sides = append(sides, side)
+	places := []meterKey{{side: SideReviewers}}
+	if side, box := meterOf(l.known[sid]); side != "" {
+		places = append(places, meterKey{side: side, box: box})
 	}
-	for _, side := range sides {
-		w, near := l.nearLocked(side, now)
+	for _, at := range places {
+		w, near := l.nearLocked(at.side, at.box, now)
 		if !near {
 			continue
 		}
-		l.notePauseLocked(usagePause{sid: sid, side: side, kind: w.Kind, what: what, at: now})
-		return windowName(side, w) + " is " + percent(w.Utilization) + " used, so the engine starts no automatic review and no automatic Send findings until the person answers on the page; the person can still press Review"
+		l.notePauseLocked(usagePause{sid: sid, side: at.side, box: at.box, kind: w.Kind, what: what, at: now})
+		return windowName(at.side, w) + " is " + percent(w.Utilization) + " used, so the engine starts no automatic review and no automatic Send findings until the person answers on the page; the person can still press Review"
 	}
 	return ""
 }
@@ -297,7 +346,7 @@ func (l *Limits) held(sid, what string) string {
 func (l *Limits) notePauseLocked(p usagePause) {
 	if n := len(l.paused); n > 0 {
 		last := l.paused[n-1]
-		if last.sid == p.sid && last.side == p.side && last.kind == p.kind && last.what == p.what && p.at.Sub(last.at) < time.Minute {
+		if last.sid == p.sid && last.side == p.side && last.box == p.box && last.kind == p.kind && last.what == p.what && p.at.Sub(last.at) < time.Minute {
 			return
 		}
 	}
@@ -331,12 +380,30 @@ func (p *Pushes) automaticHeld(sid string) string {
 	return l.held(sid, usageWhatSend)
 }
 
-func (l *Limits) Continue(side, kind string) error {
+func (l *Limits) Continue(side, sid, kind string) error {
 	side = sideOf(side)
 	now := l.now()
 	l.mu.Lock()
+	box := ""
+	switch {
+	case side == SideReviewers && sid != "":
+		l.mu.Unlock()
+		return invalid("sid")
+	case side == SideAgents || side == SideCodex:
+		k, known := l.known[sid]
+		if !sidPattern.MatchString(sid) || !known {
+			l.mu.Unlock()
+			return explained(conflict("not started here"), "Only a session this engine started has usage limits of its own container to answer for.")
+		}
+		s, b := meterOf(k)
+		if s != side {
+			l.mu.Unlock()
+			return explained(conflict("not near"), "That limit isn't near its end now, so there is nothing to answer.")
+		}
+		box = b
+	}
 	var found *RateWindow
-	for _, w := range l.windowsLocked(side, now) {
+	for _, w := range l.windowsLocked(side, box, now) {
 		if w.Kind == kind && (w.Utilization >= UsageNear || w.Status == StatusRejected) {
 			found = &w
 		}
@@ -345,12 +412,12 @@ func (l *Limits) Continue(side, kind string) error {
 		l.mu.Unlock()
 		return explained(conflict("not near"), "That limit isn't near its end now, so there is nothing to answer.")
 	}
-	l.acks[ackKey(side, kind)] = found.ResetsAt
+	l.acks[usageAck{side: side, box: box, kind: kind}] = found.ResetsAt
 	name := windowName(side, *found)
-	lifted := l.liftLocked(side, kind)
+	lifted := l.liftLocked(side, box, kind)
 	continued := l.cfg.Continued
 	l.mu.Unlock()
-	l.audit(AuditEntry{Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
+	l.audit(AuditEntry{Session: sid, Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
 	l.flush(true)
 	if continued != nil {
 		for _, p := range lifted {
@@ -360,10 +427,10 @@ func (l *Limits) Continue(side, kind string) error {
 	return nil
 }
 
-func (l *Limits) liftLocked(side, kind string) []usagePause {
+func (l *Limits) liftLocked(side, box, kind string) []usagePause {
 	var lifted []usagePause
 	l.paused = slices.DeleteFunc(l.paused, func(p usagePause) bool {
-		if p.side != side || p.kind != kind {
+		if p.side != side || p.box != box || p.kind != kind {
 			return false
 		}
 		if !slices.ContainsFunc(lifted, func(x usagePause) bool { return x.sid == p.sid && x.what == p.what }) {
@@ -411,12 +478,12 @@ func (p *Pushes) Continued(sid string, findings bool) {
 }
 
 func (l *Limits) wakeOfferLocked(sid string, now time.Time) time.Time {
-	side := agentSide(l.known[sid].agent)
+	side, box := meterOf(l.known[sid])
 	if side == "" {
 		return time.Time{}
 	}
 	var at time.Time
-	for _, w := range l.windowsLocked(side, now) {
+	for _, w := range l.windowsLocked(side, box, now) {
 		if (w.Utilization >= 1 || w.Status == StatusRejected) && !w.ResetsAt.IsZero() && w.ResetsAt.After(at) {
 			at = w.ResetsAt
 		}

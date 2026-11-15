@@ -34,7 +34,7 @@ func (p *Pushes) holdItems(t PushTarget, h HoldSettings, entries map[review.Key]
 	var out []string
 	if h.AfterBlock {
 		for _, q := range required {
-			if RoundOf(entries, t.Branch, q.Agent).Blocked > 0 {
+			if RoundOf(entries, t.Branch, q.Agent, false).Blocked > 0 {
 				out = append(out, "the person's Push: this project holds the agent's own push after a blocked review round, and "+q.Agent+" blocked on this branch")
 				break
 			}

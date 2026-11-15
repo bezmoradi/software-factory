@@ -95,11 +95,12 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 	case "continue":
 		side, okSide := body["side"].(string)
 		kind, okKind := body["kind"].(string)
-		if !keysWithin(body, "op", "side", "kind") || !okSide || !okKind || len(side) > 40 || len(kind) > 60 {
+		_, hasSid := body["sid"]
+		if !keysWithin(body, "op", "side", "kind", "sid") || !okSide || !okKind || len(side) > 40 || len(kind) > 60 || hasSid && !okSid {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = l.Continue(side, kind)
+		err = l.Continue(side, sid, kind)
 	case "wake":
 		on, okOn := body["on"].(bool)
 		if !keysWithin(body, "op", "sid", "on") || !okSid || !okOn {

@@ -71,26 +71,32 @@ func (l *Limits) Frame() Fields {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	meter := []any{}
-	for _, side := range []string{SideAgents, SideCodex, SideReviewers} {
-		list := l.windowsLocked(side, now)
-		if len(list) == 0 {
-			continue
-		}
-		windows := make([]any, 0, len(list))
-		for _, w := range list {
-			at, acked := l.acks[ackKey(side, w.Kind)]
-			continued := acked && at.Equal(w.ResetsAt)
-			windows = append(windows, Fields{"kind": w.Kind, "name": windowName(side, w), "utilization": math.Round(w.Utilization*1000) / 1000, "resetsAt": ms(w.ResetsAt), "status": w.Status,
-				"near": !continued && (w.Utilization >= UsageNear || w.Status == StatusRejected), "continued": continued})
-		}
-		meter = append(meter, Fields{"side": side, "label": sideWords[side], "plan": l.planLocked(side), "windows": windows, "at": ms(l.meter[side].at)})
-	}
 	sids := make([]string, 0, len(l.known))
 	for sid := range l.known {
 		sids = append(sids, sid)
 	}
 	slices.Sort(sids)
+	meter := []any{}
+	addMeter := func(side, box, sid string) {
+		list := l.windowsLocked(side, box, now)
+		if len(list) == 0 {
+			return
+		}
+		windows := make([]any, 0, len(list))
+		for _, w := range list {
+			at, acked := l.acks[usageAck{side: side, box: box, kind: w.Kind}]
+			continued := acked && at.Equal(w.ResetsAt)
+			windows = append(windows, Fields{"kind": w.Kind, "name": windowName(side, w), "short": windowShort(w), "utilization": math.Round(w.Utilization*1000) / 1000, "resetsAt": ms(w.ResetsAt), "status": w.Status,
+				"near": !continued && (w.Utilization >= UsageNear || w.Status == StatusRejected), "continued": continued})
+		}
+		meter = append(meter, Fields{"side": side, "sid": sid, "label": sideWords[side], "plan": l.planLocked(side, box), "windows": windows, "at": ms(l.meter[meterKey{side: side, box: box}].at)})
+	}
+	addMeter(SideReviewers, "", "")
+	for _, sid := range sids {
+		if side, box := meterOf(l.known[sid]); side == SideAgents || side == SideCodex {
+			addMeter(side, box, sid)
+		}
+	}
 	sessions := []any{}
 	for _, sid := range sids {
 		s := l.sessions[sid]
@@ -141,7 +147,7 @@ func (l *Limits) Frame() Fields {
 	})
 	paused := []any{}
 	for _, p := range l.paused {
-		if w, near := l.nearLocked(p.side, now); !near || w.Kind != p.kind {
+		if w, near := l.nearLocked(p.side, p.box, now); !near || w.Kind != p.kind {
 			continue
 		}
 		paused = append(paused, Fields{"sid": p.sid, "side": p.side, "kind": p.kind, "what": p.what, "at": ms(p.at)})
@@ -227,7 +233,7 @@ func (r *Registry) admittedProject(sid string, out *limitsSession) bool {
 	if a == nil {
 		return false
 	}
-	*out = limitsSession{sid: sid, project: a.Project, agent: a.Agent, running: a.running}
+	*out = limitsSession{sid: sid, project: a.Project, agent: a.Agent, box: a.Box, running: a.running}
 	return true
 }
 

@@ -197,6 +197,9 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   if (s.mode === 'bypassPermissions') name.append(el('span', 'tag bad', 'bypass permissions'))
   const group = groupTag(s, all)
   if (group) name.append(group)
+  const usage = el('sf-usage-line', 'usage-line')
+  usage.sid = s.sid
+  name.append(usage)
   const shared = sharing(s, all)
   if (shared.length) {
     const tag = el('span', 'tag warn', 'same checkout')

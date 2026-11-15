@@ -1038,7 +1038,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	var missing []string
 	for _, q := range g.required {
 		r := WorkReviewer{Agent: q.Agent, Role: q.Role, Name: ReviewerName(q), Why: q.Why, State: "none", Limit: limit}
-		rd := RoundOf(entries, g.t.Branch, q.Agent)
+		rd := RoundOf(entries, g.t.Branch, q.Agent, false)
 		r.Round, r.Capped = rd.Count, rd.Capped(limit)
 		k := review.Key{Commit: g.head, Branch: g.t.Branch, Agent: q.Agent}
 		if e, complete, ok := pooledEntry(entries, k, q.RunCount()); ok {

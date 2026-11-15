@@ -107,6 +107,7 @@ type limitsSession struct {
 	sid     string
 	project string
 	agent   string
+	box     string
 	running bool
 	signIn  *SignIn
 }
@@ -123,8 +124,8 @@ type Limits struct {
 	sessions       map[string]*capSession
 	known          map[string]limitsSession
 	reviewerSignIn *SignIn
-	meter          map[string]*meterSide
-	acks           map[string]time.Time
+	meter          map[meterKey]*meterSide
+	acks           map[usageAck]time.Time
 	paused         []usagePause
 	loops          map[string]*loopTrack
 	tokens         map[string]time.Time
@@ -139,7 +140,7 @@ func newLimits(r *Registry) *Limits {
 	return &Limits{
 		reg: r, now: r.now, cfg: LimitsConfig{Logger: quiet{}},
 		projects: map[string]Caps{}, sessions: map[string]*capSession{}, known: map[string]limitsSession{},
-		meter: map[string]*meterSide{}, acks: map[string]time.Time{}, loops: map[string]*loopTrack{},
+		meter: map[meterKey]*meterSide{}, acks: map[usageAck]time.Time{}, loops: map[string]*loopTrack{},
 		tokens: map[string]time.Time{}, wakes: map[string]time.Time{},
 	}
 }

@@ -193,6 +193,7 @@ type Pushes struct {
 	views   map[string]PushView
 	waiting map[string]string
 	again   map[string]bool
+	recheck map[string]string
 	refused map[string][]string
 	spoken  map[string]string
 	pushed  func(PushedFacts)
@@ -243,7 +244,7 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 		cfg.Logger = quiet{}
 	}
 	p := &Pushes{cfg: cfg, kind: kind, busy: map[string]bool{}, held: map[string]*heldPush{},
-		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, again: map[string]bool{}, refused: map[string][]string{}, spoken: map[string]string{}}
+		calls: newLimiter(PushCalls, PushWindow), capped: map[string]bool{}, views: map[string]PushView{}, waiting: map[string]string{}, again: map[string]bool{}, recheck: map[string]string{}, refused: map[string][]string{}, spoken: map[string]string{}}
 	p.loadDenials()
 	p.loadWaiting()
 	return p, nil
@@ -302,7 +303,7 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 	}
 	ctx, cancel := context.WithTimeout(ctx, PushFor)
 	defer cancel()
-	reply, d := p.decide(ctx, sid, ByAgent, nil)
+	reply, d := p.decide(ctx, sid, ByAgent, nil, "")
 	p.mu.Lock()
 	said := p.spoken[sid]
 	delete(p.spoken, sid)
@@ -439,6 +440,23 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	return head, true, ""
 }
 
+func (p *Pushes) heldReviewed(sid, head, branch string) {
+	p.wg.Go(func() {
+		defer p.release(sid)
+		t, ok := p.cfg.Targets(sid)
+		if !ok || t.Branch != branch {
+			return
+		}
+		if now, err := p.cfg.Heads.Head(t.Repo, t.Branch); err != nil || now != head {
+			return
+		}
+		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
+		defer cancel()
+		reply, _ := p.decide(ctx, sid, ByReviews, nil, head)
+		p.cfg.Logger.Info("push", "event", "held-reviewed", "then", string(reply.Decision))
+	})
+}
+
 func (p *Pushes) requiredAgents(sid string, t PushTarget, head string) []string {
 	list := p.requiredOf(sid, t, head)
 	out := make([]string, 0, len(list))
@@ -468,8 +486,24 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		return
 	}
 	p.mu.Lock()
-	if p.closing || p.waiting[sid] != head || p.refusedLocked(sid, head) {
+	if p.closing || p.refusedLocked(sid, head) {
 		p.mu.Unlock()
+		return
+	}
+	if p.waiting[sid] != head {
+		h := p.held[sid]
+		again := h != nil && h.commit == head && p.cfg.Now().Before(h.expires)
+		branch := ""
+		switch {
+		case again && p.busy[sid]:
+			p.recheck[sid], again = head, false
+		case again:
+			p.busy[sid], branch = true, h.branch
+		}
+		p.mu.Unlock()
+		if again {
+			p.heldReviewed(sid, head, branch)
+		}
 		return
 	}
 	if p.denialsUnread {
@@ -491,7 +525,7 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		defer p.release(sid)
 		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
 		defer cancel()
-		reply, _ := p.decide(ctx, sid, ByReviews, nil)
+		reply, _ := p.decide(ctx, sid, ByReviews, nil, "")
 		p.decided(sid, head, reply)
 		if reply.Decision == push.DecisionHeld {
 			p.autoFindings(sid)
@@ -538,10 +572,15 @@ func (p *Pushes) release(sid string) {
 	p.mu.Lock()
 	delete(p.busy, sid)
 	again, head := p.again[sid], p.waiting[sid]
+	held := p.recheck[sid]
 	delete(p.again, sid)
+	delete(p.recheck, sid)
 	p.mu.Unlock()
 	if again && head != "" {
 		p.ReviewDone(sid, head)
+	}
+	if held != "" {
+		p.ReviewDone(sid, held)
 	}
 }
 
@@ -556,7 +595,7 @@ func (p *Pushes) start(sid string, answer *gate.Answer) {
 		defer p.release(sid)
 		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
 		defer cancel()
-		p.decide(ctx, sid, ByPage, answer)
+		p.decide(ctx, sid, ByPage, answer, "")
 	})
 }
 
@@ -739,7 +778,18 @@ func (x *pushing) clean(s string) string {
 	if x.token != "" {
 		s = strings.ReplaceAll(s, x.token, "[token]")
 	}
-	return clip(s, maxPushReason)
+	return clipAtWord(s, maxPushReason)
+}
+
+func clipAtWord(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := clip(s, n-len("…"))
+	if i := strings.LastIndexByte(cut, ' '); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ;,:") + "…"
 }
 
 func (x *pushing) end(result gate.Result, reason string, missing []string, person string) push.Reply {
@@ -849,7 +899,7 @@ func reviewWords(passed, overridden int) string {
 	return strconv.Itoa(passed) + " of " + strconv.Itoa(n) + " reviews passed and the person overrode the rest"
 }
 
-func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer) (push.Reply, gate.Decision) {
+func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer, want string) (push.Reply, gate.Decision) {
 	x := &pushing{p: p, sid: sid, answer: answer, entry: AuditEntry{Time: p.cfg.Now(), Session: sid, By: by, Request: randomHex(16)}}
 	refuse := func(why string) (push.Reply, gate.Decision) {
 		return x.end(gate.Refused, why, nil, ""), gate.Decision{Result: gate.Refused, Reason: why}
@@ -877,6 +927,9 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return refuse("the engine couldn't read the session's branch " + t.Branch + ": " + err.Error())
 	}
 	x.entry.Commit = head
+	if want != "" && head != want {
+		return refuse("the branch moved from commit " + shortSHA(want) + " to " + shortSHA(head) + " while the engine decided the held request again, so it pushed nothing; ask to push again")
+	}
 	p.mu.Lock()
 	unread, denied := p.denialsUnread && by != ByPage, p.refusedLocked(sid, head)
 	p.mu.Unlock()
@@ -1025,7 +1078,7 @@ func (p *Pushes) facts(sid string, t PushTarget, head, main, mainName, by string
 		f.Reviews[k] = e.Record
 	}
 	for _, q := range f.Required {
-		if rd := RoundOf(entries, t.Branch, q.Agent); rd.Capped(limit) {
+		if rd := RoundOf(entries, t.Branch, q.Agent, false); rd.Capped(limit) {
 			f.Capped[q.Agent] = rd.Count
 		}
 		for _, e := range runsOf(entries, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}) {

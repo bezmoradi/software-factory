@@ -312,8 +312,12 @@ func unfinishedReviews(head string, ended []ReviewEntry) string {
 	if len(ended) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(ended))
+	var parts, held []string
 	for _, e := range ended {
+		if e.Record.Held != "" {
+			held = append(held, "the review of commit "+shortSHA(head)+" by "+e.Key.Agent+" passed, but "+clip(e.Record.Held, 400))
+			continue
+		}
 		what := "failed"
 		if e.Record.State == review.Unknown {
 			what = "gave no verdict the engine reads"
@@ -324,7 +328,10 @@ func unfinishedReviews(head string, ended []ReviewEntry) string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, "; ") + "; the engine won't start " + plural(len(ended), "it", "them") + " again on your request, but the person can press Review on the page"
+	if len(parts) > 0 {
+		parts = []string{strings.Join(parts, "; ") + "; the engine won't start " + plural(len(parts), "it", "them") + " again on your request, but the person can press Review on the page"}
+	}
+	return strings.Join(append(parts, held...), "; ")
 }
 
 func (p *Pushes) afterReviews(by, sid string, t PushTarget, head string) string {

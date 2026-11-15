@@ -27,7 +27,7 @@ func (r *Registry) limitsSeen(c *conn, kind string, ev map[string]any, now time.
 			l.costSeen(c.sid, a.Project, c.epoch, cost)
 		}
 		if raw, ok := ev["rateLimits"]; ok && a.Agent == "claude" && a.SignIn != nil && a.SignIn.Method == SignInSubscription {
-			l.Windows(SideAgents, pluginWindows(raw, now))
+			l.boxWindows(SideAgents, a.Box, pluginWindows(raw, now))
 		}
 	}
 }
@@ -192,7 +192,7 @@ func (r *Registry) limitsSnapshot() map[string]limitsSession {
 			v := *a.SignIn
 			s = &v
 		}
-		out[sid] = limitsSession{sid: sid, project: a.Project, agent: a.Agent, running: a.running, signIn: s}
+		out[sid] = limitsSession{sid: sid, project: a.Project, agent: a.Agent, box: a.Box, running: a.running, signIn: s}
 	}
 	return out
 }
@@ -225,6 +225,7 @@ func (l *Limits) tick() {
 	l.lastTick = now
 	l.known = known
 	l.reviewerSignIn = reviewer
+	l.dropGoneBoxesLocked()
 	for sid, k := range known {
 		if !k.running {
 			continue

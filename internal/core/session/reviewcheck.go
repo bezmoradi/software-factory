@@ -18,6 +18,7 @@ const (
 	checksPerAgent  = 6
 	checksKept      = 200
 	versionFor      = 30 * time.Second
+	versionRetry    = 2 * time.Second
 	maxChain        = 50
 	checkSnapFailed = "the engine couldn't write the check's snapshot: "
 )
@@ -102,23 +103,34 @@ func (r *Reviews) Current() (string, string) {
 }
 
 func (r *Reviews) reviewerVersion(ctx context.Context) string {
-	vctx, cancel := context.WithTimeout(ctx, versionFor)
-	defer cancel()
-	res, err := r.cfg.Host.Run(vctx, Command{Argv: []string{r.cfg.Command, "--version"}, Dir: r.cfg.Dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: versionFor})
-	v := ""
-	if err == nil && res.Code == 0 && !res.TimedOut {
-		if f := strings.Fields(res.Stdout); len(f) > 0 && reviewVersionText.MatchString(f[0]) {
-			v = f[0]
+	v := r.readVersion(ctx)
+	if v == "" {
+		select {
+		case <-time.After(versionRetry):
+			v = r.readVersion(ctx)
+		case <-ctx.Done():
 		}
 	}
 	if v == "" {
 		r.cfg.Logger.Warn("review", "event", "version-unread")
-		v = r.cfg.ClaudeCode
 	}
 	r.mu.Lock()
 	r.claude = v
 	r.mu.Unlock()
 	return v
+}
+
+func (r *Reviews) readVersion(ctx context.Context) string {
+	vctx, cancel := context.WithTimeout(ctx, versionFor)
+	defer cancel()
+	res, err := r.cfg.Host.Run(vctx, Command{Argv: []string{r.cfg.Command, "--version"}, Dir: r.cfg.Dir, Pass: []string{"DISABLE_AUTOUPDATER"}, Timeout: versionFor})
+	if err != nil || res.Code != 0 || res.TimedOut {
+		return ""
+	}
+	if f := strings.Fields(res.Stdout); len(f) > 0 && reviewVersionText.MatchString(f[0]) {
+		return f[0]
+	}
+	return ""
 }
 
 func (r *Reviews) checkRecords() ([]ReviewerCheck, bool) {
@@ -186,14 +198,31 @@ func keptChecks(list []ReviewerCheck) []ReviewerCheck {
 }
 
 func latestCovering(checks []ReviewerCheck, agent string, v review.Versions) (ReviewerCheck, bool) {
+	return newestCovering(checks, agent, v, func(review.CheckResult) bool { return true })
+}
+
+func newestCovering(checks []ReviewerCheck, agent string, v review.Versions, keep func(review.CheckResult) bool) (ReviewerCheck, bool) {
 	var out ReviewerCheck
 	found := false
 	for _, c := range checks {
-		if c.Agent == agent && c.Versions.Covers(v) && (!found || c.StartedAt.After(out.StartedAt)) {
+		if c.Agent == agent && c.Versions.Covers(v) && keep(c.Result) && (!found || c.StartedAt.After(out.StartedAt)) {
 			out, found = c, true
 		}
 	}
 	return out, found
+}
+
+func holdingCheck(checks []ReviewerCheck, agent string, v review.Versions) (ReviewerCheck, bool) {
+	if c, ok := newestCovering(checks, agent, v, func(r review.CheckResult) bool { return r == review.CheckRunning }); ok {
+		return c, true
+	}
+	settled := func(r review.CheckResult) bool {
+		return r == review.CheckPassed || r == review.CheckWarned || r == review.CheckFailure
+	}
+	if c, ok := newestCovering(checks, agent, v, settled); ok {
+		return c, true
+	}
+	return latestCovering(checks, agent, v)
 }
 
 func latestOf(checks []ReviewerCheck, agent string) *ReviewerCheck {
@@ -210,15 +239,17 @@ func latestOf(checks []ReviewerCheck, agent string) *ReviewerCheck {
 func (r *Reviews) passHeld(e ReviewEntry, checks []ReviewerCheck, checked bool) (review.Channel, string) {
 	v := versionsOf(e)
 	if why := r.cfg.Minimum.Below(v, e.Record.Provider != UploadedProvider); why != "" {
-		return review.BelowMinimum, "the reviewer that made it is older than the minimum this engine accepts (" + why + "), so the pass doesn't count, and the role runs again on the next push"
+		return review.BelowMinimum, "the reviewer that made it is older than the minimum this engine accepts (" + why + "), so the pass doesn't count; it runs again when the agent next asks to push or the person presses Review"
 	}
 	if !checked {
 		return "", ""
 	}
-	c, ok := latestCovering(checks, e.Key.Agent, v)
+	c, ok := holdingCheck(checks, e.Key.Agent, v)
 	switch {
+	case v.ClaudeCode == "":
+		return review.Unchecked, "the reviewer container's Claude Code version couldn't be read when the review started, so no check can cover the pass and it doesn't count; it runs again when the agent next asks to push or the person presses Review"
 	case !ok:
-		return review.Unchecked, "the engine hasn't checked this reviewer since an update (" + v.Words() + "), so the pass doesn't count yet; the role runs again on the next push, and the engine checks the reviewer after it"
+		return review.Unchecked, "the engine hasn't checked this reviewer since an update (" + v.Words() + "), so the pass doesn't count yet; it runs again, with a check after it, when the agent next asks to push or the person presses Review"
 	case c.Result == review.CheckRunning:
 		return review.Checking, "the engine is checking this reviewer after an update (" + v.Words() + "), and the pass counts once the check settles; push again when it ends"
 	case c.Result == review.CheckFailure:
@@ -249,7 +280,7 @@ func (r *Reviews) counted(list []ReviewEntry) []ReviewEntry {
 			h.channel, h.why = r.passHeld(e, checks, checked)
 			if h.why == "" && e.Since != "" && depth < maxChain {
 				if j, ok := index[review.Key{Commit: e.Since, Branch: e.Key.Branch, Agent: e.Key.Agent, Run: e.Key.Run}]; ok && j != i && hold(j, depth+1).why != "" {
-					h = held{review.Unchecked, "it reviewed only what changed since commit " + shortSHA(e.Since) + ", whose pass doesn't count for its reviewer's version, so this pass doesn't count either; the role runs again in full on the next push"}
+					h = held{review.Unchecked, "it reviewed only what changed since commit " + shortSHA(e.Since) + ", whose pass doesn't count, so this one doesn't either; it runs again in full when the agent next asks to push or the person presses Review"}
 				}
 			}
 		}
@@ -281,7 +312,7 @@ func (r *Reviews) checksDue(entries []ReviewEntry) []dueCheck {
 		}) {
 			continue
 		}
-		if r.cfg.Minimum.Below(v, e.Record.Provider != UploadedProvider) != "" {
+		if v.ClaudeCode == "" || r.cfg.Minimum.Below(v, e.Record.Provider != UploadedProvider) != "" {
 			continue
 		}
 		if c, ok := latestCovering(checks, e.Key.Agent, v); ok && c.Result != review.CheckRunning {

@@ -37,6 +37,23 @@ func attemptOf(e ReviewEntry) int {
 	return max(e.Attempt, 1)
 }
 
+func autoAttemptsOf(e ReviewEntry) int {
+	switch {
+	case e.AutoAttempts > 0:
+		return e.AutoAttempts
+	case e.Auto:
+		return attemptOf(e)
+	}
+	return 0
+}
+
+func autoAttempt(auto bool) int {
+	if auto {
+		return 1
+	}
+	return 0
+}
+
 type ReviewScope int
 
 const (

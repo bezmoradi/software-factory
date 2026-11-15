@@ -92,7 +92,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	var finished []RoleReview
 	var checking []string
 	for _, q := range required {
-		rd := RoundOf(entries, t.Branch, q.Agent)
+		rd := RoundOf(entries, t.Branch, q.Agent, q.Advisory)
 		var open []review.Key
 		for _, key := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
 			if e, ok := entries[key]; ok && t.Scope.skips(e) && e.Record.Advisory == q.Advisory {
@@ -117,6 +117,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 			p := plannedRole{q: q, base: base, covers: base, round: rd.Count + 1, attempt: nextAttempt(entries, key), run: key.Number(), runs: q.RunCount()}
 			if e, ok := entries[key]; ok {
 				p.auto = e.Auto
+				if e.Record.State != review.Running {
+					p.autoAttempts = autoAttemptsOf(e)
+				}
 			}
 			for _, e := range runsOf(entries, key) {
 				if e.Record.Override != "" {
@@ -126,10 +129,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 					p.round = rd.Count
 				}
 			}
-			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number()); prev != nil {
+			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory); prev != nil {
 				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
 			}
-			p.overridden = acceptedRound(entries, t.Branch, q.Agent)
+			p.overridden = acceptedRound(entries, t.Branch, q.Agent, q.Advisory)
 			plans = append(plans, p)
 		}
 	}
@@ -193,18 +196,19 @@ func reviewedMessage(head string, checking []string) string {
 }
 
 type plannedRole struct {
-	q          workflow.Requirement
-	base       string
-	since      string
-	covers     string
-	previous   string
-	overridden *ReviewEntry
-	kept       string
-	round      int
-	auto       bool
-	attempt    int
-	run        int
-	runs       int
+	q            workflow.Requirement
+	base         string
+	since        string
+	covers       string
+	previous     string
+	overridden   *ReviewEntry
+	kept         string
+	round        int
+	auto         bool
+	attempt      int
+	autoAttempts int
+	run          int
+	runs         int
 }
 
 func plural(n int, one, many string) string {
@@ -214,8 +218,8 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int) *ReviewEntry {
-	prev := previousRound(entries, t.Branch, agent, head, run)
+func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool) *ReviewEntry {
+	prev := previousRound(entries, t.Branch, agent, head, run, advisory)
 	if prev == nil || prev.Record.Shaped != "" {
 		return nil
 	}

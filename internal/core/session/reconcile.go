@@ -106,7 +106,7 @@ func (p *Pushes) reconcile(ctx context.Context, e AuditEntry) bool {
 			out.Reason += "; press Push again"
 		}
 	}
-	out.Reason = clip(out.Reason, maxPushReason)
+	out.Reason = clipAtWord(out.Reason, maxPushReason)
 	if err := p.cfg.Audit.Append(out); err != nil {
 		p.cfg.Logger.Warn("push reconcile", "event", "audit-not-written")
 		return false

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 
@@ -156,7 +158,8 @@ func earlierName(agent string, run int) string {
 			b.WriteByte('-')
 		}
 	}
-	name := clip(b.String(), 100)
+	sum := sha256.Sum256([]byte(agent))
+	name := clip(b.String(), 80) + "-" + hex.EncodeToString(sum[:4])
 	if run > 1 {
 		name += "-run-" + strconv.Itoa(run)
 	}
