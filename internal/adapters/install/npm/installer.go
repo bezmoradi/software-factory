@@ -67,7 +67,7 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Registry = DefaultRegistry
 	}
 	u, err := url.Parse(cfg.Registry)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" && u.Path != "/" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" && u.Path != "/" {
 		return nil, fmt.Errorf("agent installs: the registry must be a plain https URL, got %q", cfg.Registry)
 	}
 	cfg.Registry = strings.TrimSuffix(cfg.Registry, "/")
@@ -78,7 +78,7 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Agents = Pinned
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Transport: &http.Transport{
+		cfg.Client = &http.Client{CheckRedirect: sameOrigin, Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
 			TLSHandshakeTimeout:   15 * time.Second,
@@ -90,6 +90,25 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Logger = quiet{}
 	}
 	return &Installer{cfg: cfg, running: map[string]bool{}, failed: map[string]string{}}, nil
+}
+
+func sameOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if first := via[0].URL; req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refused a redirect from %s to another host or scheme", first.Host)
+	}
+	return nil
+}
+
+func removeLeftovers(dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 func (i *Installer) Agents() []Agent {
@@ -230,6 +249,7 @@ func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(s
 		return err
 	}
 	defer unlock()
+	removeLeftovers(i.cfg.Dir)
 	if i.Installed(a.ID) {
 		report(fmt.Sprintf("%s %s is already installed.", a.Name, a.Version))
 		return i.checkInstalled(ctx, a, b, report)

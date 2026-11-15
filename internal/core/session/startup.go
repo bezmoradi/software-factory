@@ -323,7 +323,7 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 		d.cfg.Logger.Warn("start-up files", "event", "unreadable")
 		return explained(conflict("start-up files"), clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
 	}
-	if len(read.Files) == 0 {
+	if len(read.Files) == 0 && len(read.Walk) == 0 {
 		return nil
 	}
 	hash := startupHash(list, read)
@@ -343,6 +343,9 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 		return nil
 	}
 	msg := r.spec.Name + " loads these files from the repository at start. They can change what it may do without asking. Read them, then approve to start."
+	if len(read.Files) == 0 {
+		msg = "The search of the worktree's subfolders stopped early, so a skill folder past where it stopped wouldn't be shown or approved. Read where it stopped, then approve to start."
+	}
 	if consent.Approve != "" {
 		msg = "The start-up files changed since you looked at them. Read them again, then approve to start."
 	}

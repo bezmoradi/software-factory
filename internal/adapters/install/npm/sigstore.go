@@ -88,6 +88,8 @@ type Verified struct {
 
 var ErrNoBuildProvenance = errors.New("the registry's attestations hold no SLSA build provenance")
 
+var errNoSourcePinned = errors.New("no source is pinned to check the provenance against")
+
 type trust struct {
 	rekor   *ecdsa.PublicKey
 	rekorID []byte
@@ -452,7 +454,7 @@ func extension(c *x509.Certificate, oid asn1.ObjectIdentifier) string {
 
 func checkIdentity(leaf *x509.Certificate, st statementJSON, want Source, logged time.Time) (Verified, error) {
 	if !want.Set() {
-		return Verified{}, errors.New("no source is pinned to check the provenance against")
+		return Verified{}, errNoSourcePinned
 	}
 	signer := want.Repository + "/" + want.Workflow + "@" + want.Ref
 	if extension(leaf, oidIssuer) != githubIssuer {

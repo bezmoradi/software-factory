@@ -145,7 +145,7 @@ func PrepareBoxes(workspace string) (string, error) {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
 		return "", fmt.Errorf("the workspace's folder of sessions can't be read: %w", err)
-	case !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 || !ownedByMe(info):
+	case !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 || !ownedByMe(info) || info.Mode().Perm()&0o022 != 0:
 		moved = ".s-refused-" + randomName()
 		if err := ws.Rename(session.BoxesFolder, moved); err != nil {
 			return "", errors.New("the workspace's folder of sessions isn't the engine's own, and it can't be moved aside")

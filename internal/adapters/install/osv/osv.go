@@ -77,8 +77,18 @@ type vulnJSON struct {
 	Withdrawn string   `json:"withdrawn"`
 }
 
+func sameOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after %d redirects", len(via))
+	}
+	if first := via[0].URL; req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refused a redirect from %s to another host or scheme", first.Host)
+	}
+	return nil
+}
+
 func NewClient() *http.Client {
-	return &http.Client{Timeout: lookupFor, Transport: &http.Transport{
+	return &http.Client{Timeout: lookupFor, CheckRedirect: sameOrigin, Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   15 * time.Second,

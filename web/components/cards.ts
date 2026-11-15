@@ -14,13 +14,37 @@ function start(host: HTMLElement, meta: string, title?: string) {
   if (title) host.append(el('h3', '', title))
 }
 
-const HIDING = /\u001b\[[0-9;?]*[A-HJKSTfsu]|\u001b[78DEM]|\u009b[0-9;?]*[A-HJKSTfsu]|\r(?!\n)|[\u0008\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u
+const HIDING = /\r(?!\n)|[\u0008\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u
+const ESCAPE = /[\u001b\u0080-\u009f]/g
+const SGR = /\u001b\[([0-9;:]*)m/y
 
-export const hidesText = (text: unknown): boolean => typeof text === 'string' && HIDING.test(text)
+function conceals(params: string): boolean {
+  const list = params.split(';')
+  for (let i = 0; i < list.length; i++) {
+    const code = Number(list[i]!.split(':')[0] || '0')
+    if (code === 8) return true
+    if ((code === 38 || code === 48 || code === 58) && !list[i]!.includes(':')) {
+      const mode = Number(list[i + 1])
+      i += mode === 5 ? 2 : mode === 2 ? 4 : 0
+    }
+  }
+  return false
+}
+
+function escapes(text: string): boolean {
+  for (const m of text.matchAll(ESCAPE)) {
+    SGR.lastIndex = m.index
+    const colour = SGR.exec(text)
+    if (!colour || conceals(colour[1]!)) return true
+  }
+  return false
+}
+
+export const hidesText = (text: unknown): boolean => typeof text === 'string' && (HIDING.test(text) || escapes(text))
 
 export function hiddenMark(text: string, what: string): HTMLElement {
   const box = el('div', 'hidden-mark small')
-  box.append(el('span', 'tag warn', 'hides text'), ' ', el('span', 'warn', `${what} holds terminal sequences that erase or move over text, or direction overrides, which can hide part of it from you while the agent reads all of it. Escaped, as Software Factory reads it:`))
+  box.append(el('span', 'tag warn', 'hides text'), ' ', el('span', 'warn', `${what} holds terminal control sequences other than plain colours, which can erase, move over or conceal text, or direction overrides, which can hide part of it from you while the agent reads all of it. Escaped, as Software Factory reads it:`))
   const code = el('code', 'hidden-escaped', visible(unspoofed(text)))
   box.append(code)
   return box

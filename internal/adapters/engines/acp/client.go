@@ -36,23 +36,22 @@ const (
 var DefaultAskingModes = []string{"default", "ask", "manual"}
 
 var (
-	ErrClosed            = errors.New("acp: connection closed")
-	ErrNotStarted        = errors.New("acp: session not started")
-	ErrStarted           = errors.New("acp: session already started")
-	ErrTurnActive        = errors.New("acp: a turn is already running")
-	ErrUnknownRequest    = errors.New("acp: no pending permission request with that id")
-	ErrUnknownOption     = errors.New("acp: the request offers no such option")
-	ErrAllowAlways       = errors.New("acp: an allow_always option is never selected")
-	ErrOptionMismatch    = errors.New("acp: the option's kind contradicts the answer")
-	ErrNotWhole          = errors.New("acp: the tool call has no rawInput, so the request may only be rejected")
-	ErrNoAllowOnce       = errors.New("acp: the agent offered no allow_once option, so the request was rejected")
-	ErrNotAsking         = errors.New("acp: the agent offers modes but none of them is an asking mode")
-	ErrModeNotKept       = errors.New("acp: the agent didn't confirm it switched to the asking mode it was set to")
-	ErrProtocolVersion   = errors.New("acp: the agent answered an unsupported protocol version")
-	ErrAuthNotRequired   = errors.New("acp: authenticate is only sent after session/new answered auth required")
-	ErrUnknownAuthMethod = errors.New("acp: the agent advertised no such agent-handled sign-in method")
-	ErrBadConfig         = errors.New("acp: invalid configuration")
-	ErrNoImages          = errors.New("acp: the agent doesn't offer the image prompt capability")
+	ErrClosed          = errors.New("acp: connection closed")
+	ErrNotStarted      = errors.New("acp: session not started")
+	ErrStarted         = errors.New("acp: session already started")
+	ErrTurnActive      = errors.New("acp: a turn is already running")
+	ErrUnknownRequest  = errors.New("acp: no pending permission request with that id")
+	ErrUnknownOption   = errors.New("acp: the request offers no such option")
+	ErrAllowAlways     = errors.New("acp: an allow_always option is never selected")
+	ErrOptionMismatch  = errors.New("acp: the option's kind contradicts the answer")
+	ErrNotWhole        = errors.New("acp: the tool call has no rawInput, so the request may only be rejected")
+	ErrNoAllowOnce     = errors.New("acp: the agent offered no allow_once option, so the request was rejected")
+	ErrNotAsking       = errors.New("acp: the agent offers modes but none of them is an asking mode")
+	ErrModeNotKept     = errors.New("acp: the agent didn't confirm it switched to the asking mode it was set to")
+	ErrProtocolVersion = errors.New("acp: the agent answered an unsupported protocol version")
+	ErrBadConfig       = errors.New("acp: invalid configuration")
+	ErrNoImages        = errors.New("acp: the agent doesn't offer the image prompt capability")
+	ErrChanged         = errors.New("acp: the tool call's input changed after it was shown, so it can only be rejected")
 )
 
 type Config struct {
@@ -89,26 +88,26 @@ type Client struct {
 	wqBytes int
 	wclosed bool
 
-	mu           sync.Mutex
-	nextID       int64
-	calls        map[int64]callback
-	ended        bool
-	closed       bool
-	overflow     bool
-	queue        []agent.Event
-	queuedBytes  int
-	initialized  bool
-	authMethods  []AuthMethod
-	authRequired bool
-	images       bool
-	sessionID    string
-	turn         bool
-	perms        map[string]*permission
-	permSeq      int
-	tools        map[string]*toolState
-	toolOrder    []string
-	toolBytes    int
-	mode         modeState
+	mu          sync.Mutex
+	nextID      int64
+	calls       map[int64]callback
+	ended       bool
+	closed      bool
+	overflow    bool
+	queue       []agent.Event
+	queuedBytes int
+	initialized bool
+	authMethods []AuthMethod
+	images      bool
+	sessionID   string
+	turn        bool
+	perms       map[string]*permission
+	permSeq     int
+	inputSeq    int
+	tools       map[string]*toolState
+	toolOrder   []string
+	toolBytes   int
+	mode        modeState
 }
 
 var (
@@ -221,7 +220,6 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 		c.mu.Lock()
 		c.sessionID = created.SessionID
-		c.authRequired = false
 		c.mu.Unlock()
 	})
 	var rerr *RPCError

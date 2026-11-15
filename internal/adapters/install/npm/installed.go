@@ -25,7 +25,7 @@ func provenanceRecorded(m manifest, b Build) bool {
 	}
 	for n, p := range b.Packages {
 		r := m.Provenance[n]
-		if r.Package != p.Name || r.Version != p.Version || r.State == ProvenanceUnchecked {
+		if r.Package != p.Name || r.Version != p.Version || (r.State == ProvenanceUnchecked || r.State == ProvenanceFailed) {
 			return false
 		}
 	}

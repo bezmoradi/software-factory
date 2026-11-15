@@ -368,7 +368,7 @@ export function openEgress(post: Post): void {
     el('p', 'small muted', 'For agents only; reviewers reach only Claude Code’s hosts and the gateway. A host you add gives every session a way out, so add only what a task needs, and give it an expiry when you can.'),
     addedList, addForm, hint, uploadWarn,
     refreshRow,
-    el('p', 'small muted', 'What egress refused since it started: host, count and last time, never the path. Every session shares one container, so egress can’t tell sessions apart.'),
+    el('p', 'small muted', 'What egress refused since it started: host, count and last time, never the path. It keeps one count per host and reason across all sessions, so it doesn’t say which session asked.'),
     refusedBox,
     el('h3', 'label', 'Company LLM gateway'),
     el('p', 'small', 'Sets Claude Code’s base URL (ANTHROPIC_BASE_URL) for the sessions and reviewers you choose, and adds the gateway’s host to their allowlist. While the gateway is on for a side, that side’s list leaves out Anthropic’s own hosts and Claude Code’s telemetry hosts (anthropic.com, claude.ai, claude.com, Statsig, Sentry, Datadog), unless the gateway is one of them, so a key pasted for the gateway can’t reach them; removing the gateway brings them back.'),

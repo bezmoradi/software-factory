@@ -1,4 +1,5 @@
-import { button, el, emit, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
+import { scrolledText } from './cards.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
 
 const STATES: Record<string, [string, string]> = {
@@ -52,6 +53,7 @@ class SfForgePanel extends HTMLElement {
   #key = ''
   #drafts = new Map<string, boolean>()
   #confirmed = new Set<string>()
+  #observers: ResizeObserver[] = []
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -61,6 +63,8 @@ class SfForgePanel extends HTMLElement {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
+    for (const observer of this.#observers) observer.disconnect()
+    this.#observers = []
     const list = value?.forge ?? []
     this.hidden = !list.length
     if (!value || !list.length) {
@@ -85,12 +89,7 @@ class SfForgePanel extends HTMLElement {
     box.append(head)
     const said = COMMENT_SAID[f.state]
     if (said) box.append(el('p', 'small muted', said))
-    if (f.body) {
-      const body = el('pre', 'forge-body', shown(f.body))
-      body.tabIndex = 0
-      body.setAttribute('aria-label', `The comment on pull request #${f.number}`)
-      box.append(body)
-    }
+    if (f.body) box.append(...this.#body(unspoofed(f.body), `The comment on pull request #${f.number}`))
     if (f.state === 'waiting') box.append(...this.#waiting(f, value, 'Post comment', () => ({ card: f.card, approve: true, confirmed: !!f.secretAt })))
     if (f.url && f.state === 'commented') {
       const line = el('p', 'small forge-link')
@@ -121,10 +120,7 @@ class SfForgePanel extends HTMLElement {
     if (pull) box.append(el('p', 'small muted forge-refs', `From ${shown(f.head)} into ${shown(f.base)}`))
     if (f.state === 'waiting' || f.state === 'sending') {
       box.append(el('p', 'small muted', FROM_SAID[f.from ?? ''] ?? FROM_SAID['']!))
-      const body = el('pre', 'forge-body', f.body ? shown(f.body) : '(no body)')
-      body.tabIndex = 0
-      body.setAttribute('aria-label', `Body of the ${pull ? 'pull request' : 'issue'}`)
-      box.append(body)
+      box.append(...this.#body(f.body ? unspoofed(f.body) : '(no body)', `Body of the ${pull ? 'pull request' : 'issue'}`))
     }
     if (f.number && f.url) {
       const line = el('p', 'small forge-link')
@@ -148,6 +144,12 @@ class SfForgePanel extends HTMLElement {
       box.append(...this.#waiting(f, value, pull ? (f.reason ? 'Open pull request at the new commit' : 'Open pull request') : 'Open issue', () => pull ? { card: f.card, approve: true, draft: this.#drafts.get(f.card) ?? true, ...confirmed } : { card: f.card, approve: true, ...confirmed }, pull, `The engine opens it on ${shown(f.host)} with your saved token`))
     }
     return box
+  }
+
+  #body(text: string, name: string): Node[] {
+    const [box, more, observer] = scrolledText(text, name, 'forge-body')
+    this.#observers.push(observer)
+    return [box, more]
   }
 
   #waiting(f: SessionForge, value: ForgePanelView, text: string, answer: () => ForgeAnswer, draft = false, title = ''): Node[] {

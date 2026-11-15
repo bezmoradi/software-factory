@@ -120,7 +120,7 @@ jobs:
                 ;;
             esac
           done
-      - name: Build and push the image for linux/amd64 and linux/arm64
+      - name: Build and push the image for linux/amd64 and linux/arm64, by digest only
         id: image
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -131,14 +131,39 @@ jobs:
             --label "org.opencontainers.image.version=$VERSION" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --metadata-file "$RUNNER_TEMP/image.json" \
-            --tag "$IMAGE:$VERSION" --push .
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" .
           digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/image.json")
           printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Publish the Compose file with the image's digest
-        id: compose
+      - name: Start the pushed image on linux/amd64 and linux/arm64
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          for arch in amd64 arm64; do
+            docker run --rm --pull always --platform "linux/$arch" --entrypoint git "$IMAGE@$IMAGE_DIGEST" --version
+            got=$(docker run --rm --pull always --platform "linux/$arch" --entrypoint uname "$IMAGE@$IMAGE_DIGEST" -m)
+            case "$arch:$got" in
+              amd64:x86_64 | arm64:aarch64) ;;
+              *)
+                echo "::error::The linux/$arch image runs as $got."
+                exit 1
+                ;;
+            esac
+            if out=$(docker run --rm --platform "linux/$arch" "$IMAGE@$IMAGE_DIGEST" no-such-role 2>&1); then
+              echo "::error::The linux/$arch image's software-factory accepted an unknown role."
+              exit 1
+            fi
+            case "$out" in
+              *"unknown role"*) ;;
+              *)
+                printf '%s\n' "$out"
+                echo "::error::The linux/$arch image's software-factory didn't start."
+                exit 1
+                ;;
+            esac
+          done
+      - name: Check the Compose file with the image's digest
+        env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           mkdir "$RUNNER_TEMP/release" "$RUNNER_TEMP/empty"
@@ -148,6 +173,26 @@ jobs:
             echo "::error::The Compose file to publish isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
+      - name: Sign the image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          identity="https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION"
+          cosign sign --yes "$IMAGE@$IMAGE_DIGEST"
+          cosign verify "$IMAGE@$IMAGE_DIGEST" --certificate-identity "$identity" --certificate-oidc-issuer "$ISSUER" >/dev/null
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Publish the Compose file, read it back by digest, and sign it
+        id: compose
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
           docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" publish -y "$COMPOSE_ARTIFACT:$VERSION"
           digest=$(docker buildx imagetools inspect "$COMPOSE_ARTIFACT:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
           printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
@@ -156,24 +201,21 @@ jobs:
             echo "::error::$COMPOSE_ARTIFACT@$digest, read back, isn't exactly egress, engine, helper and reviewer on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
+          identity="https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION"
+          cosign sign --yes "$COMPOSE_ARTIFACT@$digest"
+          cosign verify "$COMPOSE_ARTIFACT@$digest" --certificate-identity "$identity" --certificate-oidc-issuer "$ISSUER" >/dev/null
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Sign the image and the Compose file
+      - name: Tag the signed image with the version
         env:
           VERSION: ${{ steps.version.outputs.version }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-          COMPOSE_DIGEST: ${{ steps.compose.outputs.digest }}
         run: |
-          identity="https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION"
-          for ref in "$IMAGE@$IMAGE_DIGEST" "$COMPOSE_ARTIFACT@$COMPOSE_DIGEST"; do
-            cosign sign --yes "$ref"
-            cosign verify "$ref" --certificate-identity "$identity" --certificate-oidc-issuer "$ISSUER" >/dev/null
-          done
-      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: true
-          create-storage-record: false
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$IMAGE_DIGEST"
+          got=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+          if [ "$got" != "$IMAGE_DIGEST" ]; then
+            echo "::error::$IMAGE:$VERSION points at $got, not the signed $IMAGE_DIGEST."
+            exit 1
+          fi
 
   sbom:
     name: SBOMs
@@ -284,7 +326,7 @@ jobs:
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           Software Factory $VERSION.
 
-          Anyone who can edit these notes can change them, so take only the version and the digests from here, put them into the install command in the README at this tag (<https://github.com/bezmoradi/software-factory/blob/$TAG/README.md#run-it-with-docker>), and check that its identity and repositories read exactly as there.
+          Anyone who can edit these notes can change them, so take the version from the newest \`v*\` tag on the repository's tags page (<https://github.com/bezmoradi/software-factory/tags>), which only the owner can create, and only the digests from here. Put them into the install command in the README at that tag (<https://github.com/bezmoradi/software-factory/blob/$TAG/README.md#run-it-with-docker>), and check that its identity and repositories read exactly as there. A digest from another version then fails \`cosign verify\`, since the identity names the tag.
 
           - Image: \`$image\` (tag \`$VERSION\`), for linux/amd64 and linux/arm64.
           - Compose file: \`$compose\` (tag \`$VERSION\`).

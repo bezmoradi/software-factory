@@ -19,7 +19,7 @@ function fileItem(f: StartupFile): HTMLLIElement {
   if (f.marks?.length) li.append(markList(f.marks))
   const notes: string[] = []
   if (f.place === 'clone') notes.push("In the clone's own folder, where Claude Code reads a worktree's local settings, and its skills when the worktree has none. It comes from no commit.")
-  else if (f.place === 'above') notes.push('In a folder above the worktree, which every session shares and any session’s agent can write. Claude Code loads it at start. It comes from no commit.')
+  else if (f.place === 'above') notes.push('In a folder above the worktree, inside this session’s own folder, which only this session’s container writes. Claude Code loads it at start. It comes from no commit.')
   else if (f.uncommitted) notes.push('Differs from that commit: it was changed or added in the worktree.')
   if (f.link) {
     li.append(el('p', 'small warn', `A symbolic link to ${visible(f.target ?? '')}. Approving it approves what it points to now; a change there asks again.`))

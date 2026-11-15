@@ -65,17 +65,37 @@ function plain(parent: HTMLElement, text: string, links: boolean) {
   if (last < text.length) parent.append(text.slice(last))
 }
 
-function closingTicks(text: string, from: number, size: number): number {
-  for (let j = text.indexOf('`', from); j >= 0; j = text.indexOf('`', j)) {
+type TickRuns = Map<number, number[]>
+
+const PLAIN_ABOVE = 256 * 1024
+
+function tickRuns(text: string): TickRuns {
+  const runs: TickRuns = new Map()
+  for (let j = text.indexOf('`'); j >= 0; j = text.indexOf('`', j)) {
     let k = j
     while (text[k] === '`') k++
-    if (k - j === size) return j
+    let starts = runs.get(k - j)
+    if (!starts) runs.set(k - j, (starts = []))
+    starts.push(j)
     j = k
   }
-  return -1
+  return runs
 }
 
-function linkEnd(text: string, i: number): LinkMatch | null {
+function closingTicks(runs: TickRuns, from: number, size: number): number {
+  const starts = runs.get(size)
+  if (!starts) return -1
+  let lo = 0
+  let hi = starts.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (starts[mid]! < from) lo = mid + 1
+    else hi = mid
+  }
+  return lo < starts.length ? starts[lo]! : -1
+}
+
+function linkEnd(text: string, i: number, runs: TickRuns): LinkMatch | null {
   let depth = 0
   let j = i
   const limit = Math.min(text.length, i + 2000)
@@ -84,7 +104,7 @@ function linkEnd(text: string, i: number): LinkMatch | null {
     else if (text[j] === '`') {
       let k = j
       while (text[k] === '`') k++
-      const close = closingTicks(text, k, k - j)
+      const close = closingTicks(runs, k, k - j)
       j = close < 0 ? k - 1 : close + k - j - 1
     } else if (text[j] === '[') depth++
     else if (text[j] === ']' && --depth === 0) break
@@ -96,7 +116,7 @@ function linkEnd(text: string, i: number): LinkMatch | null {
   return { label: text.slice(i + 1, j), href: (m[1] ?? m[2])!.replace(/\\(.)/g, '$1'), title: m[3] ? m[3].slice(1, -1) : '', end: j + 2 + m[0].length }
 }
 
-function emphasis(text: string, i: number, c: string, run: number, dead: Map<string, number>): { n: number; inner: string; end: number } | null {
+function emphasis(text: string, i: number, c: string, run: number, dead: Map<string, number>, runs: TickRuns): { n: number; inner: string; end: number } | null {
   const n = run
   if (n > (c === '~' ? 2 : 3) || dead.get(c + n)! <= i) return null
   const after = text[i + run]
@@ -110,7 +130,7 @@ function emphasis(text: string, i: number, c: string, run: number, dead: Map<str
     if (text[j] === '`') {
       let k = j
       while (text[k] === '`') k++
-      const close = closingTicks(text, k, k - j)
+      const close = closingTicks(runs, k, k - j)
       j = close < 0 ? k : close + k - j
       continue
     }
@@ -147,6 +167,7 @@ function target(label: string, link: LinkMatch, href: string): HTMLElement | nul
 
 function inline(parent: HTMLElement, text: string, links: boolean, exact: boolean) {
   const dead = new Map<string, number>()
+  const runs = tickRuns(text)
   const noTicks = new Set<number>()
   let buf = ''
   const flush = () => {
@@ -166,7 +187,7 @@ function inline(parent: HTMLElement, text: string, links: boolean, exact: boolea
     } else if (c === '`') {
       let k = i
       while (text[k] === '`') k++
-      const close = noTicks.has(k - i) ? -1 : closingTicks(text, k, k - i)
+      const close = noTicks.has(k - i) ? -1 : closingTicks(runs, k, k - i)
       if (close < 0) {
         noTicks.add(k - i)
         buf += text.slice(i, k)
@@ -188,10 +209,10 @@ function inline(parent: HTMLElement, text: string, links: boolean, exact: boolea
         parent.append(a)
       } else parent.append(url)
       i += url.length + 2
-    } else if (c === '!' && text[i + 1] === '[' && (link = linkEnd(text, i + 1))) {
+    } else if (c === '!' && text[i + 1] === '[' && (link = linkEnd(text, i + 1, runs))) {
       buf += text.slice(i, link.end)
       i = link.end
-    } else if (c === '[' && (link = linkEnd(text, i))) {
+    } else if (c === '[' && (link = linkEnd(text, i, runs))) {
       const href = links && safeUrl(link.href)
       flush()
       if (href) {
@@ -214,7 +235,7 @@ function inline(parent: HTMLElement, text: string, links: boolean, exact: boolea
     } else if (c === '*' || c === '_' || c === '~') {
       let k = i
       while (text[k] === c) k++
-      const hit = emphasis(text, i, c, k - i, dead)
+      const hit = emphasis(text, i, c, k - i, dead, runs)
       if (!hit) {
         buf += text.slice(i, k)
         i = k
@@ -457,10 +478,15 @@ export function headings(text: string, level: number): string[] {
 
 function paint(node: HTMLElement, text: string, exact: boolean) {
   const next = el('div')
-  try {
-    render(next, exact ? linesOf(text).map(named) : linesOf(unspoofed(text)), exact)
-  } catch {
-    next.replaceChildren(el('p', '', exact ? named(text) : unspoofed(text)))
+  const flat = () => el('p', '', exact ? named(text) : unspoofed(text))
+  if (text.length > PLAIN_ABOVE) {
+    next.append(el('p', 'small muted', `Over ${PLAIN_ABOVE / 1024} KiB, so shown as plain text, not formatted.`), flat())
+  } else {
+    try {
+      render(next, exact ? linesOf(text).map(named) : linesOf(unspoofed(text)), exact)
+    } catch {
+      next.replaceChildren(flat())
+    }
   }
   const old = [...node.childNodes]
   const fresh = [...next.childNodes]

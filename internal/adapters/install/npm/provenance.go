@@ -78,10 +78,14 @@ func Judge(a Agent, p Package, data []byte, published bool) ProvenanceResult {
 	if !a.Source.Set() {
 		_, err := VerifyAttestations(data, p.Name, p.Version, p.Integrity, Source{})
 		r.State = ProvenanceUnpinned
-		r.Note = "The registry has provenance for this version, but the pin names no source, so it wasn't checked against one."
-		if errors.Is(err, ErrNoBuildProvenance) {
+		switch {
+		case errors.Is(err, ErrNoBuildProvenance):
 			r.State = ProvenanceNone
 			r.Note = "The registry has a publish attestation for this version but no build provenance."
+		case err == nil || errors.Is(err, errNoSourcePinned):
+			r.Note = "The registry has provenance for this version, but the pin names no source, so it wasn't checked against one."
+		default:
+			r.Note = "The registry has provenance for this version: present but doesn't verify. " + sentence(err.Error()) + " The pin names no source, so this doesn't stop the install."
 		}
 		return r
 	}

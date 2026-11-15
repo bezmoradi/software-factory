@@ -192,6 +192,7 @@ func (p *Plugins) install(ctx context.Context, pl Plugin, report func(string)) e
 		return err
 	}
 	defer unlock()
+	removeLeftovers(base)
 	if p.Installed(pl.ID) {
 		report(fmt.Sprintf("%s %s is already installed.", pl.Name, pl.Version))
 		return nil
