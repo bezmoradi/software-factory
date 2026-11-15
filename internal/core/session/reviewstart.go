@@ -107,9 +107,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	limit := roundLimit(t.Rounds)
 	var plans []plannedRole
 	var capped []string
+	var missing []string
 	var finished []RoleReview
 	var checking []string
 	for _, q := range required {
+		if q.Missing {
+			missing = append(missing, q.Agent)
+			continue
+		}
 		rd := RoundOf(entries, t.Branch, q.Agent, q.Advisory)
 		var open []review.Key
 		for _, key := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
@@ -158,6 +163,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return explained(conflict("nothing to retry"), "Every review this commit needs has an outcome, so the engine doesn't run one again.")
 	}
+	notInstalled := ""
+	if len(missing) > 0 {
+		notInstalled = "No plugin installed in the reviewer image provides " + strings.Join(missing, " or ") + ", so the engine doesn't start " + plural(len(missing), "that review", "those reviews") + " and the push stays held."
+	}
+	if len(plans) == 0 && len(capped) == 0 && notInstalled != "" {
+		release()
+		return explained(conflict("not installed"), notInstalled)
+	}
 	if len(plans) == 0 && len(capped) == 0 {
 		release()
 		return explained(conflict("reviewed"), reviewedMessage(head, checking))
@@ -185,6 +198,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	if len(capped) > 0 {
 		held = strings.Join(capped, " and ") + " blocked in " + strconv.Itoa(limit) + " " + plural(limit, "round", "rounds") + " on this branch, the limit this project set, so the engine didn't start " + plural(len(capped), "it", "them") + " again: you decide on the push."
 		view.Note += " " + held
+	}
+	if notInstalled != "" {
+		held = strings.TrimSpace(held + " " + notInstalled)
+		view.Note += " " + notInstalled
 	}
 	r.show(t.SID, view)
 	r.cfg.Logger.Info("review", "event", "started", "roles", len(plans), "capped", len(capped))

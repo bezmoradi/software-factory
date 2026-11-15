@@ -224,8 +224,24 @@ func splitPath(p string) ([]string, error) {
 	return parts, nil
 }
 
+const WithinWork = 16 << 20
+
 func (Reader) ReadFile(path, commit, file string) (push.File, error) {
+	return readFile(path, commit, file, 0)
+}
+
+func (Reader) ReadFileWithin(path, commit, file string, limit int64) (push.File, error) {
+	if limit <= 0 || limit > WithinWork/2 {
+		return push.File{}, fmt.Errorf("%w: the limit for %s is out of range", push.ErrTooLarge, short(file))
+	}
+	return readFile(path, commit, file, limit)
+}
+
+func readFile(path, commit, file string, limit int64) (push.File, error) {
 	return with(path, func(r *repo) (push.File, error) {
+		if limit > 0 {
+			r.store.budget = WithinWork
+		}
 		parts, err := splitPath(file)
 		if err != nil {
 			return push.File{}, err
@@ -264,7 +280,9 @@ func (Reader) ReadFile(path, commit, file string) (push.File, error) {
 			if found.mode == push.ModeSubmodule {
 				return push.File{Mode: found.mode, SHA: found.sha}, nil
 			}
+			r.store.top = limit
 			data, err := r.blob(found.sha)
+			r.store.top = 0
 			if err != nil {
 				return push.File{}, err
 			}

@@ -21,6 +21,7 @@ type Setup struct {
 	FileRules   []FileRule
 	Rounds      int
 	Protect     []string
+	Catalog     Catalog
 }
 
 func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string) {
@@ -71,6 +72,7 @@ type Requirement struct {
 	Why      string
 	Runs     int
 	Advisory bool
+	Missing  bool
 }
 
 func (q Requirement) RunCount() int {
@@ -197,13 +199,12 @@ func Required(s Setup, t WorkType, files []string) []Requirement {
 	if t.Profile() == Exploring {
 		return out
 	}
-	for _, rule := range fileReviewers {
-		for _, f := range files {
-			if rule.re.MatchString(f) {
-				add(Requirement{Agent: rule.agent, Why: "This branch changes " + clip(f, 120)})
-				break
-			}
-		}
+	byCatalog := ""
+	if s.Catalog.State == CatalogUsed {
+		byCatalog = ", which knackpack's catalog sends to this reviewer"
+	}
+	for _, m := range s.Catalog.matches(files) {
+		add(Requirement{Agent: m.agent, Why: "This branch changes " + clip(m.file, 120) + byCatalog})
 	}
 	for _, rule := range s.FileRules {
 		re, ok := globRegexp(rule.Pattern, false)

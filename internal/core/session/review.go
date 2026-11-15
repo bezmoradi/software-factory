@@ -123,6 +123,7 @@ type RoleReview struct {
 	Runs     int
 	Advisory bool
 	Cited    CitedIDs
+	Findings []FindingRef
 
 	PluginCommit string
 	ClaudeCode   string
@@ -683,6 +684,14 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.CostUSD = e.CostUSD
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
 	v.Cited = e.Cited.clone()
+	v.Findings = nil
+	if e.Record.State == review.Pass || e.Record.State == review.Block || e.Record.State == review.Unknown {
+		text := e.Message
+		if e.Reply != "" {
+			text = e.Reply
+		}
+		v.Findings = FindingRefs(text)
+	}
 	v.started = e.StartedAt
 	v.approved, v.team = e.Approved, e.Team
 	return v

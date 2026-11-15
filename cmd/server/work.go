@@ -11,14 +11,15 @@ import (
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
+	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, targets func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
+func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
 	if repos == nil {
 		return nil, nil
 	}
 	wc := session.WorkConfig{
-		Targets: targets, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Repos: repos,
+		Targets: targets, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
 		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), DocsInRepo: docs,
 		Changes: files.Reader{}, Level: reg.PushLevel,
@@ -29,6 +30,7 @@ func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *sess
 	}
 	if pins != nil {
 		wc.Installed = func() []string { return pins.Agents("knackpack") }
+		wc.Catalog = catalogs.Current
 	}
 	if agentFiles != nil {
 		wc.RoleAgents = agentFiles
@@ -38,6 +40,17 @@ func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *sess
 		reg.OnDocsReported(w.RecheckApproval)
 	}
 	return w, err
+}
+
+func knackpackCatalog(pins *npm.Plugins, logger shared.Logger) *session.Catalogs {
+	if pins == nil {
+		return nil
+	}
+	c := session.NewCatalogs(func() session.CatalogFile {
+		return pins.Catalog("knackpack", workflow.CatalogFile, workflow.MaxCatalogBytes)
+	}, logger)
+	c.Load()
+	return c
 }
 
 func knackpackDir(pins *npm.Plugins) func() (string, error) {

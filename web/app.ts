@@ -2,14 +2,14 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { button, el, emit, fileLink, shown, visible, visibleCommand } from './lib/dom.ts'
+import { button, el, emit, fileLink, repoPath, shown, visible, visibleCommand } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
 import { placeMenu, sessionState, warnings } from './components/overview.ts'
-import type { AgentInfo, Catalog, CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
+import type { AgentInfo, Catalog, CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
@@ -882,12 +882,35 @@ function reviewsOf(s: Session): ReviewsView | null {
   if (!i.verified || !i.project) return null
   const review = i.review && Array.isArray(i.review.roles) && i.review.commit ? i.review : null
   const gate = s.gate
-  const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.map(r => ({ name: r.name, agent: r.type, why: r.why ?? '' })) : []
+  const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.map(r => ({ name: r.name, agent: r.type, why: r.why ?? '', summary: typeof r.summary === 'string' ? r.summary : '' })) : []
   const unpicked = gate?.chosen === false
   const disabled = !state.connected ? 'Reviews start once the page is connected again.'
     : unpicked ? 'Pick a work type first: it decides which reviews run.'
     : startedOf(s) === false ? 'Nothing to review or push yet: this session has no commits.' : ''
-  return { sid: s.sid, review, disabled, asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid) }
+  return { sid: s.sid, review, disabled, asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
+    linked: findingLinks(s.sid, review), catalog: gate?.catalog ? { state: gate.catalog, why: typeof gate.catalogWhy === 'string' ? gate.catalogWhy : '' } : undefined }
+}
+
+const findingChecks = new Map<string, { key: string; found: string[]; done: boolean }>()
+const COMMIT = /^[0-9a-f]{40}$/
+
+function findingLinks(sid: string, review: SessionReview | null): { commit: string; paths: string[] } | undefined {
+  if (!review || review.running || !COMMIT.test(review.commit)) return undefined
+  const paths = [...new Set(review.roles.flatMap(r => (Array.isArray(r.findings) ? r.findings : []).map(f => f?.path).filter((p): p is string => typeof p === 'string' && repoPath(p))))].slice(0, 20)
+  if (!paths.length) return undefined
+  const key = `${review.commit}\n${paths.join('\n')}`
+  const had = findingChecks.get(sid)
+  if (had?.key === key) return had.done ? { commit: review.commit, paths: had.found } : undefined
+  const now = { key, found: [] as string[], done: false }
+  findingChecks.set(sid, now)
+  void api('/api/file-check', { sid, commit: review.commit, paths }).catch(() => null).then(reply).then(({ ok, body }) => {
+    if (findingChecks.get(sid) !== now) return
+    now.done = true
+    if (ok && Array.isArray(body.found)) now.found = body.found.filter((p): p is string => typeof p === 'string' && paths.includes(p))
+    else setTimeout(() => findingChecks.get(sid) === now && findingChecks.delete(sid), RECHECK_MS)
+    paint()
+  })
+  return undefined
 }
 
 function pushPanelOf(s: Session): PushPanelView | null {
@@ -1330,26 +1353,34 @@ const FILE_ERRORS: Record<string, string> = {
   binary: "This isn't a text file.",
   missing: "This file isn't there anymore.",
   link: "This path goes through a symbolic link, which the page doesn't follow.",
+  commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
 }
 
 function fileLabel(key: string): string {
   const path = files.get(key)?.path ?? key
+  const commit = files.get(key)?.commit
   const name = baseName(path)
   const twin = openTabs.some(k => k !== key && k.startsWith('f:') && baseName(files.get(k)?.path ?? k) === name)
   const parts = path.split('/').filter(Boolean)
-  return twin && parts.length > 1 ? `${name} · ${parts[parts.length - 2]}` : name
+  const label = twin && parts.length > 1 ? `${name} · ${parts[parts.length - 2]}` : name
+  return commit ? `${label} @ ${shortSha(commit)}` : label
+}
+
+function fileKey(key: string): { sid: string; path: string; commit: string } {
+  const at = key.indexOf(':', 2)
+  const rest = key.slice(at + 1)
+  const cut = rest.indexOf('\0')
+  return { sid: key.slice(2, at), path: cut < 0 ? rest : rest.slice(0, cut), commit: cut < 0 ? '' : rest.slice(cut + 1) }
 }
 
 const fileLoads = new Set<string>()
 let focusFile = ''
 
 function loadFile(key: string) {
-  const at = key.indexOf(':', 2)
-  const sid = key.slice(2, at)
-  const path = key.slice(at + 1)
+  const { sid, path, commit } = fileKey(key)
   if (fileLoads.has(key) || !sessions.has(sid)) return
   fileLoads.add(key)
-  void api('/api/file', { sid, path }).catch(() => null).then(async res => {
+  void api('/api/file', commit ? { sid, path, commit } : { sid, path }).catch(() => null).then(async res => {
     const body = res ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null
     fileLoads.delete(key)
     if (!openTabs.includes(key)) return
@@ -1357,7 +1388,8 @@ function loadFile(key: string) {
     const shown = typeof body?.path === 'string' ? body.path : path
     const old = files.get(key)
     if (text !== undefined && old?.text === text && old.path === shown) return
-    files.set(key, text !== undefined ? { path: shown, text } : { path, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
+    const at = { ...(commit ? { commit } : {}), ...(old?.line ? { line: old.line } : {}) }
+    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
     const file = byId<HTMLElementTagNameMap['sf-file']>('file')
     const refocus = current.key === key && (focusFile === key || file.contains(document.activeElement) || document.activeElement === document.body)
     paint()
@@ -1365,10 +1397,18 @@ function loadFile(key: string) {
   })
 }
 
-function openFile(sid: string, path: string) {
-  const key = `f:${sid}:${path}`
-  if (!files.has(key)) files.set(key, { path })
+function openFile(sid: string, path: string, commit = '', line = 0) {
+  const key = commit ? `f:${sid}:${path}\0${commit}` : `f:${sid}:${path}`
+  const old = files.get(key)
+  if (!old) files.set(key, { path, ...(commit ? { commit } : {}), ...(line ? { line } : {}) })
+  else if (commit) {
+    const next: FileView = { ...old }
+    if (line) next.line = line
+    else delete next.line
+    files.set(key, next)
+  }
   focusFile = key
+  if (key === current.key) paint()
   go(key)
   byId<HTMLElementTagNameMap['sf-file']>('file').focusContent()
 }
@@ -2186,7 +2226,7 @@ document.addEventListener('auxclick', followView)
 byId('tabs').addEventListener('sf-open', e => go(e.detail.id))
 document.body.addEventListener('sf-file', e => {
   const s = current()
-  if (s) openFile(s.sid, e.detail.path)
+  if (s) openFile(s.sid, e.detail.path, typeof e.detail.commit === 'string' && COMMIT.test(e.detail.commit) ? e.detail.commit : '', typeof e.detail.line === 'number' && Number.isInteger(e.detail.line) && e.detail.line > 0 ? e.detail.line : 0)
 })
 byId('file').addEventListener('sf-reload', () => {
   if (!current.key.startsWith('f:')) return

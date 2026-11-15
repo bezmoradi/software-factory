@@ -58,7 +58,7 @@ var (
 	machineLine       = regexp.MustCompile(`(?i)^knackpack-verdict/1:[` + space + `]*(pass|block)$`)
 	verdictLine       = regexp.MustCompile(`(?i)^verdict:[` + space + `]*(pass|block)[` + space + `]*\.?$`)
 	verdictPrefix     = regexp.MustCompile(`(?i)^verdict:[` + space + `]*`)
-	findingsShaped    = regexp.MustCompile(`(?i)^knackpack-findings/`)
+	findingsShaped    = regexp.MustCompile(`(?i)^knackpack-findings/|^knackpack-finding/1 \{.*\}$`)
 	reportConclusion  = regexp.MustCompile(`(?i)^(recommendation|decision):`)
 	markup            = regexp.MustCompile("[*_`#>]")
 )
@@ -231,4 +231,18 @@ func ReplyVerdict(r *Rule, answer string) Verdict {
 		}
 	}
 	return Verdict{State: Unknown}
+}
+
+func ClosingPass(reply string) bool {
+	last := ""
+	for l := range strings.SplitSeq(reply, "\n") {
+		if p := plainLine(l); p != "" {
+			last = p
+		}
+	}
+	m := machineLine.FindStringSubmatch(last)
+	if m == nil {
+		m = verdictLine.FindStringSubmatch(last)
+	}
+	return m != nil && stateOf(m[1]) == Pass
 }

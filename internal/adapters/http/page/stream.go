@@ -114,7 +114,8 @@ type roleJSON struct {
 	Runs        int     `json:"runs,omitempty"`
 	Advisory    bool    `json:"advisory,omitempty"`
 
-	Cited *citedJSON `json:"cited,omitempty"`
+	Cited    *citedJSON       `json:"cited,omitempty"`
+	Findings []findingRefJSON `json:"findings,omitempty"`
 
 	PluginCommit string   `json:"pluginCommit,omitempty"`
 	ClaudeCode   string   `json:"claudeCode,omitempty"`
@@ -122,6 +123,25 @@ type roleJSON struct {
 
 	Progress *progressJSON `json:"progress,omitempty"`
 	Given    *givenJSON    `json:"given,omitempty"`
+}
+
+type findingRefJSON struct {
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Where    string `json:"where,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+}
+
+func findingRefsOf(list []session.FindingRef) []findingRefJSON {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]findingRefJSON, 0, len(list))
+	for _, f := range list {
+		out = append(out, findingRefJSON{Severity: f.Severity, Title: f.Title, Where: f.Where, Path: f.Path, Line: f.Line})
+	}
+	return out
 }
 
 type reviewJSON struct {
@@ -155,6 +175,7 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 		out.Roles[len(out.Roles)-1].Run, out.Roles[len(out.Roles)-1].Runs, out.Roles[len(out.Roles)-1].Advisory = r.Run, r.Runs, r.Advisory
 		out.Roles[len(out.Roles)-1].Cited = citedOf(r.Cited)
 		out.Roles[len(out.Roles)-1].HasFull = r.HasFull
+		out.Roles[len(out.Roles)-1].Findings = findingRefsOf(r.Findings)
 	}
 	return out
 }

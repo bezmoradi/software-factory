@@ -93,6 +93,7 @@ type WorkConfig struct {
 	Heads      Heads
 	History    History
 	Files      WorkFiles
+	Bounded    BoundedFiles
 	Repos      WorkRepos
 	Reported   func(sid string) (Workflow, bool)
 	Reviews    ReviewEntries
@@ -108,6 +109,7 @@ type WorkConfig struct {
 	RoleAgents RoleAgents
 	Changes    ChangeReader
 	Level      func(sid string) (level.Result, bool)
+	Catalog    func() workflow.Catalog
 
 	ApprovalMoved func(sid string, at func(commit string) (ApprovalGiven, bool))
 }
@@ -168,6 +170,7 @@ type WorkReviewer struct {
 	Override string
 	Since    string
 	SetAside string
+	Summary  string
 }
 
 type GateView struct {
@@ -201,6 +204,8 @@ type GateView struct {
 	FlagsRead     bool
 	LFS           []string
 	Handoff       bool
+	Catalog       workflow.CatalogState
+	CatalogWhy    string
 }
 
 type TeamView struct {
@@ -256,6 +261,7 @@ type WorkPage interface {
 	AskRewrite(sid, commit string, field CommitField) error
 	EditHold(sid, top string, paths []string) string
 	Guarded(sid, top string, paths []string) string
+	ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error)
 }
 
 var _ WorkPage = (*Work)(nil)
@@ -269,6 +275,9 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 	}
 	if cfg.Installed == nil {
 		cfg.Installed = func() []string { return nil }
+	}
+	if cfg.Catalog == nil {
+		cfg.Catalog = workflow.NoCatalog
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -454,6 +463,7 @@ func (w *Work) setupFor(name string, claude bool) setupOf {
 		team = &t
 	}
 	out.setup, out.problems = workflow.SetupOf(team, personal, adapter)
+	out.setup.Catalog = w.cfg.Catalog()
 	if w.cfg.RoleAgents != nil {
 		maps.Copy(out.setup.Roles, w.cfg.RoleAgents.RolesFor(name))
 	}
@@ -854,6 +864,11 @@ func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
 	required := w.deepened(t, workflow.Required(setup.setup, eff, files), base, head, err == nil)
+	if installed := w.cfg.Installed(); len(installed) > 0 {
+		for i, q := range required {
+			required[i].Missing = q.Role == "" && !slices.Contains(installed, q.Agent)
+		}
+	}
 	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
@@ -1064,7 +1079,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	var out []WorkReviewer
 	var missing []string
 	for _, q := range g.required {
-		r := WorkReviewer{Agent: q.Agent, Role: q.Role, Name: ReviewerName(q), Why: q.Why, State: "none", Limit: limit}
+		r := WorkReviewer{Agent: q.Agent, Role: q.Role, Name: ReviewerName(q), Why: q.Why, State: "none", Limit: limit, Summary: g.setup.setup.Catalog.Summary(q.Agent)}
 		rd := RoundOf(entries, g.t.Branch, q.Agent, false)
 		r.Round, r.Capped = rd.Count, rd.Capped(limit)
 		k := review.Key{Commit: g.head, Branch: g.t.Branch, Agent: q.Agent}
@@ -1146,6 +1161,7 @@ func (w *Work) View(sid string) (GateView, error) {
 	v.Define = (feature && g.reqOk) || (!feature && g.docs.req != nil)
 	reviewers, missing := w.reviewerStates(g)
 	v.Reviewers = reviewers
+	v.Catalog, v.CatalogWhy = g.setup.setup.Catalog.State, g.setup.setup.Catalog.Reason
 	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
 	for _, p := range g.scan.lfs {
 		v.LFS = append(v.LFS, maskLines(p, true))

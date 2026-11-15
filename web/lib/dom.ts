@@ -68,10 +68,17 @@ export function emit<K extends keyof SfEvents>(target: EventTarget, type: K, ...
   target.dispatchEvent(detail.length ? new CustomEvent(type, { bubbles: true, detail: detail[0] }) : new Event(type, { bubbles: true }))
 }
 
-export function fileLink(path: string, key = ''): HTMLButtonElement {
+const REPO_PATH_UNSAFE = /[\\:\u0000-\u001f\u007f]/
+
+export function repoPath(path: string): boolean {
+  return path.length > 0 && path.length <= 300 && !path.startsWith('/') && !path.startsWith('~') && !REPO_PATH_UNSAFE.test(path) && path === visible(path) && path.split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+export function fileLink(path: string, key = '', at?: { commit: string; line?: number }): HTMLButtonElement {
   const shown = visible(path)
-  const link = button(shown, 'link file-link', () => emit(link, 'sf-file', { path }), 'button', key)
-  link.title = `Open ${shown} read-only`
+  const where = at ? `${shown}${at.line ? `:${at.line}` : ''}` : shown
+  const link = button(where, 'link file-link', () => emit(link, 'sf-file', at ? { path, commit: at.commit, ...(at.line ? { line: at.line } : {}) } : { path }), 'button', key)
+  link.title = at ? `Open ${shown}${at.line ? ` at line ${at.line}` : ''}, as commit ${at.commit.slice(0, 7)} has it, read-only` : `Open ${shown} read-only`
   return link
 }
 

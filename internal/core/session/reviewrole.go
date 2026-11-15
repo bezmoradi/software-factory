@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
 )
@@ -49,7 +50,7 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	}
 	text := strings.TrimSpace(out.text)
 	e.Message, e.Clipped = keptReply(text, maxReviewText)
-	e.Reply, e.ReplyClipped = keptReply(text, MaxFullReply)
+	e.Reply, e.ReplyClipped = keptWhole(text, MaxFullReply)
 	if out.failed || res.Code != 0 {
 		why := "Claude Code reported an error"
 		if out.subtype != "" && out.subtype != "success" {
@@ -137,20 +138,66 @@ func keptReply(text string, limit int) (string, bool) {
 	}
 	lines := strings.Split(text, "\n")
 	var ending []string
-	for i := len(lines) - 1; i >= 0 && len(ending) < 3; i-- {
-		l := strings.TrimSpace(lines[i])
+	closing, size := 0, 0
+	for _, line := range slices.Backward(lines) {
+		l := strings.TrimSpace(line)
 		if l == "" {
 			continue
 		}
 		bare := strings.ToLower(strings.TrimLeft(l, "*_`#> "))
-		if !strings.HasPrefix(bare, "knackpack-findings/") && !strings.HasPrefix(bare, "knackpack-verdict/") {
+		if strings.HasPrefix(l, FindingLinePrefix) && len(l) <= MaxFindingLine && len(ending)-closing < MaxFindingLines && size+len(l)+1 <= limit/2 {
+			ending = append([]string{l}, ending...)
+			size += len(l) + 1
+			continue
+		}
+		if closing >= 3 || len(ending) > closing || (!strings.HasPrefix(bare, "knackpack-findings/") && !strings.HasPrefix(bare, "knackpack-verdict/")) {
 			break
 		}
-		ending = append([]string{clip(l, 200)}, ending...)
+		kept := clip(l, 200)
+		ending = append([]string{kept}, ending...)
+		closing++
+		size += len(kept) + 1
 	}
 	if len(ending) == 0 {
 		return clip(text, limit), true
 	}
 	tail := "\n" + clippedMiddle + "\n" + strings.Join(ending, "\n")
 	return strings.TrimSpace(clip(text, limit-len(tail))) + tail, true
+}
+
+const WholeTail = 16 << 10
+
+func keptWhole(text string, limit int) (string, bool) {
+	if len(text) <= limit {
+		return text, false
+	}
+	end, _ := keptReply(text, limit)
+	want := WholeTail
+	if i := strings.LastIndex(end, clippedMiddle); i >= 0 {
+		want = max(want, len(end)-i-len(clippedMiddle))
+	}
+	want = min(want, limit/2)
+	from := len(text) - want
+	if i := strings.IndexByte(text[from:], '\n'); i >= 0 && text[from-1] != '\n' {
+		from += i + 1
+	}
+	for from < len(text) && !utf8.RuneStart(text[from]) {
+		from++
+	}
+	tail := text[from:]
+	marker := "\n" + clippedMiddle + "\n"
+	return strings.TrimSpace(byteHead(text, limit-len(tail)-len(marker))) + marker + tail, true
+}
+
+func byteHead(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

@@ -190,6 +190,7 @@ type engineParts struct {
 	agentFiles *session.ReviewerAgents
 	identity   *session.Identities
 	allowlist  *session.Allowlist
+	catalogs   *session.Catalogs
 }
 
 func reachable(b session.Boxes) func(context.Context) error {
@@ -338,7 +339,8 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	docs := docsInRepo(cfg, logger)
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
-	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, agentFiles, logger)
+	catalogs := knackpackCatalog(pins, logger)
+	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -406,7 +408,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -639,6 +641,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 				if err := parts.plugins.InstallMissing(ctx, nil); err != nil {
 					logger.Warn("plugin install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
 				}
+				parts.catalogs.Load()
 			}
 		}()
 	}

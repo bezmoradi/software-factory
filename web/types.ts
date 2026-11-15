@@ -426,6 +426,15 @@ export interface ReviewRole {
   runs?: number
   advisory?: boolean
   cited?: CitedIDs
+  findings?: FindingRef[]
+}
+
+export interface FindingRef {
+  severity: string
+  title: string
+  where?: string
+  path?: string
+  line?: number
 }
 
 export interface CitedIDs {
@@ -501,8 +510,10 @@ export interface ReviewsView {
   pushing: boolean
   pushed?: boolean
   pushSaid?: { text: string; tone: string } | null
-  planned?: { name: string; agent: string; why: string }[]
+  planned?: { name: string; agent: string; why: string; summary: string }[]
   gate?: Reviewer[]
+  linked?: { commit: string; paths: string[] }
+  catalog?: { state: string; why: string }
   head?: string
   overriding?: string
   testList?: TestList | null
@@ -789,6 +800,7 @@ export interface Reviewer {
   since?: string
   incremental?: boolean
   setAside?: string
+  summary?: string
 }
 
 export interface GateEvent {
@@ -817,6 +829,8 @@ export interface GateEvent {
   flagsRead?: boolean
   lfs?: string[]
   handoff?: boolean
+  catalog?: string
+  catalogWhy?: string
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }
@@ -1088,6 +1102,8 @@ export interface FileView {
   path: string
   text?: string
   note?: string
+  commit?: string
+  line?: number
 }
 
 export interface Prefs {
@@ -1113,7 +1129,7 @@ declare global {
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
     'sf-handover': CustomEvent<{ sid: string; agent: string }>
     'sf-open-session': CustomEvent<{ sid: string }>
-    'sf-file': CustomEvent<{ path: string }>
+    'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event
     'sf-settled': Event
     'sf-review': CustomEvent<{ all: boolean }>

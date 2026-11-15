@@ -1,4 +1,5 @@
 import { button, el, emit, visible } from '../lib/dom.ts'
+import { shortSha } from '../lib/format.ts'
 import type { FileView } from '../types.ts'
 import { icon } from './icon.ts'
 import './markdown.ts'
@@ -56,6 +57,8 @@ class SfFile extends HTMLElement {
     })
     const bar = el('div', 'file-bar')
     bar.append(crumbs)
+    const at = v.line && v.line > 0 ? v.line : 0
+    if (v.commit) bar.append(el('span', 'file-at', `as commit ${shortSha(v.commit)} has it${at ? `, line ${at}` : ''}`))
     if (v.note !== undefined || v.text === undefined) {
       const note = el('p', 'file-note')
       note.tabIndex = -1
@@ -70,12 +73,15 @@ class SfFile extends HTMLElement {
     const all = v.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
     const shown = all.slice(0, MAX_LINES)
     const markdown = MARKDOWN.test(v.path)
-    if (markdown) bar.append(this.#swap())
-    const lines = markdown && rendered ? null : this.#source(v.path, shown)
+    if (markdown && !at) bar.append(this.#swap())
+    const lines = markdown && rendered && !at ? null : this.#source(v.path, shown, at)
     this.#lines = lines
     this.replaceChildren(bar, lines ?? this.#doc(v.path, shown))
     if (all.length > shown.length) this.append(el('p', 'file-note', `Showing the first ${MAX_LINES.toLocaleString()} of ${all.length.toLocaleString()} lines.`))
+    if (at && at > shown.length) this.append(el('p', 'file-note', `The finding names line ${at.toLocaleString()}, but the file shown has ${shown.length.toLocaleString()} lines.`))
     this.#setWrap(wrapLines)
+    const target = lines?.querySelector<HTMLElement>('.lc.at')
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ block: 'center', inline: 'nearest' }))
   }
 
   #swap(): HTMLElement {
@@ -101,7 +107,7 @@ class SfFile extends HTMLElement {
     return doc
   }
 
-  #source(path: string, shown: string[]): HTMLElement {
+  #source(path: string, shown: string[], at = 0): HTMLElement {
     const lines = el('div', 'file-lines')
     lines.setAttribute('role', 'document')
     lines.setAttribute('aria-label', `${path}, read-only. Alt+Z turns word wrap off and on.`)
@@ -109,9 +115,12 @@ class SfFile extends HTMLElement {
     lines.style.setProperty('--digits', String(String(shown.length).length))
     const frag = document.createDocumentFragment()
     shown.forEach((line, i) => {
-      const n = el('span', 'ln', String(i + 1))
+      const here = i + 1 === at
+      const n = el('span', here ? 'ln at' : 'ln', String(i + 1))
       n.setAttribute('aria-hidden', 'true')
-      frag.append(n, el('span', 'lc', visible(line) || ' '))
+      const c = el('span', here ? 'lc at' : 'lc', visible(line) || ' ')
+      if (here) c.setAttribute('aria-current', 'location')
+      frag.append(n, c)
     })
     lines.append(frag)
     return lines

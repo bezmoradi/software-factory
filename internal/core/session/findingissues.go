@@ -20,7 +20,7 @@ const (
 
 var (
 	findingHeading  = regexp.MustCompile(`(?i)^\s{0,3}#{2,4}\s*\[(medium|low)\]\s*(.*)$`)
-	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings)/`)
+	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings?)/`)
 	findingLocation = regexp.MustCompile(`(?i)^[\s*_>-]*(location|where|file|files|path)[\s*_]*:[\s*_]*(.+?)[\s*_]*$`)
 	findingPath     = regexp.MustCompile("`([^`\\s]+:\\d+(?:-\\d+)?)`")
 )
@@ -88,7 +88,7 @@ func NonBlockingFindings(message string) []FindingItem {
 		}
 	}
 	flush()
-	return out
+	return withFindingLines(out, AgreedFindingLines(message), "Medium", "Low")
 }
 
 func (fl *Follows) findingsAt(sid string) (PushTarget, string, []FindingItem, error) {

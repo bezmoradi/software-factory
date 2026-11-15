@@ -174,6 +174,7 @@ func review(args []string, st *stream) (reply, error) {
 			"3. Check the push reached the git host.\n   Expected: the branch's commit on the git host is the session's latest commit.\n   Input: none", turns: 3}, nil
 	}
 	r := verdict(agent, prompt, st)
+	r.text = findingLines(r.text)
 	r.text = strings.Replace(r.text, "\n", given(args)+"\n", 1)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)

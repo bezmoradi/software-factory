@@ -2,6 +2,7 @@ package review
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -49,4 +50,51 @@ func counted(reply string, groups ...int) bool {
 		}
 	}
 	return false
+}
+
+type Counts struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
+	Blocking int
+}
+
+func (c Counts) Of(severity string) int {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return c.Critical
+	case "high":
+		return c.High
+	case "medium":
+		return c.Medium
+	case "low":
+		return c.Low
+	}
+	return 0
+}
+
+func CountsLine(reply string) (Counts, bool) {
+	var out Counts
+	found := false
+	for l := range strings.SplitSeq(reply, "\n") {
+		m := findingsCounts.FindStringSubmatch(plainLine(l))
+		if m == nil {
+			continue
+		}
+		var n [5]int
+		ok := true
+		for i := range n {
+			v, err := strconv.Atoi(m[i+1])
+			if err != nil || v > 1000000 {
+				ok = false
+				break
+			}
+			n[i] = v
+		}
+		if ok {
+			out, found = Counts{Critical: n[0], High: n[1], Medium: n[2], Low: n[3], Blocking: n[4]}, true
+		}
+	}
+	return out, found
 }

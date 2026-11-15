@@ -57,6 +57,7 @@ type gateReviewerJSON struct {
 	Since       string `json:"since"`
 	Incremental bool   `json:"incremental"`
 	SetAside    string `json:"setAside,omitempty"`
+	Summary     string `json:"summary,omitempty"`
 }
 
 type gateJSON struct {
@@ -92,6 +93,8 @@ type gateJSON struct {
 	FlagsRead    bool               `json:"flagsRead"`
 	LFS          []string           `json:"lfs"`
 	Handoff      bool               `json:"handoff"`
+	Catalog      string             `json:"catalog"`
+	CatalogWhy   string             `json:"catalogWhy,omitempty"`
 }
 
 func docJSON(d *session.WorkDoc) *workDocJSON {
@@ -124,7 +127,8 @@ func gateOf(v session.GateView) gateJSON {
 		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
 		Research: v.Research, Tasks: v.TasksNeeded, TasksWritten: v.TasksWritten, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
-		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff}
+		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
@@ -133,7 +137,7 @@ func gateOf(v session.GateView) gateJSON {
 	}
 	for _, r := range v.Reviewers {
 		out.Reviewers = append(out.Reviewers, gateReviewerJSON{Type: r.Agent, Role: string(r.Role), Name: r.Name, Why: r.Why, State: r.State, Verdict: r.Verdict,
-			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != "", SetAside: r.SetAside})
+			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != "", SetAside: r.SetAside, Summary: r.Summary})
 	}
 	return out
 }

@@ -95,6 +95,8 @@ type store struct {
 	loaded  bool
 	reads   int
 	work    int64
+	budget  int64
+	top     int64
 	indexed int64
 	cache   map[string]object
 	bases   map[baseKey]object
@@ -152,6 +154,34 @@ func (s *store) rememberBase(k baseKey, o object) {
 	s.cached += len(o.data)
 }
 
+func (s *store) workMax() int64 {
+	if s.budget > 0 {
+		return s.budget
+	}
+	return maxWork
+}
+
+func (s *store) overWork() error {
+	if s.budget > 0 {
+		return fmt.Errorf("%w: reading this file needs more than %d MiB of work", push.ErrTooLarge, s.budget>>20)
+	}
+	return fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+}
+
+func (s *store) objectMax(depth int) int64 {
+	if depth == 0 && s.top > 0 {
+		return s.top
+	}
+	return maxObject
+}
+
+func (s *store) deltaMax(depth int) int64 {
+	if s.budget == 0 && s.objectMax(depth) == maxObject {
+		return maxObject
+	}
+	return min(s.objectMax(depth), s.workMax()-s.work)
+}
+
 func (s *store) read(sha string) (object, error) {
 	return s.readDepth(sha, 0)
 }
@@ -172,7 +202,7 @@ func (s *store) readDepth(sha string, depth int) (o object, err error) {
 		}
 	}()
 	var bad error
-	o, err = s.loose(sha)
+	o, err = s.loose(sha, depth)
 	if err == nil {
 		s.remember(sha, o)
 		return o, nil
@@ -223,7 +253,7 @@ func digest(k kind, data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *store) loose(sha string) (object, error) {
+func (s *store) loose(sha string, depth int) (object, error) {
 	f, _, err := openRegular(s.root, filepath.Join("objects", sha[:2], sha[2:]), maxObject+(1<<20))
 	if err != nil {
 		return object{}, err
@@ -259,8 +289,11 @@ func (s *store) loose(sha string) (object, error) {
 	if size > maxObject {
 		return object{}, fmt.Errorf("%w: object %s is over %d MiB", push.ErrTooLarge, sha, maxObject>>20)
 	}
-	if s.work += size; s.work > maxWork {
-		return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+	if size > s.objectMax(depth) {
+		return object{}, fmt.Errorf("%w: object %s is over the limit", push.ErrTooLarge, sha)
+	}
+	if s.work += size; s.work > s.workMax() {
+		return object{}, s.overWork()
 	}
 	data := make([]byte, size)
 	if _, err := io.ReadFull(z, data); err != nil {
@@ -499,6 +532,9 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	var base object
 	switch k {
 	case kindCommit, kindTree, kindBlob, kindTag:
+		if int64(size) > s.objectMax(depth) {
+			return object{}, fmt.Errorf("%w: a packed object is over the limit", push.ErrTooLarge)
+		}
 	case kindOfs:
 		b, ok := next()
 		if !ok {
@@ -535,8 +571,8 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	if start >= end {
 		return object{}, fmt.Errorf("%w: a pack entry is truncated", push.ErrCorrupt)
 	}
-	if s.work += int64(size); s.work > maxWork {
-		return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+	if s.work += int64(size); s.work > s.workMax() {
+		return object{}, s.overWork()
 	}
 	z, err := zlib.NewReader(io.NewSectionReader(p.file, start, end-start))
 	if err != nil {
@@ -548,12 +584,12 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	}
 	o := object{kind: k, data: data}
 	if k == kindOfs || k == kindRef {
-		out, err := applyDelta(base.data, data)
+		out, err := applyDelta(base.data, data, s.deltaMax(depth))
 		if err != nil {
 			return object{}, err
 		}
-		if s.work += int64(len(out)); s.work > maxWork {
-			return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+		if s.work += int64(len(out)); s.work > s.workMax() {
+			return object{}, s.overWork()
 		}
 		o = object{kind: base.kind, data: out}
 	}
@@ -561,7 +597,7 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	return o, nil
 }
 
-func applyDelta(base, delta []byte) ([]byte, error) {
+func applyDelta(base, delta []byte, limit int64) ([]byte, error) {
 	bad := fmt.Errorf("%w: a delta can't be applied", push.ErrCorrupt)
 	i := 0
 	varint := func() (uint64, bool) {
@@ -590,6 +626,9 @@ func applyDelta(base, delta []byte) ([]byte, error) {
 	}
 	if size > maxObject {
 		return nil, fmt.Errorf("%w: a delta result is over %d MiB", push.ErrTooLarge, maxObject>>20)
+	}
+	if limit < 0 || size > uint64(limit) {
+		return nil, fmt.Errorf("%w: a delta result is over the limit", push.ErrTooLarge)
 	}
 	out := make([]byte, 0, size)
 	for i < len(delta) {

@@ -1,10 +1,10 @@
 import { api } from '../api.ts'
-import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, emit, fileLink, repoPath, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
-import type { AsideRun, CitedIDs, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
+import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
 const STATES: Record<string, [string, string]> = {
@@ -200,9 +200,15 @@ class SfReviews extends HTMLElement {
     if (value.planned?.length) {
       parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in the reviewer container, except one that already passed or blocked it:`))
       const list = el('ul', 'small planned')
-      for (const x of value.planned) list.append(el('li', '', `${text(x.name)} (${text(x.agent)})${x.why ? `: ${text(x.why)}` : ''}`))
+      for (const x of value.planned) {
+        const li = el('li', '', `${text(x.name)} (${text(x.agent)})${x.why ? `: ${text(x.why)}` : ''}`)
+        if (x.summary) li.append(el('div', 'muted', text(x.summary)))
+        list.append(li)
+      }
       parts.push(list)
     }
+    if (value.catalog?.state === 'refused') parts.push(el('p', 'small warn', `knackpack's reviewer catalog was refused: ${sentence(text(value.catalog.why || 'it could not be read'))} The engine's built-in list chooses the file reviewers.`))
+    else if (value.catalog?.state === 'used') parts.push(el('p', 'small muted', "knackpack's reviewer catalog chooses the file reviewers. It names reviewers and the files they cover; it grants no tool or permission."))
     if (r) {
       const cost = money(r.costUsd)
       const total = money(r.sessionCostUsd)
@@ -214,7 +220,7 @@ class SfReviews extends HTMLElement {
       for (const role of r.roles) {
         const override = role.state === 'block' && !role.override && !role.advisory && !offered.has(role.agent)
         if (override) offered.add(role.agent)
-        list.append(this.#role(role, current && !r.running ? r.commit : '', value, failed?.shared ?? '', override))
+        list.append(this.#role(role, current && !r.running ? r.commit : '', value, failed?.shared ?? '', override, r.running ? '' : r.commit))
       }
       parts.push(list)
     } else if (!value.disabled) {
@@ -310,7 +316,7 @@ class SfReviews extends HTMLElement {
     return box
   }
 
-  #role(role: ReviewRole, commit: string, value: ReviewsView, said: string, offerOverride: boolean): HTMLLIElement {
+  #role(role: ReviewRole, commit: string, value: ReviewsView, said: string, offerOverride: boolean, reviewed: string): HTMLLIElement {
     const li = el('li')
     const row = el('div', 'row')
     const overridden = role.state === 'block' && !!role.override
@@ -320,6 +326,8 @@ class SfReviews extends HTMLElement {
     const cost = money(role.costUsd)
     const round = role.round ? `round ${role.round}${role.limit ? ` of ${role.limit}` : ''} on this branch` : ''
     li.append(row, el('div', 'small muted', [text(role.agent), role.why ? text(role.why) : '', round, cost ? `≈ ${cost} (estimate)` : ''].filter(Boolean).join(' · ')))
+    const summary = value.gate?.find(g => g.type === role.agent)?.summary
+    if (typeof summary === 'string' && summary) li.append(el('div', 'small muted', text(summary)))
     if (role.advisory) li.append(el('div', 'small muted', 'Advisory for this project: its findings are warnings, and it never counts for the push, the push hold or automatic findings sends.'))
     const made = provenance(role)
     if (made) li.append(el('div', 'small muted', made))
@@ -339,10 +347,30 @@ class SfReviews extends HTMLElement {
       pre.setAttribute('aria-label', `${runName(role)}'s final message`)
       li.append(pre)
     }
+    const found = this.#findings(role, value, reviewed)
+    if (found) li.append(found)
     if (role.hasFull) li.append(this.#full(role, value))
     if (role.cited?.looked.length) li.append(cited(role.cited))
     if (role.given) li.append(this.#given(role, role.given))
     return li
+  }
+
+  #findings(role: ReviewRole, value: ReviewsView, reviewed: string): HTMLElement | null {
+    const list = (Array.isArray(role.findings) ? role.findings : []).filter((f): f is FindingRef => !!f && typeof f.severity === 'string' && typeof f.title === 'string')
+    if (!list.length) return null
+    const linked = reviewed && value.linked?.commit === reviewed ? new Set(value.linked.paths) : new Set<string>()
+    const ul = el('ul', 'small review-findings')
+    ul.setAttribute('aria-label', `${runName(role)}'s findings`)
+    list.forEach((f, i) => {
+      const li = el('li')
+      li.append(el('span', 'muted', `[${text(f.severity)}] `), el('span', '', text(f.title)))
+      const path = typeof f.path === 'string' && repoPath(f.path) ? f.path : ''
+      const line = typeof f.line === 'number' && Number.isInteger(f.line) && f.line > 0 ? f.line : 0
+      if (path && linked.has(path)) li.append(el('span', 'muted', ' · '), fileLink(path, `finding:${role.agent}:${role.run ?? 1}:${i}`, line ? { commit: reviewed, line } : { commit: reviewed }))
+      else if (typeof f.where === 'string' && f.where) li.append(el('span', 'muted', ` · ${text(f.where)}`))
+      ul.append(li)
+    })
+    return ul
   }
 
   #progress(role: ReviewRole): HTMLElement | null {
@@ -380,7 +408,7 @@ class SfReviews extends HTMLElement {
         const pre = el('pre', 'review-message review-full small', text(got.text))
         pre.tabIndex = 0
         pre.setAttribute('aria-label', `${runName(role)}'s whole report`)
-        body.replaceChildren(el('div', 'small muted', got.clipped ? 'The reply was longer than 64 KiB: the engine kept its start and its closing knackpack-findings and knackpack-verdict lines. The message above is its summary.' : 'The message above is its summary: its start and its closing lines.'), pre)
+        body.replaceChildren(el('div', 'small muted', got.clipped ? 'The reply was longer than 64 KiB: the engine kept its start and its last 16 KiB, which hold its findings and closing lines, and left out the middle. The message above is its summary.' : 'The message above is its summary: its start and its closing lines.'), pre)
       })
     }
     box.open = this.#opened.has(key)

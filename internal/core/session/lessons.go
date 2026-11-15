@@ -232,7 +232,7 @@ func BlockingFindings(message string) []FindingItem {
 		}
 	}
 	flush()
-	return out
+	return withFindingLines(out, AgreedFindingLines(message), "Critical", "High")
 }
 
 func (r *Reviews) learned(t ReviewTarget, e ReviewEntry) {
