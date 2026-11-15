@@ -437,11 +437,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			refuse(w, p)
 			return
 		}
-		if p := s.removeWorktree(r.Context(), q); p != nil {
+		aside, p := s.removeWorktree(r.Context(), q)
+		if p != nil {
 			refuse(w, p)
 			return
 		}
-		send(w, http.StatusOK, map[string]bool{"ok": true})
+		send(w, http.StatusOK, worktreeRemoveReply{OK: true, SetAside: aside})
 	case clearRoute:
 		s.clear(w, r)
 	case screenshotsRemoveRoute:

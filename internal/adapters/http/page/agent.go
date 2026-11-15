@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -80,9 +81,28 @@ func connSecret(r *http.Request) string {
 	return values[0]
 }
 
+type markedBody struct {
+	io.ReadCloser
+	read atomic.Bool
+}
+
+func (b *markedBody) Read(p []byte) (int, error) {
+	b.read.Store(true)
+	return b.ReadCloser.Read(p)
+}
+
 func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(writeFor))
+	if r.ContentLength != 0 && r.Body != nil && r.Body != http.NoBody {
+		body := &markedBody{ReadCloser: r.Body}
+		r.Body = body
+		defer func() {
+			if !body.read.Load() {
+				_ = rc.SetReadDeadline(time.Now())
+			}
+		}()
+	}
 	if r.URL.Path == "/poll" || r.URL.Path == "/wait" {
 		_ = rc.SetReadDeadline(time.Now().Add(PollFor + writeFor))
 	} else {

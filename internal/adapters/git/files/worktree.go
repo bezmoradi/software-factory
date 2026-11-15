@@ -282,7 +282,7 @@ func (w Worktrees) Linked(clone, dir string) (bool, error) {
 	}
 	defer func() { _ = root.Close() }()
 	data, err := readSmall(root, ".git", maxSmallFile)
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, push.ErrCorrupt) || errors.Is(err, push.ErrTooLarge) {
 		return false, nil
 	}
 	if err != nil {

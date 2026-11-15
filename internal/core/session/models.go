@@ -171,6 +171,7 @@ func (w *SessionWork) saveModels() {
 	if w.cfg.Models == nil {
 		return
 	}
+	w.saveMu.Lock()
 	w.mu.Lock()
 	st := ModelState{Sessions: maps.Clone(w.models)}
 	for k, c := range w.roles {
@@ -178,7 +179,6 @@ func (w *SessionWork) saveModels() {
 		st.Roles = append(st.Roles, RoleModel{Project: parts[0], URL: parts[1], Role: review.Role(parts[2]), Model: c.Model, Effort: c.Effort})
 	}
 	w.mu.Unlock()
-	w.saveMu.Lock()
 	err := w.cfg.Models.Save(st)
 	w.saveMu.Unlock()
 	if err != nil {

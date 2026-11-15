@@ -161,6 +161,8 @@ func (w *SessionWork) projectID(project string) (ProjectID, bool) {
 }
 
 func (w *SessionWork) ForgetProject(id ProjectID) {
+	w.saveMu.Lock()
+	defer w.saveMu.Unlock()
 	w.mu.Lock()
 	_, had := w.projects[id]
 	delete(w.projects, id)
@@ -169,9 +171,7 @@ func (w *SessionWork) ForgetProject(id ProjectID) {
 	if !had || w.cfg.Commands == nil {
 		return
 	}
-	w.saveMu.Lock()
 	err := w.cfg.Commands.Save(snapshot)
-	w.saveMu.Unlock()
 	if err != nil {
 		w.cfg.Logger.Warn("session work", "event", "commands-not-saved")
 	}
@@ -187,6 +187,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	if !known {
 		return explained(notFound("project"), "The engine has no project of that name.")
 	}
+	w.saveMu.Lock()
 	w.mu.Lock()
 	before := w.projects[id]
 	next := ProjectCommands{Check: check, Setup: setup}
@@ -195,6 +196,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	} else {
 		if _, ok := w.projects[id]; !ok && len(w.projects) >= maxCommandProjects {
 			w.mu.Unlock()
+			w.saveMu.Unlock()
 			return explained(limited("projects"), "The engine keeps commands for at most 1,000 projects.")
 		}
 		w.projects[id] = next
@@ -202,10 +204,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	snapshot := maps.Clone(w.projects)
 	w.mu.Unlock()
 	if w.cfg.Commands != nil {
-		w.saveMu.Lock()
-		err := w.cfg.Commands.Save(snapshot)
-		w.saveMu.Unlock()
-		if err != nil {
+		if err := w.cfg.Commands.Save(snapshot); err != nil {
 			w.mu.Lock()
 			if before == (ProjectCommands{}) {
 				delete(w.projects, id)
@@ -213,9 +212,11 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 				w.projects[id] = before
 			}
 			w.mu.Unlock()
+			w.saveMu.Unlock()
 			return explained(conflict("state"), "The engine couldn't save the project's commands.")
 		}
 	}
+	w.saveMu.Unlock()
 	for kind, pair := range map[string][2]string{CommandCheck: {before.Check, check}, CommandSetup: {before.Setup, setup}} {
 		if pair[0] == pair[1] {
 			continue

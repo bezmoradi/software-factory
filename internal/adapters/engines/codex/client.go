@@ -29,16 +29,16 @@ const (
 	ReasonAgentExited    = "agent-exited"
 	ReasonThreadClosed   = "thread-closed"
 	ReasonBadMessage     = "bad-message"
+	ReasonNotReading     = "not-reading"
 )
 
 const (
-	SignInNone       = "none"
-	SignInChatGPT    = "chatgpt"
-	SignInAPIKey     = "apiKey"
-	SignInBedrock    = "amazonBedrock"
-	SignInGCP        = "gcp"
-	SignInUnknown    = "unknown"
-	signInNotChecked = ""
+	SignInNone    = "none"
+	SignInChatGPT = "chatgpt"
+	SignInAPIKey  = "apiKey"
+	SignInBedrock = "amazonBedrock"
+	SignInGCP     = "gcp"
+	SignInUnknown = "unknown"
 )
 
 const (
@@ -49,6 +49,7 @@ const (
 	maxItems   = 2048
 	maxReplies = 256
 	maxPrompt  = 1 << 20
+	maxWriteB  = 64 << 20
 	clientName = "software_factory"
 	clientText = "Software Factory"
 )
@@ -105,9 +106,13 @@ var (
 )
 
 type Client struct {
-	rw  io.ReadWriteCloser
-	log shared.Logger
-	wmu sync.Mutex
+	rw      io.ReadWriteCloser
+	log     shared.Logger
+	wmu     sync.Mutex
+	wq      [][]byte
+	wqBytes int
+	wclosed bool
+	wwake   chan struct{}
 
 	mu        sync.Mutex
 	nextID    int64
@@ -174,6 +179,7 @@ func newClient(rw io.ReadWriteCloser, cfg Config) *Client {
 		doneTurns: map[string]bool{},
 		subs:      map[string]*subagent{},
 		wake:      make(chan struct{}, 1),
+		wwake:     make(chan struct{}, 1),
 		events:    make(chan agent.Event),
 		replies:   make(chan any, maxReplies),
 		done:      make(chan struct{}),
@@ -186,6 +192,7 @@ func newClient(rw io.ReadWriteCloser, cfg Config) *Client {
 	go c.read()
 	go c.pump()
 	go c.replier()
+	go c.writeLoop()
 	return c
 }
 
@@ -353,12 +360,6 @@ func sandboxName(t string) string {
 		return t
 	}
 	return "unknown"
-}
-
-func (c *Client) SignIn() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.signIn
 }
 
 func (c *Client) Events() <-chan agent.Event {
@@ -603,11 +604,55 @@ func (c *Client) write(v any) error {
 	}
 	b = append(b, '\n')
 	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if _, err := c.rw.Write(b); err != nil {
-		return fmt.Errorf("%w: %w", ErrClosed, err)
+	if c.wclosed {
+		c.wmu.Unlock()
+		return ErrClosed
+	}
+	if c.wqBytes+len(b) > maxWriteB {
+		c.wmu.Unlock()
+		c.log.Warn("codex: the agent stopped reading its input")
+		go c.finish(ReasonNotReading)
+		return ErrClosed
+	}
+	c.wq = append(c.wq, b)
+	c.wqBytes += len(b)
+	c.wmu.Unlock()
+	select {
+	case c.wwake <- struct{}{}:
+	default:
 	}
 	return nil
+}
+
+func (c *Client) writeLoop() {
+	for {
+		b, ok := c.nextWrite()
+		if !ok {
+			select {
+			case <-c.wwake:
+				continue
+			case <-c.done:
+				return
+			}
+		}
+		if _, err := c.rw.Write(b); err != nil {
+			go c.finish(ReasonAgentExited)
+			return
+		}
+	}
+}
+
+func (c *Client) nextWrite() ([]byte, bool) {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	if c.wclosed || len(c.wq) == 0 {
+		return nil, false
+	}
+	b := c.wq[0]
+	c.wq[0] = nil
+	c.wq = c.wq[1:]
+	c.wqBytes -= len(b)
+	return b, true
 }
 
 func (c *Client) reply(v any) {
@@ -681,6 +726,10 @@ func (c *Client) finish(reason string) {
 		c.ended = true
 		c.signalLocked()
 		c.mu.Unlock()
+		c.wmu.Lock()
+		c.wclosed = true
+		c.wq, c.wqBytes = nil, 0
+		c.wmu.Unlock()
 		close(c.done)
 		_ = c.rw.Close()
 		c.log.Info("codex: session ended", "reason", reason)

@@ -44,10 +44,10 @@ func (w *SessionWork) savePorts() {
 	if w.cfg.Ports == nil {
 		return
 	}
+	w.saveMu.Lock()
 	w.mu.Lock()
 	snapshot := maps.Clone(w.ports)
 	w.mu.Unlock()
-	w.saveMu.Lock()
 	err := w.cfg.Ports.Save(snapshot)
 	w.saveMu.Unlock()
 	if err != nil {

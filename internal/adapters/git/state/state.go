@@ -8,10 +8,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
-const maxFile = 4 << 20
+const (
+	maxFile        = 4 << 20
+	strayTempAfter = time.Minute
+)
+
+var swept sync.Map
 
 var errDir = errors.New("the state folder must be a folder this user owns, mode 0700, not a symbolic link")
 
@@ -24,6 +32,7 @@ func read(dir, name string) ([]byte, error) {
 	if !ownDir(dir) {
 		return nil, errDir
 	}
+	sweepStrayTemps(dir, name)
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -109,5 +118,42 @@ func writeFile(dir, name string, data []byte) error {
 		return err
 	}
 	ok = true
-	return nil
+	return syncFolder(dir)
+}
+
+func syncFolder(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+		err = nil
+	}
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+func sweepStrayTemps(dir, name string) {
+	if _, done := swept.LoadOrStore(dir+"\x00"+name, true); done {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := "." + name + "."
+	for _, e := range entries {
+		rest, found := strings.CutPrefix(e.Name(), prefix)
+		if !found || rest == "" || strings.Trim(rest, "0123456789") != "" || !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < strayTempAfter || !ownedByMe(info) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }

@@ -84,6 +84,7 @@ func (w *SessionWork) saveQueues() {
 	if w.cfg.Queues == nil {
 		return
 	}
+	w.saveMu.Lock()
 	w.mu.Lock()
 	snapshot := make(map[string]QueueState, len(w.queues))
 	for sid, q := range w.queues {
@@ -92,7 +93,6 @@ func (w *SessionWork) saveQueues() {
 		}
 	}
 	w.mu.Unlock()
-	w.saveMu.Lock()
 	err := w.cfg.Queues.Save(snapshot)
 	w.saveMu.Unlock()
 	if err != nil {
