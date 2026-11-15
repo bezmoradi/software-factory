@@ -25,6 +25,7 @@ func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *sess
 	}
 	if reviews != nil {
 		wc.Reviews = reviews
+		wc.ApprovalMoved = reviews.ApprovalMoved
 	}
 	if pins != nil {
 		wc.Installed = func() []string { return pins.Agents("knackpack") }
@@ -32,7 +33,11 @@ func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *sess
 	if agentFiles != nil {
 		wc.RoleAgents = agentFiles
 	}
-	return session.NewWork(wc)
+	w, err := session.NewWork(wc)
+	if err == nil && reviews != nil {
+		reg.OnDocsReported(w.RecheckApproval)
+	}
+	return w, err
 }
 
 func knackpackDir(pins *npm.Plugins) func() (string, error) {

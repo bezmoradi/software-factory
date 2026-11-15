@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
@@ -25,14 +26,52 @@ type ApprovedText struct {
 	Files    []SnapshotFile
 	Unkept   []string
 	Withheld []string
+	given    []string
 }
+
+type ApprovalGiven struct {
+	Steps  bool
+	Digest string
+}
+
+func (a ApprovedText) Given() ApprovalGiven {
+	out := ApprovalGiven{Steps: a.Steps}
+	if len(a.given) > 0 {
+		out.Digest = textHash(strings.Join(a.given, "\n"))
+	}
+	return out
+}
+
+func (a ApprovalGiven) holds(e ReviewEntry) bool {
+	return a.setsAside(e.Record.State, e.Record.Advisory, e.Approved)
+}
+
+func (a ApprovalGiven) setsAside(state review.State, advisory bool, approved string) bool {
+	return a.Steps && state == review.Pass && !advisory && approved != a.Digest
+}
+
+func (a ApprovalGiven) hold(entries map[review.Key]ReviewEntry, branch, head string) {
+	for k, e := range entries {
+		if k.Branch != branch || k.Commit != head || !a.holds(e) {
+			continue
+		}
+		e.Record.State, e.Record.Channel, e.Record.Held, e.Reason = review.Unknown, review.ApprovalChanged, approvalHeldWhy, approvalHeldWhy
+		entries[k] = e
+	}
+}
+
+const approvalHeldWhy = "it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 
 func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) ApprovedText {
 	ws, ok := w.session(sid)
 	if !ok {
 		return ApprovedText{}
 	}
-	g := w.gather(sid, ws, t, head, main)
+	return w.approvedOf(w.gather(sid, ws, t, head, main))
+}
+
+func (w *Work) approvedOf(g gathered) ApprovedText {
+	ws := g.ws
 	if !slices.Contains(g.eff.Steps, workflow.Define) && !slices.Contains(g.eff.Steps, workflow.Plan) {
 		return ApprovedText{}
 	}
@@ -41,9 +80,19 @@ func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) Approved
 	add := func(what, name, from, text string) {
 		if secretText(text) {
 			out.Withheld = append(out.Withheld, what)
+			out.given = append(out.given, what+" withheld "+textHash(text))
 			return
 		}
 		out.Files = append(out.Files, approvedFile(what, name, from, text))
+		out.given = append(out.given, what+" given "+textHash(text))
+	}
+	unkept := func(what string, a *workApproval) {
+		out.Unkept = append(out.Unkept, what)
+		hash := ""
+		if a != nil {
+			hash = a.Hash
+		}
+		out.given = append(out.given, what+" unkept "+hash)
 	}
 	if g.reqOk {
 		name := approvedName(names.Requirements, "requirements.md")
@@ -53,7 +102,7 @@ func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) Approved
 		case !g.docs.held && ws.req != nil && ws.req.Text != "":
 			add("requirements", name, "as the engine saved them when the person approved them", ws.req.Text)
 		default:
-			out.Unkept = append(out.Unkept, "requirements")
+			unkept("requirements", ws.req)
 		}
 	}
 	if g.planOk {
@@ -64,7 +113,7 @@ func (w *Work) ApprovedFor(sid string, t PushTarget, head, main string) Approved
 			}
 			add("plan", approvedName(names.Plan, "plan.md"), from, g.docs.plan.Text)
 		} else {
-			out.Unkept = append(out.Unkept, "plan")
+			unkept("plan", ws.plan)
 		}
 	}
 	return out

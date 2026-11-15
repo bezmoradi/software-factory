@@ -227,6 +227,7 @@ type Registry struct {
 	turnSaving  bool
 	turnAgain   bool
 	compacted   func(sid string, queued bool)
+	docsMoved   func(sid string)
 	compactions *limiter
 	noteStore   NoteStore
 	noteVersion uint64
@@ -601,7 +602,11 @@ func (r *Registry) Report(given string, b Batch) error {
 				ev = clean.fields(ev["seq"], ev["ts"])
 				if target == nil && seq > c.lastSeq {
 					w := clean
+					moved := docsDiffer(r.workflows[c.sid], &w)
 					r.workflows[c.sid] = &w
+					if moved && r.docsMoved != nil {
+						go r.docsMoved(c.sid)
+					}
 				}
 			}
 		}

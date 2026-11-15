@@ -61,8 +61,19 @@ func (s *Server) Agent() http.Handler {
 }
 
 func (s *Server) agentReject(w http.ResponseWriter, r *http.Request, status int, why string) {
-	s.logger.Warn("request refused", "side", "agent", "route", s.agentRoute(r), "why", why)
+	s.agentRefused(r, why)
 	refuse(w, status, why)
+}
+
+func (s *Server) agentRefused(r *http.Request, why string) {
+	s.logger.Warn("request refused", boxed(r, "side", "agent", "route", s.agentRoute(r), "why", why)...)
+}
+
+func boxed(r *http.Request, args ...any) []any {
+	if box := ConnBox(r.Context()); box != "" {
+		args = append(args, "box", box)
+	}
+	return args
 }
 
 func pushToken(r *http.Request) string {
@@ -272,7 +283,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) agentError(w http.ResponseWriter, r *http.Request, err error) {
 	code, body := status(err)
 	if code == http.StatusConflict || code == http.StatusUnauthorized || code >= 500 {
-		s.logger.Warn("request refused", "side", "agent", "route", s.agentRoute(r), "why", body.Error)
+		s.agentRefused(r, body.Error)
 	}
 	send(w, code, body)
 }
@@ -308,7 +319,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, why := status(err)
 		if code == http.StatusTooManyRequests {
-			s.logger.Warn("registration limited", "side", "agent")
+			s.logger.Warn("registration limited", boxed(r, "side", "agent")...)
+		} else {
+			s.agentRefused(r, why.Error)
 		}
 		send(w, code, why)
 		return
@@ -324,7 +337,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) busy(w http.ResponseWriter, r *http.Request) {
-	s.logger.Warn("request refused", "side", "agent", "route", s.agentRoute(r), "why", "events-busy")
+	s.agentRefused(r, "events-busy")
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 	send(w, http.StatusTooManyRequests, map[string]any{"error": "events-busy", "retryAfter": retryAfter})
 }

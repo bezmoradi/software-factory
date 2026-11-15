@@ -58,6 +58,26 @@ func (r *Registry) Workflow(sid string) (Workflow, bool) {
 	return *w, true
 }
 
+func (r *Registry) OnDocsReported(f func(sid string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.docsMoved = f
+}
+
+func docsDiffer(was, now *Workflow) bool {
+	if was == nil {
+		return true
+	}
+	return reportedKey(was.Requirements) != reportedKey(now.Requirements) || reportedKey(was.Plan) != reportedKey(now.Plan)
+}
+
+func reportedKey(d *Doc) string {
+	if d == nil {
+		return ""
+	}
+	return d.Hash + " " + d.Path
+}
+
 func hashText(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])

@@ -92,6 +92,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return explained(conflict("records"), "The engine couldn't read its review records.")
 	}
+	given := reviewGiven{asked: t.Approved != nil, rules: rulesGiven{main: main}}
+	ticket := r.approvalTicket()
+	if t.Approved != nil {
+		given.approved = t.Approved(head, main)
+	}
+	approval := given.approved.Given()
+	approval.hold(entries, t.Branch, head)
+	r.approvalIs(t.SID, head, ticket, approval)
 	limit := roundLimit(t.Rounds)
 	var plans []plannedRole
 	var capped []string
@@ -135,7 +143,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 					p.round = rd.Count
 				}
 			}
-			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory); prev != nil {
+			if prev := r.incremental(t, entries, q.Agent, head, main, key.Number(), q.Advisory, approval); prev != nil {
 				p.base, p.since, p.covers, p.previous = prev.Key.Commit, prev.Key.Commit, prev.Coverage(), prev.Message
 			}
 			p.overridden = acceptedRound(entries, t.Branch, q.Agent, q.Advisory)
@@ -175,10 +183,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		view.Note += " " + held
 	}
 	r.show(t.SID, view)
-	given := reviewGiven{asked: t.Approved != nil, rules: rulesGiven{main: main}}
-	if t.Approved != nil {
-		given.approved = t.Approved(head, main)
-	}
 	if t.TeamRules != nil {
 		given.team = t.TeamRules(base, head)
 	}
@@ -224,9 +228,9 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool) *ReviewEntry {
+func (r *Reviews) incremental(t ReviewTarget, entries map[review.Key]ReviewEntry, agent, head, main string, run int, advisory bool, approval ApprovalGiven) *ReviewEntry {
 	prev := previousRound(entries, t.Branch, agent, head, run, advisory)
-	if prev == nil || prev.Record.Shaped != "" {
+	if prev == nil || prev.Record.Shaped != "" || approval.Steps && prev.Approved != approval.Digest {
 		return nil
 	}
 	if prev.Record.State == review.Block && (prev.Message == "" || prev.Clipped || len(prev.Message) >= maxReviewText-4) {

@@ -16,6 +16,8 @@ const (
 	Unchecked    Channel = "unchecked"
 	Checking     Channel = "checking"
 	CheckFailed  Channel = "check-failed"
+
+	ApprovalChanged Channel = "approval-changed"
 )
 
 type Versions struct {

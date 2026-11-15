@@ -142,7 +142,7 @@ func short(sha string) string {
 	return sha
 }
 
-var versionHeld = map[Channel]bool{BelowMinimum: true, Unchecked: true, Checking: true, CheckFailed: true}
+var versionHeld = map[Channel]bool{BelowMinimum: true, Unchecked: true, Checking: true, CheckFailed: true, ApprovalChanged: true}
 
 var heldBy = map[Channel]string{
 	Shallow:    "it passed in one turn without reading a file, which counts as no verdict: press Review again",

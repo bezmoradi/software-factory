@@ -78,7 +78,7 @@ type dueCheck struct {
 }
 
 func Rerunnable(e ReviewEntry) bool {
-	return e.Record.State == review.Unknown && (e.Record.Channel == review.BelowMinimum || e.Record.Channel == review.Unchecked)
+	return e.Record.State == review.Unknown && (e.Record.Channel == review.BelowMinimum || e.Record.Channel == review.Unchecked || e.Record.Channel == review.ApprovalChanged)
 }
 
 func versionsOf(e ReviewEntry) review.Versions {

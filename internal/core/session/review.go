@@ -58,6 +58,7 @@ type ReviewEntry struct {
 	Attempt      int
 	AutoAttempts int
 	Cited        CitedIDs
+	Approved     string
 }
 
 type ReviewRecords interface {
@@ -117,6 +118,7 @@ type RoleReview struct {
 	Progress *ReviewProgress
 	Given    *RunGiven
 	started  time.Time
+	approved string
 }
 
 type ReviewView struct {
@@ -209,6 +211,8 @@ type Reviews struct {
 	mu         sync.Mutex
 	running    map[string]bool
 	views      map[string]ReviewView
+	approvals  map[string]viewApproval
+	approvalAt uint64
 	store      sync.Mutex
 	checkStore sync.Mutex
 	checking   map[string]chan struct{}
@@ -281,7 +285,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]bool{}, views: map[string]ReviewView{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]bool{}, views: map[string]ReviewView{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
 		return nil, err
 	}
@@ -352,7 +356,14 @@ func (r *Reviews) View(sid string) (ReviewView, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.views[sid]
-	return v.clone(), ok
+	return r.asideLocked(sid, v.clone()), ok
+}
+
+func (r *Reviews) Forget(sid string) {
+	r.mu.Lock()
+	delete(r.views, sid)
+	delete(r.approvals, sid)
+	r.mu.Unlock()
 }
 
 func (r *Reviews) Wait() { r.wg.Wait() }
@@ -369,16 +380,86 @@ func (r *Reviews) roles() []review.Role {
 
 func (r *Reviews) show(sid string, v ReviewView) {
 	r.mu.Lock()
+	v = r.keptLocked(sid, v)
+	r.mu.Unlock()
+	r.cfg.Show(sid, v)
+}
+
+func (r *Reviews) keptLocked(sid string, v ReviewView) ReviewView {
 	r.citedOnto(&v)
 	v.TestList = r.testListOf(sid)
 	v.PlanReview, v.Explain = r.asideOf(AsidePlanReview, sid), r.asideOf(AsideExplain, sid)
 	r.views[sid] = v.clone()
+	return r.asideLocked(sid, v.clone())
+}
+
+type viewApproval struct {
+	commit string
+	given  ApprovalGiven
+	ticket uint64
+}
+
+func (r *Reviews) asideLocked(sid string, v ReviewView) ReviewView {
+	a, ok := r.approvals[sid]
+	if !ok || a.commit != v.Commit {
+		return v
+	}
+	for i, role := range v.Roles {
+		if a.given.setsAside(role.State, role.Advisory, role.approved) {
+			v.Roles[i].State, v.Roles[i].Reason = review.Unknown, approvalHeldWhy
+		}
+	}
+	return v
+}
+
+func (r *Reviews) approvalTicket() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.approvalAt++
+	return r.approvalAt
+}
+
+func (r *Reviews) approvalIs(sid, commit string, ticket uint64, a ApprovalGiven) {
+	r.mu.Lock()
+	r.approvalLocked(sid, commit, ticket, a)
 	r.mu.Unlock()
-	r.cfg.Show(sid, v.clone())
+}
+
+func (r *Reviews) approvalLocked(sid, commit string, ticket uint64, a ApprovalGiven) bool {
+	if old, ok := r.approvals[sid]; ok && old.ticket > ticket {
+		return false
+	}
+	r.approvals[sid] = viewApproval{commit: commit, given: a, ticket: ticket}
+	return true
+}
+
+func (r *Reviews) ApprovalMoved(sid string, at func(commit string) (ApprovalGiven, bool)) {
+	r.mu.Lock()
+	v, ok := r.views[sid]
+	r.mu.Unlock()
+	if !ok || v.Commit == "" {
+		return
+	}
+	commit := v.Commit
+	ticket := r.approvalTicket()
+	now, ok := at(commit)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	v, ok = r.views[sid]
+	if !ok || v.Commit != commit || !r.approvalLocked(sid, commit, ticket, now) {
+		r.mu.Unlock()
+		return
+	}
+	shown := r.asideLocked(sid, v.clone())
+	r.mu.Unlock()
+	r.cfg.Show(sid, shown)
 }
 
 func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin string, view ReviewView, held string, given reviewGiven) {
 	ctx := r.cfg.Base
+	main := given.rules.main
 	if why := r.check(ctx); why != "" {
 		view.Running = false
 		view.Note = strings.TrimSpace("Reviews didn't start: " + why + " " + held)
@@ -395,7 +476,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
 			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
-			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto)}
+			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest}
 	}
 	r.put(entries...)
 	r.mu.Lock()
@@ -514,6 +595,10 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			r.put(e)
 			r.audited(t, e)
 			r.learned(t, e)
+			if t.Approved != nil {
+				ticket := r.approvalTicket()
+				r.approvalIs(t.SID, head, ticket, t.Approved(head, main).Given())
+			}
 			mu.Lock()
 			entries[i] = e
 			view.Roles[i] = roleOf(view.Roles[i], e)
@@ -580,6 +665,7 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
 	v.Cited = e.Cited.clone()
 	v.started = e.StartedAt
+	v.approved = e.Approved
 	return v
 }
 

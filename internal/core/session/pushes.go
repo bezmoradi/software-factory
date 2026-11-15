@@ -379,7 +379,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	if err != nil {
 		return "", false, ""
 	}
-	entries, err := p.cfg.Reviews.Entries()
+	entries, required, err := p.entriesAt(sid, t, head)
 	if err != nil {
 		return "", false, ""
 	}
@@ -391,7 +391,7 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	}
 	running, recorded, rerun := false, false, false
 	var ended []ReviewEntry
-	for _, q := range p.requiredOf(sid, t, head) {
+	for _, q := range required {
 		for _, k := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
 			e, ok := entries[k]
 			if !ok {
@@ -484,17 +484,32 @@ func (p *Pushes) requiredAgents(sid string, t PushTarget, head string) []string 
 }
 
 func (p *Pushes) requiredOf(sid string, t PushTarget, head string) []workflow.Requirement {
+	required, _ := p.requiredNow(sid, t, head)
+	return required
+}
+
+func (p *Pushes) entriesAt(sid string, t PushTarget, head string) (map[review.Key]ReviewEntry, []workflow.Requirement, error) {
+	entries, err := p.cfg.Reviews.Entries()
+	if err != nil {
+		return nil, nil, err
+	}
+	required, approval := p.requiredNow(sid, t, head)
+	approval.hold(entries, t.Branch, head)
+	return entries, required, nil
+}
+
+func (p *Pushes) requiredNow(sid string, t PushTarget, head string) ([]workflow.Requirement, ApprovalGiven) {
 	if p.cfg.Work != nil {
 		main, _ := p.cfg.Repos.Main(t.Name)
 		if wf, ok := p.cfg.Work.PushFacts(sid, t, head, main); ok {
-			return slices.Clone(wf.Required)
+			return slices.Clone(wf.Required), wf.Approval
 		}
 	}
 	out := make([]workflow.Requirement, 0, len(p.cfg.Agents))
 	for role, a := range p.cfg.Agents {
 		out = append(out, workflow.Requirement{Agent: a, Role: role})
 	}
-	return out
+	return out, ApprovalGiven{}
 }
 
 func (p *Pushes) ReviewDone(sid, head string) {
@@ -1129,6 +1144,9 @@ func (p *Pushes) facts(sid string, t PushTarget, head, main, mainName, by string
 		if entries, err = p.cfg.Reviews.Entries(); err != nil {
 			return f, "", errors.New("the engine couldn't read its review records")
 		}
+	}
+	if worked {
+		wf.Approval.hold(entries, t.Branch, head)
 	}
 	for k, e := range entries {
 		f.Reviews[k] = e.Record

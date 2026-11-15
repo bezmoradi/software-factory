@@ -56,6 +56,7 @@ type gateReviewerJSON struct {
 	Override    string `json:"override"`
 	Since       string `json:"since"`
 	Incremental bool   `json:"incremental"`
+	SetAside    string `json:"setAside,omitempty"`
 }
 
 type gateJSON struct {
@@ -132,7 +133,7 @@ func gateOf(v session.GateView) gateJSON {
 	}
 	for _, r := range v.Reviewers {
 		out.Reviewers = append(out.Reviewers, gateReviewerJSON{Type: r.Agent, Role: string(r.Role), Name: r.Name, Why: r.Why, State: r.State, Verdict: r.Verdict,
-			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != ""})
+			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != "", SetAside: r.SetAside})
 	}
 	return out
 }

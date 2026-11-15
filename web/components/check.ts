@@ -36,9 +36,11 @@ class SfCheck extends HTMLElement {
       ? [gate!.verdict || 'Passed', 'ok']
       : state === 'block'
         ? [gate!.verdict || 'Blocked', 'bad']
-        : state === 'unknown'
-          ? [`${UNKNOWN}.`, 'warn']
-          : (Object.hasOwn(NOTES, state) ? NOTES[state] : undefined) ?? NOTES.none
+        : state === 'unknown' && gate!.setAside
+          ? [`Passed, but ${visible(gate!.setAside)}.`, 'warn']
+          : state === 'unknown'
+            ? [`${UNKNOWN}.`, 'warn']
+            : (Object.hasOwn(NOTES, state) ? NOTES[state] : undefined) ?? NOTES.none
     this.#note.className = `small ${tone}`
     if (this.#note.textContent !== text) {
       this.#note.textContent = text

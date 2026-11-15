@@ -254,12 +254,12 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		return false
 	}
 	t, _ := p.cfg.Targets(sid)
-	entries, err := p.cfg.Reviews.Entries()
+	entries, required, err := p.entriesAt(sid, t, commit)
 	if err != nil {
 		return p.cfg.Now().Before(item.until)
 	}
 	needs := false
-	for _, q := range p.requiredOf(sid, t, commit) {
+	for _, q := range required {
 		for _, k := range (review.Key{Commit: commit, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
 			e, ok := entries[k]
 			switch {
@@ -338,12 +338,12 @@ func (p *Pushes) afterReviews(by, sid string, t PushTarget, head string) string 
 	if by != ByReviews || p.cfg.Reviews == nil {
 		return ""
 	}
-	entries, err := p.cfg.Reviews.Entries()
+	entries, required, err := p.entriesAt(sid, t, head)
 	if err != nil {
 		return ""
 	}
 	var ended []ReviewEntry
-	for _, q := range p.requiredOf(sid, t, head) {
+	for _, q := range required {
 		for _, k := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
 			if e, ok := entries[k]; ok && (e.Record.State == review.Failed || e.Record.State == review.Unknown) {
 				ended = append(ended, e)

@@ -786,6 +786,7 @@ export interface Reviewer {
   override?: string
   since?: string
   incremental?: boolean
+  setAside?: string
 }
 
 export interface GateEvent {

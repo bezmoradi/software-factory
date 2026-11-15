@@ -400,6 +400,9 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if pushes != nil {
 		d.OnRemoved(pushes.ForgetDenials)
 	}
+	if reviews != nil {
+		d.OnRemoved(reviews.Forget)
+	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
 	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow}, nil

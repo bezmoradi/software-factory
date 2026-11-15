@@ -108,6 +108,8 @@ type WorkConfig struct {
 	RoleAgents RoleAgents
 	Changes    ChangeReader
 	Level      func(sid string) (level.Result, bool)
+
+	ApprovalMoved func(sid string, at func(commit string) (ApprovalGiven, bool))
 }
 
 type workApproval struct {
@@ -165,6 +167,7 @@ type WorkReviewer struct {
 	Capped   bool
 	Override string
 	Since    string
+	SetAside string
 }
 
 type GateView struct {
@@ -232,6 +235,7 @@ type WorkFacts struct {
 	Rounds        int
 	Refusal       string
 	Hold          HoldSettings
+	Approval      ApprovalGiven
 }
 
 type WorkPage interface {
@@ -540,6 +544,7 @@ func (w *Work) SetType(sid, id string) error {
 	}
 	w.mu.Unlock()
 	w.persist(sid)
+	w.RecheckApproval(sid)
 	w.cfg.Logger.Info("work type", "type", id)
 	return nil
 }
@@ -811,7 +816,8 @@ func (w *Work) PushFacts(sid string, t PushTarget, head, main string) (WorkFacts
 	if err != nil {
 		items = append(slices.Clone(items), workUnreadItem)
 	}
-	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold}, true
+	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold,
+		Approval: w.approvedOf(g).Given()}, true
 }
 
 const workUnreadItem = "project settings the engine can read: it couldn't read them (work.json), so it can't tell this project's push hold, review rounds or work type"
@@ -968,6 +974,7 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	w.mu.Unlock()
 	w.persist(sid)
 	w.approved(sid, g.t, g.head, plan, hash)
+	w.RecheckApproval(sid)
 	w.cfg.Logger.Info("approved", "what", what)
 	if next := nextStep(g, plan); next != "" && w.cfg.Tell != nil {
 		if err := w.cfg.Tell(sid, next); err != nil {
@@ -975,6 +982,24 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 		}
 	}
 	return nil
+}
+
+func (w *Work) RecheckApproval(sid string) {
+	if w.cfg.ApprovalMoved != nil {
+		w.cfg.ApprovalMoved(sid, func(commit string) (ApprovalGiven, bool) { return w.approvalAt(sid, commit) })
+	}
+}
+
+func (w *Work) approvalAt(sid, commit string) (ApprovalGiven, bool) {
+	t, ok := w.cfg.Targets(sid)
+	if !ok {
+		return ApprovalGiven{}, false
+	}
+	if _, ok := w.session(sid); !ok {
+		return ApprovalGiven{}, false
+	}
+	main, _ := w.cfg.Repos.Main(t.Name)
+	return w.ApprovedFor(sid, t, commit, main).Given(), true
 }
 
 func (w *Work) EditHold(sid, top string, paths []string) string {
@@ -1029,6 +1054,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	if w.cfg.Reviews != nil {
 		entries, _ = w.cfg.Reviews.Entries()
 	}
+	w.approvedOf(g).Given().hold(entries, g.t.Branch, g.head)
 	records := map[review.Key]review.Record{}
 	for k, e := range entries {
 		records[k] = e.Record
@@ -1043,6 +1069,9 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 		k := review.Key{Commit: g.head, Branch: g.t.Branch, Agent: q.Agent}
 		if e, complete, ok := pooledEntry(entries, k, q.RunCount()); ok {
 			r.State, r.Verdict, r.Override, r.Since = string(e.Record.State), e.Record.Verdict, e.Record.Override, e.Since
+			if e.Record.Channel == review.ApprovalChanged && e.Record.State == review.Unknown {
+				r.SetAside = approvalHeldWhy
+			}
 			if !complete && e.Record.State == review.Pass {
 				r.State = "none"
 			}
@@ -1245,6 +1274,7 @@ func (w *Work) ApproveTeam(ctx context.Context, path, sha string) (TeamView, err
 		return TeamView{}, err
 	}
 	w.teamAudit(r.Name, AuditApproveTeam, sha)
+	w.recheckProject(r.Name)
 	w.cfg.Logger.Info("team file approved")
 	return w.teamView(r), nil
 }
@@ -1264,6 +1294,7 @@ func (w *Work) ForgetTeam(path string) (TeamView, error) {
 	}
 	if forgotten != "" {
 		w.teamAudit(r.Name, AuditForgetTeam, forgotten)
+		w.recheckProject(r.Name)
 	}
 	w.cfg.Logger.Info("team file forgotten")
 	return w.teamView(r), nil
@@ -1315,7 +1346,7 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 	default:
 		return explained(invalid("op"), "The engine keeps a project's review rounds and default work type only.")
 	}
-	return w.change(func(st *WorkState) error {
+	if err := w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]
 		if op == "rounds" {
 			p.Rounds = rounds
@@ -1324,7 +1355,27 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 		}
 		st.Projects[r.Name] = p
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if op == "type" {
+		w.recheckProject(r.Name)
+	}
+	return nil
+}
+
+func (w *Work) recheckProject(name string) {
+	w.mu.Lock()
+	var sids []string
+	for sid, s := range w.sessions {
+		if s != nil && s.repo == name {
+			sids = append(sids, sid)
+		}
+	}
+	w.mu.Unlock()
+	for _, sid := range sids {
+		w.RecheckApproval(sid)
+	}
 }
 
 func (w *Work) reviewedOn(branch, head string) []string {
