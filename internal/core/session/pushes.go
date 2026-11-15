@@ -446,11 +446,25 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 func (p *Pushes) heldReviewed(sid, head, branch string) {
 	p.wg.Go(func() {
 		defer p.release(sid)
+		kept := func(why string) {
+			p.cfg.Logger.Info("push", "event", "card-kept", "why", why)
+		}
 		t, ok := p.cfg.Targets(sid)
-		if !ok || t.Branch != branch {
+		switch {
+		case !ok:
+			kept("target")
+			return
+		case t.Branch != branch:
+			kept("branch")
 			return
 		}
-		if now, err := p.cfg.Heads.Head(t.Repo, t.Branch); err != nil || now != head {
+		now, err := p.cfg.Heads.Head(t.Repo, t.Branch)
+		switch {
+		case err != nil:
+			kept("head-unread")
+			return
+		case now != head:
+			kept("head-moved")
 			return
 		}
 		ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
@@ -775,6 +789,7 @@ type pushing struct {
 	passed     int
 	overridden int
 	unmet      []string
+	refresh    bool
 }
 
 func (x *pushing) clean(s string) string {
@@ -795,8 +810,39 @@ func clipAtWord(s string, n int) string {
 	return strings.TrimRight(cut, " ;,:") + "…"
 }
 
+func (x *pushing) refreshCard(result gate.Result, reason string, missing []string) push.Reply {
+	p := x.p
+	kept := func(why string) push.Reply {
+		p.cfg.Logger.Info("push", "event", "card-kept", "was", string(result), "why", why)
+		return push.Reply{Decision: push.DecisionRefused, Reason: x.clean(reason)}
+	}
+	if result != gate.Held {
+		return kept("outcome")
+	}
+	e := x.entry
+	e.Reason = x.clean(reason)
+	e = e.masked()
+	p.mu.Lock()
+	old := p.held[x.sid]
+	if old == nil || old.commit != e.Commit || old.branch != e.Branch || old.remote != e.Remote || !p.cfg.Now().Before(old.expires) {
+		p.mu.Unlock()
+		return kept("card")
+	}
+	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent}
+	p.held[x.sid] = h
+	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
+		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
+	p.mu.Unlock()
+	p.show(x.sid, v)
+	p.cfg.Logger.Info("push", "event", "card-refreshed", "missing", len(missing))
+	return push.Reply{Decision: push.DecisionHeld, Reason: e.Reason}
+}
+
 func (x *pushing) end(result gate.Result, reason string, missing []string, person string) push.Reply {
 	p := x.p
+	if x.refresh {
+		return x.refreshCard(result, reason, missing)
+	}
 	reason = x.clean(reason)
 	e := x.entry
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
@@ -902,8 +948,8 @@ func reviewWords(passed, overridden int) string {
 	return strconv.Itoa(passed) + " of " + strconv.Itoa(n) + " reviews passed and the person overrode the rest"
 }
 
-func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer, want string) (push.Reply, gate.Decision) {
-	x := &pushing{p: p, sid: sid, answer: answer, entry: AuditEntry{Time: p.cfg.Now(), Session: sid, By: by, Request: randomHex(16)}}
+func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer, card string) (push.Reply, gate.Decision) {
+	x := &pushing{p: p, sid: sid, answer: answer, refresh: card != "", entry: AuditEntry{Time: p.cfg.Now(), Session: sid, By: by, Request: randomHex(16)}}
 	refuse := func(why string) (push.Reply, gate.Decision) {
 		return x.end(gate.Refused, why, nil, ""), gate.Decision{Result: gate.Refused, Reason: why}
 	}
@@ -930,13 +976,15 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return refuse("the engine couldn't read the session's branch " + t.Branch + ": " + err.Error())
 	}
 	x.entry.Commit = head
-	if want != "" && head != want {
-		return refuse("the branch moved from commit " + shortSHA(want) + " to " + shortSHA(head) + " while the engine decided the held request again, so it pushed nothing; ask to push again")
+	if x.refresh && head != card {
+		return refuse("the branch moved from commit " + shortSHA(card) + " to " + shortSHA(head) + ", so the held card stays as it was")
 	}
 	p.mu.Lock()
 	unread, denied := p.denialsUnread && by != ByPage, p.refusedLocked(sid, head)
 	p.mu.Unlock()
 	switch {
+	case unread && x.refresh:
+		return refuse(denialsUnreadWhy)
 	case unread:
 		return x.end(gate.Held, denialsUnreadWhy, nil, ""), gate.Decision{Result: gate.Held, Reason: denialsUnreadWhy}
 	case denied && by == ByPage:
@@ -1006,8 +1054,10 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	if answer != nil && answer.Allow && answer.Commit != head {
 		note = "the developer's Allow was for commit " + shortSHA(answer.Commit) + ", and the branch is at " + shortSHA(head) + " now, so it doesn't count; "
 	}
-	switch d.Result {
-	case gate.Allowed:
+	switch {
+	case d.Result == gate.Allowed && x.refresh:
+		return x.end(gate.Held, "every review of commit "+shortSHA(head)+" now passes and the push needs nothing more; the engine doesn't push a held card when its reviews finish, so press Push to push it", d.Missing, ""), d
+	case d.Result == gate.Allowed:
 		pre := x.entry
 		pre.Result, pre.Reason, pre.Missing, pre.PersonReason = string(gate.Allowed), "pushing "+shortSHA(head)+" to "+t.Branch+" at "+url+"; the next entry says whether it went out", slices.Clone(d.Missing), x.clean(d.Exception)
 		if err := p.cfg.Audit.Append(pre); err != nil {
@@ -1027,11 +1077,11 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		out := x.end(gate.Pushed, why, d.Missing, d.Exception)
 		p.announcePushed(x, t, facts, len(d.Missing))
 		return out, d
-	case gate.Held:
+	case d.Result == gate.Held:
 		x.findings = !x.handoff && p.hasFindings(sid, t, head)
 		x.unmet = d.Unmet
 		return x.end(gate.Held, note+p.afterReviews(by, sid, t, head)+d.Reason, d.Missing, ""), d
-	case gate.Denied:
+	case d.Result == gate.Denied:
 		person := ""
 		if answer != nil {
 			person = gate.Reason(answer.Reason)
