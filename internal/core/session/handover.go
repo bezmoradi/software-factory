@@ -154,6 +154,9 @@ func (d *Dispatcher) Handover(ctx context.Context, sid, agent string, consent Co
 	if d.cfg.Work != nil {
 		d.cfg.Work.carry(sid, started.SID, spec.Knackpack)
 	}
+	if d.cfg.Reviews != nil {
+		d.cfg.Reviews.ShowKept([]string{started.SID}, d.keptBranches([]string{started.SID}, false))
+	}
 	d.reg.NoteFor(noteHandover)(started.SID, d.handoverNote(r, head, last, moved))
 	d.handoverAudit(r, spec, started.SID, head, last, moved)
 	shared.For(ctx, d.cfg.Logger).Info("handover", "from", r.spec.ID, "to", spec.ID, "moved", moved)

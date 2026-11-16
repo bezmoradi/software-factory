@@ -176,7 +176,7 @@ func (d *Dispatcher) Restore() int {
 		}
 	}
 	if d.cfg.Reviews != nil {
-		d.cfg.Reviews.ShowKept(sids, d.keptBranches(sids))
+		d.cfg.Reviews.ShowKept(sids, d.keptBranches(sids, d.cfg.Work != nil))
 	}
 	if len(sids) > 0 {
 		d.cfg.Logger.Info("sessions", "event", "restored", "count", len(sids))
@@ -187,14 +187,14 @@ func (d *Dispatcher) Restore() int {
 	return len(sids)
 }
 
-func (d *Dispatcher) keptBranches(sids []string) map[string]KeptBranch {
+func (d *Dispatcher) keptBranches(sids []string, recheck bool) map[string]KeptBranch {
 	out := map[string]KeptBranch{}
 	for _, sid := range sids {
 		t, ok := d.PushTarget(sid)
 		if !ok {
 			continue
 		}
-		k := KeptBranch{Branch: t.Branch, Recheck: d.cfg.Work != nil}
+		k := KeptBranch{Branch: t.Branch, Recheck: recheck}
 		if d.cfg.Work != nil {
 			k.Rounds = d.cfg.Work.Rounds(sid, t.Name)
 		}

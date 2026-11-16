@@ -241,26 +241,31 @@ class SfPushPanel extends HTMLElement {
 
   #held(p: SessionPush, value: PushPanelView): HTMLElement {
     const box = el('div', 'push-card')
-    if (p.missing.length) {
-      const passed = new Set(value.passedSince ?? [])
-      if (passed.size) {
-        const lead = `${passed.size === 1 ? 'A review this card lists has' : `${passed.size} reviews this card lists have`} passed since it was made`
-        const live = !!p.expires && p.expires > Date.now()
-        const note = el('p', 'small muted', live ? `${lead}; the engine is checking the push again, so this list is about to change.` : `${lead}, but this card has expired, so nothing checks it again by itself: press Push in the Reviews section above to check the push again.`)
-        note.setAttribute('role', 'status')
-        box.append(note)
-      }
-      box.append(el('p', 'small warn', 'Missing:'))
+    const passed = new Set(value.passedSince ?? [])
+    const blocked = new Set((value.blockedSince ?? []).filter(m => !passed.has(m)))
+    const done = p.missing.filter(m => passed.has(m))
+    const failed = p.missing.filter(m => blocked.has(m))
+    const still = p.missing.filter(m => !passed.has(m) && !blocked.has(m))
+    const expired = !!p.expires && p.expires <= Date.now()
+    if (done.length && !expired) {
+      const note = el('p', 'small muted', `${done.length === 1 ? 'A review this card lists has' : `${done.length} reviews this card lists have`} passed since it was made; the engine is checking the push again, so these lists are about to change.`)
+      note.setAttribute('role', 'status')
+      box.append(note)
+    }
+    const listed = (heading: string, tone: string, items: string[]) => {
+      if (!items.length) return
+      box.append(el('p', `small ${tone}`, heading))
       const list = el('ul', 'small push-missing')
-      for (const m of p.missing) {
-        const li = el('li', '', text(m))
-        if (passed.has(m)) li.append(' ', el('span', 'tag ok', 'passed since'))
-        list.append(li)
-      }
+      for (const m of items) list.append(el('li', '', text(m)))
       box.append(list)
     }
-    if (p.expires && p.expires <= Date.now()) {
-      box.append(el('p', 'small warn', `This card expired at ${when(p.expires)}, so Allow and Deny no longer apply to it. Press Push in the Reviews section above to check the push again.`))
+    listed('Missing:', 'warn', still)
+    listed('Passed since this card was made:', 'muted', done)
+    listed('Blocked since this card was made:', 'bad', failed)
+    if (failed.length) box.append(el('p', 'small muted', `${failed.length === 1 ? 'Its findings are' : 'Their findings are'} in the Reviews section above.`))
+    if (p.expires && expired) {
+      const recheck = done.length ? ', and nothing checks it again by itself' : ''
+      box.append(el('p', 'small warn', `This card expired at ${when(p.expires)}, so Allow and Deny no longer apply to it${recheck}. Press Push in the Reviews section above to check the push again.`))
       if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))
       return box
     }

@@ -154,9 +154,17 @@ class SfTabs extends HTMLElement {
     if (panel) tab.setAttribute('aria-controls', panel)
     tab.tabIndex = on ? 0 : -1
     tab.draggable = t.closable
-    const title = [t.label, t.need ? 'Needs you: a card is waiting for your answer' : '', t.title ?? ''].filter(Boolean).join('\n')
+    const title = [t.description ? `${t.label} (${t.description})` : t.label, t.need ? 'Needs you: a card is waiting for your answer' : '', t.title ?? ''].filter(Boolean).join('\n')
     if (title) tab.title = title
-    tab.append(el('span', 'caption', t.label))
+    const caption = el('span', 'caption')
+    caption.append(el('span', 'name', t.label))
+    if (t.description) {
+      tab.setAttribute('aria-label', `${t.label} ${t.description}`)
+      const short = t.short && t.short !== t.description ? t.short : ''
+      caption.append(el('span', `description${short ? ' description-full' : ''}`, t.description))
+      if (short) caption.append(el('span', 'description description-short', short))
+    }
+    tab.append(caption)
     const notes = [t.need ? 'needs you' : '', t.closable ? 'Delete closes it; Control Shift Page Up or Page Down moves it' : ''].filter(Boolean)
     if (notes.length) tab.setAttribute('aria-description', notes.join('; '))
     if (t.closable) {

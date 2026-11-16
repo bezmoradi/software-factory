@@ -132,11 +132,12 @@ type RoleReview struct {
 	ClaudeCode   string
 	Models       []string
 
-	Progress *ReviewProgress
-	Given    *RunGiven
-	started  time.Time
-	approved string
-	team     string
+	Progress  *ReviewProgress
+	Given     *RunGiven
+	Unchecked bool
+	started   time.Time
+	approved  string
+	team      string
 }
 
 type ReviewView struct {

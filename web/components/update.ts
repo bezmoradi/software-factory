@@ -1,4 +1,5 @@
 import { button, el } from '../lib/dom.ts'
+import { icon } from './icon.ts'
 import { commandBlock } from './login.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -40,7 +41,7 @@ function releaseOf(v: unknown): Release | null {
   const r = v as Record<string, unknown>
   if (typeof r.version !== 'string' || !VERSION.test(r.version)) return null
   const digest = typeof r.digest === 'string' && DIGEST.test(r.digest) ? r.digest : ''
-  const problem = r.digestProblem === 'missing' || r.digestProblem === 'malformed' ? r.digestProblem : ''
+  const problem = r.digestProblem === 'missing' || r.digestProblem === 'malformed' || r.digestProblem === 'several' ? r.digestProblem : ''
   return { version: r.version, digest, digestProblem: digest ? '' : problem || 'missing' }
 }
 
@@ -121,19 +122,40 @@ function code(text: string): HTMLElement {
   return el('code', '', text)
 }
 
+function oneLine(command: string, name: string): HTMLElement {
+  const block = commandBlock(command)
+  block.classList.add('update-oneline')
+  const text = block.querySelector('code')
+  if (!text) return block
+  const scroll = el('div', 'update-scroll')
+  scroll.tabIndex = 0
+  scroll.setAttribute('role', 'region')
+  scroll.setAttribute('aria-label', name)
+  text.replaceWith(scroll)
+  scroll.append(text)
+  return block
+}
+
 function releaseSteps(r: Release): HTMLElement {
   const box = el('section', 'update-steps')
   const tag = `v${r.version}`
-  box.append(el('h3', 'label', 'If you installed a release'))
+  box.append(el('h3', 'update-subhead', 'If you installed a release'))
   if (r.digest) {
     box.append(
-      para('small', 'In a terminal, go to the folder that holds ', code('software-factory-socket.yaml'), ', the one you installed from, and run this command there, on one line. On Linux, first run ', code('export SF_DOCKER_GID=$(stat -c %g /var/run/docker.sock)'), '. It needs Docker Compose 5.7.1 or later and cosign.'),
+      para('small', 'In a terminal, go to the folder that holds ', code('software-factory-socket.yaml'), ', the one you installed from. It needs Docker Compose 5.7.1 or later and cosign.'),
+      para('small', 'On Linux, first set the group of Docker’s socket:'),
+      oneLine('export SF_DOCKER_GID=$(stat -c %g /var/run/docker.sock)', 'The Linux command'),
+      para('small', 'Then run this command there, on one line:'),
       commandBlock(installCommand(r.version, r.digest)),
       para('small muted', code('cosign verify'), ' checks that the Compose file was signed by the release workflow for the tag ', code(tag), ', and the rest runs only if it was. The version comes from the repository’s tags, which only the owner can create, and the digest from the release’s notes.'),
     )
     return box
   }
-  const why = r.digestProblem === 'malformed' ? 'The release’s notes name a Compose digest the engine doesn’t accept as one (a sha256: digest of 64 lowercase hex digits), so the page doesn’t fill in the command.' : 'The release’s notes carry no Compose digest, so the page can’t fill in the command.'
+  const why = r.digestProblem === 'several'
+    ? 'The release’s notes name more than one Compose digest, so the page can’t tell which one to use and doesn’t fill in the command.'
+    : r.digestProblem === 'malformed'
+      ? 'The release’s notes name a Compose digest the engine doesn’t accept as one (a sha256: digest of 64 lowercase hex digits), so the page doesn’t fill in the command.'
+      : 'The release’s notes carry no Compose digest, so the page can’t fill in the command.'
   box.append(
     para('small warn', why),
     para('small', 'Take the install command from the ', link(`${REPO}/blob/${tag}/README.md#run-it-with-docker`, `README at ${tag}`), ', with ', code(r.version), ' as the version and the digest of ', code('ghcr.io/bezmoradi/software-factory-compose'), ' from the ', link(`${REPO}/releases/tag/${tag}`, 'release’s notes'), ', and run it in the folder that holds ', code('software-factory-socket.yaml'), '.'),
@@ -150,7 +172,7 @@ function sourceSteps(development: boolean): HTMLElement {
   up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up'))
   steps.append(pull, up)
   box.append(
-    el('h3', 'label', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
+    el('h3', 'update-subhead', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
     para('small', 'In your clone of the repository. Stop ', code('make dev'), ' first if it runs, and read what the pull brings before you build it.'),
     steps,
   )
@@ -165,7 +187,7 @@ function keepsAndStops(): HTMLElement {
     'Projects, git host tokens, logins, reviews, settings and the audit stay in their volumes, since the project name stays software-factory.',
     'The engine installs the agent versions the new release pins when it starts. The open page reloads itself and signs in again once the new engine is up.',
   ]) list.append(el('li', '', text))
-  box.append(el('h3', 'label', 'What an update keeps and stops'), list)
+  box.append(el('h3', 'update-subhead', 'What an update keeps and stops'), list)
   return box
 }
 
@@ -184,8 +206,14 @@ export function openUpdate(): void {
     const back = opener?.isConnected ? opener : document.getElementById('palette-open')
     back?.focus()
   }
-  const heading = el('h2', 'label', title)
+  const heading = el('h2', 'update-title', title)
   heading.tabIndex = -1
+  const cross = button('', 'ghost icon-button update-x', close)
+  cross.setAttribute('aria-label', 'Close')
+  cross.title = 'Close'
+  cross.append(icon('close'))
+  const head = el('div', 'update-head')
+  head.append(heading, cross)
   const said = el('p', 'small warn')
   said.setAttribute('role', 'status')
   const later = button('Remind me later', 'ghost small', () => {
@@ -202,7 +230,7 @@ export function openUpdate(): void {
   const tag = `v${r.version}`
   const steps = development ? [sourceSteps(true), releaseSteps(r)] : [releaseSteps(r), sourceSteps(false)]
   d.append(
-    heading,
+    head,
     para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
     para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
     ...steps,
@@ -242,7 +270,10 @@ class SfUpdate extends HTMLElement {
       this.hidden = false
       return
     }
-    const b = button(text, 'primary small update-open', () => openUpdate())
+    const b = button('', 'primary small update-open', () => openUpdate())
+    const badge = el('span', 'update-badge')
+    badge.setAttribute('aria-hidden', 'true')
+    b.append(icon('download', 'icon update-icon'), el('span', 'update-open-text', text), badge)
     b.setAttribute('aria-haspopup', 'dialog')
     b.title = `Software Factory ${r.version} is out. Shows how to update; nothing updates by itself.`
     this.replaceChildren(b)
@@ -252,19 +283,27 @@ class SfUpdate extends HTMLElement {
 
 class SfUpdateSetting extends HTMLElement {
   #box = el('input')
+  #label = el('label', 'notify-pref small')
   #note = el('p', 'small muted')
+  #off = el('span', 'update-off', '(off)')
   #said = el('p', 'small warn')
+  #busy = false
 
   connectedCallback() {
     painted.add(this)
     if (!this.childElementCount) {
       this.#box.type = 'checkbox'
+      this.#note.id = 'update-setting-note'
+      this.#box.setAttribute('aria-describedby', this.#note.id)
+      this.#box.addEventListener('click', e => {
+        if (this.#busy || this.#box.getAttribute('aria-disabled') === 'true') e.preventDefault()
+      })
       this.#box.addEventListener('change', () => void this.#change())
       this.#said.setAttribute('role', 'status')
-      const label = el('label', 'notify-pref small')
-      label.append(this.#box, el('span', '', 'Check for updates'))
+      this.#off.setAttribute('aria-hidden', 'true')
+      this.#label.append(this.#box, el('span', '', 'Check for updates'), this.#off)
       const set = el('fieldset', 'themes')
-      set.append(el('legend', 'label', 'Updates'), label, this.#note, this.#said)
+      set.append(el('legend', 'label', 'Updates'), this.#label, this.#note, this.#said)
       this.append(set)
     }
     this.paint()
@@ -276,20 +315,28 @@ class SfUpdateSetting extends HTMLElement {
 
   async #change() {
     const on = this.#box.checked
-    this.#box.disabled = true
+    this.#busy = true
+    this.#box.setAttribute('aria-busy', 'true')
     const a = await call({ check: on })
+    this.#busy = false
+    this.#box.removeAttribute('aria-busy')
     this.#said.textContent = a.ok ? '' : a.message
     this.paint()
   }
 
   paint() {
     const v = view
-    this.#box.checked = !!v?.check
-    this.#box.disabled = !v || v.forced || v.unreadable
+    const locked = !v || v.forced || v.unreadable
+    if (!this.#busy) this.#box.checked = !!v?.check
+    if (locked) this.#box.setAttribute('aria-disabled', 'true')
+    else this.#box.removeAttribute('aria-disabled')
+    this.#label.classList.toggle('is-off', locked)
+    this.#off.hidden = !v || !locked
+    this.#note.classList.toggle('muted', !locked)
     if (!v) this.#note.textContent = 'Shown once the page is connected to the engine.'
-    else if (v.forced) this.#note.textContent = 'Off: the engine was started with SF_NO_UPDATE_CHECK set.'
+    else if (v.forced) this.#note.textContent = 'Off: the engine was started with SF_NO_UPDATE_CHECK set, so this can’t be turned on here.'
     else if (v.unreadable) this.#note.textContent = 'Off: the engine can’t read its update setting (update.json in its state).'
-    else this.#note.textContent = 'At start and once a day the engine asks api.github.com for the newest release, from your computer, with no token or cookie. A newer one shows Update in the top bar.'
+    else this.#note.textContent = 'Once a day the engine asks api.github.com for the newest release, from your computer, with no token or cookie. A newer one shows Update in the top bar.'
   }
 }
 

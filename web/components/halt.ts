@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
 import { button, el, visible } from '../lib/dom.ts'
+import { icon } from './icon.ts'
 
 export interface HaltView {
   mode: '' | 'paused' | 'stopped'
@@ -88,6 +89,16 @@ async function send(body: Record<string, unknown>) {
 
 const awayHere = () => !!session && view.away.includes(session.sid)
 
+function control(name: string, shape: string, cls: string, tip: string, onClick?: () => void, shown = ''): HTMLButtonElement {
+  const b = button('', cls, onClick)
+  const words = el('span', 'halt-words')
+  if (shown && name.startsWith(shown)) words.append(el('span', 'halt-keep', shown), el('span', 'halt-text', name.slice(shown.length)))
+  else words.append(el('span', 'halt-text', name))
+  b.append(icon(shape, 'icon halt-icon'), words)
+  b.title = `${name}. ${tip}`
+  return b
+}
+
 class SfHalt extends HTMLElement {
   connectedCallback() {
     shown.add(this)
@@ -100,10 +111,9 @@ class SfHalt extends HTMLElement {
 
   paint() {
     const parts: Node[] = []
-    const away = button(view.awayAll || awayHere() ? 'Away: on' : 'Away', `ghost small${view.awayAll || awayHere() ? ' warn' : ''}`)
+    const away = control(view.awayAll || awayHere() ? 'Away: on' : 'Away', 'moon', `ghost small${view.awayAll || awayHere() ? ' warn' : ''}`, 'Away mode denies each new permission card with a note to the agent, so a session doesn’t wait for you.')
     away.setAttribute('popovertarget', 'halt-away')
     away.setAttribute('aria-haspopup', 'menu')
-    away.title = 'Away mode denies each new permission card with a note to the agent, so a session doesn’t wait for you.'
     const menu = el('div', 'prefs menu surface halt-menu')
     menu.id = 'halt-away'
     menu.setAttribute('popover', '')
@@ -124,19 +134,17 @@ class SfHalt extends HTMLElement {
     menu.append(el('p', 'small muted', `Each new permission card is denied with the note “${AWAY_NOTE}”. Issue, pull request and push cards still wait for you.`))
     parts.push(away, menu)
     if (!view.mode) {
-      const pause = button('Pause all', 'ghost small', () => void send({ op: 'pause' }))
-      pause.title = 'Holds new turns and automatic reviews and pushes; running sessions keep running.'
-      const stop = button(armed ? 'Confirm stop everything' : 'Stop everything', 'small danger', () => {
+      const pause = control('Pause all', 'pause', 'ghost small', 'Holds new turns and automatic reviews and pushes; running sessions keep running.', () => void send({ op: 'pause' }))
+      const stop = control(armed ? 'Confirm stop everything' : 'Stop everything', 'stop', 'small danger', 'Interrupts every running turn, stops every session, holds every push and refuses new starts until Release.', () => {
         if (!armed) {
           armed = true
           return this.paint()
         }
         armed = false
         void send({ op: 'stop' })
-      })
-      stop.title = 'Interrupts every running turn, stops every session, holds every push and refuses new starts until Release.'
+      }, armed ? 'Confirm' : '')
       parts.push(pause, stop)
-      if (armed) parts.push(button('Cancel', 'ghost small', () => {
+      if (armed) parts.push(control('Cancel', 'close', 'ghost small', 'Keeps everything running.', () => {
         armed = false
         this.paint()
       }))

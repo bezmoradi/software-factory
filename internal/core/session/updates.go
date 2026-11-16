@@ -38,6 +38,7 @@ const (
 
 	DigestMissing   = "missing"
 	DigestMalformed = "malformed"
+	DigestSeveral   = "several"
 )
 
 var (
@@ -98,7 +99,7 @@ func CleanUpdateLast(l UpdateLast) (UpdateLast, bool) {
 	}
 	switch {
 	case l.Digest != "" && composeDigestPattern.MatchString(l.Digest) && l.Problem == "":
-	case l.Digest == "" && (l.Problem == DigestMissing || l.Problem == DigestMalformed):
+	case l.Digest == "" && (l.Problem == DigestMissing || l.Problem == DigestMalformed || l.Problem == DigestSeveral):
 	default:
 		return UpdateLast{}, false
 	}
@@ -205,15 +206,18 @@ func ComposeDigest(notes string) (string, string) {
 	if len(seen) == 0 {
 		return "", DigestMissing
 	}
-	if len(seen) > 1 {
-		return "", DigestMalformed
-	}
 	for d := range seen {
-		if composeDigestPattern.MatchString(d) {
-			return d, ""
+		if !composeDigestPattern.MatchString(d) {
+			return "", DigestMalformed
 		}
 	}
-	return "", DigestMalformed
+	if len(seen) > 1 {
+		return "", DigestSeveral
+	}
+	for d := range seen {
+		return d, ""
+	}
+	return "", DigestMissing
 }
 
 func releaseKind(err error) string {

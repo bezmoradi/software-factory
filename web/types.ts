@@ -400,6 +400,7 @@ export interface PushPanelView {
   flagsRead?: boolean
   checks?: AgentCheck[]
   passedSince?: string[]
+  blockedSince?: string[]
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -412,6 +413,7 @@ export interface ReviewRole {
   verdict: string
   message: string
   hasFull?: boolean
+  unchecked?: boolean
   reason: string
   costUsd?: number
   why?: string
@@ -1107,6 +1109,8 @@ export interface CheckStatus {
 export interface Tab {
   id: string
   label: string
+  description?: string
+  short?: string
   title?: string
   closable: boolean
   need: boolean

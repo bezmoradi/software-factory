@@ -181,6 +181,13 @@ class SfReviews extends HTMLElement {
       described.push(p.id)
       parts.push(p)
     }
+    const unchecked = r?.roles.filter(x => x.unchecked).length ?? 0
+    if (unchecked) {
+      const p = el('p', 'small warn', `${unchecked === 1 ? "One pass, marked “not rechecked”, hasn't" : `${unchecked} passes, marked “not rechecked”, haven't`} been checked since the engine restarted against the current approved texts and team rules, which can set a pass aside. The next approval recheck does it.`)
+      p.id = 'reviews-unchecked'
+      described.push(p.id)
+      parts.push(p)
+    }
     const absent = (value.gate ?? []).filter(g => g.state === 'not-installed').map(g => text(g.type))
     const absentNote = absent.length ? `No plugin installed in the reviewer image provides ${absent.join(' or ')}, so the engine doesn't start ${absent.length === 1 ? 'that review' : 'those reviews'} and the push stays held.` : ''
     if (absentNote && !text(note).includes(absentNote)) {
@@ -332,7 +339,13 @@ class SfReviews extends HTMLElement {
     const overridden = role.state === 'block' && !!role.override
     const warned = !!role.advisory && role.state === 'block'
     const [word, tone] = overridden ? ['overridden', 'warn'] : warned ? ['warning', 'warn'] : STATES[role.state] ?? [role.state, 'warn']
-    row.append(el('span', '', runName(role)), el('span', 'spacer'), el('span', `tag${tone ? ` ${tone}` : ''}`, word))
+    row.append(el('span', '', runName(role)), el('span', 'spacer'))
+    if (role.unchecked && role.state === 'pass') {
+      const mark = el('span', 'tag warn', 'not rechecked')
+      mark.title = 'Not checked against the current approved texts and team rules since the engine restarted'
+      row.append(mark)
+    }
+    row.append(el('span', `tag${tone ? ` ${tone}` : ''}`, word))
     const cost = money(role.costUsd)
     const round = role.round ? `round ${role.round}${role.limit ? ` of ${role.limit}` : ''} on this branch` : ''
     li.append(row, el('div', 'small muted', [text(role.agent), role.why ? text(role.why) : '', round, cost ? `≈ ${cost} (estimate)` : ''].filter(Boolean).join(' · ')))

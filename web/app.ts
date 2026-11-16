@@ -145,6 +145,41 @@ const ACTIVE = ['pending', 'running', 'waiting']
 const RESET_NOTE = 'The session restarted, so what came before this point is shown only as far as the agent kept it.'
 
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+
+const topBar = document.querySelector<HTMLElement>('body > .bar')
+const BAR_STEPS = ['fit-brand', 'fit-compact', 'fit-tight']
+let barFitQueued = false
+
+function barFits(bar: HTMLElement): boolean {
+  const style = getComputedStyle(bar)
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  let need = 0
+  let shown = 0
+  for (const c of bar.children) {
+    if (!c.getClientRects().length) continue
+    shown++
+    if (c.id === 'state') need += (document.body.classList.contains('live') ? 8 : 6) * rem
+    else if (c.id !== 'title' && !c.classList.contains('spacer')) need += c.getBoundingClientRect().width
+  }
+  need += (parseFloat(style.columnGap) || 0) * Math.max(0, shown - 1)
+  return need <= bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+}
+
+function fitBar() {
+  barFitQueued = false
+  if (!topBar) return
+  topBar.classList.remove(...BAR_STEPS)
+  for (const step of BAR_STEPS) {
+    if (barFits(topBar)) return
+    topBar.classList.add(step)
+  }
+}
+
+function queueBarFit() {
+  if (barFitQueued) return
+  barFitQueued = true
+  requestAnimationFrame(fitBar)
+}
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
 const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
 const reviewModels = el('sf-review-models')
@@ -669,7 +704,10 @@ function paint() {
   byId('size-pick').hidden = !picking
   if (picking) paintTeamPicks(s)
   byId('composer').classList.toggle('picking', picking)
-  document.body.classList.toggle('live', !!s)
+  if (document.body.classList.contains('live') !== !!s) {
+    document.body.classList.toggle('live', !!s)
+    queueBarFit()
+  }
   for (const x of list) x.view.away = x !== s
   const needs = list.some(x => waitingOf(x).length)
   const waitingCount = list.filter(x => waitingOf(x).length).length
@@ -686,7 +724,8 @@ function paint() {
         return { id: k, label: `Changes: ${c ? visible(label(c.info)) : 'session'}`, title: c?.info.cwd || '', closable: true, need: false }
       }
       const x = sessions.get(k.slice(2))
-      return { id: k, label: x ? visible(label(x.info)) : 'Session', title: x?.info.cwd || '', closable: true, need: !!x && !!waitingOf(x).length }
+      const twin = x ? sessionTwin(x) : { description: '', short: '' }
+      return { id: k, label: x ? visible(label(x.info)) : 'Session', description: visible(twin.description), short: visible(twin.short), title: x?.info.cwd || '', closable: true, need: !!x && !!waitingOf(x).length }
     }),
     active: current.key,
   }
@@ -1004,9 +1043,9 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const gate = state.connected && s.gate?.head ? s.gate : null
   pushOutcome(s)
   const review = i.review
-  const passed = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles.filter(r => r.state === 'pass').map(r => r.agent) : []
-  const passedSince = push ? push.missing.filter(m => passed.some(agent => m.startsWith(`a review by ${agent} `))) : []
-  return { passedSince, push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
+  const ran = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles : []
+  const since = (verdict: string) => push ? push.missing.filter(m => ran.some(r => r.state === verdict && m.startsWith(`a review by ${r.agent} `))) : []
+  return { passedSince: since('pass'), blockedSince: since('block'), push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {
@@ -1449,6 +1488,28 @@ const FILE_ERRORS: Record<string, string> = {
   missing: "This file isn't there anymore.",
   link: "This path goes through a symbolic link, which the page doesn't follow.",
   commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
+}
+
+function twinRole(i: SessionInfo): string {
+  return i.lineage?.handedTo ? 'earlier' : i.lineage?.earlier?.length ? 'took over' : ''
+}
+
+function twinWords(i: SessionInfo): string {
+  return [i.agent ? agentName(i.agent) : '', twinRole(i)].filter(Boolean).join(', ')
+}
+
+function sessionTwin(x: Session): { description: string; short: string } {
+  const name = label(x.info)
+  const twins = openTabs.flatMap(k => {
+    const y = k.startsWith('s/') && k !== `s/${x.sid}` ? sessions.get(k.slice(2)) : undefined
+    return y && label(y.info) === name ? [y] : []
+  })
+  if (!twins.length) return { description: '', short: '' }
+  const words = twinWords(x.info)
+  const sid = x.sid.slice(0, 8)
+  if (twins.some(y => twinWords(y.info) === words)) return { description: [words, sid].filter(Boolean).join(', '), short: sid }
+  const role = twinRole(x.info)
+  return { description: words, short: role && twins.every(y => twinRole(y.info) !== role) ? role : words }
 }
 
 function fileLabel(key: string): string {
@@ -2691,6 +2752,11 @@ const covered = new ResizeObserver(coverEnd)
 covered.observe(strip)
 covered.observe(strip.parentElement!)
 covered.observe(scroller)
+if (topBar) {
+  const watch = new ResizeObserver(queueBarFit)
+  for (const node of [topBar, byId('halt'), byId('update'), byId('palette-open')]) watch.observe(node)
+  fitBar()
+}
 byId('jump-start').addEventListener('click', () => jump('start'))
 byId('jump-latest').addEventListener('click', () => jump('latest'))
 document.addEventListener('keydown', e => {

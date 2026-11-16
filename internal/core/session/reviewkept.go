@@ -18,7 +18,6 @@ const (
 	MaxGivenFiles  = maxGivenFiles + 1
 	MaxGivenFile   = 512
 	MaxGivenWhy    = 1000
-	notRechecked   = "Not rechecked since the engine restarted against the current approved texts and team rules, which can set this pass aside; the next approval recheck does."
 )
 
 type KeptGiven struct {
@@ -83,7 +82,7 @@ func (r *Reviews) uncheckedLocked(sid string, v ReviewView) ReviewView {
 	}
 	for i, role := range v.Roles {
 		if role.State == review.Pass && !role.Advisory {
-			v.Roles[i].Reason = strings.TrimSpace(role.Reason + " " + notRechecked)
+			v.Roles[i].Unchecked = true
 		}
 	}
 	return v
