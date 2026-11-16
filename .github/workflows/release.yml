@@ -161,6 +161,7 @@ jobs:
                 exit 1
                 ;;
             esac
+            docker image rm "$IMAGE@$IMAGE_DIGEST" >/dev/null
           done
       - name: Check the Compose file with the image's digest
         env:
