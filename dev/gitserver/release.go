@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +22,7 @@ const (
 )
 
 var (
-	releaseNotesModes  = []string{"digest", "no-digest", "bad-digest", "two-digests", "no-release", "pre-release"}
+	releaseNotesModes  = []string{"published", "no-release", "pre-release"}
 	releaseAnswerModes = []string{"ok", "malformed", "slow", "refused"}
 	errReleaseUsage    = errors.New("usage: sf-gitserver release <tag> [" + strings.Join(releaseNotesModes, "|") + "] | release off | release-answer " + strings.Join(releaseAnswerModes, "|") + " | release-seen")
 )
@@ -36,7 +34,7 @@ type releaseState struct {
 }
 
 func readReleaseState(root string) releaseState {
-	s := releaseState{Notes: "digest", Answer: "ok"}
+	s := releaseState{Notes: "published", Answer: "ok"}
 	data, err := os.ReadFile(filepath.Join(root, releaseStateFile))
 	if err == nil {
 		_ = json.Unmarshal(data, &s)
@@ -61,7 +59,7 @@ func releaseCommand(root string, args []string) error {
 		if args[1] == "" || strings.ContainsAny(args[1], "/ \t\n") || len(args[1]) > 60 {
 			return errors.New(args[1] + " isn't a tag name this fake serves")
 		}
-		s.Tag, s.Notes = args[1], "digest"
+		s.Tag, s.Notes = args[1], "published"
 		if len(args) == 3 {
 			if !slices.Contains(releaseNotesModes, args[2]) {
 				return errReleaseUsage
@@ -90,23 +88,8 @@ func releaseCommand(root string, args []string) error {
 	return nil
 }
 
-func fakeDigest(seed string) string {
-	sum := sha256.Sum256([]byte(seed))
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func releaseNotes(tag, mode string) string {
-	compose := "ghcr.io/bezmoradi/software-factory-compose@" + fakeDigest("compose "+tag)
-	image := "ghcr.io/bezmoradi/software-factory@" + fakeDigest("image "+tag)
-	switch mode {
-	case "no-digest":
-		return "Software Factory " + tag + ".\n\nThe digests are on their way.\n"
-	case "bad-digest":
-		compose = "ghcr.io/bezmoradi/software-factory-compose@sha256:ABC123"
-	case "two-digests":
-		return "- Compose file: `" + compose + "`.\n- Also: `ghcr.io/bezmoradi/software-factory-compose@" + fakeDigest("other "+tag) + "`.\n"
-	}
-	return "Software Factory " + tag + ".\n\n- Image: `" + image + "`.\n- Compose file: `" + compose + "`.\n\n```bash\ndocker compose -p software-factory -f oci://" + compose + " -f software-factory-socket.yaml up -d --wait --remove-orphans -y\n```\n"
+func releaseNotes(tag string) string {
+	return "Software Factory " + tag + ".\n\n```bash\ncurl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh\n```\n"
 }
 
 type releaseFake struct {
@@ -179,7 +162,7 @@ func (f releaseFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			answerJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
-		answerJSON(w, http.StatusOK, map[string]any{"tag_name": tag, "name": "Software Factory " + tag, "draft": false, "prerelease": s.Notes == "pre-release", "body": releaseNotes(tag, s.Notes)})
+		answerJSON(w, http.StatusOK, map[string]any{"tag_name": tag, "name": "Software Factory " + tag, "draft": false, "prerelease": s.Notes == "pre-release", "body": releaseNotes(tag)})
 	default:
 		answerJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}

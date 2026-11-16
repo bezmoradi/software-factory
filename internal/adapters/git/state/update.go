@@ -24,8 +24,6 @@ type updateLastJSON struct {
 	At      time.Time `json:"at"`
 	Kind    string    `json:"kind"`
 	Release string    `json:"release,omitempty"`
-	Digest  string    `json:"digest,omitempty"`
-	Problem string    `json:"problem,omitempty"`
 }
 
 type updateFileJSON struct {
@@ -66,7 +64,7 @@ func (u UpdatePrefs) Load() (session.UpdateSettings, error) {
 		out.Later = later
 	}
 	if f.Last != nil {
-		last, ok := session.CleanUpdateLast(session.UpdateLast{At: f.Last.At, Kind: f.Last.Kind, Version: f.Last.Release, Digest: f.Last.Digest, Problem: f.Last.Problem})
+		last, ok := session.CleanUpdateLast(session.UpdateLast{At: f.Last.At, Kind: f.Last.Kind, Version: f.Last.Release})
 		if ok {
 			out.Last = last
 		}
@@ -79,7 +77,7 @@ func (u UpdatePrefs) Save(s session.UpdateSettings) error {
 	defer u.lock()()
 	f := updateFileJSON{Version: 1, Check: s.Check, Later: s.Later, Owner: owner}
 	if !s.Last.At.IsZero() {
-		f.Last = &updateLastJSON{At: s.Last.At.UTC(), Kind: s.Last.Kind, Release: s.Last.Version, Digest: s.Last.Digest, Problem: s.Last.Problem}
+		f.Last = &updateLastJSON{At: s.Last.At.UTC(), Kind: s.Last.Kind, Release: s.Last.Version}
 	}
 	return write(u.Dir, updateFile, f)
 }

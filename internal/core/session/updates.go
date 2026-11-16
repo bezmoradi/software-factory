@@ -19,8 +19,6 @@ const (
 	updateCheckFor     = time.Minute
 	updateTries        = 3
 	maxReleaseTags     = 500
-	maxNotesScanned    = 64 << 10
-	maxComposeRefs     = 20
 
 	UpdateNotYet     = "not-yet"
 	UpdateOff        = "off"
@@ -35,18 +33,12 @@ const (
 	UpdateRefused    = "refused"
 	UpdateMalformed  = "malformed"
 	UpdateUntrusted  = "untrusted"
-
-	DigestMissing   = "missing"
-	DigestMalformed = "malformed"
-	DigestSeveral   = "several"
 )
 
 var (
-	releaseTagPattern    = regexp.MustCompile(`^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$`)
-	composeRefPattern    = regexp.MustCompile(`ghcr\.io/bezmoradi/software-factory-compose@([A-Za-z0-9:]*)`)
-	composeDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	failureKinds         = []string{UpdateOffline, UpdateTimeout, UpdateRefused, UpdateMalformed, UpdateUntrusted}
-	checkedKinds         = []string{UpdateNewer, UpdateCurrent, UpdateNoRelease, UpdateOwnVersion, UpdateOffline, UpdateTimeout, UpdateRefused, UpdateMalformed, UpdateUntrusted}
+	releaseTagPattern = regexp.MustCompile(`^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$`)
+	failureKinds      = []string{UpdateOffline, UpdateTimeout, UpdateRefused, UpdateMalformed, UpdateUntrusted}
+	checkedKinds      = []string{UpdateNewer, UpdateCurrent, UpdateNoRelease, UpdateOwnVersion, UpdateOffline, UpdateTimeout, UpdateRefused, UpdateMalformed, UpdateUntrusted}
 
 	ErrUpdateForced     = errors.New("SF_NO_UPDATE_CHECK=1 turns the update check off for this engine, so the page can't change it")
 	ErrUpdateUnreadable = errors.New("the engine can't read its update settings (update.json), so it doesn't change them")
@@ -62,7 +54,6 @@ func (f ReleaseFailure) Error() string { return "the release check failed: " + f
 type ReleaseNotes struct {
 	Found      bool
 	Tag        string
-	Body       string
 	PreRelease bool
 	Draft      bool
 }
@@ -76,8 +67,6 @@ type UpdateLast struct {
 	At      time.Time
 	Kind    string
 	Version string
-	Digest  string
-	Problem string
 }
 
 type UpdateSettings struct {
@@ -91,16 +80,10 @@ func CleanUpdateLast(l UpdateLast) (UpdateLast, bool) {
 		return UpdateLast{}, false
 	}
 	if l.Kind != UpdateNewer {
-		return UpdateLast{At: l.At, Kind: l.Kind}, l.Version == "" && l.Digest == "" && l.Problem == ""
+		return UpdateLast{At: l.At, Kind: l.Kind}, l.Version == ""
 	}
 	version, ok := ParseReleaseVersion(l.Version)
 	if !ok || version != l.Version {
-		return UpdateLast{}, false
-	}
-	switch {
-	case l.Digest != "" && composeDigestPattern.MatchString(l.Digest) && l.Problem == "":
-	case l.Digest == "" && (l.Problem == DigestMissing || l.Problem == DigestMalformed || l.Problem == DigestSeveral):
-	default:
 		return UpdateLast{}, false
 	}
 	return l, true
@@ -112,16 +95,14 @@ type UpdateStore interface {
 }
 
 type UpdateView struct {
-	Running       string
-	Check         bool
-	Forced        bool
-	Unreadable    bool
-	Development   bool
-	Result        string
-	Checked       time.Time
-	Version       string
-	Digest        string
-	DigestProblem string
+	Running     string
+	Check       bool
+	Forced      bool
+	Unreadable  bool
+	Development bool
+	Result      string
+	Checked     time.Time
+	Version     string
 }
 
 type UpdatesPage interface {
@@ -142,12 +123,6 @@ type UpdatesConfig struct {
 	Logger      shared.Logger
 }
 
-type foundRelease struct {
-	version string
-	digest  string
-	problem string
-}
-
 type Updates struct {
 	cfg     UpdatesConfig
 	mu      sync.Mutex
@@ -155,7 +130,7 @@ type Updates struct {
 	broken  bool
 	result  string
 	checked time.Time
-	found   foundRelease
+	found   string
 	wake    chan struct{}
 }
 
@@ -193,31 +168,6 @@ func ParseReleaseVersion(version string) (string, bool) {
 
 func compareReleases(a, b releaseVersion) int {
 	return slices.Compare(a[:], b[:])
-}
-
-func ComposeDigest(notes string) (string, string) {
-	if len(notes) > maxNotesScanned {
-		notes = notes[:maxNotesScanned]
-	}
-	seen := map[string]bool{}
-	for _, m := range composeRefPattern.FindAllStringSubmatch(notes, maxComposeRefs) {
-		seen[m[1]] = true
-	}
-	if len(seen) == 0 {
-		return "", DigestMissing
-	}
-	for d := range seen {
-		if !composeDigestPattern.MatchString(d) {
-			return "", DigestMalformed
-		}
-	}
-	if len(seen) > 1 {
-		return "", DigestSeveral
-	}
-	for d := range seen {
-		return d, ""
-	}
-	return "", DigestMissing
 }
 
 func releaseKind(err error) string {
@@ -264,7 +214,7 @@ func (u *Updates) adopt(l UpdateLast) {
 		return
 	}
 	u.result, u.checked = l.Kind, l.At
-	u.found = foundRelease{version: l.Version, digest: l.Digest, problem: l.Problem}
+	u.found = l.Version
 }
 
 func (u *Updates) firstWait() time.Duration {
@@ -345,7 +295,7 @@ func (u *Updates) check(ctx context.Context) {
 	saved := true
 	if !u.broken && u.cfg.Store != nil {
 		next := u.set
-		next.Last = UpdateLast{At: u.checked, Kind: kind, Version: found.version, Digest: found.digest, Problem: found.problem}
+		next.Last = UpdateLast{At: u.checked, Kind: kind, Version: found}
 		if u.cfg.Store.Save(next) == nil {
 			u.set = next
 		} else {
@@ -359,14 +309,14 @@ func (u *Updates) check(ctx context.Context) {
 	}
 }
 
-func (u *Updates) lookup(ctx context.Context) (foundRelease, string) {
+func (u *Updates) lookup(ctx context.Context) (string, string) {
 	own, ok := parseReleaseTag("v" + u.cfg.Version)
 	if !ok {
-		return foundRelease{}, UpdateOwnVersion
+		return "", UpdateOwnVersion
 	}
 	tags, err := u.cfg.Source.Tags(ctx)
 	if err != nil {
-		return foundRelease{}, releaseKind(err)
+		return "", releaseKind(err)
 	}
 	if len(tags) > maxReleaseTags {
 		tags = tags[:maxReleaseTags]
@@ -385,34 +335,33 @@ func (u *Updates) lookup(ctx context.Context) (foundRelease, string) {
 	}
 	if len(newer) == 0 {
 		if parsed == 0 {
-			return foundRelease{}, UpdateNoRelease
+			return "", UpdateNoRelease
 		}
-		return foundRelease{}, UpdateCurrent
+		return "", UpdateCurrent
 	}
 	slices.SortFunc(newer, func(a, b releaseVersion) int { return compareReleases(b, a) })
 	for _, v := range newer[:min(len(newer), updateTries)] {
 		notes, err := u.cfg.Source.Release(ctx, v.Tag())
 		if err != nil {
-			return foundRelease{}, releaseKind(err)
+			return "", releaseKind(err)
 		}
 		if !notes.Found || notes.Draft || notes.PreRelease || notes.Tag != v.Tag() {
 			continue
 		}
-		digest, problem := ComposeDigest(notes.Body)
-		return foundRelease{version: v.String(), digest: digest, problem: problem}, UpdateNewer
+		return v.String(), UpdateNewer
 	}
-	return foundRelease{}, UpdateNoRelease
+	return "", UpdateNoRelease
 }
 
 func (u *Updates) shownLocked() bool {
-	if u.cfg.Forced || u.broken || !u.set.Check || u.found.version == "" || !u.newerThanRunning(u.found.version) {
+	if u.cfg.Forced || u.broken || !u.set.Check || u.found == "" || !u.newerThanRunning(u.found) {
 		return false
 	}
 	if u.set.Later == "" {
 		return true
 	}
 	later, ok := parseReleaseTag("v" + u.set.Later)
-	found, _ := parseReleaseTag("v" + u.found.version)
+	found, _ := parseReleaseTag("v" + u.found)
 	return !ok || compareReleases(found, later) > 0
 }
 
@@ -434,7 +383,7 @@ func (u *Updates) View() UpdateView {
 	v := UpdateView{Running: u.cfg.Version, Check: u.set.Check && !u.cfg.Forced && !u.broken, Forced: u.cfg.Forced, Unreadable: u.broken,
 		Development: u.cfg.Development, Result: u.resultLocked(), Checked: u.checked}
 	if u.shownLocked() {
-		v.Version, v.Digest, v.DigestProblem = u.found.version, u.found.digest, u.found.problem
+		v.Version = u.found
 	}
 	return v
 }
@@ -462,7 +411,7 @@ func (u *Updates) SetCheck(on bool) error {
 	err := u.save(next)
 	stale := u.checked.IsZero() || u.cfg.Now().Sub(u.checked) >= UpdateRecheckAfter
 	if err == nil && on && stale {
-		u.result, u.found = UpdateNotYet, foundRelease{}
+		u.result, u.found = UpdateNotYet, ""
 	}
 	u.mu.Unlock()
 	if err != nil {
@@ -480,7 +429,7 @@ func (u *Updates) SetCheck(on bool) error {
 func (u *Updates) Later(version string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if !u.shownLocked() || version != u.found.version {
+	if !u.shownLocked() || version != u.found {
 		return ErrUpdateNotShown
 	}
 	next := u.set
