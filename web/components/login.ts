@@ -291,7 +291,7 @@ export async function claudeLogin(post: Post, closed?: () => void, known?: SignI
   await refresh()
 }
 
-function commandBlock(command: string): HTMLElement {
+export function commandBlock(command: string): HTMLElement {
   const block = el('div', 'setup-code')
   const copy = button('', 'setup-copy', () => {
     void navigator.clipboard.writeText(command).then(() => {

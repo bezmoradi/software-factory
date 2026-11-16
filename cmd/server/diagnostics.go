@@ -27,6 +27,7 @@ var (
 		{"PORT", portWithin(0)},
 		{"SF_PUBLIC_PORT", portWithin(1)},
 		{"SF_OSV", oneOf("off")},
+		{"SF_NO_UPDATE_CHECK", oneOf("1")},
 		{"SF_SANDBOX_CHECK", oneOf("on", "off")},
 		{"SF_UMASK", octalUmask},
 		{"SF_DEV_SKIP_SIGNIN", oneOf("1")},
@@ -35,7 +36,7 @@ var (
 		{"SF_DEV_AUDIT_ROTATE", numberWithin(1024, 32<<20)},
 	}
 	namedSettings = []string{"SF_PAGE_HOST", "SF_PAGE_NAME", "SF_COMPOSE_PROJECT", "SF_REVIEWS", "SF_REVIEWER_PROXY", "SF_HELPER", "SF_BOX_SUBNETS", "SF_EGRESS_PROXY", "SF_EGRESS_STATUS",
-		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_AGENTS_INSTALL", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER"}
+		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_AGENTS_INSTALL", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER", devUpdateAPI}
 	digits     = regexp.MustCompile(`^[0-9]{1,9}$`)
 	umaskDigit = regexp.MustCompile(`^0?[0-7]{3}$`)
 )
@@ -140,8 +141,10 @@ func versionsShown(helper session.Boxes) func(ctx context.Context) []session.Dia
 	}
 }
 
-func diagnosticsPage(parts engineParts, reg *session.Registry, logger shared.Logger) session.DiagnosticsPage {
-	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes), Settings: settingsShown(os.Getenv), Sessions: reg.Sessions}
+func diagnosticsPage(parts engineParts, reg *session.Registry, updates session.UpdatesPage, logger shared.Logger) session.DiagnosticsPage {
+	shown := settingsShown(os.Getenv)
+	settings := func() []session.DiagFact { return append(shown(), updateFacts(updates)...) }
+	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes), Settings: settings, Sessions: reg.Sessions}
 	if parts.repos != nil {
 		cfg.Projects = parts.repos.List
 	}

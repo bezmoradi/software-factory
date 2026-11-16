@@ -94,6 +94,7 @@ var stores = map[string]storeRow{
 	viewedFile:          {class: classKept, version: 1, label: "files marked viewed in the Changes view"},
 	dropsFile:           {class: classKept, version: 1, place: placeKeepOwn, label: "counts of dropped records"},
 	prefsFile:           {class: classKept, limit: maxPrefsFile, place: placeKeepOwn, label: "the page's preferences"},
+	updateFile:          {class: classKept, version: 1, place: placeKeepOwn, label: "whether the engine checks for updates, and the release put off with Remind me later"},
 	auditFile:           {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit"},
 	"audit.1.jsonl":     {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit's older part"},
 	tokensFile:          {class: classOut, label: "git host tokens are never exported"},
@@ -213,6 +214,8 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(Drops{Dir: d}.Load)
 	case prefsFile:
 		err = checkPrefs(d)
+	case updateFile:
+		err = loaded(NewUpdatePrefs(d).Load)
 	}
 	return err
 }

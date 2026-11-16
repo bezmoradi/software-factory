@@ -46,6 +46,7 @@ services:
       SF_UPLOADS: /uploads
       SF_UMASK: "0002"
       SF_OSV: ${SF_OSV:-}
+      SF_NO_UPDATE_CHECK: ${SF_NO_UPDATE_CHECK:-}
       SF_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-}
     ports:
       - target: 8080

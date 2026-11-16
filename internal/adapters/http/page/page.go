@@ -95,6 +95,8 @@ type Server struct {
 
 	viewed session.ViewedPage
 
+	updates session.UpdatesPage
+
 	inflight *oneAtATime
 	decodes  chan struct{}
 }
@@ -197,6 +199,7 @@ var pageRoutes = map[string]bool{
 	reviewReplyRoute: true,
 	diagnosticsRoute: true,
 	viewedRoute:      true,
+	updateRoute:      true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -332,6 +335,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == diagnosticsRoute {
 		s.diagnostics(w, r, body)
+		return
+	}
+	if r.URL.Path == updateRoute {
+		s.update(w, r, body)
 		return
 	}
 	if r.URL.Path == walkthroughRoute {

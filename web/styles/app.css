@@ -960,8 +960,20 @@ sf-reviews .review-full { max-height: 32rem; }
 sf-reviews .review-given summary { cursor: pointer; }
 sf-reviews .review-files { margin: .2rem 0 0; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
 sf-notify { display: block; margin-top: .6rem; }
-sf-notify .notify-pref { display: flex; align-items: center; gap: .5rem; padding: .2rem .5rem; cursor: pointer; }
+sf-update-setting { display: block; }
+:is(sf-notify, sf-update-setting) .notify-pref { display: flex; align-items: center; gap: .5rem; padding: .2rem .5rem; cursor: pointer; }
 sf-notify p { margin: .25rem .5rem 0; }
+sf-update-setting p { margin: .25rem .5rem 0; }
+sf-update-setting p:empty { display: none; }
+sf-update { display: flex; align-items: center; flex: none; }
+sf-update[hidden] { display: none; }
+sf-update button.small { min-height: 20px; padding: 0 .5rem; font-size: .75rem; }
+dialog.update h3 { margin: .9rem 0 .35rem; }
+dialog.update .update-list { margin: .25rem 0; padding-left: 1.25rem; }
+dialog.update .update-list li + li { margin-top: .4rem; }
+dialog.update .update-list p { margin: 0 0 .3rem; }
+dialog.update .setup-code { margin: .35rem 0; }
+dialog.update code { overflow-wrap: anywhere; }
 sf-recap { display: block; }
 sf-recap[hidden] { display: none; }
 sf-recap p { margin: 0 0 .3rem; }

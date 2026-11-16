@@ -51,6 +51,7 @@ import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
+import { initUpdates, loadUpdate } from './components/update.ts'
 import { sendState } from './api.ts'
 
 interface Session {
@@ -1841,6 +1842,7 @@ async function connect(): Promise<void> {
     state.note = ''
     openedAt = Date.now()
     paint()
+    void loadUpdate()
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
     reading = reader
     let buf = ''
@@ -2865,7 +2867,7 @@ function paletteItems(): PaletteItem[] {
   panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(api), needsEngine)
   panel('v:identity', 'Name and email for commits', () => openIdentity(), needsEngine)
   panel('v:away', 'Away mode', () => openAway(), needsEngine)
-  panel('v:prefs', 'Appearance', () => byId('prefs').showPopover())
+  panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
   panel('v:keys', 'Keyboard shortcuts', () => showShortcuts())
   return items
 }
@@ -2914,6 +2916,7 @@ byId('disconnect').addEventListener('click', async () => {
 })
 paint()
 initPrefs(body => api('/api/prefs', body).catch(() => null))
+initUpdates(api)
 addEventListener('pagehide', () => {
   saveTabs()
   saveCheckpoints()

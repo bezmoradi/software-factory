@@ -10,6 +10,8 @@ services:
       context: .
       target: dev
   engine:
+    image: software-factory:dev
+    build: !reset null
     environment:
       <<: *dev-deny
       SF_DEV_ACP_AGENT: /usr/local/bin/sf-fake-acp
@@ -20,6 +22,7 @@ services:
       SF_DEV_STATE_VERSION: ${SF_DEV_STATE_VERSION:-}
       SF_DEV_AUDIT_ROTATE: ${SF_DEV_AUDIT_ROTATE:-}
       SF_DEV_OSV: ${SF_DEV_OSV:-}
+      SF_DEV_UPDATE_API: ${SF_DEV_UPDATE_API:-}
     networks:
       gitnet: {}
     volumes:
@@ -28,6 +31,9 @@ services:
       gitserver:
         condition: service_healthy
   egress:
+    build:
+      context: .
+      target: runtime
     environment:
       <<: *dev-deny
   gitserver:

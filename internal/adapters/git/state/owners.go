@@ -18,6 +18,7 @@ var ownedRecords = map[string][]ownedPart{
 	reviewerAgentsFile:  {{path: []string{"files", "[]"}}, {path: []string{"roles", "[]"}}},
 	workFile:            {{path: []string{"teams", "{}"}}, {path: []string{"projects", "{}"}}, {path: []string{"sessions", "{}"}}},
 	identityFile:        {{}},
+	updateFile:          {{}},
 	reviewsFile:         {{path: []string{"reviews", "[]"}, only: "override"}},
 	egressFile:          {{path: []string{"added", "[]"}}, {path: []string{"gateway"}}},
 	capsFile:            {{path: []string{"projects", "{}"}}, {path: []string{"sessions", "[]", "own"}}},
