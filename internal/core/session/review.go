@@ -77,6 +77,8 @@ type ReviewReplies interface {
 	Get(sid string, k review.Key, started time.Time) (string, bool, bool)
 	Keep(keys []review.Key) error
 	Forget(sid string) error
+	PutGiven(sid string, e ReviewEntry, g KeptGiven) error
+	GetGiven(sid string, k review.Key, started time.Time) (KeptGiven, bool)
 }
 
 type Snapshot struct {
@@ -232,6 +234,7 @@ type Reviews struct {
 	mu         sync.Mutex
 	running    map[string]int
 	views      map[string]ReviewView
+	rebuilt    map[string]string
 	approvals  map[string]viewApproval
 	approvalAt uint64
 	store      sync.Mutex
@@ -308,7 +311,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
 		return nil, err
 	}
@@ -385,6 +388,7 @@ func (r *Reviews) View(sid string) (ReviewView, bool) {
 func (r *Reviews) Forget(sid string) {
 	r.mu.Lock()
 	delete(r.views, sid)
+	delete(r.rebuilt, sid)
 	delete(r.approvals, sid)
 	r.mu.Unlock()
 }
@@ -425,7 +429,7 @@ type viewApproval struct {
 func (r *Reviews) asideLocked(sid string, v ReviewView) ReviewView {
 	a, ok := r.approvals[sid]
 	if !ok || a.commit != v.Commit {
-		return v
+		return r.uncheckedLocked(sid, v)
 	}
 	for i, role := range v.Roles {
 		if why := a.given.setsAside(role.State, role.Advisory, role.approved, role.team); why != "" {
@@ -453,6 +457,7 @@ func (r *Reviews) approvalLocked(sid, commit string, ticket uint64, a ApprovalGi
 		return false
 	}
 	r.approvals[sid] = viewApproval{commit: commit, given: a, ticket: ticket}
+	delete(r.rebuilt, sid)
 	return true
 }
 
@@ -602,6 +607,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			prompts[i] += AgentVerdictAsk
 		}
 		view.Roles[i].Given = givenOf(ReviewArgvWith(r.cfg.Command, plugin, entries[i].Key.Agent, prompts[i], r.roleModelFor(t.Repo, entries[i].Role)), plans[i].base, head, extra[plans[i].base])
+	}
+	for i := range entries {
+		r.keepGiven(t.SID, entries[i], keptGivenOf(plans[i].q.Why, view.Roles[i].Given))
 	}
 	r.show(t.SID, view.clone())
 	var mu sync.Mutex

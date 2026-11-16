@@ -21,9 +21,15 @@ const (
 	repliesFolder  = "review-replies"
 	repliesVersion = 1
 	maxReplyFile   = 7*session.MaxFullReply + 4096
+	givenVersion   = 1
+	maxGivenData   = session.MaxGivenPrompt + session.MaxGivenFlags*session.MaxGivenFlag + session.MaxGivenFiles*session.MaxGivenFile + session.MaxGivenWhy
+	maxGivenFile   = 7*maxGivenData + 4096
 )
 
-var replyName = regexp.MustCompile(`^([0-9a-f]{16})-([0-9a-f]{32})\.json$`)
+var (
+	replyName = regexp.MustCompile(`^([0-9a-f]{16})-([0-9a-f]{32})\.json$`)
+	givenName = regexp.MustCompile(`^([0-9a-f]{16})-([0-9a-f]{32})-given\.json$`)
+)
 
 type Replies struct {
 	Dir string
@@ -55,6 +61,111 @@ func keyPart(k review.Key) string {
 
 func replyFile(sid string, k review.Key) string {
 	return sessionPart(sid) + "-" + keyPart(k) + ".json"
+}
+
+func givenFile(sid string, k review.Key) string {
+	return sessionPart(sid) + "-" + keyPart(k) + "-given.json"
+}
+
+type givenJSON struct {
+	Version int       `json:"version"`
+	Session string    `json:"session"`
+	Commit  string    `json:"commit"`
+	Branch  string    `json:"branch"`
+	Agent   string    `json:"agent"`
+	Run     int       `json:"run"`
+	Started time.Time `json:"started"`
+	Why     string    `json:"why,omitempty"`
+	Given   bool      `json:"given,omitempty"`
+	Prompt  string    `json:"prompt,omitempty"`
+	Flags   []string  `json:"flags,omitempty"`
+	Files   []string  `json:"files,omitempty"`
+}
+
+func keptText(s string, limit int) bool {
+	return len(s) <= limit && utf8.ValidString(s)
+}
+
+func keptTexts(list []string, count, limit int) bool {
+	if len(list) > count {
+		return false
+	}
+	for _, s := range list {
+		if !keptText(s, limit) {
+			return false
+		}
+	}
+	return true
+}
+
+func validGiven(g session.KeptGiven) bool {
+	if !keptText(g.Why, session.MaxGivenWhy) {
+		return false
+	}
+	if g.Given == nil {
+		return true
+	}
+	return keptText(g.Given.Prompt, session.MaxGivenPrompt) && keptTexts(g.Given.Flags, session.MaxGivenFlags, session.MaxGivenFlag) &&
+		keptTexts(g.Given.Files, session.MaxGivenFiles, session.MaxGivenFile)
+}
+
+func (s Replies) PutGiven(sid string, e session.ReviewEntry, g session.KeptGiven) error {
+	some := g.Why != "" || g.Given != nil
+	dir, err := s.folder(some)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	name := givenFile(sid, e.Key)
+	if !some {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if !validGiven(g) {
+		return errors.New("what a review was given is larger than the engine keeps, or isn't UTF-8")
+	}
+	f := givenJSON{Version: givenVersion, Session: sid, Commit: e.Key.Commit, Branch: e.Key.Branch, Agent: e.Key.Agent, Run: e.Key.Number(), Started: e.StartedAt.UTC(), Why: g.Why}
+	if g.Given != nil {
+		f.Given, f.Prompt, f.Flags, f.Files = true, g.Given.Prompt, g.Given.Flags, g.Given.Files
+	}
+	data, err := encode(f)
+	if err != nil {
+		return err
+	}
+	if len(data) > maxGivenFile {
+		return errors.New("what a review was given would make a file larger than the engine reads back")
+	}
+	return writeFile(dir, name, data)
+}
+
+func (s Replies) GetGiven(sid string, k review.Key, started time.Time) (session.KeptGiven, bool) {
+	dir, err := s.folder(false)
+	if err != nil {
+		return session.KeptGiven{}, false
+	}
+	data, err := read(dir, givenFile(sid, k))
+	if err != nil || data == nil || len(data) > maxGivenFile {
+		return session.KeptGiven{}, false
+	}
+	var f givenJSON
+	if json.Unmarshal(data, &f) != nil || f.Version < 1 || f.Version > givenVersion {
+		return session.KeptGiven{}, false
+	}
+	if f.Session != sid || f.Commit != k.Commit || f.Branch != k.Branch || f.Agent != k.Agent || f.Run != k.Number() || !f.Started.Equal(started) {
+		return session.KeptGiven{}, false
+	}
+	out := session.KeptGiven{Why: f.Why}
+	if f.Given {
+		out.Given = &session.RunGiven{Prompt: f.Prompt, Flags: f.Flags, Files: f.Files}
+	}
+	if !validGiven(out) {
+		return session.KeptGiven{}, false
+	}
+	return out, true
 }
 
 func (s Replies) folder(create bool) (string, error) {
@@ -156,7 +267,11 @@ func (s Replies) sweep(drop func(owner, key string) bool) error {
 	for _, e := range entries {
 		name := e.Name()
 		gone := false
-		if m := replyName.FindStringSubmatch(name); m != nil && e.Type().IsRegular() {
+		m := replyName.FindStringSubmatch(name)
+		if m == nil {
+			m = givenName.FindStringSubmatch(name)
+		}
+		if m != nil && e.Type().IsRegular() {
 			gone = drop(m[1], m[2])
 		} else if strings.HasPrefix(name, ".") && e.Type().IsRegular() {
 			info, err := e.Info()

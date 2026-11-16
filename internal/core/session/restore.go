@@ -176,7 +176,7 @@ func (d *Dispatcher) Restore() int {
 		}
 	}
 	if d.cfg.Reviews != nil {
-		d.cfg.Reviews.ShowKept(sids)
+		d.cfg.Reviews.ShowKept(sids, d.keptBranches(sids))
 	}
 	if len(sids) > 0 {
 		d.cfg.Logger.Info("sessions", "event", "restored", "count", len(sids))
@@ -185,6 +185,30 @@ func (d *Dispatcher) Restore() int {
 		d.saveRuns()
 	}
 	return len(sids)
+}
+
+func (d *Dispatcher) keptBranches(sids []string) map[string]KeptBranch {
+	out := map[string]KeptBranch{}
+	for _, sid := range sids {
+		t, ok := d.PushTarget(sid)
+		if !ok {
+			continue
+		}
+		k := KeptBranch{Branch: t.Branch, Recheck: d.cfg.Work != nil}
+		if d.cfg.Work != nil {
+			k.Rounds = d.cfg.Work.Rounds(sid, t.Name)
+		}
+		d.mu.Lock()
+		if r := d.runs[sid]; r != nil && len(r.earlier) > 0 {
+			k.Since = r.at
+			for _, st := range slices.Backward(r.earlier) {
+				k.Earlier = append(k.Earlier, st.SID)
+			}
+		}
+		d.mu.Unlock()
+		out[sid] = k
+	}
+	return out
 }
 
 func (d *Dispatcher) restorable(s SavedRun) bool {

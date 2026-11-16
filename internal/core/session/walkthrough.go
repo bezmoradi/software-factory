@@ -135,18 +135,6 @@ func (r *Reviews) saveTests() {
 	}
 }
 
-func (r *Reviews) ShowKept(sids []string) {
-	for _, sid := range sids {
-		r.mu.Lock()
-		_, kept := r.tests[sid]
-		view, shown := r.views[sid]
-		r.mu.Unlock()
-		if kept && !shown {
-			r.show(sid, view)
-		}
-	}
-}
-
 func (r *Reviews) CheckStep(sid, commit string, step int, done bool) error {
 	r.testStore.Lock()
 	defer r.testStore.Unlock()
