@@ -211,7 +211,7 @@ func (r *Reviews) runAside(t ReviewTarget, base, head, plugin string, a asideRun
 		v.Reason = testListStopped
 		return v
 	case err != nil && rctx.Err() != nil, err == nil && res.TimedOut:
-		v.Reason = fmt.Sprintf("it didn't finish within %d minutes", int(r.cfg.Timeout/time.Minute))
+		v.Reason = timedOut(r.cfg.Timeout)
 		return v
 	case err != nil:
 		v.Reason, _ = reviewHostProblem(err)

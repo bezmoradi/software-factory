@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
@@ -21,11 +23,14 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
+const devReviewMinutes = "SF_DEV_REVIEW_MINUTES"
+
 type ReviewConfig struct {
-	Dir    string
-	SeenAs string
-	Proxy  string
-	Dev    string
+	Dir        string
+	SeenAs     string
+	Proxy      string
+	Dev        string
+	DevMinutes string
 }
 
 func parseReview(cfg *PageConfig, getenv func(string) string) error {
@@ -52,8 +57,26 @@ func parseReview(cfg *PageConfig, getenv func(string) string) error {
 	if rc.Dir != "" && cfg.Install.Dir == "" {
 		return errors.New("reviews run knackpack from the agents volume, so SF_AGENTS_DIR can't be off while SF_REVIEWS is set")
 	}
+	rc.DevMinutes = getenv(devReviewMinutes)
 	cfg.Review = rc
 	return nil
+}
+
+func devReviewFor(v string, dev bool, logger shared.Logger) (time.Duration, error) {
+	if v == "" {
+		return 0, nil
+	}
+	if !dev {
+		logger.Warn("review", "event", "dev-timeout-ignored", "why", devReviewMinutes+" shortens the reviewer runs' time limit, so the engine honours it only in a development image, and this image has no "+boxes.DevMarker)
+		return 0, nil
+	}
+	most := int(session.ReviewFor/time.Minute) - 1
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > most || strconv.Itoa(n) != v {
+		return 0, fmt.Errorf("%s must be a whole number of minutes from 1 to %d, got %q", devReviewMinutes, most, v)
+	}
+	logger.Warn(fmt.Sprintf("development switch: a reviewer run times out after %d minutes, not %d", n, int(session.ReviewFor/time.Minute)), "variable", devReviewMinutes)
+	return time.Duration(n) * time.Minute, nil
 }
 
 func plugins(cfg InstallConfig, logger shared.Logger) (*npm.Plugins, error) {
@@ -128,6 +151,11 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 		Dir: cfg.Review.SeenAs, Command: command, Base: base, Show: reg.SetReview, Logger: logger,
 		Expected: expected, ShowSignIn: func(si session.SignIn) { reg.Notify(page.ReviewerFrame(si)) }, Audit: state.NewAudit(cfg.StateDir),
 	}
+	timeout, err := devReviewFor(cfg.Review.DevMinutes, developmentImage(boxes.DevMarker), logger)
+	if err != nil {
+		return nil, err
+	}
+	rc.Timeout = timeout
 	if checker, ok := host.(session.SignInChecker); ok {
 		rc.SignIns = checker
 	}

@@ -696,10 +696,12 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	stop()
 	parts.closeSends()
 	stopClones()
+	reviewsEnded := parts.endReviews(reviewsGrace, logger)
 	reg.DetachAll()
 	parts.waitSends(pushGrace)
 	stopSends()
 	parts.waitSends(sendsAfter)
+	<-reviewsEnded
 	cancelBase()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -710,6 +712,22 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return serveErr
 	}
 	return nil
+}
+
+const reviewsGrace = 5 * time.Second
+
+func (p engineParts) endReviews(limit time.Duration, logger shared.Logger) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if p.reviews == nil {
+			return
+		}
+		if left := p.reviews.WaitRunning(limit); left > 0 {
+			logger.Warn("review", "event", "shutdown-timeout", "running", left, "waited", limit.String())
+		}
+	}()
+	return done
 }
 
 func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig) (net.Listener, error) {

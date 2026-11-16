@@ -735,7 +735,7 @@ func (r *Reviews) projectRun(ctx context.Context, plugin string, files []Snapsho
 	case err != nil && ctx.Err() != nil:
 		return "", 0, testListStopped
 	case err != nil && rctx.Err() != nil, err == nil && res.TimedOut:
-		return "", 0, fmt.Sprintf("it didn't finish within %d minutes", int(r.cfg.Timeout/time.Minute))
+		return "", 0, timedOut(r.cfg.Timeout)
 	case err != nil:
 		why, _ := reviewHostProblem(err)
 		return "", 0, why

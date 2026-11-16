@@ -103,7 +103,11 @@ func (h *reviewerHosts) open(ctx context.Context, snapshot string, brief bool) (
 	info, err := h.makers.StartReviewer(ctx, run, snapshot)
 	if err != nil {
 		h.close(ctx, run)
-		log.Warn("reviewer container", "event", "not-started", "run", run)
+		if stopped(ctx) {
+			log.Info("reviewer container", "event", "stopped", "run", run)
+		} else {
+			log.Warn("reviewer container", "event", "not-started", "run", run)
+		}
 		return nil, reviewerProblem(reviewerHostCode, "the box helper didn't start a reviewer container: "+clipError(err))
 	}
 	if err := h.routes.reviewerUp(ctx, run, info.Subnet); err != nil {
@@ -118,7 +122,11 @@ func (h *reviewerHosts) open(ctx context.Context, snapshot string, brief bool) (
 	client.WithKey(randomHex(32))
 	if err := client.GiveKey(ctx); err != nil {
 		h.close(ctx, run)
-		log.Warn("reviewer container", "event", "key-refused", "run", run)
+		if stopped(ctx) {
+			log.Info("reviewer container", "event", "stopped", "run", run)
+		} else {
+			log.Warn("reviewer container", "event", "key-refused", "run", run)
+		}
 		return nil, reviewerProblem(reviewerHostCode, "the reviewer container's agent-host didn't take the key the engine made for it, so the engine removed the container")
 	}
 	log.Info("reviewer container", "event", "started", "run", run, "snapshot", snapshot != "")
@@ -183,6 +191,10 @@ func (slotBusy) ReviewersBusy() bool { return true }
 
 var _ session.SlotRefusal = slotBusy{}
 
+func stopped(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.Canceled)
+}
+
 func clipError(err error) string {
 	s := err.Error()
 	if len(s) > 400 {
@@ -208,7 +220,12 @@ func (h *reviewerHosts) probed(ctx context.Context, l *reviewerLease, dir string
 	if len(o.Parts) > 0 {
 		why += ": " + strings.Join(o.Parts, "; ")
 	}
-	shared.For(ctx, h.logger).Warn("reviewer container", "event", "sandbox-failed", "run", l.run)
+	log := shared.For(ctx, h.logger)
+	if stopped(ctx) {
+		log.Info("reviewer container", "event", "stopped", "run", l.run)
+	} else {
+		log.Warn("reviewer container", "event", "sandbox-failed", "run", l.run)
+	}
 	return reviewerProblem(reviewerSandbox, why)
 }
 
@@ -381,7 +398,11 @@ func (h *reviewerHosts) sweep(ctx context.Context) error {
 			continue
 		}
 		if err := h.makers.RemoveReviewer(sctx, r.Box); err != nil {
-			h.logger.Warn("reviewer container", "event", "leftover-not-removed", "run", r.Box)
+			if stopped(ctx) {
+				h.logger.Info("reviewer container", "event", "stopped", "run", r.Box)
+			} else {
+				h.logger.Warn("reviewer container", "event", "leftover-not-removed", "run", r.Box)
+			}
 			failed = errors.Join(failed, err)
 			continue
 		}

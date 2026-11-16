@@ -10,6 +10,8 @@ const FILE_TOOLS = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'
 const CARD_TAGS = { permission: 'sf-permission', ask: 'sf-ask', plan: 'sf-plan' } as const
 const CARD_ORDER: string[] = Object.keys(CARD_TAGS)
 
+export type Spot = { turn: Element; offset: number }
+
 const tokens = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}m` : n >= 1000 ? `${+(n / 1000).toFixed(1)}k` : String(n))
 
 function square(kind: string, color: string, fullness = 1, legend = false): HTMLSpanElement {
@@ -63,6 +65,7 @@ class SfConversation extends HTMLElement {
   })
   #width = 0
   #fresh = new Set<HTMLElement>()
+  #unmeasured = new Set<HTMLElement>()
   #marks = new Map<string, HTMLLIElement>()
   #marksKey = ''
   scroller: HTMLElement | null = null
@@ -70,7 +73,7 @@ class SfConversation extends HTMLElement {
 
   #scrolled = () => {
     const s = this.scroller
-    if (!s || this.hidden) return
+    if (!s || this.away) return
     const gap = s.scrollHeight - s.clientHeight - s.scrollTop
     if (s.scrollTop < this.#top && gap > 1) this.#pinned = false
     else if (gap <= 80) this.#pinned = true
@@ -88,6 +91,10 @@ class SfConversation extends HTMLElement {
     if (this.scroller) this.#resized.observe(this.scroller)
     if (this.#timeline) return
     this.#timeline = el('ol', 'timeline')
+    this.#timeline.addEventListener('contentvisibilityautostatechange', e => {
+      if (e.skipped || !(e.target instanceof HTMLElement) || !this.#unmeasured.size) return
+      this.#measure([...e.target.querySelectorAll<HTMLElement>('.tool .call')].filter(c => this.#unmeasured.has(c)))
+    }, { capture: true })
     this.#needs = el('section')
     this.#heading = el('h2', 'sr-only', 'Waiting on you')
     this.#heading.hidden = true
@@ -105,8 +112,41 @@ class SfConversation extends HTMLElement {
     return this.#pinned
   }
 
+  get away(): boolean {
+    return this.classList.contains('away')
+  }
+
+  set away(on: boolean) {
+    if (on !== this.away) this.classList.toggle('away', on)
+  }
+
+  spot(): Spot | null {
+    const s = this.scroller
+    if (!s || !this.#timeline || this.away) return null
+    const top = s.getBoundingClientRect().top
+    const turns = this.#timeline.children
+    let lo = 0
+    let hi = turns.length - 1
+    let first: Element | null = null
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      const turn = turns[mid]!
+      if (turn.getBoundingClientRect().bottom > top) {
+        first = turn
+        hi = mid - 1
+      } else lo = mid + 1
+    }
+    return first ? { turn: first, offset: first.getBoundingClientRect().top - top } : null
+  }
+
+  restore(spot: Spot | null | undefined): void {
+    const s = this.scroller
+    if (!s || !spot || this.away || spot.turn.parentElement !== this.#timeline) return
+    s.scrollTop += spot.turn.getBoundingClientRect().top - s.getBoundingClientRect().top - spot.offset
+  }
+
   #stick() {
-    if (this.#pinned && !this.hidden && this.scroller) this.scroller.scrollTop = this.scroller.scrollHeight
+    if (this.#pinned && !this.away && this.scroller) this.scroller.scrollTop = this.scroller.scrollHeight
   }
 
   #pin() {
@@ -142,13 +182,26 @@ class SfConversation extends HTMLElement {
   }
 
   #clip() {
-    if (this.hidden || !this.#timeline) return
+    if (this.away || !this.#timeline) return
     const width = this.clientWidth
-    const calls = width === this.#width ? [...this.#fresh].filter(c => c.isConnected) : [...this.#timeline.querySelectorAll<HTMLElement>('.tool .call')]
+    if (!width) return
+    const calls = width === this.#width ? [...this.#fresh] : [...this.#timeline.querySelectorAll<HTMLElement>('.tool .call')]
+    if (width !== this.#width) this.#unmeasured.clear()
     this.#width = width
     this.#fresh.clear()
-    const cut = calls.map(c => c.scrollHeight > c.clientHeight + 1)
-    calls.forEach((call, i) => {
+    this.#measure(calls)
+  }
+
+  #measure(calls: HTMLElement[]) {
+    const laidOut: HTMLElement[] = []
+    for (const call of calls) {
+      this.#unmeasured.delete(call)
+      if (!call.isConnected) continue
+      if (call.checkVisibility({ contentVisibilityAuto: true })) laidOut.push(call)
+      else this.#unmeasured.add(call)
+    }
+    const cut = laidOut.map(c => c.scrollHeight > c.clientHeight + 1)
+    laidOut.forEach((call, i) => {
       const li = call.parentElement!
       const more = li.querySelector(':scope > .call-more')
       if (cut[i] && !more) call.after(this.#more(li))
@@ -183,6 +236,7 @@ class SfConversation extends HTMLElement {
     this.#needs!.replaceChildren(this.#heading!)
     this.#heading!.hidden = true
     this.#tools.clear()
+    this.#unmeasured.clear()
     this.#groups.clear()
     this.#cards.clear()
     this.#reply = null
@@ -379,5 +433,8 @@ customElements.define('sf-conversation', SfConversation)
 declare global {
   interface HTMLElementTagNameMap {
     'sf-conversation': SfConversation
+  }
+  interface HTMLElementEventMap {
+    contentvisibilityautostatechange: ContentVisibilityAutoStateChangeEvent
   }
 }

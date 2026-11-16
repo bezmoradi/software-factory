@@ -225,8 +225,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	r.show(t.SID, view)
 	shared.For(ctx, r.cfg.Logger).Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
+	r.began()
 	r.wg.Go(func() {
 		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, view, held, given)
+		r.ended()
 		release()
 		if r.cfg.Base.Err() == nil {
 			r.finished(t.SID, head)

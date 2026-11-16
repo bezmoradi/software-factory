@@ -23,6 +23,7 @@ services:
       SF_DEV_AUDIT_ROTATE: ${SF_DEV_AUDIT_ROTATE:-}
       SF_DEV_OSV: ${SF_DEV_OSV:-}
       SF_DEV_UPDATE_API: ${SF_DEV_UPDATE_API:-}
+      SF_DEV_REVIEW_MINUTES: ${SF_DEV_REVIEW_MINUTES:-}
     networks:
       gitnet: {}
     volumes:

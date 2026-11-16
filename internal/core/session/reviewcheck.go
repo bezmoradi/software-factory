@@ -113,7 +113,10 @@ func (r *Reviews) reviewerVersion(ctx context.Context) string {
 		case <-ctx.Done():
 		}
 	}
-	if v == "" {
+	switch {
+	case v == "" && cancelled(ctx):
+		shared.For(ctx, r.cfg.Logger).Info("review", "event", "stopped", "why", "version")
+	case v == "":
 		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "version-unread")
 	}
 	r.mu.Lock()
@@ -381,7 +384,7 @@ func (r *Reviews) ensureCheck(ctx context.Context, d dueCheck, plugin string) (R
 func (r *Reviews) runCheck(ctx context.Context, agent string, role review.Role, v review.Versions, plugin, by string) ReviewerCheck {
 	c := ReviewerCheck{Agent: agent, Role: role, Versions: v, Result: review.CheckRunning, By: by, StartedAt: r.cfg.Now()}
 	r.saveCheck(c)
-	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "started", "role", string(role), "by", by)
+	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "started", "role", loggedRole(role, agent), "by", by)
 	defect, clean := checkChanges(role)
 	var runs [2]CheckRunResult
 	var costs [2]float64
@@ -415,7 +418,7 @@ func (r *Reviews) runCheck(ctx context.Context, agent string, role review.Role, 
 	c.Reason = checkReason(c, caught, defect.planted)
 	c.EndedAt = r.cfg.Now()
 	r.saveCheck(c)
-	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "finished", "role", string(role), "result", string(c.Result))
+	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "finished", "role", loggedRole(role, agent), "result", string(c.Result))
 	return c
 }
 
@@ -552,7 +555,7 @@ func (r *Reviews) CheckNow(ctx context.Context, agent string, costOK bool) error
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	last := latestOf(checks, agent)
-	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "asked", "role", string(role))
+	shared.For(ctx, r.cfg.Logger).Info("review check", "event", "asked", "role", loggedRole(role, agent))
 	r.wg.Go(func() {
 		defer release()
 		base := shared.WithRequest(r.cfg.Base, shared.RequestOf(ctx))

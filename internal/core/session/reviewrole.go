@@ -26,12 +26,12 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	case err != nil && ctx.Err() != nil:
 		return r.failed(e, stopped), "engine-stopped"
 	case err != nil && rctx.Err() != nil:
-		return r.failed(e, fmt.Sprintf("it didn't finish within %d minutes", int(r.cfg.Timeout/time.Minute))), "timeout"
+		return r.failed(e, timedOut(r.cfg.Timeout)), "timeout"
 	case err != nil:
 		why, kind := reviewHostProblem(err)
 		return r.failed(e, why), kind
 	case res.TimedOut:
-		return r.failed(e, fmt.Sprintf("it didn't finish within %d minutes", int(r.cfg.Timeout/time.Minute))), "timeout"
+		return r.failed(e, timedOut(r.cfg.Timeout)), "timeout"
 	}
 	out, ok := claudeResult(res.Stdout)
 	if !ok {
@@ -201,4 +201,9 @@ func byteHead(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+func timedOut(limit time.Duration) string {
+	n := int(limit / time.Minute)
+	return fmt.Sprintf("it didn't finish within %d %s", n, plural(n, "minute", "minutes"))
 }

@@ -7,6 +7,16 @@ class SfTabs extends HTMLElement {
   #key = ''
   #dragged = ''
   #targets: HTMLElement[] = []
+  #reveal = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      this.#reveal.unobserve(e.target)
+      const box = e.rootBounds
+      if (!e.target.isConnected || !box || box.width <= 0 || e.intersectionRatio >= 1) continue
+      const r = e.boundingClientRect
+      const by = r.left < box.left ? r.left - box.left : r.right > box.right ? Math.min(r.right - box.right, r.left - box.left) : 0
+      if (by) this.scrollBy({ left: by })
+    }
+  }, { root: this, threshold: 1 })
 
   constructor() {
     super()
@@ -128,8 +138,10 @@ class SfTabs extends HTMLElement {
     const focused = this.contains(document.activeElement) ? document.activeElement!.closest<HTMLElement>('.tab')?.dataset.id : null
     this.replaceChildren(...this.#tabs.map(t => this.#tab(t)))
     const active = this.querySelector<HTMLElement>('.tab.active')
-    active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    if (focused) (this.querySelector<HTMLElement>(`.tab[data-id="${CSS.escape(focused)}"]`) || active)?.focus()
+    const shown = (focused ? this.querySelector<HTMLElement>(`.tab[data-id="${CSS.escape(focused)}"]`) : null) || active
+    if (focused) shown?.focus({ preventScroll: true })
+    this.#reveal.disconnect()
+    if (shown) this.#reveal.observe(shown)
   }
 
   #tab(t: Tab) {

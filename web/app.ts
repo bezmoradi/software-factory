@@ -16,6 +16,7 @@ import './components/file.ts'
 import { icon } from './components/icon.ts'
 import './components/check.ts'
 import './components/gate.ts'
+import type { Spot } from './components/conversation.ts'
 import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
@@ -165,6 +166,8 @@ let wide: boolean | null = null
 let sideAt = ''
 let sideFull = false
 let sideScroll = 0
+const rootRem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+let frameRem = byId('frame').clientWidth / rootRem()
 let retry = 1000
 let lost = 0
 const sending = new Set<string>()
@@ -214,7 +217,7 @@ function ensure(sid: string): Session {
   if (s) return s
   const view = el('sf-conversation')
   view.dataset.sid = sid
-  view.hidden = true
+  view.away = true
   view.scroller = scroller
   byId('conversations').append(view)
   s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, step: '', compacting: '', changes: null, forkStart: null, changesKey: '', changesAt: 0, compare: { from: 'fork', commit: '' }, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
@@ -525,10 +528,13 @@ document.addEventListener('visibilitychange', () => {
 let openTabs = ['overview']
 let recent: string[] = []
 const scrolls = new Map<string, number>()
+const spots = new Map<string, Spot | null>()
 
 function go(key: string) {
   if (key === current.key) return
   scrolls.set(current.key, scroller.scrollTop)
+  const leaving = current()
+  if (leaving) spots.set(current.key, leaving.view.spot())
   const from = current.key
   current.key = key
   swapDraft(from, key)
@@ -541,6 +547,7 @@ function go(key: string) {
   grow()
   const view = current()?.view
   scroller.scrollTop = view?.pinned ? scroller.scrollHeight : scrolls.get(key) ?? (key.startsWith('s/') ? scroller.scrollHeight : 0)
+  if (view && !view.pinned) view.restore(spots.get(key))
   paintJump()
   settleFocus()
 }
@@ -663,7 +670,7 @@ function paint() {
   if (picking) paintTeamPicks(s)
   byId('composer').classList.toggle('picking', picking)
   document.body.classList.toggle('live', !!s)
-  for (const x of list) x.view.hidden = x !== s
+  for (const x of list) x.view.away = x !== s
   const needs = list.some(x => waitingOf(x).length)
   const waitingCount = list.filter(x => waitingOf(x).length).length
   byId('need-badge').textContent = String(waitingCount)
@@ -2561,8 +2568,7 @@ byId('overview').addEventListener('sf-counts', e => {
 })
 
 function placeSide() {
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-  const now = byId('frame').clientWidth / rem >= WIDE_REM
+  const now = frameRem >= WIDE_REM
   const at = document.body.classList.contains('side-full') ? 'full' : now ? 'frame' : 'narrow'
   if (at !== sideAt) {
     sideAt = at
@@ -2626,17 +2632,36 @@ byId('side-toggle').addEventListener('click', () => {
   toggle.setAttribute('aria-expanded', String(open))
   byId('side').classList.toggle('open', open)
 })
-new ResizeObserver(placeSide).observe(byId('frame'))
-new MutationObserver(placeSide).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
+const measureFrame = () => {
+  frameRem = byId('frame').clientWidth / rootRem()
+  placeSide()
+}
+new ResizeObserver(measureFrame).observe(byId('frame'))
+new MutationObserver(measureFrame).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
 placeSide()
 
 let jumping: ReturnType<typeof setTimeout> | null = null
+const nearEdge = { start: true, end: true }
+
+function watchEdge(edge: 'start' | 'end') {
+  const mark = el('div', 'scroll-edge')
+  mark.setAttribute('aria-hidden', 'true')
+  if (edge === 'start') scroller.prepend(mark)
+  else scroller.append(mark)
+  new IntersectionObserver(entries => {
+    const last = entries[entries.length - 1]
+    if (!last || nearEdge[edge] === last.isIntersecting) return
+    nearEdge[edge] = last.isIntersecting
+    paintJump()
+  }, { root: scroller, rootMargin: edge === 'start' ? '100% 0px 0px 0px' : '0px 0px 100% 0px' }).observe(mark)
+}
+watchEdge('start')
+watchEdge('end')
 
 function paintJump() {
   const live = current.key.startsWith('s/') && !jumping
-  const screen = scroller.clientHeight
-  byId('jump-start').hidden = !live || scroller.scrollTop < screen
-  byId('jump-latest').hidden = !live || scroller.scrollHeight - scroller.scrollTop - screen < screen
+  byId('jump-start').hidden = !live || nearEdge.start
+  byId('jump-latest').hidden = !live || nearEdge.end
 }
 
 function landed() {
@@ -2652,11 +2677,20 @@ function jump(to: 'start' | 'latest') {
   scroller.scrollTo({ top: to === 'start' ? 0 : scroller.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
 
-scroller.addEventListener('scroll', paintJump, { passive: true })
 scroller.addEventListener('scrollend', landed)
-const resized = new ResizeObserver(paintJump)
-resized.observe(scroller)
-resized.observe(byId('conversations'))
+const strip = byId('jump').parentElement!
+const coverEnd = () => {
+  const over = getComputedStyle(strip).position === 'absolute' && strip.offsetHeight ? Math.max(0, Math.ceil(scroller.getBoundingClientRect().bottom - strip.getBoundingClientRect().top)) : 0
+  const pad = over ? `${over}px` : ''
+  const list = byId('conversations')
+  if (list.style.paddingBottom === pad) return
+  list.style.paddingBottom = pad
+  if (current()?.view.pinned) scroller.scrollTop = scroller.scrollHeight
+}
+const covered = new ResizeObserver(coverEnd)
+covered.observe(strip)
+covered.observe(strip.parentElement!)
+covered.observe(scroller)
 byId('jump-start').addEventListener('click', () => jump('start'))
 byId('jump-latest').addEventListener('click', () => jump('latest'))
 document.addEventListener('keydown', e => {

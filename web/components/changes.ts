@@ -9,6 +9,7 @@ const MAX_COMMENT = 2000
 const MAX_MESSAGE = 20000
 const MAX_HIGHLIGHT = 20000
 const MAX_HIGHLIGHT_CHARS = 400_000
+const CHUNK_ROWS = 50
 const LAYOUT_KEY = 'sf-diff-layout'
 const SHA = /^[0-9a-f]{40}$/
 const NOT_DIFFED: Record<string, string> = { large: 'over the 1 MiB a file may have to be diffed', budget: 'past the 8 MiB the view reads in all', binary: 'binary, its lines counted', unreadable: 'its stored object couldn’t be read' }
@@ -175,6 +176,29 @@ function sideRows(rows: DiffRow[]): SideRow[] {
     }
   }
   return out
+}
+
+function fileSections(nodes: HTMLElement[]): HTMLElement[] {
+  const sections: HTMLElement[] = []
+  let chunk: HTMLElement | null = null
+  for (const node of nodes) {
+    const header = node.classList.contains('file')
+    if (header || !sections.length) {
+      sections.push(el('div', 'diff-file'))
+      chunk = null
+    }
+    const section = sections[sections.length - 1]!
+    if (header) {
+      section.append(node)
+      continue
+    }
+    if (!chunk || chunk.childElementCount >= CHUNK_ROWS) {
+      chunk = el('div', 'diff-chunk')
+      section.append(chunk)
+    }
+    chunk.append(node)
+  }
+  return sections
 }
 
 function codeOf(r: DiffRow, highlight: boolean): HTMLElement {
@@ -441,7 +465,7 @@ class SfChanges extends HTMLElement {
     } else {
       this.#rows.forEach((r, i) => nodes.push(r.kind === 'file' ? this.#fileHeader(r, files) : this.#unreadableLine(r, files) ?? this.#unifiedLine(r, i, highlight)))
     }
-    this.#lines.replaceChildren(...nodes)
+    this.#lines.replaceChildren(...fileSections(nodes))
     if (picked >= 0 && this.#commentable(picked)) {
       for (const node of this.#lines.querySelectorAll<HTMLElement>(`[data-row="${picked}"]`)) node.classList.add('at')
     }

@@ -48,6 +48,7 @@ var (
 
 const (
 	slowFor   = 45 * time.Second
+	slowMost  = 3600
 	fakeModel = "sf-fake-model"
 	fakeCost  = 0.0125
 )
@@ -204,6 +205,18 @@ func has(name string) bool {
 	return err == nil
 }
 
+func slowness() time.Duration {
+	data, err := os.ReadFile(filepath.Join("head", "SLOW-REVIEW"))
+	if err != nil {
+		return slowFor
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || n < 1 || n > slowMost {
+		return slowFor
+	}
+	return time.Duration(n) * time.Second
+}
+
 func verdict(agent, prompt string, st *stream) reply {
 	r := reply{turns: 3}
 	if has("SHALLOW-REVIEW") {
@@ -214,7 +227,7 @@ func verdict(agent, prompt string, st *stream) reply {
 	}
 	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
 	if has("SLOW-REVIEW") {
-		st.slow(slowFor)
+		st.slow(slowness())
 	}
 	if switched(passAllFile) {
 		r.text = report + "\n$HOME/" + passAllFile + " asks the fake reviewer to pass everything.\nNo blocking issues found.\nknackpack-verdict/1: pass"

@@ -242,6 +242,8 @@ type Reviews struct {
 	checking   map[string]chan struct{}
 	claude     string
 	wg         sync.WaitGroup
+	reviewing  int
+	idle       chan struct{}
 	done       func(sid, head string)
 	signIn     *SignIn
 	signStale  bool
@@ -395,6 +397,56 @@ func (r *Reviews) Forget(sid string) {
 
 func (r *Reviews) Wait() { r.wg.Wait() }
 
+func cancelled(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.Canceled)
+}
+
+func loggedRole(role review.Role, agent string) string {
+	if role == "" {
+		return agent
+	}
+	return string(role)
+}
+
+func (r *Reviews) began() {
+	r.mu.Lock()
+	r.reviewing++
+	r.mu.Unlock()
+}
+
+func (r *Reviews) ended() {
+	r.mu.Lock()
+	r.reviewing--
+	if r.reviewing == 0 && r.idle != nil {
+		close(r.idle)
+		r.idle = nil
+	}
+	r.mu.Unlock()
+}
+
+func (r *Reviews) WaitRunning(limit time.Duration) int {
+	r.mu.Lock()
+	if r.reviewing == 0 {
+		r.mu.Unlock()
+		return 0
+	}
+	if r.idle == nil {
+		r.idle = make(chan struct{})
+	}
+	idle := r.idle
+	r.mu.Unlock()
+	t := time.NewTimer(limit)
+	defer t.Stop()
+	select {
+	case <-idle:
+		return 0
+	case <-t.C:
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reviewing
+}
+
 func (r *Reviews) roles() []review.Role {
 	out := []review.Role{}
 	for _, role := range review.Roles {
@@ -496,7 +548,11 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			view.Roles[i].Reason = "didn't start: " + why
 		}
 		r.show(t.SID, view)
-		shared.For(ctx, r.cfg.Logger).Warn("review", "event", "not-started", "why", "sandbox")
+		if cancelled(ctx) {
+			shared.For(ctx, r.cfg.Logger).Info("review", "event", "stopped", "why", "sandbox")
+		} else {
+			shared.For(ctx, r.cfg.Logger).Warn("review", "event", "not-started", "why", "sandbox")
+		}
 		return
 	}
 	started := r.cfg.Now()
@@ -644,9 +700,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			mu.Unlock()
 			r.show(t.SID, shown)
 			if why != "" {
-				shared.For(ctx, r.cfg.Logger).Warn("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State), "why", why)
+				shared.For(ctx, r.cfg.Logger).Warn("review", "event", "finished", "role", loggedRole(e.Role, e.Key.Agent), "state", string(e.Record.State), "why", why)
 			} else {
-				shared.For(ctx, r.cfg.Logger).Info("review", "event", "finished", "role", string(e.Role), "state", string(e.Record.State))
+				shared.For(ctx, r.cfg.Logger).Info("review", "event", "finished", "role", loggedRole(e.Role, e.Key.Agent), "state", string(e.Record.State))
 			}
 			r.wg.Go(func() {
 				if c, looked := r.lookUpCited(ctx, e); looked {
@@ -892,7 +948,11 @@ func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 		return SignIn{}, busy
 	}
 	if err != nil {
-		shared.For(ctx, r.cfg.Logger).Warn("review sign-in check", "event", "failed")
+		if cancelled(ctx) {
+			shared.For(ctx, r.cfg.Logger).Info("review sign-in check", "event", "stopped")
+		} else {
+			shared.For(ctx, r.cfg.Logger).Warn("review sign-in check", "event", "failed")
+		}
 		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check the reviewers' sign-in, so the review doesn't start: "+hostMessage(err))
 	}
 	s.CheckedAt = started
