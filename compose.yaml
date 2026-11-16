@@ -34,22 +34,27 @@ services:
       SF_PAGE_HOST: 0.0.0.0
       SF_PUBLIC_PORT: ${SF_PORT:-7799}
       SF_PAGE_NAME: engine-page
-      SF_AGENT_ADDRESS: engine-agents:8081
-      SF_AGENT_HOST: agent:8090
-      SF_REVIEWER_HOST: reviewer:8090
+      SF_AGENT_ADDRESS: 0.0.0.0:8081
       SF_REVIEWS: /reviews
       SF_REVIEWER_PROXY: egress-review:3128
-      SF_EGRESS_PROXY: egress:3128
+      SF_EGRESS_PROXY: egress:3130
       SF_EGRESS_STATUS: egress-control:3129
+      SF_EGRESS_KEY_FILE: /run/sf-egress/control-key
+      SF_HELPER: helper:8099
+      SF_HELPER_KEY_FILE: /run/sf-helper/key
+      SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
       SF_UPLOADS: /uploads
       SF_UMASK: "0002"
+      SF_OSV: ${SF_OSV:-}
+      SF_NO_UPDATE_CHECK: ${SF_NO_UPDATE_CHECK:-}
+      SF_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-}
     ports:
-      - "127.0.0.1:${SF_PORT:-7799}:8080"
+      - target: 8080
+        published: "${SF_PORT:-7799}"
+        host_ip: 127.0.0.1
     networks:
-      agentnet:
-        aliases: [engine-agents]
-      reviewnet: {}
       controlnet: {}
+      helpernet: {}
       outside:
         aliases: [engine-page]
     volumes:
@@ -58,17 +63,18 @@ services:
       - agents:/opt/software-factory/agents
       - reviews:/reviews
       - uploads:/uploads
+      - egress-key:/run/sf-egress
+      - helper-key:/run/sf-helper
     tmpfs:
       - /tmp:size=64m,mode=1777
     mem_limit: 1g
     pids_limit: 512
     stop_grace_period: 45s
     depends_on:
+      helper:
+        condition: service_started
+        restart: true
       egress:
-        condition: service_healthy
-      agent:
-        condition: service_healthy
-      reviewer:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
@@ -77,80 +83,37 @@ services:
       start_period: 20s
       retries: 3
 
-  agent:
+  helper:
     <<: [*image, *hardening]
-    user: agent
-    command: ["agent-host"]
+    user: "10005:10005"
+    group_add: ["${SF_DOCKER_GID:-0}"]
+    command: ["box-helper"]
     environment:
-      HOME: /home/agent
-      SF_AGENT_HOST_LISTEN: ":8090"
-      SF_ENGINE_AGENT_ADDRESS: engine-agents:8081
-      SF_PLUGIN_SOCKET: /run/sf/plugin.sock
-      SF_UMASK: "0002"
-      HTTPS_PROXY: http://egress:3128
-      HTTP_PROXY: http://egress:3128
-      https_proxy: http://egress:3128
-      http_proxy: http://egress:3128
-      NO_PROXY: localhost,127.0.0.1,::1
-      no_proxy: localhost,127.0.0.1,::1
-      DISABLE_AUTOUPDATER: "1"
-    networks:
-      agentnet:
-        aliases: [agent]
+      GOMEMLIMIT: 48MiB
+      SF_HELPER_LISTEN: ":8099"
+      SF_HELPER_KEY_FILE: /run/sf-helper/key
+      SF_BOX_MEMORY: ${SF_BOX_MEMORY:-}
+      SF_BOX_CPUS: ${SF_BOX_CPUS:-}
+      SF_REVIEWER_MEMORY: ${SF_REVIEWER_MEMORY:-}
+      SF_REVIEWER_CPUS: ${SF_REVIEWER_CPUS:-}
+      SF_MAX_BOXES: ${SF_MAX_BOXES:-}
+      SF_BOX_RUNTIME: ${SF_BOX_RUNTIME:-}
+      SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
+      SF_BOX_SWEEP_DRY: ${SF_BOX_SWEEP_DRY:-}
     volumes:
-      - workspace:/workspace
-      - agents:/opt/software-factory/agents:ro
-      - agent-home:/home/agent
-      - uploads:/uploads:ro
-    tmpfs:
-      - /tmp:size=1g,mode=1777
-      - /run/sf:size=1m,mode=0700,uid=10002,gid=10000
-    mem_limit: 4g
-    pids_limit: 2048
+      - ${SF_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - helper-key:/run/sf-helper:ro
+    networks:
+      helpernet: {}
+    mem_limit: 64m
+    pids_limit: 64
+    stop_grace_period: 60s
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      test: ["CMD", "curl", "-fsSk", "--tlsv1.3", "--noproxy", "*", "-o", "/dev/null", "https://127.0.0.1:8099/healthz"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
-      retries: 3
-
-  reviewer:
-    <<: [*image, *hardening]
-    user: reviewer
-    command: ["agent-host", "-mode", "review"]
-    environment:
-      HOME: /home/reviewer
-      SF_WORKSPACE: /reviews
-      SF_AGENT_HOST_LISTEN: ":8090"
-      SF_AGENT_HOST_KEY_FILE: /reviews/.agent-host-key
-      HTTPS_PROXY: http://egress-review:3128
-      HTTP_PROXY: http://egress-review:3128
-      https_proxy: http://egress-review:3128
-      http_proxy: http://egress-review:3128
-      NO_PROXY: localhost,127.0.0.1,::1
-      no_proxy: localhost,127.0.0.1,::1
-      DISABLE_AUTOUPDATER: "1"
-    networks:
-      reviewnet:
-        aliases: [reviewer]
-    volumes:
-      - reviews:/reviews:ro
-      - type: volume
-        source: agents
-        target: /opt/software-factory/agents
-        read_only: true
-        volume:
-          nocopy: true
-      - reviewer-home:/home/reviewer
-    tmpfs:
-      - /tmp:size=1g,mode=1777
-    mem_limit: 4g
-    pids_limit: 2048
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://127.0.0.1:8090/healthz"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
+      start_period: 30s
+      start_interval: 2s
       retries: 3
 
   egress:
@@ -159,32 +122,30 @@ services:
     command: ["egress"]
     environment:
       <<: *egress-lists
-      EGRESS_LISTEN: egress-agents:3128
-      EGRESS_REVIEW_LISTEN: egress-review:3128
+      EGRESS_LISTEN: 0.0.0.0:3130
+      EGRESS_REVIEW_LISTEN: 0.0.0.0:3128
       EGRESS_STATUS_LISTEN: egress-control:3129
+      EGRESS_CONTROL_KEY_FILE: /run/sf-egress/control-key
+      SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
+    volumes:
+      - egress-key:/run/sf-egress:ro
     networks:
-      agentnet:
-        aliases: [egress, egress-agents]
-      reviewnet:
-        aliases: [egress-review]
       controlnet:
         aliases: [egress-control]
       outside: {}
     mem_limit: 256m
     pids_limit: 256
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "-o", "/dev/null", "http://egress-control:3129/status"]
+      test: ["CMD", "curl", "-fsSk", "--tlsv1.3", "--noproxy", "*", "-o", "/dev/null", "https://egress-control:3129/status"]
       interval: 30s
       timeout: 5s
       start_period: 10s
       retries: 3
 
 networks:
-  agentnet:
-    internal: true
-  reviewnet:
-    internal: true
   controlnet:
+    internal: true
+  helpernet:
     internal: true
   outside: {}
 
@@ -192,12 +153,22 @@ volumes:
   engine-state:
   workspace:
   agents:
-  agent-home:
   reviews:
-  reviewer-home:
   uploads:
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
       o: size=320m,uid=10001,gid=10000,mode=0710
+  egress-key:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64k,uid=10001,gid=10003,mode=2750
+  helper-key:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64k,uid=10001,gid=10005,mode=2750

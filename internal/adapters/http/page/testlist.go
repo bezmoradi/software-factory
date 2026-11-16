@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const testListRoute = "/api/test-list"
@@ -18,18 +19,22 @@ type testListJSON struct {
 	Reason  string  `json:"reason"`
 	CostUSD float64 `json:"costUsd,omitempty"`
 	At      int64   `json:"at"`
+
+	Steps []walkStepJSON `json:"steps,omitempty"`
 }
 
 func testListOf(v *session.TestListView) *testListJSON {
 	if v == nil {
 		return nil
 	}
-	return &testListJSON{Commit: v.Commit, Branch: v.Branch, State: v.State, Text: v.Text, Reason: v.Reason, CostUSD: v.CostUSD, At: millis(v.At)}
+	out := &testListJSON{Commit: v.Commit, Branch: v.Branch, State: v.State, Text: v.Text, Reason: v.Reason, CostUSD: v.CostUSD, At: millis(v.At)}
+	out.Steps = stepsOf(v.Steps)
+	return out
 }
 
 func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Reviews == nil {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it can't write a manual test list."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't write a manual test list."})
 		return
 	}
 	sid, ok := body["sid"].(string)
@@ -42,6 +47,6 @@ func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[strin
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := s.cfg.Reviews.TestList(ctx, sid, consent.CostOK)
-	s.logger.Info("test list", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("test list", "ok", err == nil)
 	reply(w, err, http.StatusAccepted)
 }

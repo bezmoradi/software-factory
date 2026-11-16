@@ -28,10 +28,215 @@ export interface SessionInfo {
   level?: string
   levelReason?: string
   levelDropped?: boolean
+  levelLost?: boolean
+  sandboxed?: boolean
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
   signIn?: SignIn
+  unbacked?: TurnMarks[]
+  stopReason?: string
+  uncommitted?: Uncommitted
+  overlaps?: Overlap[]
+  checks?: AgentCheck[]
+  lineage?: Lineage
+  follow?: PullFollow
+  splits?: SplitCard[]
+  box?: string
+  signInWait?: boolean
+  branch?: string
+}
+
+export interface SplitCard {
+  card: string
+  title: string
+  message: string
+  state: 'waiting' | 'queued' | 'starting' | 'started' | 'dismissed'
+  sid?: string
+  edited: boolean
+  asked: number
+  at: number
+  secretAt?: string
+}
+
+export interface Stint {
+  agent: string
+  sid: string
+  name?: string
+  from: string
+  to: string
+}
+
+export interface Lineage {
+  branch: string
+  origin?: string
+  from: string
+  earlier: Stint[]
+  handedTo?: string
+  last?: string
+  group?: string
+  groupKind?: 'pair' | 'goal'
+}
+
+export interface StartFrom {
+  branch?: string
+  pull?: number
+  sid?: string
+  commit?: string
+}
+
+export interface StartPointsView {
+  main: string
+  branches: { name: string; commit: string }[]
+  pulls: { number: number; title: string; branch: string; commit: string }[]
+  pullsWhy: string
+}
+
+export interface PullCheck {
+  name: string
+  result: string
+  url: string
+  failed: boolean
+}
+
+export interface PullComment {
+  kind: string
+  author: string
+  body: string
+  created: number
+  url: string
+  state?: string
+  path?: string
+  line?: number
+  outdated?: boolean
+}
+
+export interface PullFollow {
+  number: number
+  url: string
+  state: 'looking' | 'open' | 'merged' | 'closed' | ''
+  draft: boolean
+  opened: boolean
+  head: string
+  conflict: boolean
+  mergeable: string
+  mergeState: string
+  checks: PullCheck[]
+  failing: number
+  passing: number
+  running: number
+  checksNew: boolean
+  comments: PullComment[]
+  more: number
+  dropped: number
+  rounds: number
+  auto: boolean
+  autoStop: string
+  polled: number
+  note: string
+  issue: number
+  issueSent: boolean
+  sent: number
+  done: boolean
+}
+
+export interface PullFollowView {
+  sid: string
+  follow: PullFollow | null
+  review: SessionReview | null
+  running: boolean
+  disabled: string
+}
+
+export interface Uncommitted {
+  commit: string
+  count: number
+  paths: string[]
+  cut: boolean
+}
+
+export interface Overlap {
+  sid: string
+  name: string
+  paths: string[]
+  more: number
+}
+
+export interface AgentCheck {
+  kind: string
+  command: string
+  ok: boolean
+  at: number
+}
+
+export interface ChangeNote {
+  path: string
+  what: string
+}
+
+export interface FileKind {
+  path: string
+  kind: string
+  target?: string
+}
+
+export interface DependencyChange {
+  ecosystem: string
+  name: string
+  from: string
+  to: string
+  change: 'added' | 'removed' | 'changed'
+  file: string
+  lockfile: boolean
+  looked: boolean
+  found: boolean
+  published: number
+  young: boolean
+  note?: string
+}
+
+export interface WorkflowRun {
+  path: string
+  name: string
+  when: string
+  secrets: string[]
+  idToken: boolean
+  trusted: string[]
+  new: boolean
+  changed: boolean
+  problem?: string
+}
+
+export interface PushExtra {
+  commit: string
+  problems: string[]
+  tests: ChangeNote[]
+  dependencies: DependencyChange[]
+  moreDependencies: number
+  kinds: FileKind[]
+  workflows: WorkflowRun[]
+  workflowsProblem?: string
+  lookup: string
+}
+
+export interface SessionFactsView {
+  uncommitted: Uncommitted | null
+  overlaps: Overlap[]
+  disabled: string
+}
+
+export interface ClaimMark {
+  kind: 'tests' | 'build' | 'file'
+  quote: string
+  file?: string
+  why: string
+}
+
+export interface TurnMarks {
+  turnId: string
+  epoch: string
+  marks: ClaimMark[]
+  notes: string[]
 }
 
 export type SignInMethod = 'subscription' | 'api-key' | 'gateway' | 'bedrock' | 'vertex' | 'not-signed-in' | 'unknown'
@@ -43,11 +248,13 @@ export interface SignIn {
   endpoint?: string
   costs: boolean
   checkedAt?: number
+  busy?: boolean
+  stale?: boolean
 }
 
 export interface StartupFile {
   path: string
-  place: 'worktree' | 'clone'
+  place: 'worktree' | 'clone' | 'above'
   link: boolean
   target?: string
   size: number
@@ -55,6 +262,14 @@ export interface StartupFile {
   content: string
   clipped: boolean
   uncommitted: boolean
+  hidden?: boolean
+  marks?: StartupMark[]
+}
+
+export interface StartupMark {
+  line: number
+  what: string
+  text: string
 }
 
 export interface StartupApproval {
@@ -63,6 +278,11 @@ export interface StartupApproval {
   commit: string
   hash: string
   files: StartupFile[]
+  instructions?: StartupFile[]
+  unchanged?: number
+  walk?: string[]
+  notes?: string[]
+  skipped?: string[]
 }
 
 export interface Needs {
@@ -72,11 +292,15 @@ export interface Needs {
   step?: string
   cost?: boolean
   trust?: string
+  box?: string
+  agent?: string
+  code?: boolean
 }
 
 export interface Consent {
   approve?: string
   costOk?: boolean
+  box?: string
 }
 
 export interface ReviewerView {
@@ -116,6 +340,7 @@ export interface SessionPush {
   overridden?: number
   findings?: boolean
   findingsSent?: number
+  extra?: PushExtra
 }
 
 export interface SessionForge {
@@ -135,6 +360,9 @@ export interface SessionForge {
   asked: number
   at: number
   matches?: ForgeMatch[]
+  secretAt?: string
+  secretLine?: string
+  from?: string
 }
 
 export interface ForgeMatch {
@@ -153,6 +381,10 @@ export interface ForgePanelView {
 
 export interface FlaggedFile {
   path: string
+  shown: string
+  commit?: string
+  field?: string
+  label?: string
   why: string
   allowed: boolean
   kind?: string
@@ -166,6 +398,9 @@ export interface PushPanelView {
   answering: boolean
   flagged?: FlaggedFile[]
   flagsRead?: boolean
+  checks?: AgentCheck[]
+  passedSince?: string[]
+  blockedSince?: string[]
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -177,6 +412,8 @@ export interface ReviewRole {
   state: ReviewRoleState
   verdict: string
   message: string
+  hasFull?: boolean
+  unchecked?: boolean
   reason: string
   costUsd?: number
   why?: string
@@ -189,6 +426,40 @@ export interface ReviewRole {
   pluginCommit?: string
   claudeCode?: string
   models?: string[]
+  progress?: ReviewProgress
+  given?: ReviewGiven
+  run?: number
+  runs?: number
+  advisory?: boolean
+  cited?: CitedIDs
+  findings?: FindingRef[]
+}
+
+export interface FindingRef {
+  severity: string
+  title: string
+  where?: string
+  path?: string
+  line?: number
+}
+
+export interface CitedIDs {
+  looked: string[]
+  notInOsv: string[]
+  failed?: string
+  more?: number
+}
+
+export interface ReviewProgress {
+  elapsedMs: number
+  toolCalls: number
+  done: boolean
+}
+
+export interface ReviewGiven {
+  prompt: string
+  flags: string[]
+  files: string[]
 }
 
 export interface SessionReview {
@@ -202,6 +473,21 @@ export interface SessionReview {
   costUsd?: number
   sessionCostUsd?: number
   testList?: TestList
+  planReview?: AsideRun
+  explain?: AsideRun
+  req?: string
+}
+
+export interface AsideRun {
+  commit: string
+  branch: string
+  state: 'running' | 'done' | 'failed' | 'withheld'
+  text: string
+  reason: string
+  costUsd?: number
+  at: number
+  planHash?: string
+  planPath?: string
 }
 
 export interface TestList {
@@ -212,9 +498,18 @@ export interface TestList {
   reason: string
   costUsd?: number
   at: number
+  steps?: WalkStep[]
+}
+
+export interface WalkStep {
+  do: string
+  expect: string
+  input: string
+  done: boolean
 }
 
 export interface ReviewsView {
+  sid?: string
   review: SessionReview | null
   disabled: string
   asking: boolean
@@ -222,12 +517,26 @@ export interface ReviewsView {
   pushing: boolean
   pushed?: boolean
   pushSaid?: { text: string; tone: string } | null
-  planned?: { name: string; agent: string; why: string }[]
+  planned?: { name: string; agent: string; why: string; summary: string }[]
   gate?: Reviewer[]
+  linked?: { commit: string; paths: string[] }
+  catalog?: { state: string; why: string }
   head?: string
   overriding?: string
   testList?: TestList | null
   testAsking?: boolean
+}
+
+export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
+
+export interface ChangeFile {
+  status: 'added' | 'changed' | 'deleted'
+  path: string
+  blob?: string
+  viewed?: boolean
+  stale?: boolean
+  size?: number
+  notDiffed?: 'large' | 'budget' | 'binary' | 'unreadable'
 }
 
 export interface Changes {
@@ -238,11 +547,13 @@ export interface Changes {
   baseRef: string
   noBase: boolean
   commits: { sha: string; parents: string[]; time: number; subject: string }[]
-  files: { status: 'added' | 'changed' | 'deleted'; path: string }[]
+  files: ChangeFile[]
   more: boolean
   note: string
   diff?: string
   clipped?: boolean
+  from?: ChangeFrom | ''
+  points?: { reviewed: string; reviewedAt: number; turn: string }
 }
 
 export type OverviewSession = SessionInfo & { waiting: CardEvent[] }
@@ -295,6 +606,7 @@ export interface ProjectsView {
   repos?: boolean
   starters?: Starter[]
   reviewer?: ReviewerView | null
+  helper?: string
 }
 
 export interface Dispatch extends Consent {
@@ -304,6 +616,11 @@ export interface Dispatch extends Consent {
   model: string
   mode: string
   type?: string
+  caps?: { money: number; minutes: number; turns: number }
+  from?: StartFrom
+  issue?: number
+  issueHash?: string
+  effort?: string
 }
 
 export interface HelloEvent {
@@ -311,6 +628,7 @@ export interface HelloEvent {
   stream: string
   sessions: SessionInfo[]
   supervisor?: string
+  compose?: string
 }
 
 export interface SessionsEvent {
@@ -332,6 +650,18 @@ export interface DroppedEvent {
   count?: number
 }
 
+export interface VersionsEvent {
+  type: 'versions'
+  sid: string
+  text: string
+}
+
+export interface AsideEvent {
+  type: 'worktree-aside'
+  sid: string
+  text: string
+}
+
 export interface SupervisorEvent {
   type: 'supervisor'
   state: string
@@ -351,6 +681,7 @@ export interface PromptEvent extends Stamped {
   images?: number
   lost?: number
   files?: string[]
+  reported?: boolean
 }
 
 export interface ContextView {
@@ -383,6 +714,13 @@ export interface ToolEvent extends Stamped {
   tool: string
   summary: string
   agentId?: string
+  agentName?: string
+}
+
+export interface NoticeEvent extends Stamped {
+  type: 'notice'
+  text: string
+  reported?: boolean
 }
 
 export interface ToolDoneEvent extends Stamped {
@@ -427,6 +765,7 @@ export interface Question {
 interface CardBase extends Stamped {
   id: string
   agentId?: string
+  agentName?: string
   readOnly?: boolean
   who?: string
   attach?: string
@@ -445,6 +784,9 @@ export interface PermissionEvent extends CardBase {
   complete: boolean
   always: string
   auto?: boolean
+  irreversible?: boolean
+  away?: boolean
+  guarded?: boolean
 }
 
 export interface PlanEvent extends CardBase {
@@ -463,7 +805,7 @@ export interface EndedEvent extends Stamped {
   type: 'ended'
 }
 
-export type ReviewState = 'none' | 'running' | 'stale' | 'pass' | 'block' | 'overridden' | 'unknown' | 'failed' | 'unclean' | 'untrusted'
+export type ReviewState = 'none' | 'running' | 'stale' | 'pass' | 'block' | 'overridden' | 'unknown' | 'failed' | 'unclean' | 'untrusted' | 'not-installed'
 
 export interface Reviewer {
   type: string
@@ -478,6 +820,8 @@ export interface Reviewer {
   override?: string
   since?: string
   incremental?: boolean
+  setAside?: string
+  summary?: string
 }
 
 export interface GateEvent {
@@ -506,6 +850,8 @@ export interface GateEvent {
   flagsRead?: boolean
   lfs?: string[]
   handoff?: boolean
+  catalog?: string
+  catalogWhy?: string
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }
@@ -524,6 +870,10 @@ export interface WorkflowDoc {
   changed?: boolean
   clipped?: boolean
   previous?: string
+  commit?: string
+  approvedAt?: string
+  reported?: boolean
+  onBase?: boolean
 }
 
 export interface WorkflowEvent extends Stamped {
@@ -541,8 +891,9 @@ export interface TeamSetup {
   defaultType: string
   roles: Record<string, string>
   agents: string[]
-  fileRules: { pattern: string; agent: string }[]
+  fileRules: { pattern: string; agent: string; instruction?: string }[]
   rounds: number
+  protect?: string[]
 }
 
 export interface TeamView {
@@ -580,6 +931,10 @@ export interface PlanApproval {
   refused?: string
   note?: string
   previous?: string
+  commit?: string
+  approvedAt?: string
+  reported?: boolean
+  onBase?: boolean
 }
 
 export interface ProjectAgents {
@@ -701,6 +1056,7 @@ export type SessionEvent =
   | UsageEvent
   | CompactEvent
   | AuditEvent
+  | NoticeEvent
 
 export interface RepoEvent {
   type: 'repo'
@@ -714,7 +1070,7 @@ export interface ReviewerEvent extends SignIn {
   type: 'reviewer'
 }
 
-export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
+export type StreamEvent = HelloEvent | SessionsEvent | ResetEvent | DroppedEvent | VersionsEvent | AsideEvent | SupervisorEvent | RepoEvent | ReviewerEvent | SessionEvent
 
 export interface SessionGrant {
   token: string
@@ -753,6 +1109,8 @@ export interface CheckStatus {
 export interface Tab {
   id: string
   label: string
+  description?: string
+  short?: string
   title?: string
   closable: boolean
   need: boolean
@@ -767,12 +1125,15 @@ export interface FileView {
   path: string
   text?: string
   note?: string
+  commit?: string
+  line?: number
 }
 
 export interface Prefs {
   theme?: string
   scale?: number
   bar?: string
+  keys?: 'on' | 'off'
 }
 
 declare global {
@@ -790,19 +1151,29 @@ declare global {
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
-    'sf-file': CustomEvent<{ path: string }>
+    'sf-handover': CustomEvent<{ sid: string; agent: string }>
+    'sf-open-session': CustomEvent<{ sid: string }>
+    'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event
     'sf-settled': Event
-    'sf-review': Event
+    'sf-review': CustomEvent<{ all: boolean }>
     'sf-expect': CustomEvent<{ agent: string; expect: Expect }>
     'sf-push-request': Event
     'sf-push-answer': CustomEvent<{ card: string; commit: string; allow: boolean; reason: string }>
     'sf-handoff': CustomEvent<{ card: string; commit: string }>
     'sf-send-findings': CustomEvent<{ card: string; commit: string }>
-    'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean }>
+    'sf-forge-answer': CustomEvent<{ card: string; approve: boolean; draft?: boolean; confirmed?: boolean }>
     'sf-test-list': Event
+    'sf-explain': Event
+    'sf-plan-review': CustomEvent<{ hash: string }>
+    'sf-insert-prompt': CustomEvent<{ text: string }>
+    'sf-walkthrough-check': CustomEvent<{ commit: string; step: number; done: boolean; settle: (ok: boolean) => void }>
     'sf-allow-file': CustomEvent<{ path: string; reason: string }>
     'sf-remove-file': CustomEvent<{ path: string }>
+    'sf-allow-commit': CustomEvent<{ commit: string; field: string; reason: string }>
+    'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
+    'sf-commit-ask': Event
+    'sf-session-deleted': CustomEvent<{ sid: string }>
   }
 }

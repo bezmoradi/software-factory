@@ -7,11 +7,12 @@ import (
 )
 
 const (
-	AuditPush      = "push"
-	AuditOverride  = "override"
-	AuditAllowFile = "allow-file"
-	MaxAuditShown  = 50
-	maxRefusalKind = 1_000_000
+	AuditPush        = "push"
+	AuditOverride    = "override"
+	AuditAllowFile   = "allow-file"
+	AuditAllowCommit = "allow-commit"
+	MaxAuditShown    = 50
+	maxRefusalKind   = 1_000_000
 )
 
 const (
@@ -41,7 +42,39 @@ const (
 	RefusedPush      = "push-refused"
 	RefusedRemote    = "remote-held"
 	RefusedProtected = "protected-write"
+	RefusedCloud     = "cloud-refused"
 )
+
+type maskedAudit struct {
+	Audit
+}
+
+func masking(a Audit) Audit {
+	if _, done := a.(maskedAudit); a == nil || done {
+		return a
+	}
+	return maskedAudit{a}
+}
+
+func (m maskedAudit) Append(e AuditEntry) error {
+	return m.Audit.Append(e.masked())
+}
+
+func (e AuditEntry) masked() AuditEntry {
+	e.Reason, e.PersonReason, e.Path = maskCut(e.Reason), maskCut(e.PersonReason), maskSecrets(e.Path)
+	if e.Missing != nil {
+		missing := make([]string, len(e.Missing))
+		for i, m := range e.Missing {
+			missing[i] = maskSecrets(m)
+		}
+		e.Missing = missing
+	}
+	return e
+}
+
+func ProjectLevelAudit(kind string) bool {
+	return slices.Contains([]string{AuditReviewerAgent, AuditApproveTeam, AuditForgetTeam, AuditApproveStartup}, kind)
+}
 
 type AuditReader interface {
 	Read(repository, branch string, limit int) ([]AuditEntry, error)
@@ -87,7 +120,7 @@ func (a *AuditLog) View(sid string) (AuditView, error) {
 }
 
 func (a *AuditLog) Refused(sid, kind string) {
-	if !slices.Contains([]string{RefusedPush, RefusedRemote, RefusedProtected}, kind) {
+	if !slices.Contains([]string{RefusedPush, RefusedRemote, RefusedProtected, RefusedCloud}, kind) {
 		return
 	}
 	t, ok := a.targets(sid)

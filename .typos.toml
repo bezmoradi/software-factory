@@ -1,5 +1,9 @@
+[default]
+extend-ignore-re = ["(?s)-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----"]
+
 [default.extend-identifiers]
 ue = "ue"
 
 [default.extend-words]
+assum = "assum"
 iy = "iy"

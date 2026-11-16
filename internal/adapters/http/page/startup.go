@@ -14,33 +14,61 @@ type signInJSON struct {
 	Endpoint  string `json:"endpoint,omitempty"`
 	Costs     bool   `json:"costs"`
 	CheckedAt int64  `json:"checkedAt,omitempty"`
+	Busy      bool   `json:"busy,omitempty"`
+	Stale     bool   `json:"stale,omitempty"`
 }
 
 func signInOf(s *session.SignIn) *signInJSON {
 	if s == nil || s.Method == "" {
 		return nil
 	}
-	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt)}
+	return &signInJSON{Method: string(s.Method), Words: s.Words(), Endpoint: s.Endpoint, Costs: s.Costs(), CheckedAt: millis(s.CheckedAt), Busy: s.Busy, Stale: s.Stale}
 }
 
 type shownFileJSON struct {
-	Path        string `json:"path"`
-	Place       string `json:"place"`
-	Link        bool   `json:"link"`
-	Target      string `json:"target,omitempty"`
-	Size        int    `json:"size"`
-	Hash        string `json:"hash"`
-	Content     string `json:"content"`
-	Clipped     bool   `json:"clipped"`
-	Uncommitted bool   `json:"uncommitted"`
+	Path        string     `json:"path"`
+	Place       string     `json:"place"`
+	Link        bool       `json:"link"`
+	Target      string     `json:"target,omitempty"`
+	Size        int        `json:"size"`
+	Hash        string     `json:"hash"`
+	Content     string     `json:"content"`
+	Clipped     bool       `json:"clipped"`
+	Uncommitted bool       `json:"uncommitted"`
+	Hidden      bool       `json:"hidden,omitempty"`
+	Marks       []markJSON `json:"marks,omitempty"`
+}
+
+type markJSON struct {
+	Line int    `json:"line"`
+	What string `json:"what"`
+	Text string `json:"text"`
 }
 
 type approvalJSON struct {
-	Agent  string          `json:"agent"`
-	Repo   string          `json:"repo"`
-	Commit string          `json:"commit"`
-	Hash   string          `json:"hash"`
-	Files  []shownFileJSON `json:"files"`
+	Agent        string          `json:"agent"`
+	Repo         string          `json:"repo"`
+	Commit       string          `json:"commit"`
+	Hash         string          `json:"hash"`
+	Files        []shownFileJSON `json:"files"`
+	Instructions []shownFileJSON `json:"instructions,omitempty"`
+	Unchanged    int             `json:"unchanged,omitempty"`
+	Walk         []string        `json:"walk,omitempty"`
+	Notes        []string        `json:"notes,omitempty"`
+	Skipped      []string        `json:"skipped,omitempty"`
+}
+
+func shownFilesOf(files []session.ShownFile) []shownFileJSON {
+	out := make([]shownFileJSON, 0, len(files))
+	for _, f := range files {
+		j := shownFileJSON{Path: f.Path, Place: string(f.Place), Link: f.Link, Target: f.Target, Size: f.Size, Hash: f.Hash,
+			Content: f.Content, Clipped: f.Clipped, Uncommitted: f.Uncommitted, Hidden: f.Hidden}
+		for _, m := range f.Marks {
+			j.Marks = append(j.Marks, markJSON{Line: m.Line, What: m.What, Text: m.Text})
+		}
+		out = append(out, j)
+	}
+	return out
 }
 
 type needsJSON struct {
@@ -50,25 +78,36 @@ type needsJSON struct {
 	Step     string        `json:"step,omitempty"`
 	Cost     bool          `json:"cost,omitempty"`
 	Trust    string        `json:"trust,omitempty"`
+	Box      string        `json:"box,omitempty"`
+	Agent    string        `json:"agent,omitempty"`
+	Code     bool          `json:"code,omitempty"`
 }
 
 func needsOf(n *session.Needs) *needsJSON {
 	if n == nil {
 		return nil
 	}
-	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust}
+	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust, Box: n.Box, Agent: n.Agent, Code: n.Code}
 	if n.Expected != "" {
 		out.Expected = string(n.Expected)
 	}
 	if a := n.Approval; a != nil {
-		v := &approvalJSON{Agent: a.Agent, Repo: a.Repo, Commit: a.Commit, Hash: a.Hash, Files: make([]shownFileJSON, 0, len(a.Files))}
-		for _, f := range a.Files {
-			v.Files = append(v.Files, shownFileJSON{Path: f.Path, Place: string(f.Place), Link: f.Link, Target: f.Target, Size: f.Size, Hash: f.Hash,
-				Content: f.Content, Clipped: f.Clipped, Uncommitted: f.Uncommitted})
+		out.Approval = &approvalJSON{Agent: a.Agent, Repo: a.Repo, Commit: a.Commit, Hash: a.Hash, Files: shownFilesOf(a.Files),
+			Unchanged: a.Unchanged, Walk: a.Walk, Notes: a.Notes, Skipped: a.Skipped}
+		if len(a.Instructions) > 0 {
+			out.Approval.Instructions = shownFilesOf(a.Instructions)
 		}
-		out.Approval = v
 	}
 	return out
+}
+
+func boxOf(body map[string]any) (string, bool) {
+	v, has := body["box"]
+	if !has {
+		return "", true
+	}
+	box, ok := v.(string)
+	return box, ok && session.ValidBox(box)
 }
 
 func consentOf(body map[string]any) (session.Consent, bool) {
@@ -131,6 +170,9 @@ func ReviewerFrame(si session.SignIn) session.Fields {
 	f := session.Fields{"type": "reviewer", "method": string(si.Method), "words": si.Words(), "costs": si.Costs(), "checkedAt": millis(si.CheckedAt)}
 	if si.Endpoint != "" {
 		f["endpoint"] = si.Endpoint
+	}
+	if si.Stale {
+		f["stale"] = true
 	}
 	return f
 }

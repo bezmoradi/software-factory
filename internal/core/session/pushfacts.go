@@ -22,7 +22,7 @@ func (p *Pushes) announcePushed(x *pushing, t PushTarget, facts gate.Facts, miss
 	}
 	e := x.entry
 	out := PushedFacts{SID: x.sid, Repository: t.Name, Branch: t.Branch, Commit: e.Commit, Remote: e.Remote, By: e.By, At: e.Time,
-		Allowed: x.answer != nil && x.answer.Allow, Missing: missing}
+		Allowed: x.answer != nil && x.answer.Allow, Missing: missing, Req: e.Req}
 	var entries map[review.Key]ReviewEntry
 	if p.cfg.Reviews != nil {
 		entries, _ = p.cfg.Reviews.Entries()
@@ -30,11 +30,8 @@ func (p *Pushes) announcePushed(x *pushing, t PushTarget, facts gate.Facts, miss
 	for _, q := range facts.Required {
 		k := review.Key{Commit: e.Commit, Branch: t.Branch, Agent: q.Agent}
 		r := PushedRole{Role: q.Role, Name: ReviewerName(q), Agent: q.Agent}
-		if rec, ok := facts.Reviews[k]; ok {
-			r.Recorded = true
-			r.Passed = rec.State == review.Pass
-			r.Overridden = rec.State == review.Block && rec.Override != ""
-		}
+		r.Recorded, r.Passed, r.Overridden = review.Outcome(facts.Reviews, k, q.RunCount())
+		r.Recorded = r.Recorded || r.Overridden
 		if en, ok := entries[k]; ok {
 			r.Since, r.PluginCommit, r.ClaudeCode, r.Models = en.Since, en.PluginCommit, en.ClaudeCode, slices.Clone(en.Models)
 		}

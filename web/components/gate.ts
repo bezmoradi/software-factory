@@ -1,7 +1,9 @@
 import { button, el, emit, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
 import { diffText, lineDiff } from '../lib/diff.ts'
-import type { HoldSetting, PlanApproval, ProjectAgents } from '../types.ts'
+import { shortSha } from '../lib/format.ts'
+import type { AsideRun, HoldSetting, PlanApproval, ProjectAgents } from '../types.ts'
 import './markdown.ts'
+import { asideBox } from './aside-run.ts'
 
 class SfApproval extends HTMLElement {
   #view: PlanApproval | null = null
@@ -48,6 +50,37 @@ class SfApproval extends HTMLElement {
     return remembered(this.#open, `changes:${v.hash}`, true, summary, pre)
   }
 
+  #planBox: HTMLElement | null = null
+  #planState: { run: AsideRun | null; asking: boolean } = { run: null, asking: false }
+  #planKey = ''
+
+  set planReview(value: { run: AsideRun | null; asking: boolean } | null) {
+    const next = value ?? { run: null, asking: false }
+    const key = JSON.stringify(next)
+    if (key === this.#planKey) return
+    this.#planKey = key
+    this.#planState = next
+    const v = this.#view
+    if (!v || !this.#planBox?.isConnected) return
+    const focused = document.activeElement?.id === 'plan-review-button'
+    const box = this.#planReview(v)
+    this.#planBox.replaceWith(box)
+    this.#planBox = box
+    if (focused) document.getElementById('plan-review-button')?.focus({ preventScroll: true })
+  }
+
+  #planReview(v: PlanApproval): HTMLElement {
+    const t = this.#planState.run
+    const stale = t && t.planHash && t.planHash !== v.hash ? ', of an earlier version of the plan' : ''
+    return asideBox({
+      id: 'plan-review-button', title: 'Second opinion on the plan', start: 'Review this plan', busy: 'Reviewing the plan…', label: 'The review of the plan',
+      hint: 'Asks Claude Code in a reviewer container of its own, with read-only tools, to review this version of the plan against the code. It approves nothing and changes no gate state',
+      intro: 'Before you approve, a reviewer run can read the plan against the code and list what looks wrong or missing. It costs one run, and nothing reads it but you.',
+      run: t, asking: this.#planState.asking, disabled: v.disabled, stale,
+      press: () => emit(this, 'sf-plan-review', { hash: v.hash }),
+    })
+  }
+
   #why = (() => {
     const p = el('p', 'small warn approval-why')
     p.setAttribute('role', 'status')
@@ -60,7 +93,19 @@ class SfApproval extends HTMLElement {
     const reqs = v.kind === 'requirements'
     const what = reqs ? 'the requirements' : 'the plan'
     this.#field.setAttribute('aria-label', `What the agent should change in ${what}`)
-    const status = v.approved ? `You approved this version of ${what}.` : v.changed ? `${reqs ? 'The requirements' : 'The plan'} changed after you approved ${reqs ? 'them' : 'it'}. Read ${reqs ? 'them' : 'it'} and approve again.` : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : 'Implement starts once you read the plan and approve it.'
+    const What = reqs ? 'The requirements' : 'The plan'
+    const them = reqs ? 'them' : 'it'
+    const status = v.onBase
+      ? `${What} ${reqs ? 'are' : 'is'} from an earlier task, already on the base branch, so ${reqs ? 'they aren’t' : 'it isn’t'} approvable here. The engine counts only text this session’s own commits added or changed${v.changed ? ', so your earlier approval no longer counts' : ''}.`
+      : v.reported
+      ? `${What} ${reqs ? 'aren’t' : 'isn’t'} committed on the session’s branch: this is the text the agent reported. The engine counts an approval only of committed text${v.changed ? ', so your earlier approval no longer counts' : ''}.`
+      : v.approved
+        ? v.approvedAt ? `You approved this version of ${what}, read from commit ${shortSha(v.approvedAt)}.` : `You approved this version of ${what}.`
+        : v.changed
+          ? v.approvedAt && v.commit
+            ? `${What} in commit ${shortSha(v.commit)} ${reqs ? 'differ' : 'differs'} from the version you approved in commit ${shortSha(v.approvedAt)}, so that approval no longer counts. Read ${them} and approve again.`
+            : `${What} changed after you approved ${them}. Read ${them} and approve again.`
+          : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : 'Implement starts once you read the plan and approve it.'
     const body = el('div', 'reply')
     const text = el('sf-markdown', 'body')
     text.exact = true
@@ -75,6 +120,10 @@ class SfApproval extends HTMLElement {
     this.replaceChildren(el('p', `small ${v.approved ? 'ok' : 'warn'}`, status))
     if (reqs && v.changed && !v.approved) this.append(this.#changes(v))
     this.append(details)
+    if (!reqs) {
+      this.#planBox = this.#planReview(v)
+      this.append(this.#planBox)
+    }
     if (v.approved) return
     const approve = button(reqs ? 'Approve requirements' : 'Approve plan', 'ghost', () => {
       if (!this.#open.has(v.hash)) {

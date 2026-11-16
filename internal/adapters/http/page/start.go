@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -49,6 +50,9 @@ type projectJSON struct {
 
 func (s *Server) projects(w http.ResponseWriter) {
 	out := map[string]any{"projects": []any{}, "cloning": []any{}, "hosts": []any{}, "repos": s.cfg.Repos != nil, "starters": []any{}, "reviewer": nil}
+	if s.cfg.HelperDown != nil && s.cfg.HelperDown() {
+		out["helper"] = "unreachable"
+	}
 	if s.cfg.Repos == nil {
 		send(w, http.StatusOK, out)
 		return
@@ -115,11 +119,14 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	sid := str(body["sid"], 80)
 	switch path {
 	case "/api/dispatch":
-		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk") {
+		rawFrom, hasFrom := body["from"]
+		from, okFrom := startFromOf(rawFrom, hasFrom)
+		box, okBox := boxOf(body)
+		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box") || !okFrom || !okBox {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		for _, k := range []string{"path", "name", "model", "mode", "agent", "type"} {
+		for _, k := range []string{"path", "name", "model", "mode", "agent", "type", "effort"} {
 			if v, ok := body[k]; ok {
 				if _, isText := v.(string); !isText {
 					refuse(w, http.StatusBadRequest, k)
@@ -141,10 +148,26 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		if agent == "" {
 			agent = "claude"
 		}
+		issue, issueHash := 0, ""
+		_, hasHash := body["issueHash"]
+		if v, has := body["issue"]; has || hasHash {
+			n, ok := wholeNumber(v, 1, session.MaxIssueNumber)
+			h, isText := body["issueHash"].(string)
+			if !ok || !isText || !session.ValidIssueHash(h) {
+				refuse(w, http.StatusBadRequest, "issue")
+				return
+			}
+			issue, issueHash = n, h
+		}
 		started, err := s.cfg.Starter.Dispatch(ctx, session.Dispatch{
 			Path: str(body["path"], session.MaxCwd+1), Agent: agent, Name: str(body["name"], 400), Model: str(body["model"], 40), Type: str(body["type"], 40), Consent: consent,
+			From:      from,
+			Issue:     issue,
+			IssueHash: issueHash,
+			Effort:    str(body["effort"], 21),
+			Box:       box,
 		})
-		s.logger.Info("dispatch", "agent", agent, "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -157,7 +180,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			return
 		}
 		err := s.cfg.Starter.Stop(ctx, sid)
-		s.logger.Info("stop-session", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("stop-session", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case "/api/wake":
 		consent, ok := consentOf(body)
@@ -166,7 +189,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			return
 		}
 		err := s.cfg.Starter.Wake(ctx, sid, consent)
-		s.logger.Info("wake", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("wake", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case "/api/remove-session":
 		if !keysWithin(body, "sid", "flag", "value") {
@@ -184,7 +207,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			given = &session.Offer{Flag: f, Value: v}
 		}
 		offer, err := s.cfg.Starter.Remove(ctx, sid, given)
-		s.logger.Info("remove-session", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("remove-session", "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
 			out := map[string]any{"error": p.Error, "message": p.Message, "offer": nil}
@@ -200,7 +223,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 
 func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Reviews == nil {
-		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no reviewer container, so it can't run reviews."})
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't run reviews."})
 		return
 	}
 	sid, ok := body["sid"].(string)
@@ -209,15 +232,17 @@ func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]
 		return
 	}
 	consent, consented := consentOf(body)
-	if !keysWithin(body, "sid", "costOk") || !ok || !consented || sid == "" || len(sid) > 80 {
+	all, hasAll := body["all"]
+	every, isBool := all.(bool)
+	if !keysWithin(body, "sid", "costOk", "all") || !ok || !consented || sid == "" || len(sid) > 80 || hasAll && !isBool {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
-	err := s.cfg.Reviews.Review(ctx, sid, consent.CostOK)
-	s.logger.Info("review", "ok", err == nil)
+	err := s.cfg.Reviews.Review(ctx, sid, consent.CostOK, every)
+	shared.For(r.Context(), s.logger).Info("review", "ok", err == nil, "all", every)
 	reply(w, err, http.StatusAccepted)
 }
 
@@ -236,6 +261,6 @@ func (s *Server) override(w http.ResponseWriter, r *http.Request, sid string, ok
 	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	err := s.cfg.Reviews.Override(ctx, sid, agent, commit, reason)
-	s.logger.Info("override", "ok", err == nil)
+	shared.For(r.Context(), s.logger).Info("override", "ok", err == nil)
 	reply(w, err, http.StatusOK)
 }

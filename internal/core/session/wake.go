@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -76,7 +78,7 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 		return false, invalid("command")
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return false, explained(invalid("command"), commandRefused)
+		return false, explained(invalid("command"), commandRefused(a.Box, a.ID))
 	}
 	if r.lastMode[sid] == "bypassPermissions" && !confirm {
 		return false, conflict("confirm")
@@ -89,14 +91,14 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 		}
 		q.msgs = append(q.msgs, msg)
 		if noted {
-			delete(r.notes, sid)
+			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
 		return true, nil
 	}
 	r.queued[sid] = &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor)}
 	if noted {
-		delete(r.notes, sid)
+		r.dropNotesLocked(sid)
 	}
 	r.announce(now)
 	return false, nil
@@ -167,11 +169,11 @@ func (d *Dispatcher) WakeWithMessage(ctx context.Context, sid, text string, conf
 	if err != nil || added {
 		return err
 	}
-	if err := d.Wake(ctx, sid, consent); err != nil {
+	if err := d.wakeFor(ctx, sid, consent, ByPage, "a message the person sent to the stopped session"); err != nil {
 		d.reg.unqueue(sid)
 		return err
 	}
-	d.cfg.Logger.Info("message queued", "event", "woken")
+	shared.For(ctx, d.cfg.Logger).Info("message queued", "event", "woken")
 	return nil
 }
 
@@ -202,7 +204,7 @@ func claudeRows(out string) ([]claudeRow, bool) {
 }
 
 func (d *Dispatcher) WatchStates(ctx context.Context, every time.Duration) {
-	if d.cfg.Host == nil {
+	if !d.boxed() {
 		return
 	}
 	if every <= 0 {
@@ -229,27 +231,54 @@ func shortWord(s string) string {
 
 func (d *Dispatcher) refreshStates(ctx context.Context) {
 	d.mu.Lock()
-	mine := map[string]*run{}
-	dir := ""
+	byBox := map[string]map[string]*run{}
+	dirs := map[string]string{}
 	for sid, r := range d.runs {
-		if r.spec.Method == MethodPlugin && r.cwd != "" {
-			mine[sid] = r
-			dir = r.cwd
+		if r.spec.Method == MethodPlugin && r.cwd != "" && r.box != "" && r.handedTo == "" && !r.handing {
+			if byBox[r.box] == nil {
+				byBox[r.box] = map[string]*run{}
+			}
+			byBox[r.box][sid] = r
+			dirs[r.box] = r.cwd
 		}
 	}
 	d.mu.Unlock()
-	if len(mine) == 0 {
+	if len(byBox) == 0 {
 		return
 	}
-	lctx, cancel := context.WithTimeout(ctx, claudeList)
-	res, err := d.cfg.Host.Run(lctx, Command{Argv: d.claude("agents", "--json", "--all"), Dir: dir, Timeout: claudeList})
-	cancel()
-	if rows, ok := claudeRows(res.Stdout); err == nil && res.Code == 0 && ok {
-		states := map[string]AgentState{}
-		live := map[string]bool{}
-		for _, s := range d.reg.Sessions() {
-			live[s.SID] = s.Live
+	live := map[string]bool{}
+	for _, s := range d.reg.Sessions() {
+		live[s.SID] = s.Live
+	}
+	states := map[string]AgentState{}
+	supervisor, answered := "", false
+	for box, mine := range byBox {
+		if !d.liveBox(box) {
+			continue
 		}
+		got, ok := d.refreshBox(ctx, box, dirs[box], mine, live, states)
+		answered = answered || ok
+		if got != "" && supervisor != "running" {
+			supervisor = got
+		}
+	}
+	if answered {
+		d.reg.SetStates(states)
+	}
+	if supervisor != "" {
+		d.reg.SetSupervisor(supervisor)
+	}
+}
+
+func (d *Dispatcher) refreshBox(ctx context.Context, box, dir string, mine map[string]*run, live map[string]bool, states map[string]AgentState) (string, bool) {
+	host := d.hostFor(box)
+	lctx, cancel := context.WithTimeout(ctx, claudeList)
+	res, err := host.Run(lctx, Command{Argv: d.claude("agents", "--json", "--all"), Dir: dir, Timeout: claudeList})
+	cancel()
+	d.restarted(ctx, host, mine, live)
+	rows, answered := claudeRows(res.Stdout)
+	answered = answered && err == nil && res.Code == 0
+	if answered {
 		for _, row := range rows {
 			r := mine[row.SessionID]
 			if r == nil || row.ID != r.id {
@@ -264,58 +293,20 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 			d.mu.Unlock()
 			if gone {
 				d.reg.Ended(row.SessionID, false)
-				d.cfg.Logger.Info("agent session", "event", "stopped-by-itself")
+				shared.For(ctx, d.cfg.Logger).Info("agent session", "event", "stopped-by-itself")
+				go d.idleBox(r)
 			}
 		}
-		d.reg.SetStates(states)
 	}
 	sctx, scancel := context.WithTimeout(ctx, daemonFor)
-	res, err = d.cfg.Host.Run(sctx, Command{Argv: d.claude("daemon", "status"), Dir: dir, Timeout: daemonFor})
+	res, err = host.Run(sctx, Command{Argv: d.claude("daemon", "status"), Dir: dir, Timeout: daemonFor})
 	scancel()
 	switch {
 	case err != nil:
 	case daemonPid.MatchString(res.Stdout):
-		d.reg.SetSupervisor("running")
+		return "running", answered
 	case strings.Contains(res.Stdout, "not running"):
-		d.reg.SetSupervisor("stopped")
+		return "stopped", answered
 	}
-}
-
-func (d *Dispatcher) StopLeftovers(ctx context.Context) {
-	if d.cfg.Host == nil || d.cfg.Repositories == nil {
-		return
-	}
-	repos, err := d.cfg.Repositories.List()
-	if err != nil || len(repos) == 0 {
-		return
-	}
-	list, err := d.listClaude(ctx, repos[0].Path)
-	if err != nil {
-		d.cfg.Logger.Warn("dispatch", "event", "leftovers-not-listed")
-		return
-	}
-	stopped := 0
-	for _, l := range list {
-		if !shortID.MatchString(l.ID) || !absolute(l.Cwd) || d.keeps(l.ID) {
-			continue
-		}
-		res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("stop", l.ID), Dir: l.Cwd, Timeout: claudeRun})
-		if err == nil && res.Code == 0 {
-			stopped++
-		}
-	}
-	if stopped > 0 {
-		d.cfg.Logger.Info("dispatch", "event", "leftovers-stopped", "count", stopped)
-	}
-}
-
-func (d *Dispatcher) keeps(id string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, r := range d.runs {
-		if r.id == id && (r.running || r.busy) {
-			return true
-		}
-	}
-	return false
+	return "", answered
 }

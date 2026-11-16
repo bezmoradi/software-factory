@@ -68,10 +68,17 @@ export function emit<K extends keyof SfEvents>(target: EventTarget, type: K, ...
   target.dispatchEvent(detail.length ? new CustomEvent(type, { bubbles: true, detail: detail[0] }) : new Event(type, { bubbles: true }))
 }
 
-export function fileLink(path: string, key = ''): HTMLButtonElement {
+const REPO_PATH_UNSAFE = /[\\:\u0000-\u001f\u007f]/
+
+export function repoPath(path: string): boolean {
+  return path.length > 0 && path.length <= 300 && !path.startsWith('/') && !path.startsWith('~') && !REPO_PATH_UNSAFE.test(path) && path === visible(path) && path.split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+export function fileLink(path: string, key = '', at?: { commit: string; line?: number }): HTMLButtonElement {
   const shown = visible(path)
-  const link = button(shown, 'link file-link', () => emit(link, 'sf-file', { path }), 'button', key)
-  link.title = `Open ${shown} read-only`
+  const where = at ? `${shown}${at.line ? `:${at.line}` : ''}` : shown
+  const link = button(where, 'link file-link', () => emit(link, 'sf-file', at ? { path, commit: at.commit, ...(at.line ? { line: at.line } : {}) } : { path }), 'button', key)
+  link.title = at ? `Open ${shown}${at.line ? ` at line ${at.line}` : ''}, as commit ${at.commit.slice(0, 7)} has it, read-only` : `Open ${shown} read-only`
   return link
 }
 
@@ -103,4 +110,34 @@ export function pageCrumb(text: string): HTMLElement {
   ol.append(li)
   nav.append(ol)
   return nav
+}
+
+export function focusView(): void {
+  const shownNode = (h: HTMLElement) => h.offsetParent !== null
+  const target = [...document.querySelectorAll<HTMLElement>('#crumbs h1, main h1, .view h1, main h2')].find(shownNode) ?? [...document.querySelectorAll<HTMLElement>('main')].find(shownNode)
+  if (!target) return
+  if (!target.hasAttribute('tabindex')) target.tabIndex = -1
+  target.focus({ preventScroll: true })
+}
+
+function lost(): boolean {
+  const a = document.activeElement
+  return !(a instanceof HTMLElement) || a === document.body || a.offsetParent === null && a !== document.documentElement && getComputedStyle(a).position !== 'fixed'
+}
+
+export function settleFocus(): void {
+  const check = () => {
+    if (!document.querySelector('dialog[open]') && lost()) focusView()
+  }
+  requestAnimationFrame(check)
+  setTimeout(check, 250)
+  setTimeout(check, 1000)
+}
+
+export function opener(): () => void {
+  const back = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+  return () => {
+    if (back?.isConnected && !back.closest('[hidden], dialog:not([open])')) back.focus({ preventScroll: true })
+    else focusView()
+  }
 }

@@ -206,7 +206,7 @@ func (p Pusher) Push(ctx context.Context, req push.Request) push.Result {
 		return push.Result{Outcome: push.Pushed, Reason: "the remote branch already has this commit", Previous: current}
 	}
 	if current != "" && !req.Force {
-		ok, err := p.Reader.IsAncestor(req.Repo, current, req.Commit)
+		ok, err := p.Reader.IsAncestor(ctx, req.Repo, current, req.Commit)
 		if err != nil || !ok {
 			return rejected("the commit doesn't build on the remote branch, so the push wouldn't be a fast-forward", current)
 		}

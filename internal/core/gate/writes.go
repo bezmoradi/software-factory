@@ -3,6 +3,8 @@ package gate
 import (
 	"path"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 var agentConfigDirs = set(".codex", ".agents")
@@ -30,6 +32,28 @@ func ProtectedWrite(top, file string) string {
 	}
 	if segments[len(segments)-1] == ".env" {
 		return "it is an environment file that agents load at start, which can change where their traffic goes"
+	}
+	return ""
+}
+
+func GuardedWrite(top, file string, protect []string) string {
+	if len(protect) == 0 || !path.IsAbs(file) || !path.IsAbs(top) {
+		return ""
+	}
+	root := strings.ToLower(path.Clean(top))
+	p := strings.ToLower(path.Clean(file))
+	rel := strings.TrimPrefix(p, "/")
+	if root != "/" {
+		rest, ok := strings.CutPrefix(p, root+"/")
+		if !ok {
+			return ""
+		}
+		rel = rest
+	}
+	for _, pattern := range protect {
+		if workflow.PathMatches(pattern, rel, true) {
+			return "it matches " + pattern + " in the protect list of the team file on the main branch, so the person answers every write to it"
+		}
 	}
 	return ""
 }

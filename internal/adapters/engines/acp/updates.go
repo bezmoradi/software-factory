@@ -9,11 +9,12 @@ import (
 )
 
 type toolState struct {
-	id     string
-	title  string
-	kind   string
-	status string
-	input  json.RawMessage
+	id      string
+	title   string
+	kind    string
+	status  string
+	input   json.RawMessage
+	version int
 }
 
 var toolKinds = map[string]bool{
@@ -73,6 +74,7 @@ func (c *Client) onUpdate(params json.RawMessage) {
 		if id, ok := stringField(fields, "currentModeId"); ok && id != "" {
 			c.mode.current = id
 			c.emitLocked(agent.Event{Type: agent.Mode, Mode: id})
+			c.modeReportedLocked()
 		}
 	case "config_option_update":
 		c.onConfigOptionsLocked(fields["configOptions"])
@@ -142,9 +144,11 @@ func (c *Client) applyToolLocked(raw json.RawMessage, create bool) (agent.Tool, 
 	}
 	if input, ok := fields["rawInput"]; ok {
 		input = bytes.TrimSpace(input)
-		if len(input) > 0 && !bytes.Equal(input, []byte("null")) {
+		if len(input) > 0 && !bytes.Equal(input, []byte("null")) && !bytes.Equal(input, st.input) {
 			c.toolBytes += len(input) - len(st.input)
 			st.input = append(json.RawMessage(nil), input...)
+			c.inputSeq++
+			st.version = c.inputSeq
 		}
 	}
 	c.evictToolsLocked(id)

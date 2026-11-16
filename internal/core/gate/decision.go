@@ -40,23 +40,26 @@ type Answer struct {
 }
 
 type Facts struct {
-	Type     workflow.WorkType
-	Level    level.Result
-	Main     string
-	Required []workflow.Requirement
-	Offers   map[string]review.Offer
-	Reviews  map[review.Key]review.Record
-	Items    []string
-	Answer   *Answer
-	Now      time.Time
-	Capped   map[string]int
+	Type          workflow.WorkType
+	Level         level.Result
+	Main          string
+	Required      []workflow.Requirement
+	Offers        map[string]review.Offer
+	Reviews       map[review.Key]review.Record
+	Items         []string
+	Answer        *Answer
+	Now           time.Time
+	Capped        map[string]int
+	NeedsApproval bool
 }
 
 type Decision struct {
-	Result    Result
-	Reason    string
-	Missing   []string
-	Exception string
+	Result        Result
+	Reason        string
+	Missing       []string
+	Unmet         []string
+	Exception     string
+	NeedsApproval bool
 }
 
 var (
@@ -103,7 +106,50 @@ func CappedItem(agent string, rounds int) string {
 	return "the developer's decision on " + agent + ", which blocked in " + strconv.Itoa(rounds) + " " + unit + " on this branch, the limit this project set: they override its verdict, allow or deny the push, or hand the open findings off, on the page"
 }
 
+func unmetReview(agent string, rec review.Record, found bool, capped int) string {
+	switch {
+	case capped > 0:
+		return "the developer's decision on " + agent
+	case !found:
+		return "a review by " + agent
+	case rec.State == review.Running:
+		return agent + "'s review to finish"
+	case rec.State == review.Block && rec.Override == "":
+		return "a fix or an override for " + agent + "'s blocking verdict"
+	}
+	return "a review by " + agent + " that counts"
+}
+
+func otherItems(n int) string {
+	if n == 1 {
+		return "1 other item listed on the page"
+	}
+	return strconv.Itoa(n) + " other items listed on the page"
+}
+
+const sandboxUnmet = "the sandbox check passing"
+
+func SandboxItem(l level.Result) string {
+	switch {
+	case l.Level == level.Locked && l.Sandboxed:
+		return ""
+	case l.Level == level.Stopped && l.Sandboxed:
+		return ""
+	}
+	why := l.Reason
+	if why == "" {
+		why = "no level was computed for this session"
+	}
+	return sandboxUnmet + ": " + why
+}
+
 func Push(r Request, f Facts) Decision {
+	d := decide(r, f)
+	d.NeedsApproval = f.NeedsApproval && len(d.Missing) > 0
+	return d
+}
+
+func decide(r Request, f Facts) Decision {
 	refuse := func(why string) Decision { return Decision{Result: Refused, Reason: why} }
 	if !fullCommit.MatchString(r.Commit) {
 		return refuse("the commit to push isn't a full commit id")
@@ -121,16 +167,11 @@ func Push(r Request, f Facts) Decision {
 		return refuse("a push that rewrites the remote's main branch, or a branch the engine can't tell apart from it, is never allowed")
 	}
 	missing := append([]string{}, f.Items...)
+	var unmet []string
 	unsandboxed := false
-	switch {
-	case f.Level.Level == level.Locked && f.Level.Sandboxed:
-	case f.Level.Level == level.Stopped && f.Level.Sandboxed:
-	default:
-		why := f.Level.Reason
-		if why == "" {
-			why = "no level was computed for this session"
-		}
-		missing = append(missing, "the sandbox check passing: "+why)
+	if item := SandboxItem(f.Level); item != "" {
+		missing = append(missing, item)
+		unmet = append(unmet, sandboxUnmet)
 		unsandboxed = true
 	}
 	roles := workflow.MinimumRoles(f.Type.Edits)
@@ -142,19 +183,30 @@ func Push(r Request, f Facts) Decision {
 	for _, role := range roles {
 		if !slices.ContainsFunc(f.Required, func(q workflow.Requirement) bool { return q.Role == role && q.Agent != "" }) {
 			missing = append(missing, "the "+role.Name()+" role filled by an agent: none is set for this work type")
+			unmet = append(unmet, "the "+role.Name()+" role filled by an agent")
 		}
 	}
 	for _, q := range f.Required {
+		if q.Missing {
+			continue
+		}
 		var offer *review.Offer
 		if o, ok := f.Offers[q.Agent]; ok {
 			offer = &o
 		}
-		if why := review.Problem(f.Reviews, review.Key{Commit: r.Commit, Branch: r.Branch, Agent: q.Agent}, offer); why != "" {
-			if n := f.Capped[q.Agent]; n > 0 {
+		k := review.Key{Commit: r.Commit, Branch: r.Branch, Agent: q.Agent}
+		if why, at := review.Pooled(f.Reviews, k, q.RunCount(), offer); why != "" {
+			n := f.Capped[q.Agent]
+			if n > 0 {
 				why = CappedItem(q.Agent, n)
 			}
 			missing = append(missing, why)
+			rec, found := f.Reviews[at]
+			unmet = append(unmet, unmetReview(q.Agent, rec, found, n))
 		}
+	}
+	if len(f.Items) > 0 {
+		unmet = append(unmet, otherItems(len(f.Items)))
 	}
 	if f.Answer.binds(r, f.Now) {
 		if !f.Answer.Allow {
@@ -162,21 +214,24 @@ func Push(r Request, f Facts) Decision {
 			if note := Reason(f.Answer.Reason); note != "" {
 				why += ": " + note
 			}
-			return Decision{Result: Denied, Reason: why, Missing: missing}
+			return Decision{Result: Denied, Reason: why, Missing: missing, Unmet: unmet}
 		}
 		if len(missing) == 0 {
 			return Decision{Result: Allowed}
 		}
+		if unsandboxed && f.Level.Waiting {
+			return Decision{Result: Held, Reason: "no Allow pushes until the first sandbox check since the engine started passes, because nothing checked the agent container while the engine was down; Allow works once it passes", Missing: missing, Unmet: unmet}
+		}
 		if unsandboxed {
-			return Decision{Result: Held, Reason: "no Allow pushes while the sandbox check fails, because the work may have come from an agent that could reach a git host; fix the check, then start a new session, review the work there and push it", Missing: missing}
+			return Decision{Result: Held, Reason: "no Allow pushes while the sandbox check fails, because the work may have come from an agent that could reach a git host; fix the check, then start a new session, review the work there and push it", Missing: missing, Unmet: unmet}
 		}
 		if why := Reason(f.Answer.Reason); why != "" {
 			return Decision{Result: Allowed, Missing: missing, Exception: why}
 		}
-		return Decision{Result: Held, Reason: "allowing a push with items missing needs the developer's reason", Missing: missing}
+		return Decision{Result: Held, Reason: "allowing a push with items missing needs the developer's reason", Missing: missing, Unmet: unmet}
 	}
 	if len(missing) == 0 {
 		return Decision{Result: Allowed}
 	}
-	return Decision{Result: Held, Reason: "held until it has: " + strings.Join(missing, "; "), Missing: missing}
+	return Decision{Result: Held, Reason: "held until it has: " + strings.Join(missing, "; "), Missing: missing, Unmet: unmet}
 }

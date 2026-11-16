@@ -33,6 +33,8 @@ const (
 	NewClaimShown    = 30 * time.Second
 	MaxConns         = 400
 	MaxStrangerConns = 100
+	MaxBoxStrangers  = 20
+	BoxRegistrations = 10
 	MaxStreams       = 2
 	MaxInbox         = 200
 	MaxText          = 20000
@@ -63,6 +65,9 @@ type Admission struct {
 	Control   bool
 	SignIn    *SignIn
 	Mode      string
+	Lineage   *Lineage
+	Box       string
+	Branch    string
 }
 
 type Registration struct {
@@ -79,7 +84,9 @@ type Registration struct {
 	Busy       bool
 	Login      bool
 	Cards      []any
+	Box        string
 	keepPush   string
+	bridged    bool
 }
 
 type Registered struct {
@@ -87,7 +94,6 @@ type Registered struct {
 	Push       string
 	Version    string
 	Protocol   int
-	WasGate    bool
 	Page       bool
 	Control    bool
 	Background *bool
@@ -124,6 +130,8 @@ type Info struct {
 	Level        level.Level
 	LevelReason  string
 	LevelDropped bool
+	LevelLost    bool
+	Sandboxed    bool
 	Review       *ReviewView
 	Push         *PushView
 	Forge        []ForgeView
@@ -132,11 +140,23 @@ type Info struct {
 	Status       string
 	WaitingFor   string
 	Queued       int
+	Unbacked     []TurnMarks
+	StopReason   string
+	Uncommitted  *Uncommitted
+	Overlaps     []Overlap
+	Checks       []AgentCheck
+	Lineage      *Lineage
+	Follow       *FollowView
+	Splits       []SplitView
+	Box          string
+	SignInWait   bool
+	Branch       string
 }
 
 type conn struct {
 	secret     string
 	push       string
+	box        string
 	sid        string
 	cwd        string
 	epoch      string
@@ -152,15 +172,25 @@ type conn struct {
 	order      uint64
 	poll       *waiter
 	inbox      []Fields
+	bridged    bool
 }
 
 type admitted struct {
 	Admission
 	running      bool
+	waitSignIn   bool
 	observations []level.Observation
 	review       *ReviewView
 	push         *PushView
 	forge        []ForgeView
+	follow       *FollowView
+	splits       []SplitView
+	turnLog      *turnLog
+	unbacked     []TurnMarks
+	lastMessage  string
+	turnSince    time.Time
+	stopReason   string
+	doneItself   bool
 }
 
 type replay struct {
@@ -177,19 +207,40 @@ type Registry struct {
 	admitted    map[string]*admitted
 	lastMode    map[string]string
 	lastGate    map[string]bool
+	restored    map[string]bool
+	checked     bool
 	catalogs    map[string]*catalog
 	workflows   map[string]*Workflow
 	sinks       map[string]Sink
 	replays     map[string]*replay
 	registerAll *limiter
 	registerOne *limiter
+	registerBox *limiter
 	shown       []Info
 	order       uint64
 	uploads     *uploadBook
+	shots       screenshotBook
 	queued      map[string]*queue
 	notes       map[string]map[string]string
 	states      map[string]AgentState
 	supervisor  string
+	claimChecks *ClaimChecks
+	claimSerial uint64
+	turned      func()
+	turnSaving  bool
+	turnAgain   bool
+	compacted   func(sid string, queued bool)
+	docsMoved   func(sid string)
+	compactions *limiter
+	noteStore   NoteStore
+	noteVersion uint64
+	noteSaved   uint64
+	noteMu      sync.Mutex
+	halt        *Halt
+	worktrees   *worktreeBook
+	limits      *Limits
+	work        *SessionWork
+	branchCopy  *Keep
 }
 
 var (
@@ -207,14 +258,14 @@ var forwarded = map[string]bool{
 	"prompt": true, "command": true, "text": true, "tool": true, "tool_done": true, "busy": true, "idle": true,
 	"ask": true, "permission": true, "plan": true, "resolved": true, "ended": true, "agents": true, "catalog": true,
 	"control": true, "mode": true, "login": true, "usage": true, "compact": true, "context": true,
-	"workflow": true,
+	"workflow": true, "notice": true,
 }
 
 func New(version string, now func() time.Time) *Registry {
 	if now == nil {
 		now = time.Now
 	}
-	return &Registry{
+	r := &Registry{
 		now:         now,
 		version:     version,
 		conns:       map[string]*conn{},
@@ -222,16 +273,22 @@ func New(version string, now func() time.Time) *Registry {
 		admitted:    map[string]*admitted{},
 		lastMode:    map[string]string{},
 		lastGate:    map[string]bool{},
+		restored:    map[string]bool{},
 		catalogs:    map[string]*catalog{},
 		workflows:   map[string]*Workflow{},
 		sinks:       map[string]Sink{},
 		replays:     map[string]*replay{},
 		registerAll: newLimiter(20, time.Minute),
 		registerOne: newLimiter(3, time.Minute),
+		registerBox: newLimiter(BoxRegistrations, time.Minute),
 		uploads:     newUploadBook(),
 		queued:      map[string]*queue{},
 		states:      map[string]AgentState{},
+		compactions: newLimiter(compactNotes, compactWindow),
 	}
+	r.halt = newHalt(now, r.Notify)
+	r.limits = newLimits(r)
+	return r
 }
 
 func secret() string {
@@ -317,21 +374,33 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 	if g.LastSeq < 0 || g.LastSeq > 1<<53 {
 		g.LastSeq = 0
 	}
+	if !ValidBox(g.Box) {
+		return Registered{}, unauthorized()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
 	a := r.admitted[g.SID]
-	if (a == nil || !a.running) && !r.registerAll.allow("all", now) {
+	if a != nil && a.Box != g.Box {
+		return Registered{}, unauthorized()
+	}
+	if !r.registerBox.allow(g.Box, now) {
+		return Registered{}, limited("register")
+	}
+	stranger := a == nil
+	if stranger && !r.registerAll.allow("all", now) {
 		return Registered{}, limited("register")
 	}
 	if !r.registerOne.allow(g.SID, now) {
 		return Registered{}, limited("register")
 	}
-	stranger := a == nil
-	if len(r.conns) >= MaxConns || stranger && r.strangerConns() >= MaxStrangerConns {
+	crowded := func() bool {
+		return len(r.conns) >= MaxConns || stranger && (r.strangerConns() >= MaxStrangerConns || r.boxStrangers(g.Box) >= MaxBoxStrangers)
+	}
+	if crowded() {
 		r.sweep(now)
 	}
-	if len(r.conns) >= MaxConns || stranger && r.strangerConns() >= MaxStrangerConns {
+	if crowded() {
 		return Registered{}, full("connections")
 	}
 	for s, old := range r.conns {
@@ -361,6 +430,7 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 		order:      r.order,
 		secret:     secret(),
 		push:       push,
+		box:        g.Box,
 		sid:        g.SID,
 		cwd:        g.Cwd,
 		epoch:      g.Epoch,
@@ -373,9 +443,9 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 		lastSeq:    g.LastSeq,
 		seen:       now,
 		born:       now,
+		bridged:    g.bridged,
 	}
 	r.conns[c.secret] = c
-	wasGate := r.lastGate[g.SID]
 	if g.GateKnown {
 		r.lastGate[g.SID] = g.Controlled || g.Restored
 	}
@@ -396,7 +466,7 @@ func (r *Registry) Register(g Registration) (Registered, error) {
 			}
 		}
 	}
-	out := Registered{Secret: c.secret, Push: c.push, Version: r.version, Protocol: Protocol, WasGate: wasGate, Page: len(r.sinks) > 0}
+	out := Registered{Secret: c.secret, Push: c.push, Version: r.version, Protocol: Protocol, Page: len(r.sinks) > 0}
 	if a != nil {
 		background := a.Kind == "background"
 		out.Background = &background
@@ -513,6 +583,7 @@ func (r *Registry) Report(given string, b Batch) error {
 	}
 	changed := false
 	for _, raw := range b.Events {
+		denied := false
 		ev, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -534,7 +605,11 @@ func (r *Registry) Report(given string, b Batch) error {
 				ev = clean.fields(ev["seq"], ev["ts"])
 				if target == nil && seq > c.lastSeq {
 					w := clean
+					moved := docsDiffer(r.workflows[c.sid], &w)
 					r.workflows[c.sid] = &w
+					if moved && r.docsMoved != nil {
+						go r.docsMoved(c.sid)
+					}
 				}
 			}
 		}
@@ -543,9 +618,16 @@ func (r *Registry) Report(given string, b Batch) error {
 				continue
 			}
 			c.lastSeq = seq
+			r.limitsSeen(c, kind, ev, now)
+			r.trackTurn(c, kind, ev, seq, now)
+			r.markTurn(c.sid, kind, ev, now)
+			r.noteFacts(c.sid, kind, ev, now)
+			r.workSeen(c, kind, ev)
 			if cardTypes[kind] {
+				fresh := r.freshCard(ev)
 				shown = r.indexCard(c.sid, ev)
 				changed = changed || shown
+				denied = shown && fresh && r.awayAnswer(c.sid, ev, now)
 			} else if shown {
 				changed = r.apply(c, kind, ev, now) || changed
 			}
@@ -560,6 +642,14 @@ func (r *Registry) Report(given string, b Batch) error {
 			maps.Copy(frame, ev)
 			frame["sid"] = c.sid
 			frame["epoch"] = c.epoch
+			delete(frame, "away")
+			delete(frame, "reported")
+			if !c.bridged || kind != "prompt" {
+				frame["reported"] = true
+			}
+			if cardTypes[kind] {
+				r.markAway(frame, denied)
+			}
 		} else if ts, ok := ev["ts"].(float64); ok {
 			frame["ts"] = ts
 		}
@@ -695,6 +785,13 @@ func (r *Registry) Known(given string) bool {
 	return r.connOf(given, r.now()) != nil
 }
 
+func (r *Registry) admittedElsewhere(sid, box string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := r.admitted[sid]
+	return a != nil && a.Box != box
+}
+
 func (r *Registry) Admit(sid string, a Admission) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -704,6 +801,9 @@ func (r *Registry) Admit(sid string, a Admission) {
 		r.admitted[sid] = known
 	}
 	known.Admission = a
+	known.stopReason = ""
+	known.doneItself = false
+	r.dropOtherBoxes(sid, a.Box)
 	if !known.running && len(known.observations) > 0 {
 		known.observe(level.Observation{By: level.Engine, Event: level.ProcessStarted})
 	}
@@ -722,7 +822,40 @@ func (r *Registry) Restore(sid string, a Admission, sandboxed bool) {
 		first = level.Observation{By: level.Engine, Event: level.CheckNotRun, Parts: []string{"the engine restarted and has no record that the check passed throughout this session's earlier runs"}}
 	}
 	r.admitted[sid] = &admitted{Admission: a, observations: []level.Observation{first, {By: level.Engine, Event: level.ProcessEnded}}}
+	if !r.checked {
+		r.restored[sid] = true
+	}
 	r.announce(r.now())
+}
+
+func (r *Registry) WaitSignIn(sid string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a != nil && a.waitSignIn != on {
+		a.waitSignIn = on
+		r.announce(r.now())
+	}
+}
+
+func (r *Registry) CheckPassed() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.checked = true
+	clear(r.restored)
+}
+
+func (r *Registry) PushLevel(sid string) (level.Result, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := r.admitted[sid]
+	if a == nil {
+		return level.Result{}, false
+	}
+	lv := level.Of(a.observations)
+	if lv.Sandboxed && r.restored[sid] {
+		return level.Result{Level: level.Held, Reason: WaitingForFirstCheck, Dropped: lv.Dropped, Waiting: true}, true
+	}
+	return lv, true
 }
 
 func (r *Registry) Forget(sid string) {
@@ -731,6 +864,7 @@ func (r *Registry) Forget(sid string) {
 	if r.admitted[sid] == nil {
 		return
 	}
+	box := r.admitted[sid].Box
 	delete(r.admitted, sid)
 	for key, c := range r.conns {
 		if c.sid != sid {
@@ -751,12 +885,80 @@ func (r *Registry) Forget(sid string) {
 	delete(r.workflows, sid)
 	delete(r.lastMode, sid)
 	delete(r.lastGate, sid)
+	delete(r.restored, sid)
 	delete(r.queued, sid)
-	delete(r.notes, sid)
+	r.dropNotesLocked(sid)
 	delete(r.states, sid)
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
+	r.dropScreenshots(box, sid)
 	r.announce(r.now())
+	go r.halt.forget(sid)
+}
+
+func (r *Registry) dropOtherBoxes(sid, box string) {
+	for key, c := range r.conns {
+		if c.sid != sid || c.box == box {
+			continue
+		}
+		if c.poll != nil {
+			c.poll.finish(waitRevoked)
+			c.poll = nil
+		}
+		delete(r.conns, key)
+	}
+}
+
+func (r *Registry) FromBox(given, push, box string) error {
+	if !ValidBox(box) {
+		return unauthorized()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fits := func(c *conn) bool {
+		if c.box != box {
+			return false
+		}
+		a := r.admitted[c.sid]
+		return a == nil || a.Box == c.box
+	}
+	if len(given) == 43 {
+		if c := r.conns[given]; c != nil && !fits(c) {
+			return unauthorized()
+		}
+	}
+	if len(push) == 43 {
+		for _, c := range r.conns {
+			if subtle.ConstantTimeCompare([]byte(c.push), []byte(push)) == 1 && !fits(c) {
+				return unauthorized()
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Registry) DropBox(box string) int {
+	if !ValidBox(box) {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for key, c := range r.conns {
+		if c.box != box {
+			continue
+		}
+		if c.poll != nil {
+			c.poll.finish(waitRevoked)
+			c.poll = nil
+		}
+		delete(r.conns, key)
+		n++
+	}
+	if n > 0 {
+		r.announce(r.now())
+	}
+	return n
 }
 
 func (r *Registry) PushSession(token string) (string, error) {
@@ -822,6 +1024,15 @@ func (r *Registry) Level(sid string) (level.Result, bool) {
 	return level.Of(a.observations), true
 }
 
+func (r *Registry) EndedDone(sid string) {
+	r.mu.Lock()
+	if a := r.admitted[sid]; a != nil {
+		a.doneItself = true
+	}
+	r.mu.Unlock()
+	r.Ended(sid, false)
+}
+
 func (r *Registry) Ended(sid string, lost bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -830,6 +1041,7 @@ func (r *Registry) Ended(sid string, lost bool) {
 		return
 	}
 	a.running = false
+	r.endTurnLocked(a)
 	event := level.ProcessEnded
 	if lost {
 		event = level.ProcessLost
@@ -867,6 +1079,10 @@ func (r *Registry) Attach(s Sink) (string, error) {
 		return "", full("stream")
 	}
 	if r.supervisor != "" && !s.Frame(Fields{"type": "supervisor", "state": r.supervisor}) {
+		s.Close()
+		return "", full("stream")
+	}
+	if !s.Frame(r.halt.frame()) {
 		s.Close()
 		return "", full("stream")
 	}
@@ -995,6 +1211,9 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.Agent = a.Agent
 		info.Project = a.Project
 		info.StartedAt = a.StartedAt
+		info.StopReason = a.stopReason
+		info.Lineage = a.Lineage
+		info.Box, info.SignInWait, info.Branch = a.Box, a.waitSignIn && !a.running, a.Branch
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1014,16 +1233,29 @@ func (r *Registry) info(sid string, now time.Time) Info {
 			v := a.push.clone()
 			info.Push = &v
 		}
+		if len(a.unbacked) > 0 {
+			info.Unbacked = slices.Clone(a.unbacked)
+		}
 		if len(a.forge) > 0 {
 			info.Forge = slices.Clone(a.forge)
 			info.Needs += forgeWaiting(a.forge)
 		}
+		if a.follow != nil {
+			info.Follow = a.follow.clone()
+		}
+		if len(a.splits) > 0 {
+			info.Splits = slices.Clone(a.splits)
+			info.Needs += splitsWaiting(a.splits)
+		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor
+		} else if a.doneItself && !a.running {
+			info.State = "done"
 		}
 		if q := r.queued[sid]; q != nil {
 			info.Queued = len(q.msgs)
 		}
+		r.factsInto(sid, &info)
 	}
 	for _, k := range r.cards {
 		if k.sid == sid {
@@ -1034,6 +1266,8 @@ func (r *Registry) info(sid string, now time.Time) Info {
 	info.Level = lv.Level
 	info.LevelReason = lv.Reason
 	info.LevelDropped = lv.Dropped
+	info.LevelLost = lv.Lost
+	info.Sandboxed = lv.Sandboxed
 	return info
 }
 
@@ -1100,6 +1334,15 @@ func (r *Registry) Replay(stream, sid, epoch string, since int64) error {
 
 func (r *Registry) Message(sid, text string, confirm bool, images, files []string) error {
 	text = strings.TrimSpace(text)
+	if why := r.halt.turns(); why != "" {
+		return explained(conflict("halted"), why)
+	}
+	if why := r.limitsMessageHeld(sid); why != "" {
+		return explained(conflict("cap"), why)
+	}
+	if held, err := r.workDivert(sid, text, len(images) > 0 || len(files) > 0); held {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
@@ -1119,7 +1362,7 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		return explained(conflict("no images"), noImages)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return explained(invalid("command"), commandRefused)
+		return explained(invalid("command"), r.commandRefusedLocked(sid))
 	}
 	if c.mode == "bypassPermissions" && !confirm {
 		return conflict("confirm")
@@ -1144,14 +1387,18 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 		}
 		q.msgs = append(q.msgs, msg)
 		if noted {
-			delete(r.notes, sid)
+			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
 		return nil
 	}
 	r.tell(c, msg, now)
 	if noted {
-		delete(r.notes, sid)
+		r.dropNotesLocked(sid)
+	}
+	if commandName(text) == "" {
+		r.limitsMessage(sid)
+		r.startTurnLocked(sid, now)
 	}
 	return nil
 }
@@ -1193,6 +1440,9 @@ func (r *Registry) Answer(sid, id string, value any) error {
 	}
 	if !validAnswer(k, value) {
 		return invalid("answer")
+	}
+	if k.kind == "permission" {
+		r.halt.answered(sid, k, value, false)
 	}
 	if k.waiter != nil {
 		w := k.waiter
@@ -1264,6 +1514,16 @@ func (r *Registry) strangerConns() int {
 	n := 0
 	for _, c := range r.conns {
 		if r.admitted[c.sid] == nil {
+			n++
+		}
+	}
+	return n
+}
+
+func (r *Registry) boxStrangers(box string) int {
+	n := 0
+	for _, c := range r.conns {
+		if c.box == box && r.admitted[c.sid] == nil {
 			n++
 		}
 	}

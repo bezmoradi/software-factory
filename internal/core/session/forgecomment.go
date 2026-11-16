@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -18,7 +19,9 @@ const (
 	CommentCalls             = 10
 	CommentWindow            = 10 * time.Minute
 
-	noDrafts = "GitHub doesn't offer drafts for this repository, so it opened as ready for review"
+	noDrafts      = "GitHub doesn't offer drafts for this repository, so it opened as ready for review"
+	commentCutOff = "the engine stopped before the git host answered; the comment may have been posted"
+	commentLost   = "the git host didn't answer clearly; the comment may have been posted"
 )
 
 type PushedRole struct {
@@ -45,6 +48,7 @@ type PushedFacts struct {
 	Missing    int
 	Roles      []PushedRole
 	At         time.Time
+	Req        string
 }
 
 type forgeOwn struct {
@@ -84,7 +88,7 @@ func finishedCard(c *forgeCard) bool {
 func openedAs(v ForgeView, asked bool) string {
 	switch {
 	case v.Draft:
-		return " as a draft; the person marks it ready for review on GitHub"
+		return " as a draft; the person marks it ready for review on the page or on GitHub"
 	case asked:
 		return "; " + noDrafts
 	}
@@ -92,15 +96,18 @@ func openedAs(v ForgeView, asked bool) string {
 }
 
 func (f *Forges) AfterPush(p PushedFacts) {
+	if fl := f.followsOf(); fl != nil {
+		fl.pushed(p)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.owned().pushed[p.SID] = p
 	if f.closed {
-		f.cfg.Logger.Info("forge", "event", "comment-skipped", "why", "stopping")
+		shared.Tagged(f.cfg.Logger, p.Req).Info("forge", "event", "comment-skipped", "why", "stopping")
 		return
 	}
 	f.wg.Go(func() {
-		ctx, cancel := context.WithTimeout(f.cfg.Base, ForgeFor)
+		ctx, cancel := context.WithTimeout(shared.WithRequest(f.cfg.Base, p.Req), ForgeFor)
 		defer cancel()
 		f.commentPush(ctx, p, 0)
 	})
@@ -115,7 +122,7 @@ func (f *Forges) afterOpened(sid string, repo ForgeRepo, branch string, number i
 		return
 	}
 	f.wg.Go(func() {
-		ctx, cancel := context.WithTimeout(f.cfg.Base, ForgeFor)
+		ctx, cancel := context.WithTimeout(shared.WithRequest(f.cfg.Base, p.Req), ForgeFor)
 		defer cancel()
 		head, err := f.cfg.API.Branch(ctx, repo, branch)
 		if err != nil || head != p.Commit {
@@ -135,13 +142,13 @@ func (f *Forges) commentPush(ctx context.Context, p PushedFacts, number int) {
 	}
 	ft, why := f.target(p.SID, NeedPulls)
 	if why != "" || ft.t.Branch != p.Branch {
-		f.cfg.Logger.Info("forge", "event", "comment-skipped", "why", "target")
+		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "comment-skipped", "why", "target")
 		return
 	}
 	if number == 0 {
 		link, open, err := f.cfg.API.OpenPull(ctx, ft.repo, p.Branch)
 		if err != nil {
-			f.cfg.Logger.Warn("forge", "event", "comment-skipped", "why", "pulls-unread")
+			shared.For(ctx, f.cfg.Logger).Warn("forge", "event", "comment-skipped", "why", "pulls-unread")
 			return
 		}
 		if !open {
@@ -153,6 +160,10 @@ func (f *Forges) commentPush(ctx context.Context, p PushedFacts, number int) {
 	now := f.cfg.Now()
 	v := ForgeView{Card: randomHex(16), Kind: ForgeComment, State: ForgePosting, Title: "Comment on pull request #" + strconv.Itoa(number), Body: body,
 		Head: p.Branch, Host: ft.repo.Host, Repo: ft.repo.Slug(), Number: number, Asked: now, At: now}
+	held := false
+	if where, _ := ForgeSecret(v.Title, body); where != "" {
+		v.State, held = ForgeWaiting, true
+	}
 	f.mu.Lock()
 	o := f.owned()
 	if o.commented[p.SID] == p.Commit {
@@ -160,31 +171,85 @@ func (f *Forges) commentPush(ctx context.Context, p PushedFacts, number int) {
 		return
 	}
 	o.commented[p.SID] = p.Commit
-	c := &forgeCard{view: v, repo: ft.repo, sid: p.SID}
+	c := &forgeCard{view: v, repo: ft.repo, sid: p.SID, pushed: &p}
 	f.cards[p.SID] = append(f.cards[p.SID], c)
 	f.trim(p.SID)
 	f.mu.Unlock()
 	f.show(p.SID)
+	if held {
+		f.commentAudit(p, v, randomHex(16), ForgeHeld, "held the comment on pull request #"+strconv.Itoa(number)+" for the person, since it looks like it holds a secret")
+		shared.For(ctx, f.cfg.Logger).Info("forge", "event", "comment-held")
+		return
+	}
+	f.postComment(ctx, c, p)
+}
+
+func (f *Forges) answerCommentUnlocking(sid string, c *forgeCard, approve bool, req string) error {
+	if c.pushed == nil {
+		f.mu.Unlock()
+		return explained(conflict("card"), "That comment has no push record any more.")
+	}
+	p := *c.pushed
+	if shared.ValidRequest(req) {
+		p.Req = req
+	}
+	if !approve {
+		c.view.State, c.view.Reason, c.view.At, c.view.Body = ForgeDenied, "you denied it", f.cfg.Now(), ""
+		v := c.view
+		f.mu.Unlock()
+		f.show(sid)
+		f.commentAudit(p, v, randomHex(16), ForgeDenied, "the person denied posting the comment on pull request #"+strconv.Itoa(v.Number))
+		shared.Tagged(f.cfg.Logger, p.Req).Info("forge", "event", "comment-denied")
+		return nil
+	}
+	c.view.State, c.view.At = ForgePosting, f.cfg.Now()
+	f.wg.Go(func() {
+		ctx, cancel := context.WithTimeout(shared.WithRequest(f.cfg.Base, p.Req), ForgeFor)
+		defer cancel()
+		f.postComment(ctx, c, p)
+	})
+	f.mu.Unlock()
+	f.show(sid)
+	return nil
+}
+
+func (f *Forges) postComment(ctx context.Context, c *forgeCard, p PushedFacts) {
+	f.mu.Lock()
+	v, repo := c.view, c.repo
+	f.mu.Unlock()
+	number := v.Number
 	request := randomHex(16)
 	f.commentAudit(p, v, request, ForgePosting, "commenting on pull request #"+strconv.Itoa(number)+" about commit "+shortSHA(p.Commit))
-	link, err := f.cfg.API.Comment(ctx, ft.repo, number, body)
+	link, err := f.cfg.API.Comment(ctx, repo, number, v.Body)
+	stopped := err != nil && f.cfg.Base.Err() != nil
+	unclear := forgeUnclear(err) || stopped
 	f.mu.Lock()
 	c.view.At = f.cfg.Now()
-	if err != nil {
-		c.view.State, c.view.Reason = ForgeFailed, f.clean(ft.repo.Token, forgeWhy(err, NeedPulls))
-	} else {
+	switch {
+	case stopped:
+		c.view.State, c.view.Reason = ForgeUnclear, commentCutOff
+	case unclear:
+		c.view.State, c.view.Reason = ForgeUnclear, commentLost
+	case err != nil:
+		c.view.State, c.view.Reason = ForgeFailed, f.clean(repo.Token, forgeWhy(err, NeedPulls))
+	default:
 		c.view.State, c.view.URL = ForgeCommented, link.URL
 	}
 	v = c.view
 	f.mu.Unlock()
 	f.show(p.SID)
+	if unclear {
+		f.commentAudit(p, v, request, ResultUnclear, "can't tell whether the comment on pull request #"+strconv.Itoa(number)+" was posted: "+v.Reason)
+		shared.For(ctx, f.cfg.Logger).Warn("forge", "event", "comment-unclear")
+		return
+	}
 	if err != nil {
 		f.commentAudit(p, v, request, ForgeFailed, "couldn't comment on pull request #"+strconv.Itoa(number)+": "+v.Reason)
-		f.cfg.Logger.Warn("forge", "event", "comment-failed")
+		shared.For(ctx, f.cfg.Logger).Warn("forge", "event", "comment-failed")
 		return
 	}
 	f.commentAudit(p, v, request, ForgeCommented, "commented on pull request #"+strconv.Itoa(number)+" about commit "+shortSHA(p.Commit)+": "+v.URL)
-	f.cfg.Logger.Info("forge", "event", "commented")
+	shared.For(ctx, f.cfg.Logger).Info("forge", "event", "commented")
 }
 
 func (f *Forges) commentAudit(p PushedFacts, v ForgeView, request, result, reason string) {
@@ -192,7 +257,7 @@ func (f *Forges) commentAudit(p PushedFacts, v ForgeView, request, result, reaso
 		return
 	}
 	e := AuditEntry{Time: f.cfg.Now(), Session: p.SID, Repository: p.Repository, Branch: p.Branch, Commit: p.Commit, Remote: v.Host + "/" + v.Repo,
-		By: ByEngine, Result: result, Reason: clip(reason, maxForgeReason), Kind: AuditPRComment, Request: request}
+		By: ByEngine, Result: result, Reason: clip(reason, maxForgeReason), Kind: AuditPRComment, Request: request, Req: p.Req}
 	for _, r := range p.Roles {
 		if r.PluginCommit != "" && e.PluginCommit == "" {
 			e.PluginCommit, e.ClaudeCode, e.Models = r.PluginCommit, r.ClaudeCode, append([]string(nil), r.Models...)

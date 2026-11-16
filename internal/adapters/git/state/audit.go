@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -63,6 +64,13 @@ type auditJSON struct {
 	Path         string    `json:"path,omitempty"`
 	Blobs        []string  `json:"blobs,omitempty"`
 	Request      string    `json:"request,omitempty"`
+	Req          string    `json:"req,omitempty"`
+	Person       string    `json:"person,omitempty"`
+	FormerPerson string    `json:"formerPerson,omitempty"`
+	Box          string    `json:"box,omitempty"`
+	From         string    `json:"from,omitempty"`
+	FromRef      string    `json:"fromRef,omitempty"`
+	Source       string    `json:"source,omitempty"`
 	Hash         string    `json:"hash,omitempty"`
 	Agent        string    `json:"agent,omitempty"`
 	PluginCommit string    `json:"pluginCommit,omitempty"`
@@ -89,7 +97,8 @@ func (a Audit) Append(e session.AuditEntry) error {
 	line, err := json.Marshal(auditJSON{Time: e.Time.UTC(), Session: e.Session, Repository: e.Repository, Branch: e.Branch, Commit: e.Commit,
 		Remote: e.Remote, By: e.By, Result: e.Result, Reason: e.Reason, Missing: missing, PersonReason: e.PersonReason,
 		Kind: kind, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Blobs: e.Blobs, Request: e.Request, Hash: e.Hash, Agent: e.Agent,
-		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models})
+		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, Req: e.Req, Person: personOf(a.Dir, e.Person), FormerPerson: matching(e.FormerPerson, personID),
+		Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source})
 	if err != nil {
 		return err
 	}
@@ -103,8 +112,9 @@ func (a Audit) Append(e session.AuditEntry) error {
 		_ = f.Close()
 		return errors.New("audit.jsonl isn't a 0600 file this user owns")
 	}
-	if info.Size() > maxAudit {
+	if info.Size() > auditLimit() {
 		_ = f.Close()
+		noteDropped(a.Dir, auditFile, countLines(filepath.Join(a.Dir, "audit.1.jsonl")))
 		if err := os.Rename(path, filepath.Join(a.Dir, "audit.1.jsonl")); err != nil {
 			return errors.New("audit.jsonl couldn't be rotated")
 		}
@@ -150,17 +160,21 @@ func (a Audit) Read(repository, branch string, limit int) ([]session.AuditEntry,
 		}
 		for i := len(lines) - 1; i >= 0 && len(out) < limit; i-- {
 			var j auditJSON
-			if json.Unmarshal(lines[i], &j) != nil || j.Repository != repository || j.Branch != branch {
+			if json.Unmarshal(lines[i], &j) != nil || j.Repository != repository {
 				continue
 			}
 			kind := j.Kind
 			if kind == "" {
 				kind = session.AuditPush
 			}
-			if kind == session.AuditReview {
+			if kind == session.AuditReview || (j.Branch != branch && !session.ProjectWideAudit(kind) && (j.Branch != "" || !session.ProjectLevelAudit(kind))) {
 				continue
 			}
-			out = append(out, entryOf(j, kind))
+			e := entryOf(j, kind)
+			if e.Person == "" {
+				e.Person = ownerIn(a.Dir)
+			}
+			out = append(out, e)
 		}
 		if len(out) >= limit {
 			break
@@ -174,7 +188,22 @@ func entryOf(j auditJSON, kind string) session.AuditEntry {
 		By: j.By, Result: j.Result, Reason: j.Reason, Missing: j.Missing, PersonReason: j.PersonReason, Kind: kind, Reviewer: j.Reviewer,
 		Verdict: j.Verdict, Path: j.Path, Blobs: j.Blobs, Request: matching(j.Request, requestID), Hash: matching(j.Hash, teamSHA),
 		Agent: matching(j.Agent, agentID), PluginCommit: matching(j.PluginCommit, commitID), ClaudeCode: matching(j.ClaudeCode, versionText),
-		Models: matchingAll(j.Models, modelName, maxModels)}
+		Models: matchingAll(j.Models, modelName, maxModels), Req: matching(j.Req, requestTag), Person: matching(j.Person, personID),
+		Box: matching(j.Box, boxID), From: matching(j.From, startKind), FromRef: matching(j.FromRef, startRef), Source: matching(j.Source, sessionID)}
+}
+
+var (
+	requestTag = regexp.MustCompile(`^[0-9a-f]{16}$`)
+	boxID      = regexp.MustCompile(`^[0-9a-f]{16}$`)
+	startKind  = regexp.MustCompile(`^[a-z][a-z-]{0,19}$`)
+	startRef   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
+)
+
+func personOf(dir, given string) string {
+	if personID.MatchString(given) {
+		return given
+	}
+	return ownerIn(dir)
 }
 
 func tail(path string) ([][]byte, error) {

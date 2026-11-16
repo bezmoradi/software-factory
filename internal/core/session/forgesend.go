@@ -23,6 +23,9 @@ type IssueFound struct {
 	Body        string
 	Created     time.Time
 	Unconfirmed bool
+	Author      string
+	Labels      []string
+	Open        bool
 }
 
 type ForgeMatch struct {
@@ -72,7 +75,7 @@ func (f *Forges) sending(t PushTarget, v ForgeView) error {
 
 func (f *Forges) expired(c *forgeCard) {
 	t, _ := f.cfg.Targets(c.sid)
-	f.audit(c.sid, t, c.view, ByEngine, ResultExpired, "the card for "+kindWord(c.view.Kind)+" \""+clip(c.view.Title, 200)+"\" expired after 24 hours without an answer")
+	f.audit(context.Background(), c.sid, t, c.view, ByEngine, ResultExpired, "the card for "+kindWord(c.view.Kind)+" expired after 24 hours without an answer: "+c.view.Title)
 }
 
 func (f *Forges) recheck(c *forgeCard, t PushTarget, v ForgeView, cause error) (ForgeLink, string, error) {

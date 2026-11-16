@@ -28,6 +28,7 @@ const (
 	findAttempts = 5
 	launchMode   = "default"
 	PushServer   = "software-factory"
+	DocsSettings = `{"env":{"KNACKPACK_DOCS":"repo"}}`
 	NotRunReason = "this engine has no sandbox check configured, so this session started without one"
 )
 
@@ -48,6 +49,18 @@ type Dispatch struct {
 	Model   string
 	Type    string
 	Consent Consent
+
+	From      StartFrom
+	Continues *Continuation
+	Issue     int
+	IssueHash string
+	Effort    string
+	Box       string
+
+	pinned    *startPoint
+	group     string
+	groupKind string
+	asked     string
 }
 
 type Started struct {
@@ -73,7 +86,12 @@ type Starter interface {
 
 type DispatcherConfig struct {
 	Agents       []AgentSpec
-	Host         Host
+	Boxes        Boxes
+	BoxStore     BoxStore
+	Routes       BoxRoutes
+	Folders      BoxFolders
+	Clones       SessionClones
+	CloneReader  CloneReader
 	Openers      map[Method]Opener
 	Repositories Repositories
 	PluginDir    string
@@ -85,7 +103,6 @@ type DispatcherConfig struct {
 	Reviews      *Reviews
 	Startup      StartupReader
 	Approvals    Approvals
-	SignIns      SignInChecker
 	Expected     *Expected
 	Work         *Work
 	Workflow     func() (string, error)
@@ -94,6 +111,9 @@ type DispatcherConfig struct {
 	Versions     func(agent string) (version, workflowCommit string)
 	Note         func(sid, text string)
 	Audit        Audit
+	Identity     *Identities
+	DocsInRepo   bool
+	KeyRoutes    KeyRoutes
 	Logger       shared.Logger
 }
 
@@ -105,6 +125,8 @@ type run struct {
 	name       string
 	branch     string
 	cwd        string
+	box        string
+	clone      string
 	sid        string
 	id         string
 	display    string
@@ -122,6 +144,24 @@ type run struct {
 	typ        string
 	at         time.Time
 	stamp      runStamp
+	thread     string
+
+	origin     string
+	from       startedFrom
+	earlier    []Stint
+	handedTo   string
+	handedHead string
+	handing    bool
+	model      string
+	effort     string
+	ports      int
+
+	group     string
+	groupKind string
+	history   bool
+	asked     string
+	waitAt    time.Time
+	aside     string
 }
 
 type Dispatcher struct {
@@ -135,6 +175,22 @@ type Dispatcher struct {
 	starting   bool
 	approvalMu sync.Mutex
 	saveMu     sync.Mutex
+	home       *HomeSettings
+	keyMu      keyLock
+	gateways   GatewayRoutes
+
+	forges *Forges
+	work   *SessionWork
+
+	decisions  *DecisionLog
+	branchCopy *Keep
+	boxes      boxBook
+	waiting    map[string]*run
+	syncMu     sync.Mutex
+	runsUnread bool
+	removed    []func(sid string)
+
+	branchState func(WorkspaceSession) (string, string, string)
 }
 
 var (
@@ -146,7 +202,12 @@ func NewDispatcher(reg *Registry, cfg DispatcherConfig) *Dispatcher {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	return &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}}
+	cfg.Audit = masking(cfg.Audit)
+	d := &Dispatcher{cfg: cfg, reg: reg, runs: map[string]*run{}, waiting: map[string]*run{}}
+	if cfg.Runs != nil {
+		reg.OnTurn(d.saveRuns)
+	}
+	return d
 }
 
 func notRun() level.Observation {
@@ -213,14 +274,20 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if spec = d.installed(spec); !spec.Enabled {
 		return Started{}, explained(conflict("not installed"), spec.Off)
 	}
-	if q.Model != "" && (spec.Method != MethodPlugin || !slices.Contains(ClaudeModels, q.Model)) {
-		return Started{}, explained(invalid("model"), "That agent can't be started with that model from the page.")
+	if err := d.checkChoice(ctx, spec, q.Model, q.Effort); err != nil {
+		return Started{}, err
 	}
 	if utf16Len(q.Name) > maxName || controlChars.MatchString(q.Name) || !utf8Valid(q.Name) {
 		return Started{}, explained(invalid("name"), "A name has at most 80 characters.")
 	}
-	if d.cfg.Host == nil || d.cfg.Repositories == nil {
-		return Started{}, explained(conflict("no agent-host"), "This engine has no agent-host to start sessions in.")
+	if !d.boxed() || d.cfg.Repositories == nil {
+		return Started{}, explained(conflict("no agent-host"), "This engine has no box helper to start sessions' containers in.")
+	}
+	if err := d.runsReadable(); err != nil {
+		return Started{}, err
+	}
+	if err := checkStartFrom(q); err != nil {
+		return Started{}, err
 	}
 	repos, err := d.cfg.Repositories.List()
 	if err != nil {
@@ -232,60 +299,149 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	}
 	repo := repos[i]
 	if d.cfg.Work != nil {
-		if err := d.cfg.Work.Check(repo.Name, spec.Method == MethodPlugin, q.Type); err != nil {
+		if err := d.cfg.Work.Check(repo.Name, spec.Knackpack, q.Type); err != nil {
 			return Started{}, err
 		}
+	}
+	id := d.cfg.Identity.Current()
+	if !id.Set() {
+		return Started{}, noIdentity()
 	}
 	if err := d.claimStart(); err != nil {
 		return Started{}, err
 	}
 	defer d.endStart()
-	check, err := d.startCheck(ctx)
+	if why := d.reg.halt.starts(); why != "" {
+		return Started{}, explained(conflict("halted"), why)
+	}
+	if q.Box == "" {
+		q.Box = d.askedBox(q)
+	}
+	if q.Box != "" {
+		return d.resume(ctx, q, spec, repo)
+	}
+	from, err := d.startSource(repo, q)
 	if err != nil {
 		return Started{}, err
 	}
-	base, err := d.cfg.Repositories.Fresh(ctx, repo.Name)
+	box, err := d.openBox(ctx, repo.Name, spec.ID)
+	if err != nil {
+		return Started{}, err
+	}
+	kept := false
+	defer func() {
+		if !kept {
+			d.dropBox(box, true)
+		}
+	}()
+	check, err := d.startCheck(ctx, box)
+	if err != nil {
+		return Started{}, err
+	}
+	main, err := d.cfg.Repositories.Fresh(ctx, repo.Name)
 	if err != nil {
 		if e, ok := errors.AsType[*Error](err); ok {
 			return Started{}, e
 		}
 		return Started{}, explained(conflict("fetch"), "The engine couldn't fetch the project's main branch, so no session started.")
 	}
+	at, err := d.startAt(ctx, repo, q, main)
+	if err != nil {
+		return Started{}, err
+	}
+	base := at.commit
 	short := randomHex(4)
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
+	r.box, r.clone = box, BoxClone(d.cfg.Workspace, box, repo.Name)
+	r.origin, r.earlier = at.origin, at.earlier
+	r.from = startFromOf(q)
+	r.group, r.groupKind, r.asked = q.group, q.groupKind, q.asked
+	if q.Continues != nil {
+		r.branch = q.Continues.Branch
+	}
+	if err := d.branchFree(r.branch); err != nil {
+		return Started{}, err
+	}
+	r.model, r.effort = q.Model, q.Effort
 	r.stamp = d.stampOf(spec.ID, time.Time{})
-	cwd, err := d.cfg.Host.AddWorktree(ctx, repo.Name, r.name, r.branch, base)
+	if err := d.makeClone(ctx, r, main, from, q.Continues != nil); err != nil {
+		return Started{}, err
+	}
+	host := d.host(r)
+	var cwd string
+	if q.Continues != nil {
+		cwd, err = host.AddExistingWorktree(ctx, repo.Name, r.name, r.branch, id)
+	} else {
+		cwd, err = host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
+	}
 	if err != nil {
-		d.cfg.Logger.Warn("dispatch", "event", "worktree-failed")
+		shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "worktree-failed")
 		return Started{}, explained(conflict("worktree"), "agent-host couldn't create the session's worktree: "+hostMessage(err))
 	}
+	if err := d.checkWorktree(r, cwd); err != nil {
+		return Started{}, err
+	}
 	r.cwd = cwd
+	return d.launch(ctx, r, q, &kept)
+}
+
+func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool) (Started, error) {
 	if err := d.admit(ctx, r, q.Consent); err != nil {
-		cleanup, cancel := context.WithTimeout(context.Background(), stopFor)
-		_ = d.cfg.Host.RemoveWorktree(cleanup, r.repo, r.name, true)
-		cancel()
 		d.mu.Lock()
 		d.started = time.Time{}
 		d.mu.Unlock()
+		*kept = d.holdForAnswer(r, q, err)
 		return Started{}, err
 	}
-	if spec.Method == MethodPlugin {
-		err = d.startClaude(ctx, r, q.Model)
+	d.homeStarted(r)
+	d.reservePorts(r)
+	var err error
+	if r.spec.Method == MethodPlugin {
+		err = d.startClaude(ctx, r, r.model)
 	} else {
 		err = d.startStdio(ctx, r)
 	}
-	if err != nil && r.sid == "" {
-		cleanup, cancel := context.WithTimeout(context.Background(), stopFor)
-		_ = d.cfg.Host.RemoveWorktree(cleanup, r.repo, r.name, true)
-		cancel()
+	if err != nil && r.sid != "" && q.Continues != nil {
+		d.forgetStart(r)
 	}
-	if d.cfg.Work != nil && r.sid != "" {
-		d.cfg.Work.Begin(r.sid, r.repo, spec.Method == MethodPlugin, q.Type)
+	if r.sid != "" {
+		*kept = true
+		d.unwait(r.box)
+		d.settleBox(r.box)
+		if err != nil {
+			go d.idleBox(r)
+		}
+	} else if err != nil {
+		*kept = d.holdForAnswer(r, q, err)
 	}
+	if d.cfg.Work != nil && r.sid != "" && d.hasRun(r.sid) {
+		d.cfg.Work.Begin(r.sid, r.repo, r.spec.Knackpack, r.typ)
+	}
+	d.startedWork(r, err)
+	d.offerDecisions(r, err)
 	if err != nil {
 		return Started{SID: r.sid, ID: r.id}, err
 	}
+	d.audited(ctx, r)
 	return Started{SID: r.sid, ID: r.id}, nil
+}
+
+func (d *Dispatcher) forgetStart(r *run) {
+	d.mu.Lock()
+	sid := r.sid
+	if d.runs[sid] == r {
+		delete(d.runs, sid)
+	}
+	r.sid = ""
+	b := r.bridge
+	r.bridge, r.process, r.running = nil, nil, false
+	d.mu.Unlock()
+	if b != nil {
+		b.close()
+	}
+	d.saveRuns()
+	d.reg.Forget(sid)
+	d.cfg.Logger.Info("dispatch", "event", "failed-start-dropped")
 }
 
 func utf8Valid(s string) bool {
@@ -320,7 +476,8 @@ func (d *Dispatcher) admission(r *run, control bool) Admission {
 		s := r.signIn
 		signIn = &s
 	}
-	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn}
+	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn,
+		Lineage: lineageOf(r), Box: r.box, Branch: r.branch}
 }
 
 func launched(a Admission) Admission {
@@ -346,8 +503,11 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 		if dir, err := d.cfg.Workflow(); err == nil {
 			argv = append(argv, "--plugin-dir="+dir)
 		} else {
-			d.cfg.Logger.Warn("dispatch", "event", "workflow-plugin-missing")
+			shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "workflow-plugin-missing")
 		}
+	}
+	if settings := d.claudeSettings(r); settings != "" {
+		argv = append(argv, "--settings="+settings)
 	}
 	argv = append(argv, "--permission-mode="+launchMode, "--session-id", sid)
 	if r.display != "" {
@@ -356,12 +516,16 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	if model != "" {
 		argv = append(argv, "--model="+model)
 	}
+	if r.effort != "" {
+		argv = append(argv, "--effort="+r.effort)
+	}
 	r.claudeArgv = argv
 	pending := *r
 	pending.sid = sid
 	d.reg.Admit(sid, launched(d.admission(&pending, true)))
 	d.observeStart(sid, r.check)
-	res, err := d.cfg.Host.Run(ctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
+	d.reg.makeScreenshots(sid)
+	res, err := d.host(r).Run(ctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 	if err != nil {
 		d.reg.Forget(sid)
 		return explained(conflict("claude"), "agent-host couldn't run claude --bg: "+hostMessage(err))
@@ -378,22 +542,27 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 			msg = "claude --bg failed."
 		}
 		if strings.Contains(strings.ToLower(msg), "not trusted") {
-			return notTrusted(r.repo, r.repoPath)
+			return notTrusted(r.repo, r.clone, r.box)
 		}
 		return explained(conflict("claude"), msg)
 	}
-	found, foundID := d.findClaude(ctx, r.cwd, id, sid)
+	found, foundID := d.findClaude(ctx, d.host(r), r.cwd, id, sid)
 	if found == "" || foundID == "" {
 		d.reg.Forget(sid)
-		return explained(conflict("claude"), "claude --bg finished, but the agent container's list doesn't show the session it started. Check the agent container's sessions before starting it again.")
+		return explained(conflict("claude"), "claude --bg finished, but the session's container doesn't list the session it started.")
 	}
 	if found != sid {
+		if d.sidTaken(found, r.box) {
+			d.reg.Forget(sid)
+			return explained(conflict("claude"), "The session's container listed a session id that another session already has, so the engine doesn't take it.")
+		}
 		d.reg.Forget(sid)
 		sid = found
 	}
 	r.id = foundID
 	r.sid = sid
 	r.running = true
+	d.booted(r)
 	d.reg.Admit(sid, launched(d.admission(r, true)))
 	d.observeStart(sid, r.check)
 	d.mu.Lock()
@@ -403,16 +572,27 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	return nil
 }
 
+func (d *Dispatcher) sidTaken(sid, box string) bool {
+	d.mu.Lock()
+	r := d.runs[sid]
+	d.mu.Unlock()
+	if r != nil {
+		return r.box != box
+	}
+	return d.reg.admittedElsewhere(sid, box)
+}
+
 type listed struct {
 	SessionID string
 	ID        string
 	Kind      string
 	Cwd       string
 	StartedAt float64
+	Pid       float64
 }
 
-func (d *Dispatcher) listClaude(ctx context.Context, dir string) ([]listed, error) {
-	res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("agents", "--json", "--all"), Dir: dir, Timeout: claudeList})
+func (d *Dispatcher) listClaude(ctx context.Context, host Host, dir string) ([]listed, error) {
+	res, err := host.Run(ctx, Command{Argv: d.claude("agents", "--json", "--all"), Dir: dir, Timeout: claudeList})
 	if err != nil || res.Code != 0 {
 		return nil, errNoSessions
 	}
@@ -423,7 +603,7 @@ func (d *Dispatcher) listClaude(ctx context.Context, dir string) ([]listed, erro
 	return list, nil
 }
 
-func (d *Dispatcher) findClaude(ctx context.Context, cwd, id, sid string) (string, string) {
+func (d *Dispatcher) findClaude(ctx context.Context, host Host, cwd, id, sid string) (string, string) {
 	for attempt := range findAttempts {
 		if attempt > 0 {
 			select {
@@ -432,7 +612,7 @@ func (d *Dispatcher) findClaude(ctx context.Context, cwd, id, sid string) (strin
 			case <-time.After(time.Second):
 			}
 		}
-		list, err := d.listClaude(ctx, cwd)
+		list, err := d.listClaude(ctx, host, cwd)
 		if err != nil {
 			continue
 		}
@@ -451,13 +631,17 @@ func (d *Dispatcher) findClaude(ctx context.Context, cwd, id, sid string) (strin
 	return "", ""
 }
 
-func (d *Dispatcher) mcpFor(b *bridge) *MCPServer {
+func (d *Dispatcher) mcpFor(b *bridge, box string) *MCPServer {
 	if d.cfg.MCPCommand == "" {
 		return nil
 	}
 	env := map[string]string{"SF_PUSH_TOKEN": b.pushToken()}
 	if d.cfg.PluginSocket != "" {
 		env["SF_PLUGIN_SOCKET"] = d.cfg.PluginSocket
+	}
+	if folder := ScreenshotFolder(BoxFolder(d.cfg.Workspace, box), b.sid); folder != "" {
+		d.reg.makeScreenshots(b.sid)
+		env[ScreenshotsVariable] = folder
 	}
 	return &MCPServer{Name: PushServer, Command: d.cfg.MCPCommand, Args: []string{"mcp"}, Env: env}
 }
@@ -472,7 +656,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	d.runs[r.sid] = r
 	d.mu.Unlock()
 	d.saveRuns()
-	b, err := newBridge(d.reg, d.cfg.Logger, r.sid, r.cwd, d.cfg.Version)
+	b, err := newBridge(d.reg, d.cfg.Logger, r.sid, r.cwd, r.box, d.cfg.Version)
 	if err != nil {
 		d.reg.Ended(r.sid, false)
 		return explained(conflict("register"), "The engine couldn't open the session's conversation.")
@@ -483,7 +667,8 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		d.reg.Ended(r.sid, false)
 		return explained(conflict("protocol"), "This engine can't speak that agent's protocol.")
 	}
-	p, err := d.cfg.Host.Start(ctx, Command{Argv: r.spec.Command, Dir: r.cwd, Pass: r.spec.Pass})
+	host := d.host(r)
+	p, err := host.Start(ctx, Command{Argv: r.spec.Command, Dir: r.cwd, Pass: r.spec.Pass})
 	if err != nil {
 		msg := "agent-host couldn't start " + r.spec.Name + ": " + hostMessage(err)
 		b.fail(msg)
@@ -491,12 +676,13 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		return explained(conflict("start"), msg)
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor)
-	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b), Version: d.cfg.Version})
+	choice := d.launchChoice(r)
+	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b, r.box), Version: d.cfg.Version, Thread: d.threadOf(r), Model: choice.Model, Effort: choice.Effort})
 	cancel()
 	if err != nil {
 		_ = p.Close()
 		sctx, scancel := context.WithTimeout(context.Background(), stopFor)
-		_ = d.cfg.Host.Stop(sctx, p.ID())
+		_ = host.Stop(sctx, p.ID())
 		scancel()
 		msg := r.spec.Name + " didn't start: " + clip(err.Error(), 1000)
 		b.fail(msg)
@@ -509,13 +695,20 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	r.running = true
 	r.stopping = false
 	d.mu.Unlock()
-	b.start(sess, func() { d.ended(r, b, p) })
+	d.keepThread(r, sess)
+	d.keepModels(sess)
+	b.start(sess, func(byEngine bool) { d.ended(r, b, p, byEngine) })
 	return nil
 }
 
-func (d *Dispatcher) ended(r *run, b *bridge, p Process) {
+func (d *Dispatcher) ended(r *run, b *bridge, p Process, byEngine bool) {
 	d.mu.Lock()
 	current := r.bridge == b
+	stopping := r.stopping
+	d.mu.Unlock()
+	lost := current && !stopping && !byEngine && !d.exitedItself(r, p.ID())
+	d.mu.Lock()
+	current = current && r.bridge == b
 	if current {
 		r.running = false
 		r.stopping = false
@@ -525,12 +718,21 @@ func (d *Dispatcher) ended(r *run, b *bridge, p Process) {
 	d.mu.Unlock()
 	_ = p.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), stopFor)
-	_ = d.cfg.Host.Stop(ctx, p.ID())
+	_ = d.host(r).Stop(ctx, p.ID())
 	cancel()
-	if current {
+	switch {
+	case current && lost:
+		d.lost(r.sid, b.cutTurn())
+	case current && !stopping && !byEngine && r.spec.ID == DevAgentID:
+		d.reg.EndedDone(r.sid)
+		d.cfg.Logger.Info("agent session", "event", "ended", "done", true)
+	case current:
 		d.reg.Ended(r.sid, false)
+		d.cfg.Logger.Info("agent session", "event", "ended")
 	}
-	d.cfg.Logger.Info("agent session", "event", "ended")
+	if current && !stopping && !byEngine {
+		go d.idleBox(r)
+	}
 }
 
 func (d *Dispatcher) claim(sid string) (*run, error) {
@@ -554,11 +756,71 @@ func (d *Dispatcher) release(r *run) {
 }
 
 func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
+	return d.stopAs(ctx, sid, ByPage, "")
+}
+
+func (d *Dispatcher) stopAs(ctx context.Context, sid, by, why string) error {
 	r, err := d.claim(sid)
 	if err != nil {
 		return err
 	}
 	defer d.release(r)
+	if r.box == "" {
+		return oldLayout()
+	}
+	if d.liveBox(r.box) {
+		_ = d.ConfirmBox(ctx, r.box)
+	}
+	if !d.liveBox(r.box) {
+		err := d.stopGone(sid, r)
+		if err == nil {
+			d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, stopReason(why, "its container wasn't running"))
+		}
+		return err
+	}
+	err = d.stopRun(ctx, sid, r)
+	var e *Error
+	if err != nil && (!errors.As(err, &e) || e.Reason != "not running") {
+		return err
+	}
+	d.waitStopped(r)
+	live := d.liveBox(r.box)
+	d.stopBox(ctx, r.box)
+	d.reg.WaitSignIn(sid, false)
+	if err != nil && live {
+		d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, stopReason(why, "the agent had already stopped; its container was stopped"))
+		return nil
+	}
+	if err == nil {
+		d.lifecycle(ctx, AuditSessionStop, r, by, ResultStopped, why)
+	}
+	return err
+}
+
+func stopReason(why, also string) string {
+	if why == "" {
+		return also
+	}
+	return why + "; " + also
+}
+
+func (d *Dispatcher) stopGone(sid string, r *run) error {
+	d.mu.Lock()
+	running, b := r.running, r.bridge
+	r.running = false
+	d.mu.Unlock()
+	if !running {
+		return explained(conflict("not running"), "This session already stopped.")
+	}
+	if b != nil {
+		b.close()
+	}
+	d.reg.Ended(sid, false)
+	d.cfg.Logger.Info("agent session", "event", "stopped-without-container")
+	return nil
+}
+
+func (d *Dispatcher) stopRun(ctx context.Context, sid string, r *run) error {
 	d.mu.Lock()
 	running, b, p := r.running, r.bridge, r.process
 	if running && b != nil {
@@ -569,12 +831,10 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 		return explained(conflict("not running"), "This session already stopped.")
 	}
 	if r.spec.Method == MethodPlugin {
-		res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("stop", r.id), Dir: r.cwd, Timeout: claudeRun})
-		if err != nil {
-			return explained(conflict("claude"), hostMessage(err))
-		}
-		if res.Code != 0 {
-			return explained(conflict("claude"), output(res))
+		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("stop", r.id), Dir: r.cwd, Timeout: claudeRun})
+		if err != nil || res.Code != 0 {
+			shared.For(ctx, d.cfg.Logger).Warn("agent session", "event", "claude-stop-failed", "box", r.box)
+			d.stopBox(ctx, r.box)
 		}
 		d.mu.Lock()
 		r.running = false
@@ -586,7 +846,7 @@ func (d *Dispatcher) Stop(ctx context.Context, sid string) error {
 		b.close()
 	}
 	if p != nil {
-		_ = d.cfg.Host.Stop(ctx, p.ID())
+		_ = d.host(r).Stop(ctx, p.ID())
 	}
 	return nil
 }
@@ -603,6 +863,17 @@ func (d *Dispatcher) claimWake() error {
 }
 
 func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) error {
+	return d.wakeFor(ctx, sid, consent, ByPage, "")
+}
+
+func (d *Dispatcher) WakeAtReset(ctx context.Context, sid string) error {
+	return d.wakeFor(shared.WithRequest(ctx, shared.NewRequest()), sid, Consent{}, ByReset, "woken at the usage reset the person asked for")
+}
+
+func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, by, why string) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	r, err := d.claim(sid)
 	if err != nil {
 		return err
@@ -610,14 +881,45 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 	defer d.release(r)
 	d.mu.Lock()
 	running := r.running
+	handed := r.handedTo != ""
 	d.mu.Unlock()
+	if handed {
+		return explained(conflict("handed over"), handedMessage)
+	}
 	if running {
 		return explained(conflict("not stopped"), "This session is still running.")
+	}
+	id := d.cfg.Identity.Current()
+	if !id.Set() {
+		return noIdentity()
 	}
 	if err := d.claimWake(); err != nil {
 		return err
 	}
-	check, err := d.startCheck(ctx)
+	if why := d.reg.halt.starts(); why != "" {
+		return explained(conflict("halted"), why)
+	}
+	if err := d.wakeBox(ctx, r.box); err != nil {
+		d.mu.Lock()
+		d.woken = time.Time{}
+		d.mu.Unlock()
+		return err
+	}
+	woke := false
+	defer func() {
+		if !woke {
+			d.stopBox(ctx, r.box)
+			d.reg.WaitSignIn(sid, false)
+		}
+	}()
+	d.syncClone(r)
+	if err := d.wakeWorktree(ctx, r, id); err != nil {
+		d.mu.Lock()
+		d.woken = time.Time{}
+		d.mu.Unlock()
+		return err
+	}
+	check, err := d.startCheck(ctx, r.box)
 	if err != nil {
 		return err
 	}
@@ -628,13 +930,23 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		d.mu.Lock()
 		d.woken = time.Time{}
 		d.mu.Unlock()
+		woke = d.waitInWake(r, err)
 		return err
 	}
+	d.reg.WaitSignIn(sid, false)
+	if err := d.host(r).SetIdentity(ctx, r.repo, r.name, id); err != nil {
+		d.mu.Lock()
+		d.woken = time.Time{}
+		d.mu.Unlock()
+		shared.For(ctx, d.cfg.Logger).Warn("wake", "event", "identity-not-set")
+		return explained(conflict("identity"), "agent-host couldn't set the name and email agents commit with in the session's worktree, so the session didn't wake: "+hostMessage(err))
+	}
+	d.homeStarted(r)
 	if d.cfg.Work != nil && !d.cfg.Work.Has(sid) {
-		d.cfg.Work.Begin(sid, r.repo, r.spec.Method == MethodPlugin, r.typ)
+		d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
 	}
 	if r.spec.Method == MethodPlugin {
-		res, err := d.cfg.Host.Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
+		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 		if err != nil {
 			return explained(conflict("claude"), hostMessage(err))
 		}
@@ -643,15 +955,25 @@ func (d *Dispatcher) Wake(ctx context.Context, sid string, consent Consent) erro
 		}
 		d.mu.Lock()
 		r.running = true
+		r.rmDone = false
 		d.mu.Unlock()
 		d.reg.Admit(sid, d.admission(r, true))
 		d.observeStart(sid, r.check)
+		d.saveRuns()
 		d.woke(r)
+		d.booted(r)
+		woke = true
+		d.lifecycle(ctx, AuditSessionWake, r, by, ResultWoken, why)
 		return nil
 	}
+	d.mu.Lock()
+	r.rmDone = false
+	d.mu.Unlock()
 	err = d.startStdio(ctx, r)
 	if err == nil {
+		woke = true
 		d.woke(r)
+		d.lifecycle(ctx, AuditSessionWake, r, by, ResultWoken, why)
 	}
 	return err
 }
@@ -686,14 +1008,60 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	d.mu.Lock()
 	running := r.running
 	held := d.heldOffer(r, given)
+	asideOK := held && given.Flag == "worktree" && r.aside != "" && given.Value == r.aside
 	d.mu.Unlock()
+	chose := held
 	if running {
 		return nil, explained(conflict("running"), "Stop the session before deleting it.")
+	}
+	if r.history || r.box == "" {
+		d.forgetHistory(sid)
+		d.forgetCopy(sid)
+		d.lifecycle(ctx, AuditSessionDelete, r, ByPage, ResultDeleted, "a session kept as history only: its record was forgotten")
+		return nil, nil
 	}
 	if given != nil && !held {
 		return nil, explained(conflict("offer"), "That choice is no longer the one offered. Try Delete again.")
 	}
-	if r.spec.Method == MethodPlugin && !r.rmDone {
+	boxGone, woken, dropped := false, false, false
+	if err := d.wakeBox(ctx, r.box); err != nil {
+		var e *Error
+		if !errors.As(err, &e) || e.Reason != "box unknown" {
+			return nil, err
+		}
+		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "unknown-at-delete", "box", r.box)
+		boxGone = true
+	} else {
+		woken = true
+	}
+	defer func() {
+		if woken && !dropped {
+			d.stopBox(ctx, r.box)
+		}
+	}()
+	host := d.host(r)
+	treeGone := boxGone
+	if !treeGone {
+		linked, lerr := d.worktreeLinked(r)
+		treeGone = lerr == nil && !linked
+	}
+	if treeGone && !r.rmDone && r.handedTo == "" {
+		if o, msg := d.goneOffer(r, goneLead, ""); o != nil && (!held || *given != *o) {
+			d.setOffer(r, o)
+			return o, explained(conflict("unpushed"), msg)
+		}
+		d.rmFinished(r)
+		held = false
+	}
+	if r.handedTo != "" && !r.rmDone {
+		if o, msg := d.goneOffer(r, strandedLead, d.handedFrom(r)); o != nil && (!held || *given != *o) {
+			d.setOffer(r, o)
+			return o, explained(conflict("unpushed"), msg)
+		}
+		d.rmFinished(r)
+		held = false
+	}
+	if r.spec.Method == MethodPlugin && !r.rmDone && r.handedTo == "" {
 		args := d.claude("rm", r.id)
 		if held && (given.Flag == "discard" || given.Flag == "force") {
 			name := "--discard-unpushed=" + given.Value
@@ -702,7 +1070,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 			}
 			args = append(args, name)
 		}
-		res, err := d.cfg.Host.Run(ctx, Command{Argv: args, Dir: r.cwd, Timeout: claudeRun})
+		res, err := host.Run(ctx, Command{Argv: args, Dir: r.cwd, Timeout: claudeRun})
 		if err != nil {
 			return nil, explained(conflict("claude"), hostMessage(err))
 		}
@@ -715,22 +1083,33 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 			}
 			return o, explained(conflict("claude"), out)
 		}
-		d.mu.Lock()
-		r.rmDone = true
-		d.mu.Unlock()
-		d.setOffer(r, nil)
+		d.rmFinished(r)
 		held = false
 	}
 	force := held && given.Flag == "worktree"
-	if err := d.cfg.Host.RemoveWorktree(ctx, r.repo, r.name, force); err != nil {
+	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, force)
+	d.tellAside(r, aside, "while the session was being deleted")
+	if err != nil && !boxGone {
 		var h *HostError
 		if errors.As(err, &h) && h.Code == HostDirty {
 			o := &Offer{Flag: "worktree", Value: r.name}
 			d.setOffer(r, o)
-			return o, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed. Choose to delete it anyway to discard them; its branch "+r.branch+" stays.")
+			return o, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed. Choose to delete it anyway to discard them; the branch "+r.branch+" goes with the session's container, apart from what was pushed.")
 		}
-		return nil, explained(conflict("worktree"), "agent-host couldn't remove the worktree: "+hostMessage(err))
+		shared.For(ctx, d.cfg.Logger).Warn("delete", "event", "worktree-not-removed", "worktree", r.name)
 	}
+	d.mu.Lock()
+	folder := r.aside
+	d.mu.Unlock()
+	if folder != "" && !asideOK {
+		o := &Offer{Flag: "worktree", Value: folder}
+		d.setOffer(r, o)
+		return o, explained(conflict("set aside"), "agent-host found the worktree "+r.name+" broken and moved it, with its files, to "+folder+" in the session's folder, so files that weren't committed are there. Deleting the session removes that folder too. Choose to delete it anyway, or wake the session first to look at them.")
+	}
+	if !d.dropBox(r.box, true) {
+		return nil, explained(conflict("box"), "The engine removed the worktree, but the box helper couldn't remove the session's container and home. Try Delete again.")
+	}
+	dropped = true
 	d.mu.Lock()
 	delete(d.runs, sid)
 	d.mu.Unlock()
@@ -739,38 +1118,136 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	if d.cfg.Work != nil {
 		d.cfg.Work.Forget(sid)
 	}
+	d.workForget(sid)
+	d.forgetCopy(sid)
+	d.lifecycle(ctx, AuditSessionDelete, r, ByPage, ResultDeleted, deleteReason(given, chose))
 	return nil, nil
 }
 
-func (d *Dispatcher) Review(ctx context.Context, sid string, costOK bool) error {
-	return d.reviewAs(ctx, sid, costOK, false)
+func deleteReason(given *Offer, held bool) string {
+	if given == nil || !held {
+		return ""
+	}
+	switch given.Flag {
+	case "discard":
+		return "the person chose to discard the commits that weren't pushed"
+	case "force":
+		return "the person chose to remove the worktree by force"
+	case "worktree":
+		return "the person chose to delete the worktree with what it held"
+	}
+	return ""
 }
 
-func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool) error {
+func (d *Dispatcher) rmFinished(r *run) {
+	d.mu.Lock()
+	r.rmDone = true
+	d.mu.Unlock()
+	d.setOffer(r, nil)
+	d.saveRuns()
+}
+
+func (d *Dispatcher) UseBranchState(read func(WorkspaceSession) (string, string, string)) {
+	d.mu.Lock()
+	d.branchState = read
+	d.mu.Unlock()
+}
+
+const (
+	goneLead     = "The session's worktree is gone, so the agent can't check its branch before the session is deleted. "
+	strandedLead = "This session committed on its branch while it was being stopped for the hand-over, after the session that continues the branch had started, so that one doesn't have it. "
+)
+
+func (d *Dispatcher) handedFrom(r *run) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	next := d.runs[r.handedTo]
+	if next == nil {
+		return ""
+	}
+	for _, st := range next.earlier {
+		if st.SID == r.sid {
+			return st.To
+		}
+	}
+	return ""
+}
+
+func (d *Dispatcher) goneOffer(r *run, lead, covered string) (*Offer, string) {
+	d.mu.Lock()
+	read := d.branchState
+	s := WorkspaceSession{SID: r.sid, Name: r.display, Repo: r.repo, Path: r.clone, Branch: r.branch, Tree: r.name, Box: r.box}
+	d.mu.Unlock()
+	head, state, why := "", TreeUnknown, "The engine can't read this session's branch here."
+	if read != nil {
+		head, state, why = read(s)
+	}
+	if state == TreeMerged || state == TreePushed || covered != "" && head == covered {
+		return nil, ""
+	}
+	value := r.name
+	if sha1Hex.MatchString(head) {
+		value = head[:12] + "@" + r.name
+	}
+	if state == TreeUnpushed {
+		then := " Push them first, or press the button again to discard them and delete the session."
+		if lead == strandedLead {
+			then = " Only this session's clone holds them, and this session can't push or wake; press the button again to discard them and delete it."
+		}
+		return &Offer{Flag: "discard", Value: value}, lead + "The engine's own read finds commits on the branch " + r.branch + ", at " + shortSHA(head) + ", that aren't pushed or on main." + then
+	}
+	return &Offer{Flag: "discard", Value: value}, lead + why + " Press the button again to delete the session anyway; its branch goes with the session's container, apart from what was pushed."
+}
+
+func (d *Dispatcher) Review(ctx context.Context, sid string, costOK, every bool) error {
+	scope := ScopeUnfinished
+	if every {
+		scope = ScopeEvery
+	}
+	return d.reviewAs(ctx, sid, costOK, false, scope)
+}
+
+func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool, scope ReviewScope) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it can't run reviews.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't run reviews.")
+	}
+	if why := d.reg.halt.automatic(); auto && why != "" {
+		return explained(conflict("halted"), why)
+	}
+	if why := d.automaticHeldIf(auto, sid); why != "" {
+		return explained(conflict("limits"), why)
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started can be reviewed from here.")
 	}
-	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK, Auto: auto}
+	rt := ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK, Auto: auto, Scope: scope}
 	if w := d.cfg.Work; w != nil {
-		rt.Plan = func(base, head string) []workflow.Requirement { return w.Reviewers(sid, t, base, head) }
+		rt.Plan = func(ctx context.Context, base, head string) ([]workflow.Requirement, error) {
+			required := w.Reviewers(ctx, sid, t, base, head)
+			return required, ctx.Err()
+		}
 		rt.Rounds = w.Rounds(sid, t.Name)
 	}
+	d.reviewGiven(&rt, sid, t)
 	return d.cfg.Reviews.Start(ctx, rt)
 }
 
-func (d *Dispatcher) Override(_ context.Context, sid, agent, commit, reason string) error {
+func (d *Dispatcher) Override(ctx context.Context, sid, agent, commit, reason string) error {
+	if err := d.historyOnly(sid); err != nil {
+		return err
+	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine has no reviewer container, so it has no verdicts to override.")
+		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it has no verdicts to override.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has verdicts to override here.")
 	}
-	return d.cfg.Reviews.Override(sid, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch}, agent, commit, reason)
+	return d.cfg.Reviews.Override(sid, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, Req: shared.RequestOf(ctx)}, agent, commit, reason)
 }
 
 func (d *Dispatcher) SessionsOf(repo string) int {
@@ -789,10 +1266,11 @@ func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[sid]
-	if r == nil {
+	if r == nil || r.handedTo != "" || r.handing || r.box == "" || r.clone == "" {
 		return PushTarget{}, false
 	}
-	return PushTarget{SID: sid, Repo: r.repoPath, Name: r.repo, Branch: r.branch}, true
+	failed, why := d.unsyncedAt(r.box)
+	return PushTarget{SID: sid, Repo: r.clone, Name: r.repo, Branch: r.branch, Project: r.repoPath, SyncFailed: failed, SyncWhy: why}, true
 }
 
 type quiet struct{}
@@ -806,6 +1284,11 @@ func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
 	if err := d.startup(r, consent); err != nil {
 		return err
 	}
+	if r.spec.Method == MethodPlugin {
+		if err := d.KeyRouted(ctx, BoxTarget(r.box)); err != nil {
+			return err
+		}
+	}
 	s, err := d.signIn(ctx, r)
 	if err != nil {
 		return err
@@ -813,37 +1296,28 @@ func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
 	d.mu.Lock()
 	r.signIn = s
 	d.mu.Unlock()
-	want := d.cfg.Expected.Of(r.spec.ID)
-	if r.spec.ID == "claude" {
-		want = d.cfg.Expected.Adopt(r.spec.ID, s.Method)
-	}
-	return judge(r.spec.Name, s, want, d.step(r.spec), consent.CostOK, "the session")
-}
-
-func (d *Dispatcher) step(a AgentSpec) string {
-	if a.Status != nil && a.Status.Step != "" {
-		return a.Status.Step
-	}
-	return "its own sign-in in the agent container"
+	want := d.expectFor(r.spec, r.box, s.Method)
+	return judge(r.spec.Name, s, want, r.spec.StepIn(r.box), consent.CostOK, "the session")
 }
 
 func (d *Dispatcher) signIn(ctx context.Context, r *run) (SignIn, error) {
 	if r.spec.Status == nil || len(r.spec.Command) == 0 {
 		return SignIn{Method: SignInUnknown, CheckedAt: d.reg.now()}, nil
 	}
-	if d.cfg.SignIns == nil {
-		return SignIn{}, explained(conflict("no sign-in check"), "This engine can't check agents' sign-ins, so it doesn't start them.")
+	checker, ok := d.host(r).(SignInChecker)
+	if !ok {
+		return SignIn{}, explained(conflict("no sign-in check"), "The engine can't check "+r.spec.Name+"'s sign-in in the session's container, so it doesn't start it: "+hostMessage(d.hostDown(r)))
 	}
 	argv := append([]string{r.spec.Command[0]}, r.spec.Status.Args...)
 	sctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
-	s, err := d.cfg.SignIns.SignIn(sctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: signInFor}, r.spec.Status.Kind)
+	s, err := checker.SignIn(sctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: signInFor}, r.spec.Status.Kind)
 	if err != nil {
-		d.cfg.Logger.Warn("sign-in check", "event", "failed")
+		shared.For(ctx, d.cfg.Logger).Warn("sign-in check", "event", "failed")
 		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check "+r.spec.Name+"'s sign-in, so the session doesn't start: "+hostMessage(err))
 	}
 	s.CheckedAt = d.reg.now()
-	d.cfg.Logger.Info("sign-in check", "agent", r.spec.ID, "method", string(s.Method))
+	shared.For(ctx, d.cfg.Logger).Info("sign-in check", "agent", r.spec.ID, "method", string(s.Method))
 	return s, nil
 }
 

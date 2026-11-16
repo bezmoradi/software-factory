@@ -6,6 +6,7 @@ const NOTES: Record<string, [string, string] | undefined> & { none: [string, str
   running: ['Reviewing…', 'muted'],
   stale: ['Reviewed an earlier commit: press Review again', 'warn'],
   failed: ["Didn't finish: it counts as not passed. Press Review again", 'bad'],
+  'not-installed': ["Not installed: no plugin in the reviewer image provides this reviewer, so Review doesn't run it and the push stays held", 'warn'],
 }
 const UNKNOWN = "Finished, but its reply had no verdict the engine recognizes"
 
@@ -36,9 +37,11 @@ class SfCheck extends HTMLElement {
       ? [gate!.verdict || 'Passed', 'ok']
       : state === 'block'
         ? [gate!.verdict || 'Blocked', 'bad']
-        : state === 'unknown'
-          ? [`${UNKNOWN}.`, 'warn']
-          : (Object.hasOwn(NOTES, state) ? NOTES[state] : undefined) ?? NOTES.none
+        : state === 'unknown' && gate!.setAside
+          ? [`Passed, but ${visible(gate!.setAside)}.`, 'warn']
+          : state === 'unknown'
+            ? [`${UNKNOWN}.`, 'warn']
+            : (Object.hasOwn(NOTES, state) ? NOTES[state] : undefined) ?? NOTES.none
     this.#note.className = `small ${tone}`
     if (this.#note.textContent !== text) {
       this.#note.textContent = text

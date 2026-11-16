@@ -1,16 +1,39 @@
 x-live: &live
   entrypoint: ["/opt/sf-dev/bin/software-factory"]
   volumes:
-    - ./.sf-dev/bin:/opt/sf-dev/bin:ro
+    - type: volume
+      source: dev-bin
+      target: /opt/sf-dev/bin
+      read_only: true
+      volume:
+        nocopy: true
 
 services:
   engine:
     <<: *live
     environment:
       SF_AGENT_BINARY: /opt/sf-dev/bin/software-factory
-  agent:
-    <<: *live
-  reviewer:
-    <<: *live
   egress:
     <<: *live
+  helper:
+    image: software-factory:dev
+    build:
+      context: .
+      target: dev
+    environment:
+      SF_BOX_LIVE: "1"
+  dev-bin:
+    profiles: [dev-bin]
+    image: software-factory:local
+    pull_policy: never
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "cat > /opt/sf-dev/bin/software-factory.new && chmod 0755 /opt/sf-dev/bin/software-factory.new && mv -f /opt/sf-dev/bin/software-factory.new /opt/sf-dev/bin/software-factory"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - dev-bin:/opt/sf-dev/bin
+
+volumes:
+  dev-bin:

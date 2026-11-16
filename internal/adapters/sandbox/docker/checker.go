@@ -2,10 +2,10 @@ package docker
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -16,12 +16,14 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/level"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
 	probeFor     = 60 * time.Second
 	statusFor    = 10 * time.Second
 	maxStatus    = 64 << 10
+	maxRefusals  = 512 << 10
 	addrsPerHost = 2
 	maxParts     = 6
 )
@@ -34,17 +36,24 @@ type Resolver interface {
 
 type Config struct {
 	Host     session.Host
-	Probe    []string
 	Dir      string
+	Probe    []string
 	Proxy    string
 	Status   string
+	Side     string
 	Allow    []string
 	Deny     []string
 	Outside  string
 	Repos    func() []string
+	Lists    Lists
 	Fixed    []string
 	Resolver Resolver
 	Client   *http.Client
+	TLS      *tls.Config
+}
+
+type Lists interface {
+	Verify(ctx context.Context, side string, read func(context.Context) (session.EgressState, error)) (session.EgressList, session.EgressState, error)
 }
 
 type Checker struct {
@@ -54,13 +63,16 @@ type Checker struct {
 var _ session.Sandbox = (*Checker)(nil)
 
 func New(cfg Config) (*Checker, error) {
-	if cfg.Host == nil || len(cfg.Probe) == 0 || cfg.Dir == "" {
-		return nil, errors.New("sandbox check: needs agent-host, the probe command and a folder to run it in")
+	if len(cfg.Probe) == 0 || (cfg.Host != nil) != (cfg.Dir != "") {
+		return nil, errors.New("sandbox check: needs the probe command, and a folder to run it in with an agent-host")
 	}
 	for _, a := range []string{cfg.Proxy, cfg.Status} {
 		if _, _, err := net.SplitHostPort(a); err != nil {
 			return nil, fmt.Errorf("sandbox check: %q must be host:port", a)
 		}
+	}
+	if cfg.Side == "" {
+		return nil, errors.New("sandbox check: needs the egress side the probe's requests arrive on")
 	}
 	if cfg.Outside == "" || covered(cfg.Allow, cfg.Outside) {
 		return nil, fmt.Errorf("sandbox check: the host outside the allowlist, %q, must be one the allowlist doesn't name", cfg.Outside)
@@ -72,7 +84,7 @@ func New(cfg Config) (*Checker, error) {
 		cfg.Resolver = net.DefaultResolver
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: statusFor, Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, DisableKeepAlives: true}}
+		cfg.Client = statusClient(cfg.TLS)
 	}
 	cfg.Allow = sortedCopy(cfg.Allow)
 	cfg.Deny = sortedCopy(cfg.Deny)
@@ -89,13 +101,41 @@ func sortedCopy(in []string) []string {
 }
 
 func (c *Checker) Check(ctx context.Context) level.Observation {
+	if c.cfg.Host != nil {
+		return c.probed(ctx, session.BoxProbe{Host: c.cfg.Host, Dir: c.cfg.Dir})
+	}
+	parts, want := c.status(ctx)
+	parts = append(parts, Uncovered(want.Allow, c.cfg.Deny, c.repoHosts())...)
+	if len(parts) > 0 {
+		return observation(level.CheckFailed, parts)
+	}
+	return level.Observation{By: level.Engine, Event: level.CheckPassed}
+}
+
+func (c *Checker) CheckBox(ctx context.Context, b session.BoxProbe) level.Observation {
+	if b.Host == nil || b.Dir == "" || !b.Subnet.IsValid() || !b.Gateway.IsValid() {
+		return observation(level.CheckNotRun, []string{"the engine has no route to the session's container, so the probe couldn't run in it"})
+	}
+	return c.probed(ctx, b)
+}
+
+func (c *Checker) probed(ctx context.Context, b session.BoxProbe) level.Observation {
 	var failed []string
-	failed = append(failed, c.status(ctx)...)
+	parts, want := c.status(ctx)
+	failed = append(failed, parts...)
 	repos := c.repoHosts()
-	failed = append(failed, Uncovered(c.cfg.Allow, c.cfg.Deny, repos)...)
-	cfg := c.probeConfig(ctx, repos)
-	results, notRun := c.probe(ctx, cfg)
+	failed = append(failed, Uncovered(want.Allow, c.cfg.Deny, repos)...)
+	cfg := c.probeConfig(ctx, repos, lasting(want))
+	cfg.Marker = newMarker()
+	cfg.Request = shared.RequestOf(ctx)
+	if b.Gateway.IsValid() {
+		cfg.Gateway = b.Gateway.String()
+	}
+	results, notRun := c.probe(ctx, b, cfg)
 	failed = append(failed, results...)
+	if len(failed) == 0 && notRun == "" {
+		failed = append(failed, c.confirm(ctx, cfg, b.Subnet)...)
+	}
 	switch {
 	case len(failed) > 0:
 		return observation(level.CheckFailed, failed)
@@ -113,30 +153,38 @@ func observation(e level.Event, parts []string) level.Observation {
 	return level.Observation{By: level.Engine, Event: e, Parts: parts}
 }
 
-type statusJSON struct {
-	Version string   `json:"version"`
-	Allow   []string `json:"allow"`
-	Deny    []string `json:"deny"`
+func (c *Checker) status(ctx context.Context) ([]string, session.EgressList) {
+	var want session.EgressList
+	var st session.EgressState
+	var err error
+	if c.cfg.Lists != nil {
+		want, st, err = c.cfg.Lists.Verify(ctx, c.cfg.Side, c.readStatus)
+	} else {
+		want = session.EgressList{Allow: c.cfg.Allow}
+		st, err = c.readStatus(ctx)
+	}
+	if err != nil {
+		return []string{err.Error()}, want
+	}
+	got := st.Lists.Side(c.cfg.Side)
+	parts := Compare(want.Allow, c.cfg.Deny, got.Allow, st.Deny)
+	if !session.SameList(session.EgressList{Allow: got.Allow, Expires: want.Expires}, got) {
+		parts = append(parts, "the egress proxy's expiring hosts aren't the ones the engine set")
+	}
+	if covered(want.Allow, c.cfg.Outside) {
+		parts = append(parts, "the egress allowlist covers "+c.cfg.Outside+", the host the sandbox check expects egress to refuse")
+	}
+	return parts, want
 }
 
-func (c *Checker) status(ctx context.Context) []string {
-	ctx, cancel := context.WithTimeout(ctx, statusFor)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+c.cfg.Status+"/status", nil)
-	if err != nil {
-		return []string{"the engine couldn't ask the egress proxy for its allowlist"}
+func lasting(l session.EgressList) []string {
+	var out []string
+	for _, a := range l.Allow {
+		if _, expires := l.Expires[a]; !expires {
+			out = append(out, a)
+		}
 	}
-	resp, err := c.cfg.Client.Do(req)
-	if err != nil {
-		return []string{"the egress proxy's status at " + c.cfg.Status + " didn't answer"}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxStatus+1))
-	var st statusJSON
-	if err != nil || resp.StatusCode != http.StatusOK || len(data) > maxStatus || json.Unmarshal(data, &st) != nil || st.Allow == nil || st.Deny == nil {
-		return []string{"the egress proxy's status couldn't be read"}
-	}
-	return Compare(c.cfg.Allow, c.cfg.Deny, st.Allow, st.Deny)
+	return out
 }
 
 func Compare(wantAllow, wantDeny, allow, deny []string) []string {
@@ -252,7 +300,7 @@ func Front(allow, deny []string) string {
 	return ""
 }
 
-func (c *Checker) probeConfig(ctx context.Context, repos []string) ProbeConfig {
+func (c *Checker) probeConfig(ctx context.Context, repos, allow []string) ProbeConfig {
 	var hosts []string
 	for _, h := range sortedCopy(append(slices.Clone(c.cfg.Deny), repos...)) {
 		if net.ParseIP(h) == nil {
@@ -288,26 +336,30 @@ func (c *Checker) probeConfig(ctx context.Context, repos []string) ProbeConfig {
 		list = append(list, net.JoinHostPort(a, "443"), net.JoinHostPort(a, "22"))
 	}
 	slices.Sort(list)
-	return ProbeConfig{Proxy: c.cfg.Proxy, GitHosts: hosts, Addrs: list, Outside: c.cfg.Outside, Front: Front(c.cfg.Allow, c.cfg.Deny)}
+	return ProbeConfig{Proxy: c.cfg.Proxy, GitHosts: hosts, Addrs: list, Outside: c.cfg.Outside, Front: Front(sortedCopy(allow), c.cfg.Deny)}
 }
 
 func Args(cfg ProbeConfig) []string {
-	return []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front}
+	args := []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
+	if shared.ValidRequest(cfg.Request) {
+		args = append(args, "-request", cfg.Request)
+	}
+	return args
 }
 
-func (c *Checker) probe(ctx context.Context, cfg ProbeConfig) ([]string, string) {
+func (c *Checker) probe(ctx context.Context, b session.BoxProbe, cfg ProbeConfig) ([]string, string) {
 	argv := append(slices.Clone(c.cfg.Probe), Args(cfg)...)
-	res, err := c.cfg.Host.Run(ctx, session.Command{Argv: argv, Dir: c.cfg.Dir, Timeout: probeFor})
+	res, err := b.Host.Run(ctx, session.Command{Argv: argv, Dir: b.Dir, Timeout: probeFor})
 	if err != nil {
 		var h *session.HostError
 		if errors.As(err, &h) && h.Message != "" {
 			return nil, "agent-host didn't run the probe: " + clip(h.Message)
 		}
-		return nil, "agent-host didn't answer, so the probe couldn't run inside the agent container"
+		return nil, "agent-host didn't answer, so the probe couldn't run inside the probed container"
 	}
 	var rep Report
 	if res.Code != 0 || json.Unmarshal([]byte(res.Stdout), &rep) != nil || rep.Version != ReportVersion {
-		return []string{"the probe in the agent container gave no answer the engine could read"}, ""
+		return []string{"the probe gave no answer the engine could read"}, ""
 	}
 	return Judge(Expected(cfg), rep), ""
 }
@@ -316,7 +368,7 @@ func Judge(expected []string, rep Report) []string {
 	byCheck := map[string]Result{}
 	for _, r := range rep.Results {
 		if _, dup := byCheck[r.Check]; dup {
-			return []string{"the probe in the agent container answered one check twice"}
+			return []string{"the probe answered one check twice"}
 		}
 		byCheck[r.Check] = r
 	}
@@ -325,7 +377,7 @@ func Judge(expected []string, rep Report) []string {
 		r, ok := byCheck[want]
 		switch {
 		case !ok:
-			parts = append(parts, "the probe in the agent container didn't answer "+want)
+			parts = append(parts, "the probe didn't answer "+want)
 		case !r.OK:
 			detail := clip(r.Detail)
 			if detail == "" {

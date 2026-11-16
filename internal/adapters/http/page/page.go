@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,22 +45,60 @@ type Config struct {
 	ReviewerSignIn func() (session.SignIn, bool)
 	Work           session.WorkPage
 	Workspace      string
+	OpenTree       func(path string) (*os.Root, error)
 	Audit          session.AuditPage
 	Logins         session.LoginPage
 	Forge          session.ForgeService
+	ReviewerAgents session.ReviewerAgentsPage
+	ReviewerChecks session.ReviewerChecksPage
+	Identity       session.IdentityPage
+	Egress         session.EgressPage
+	Recaps         session.RecapPage
+	WorkspaceView  session.WorkspacePage
+	Exceptions     session.ExceptionsPage
+	HelperDown     func() bool
+	Diagnostics    session.DiagnosticsPage
 }
 
 type Server struct {
-	cfg      Config
-	reg      *session.Registry
-	logger   shared.Logger
-	keys     *keys
-	assets   *assets
-	host     string
-	origin   string
-	mu       sync.Mutex
-	attempts []time.Time
-	lists    fileLists
+	cfg       Config
+	reg       *session.Registry
+	logger    shared.Logger
+	keys      *keys
+	assets    *assets
+	host      string
+	origin    string
+	mu        sync.Mutex
+	attempts  []time.Time
+	lists     fileLists
+	reports   session.AgentReportPage
+	rules     session.AllowRulesPage
+	facts     session.ProjectFactsPage
+	prompts   session.SavedPromptsPage
+	branching session.BranchPage
+	pulls     session.PullsPage
+	issues    session.IssuesPage
+	work      *session.SessionWork
+	metrics   session.MetricsPage
+	replies   session.WholeReplies
+	decisions session.DecisionLogPage
+
+	branchCopy session.KeepPage
+
+	pairs  session.PairsPage
+	splits *session.Splits
+
+	backups session.BackupPage
+
+	lessons session.LessonsPage
+	depth   session.ReviewDepthPage
+
+	viewed session.ViewedPage
+
+	updates session.UpdatesPage
+
+	inflight *oneAtATime
+	decodes  chan struct{}
 }
 
 func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, error) {
@@ -77,13 +116,15 @@ func New(cfg Config, reg *session.Registry, logger shared.Logger) (*Server, erro
 	}
 	host := "127.0.0.1:" + strconv.Itoa(cfg.PublicPort)
 	return &Server{
-		cfg:    cfg,
-		reg:    reg,
-		logger: logger,
-		keys:   newKeys(cfg.Now),
-		assets: loadAssets(cfg.StateDir),
-		host:   host,
-		origin: "http://" + host,
+		cfg:      cfg,
+		reg:      reg,
+		logger:   logger,
+		keys:     newKeys(cfg.Now),
+		assets:   loadAssets(cfg.StateDir),
+		host:     host,
+		origin:   "http://" + host,
+		inflight: newOneAtATime(),
+		decodes:  make(chan struct{}, MaxDecodes),
 	}, nil
 }
 
@@ -136,7 +177,29 @@ var pageRoutes = map[string]bool{
 	"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true,
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
-	uploadRoute: true, testListRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	haltRoute:       true,
+	limitsRoute:     true,
+	egressRoute:     true,
+	allowRulesRoute: true, agentReportRoute: true,
+	walkthroughRoute: true,
+	recapRoute:       true, workspaceRoute: true, exceptionsRoute: true,
+	projectFactsRoute: true,
+	planReviewRoute:   true, explainRoute: true,
+	savedPromptsRoute: true,
+	bringMainRoute:    true, handoverRoute: true, startPointsRoute: true,
+	pullRoute: true, issuesRoute: true, findingIssuesRoute: true,
+	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true, agentModelsRoute: true,
+	screenshotsRoute: true, screenshotRoute: true,
+	metricsRoute: true, decisionLogRoute: true,
+	keepRoute: true,
+	pairRoute: true, splitPageRoute: true,
+	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
+	lessonsRoute: true, reviewDepthRoute: true,
+	reviewReplyRoute: true,
+	diagnosticsRoute: true,
+	viewedRoute:      true,
+	updateRoute:      true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -150,8 +213,8 @@ func (s *Server) pageRoute(r *http.Request) string {
 	return "other"
 }
 
-func (s *Server) reject(w http.ResponseWriter, status int, why string) {
-	s.logger.Warn("request refused", "side", "page", "why", why)
+func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why string) {
+	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", why)
 	refuse(w, status, why)
 }
 
@@ -165,21 +228,19 @@ func siteAllowed(site []string, visit bool) bool {
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(writeFor))
-	if r.Method == http.MethodPost {
-		_ = rc.SetReadDeadline(time.Now().Add(readFor))
-	}
+	_ = rc.SetReadDeadline(time.Now().Add(readFor))
 	if r.Host != s.host {
-		s.reject(w, http.StatusMisdirectedRequest, "host")
+		s.reject(w, r, http.StatusMisdirectedRequest, "host")
 		return
 	}
 	origin, hasOrigin := r.Header["Origin"]
 	if hasOrigin && (len(origin) != 1 || origin[0] != s.origin) {
-		s.reject(w, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin")
 		return
 	}
 	visit := r.Method == http.MethodGet && r.URL.Path == "/" && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
 	if site, ok := r.Header["Sec-Fetch-Site"]; ok && !siteAllowed(site, visit) {
-		s.reject(w, http.StatusForbidden, "site")
+		s.reject(w, r, http.StatusForbidden, "site")
 		return
 	}
 	if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, s.assets.prefix) {
@@ -200,11 +261,11 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		s.reject(w, http.StatusBadRequest, "query")
+		s.reject(w, r, http.StatusBadRequest, "query")
 		return
 	}
 	if r.Method == http.MethodPost && !hasOrigin {
-		s.reject(w, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin")
 		return
 	}
 	if r.URL.Path == signinRoute {
@@ -216,7 +277,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
-		s.reject(w, http.StatusUnauthorized, "token")
+		s.reject(w, r, http.StatusUnauthorized, "token")
 		return
 	}
 	if r.URL.Path == "/api/events" {
@@ -227,12 +288,16 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.upload(w, r)
 		return
 	}
+	if r.URL.Path == importRoute {
+		s.importState(w, r)
+		return
+	}
 	if !isJSON(r) {
 		refuse(w, http.StatusUnsupportedMediaType, "type")
 		return
 	}
 	limit := int64(MaxPageBody)
-	if approveRoutes[r.URL.Path] {
+	if approveRoutes[r.URL.Path] || r.URL.Path == reviewerAgentsRoute {
 		limit = MaxApproveBody
 	}
 	body, bad := readObject(w, r, limit)
@@ -242,6 +307,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if workflowRoutes[r.URL.Path] {
 		s.workflowAPI(w, r, r.URL.Path, body)
+		return
+	}
+	if backupRoutes[r.URL.Path] {
+		s.backupAPI(w, r, body)
 		return
 	}
 	if starting[r.URL.Path] {
@@ -256,8 +325,64 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.testList(w, r, body)
 		return
 	}
+	if r.URL.Path == reviewReplyRoute {
+		s.wholeReply(w, body)
+		return
+	}
+	if r.URL.Path == viewedRoute {
+		s.markViewed(w, r, body)
+		return
+	}
+	if r.URL.Path == diagnosticsRoute {
+		s.diagnostics(w, r, body)
+		return
+	}
+	if r.URL.Path == updateRoute {
+		s.update(w, r, body)
+		return
+	}
+	if r.URL.Path == walkthroughRoute {
+		s.walkthroughCheck(w, r, body)
+		return
+	}
+	if r.URL.Path == reviewerAgentsRoute {
+		s.reviewerAgents(w, body)
+		return
+	}
+	if r.URL.Path == reviewerChecksRoute {
+		s.reviewerChecks(w, r, body)
+		return
+	}
 	if r.URL.Path == expectRoute {
 		s.expect(w, body)
+		return
+	}
+	if r.URL.Path == identityRoute {
+		s.commitIdentity(w, body)
+		return
+	}
+	if r.URL.Path == egressRoute {
+		s.egress(w, r, body)
+		return
+	}
+	if r.URL.Path == allowRulesRoute {
+		s.allowRules(w, r, body)
+		return
+	}
+	if r.URL.Path == agentReportRoute {
+		s.agentReport(w, body)
+		return
+	}
+	if r.URL.Path == projectFactsRoute {
+		s.projectFacts(w, r, body)
+		return
+	}
+	if r.URL.Path == metricsRoute {
+		s.projectMetrics(w, body)
+		return
+	}
+	if r.URL.Path == decisionLogRoute {
+		s.decisionLog(w, body)
 		return
 	}
 	if r.URL.Path == loginRoute {
@@ -273,7 +398,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == forgeAnswerRoute {
-		s.forgeAnswer(w, body)
+		s.forgeAnswer(w, r, body)
 		return
 	}
 	if repoRoutes[r.URL.Path] {
@@ -286,6 +411,58 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/message" {
 		s.message(w, r, body)
+		return
+	}
+	if r.URL.Path == haltRoute {
+		s.halt(w, body)
+		return
+	}
+	if viewRoutes[r.URL.Path] {
+		s.views(w, r, body)
+		return
+	}
+	if r.URL.Path == limitsRoute {
+		s.limits(w, r, body)
+		return
+	}
+	if asideRoutes[r.URL.Path] {
+		s.aside(w, r, body)
+		return
+	}
+	if r.URL.Path == savedPromptsRoute {
+		s.savedPrompts(w, body)
+		return
+	}
+	if branchingRoutes[r.URL.Path] {
+		s.branchingAPI(w, r, body)
+		return
+	}
+	if pullRoutes[r.URL.Path] {
+		s.pullAPI(w, r, body)
+		return
+	}
+	if runRoutes[r.URL.Path] {
+		s.runs(w, r, body)
+		return
+	}
+	if shotRoutes[r.URL.Path] {
+		s.screenshots(w, r.URL.Path, body)
+		return
+	}
+	if r.URL.Path == keepRoute {
+		s.keepAPI(w, r, body)
+		return
+	}
+	if r.URL.Path == pairRoute {
+		s.pairAPI(w, r, body)
+		return
+	}
+	if r.URL.Path == splitPageRoute {
+		s.splitPage(w, r, body)
+		return
+	}
+	if lessonRoutes[r.URL.Path] {
+		s.lessonsAPI(w, r, body)
 		return
 	}
 	s.api(w, r.URL.Path, body)
@@ -347,7 +524,7 @@ func (s *Server) allowSignin() bool {
 
 func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 	if !s.allowSignin() {
-		s.reject(w, http.StatusTooManyRequests, "signin-rate")
+		s.reject(w, r, http.StatusTooManyRequests, "signin-rate")
 		return
 	}
 	body, bad := readObject(w, r, MaxPageBody)
@@ -356,25 +533,30 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body) != 0 {
-		s.reject(w, http.StatusBadRequest, "body")
+		s.reject(w, r, http.StatusBadRequest, "body")
 		return
 	}
 	key := s.keys.issue()
 	s.reg.DetachAll()
-	s.logger.Info("page signed in")
+	shared.For(r.Context(), s.logger).Info("page signed in")
 	send(w, http.StatusOK, map[string]any{"token": key})
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
 	sink := newStream(MaxStreamQueue)
 	id, err := s.reg.Attach(sink)
 	if err != nil {
-		s.reject(w, http.StatusTooManyRequests, "streams")
+		s.reject(w, r, http.StatusTooManyRequests, "streams")
 		return
 	}
 	defer s.reg.Detach(id)
-	s.logger.Info("page stream opened")
-	rc := http.NewResponseController(w)
+	if !s.authorized(r) {
+		s.reject(w, r, http.StatusUnauthorized, "token")
+		return
+	}
+	shared.For(r.Context(), s.logger).Info("page stream opened")
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()

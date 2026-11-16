@@ -44,6 +44,10 @@ func main() {
 		}
 	case len(os.Args) == 2 && os.Args[1] == "commit":
 		err = errUsage
+	case len(os.Args) > 1 && os.Args[1] == "token-expiry":
+		err = expiryCommand(root, os.Args[1:])
+	case len(os.Args) > 1 && (os.Args[1] == "release" || os.Args[1] == "release-answer" || os.Args[1] == "release-seen"):
+		err = releaseCommand(root, os.Args[1:])
 	default:
 		err = apiCommand(root, os.Args[1:])
 	}
@@ -154,6 +158,9 @@ func serve(root string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.Handle("/api/v3/", api{root: root, token: token, repo: "demo"})
+	mux.Handle("/api/graphql", graphql{root: root, token: token})
+	mux.Handle("/osv/", osvFake{root: root})
+	mux.Handle("/release-api/", releaseFake{root: root})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, pass, ok := r.BasicAuth(); !ok || pass != token {
 			log.Printf("%s %s refused: no or wrong token", r.Method, r.URL.Path)

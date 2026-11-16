@@ -1,15 +1,53 @@
-import { button, el, emit, remembered, visible, visibleCommand } from '../lib/dom.ts'
-import { attachCommand, plural } from '../lib/format.ts'
+import { button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
 
-const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attachCommand(attach)}` : "This session is read-only on this page, so this can't be answered here.")
-const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attachCommand(attach)}` : '')
+const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attach}` : "This session is read-only on this page, so this can't be answered here.")
+const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attach}` : '')
+
+const subagent = (agentId?: string, agentName?: string) => (agentId ? (agentName ? `Subagent ${shown(agentName)}` : 'A subagent') : '')
 
 function start(host: HTMLElement, meta: string, title?: string) {
   host.classList.add('card')
   host.replaceChildren(el('div', 'label meta', meta))
   if (title) host.append(el('h3', '', title))
+}
+
+const HIDING = /\r(?!\n)|[\u0008\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u
+const ESCAPE = /[\u001b\u0080-\u009f]/g
+const SGR = /\u001b\[([0-9;:]*)m/y
+
+function conceals(params: string): boolean {
+  const list = params.split(';')
+  for (let i = 0; i < list.length; i++) {
+    const code = Number(list[i]!.split(':')[0] || '0')
+    if (code === 8) return true
+    if ((code === 38 || code === 48 || code === 58) && !list[i]!.includes(':')) {
+      const mode = Number(list[i + 1])
+      i += mode === 5 ? 2 : mode === 2 ? 4 : 0
+    }
+  }
+  return false
+}
+
+function escapes(text: string): boolean {
+  for (const m of text.matchAll(ESCAPE)) {
+    SGR.lastIndex = m.index
+    const colour = SGR.exec(text)
+    if (!colour || conceals(colour[1]!)) return true
+  }
+  return false
+}
+
+export const hidesText = (text: unknown): boolean => typeof text === 'string' && (HIDING.test(text) || escapes(text))
+
+export function hiddenMark(text: string, what: string): HTMLElement {
+  const box = el('div', 'hidden-mark small')
+  box.append(el('span', 'tag warn', 'hides text'), ' ', el('span', 'warn', `${what} holds terminal control sequences other than plain colours, which can erase, move over or conceal text, or direction overrides, which can hide part of it from you while the agent reads all of it. Escaped, as Software Factory reads it:`))
+  const code = el('code', 'hidden-escaped', visible(unspoofed(text)))
+  box.append(code)
+  return box
 }
 
 const pending = new WeakSet<HTMLElement>()
@@ -153,8 +191,8 @@ class SfAsk extends HTMLElement {
   }
 
   #render() {
-    const { id, questions, readOnly, attach, who = 'Claude' } = this.#card!
-    start(this, `${who} asks`)
+    const { id, questions, readOnly, attach, agentId, agentName, who = 'Claude' } = this.#card!
+    start(this, `${subagent(agentId, agentName) || who} asks`)
     if (readOnly) {
       for (const q of questions) {
         this.append(el('h3', '', visible(q.question)))
@@ -242,23 +280,26 @@ class SfPermission extends HTMLElement {
   }
 
   #render() {
-    const { id, tool, detail, summary, agentId, complete, always, auto, readOnly, attach, who = 'Claude' } = this.#card!
-    start(this, agentId ? 'A subagent wants to run a tool' : `${who} wants to run a tool`, `Allow ${visible(tool)}?`)
+    const { id, tool, detail, summary, agentId, agentName, complete, always, auto, irreversible, guarded, readOnly, attach, who = 'Claude' } = this.#card!
+    start(this, `${subagent(agentId, agentName) || who} wants to run a tool`, `Allow ${visible(tool)}?`)
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
+    if (hidesText(detail || summary)) this.append(hiddenMark(detail || summary, 'This call'))
+    if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
+    if (guarded) this.append(el('p', 'small warn', "This file is in the protect list of the team file on the main branch, so Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {
-      choices.append(el('p', 'small muted', attach ? `Too long to show in full here, so allow it in Claude Code itself: ${attachCommand(attach)}` : "The page can't show the whole call, so it can only deny it."))
+      choices.append(el('p', 'small muted', attach ? `Too long to show in full here, so allow it in Claude Code itself: ${attach}` : "The page can't show the whole call, so it can only deny it."))
     } else {
       const yes = button('Yes', 'primary', undefined, 'button', 'yes')
       yes.addEventListener('click', () => reply(this, id, { choice: 'yes' }))
       choices.append(yes)
-      if (always) {
+      if (always && !irreversible) {
         const again = button(visible(always), '', undefined, 'button', 'always')
         again.addEventListener('click', () => reply(this, id, { choice: 'always' }))
         choices.append(again)
       }
-      if (auto) {
+      if (auto && !irreversible) {
         const switching = button('Yes, and switch to auto mode', '', undefined, 'button', 'auto')
         switching.addEventListener('click', () => reply(this, id, { choice: 'auto' }))
         choices.append(switching)
@@ -301,7 +342,7 @@ class SfPlan extends HTMLElement {
       body.append(text)
       this.append(remembered(this.#open, 'plan', true, el('summary', 'small', 'The plan'), body))
     }
-    const where = attach ? `run ${attachCommand(attach)} and answer there` : 'answer in Claude Code itself'
+    const where = attach ? `run ${attach} and answer there` : 'answer in Claude Code itself'
     if (readOnly) return this.append(el('p', 'small muted', `To approve it or ask for changes, ${where}.`))
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: 'What should Claude change?', label: 'What Claude should change in the plan', send: 'Tell Claude what to change', maxLength: 2000, required: true })).ready()
     note.onSend = text => reply(this, id, { choice: 'revise', note: text })

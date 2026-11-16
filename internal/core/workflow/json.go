@@ -57,6 +57,18 @@ func strictJSON(text string) (v any, problem string) {
 	return v, ""
 }
 
+func JSONObject(text string) (map[string]any, string) {
+	v, problem := strictJSON(text)
+	if problem != "" {
+		return nil, problem
+	}
+	o, ok := v.(*object)
+	if !ok {
+		return nil, "not one JSON object"
+	}
+	return o.values, ""
+}
+
 func (p *parser) fail(why string) {
 	panic(jsonError{why + " at character " + strconv.Itoa(p.i)})
 }

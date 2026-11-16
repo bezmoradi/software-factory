@@ -82,6 +82,8 @@ func explain(err error) error {
 		return errors.New(text)
 	case errors.Is(err, ErrNotAsking):
 		return errors.New("the agent offers no mode that asks before it acts, so Software Factory doesn't start it")
+	case errors.Is(err, ErrModeNotKept):
+		return errors.New("the agent didn't confirm it switched to the mode that asks before it acts, so Software Factory stopped it")
 	case errors.Is(err, ErrProtocolVersion):
 		return errors.New("the agent speaks another ACP protocol version")
 	case errors.Is(err, context.DeadlineExceeded):

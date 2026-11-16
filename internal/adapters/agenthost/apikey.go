@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 )
 
 type apiKeyJSON struct {
+	Box  string `json:"box,omitempty"`
 	Step string `json:"step"`
 	Key  string `json:"key,omitempty"`
 }
@@ -36,7 +38,10 @@ func keyHelper(path string) string {
 	return "cat '" + path + "'"
 }
 
-func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
+func (s *Server) apiKeyStep(ctx context.Context, q apiKeyJSON) *problem {
+	if p := s.sameBox(q.Box); p != nil {
+		return p
+	}
 	home := os.Getenv("HOME")
 	if !filepath.IsAbs(home) || strings.ContainsAny(home, "'\n") {
 		return fail(http.StatusConflict, "home", "The container has no usable home folder for Claude Code's settings.")
@@ -58,7 +63,7 @@ func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
 		if next != nil && writePrivate(settings, next, 0o700) != nil {
 			return fail(http.StatusConflict, "settings", helperMessage(nil))
 		}
-		s.log.Info("api key", "step", "set")
+		shared.For(ctx, s.log).Info("api key", "step", "set")
 		return nil
 	case "clear":
 		if q.Key != "" {
@@ -74,7 +79,7 @@ func (s *Server) apiKeyStep(q apiKeyJSON) *problem {
 		if err := os.Remove(keyPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fail(http.StatusConflict, "key-file", "The saved key couldn't be removed from the container.")
 		}
-		s.log.Info("api key", "step", "clear")
+		shared.For(ctx, s.log).Info("api key", "step", "clear")
 		return nil
 	}
 	return fail(http.StatusBadRequest, "step", "")
@@ -168,6 +173,6 @@ func writePrivate(path string, data []byte, dirMode os.FileMode) error {
 
 var _ session.KeyHost = (*Client)(nil)
 
-func (c *Client) APIKey(ctx context.Context, step, key string) error {
-	return c.call(ctx, http.MethodPost, "/v1/api-key", apiKeyJSON{Step: step, Key: key}, nil)
+func (c *Client) APIKey(ctx context.Context, box, step, key string) error {
+	return c.call(ctx, http.MethodPost, "/v1/api-key", apiKeyJSON{Box: box, Step: step, Key: key}, nil)
 }

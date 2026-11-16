@@ -19,6 +19,13 @@ type auditEntryJSON struct {
 	Verdict      string   `json:"verdict"`
 	Path         string   `json:"path"`
 	Missing      []string `json:"missing"`
+	Session      string   `json:"session,omitempty"`
+	Box          string   `json:"box,omitempty"`
+	From         string   `json:"from,omitempty"`
+	FromRef      string   `json:"fromRef,omitempty"`
+	Source       string   `json:"source,omitempty"`
+	Person       string   `json:"person,omitempty"`
+	Req          string   `json:"req,omitempty"`
 }
 
 func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
@@ -40,7 +47,8 @@ func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
 	entries := make([]auditEntryJSON, 0, len(v.Entries))
 	for _, e := range v.Entries {
 		entries = append(entries, auditEntryJSON{Time: millis(e.Time), Kind: e.Kind, By: e.By, Result: e.Result, Reason: e.Reason, PersonReason: e.PersonReason,
-			Commit: e.Commit, Branch: e.Branch, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Missing: nonNil(e.Missing)})
+			Commit: e.Commit, Branch: e.Branch, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Missing: nonNil(e.Missing),
+			Session: e.Session, Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Person: e.Person, Req: e.Req})
 	}
 	refusals := v.Refusals
 	if refusals == nil {
@@ -62,10 +70,14 @@ func (s *Server) refused(sid string, advice adviceKinds) {
 	if advice.protected {
 		s.cfg.Audit.Refused(sid, session.RefusedProtected)
 	}
+	if advice.cloud {
+		s.cfg.Audit.Refused(sid, session.RefusedCloud)
+	}
 }
 
 type adviceKinds struct {
 	pushes    bool
 	remote    bool
 	protected bool
+	cloud     bool
 }

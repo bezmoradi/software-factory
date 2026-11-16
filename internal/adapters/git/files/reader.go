@@ -3,6 +3,8 @@ package files
 import (
 	"bytes"
 	"container/heap"
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -45,37 +47,45 @@ func (Reader) Commit(path, sha string) (push.Commit, error) {
 	})
 }
 
-func (Reader) IsAncestor(path, ancestor, commit string) (bool, error) {
+func (Reader) IsAncestor(ctx context.Context, path, ancestor, commit string) (bool, error) {
 	return with(path, func(r *repo) (bool, error) {
 		if _, err := r.commit(ancestor); err != nil {
 			return false, err
 		}
-		seen := map[string]bool{}
+		queued := map[string]bool{commit: true}
 		queue := []string{commit}
-		for len(queue) > 0 {
+		for n := 1; len(queue) > 0; n++ {
+			if err := walked(ctx, n); err != nil {
+				return false, err
+			}
 			sha := queue[0]
 			queue = queue[1:]
 			if sha == ancestor {
 				return true, nil
 			}
-			if seen[sha] {
-				continue
-			}
-			seen[sha] = true
-			if len(seen) > maxCommits {
-				return false, fmt.Errorf("%w: more than %d commits to walk", push.ErrTooLarge, maxCommits)
-			}
 			c, err := r.commit(sha)
+			if errors.Is(err, push.ErrNotFound) {
+				return false, fmt.Errorf("%w: commit %s, reached from %s, isn't in the repository: %w", push.ErrCorrupt, sha, commit, err)
+			}
 			if err != nil {
 				return false, err
 			}
-			queue = append(queue, c.Parents...)
+			for _, p := range c.Parents {
+				if queued[p] {
+					continue
+				}
+				if len(queued) >= maxCommits {
+					return false, fmt.Errorf("%w: more than %d commits to walk", push.ErrTooLarge, maxCommits)
+				}
+				queued[p] = true
+				queue = append(queue, p)
+			}
 		}
 		return false, nil
 	})
 }
 
-func (Reader) ChangedFiles(path, from, to string) ([]push.Change, error) {
+func (Reader) ChangedFiles(ctx context.Context, path, from, to string) ([]push.Change, error) {
 	return with(path, func(r *repo) ([]push.Change, error) {
 		var left string
 		if from != "" {
@@ -89,7 +99,7 @@ func (Reader) ChangedFiles(path, from, to string) ([]push.Change, error) {
 		if err != nil {
 			return nil, err
 		}
-		d := differ{r: r}
+		d := differ{r: r, ctx: ctx}
 		if err := d.trees(left, c.Tree, "", 0); err != nil {
 			return nil, err
 		}
@@ -99,6 +109,7 @@ func (Reader) ChangedFiles(path, from, to string) ([]push.Change, error) {
 }
 
 type differ struct {
+	ctx     context.Context
 	r       *repo
 	out     []push.Change
 	visited int
@@ -122,6 +133,11 @@ func (d *differ) entries(sha string) (map[string]entry, func(), error) {
 func (d *differ) trees(a, b, prefix string, depth int) error {
 	if a == b {
 		return nil
+	}
+	if d.ctx != nil {
+		if err := d.ctx.Err(); err != nil {
+			return err
+		}
 	}
 	if depth > maxTreeDepth {
 		return fmt.Errorf("%w: trees nest deeper than %d", push.ErrTooLarge, maxTreeDepth)
@@ -218,54 +234,93 @@ func splitPath(p string) ([]string, error) {
 	return parts, nil
 }
 
+const WithinWork = 16 << 20
+
 func (Reader) ReadFile(path, commit, file string) (push.File, error) {
+	return readFile(path, commit, file, 0)
+}
+
+func (Reader) ReadFileWithin(path, commit, file string, limit int64) (push.File, error) {
+	if limit <= 0 || limit > WithinWork/2 {
+		return push.File{}, fmt.Errorf("%w: the limit for %s is out of range", push.ErrTooLarge, short(file))
+	}
+	return readFile(path, commit, file, limit)
+}
+
+func readFile(path, commit, file string, limit int64) (push.File, error) {
 	return with(path, func(r *repo) (push.File, error) {
-		parts, err := splitPath(file)
+		if limit > 0 {
+			r.store.budget = WithinWork
+		}
+		found, err := r.entryAt(commit, file)
 		if err != nil {
 			return push.File{}, err
 		}
-		c, err := r.commit(commit)
+		if found.mode == push.ModeSubmodule {
+			return push.File{Mode: found.mode, SHA: found.sha}, nil
+		}
+		r.store.top = limit
+		data, err := r.blob(found.sha)
+		r.store.top = 0
 		if err != nil {
 			return push.File{}, err
 		}
-		tree := c.Tree
-		for i, part := range parts {
-			list, err := r.tree(tree)
-			if err != nil {
-				return push.File{}, err
-			}
-			var found *entry
-			for k := range list {
-				if list[k].name == part {
-					found = &list[k]
-					break
-				}
-			}
-			if found == nil {
-				return push.File{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
-			}
-			last := i == len(parts)-1
-			if found.mode == push.ModeFolder {
-				if last {
-					return push.File{}, fmt.Errorf("%w: %s is a folder", push.ErrNotFound, short(file))
-				}
-				tree = found.sha
-				continue
-			}
-			if !last {
-				return push.File{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
-			}
-			if found.mode == push.ModeSubmodule {
-				return push.File{Mode: found.mode, SHA: found.sha}, nil
-			}
-			data, err := r.blob(found.sha)
-			if err != nil {
-				return push.File{}, err
-			}
-			return push.File{Mode: found.mode, SHA: found.sha, Data: data}, nil
-		}
-		return push.File{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
+		return push.File{Mode: found.mode, SHA: found.sha, Data: data}, nil
 	})
+}
+
+func (Reader) BlobAt(ctx context.Context, path, commit, file string) (string, error) {
+	return with(path, func(r *repo) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		found, err := r.entryAt(commit, file)
+		if err != nil {
+			return "", err
+		}
+		return found.sha, nil
+	})
+}
+
+func (r *repo) entryAt(commit, file string) (entry, error) {
+	parts, err := splitPath(file)
+	if err != nil {
+		return entry{}, err
+	}
+	c, err := r.commit(commit)
+	if err != nil {
+		return entry{}, err
+	}
+	tree := c.Tree
+	for i, part := range parts {
+		list, err := r.tree(tree)
+		if err != nil {
+			return entry{}, err
+		}
+		var found *entry
+		for k := range list {
+			if list[k].name == part {
+				found = &list[k]
+				break
+			}
+		}
+		if found == nil {
+			return entry{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
+		}
+		last := i == len(parts)-1
+		if found.mode == push.ModeFolder {
+			if last {
+				return entry{}, fmt.Errorf("%w: %s is a folder", push.ErrNotFound, short(file))
+			}
+			tree = found.sha
+			continue
+		}
+		if !last {
+			return entry{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
+		}
+		return *found, nil
+	}
+	return entry{}, fmt.Errorf("%w: %s", push.ErrNotFound, short(file))
 }
 
 const (

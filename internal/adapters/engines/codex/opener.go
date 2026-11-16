@@ -12,7 +12,9 @@ import (
 )
 
 type Opener struct {
-	Logger shared.Logger
+	Logger                shared.Logger
+	DeveloperInstructions string
+	RateWindows           func(plan string, w []session.RateWindow)
 }
 
 var _ session.Opener = Opener{}
@@ -24,7 +26,7 @@ type stdioServer struct {
 }
 
 func (o Opener) Open(ctx context.Context, rw io.ReadWriteCloser, l session.Launch) (agent.Session, error) {
-	cfg := Config{Cwd: l.Cwd, ClientVersion: l.Version, Logger: o.Logger}
+	cfg := Config{Cwd: l.Cwd, ClientVersion: l.Version, Thread: l.Thread, Logger: o.Logger, RateWindows: o.RateWindows, Model: l.Model, Effort: l.Effort}
 	if l.MCP != nil {
 		args := l.MCP.Args
 		if args == nil {
@@ -36,6 +38,7 @@ func (o Opener) Open(ctx context.Context, rw io.ReadWriteCloser, l session.Launc
 			return nil, err
 		}
 		cfg.MCPServers = map[string]json.RawMessage{l.MCP.Name: raw}
+		cfg.DeveloperInstructions = o.DeveloperInstructions
 	}
 	c, err := Start(ctx, rw, cfg)
 	if err != nil {

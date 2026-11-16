@@ -20,7 +20,7 @@ var dist embed.FS
 const (
 	prefsFile  = "prefs.json"
 	maxPrefs   = 4096
-	indexMarks = `data-theme="solarized-dark" data-scale="100" data-bar="left"`
+	indexMarks = `data-theme="solarized-dark" data-scale="100" data-bar="left" data-keys="on"`
 )
 
 var (
@@ -40,6 +40,7 @@ type prefs struct {
 	Theme string `json:"theme,omitempty"`
 	Scale int    `json:"scale,omitempty"`
 	Bar   string `json:"bar,omitempty"`
+	Keys  string `json:"keys,omitempty"`
 }
 
 type assets struct {
@@ -137,6 +138,9 @@ func (a *assets) clean(p prefs) prefs {
 	if p.Bar == "left" || p.Bar == "right" {
 		out.Bar = p.Bar
 	}
+	if p.Keys == "on" || p.Keys == "off" {
+		out.Keys = p.Keys
+	}
 	return out
 }
 
@@ -147,7 +151,7 @@ func (a *assets) page() (string, bool) {
 	a.mu.Lock()
 	p := a.saved
 	a.mu.Unlock()
-	theme, scale, bar := "solarized-dark", 100, "left"
+	theme, scale, bar, keys := "solarized-dark", 100, "left", "on"
 	if p.Theme != "" {
 		theme = p.Theme
 	}
@@ -157,7 +161,10 @@ func (a *assets) page() (string, bool) {
 	if p.Bar != "" {
 		bar = p.Bar
 	}
-	marks := `data-theme="` + theme + `" data-scale="` + strconv.Itoa(scale) + `" data-bar="` + bar + `"`
+	if p.Keys != "" {
+		keys = p.Keys
+	}
+	marks := `data-theme="` + theme + `" data-scale="` + strconv.Itoa(scale) + `" data-bar="` + bar + `" data-keys="` + keys + `"`
 	return strings.Replace(a.index, indexMarks, marks, 1), true
 }
 
@@ -189,6 +196,12 @@ func (a *assets) save(update map[string]any) bool {
 				return false
 			}
 			next.Bar = s
+		case "keys":
+			s, ok := v.(string)
+			if !ok || (s != "on" && s != "off") {
+				return false
+			}
+			next.Keys = s
 		default:
 			return false
 		}

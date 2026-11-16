@@ -95,10 +95,54 @@ type store struct {
 	loaded  bool
 	reads   int
 	work    int64
+	budget  int64
+	top     int64
 	indexed int64
 	cache   map[string]object
 	bases   map[baseKey]object
 	cached  int
+	cap     int64
+	baseCap int64
+	inter   *int64
+}
+
+type objectLimit struct {
+	size   int64
+	budget bool
+	final  bool
+}
+
+func (e objectLimit) Error() string {
+	if e.budget {
+		return fmt.Sprintf("reading an object of %d bytes would pass this read's budget", e.size)
+	}
+	return fmt.Sprintf("an object of %d bytes is over this read's limit", e.size)
+}
+
+func (e objectLimit) Unwrap() error { return push.ErrTooLarge }
+
+func (s *store) limitFor(depth int) int64 {
+	if depth == 0 {
+		return s.cap
+	}
+	return s.baseCap
+}
+
+func (s *store) charge(size, limit int64, final, cached bool) error {
+	if s.cap <= 0 {
+		return nil
+	}
+	if size > limit {
+		return objectLimit{size: size, final: final}
+	}
+	if cached {
+		return nil
+	}
+	if size > *s.inter {
+		return objectLimit{size: size, budget: true}
+	}
+	*s.inter -= size
+	return nil
 }
 
 type baseKey struct {
@@ -152,6 +196,34 @@ func (s *store) rememberBase(k baseKey, o object) {
 	s.cached += len(o.data)
 }
 
+func (s *store) workMax() int64 {
+	if s.budget > 0 {
+		return s.budget
+	}
+	return maxWork
+}
+
+func (s *store) overWork() error {
+	if s.budget > 0 {
+		return fmt.Errorf("%w: reading this file needs more than %d MiB of work", push.ErrTooLarge, s.budget>>20)
+	}
+	return fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+}
+
+func (s *store) objectMax(depth int) int64 {
+	if depth == 0 && s.top > 0 {
+		return s.top
+	}
+	return maxObject
+}
+
+func (s *store) deltaMax(depth int) int64 {
+	if s.budget == 0 && s.objectMax(depth) == maxObject {
+		return maxObject
+	}
+	return min(s.objectMax(depth), s.workMax()-s.work)
+}
+
 func (s *store) read(sha string) (object, error) {
 	return s.readDepth(sha, 0)
 }
@@ -161,6 +233,9 @@ func (s *store) readDepth(sha string, depth int) (o object, err error) {
 		return object{}, fmt.Errorf("%w: %q isn't an object name", push.ErrNotFound, short(sha))
 	}
 	if o, ok := s.cache[sha]; ok {
+		if err := s.charge(int64(len(o.data)), s.limitFor(depth), depth == 0, true); err != nil {
+			return object{}, err
+		}
 		return o, nil
 	}
 	if err := s.count(); err != nil {
@@ -172,7 +247,7 @@ func (s *store) readDepth(sha string, depth int) (o object, err error) {
 		}
 	}()
 	var bad error
-	o, err = s.loose(sha)
+	o, err = s.loose(sha, depth)
 	if err == nil {
 		s.remember(sha, o)
 		return o, nil
@@ -223,7 +298,7 @@ func digest(k kind, data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *store) loose(sha string) (object, error) {
+func (s *store) loose(sha string, depth int) (object, error) {
 	f, _, err := openRegular(s.root, filepath.Join("objects", sha[:2], sha[2:]), maxObject+(1<<20))
 	if err != nil {
 		return object{}, err
@@ -256,11 +331,17 @@ func (s *store) loose(sha string) (object, error) {
 	if err != nil || size < 0 || (len(sizeText) > 1 && sizeText[0] == '0') {
 		return object{}, fmt.Errorf("%w: loose object %s has a bad size", push.ErrCorrupt, sha)
 	}
+	if err := s.charge(size, s.limitFor(depth), depth == 0, false); err != nil {
+		return object{}, err
+	}
 	if size > maxObject {
 		return object{}, fmt.Errorf("%w: object %s is over %d MiB", push.ErrTooLarge, sha, maxObject>>20)
 	}
-	if s.work += size; s.work > maxWork {
-		return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+	if size > s.objectMax(depth) {
+		return object{}, fmt.Errorf("%w: object %s is over the limit", push.ErrTooLarge, sha)
+	}
+	if s.work += size; s.work > s.workMax() {
+		return object{}, s.overWork()
 	}
 	data := make([]byte, size)
 	if _, err := io.ReadFull(z, data); err != nil {
@@ -455,6 +536,9 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 		return object{}, fmt.Errorf("%w: a delta chain is deeper than %d", push.ErrCorrupt, maxDeltaDepth)
 	}
 	if o, ok := s.bases[baseKey{p, offset}]; ok {
+		if err := s.charge(int64(len(o.data)), s.limitFor(depth), depth == 0, true); err != nil {
+			return object{}, err
+		}
 		return o, nil
 	}
 	if err := s.count(); err != nil {
@@ -493,12 +577,23 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 		size |= uint64(b&0x7f) << shift
 		shift += 7
 	}
+	whole := k == kindCommit || k == kindTree || k == kindBlob || k == kindTag
+	limit, final := s.baseCap, false
+	if whole {
+		limit, final = s.limitFor(depth), depth == 0
+	}
+	if err := s.charge(int64(min(size, maxObject+1)), limit, final, false); err != nil {
+		return object{}, err
+	}
 	if size > maxObject {
 		return object{}, fmt.Errorf("%w: a packed object is over %d MiB", push.ErrTooLarge, maxObject>>20)
 	}
 	var base object
 	switch k {
 	case kindCommit, kindTree, kindBlob, kindTag:
+		if int64(size) > s.objectMax(depth) {
+			return object{}, fmt.Errorf("%w: a packed object is over the limit", push.ErrTooLarge)
+		}
 	case kindOfs:
 		b, ok := next()
 		if !ok {
@@ -535,8 +630,8 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	if start >= end {
 		return object{}, fmt.Errorf("%w: a pack entry is truncated", push.ErrCorrupt)
 	}
-	if s.work += int64(size); s.work > maxWork {
-		return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+	if s.work += int64(size); s.work > s.workMax() {
+		return object{}, s.overWork()
 	}
 	z, err := zlib.NewReader(io.NewSectionReader(p.file, start, end-start))
 	if err != nil {
@@ -548,12 +643,15 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	}
 	o := object{kind: k, data: data}
 	if k == kindOfs || k == kindRef {
-		out, err := applyDelta(base.data, data)
+		if err := s.charge(deltaResult(data), s.limitFor(depth), depth == 0, false); err != nil {
+			return object{}, err
+		}
+		out, err := applyDelta(base.data, data, s.deltaMax(depth))
 		if err != nil {
 			return object{}, err
 		}
-		if s.work += int64(len(out)); s.work > maxWork {
-			return object{}, fmt.Errorf("%w: reading the repository's objects needs more than %d GiB of work", push.ErrTooLarge, maxWork>>30)
+		if s.work += int64(len(out)); s.work > s.workMax() {
+			return object{}, s.overWork()
 		}
 		o = object{kind: base.kind, data: out}
 	}
@@ -561,7 +659,7 @@ func (s *store) packed(p *pack, offset int64, depth int) (object, error) {
 	return o, nil
 }
 
-func applyDelta(base, delta []byte) ([]byte, error) {
+func applyDelta(base, delta []byte, limit int64) ([]byte, error) {
 	bad := fmt.Errorf("%w: a delta can't be applied", push.ErrCorrupt)
 	i := 0
 	varint := func() (uint64, bool) {
@@ -590,6 +688,9 @@ func applyDelta(base, delta []byte) ([]byte, error) {
 	}
 	if size > maxObject {
 		return nil, fmt.Errorf("%w: a delta result is over %d MiB", push.ErrTooLarge, maxObject>>20)
+	}
+	if limit < 0 || size > uint64(limit) {
+		return nil, fmt.Errorf("%w: a delta result is over the limit", push.ErrTooLarge)
 	}
 	out := make([]byte, 0, size)
 	for i < len(delta) {
@@ -638,4 +739,24 @@ func applyDelta(base, delta []byte) ([]byte, error) {
 		return nil, bad
 	}
 	return out, nil
+}
+
+func deltaResult(delta []byte) int64 {
+	i := 0
+	varint := func() int64 {
+		var v uint64
+		var shift uint
+		for i < len(delta) && shift <= 63 {
+			b := delta[i]
+			i++
+			v |= uint64(b&0x7f) << shift
+			shift += 7
+			if b&0x80 == 0 {
+				return int64(min(v, maxObject+1))
+			}
+		}
+		return maxObject + 1
+	}
+	varint()
+	return varint()
 }

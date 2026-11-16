@@ -21,6 +21,8 @@ type permission struct {
 	seq     int
 	rpcID   json.RawMessage
 	whole   bool
+	tool    string
+	version int
 	options []agent.Option
 }
 
@@ -73,7 +75,11 @@ func (c *Client) onPermission(id json.RawMessage, params json.RawMessage) {
 	}
 	c.permSeq++
 	rid := "perm-" + strconv.Itoa(c.permSeq)
-	c.perms[rid] = &permission{seq: c.permSeq, rpcID: append(json.RawMessage(nil), id...), whole: tool.Whole, options: options}
+	version := 0
+	if st := c.tools[tool.ID]; st != nil {
+		version = st.version
+	}
+	c.perms[rid] = &permission{seq: c.permSeq, rpcID: append(json.RawMessage(nil), id...), whole: tool.Whole, tool: tool.ID, version: version, options: options}
 	c.emitLocked(agent.Event{Type: agent.Permission, Request: &agent.Request{ID: rid, Tool: tool, Options: visible}})
 	c.note("permission-request")
 }
@@ -122,6 +128,9 @@ func (c *Client) Answer(ctx context.Context, requestID string, a agent.Answer) e
 	optionID, rejected, err := decide(p, a)
 	if err != nil {
 		return err
+	}
+	if st := c.tools[p.tool]; a.Allow && !rejected && (st == nil || st.version != p.version) {
+		return ErrChanged
 	}
 	if err := c.enqueue(permissionReply(p.rpcID, optionID)); err != nil {
 		return err

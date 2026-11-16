@@ -81,6 +81,10 @@ func InstallAgents(ctx context.Context, args []string, logger shared.Logger) err
 			continue
 		}
 		if len(args) == 0 && inst.Installed(a.ID) {
+			if err := inst.CheckInstalled(ctx, a.ID, say); err != nil {
+				say(err.Error())
+				errs = append(errs, err)
+			}
 			say(fmt.Sprintf("%s %s is installed.", a.Name, a.Version))
 			continue
 		}

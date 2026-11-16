@@ -28,6 +28,7 @@ const (
 	DeniedRead Channel = "denied-read"
 	SeverePass Channel = "severe-pass"
 	Withheld   Channel = "withheld"
+	ShapedPass Channel = "verdict-shaped"
 )
 
 type Verdict struct {
@@ -47,16 +48,18 @@ const space = `\s\x0b\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{2
 var (
 	knackpackRule = &Rule{block: regexp.MustCompile(`(?i)\b(changes required|needs verification)\b`), notAfterNo: true, pass: regexp.MustCompile(`(?i)\bno blocking issues found\b`)}
 	rules         = map[string]*Rule{
-		"knackpack:slop-reviewer":           {block: regexp.MustCompile(`(?i)\b(changes required|needs context)\b`), notAfterNo: true, pass: regexp.MustCompile(`(?i)\b(simpler change available|nothing to remove in scope)\b`)},
-		"knackpack:security-reviewer":       {block: regexp.MustCompile(`(?i)\b(blocked|ready for required human review)\b`), pass: regexp.MustCompile(`(?i)\b(no blocking security issues found|ready to build)\b`)},
+		slopReviewer:                        {block: regexp.MustCompile(`(?i)\b(changes required|needs context)\b`), notAfterNo: true, pass: regexp.MustCompile(`(?i)\b(simpler change available|nothing to remove in scope)\b`)},
+		"knackpack:security-reviewer":       {block: regexp.MustCompile(`(?i)\b(blocked|ready for required human review)\b`), notAfterNo: true, pass: regexp.MustCompile(`(?i)\b(no blocking security issues found|ready to build)\b`)},
 		"knackpack:architecture-reviewer":   {block: regexp.MustCompile(`(?i)\b(revise before implementation|insufficient evidence)\b`), pass: regexp.MustCompile(`(?i)\bproceed\b`)},
 		"knackpack:design-pattern-reviewer": {block: regexp.MustCompile(`(?i)\b(behaviorally incorrect|unsuitable for the stated need|insufficient evidence)\b`), pass: regexp.MustCompile(`(?i)\b(appropriate as implemented|correct but could be simpler)\b`)},
 	}
 	knackpackReviewer = regexp.MustCompile(`^knackpack:[\w-]+-reviewer$`)
-	afterNo           = regexp.MustCompile(`(?i)\bno[` + space + `]$`)
+	afterNo           = regexp.MustCompile(`(?i)\b(no|not|nothing|never|none)[` + space + `]+$`)
 	machineLine       = regexp.MustCompile(`(?i)^knackpack-verdict/1:[` + space + `]*(pass|block)$`)
 	verdictLine       = regexp.MustCompile(`(?i)^verdict:[` + space + `]*(pass|block)[` + space + `]*\.?$`)
 	verdictPrefix     = regexp.MustCompile(`(?i)^verdict:[` + space + `]*`)
+	findingsShaped    = regexp.MustCompile(`(?i)^knackpack-findings/|^knackpack-finding/1 \{.*\}$`)
+	reportConclusion  = regexp.MustCompile(`(?i)^(recommendation|decision):`)
 	markup            = regexp.MustCompile("[*_`#>]")
 )
 
@@ -108,6 +111,54 @@ func stateOf(word string) State {
 	return Block
 }
 
+func sentenceLine(l string) bool {
+	return !strings.HasPrefix(l, "/") && !machineLine.MatchString(l) && !findingsShaped.MatchString(l)
+}
+
+func (r *Rule) readsAnywhere(l string) bool {
+	return r != nil && (r.blocks(l) || r.pass.MatchString(l))
+}
+
+func (r *Rule) blocksAtStart(line string) bool {
+	m := r.block.FindStringIndex(verdictPrefix.ReplaceAllString(line, ""))
+	return m != nil && m[0] == 0
+}
+
+func closingParagraph(answer string) []string {
+	var out []string
+	for _, l := range slices.Backward(strings.Split(answer, "\n")) {
+		p := plainLine(l)
+		if p == "" && len(out) > 0 {
+			break
+		}
+		if p != "" && sentenceLine(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (r *Rule) closingBlocks(answer string, lines []string, said, shown string) bool {
+	if r.blocks(said) || r.blocks(shown) || slices.ContainsFunc(closingParagraph(answer), r.blocks) {
+		return true
+	}
+	return slices.ContainsFunc(lines, func(l string) bool { return sentenceLine(l) && r.blocksAtStart(l) })
+}
+
+func shownSentence(r *Rule, lines []string, said string) string {
+	if verdictPrefix.MatchString(said) || r.readsAnywhere(said) {
+		return said
+	}
+	for _, match := range []func(string) bool{verdictPrefix.MatchString, r.readsAnywhere, reportConclusion.MatchString} {
+		for _, l := range lines {
+			if sentenceLine(l) && match(l) {
+				return l
+			}
+		}
+	}
+	return said
+}
+
 func ReplyVerdict(r *Rule, answer string) Verdict {
 	var lines []string
 	for l := range strings.SplitSeq(answer, "\n") {
@@ -133,12 +184,16 @@ func ReplyVerdict(r *Rule, answer string) Verdict {
 	if m := machineLine.FindStringSubmatch(last); m != nil {
 		said := last
 		for i := len(lines) - 2; i >= 0; i-- {
-			if !strings.HasPrefix(lines[i], "/") && !machineLine.MatchString(lines[i]) {
+			if sentenceLine(lines[i]) {
 				said = lines[i]
 				break
 			}
 		}
-		return Verdict{State: stateOf(m[1]), Verdict: clip(said, 200), Channel: Machine}
+		shown := shownSentence(r, lines, said)
+		if r != nil && stateOf(m[1]) == Pass && r.closingBlocks(answer, lines, said, shown) {
+			return Verdict{State: Unknown, Channel: Conflict}
+		}
+		return Verdict{State: stateOf(m[1]), Verdict: clip(shown, 200), Channel: Machine}
 	}
 	if r == nil {
 		for _, t := range slices.Backward(tail) {
@@ -176,4 +231,18 @@ func ReplyVerdict(r *Rule, answer string) Verdict {
 		}
 	}
 	return Verdict{State: Unknown}
+}
+
+func ClosingPass(reply string) bool {
+	last := ""
+	for l := range strings.SplitSeq(reply, "\n") {
+		if p := plainLine(l); p != "" {
+			last = p
+		}
+	}
+	m := machineLine.FindStringSubmatch(last)
+	if m == nil {
+		m = verdictLine.FindStringSubmatch(last)
+	}
+	return m != nil && stateOf(m[1]) == Pass
 }

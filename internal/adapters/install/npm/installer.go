@@ -67,7 +67,7 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Registry = DefaultRegistry
 	}
 	u, err := url.Parse(cfg.Registry)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" && u.Path != "/" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" && u.Path != "/" {
 		return nil, fmt.Errorf("agent installs: the registry must be a plain https URL, got %q", cfg.Registry)
 	}
 	cfg.Registry = strings.TrimSuffix(cfg.Registry, "/")
@@ -78,7 +78,7 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Agents = Pinned
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Transport: &http.Transport{
+		cfg.Client = &http.Client{CheckRedirect: sameOrigin, Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
 			TLSHandshakeTimeout:   15 * time.Second,
@@ -90,6 +90,25 @@ func New(cfg Config) (*Installer, error) {
 		cfg.Logger = quiet{}
 	}
 	return &Installer{cfg: cfg, running: map[string]bool{}, failed: map[string]string{}}, nil
+}
+
+func sameOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if first := via[0].URL; req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {
+		return fmt.Errorf("refused a redirect from %s to another host or scheme", first.Host)
+	}
+	return nil
+}
+
+func removeLeftovers(dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 func (i *Installer) Agents() []Agent {
@@ -145,15 +164,19 @@ func (i *Installer) Ready(id string) (bool, string) {
 	case running:
 		return false, fmt.Sprintf("The engine is installing %s %s into the agents volume. It shows here once it's done.", a.Name, a.Version)
 	case failed != "":
-		return false, fmt.Sprintf("%s %s isn't installed: %s Run docker compose exec engine software-factory install-agents to try again.", a.Name, a.Version, failed)
+		return false, fmt.Sprintf("%s %s isn't installed: %s Run %s exec engine software-factory install-agents to try again.", a.Name, a.Version, failed, session.Compose())
 	}
-	return false, fmt.Sprintf("%s %s isn't installed yet. Run docker compose exec engine software-factory install-agents.", a.Name, a.Version)
+	return false, fmt.Sprintf("%s %s isn't installed yet. Run %s exec engine software-factory install-agents.", a.Name, a.Version, session.Compose())
 }
 
 func (i *Installer) InstallMissing(ctx context.Context, report func(string)) error {
 	var errs []error
 	for _, a := range i.cfg.Agents {
-		if _, _, ok := i.find(a.ID); !ok || i.Installed(a.ID) {
+		if _, _, ok := i.find(a.ID); !ok {
+			continue
+		}
+		if i.Installed(a.ID) {
+			_ = i.CheckInstalled(ctx, a.ID, report)
 			continue
 		}
 		if err := i.Install(ctx, a.ID, report); err != nil {
@@ -206,12 +229,13 @@ func sentence(s string) string {
 }
 
 type manifest struct {
-	Agent       string   `json:"agent"`
-	Version     string   `json:"version"`
-	Arch        string   `json:"arch"`
-	Packages    []string `json:"packages"`
-	Integrity   []string `json:"integrity"`
-	InstalledAt string   `json:"installedAt"`
+	Agent       string             `json:"agent"`
+	Version     string             `json:"version"`
+	Arch        string             `json:"arch"`
+	Packages    []string           `json:"packages"`
+	Integrity   []string           `json:"integrity"`
+	InstalledAt string             `json:"installedAt"`
+	Provenance  []ProvenanceResult `json:"provenance"`
 }
 
 func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(string)) error {
@@ -225,9 +249,10 @@ func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(s
 		return err
 	}
 	defer unlock()
+	removeLeftovers(i.cfg.Dir)
 	if i.Installed(a.ID) {
 		report(fmt.Sprintf("%s %s is already installed.", a.Name, a.Version))
-		return nil
+		return i.checkInstalled(ctx, a, b, report)
 	}
 	tmp := filepath.Join(i.cfg.Dir, ".tmp-"+a.ID+"-"+randomHex())
 	if err := os.Mkdir(tmp, 0o755); err != nil {
@@ -240,6 +265,12 @@ func (i *Installer) install(ctx context.Context, a Agent, b Build, report func(s
 		if err := i.fetch(ctx, p, tmp); err != nil {
 			return err
 		}
+		prov, err := i.provenance(ctx, a, p)
+		if err != nil {
+			return err
+		}
+		report(ProvenanceLine(prov))
+		m.Provenance = append(m.Provenance, prov)
 		m.Packages = append(m.Packages, p.Name+"@"+p.Version)
 		m.Integrity = append(m.Integrity, p.Integrity)
 	}

@@ -2,7 +2,9 @@ package codex
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/agent"
 )
@@ -14,12 +16,30 @@ const (
 	kindFile
 	kindElicitation
 	kindPermissions
+	kindQuestion
+)
+
+const (
+	maxQuestionCount = 8
+	maxQuestionText  = 1000
+	maxHeaderText    = 120
+	maxChoices       = 10
+	maxChoiceText    = 200
+	maxChoiceNote    = 500
+	maxAnswerText    = 2000
+	userNote         = "user_note: "
+	secretAsked      = "Codex asked a question that wants a secret answer. The page doesn't take secrets, so the question went back unanswered."
 )
 
 var (
 	allowOnce  = agent.Option{ID: decisionAccept, Kind: "allow_once", Name: "Yes"}
 	rejectOnce = agent.Option{ID: decisionDecline, Kind: "reject_once", Name: "No"}
 )
+
+type asked struct {
+	question agent.Question
+	labels   map[string]string
+}
 
 type pending struct {
 	id      string
@@ -30,6 +50,9 @@ type pending struct {
 	item    *item
 	version int
 	tool    agent.Tool
+	agent   string
+	foreign bool
+	asked   []asked
 }
 
 func (p *pending) options() []agent.Option {
@@ -56,6 +79,34 @@ func (p *pending) choice(a agent.Answer) (bool, error) {
 	return false, ErrBadOption
 }
 
+func (p *pending) answered(given map[string]string) (any, error) {
+	if len(given) == 0 {
+		return nil, ErrBadOption
+	}
+	out := make(map[string]userInputAnswer, len(p.asked))
+	for _, q := range p.asked {
+		out[q.question.ID] = userInputAnswer{Answers: []string{}}
+	}
+	for id, text := range given {
+		var q *asked
+		for i := range p.asked {
+			if p.asked[i].question.ID == id {
+				q = &p.asked[i]
+			}
+		}
+		text = strings.TrimSpace(text)
+		if q == nil || text == "" || len(text) > maxAnswerText || !utf8.ValidString(text) {
+			return nil, ErrBadOption
+		}
+		if label, ok := q.labels[text]; ok {
+			out[id] = userInputAnswer{Answers: []string{label}}
+		} else {
+			out[id] = userInputAnswer{Answers: []string{userNote + text}}
+		}
+	}
+	return outResult{ID: p.rpcID, Result: userInputReply{Answers: out}}, nil
+}
+
 func (p *pending) reply(allow, stop bool) any {
 	switch p.kind {
 	case kindCommand, kindFile:
@@ -74,6 +125,8 @@ func (p *pending) reply(allow, stop bool) any {
 			a = decisionCancel
 		}
 		return outResult{ID: p.rpcID, Result: elicitationReply{Action: a}}
+	case kindQuestion:
+		return outResult{ID: p.rpcID, Result: userInputReply{Answers: map[string]userInputAnswer{}}}
 	}
 	return outResult{ID: p.rpcID, Result: permissionsReply{Scope: "turn"}}
 }
@@ -84,23 +137,26 @@ func (c *Client) serverRequest(env envelope) {
 		c.log.Warn("codex: request with an invalid id dropped")
 		return
 	}
+	c.mu.Lock()
+	sub, ours := c.threadOfLocked(env.Params)
+	c.mu.Unlock()
+	req := &pending{rpcID: id, agent: sub, foreign: !ours}
 	switch env.Method {
 	case methodCommandApproval:
-		c.commandApproval(id, env.Params)
+		c.commandApproval(req, env.Params)
 	case methodFileApproval:
-		c.fileApproval(id, env.Params)
+		c.fileApproval(req, env.Params)
 	case methodElicitation:
-		c.elicitation(id, env.Params)
+		c.elicitation(req, env.Params)
 	case methodPermissions:
-		c.permissions(id, env.Params)
+		c.permissions(req, env.Params)
+	case methodUserInput:
+		c.userInput(req, env.Params)
 	case methodLegacyExec, methodLegacyPatch:
 		r := legacyReply{}
 		r.Decision.Denied.Rejection = legacyRejection
 		c.reply(outResult{ID: id, Result: r})
 		c.log.Info("codex: legacy approval declined", "method", env.Method)
-	case methodUserInput:
-		c.reply(outResult{ID: id, Result: userInputReply{Answers: map[string]struct{}{}}})
-		c.log.Info("codex: question answered empty", "method", env.Method)
 	case methodDynamicTool, methodTokenRefresh, methodAttestation:
 		c.reply(outError{ID: id, Error: rpcError{Code: codeNotSupported, Message: notSupportedText}})
 		c.log.Info("codex: request refused", "method", env.Method)
@@ -110,7 +166,7 @@ func (c *Client) serverRequest(env envelope) {
 	}
 }
 
-func (c *Client) commandApproval(id json.RawMessage, params json.RawMessage) {
+func (c *Client) commandApproval(req *pending, params json.RawMessage) {
 	var p struct {
 		Kind                   string            `json:"kind"`
 		TurnID                 string            `json:"turnId"`
@@ -122,7 +178,7 @@ func (c *Client) commandApproval(id json.RawMessage, params json.RawMessage) {
 		AdditionalPermissions  json.RawMessage   `json:"additionalPermissions"`
 		AvailableDecisions     []json.RawMessage `json:"availableDecisions"`
 	}
-	req := &pending{rpcID: id, kind: kindCommand}
+	req.kind = kindCommand
 	if json.Unmarshal(params, &p) != nil {
 		c.refuse(req, "command")
 		return
@@ -174,14 +230,14 @@ func offersAccept(decisions []json.RawMessage) bool {
 	return false
 }
 
-func (c *Client) fileApproval(id json.RawMessage, params json.RawMessage) {
+func (c *Client) fileApproval(req *pending, params json.RawMessage) {
 	var p struct {
 		TurnID    string  `json:"turnId"`
 		ItemID    string  `json:"itemId"`
 		Reason    *string `json:"reason"`
 		GrantRoot *string `json:"grantRoot"`
 	}
-	req := &pending{rpcID: id, kind: kindFile}
+	req.kind = kindFile
 	if json.Unmarshal(params, &p) != nil {
 		c.refuse(req, "file")
 		return
@@ -196,7 +252,7 @@ func (c *Client) fileApproval(id json.RawMessage, params json.RawMessage) {
 		input["grantRoot"] = *p.GrantRoot
 	}
 	c.mu.Lock()
-	it := c.items[p.ItemID]
+	it := c.items[itemKey(req.agent, p.ItemID)]
 	if it != nil && it.kind == itemFile {
 		req.item = it
 		req.version = it.version
@@ -211,7 +267,7 @@ func (c *Client) fileApproval(id json.RawMessage, params json.RawMessage) {
 	c.register(req, "file")
 }
 
-func (c *Client) elicitation(id json.RawMessage, params json.RawMessage) {
+func (c *Client) elicitation(req *pending, params json.RawMessage) {
 	var p struct {
 		ServerName      string          `json:"serverName"`
 		TurnID          *string         `json:"turnId"`
@@ -221,7 +277,7 @@ func (c *Client) elicitation(id json.RawMessage, params json.RawMessage) {
 		RequestedSchema json.RawMessage `json:"requestedSchema"`
 		Meta            json.RawMessage `json:"_meta"`
 	}
-	req := &pending{rpcID: id, kind: kindElicitation}
+	req.kind = kindElicitation
 	if json.Unmarshal(params, &p) != nil {
 		c.refuse(req, "elicitation")
 		return
@@ -273,7 +329,7 @@ func emptyForm(raw json.RawMessage) bool {
 	return s.Type == "object" && len(s.Properties) == 0 && len(s.Required) == 0
 }
 
-func (c *Client) permissions(id json.RawMessage, params json.RawMessage) {
+func (c *Client) permissions(req *pending, params json.RawMessage) {
 	var p struct {
 		TurnID      string          `json:"turnId"`
 		ItemID      string          `json:"itemId"`
@@ -281,7 +337,7 @@ func (c *Client) permissions(id json.RawMessage, params json.RawMessage) {
 		Reason      *string         `json:"reason"`
 		Permissions json.RawMessage `json:"permissions"`
 	}
-	req := &pending{rpcID: id, kind: kindPermissions}
+	req.kind = kindPermissions
 	if json.Unmarshal(params, &p) != nil {
 		c.refuse(req, "permissions")
 		return
@@ -298,12 +354,87 @@ func (c *Client) permissions(id json.RawMessage, params json.RawMessage) {
 	c.register(req, "permissions")
 }
 
+func (c *Client) userInput(req *pending, params json.RawMessage) {
+	var p struct {
+		TurnID    string `json:"turnId"`
+		ItemID    string `json:"itemId"`
+		Questions []struct {
+			ID       string `json:"id"`
+			Header   string `json:"header"`
+			Question string `json:"question"`
+			IsSecret bool   `json:"isSecret"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	req.kind = kindQuestion
+	if json.Unmarshal(params, &p) != nil || len(p.Questions) == 0 || len(p.Questions) > maxQuestionCount {
+		c.refuse(req, "question")
+		return
+	}
+	req.turnID = p.TurnID
+	seen := map[string]bool{}
+	for i, q := range p.Questions {
+		if q.IsSecret {
+			c.reply(req.reply(false, false))
+			c.mu.Lock()
+			c.emitLocked(agent.Event{Type: agent.Notice, Text: secretAsked})
+			c.mu.Unlock()
+			c.log.Info("codex: question for a secret answered empty")
+			return
+		}
+		if q.ID == "" || len(q.ID) > maxIDLen || seen[q.ID] || len(q.Options) > maxChoices {
+			c.refuse(req, "question")
+			return
+		}
+		seen[q.ID] = true
+		text := firstText(clipTo(q.Question, maxQuestionText), clipTo(q.Header, maxHeaderText), "Question "+strconv.Itoa(i+1))
+		a := asked{question: agent.Question{ID: q.ID, Header: clipTo(q.Header, maxHeaderText), Text: text}, labels: map[string]string{}}
+		for _, o := range q.Options {
+			label := strings.TrimSpace(clipTo(o.Label, maxChoiceText))
+			if label == "" || a.labels[label] != "" {
+				continue
+			}
+			a.labels[label] = o.Label
+			a.question.Choices = append(a.question.Choices, agent.Choice{Label: label, Description: clipTo(o.Description, maxChoiceNote)})
+		}
+		req.asked = append(req.asked, a)
+	}
+	req.whole = true
+	req.tool = agent.Tool{ID: p.ItemID, Title: "Codex asks", Kind: "question"}
+	c.register(req, "question")
+}
+
+func clipTo(s string, n int) string {
+	s = strings.ToValidUTF8(s, "")
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
+}
+
+func firstText(list ...string) string {
+	for _, s := range list {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func (c *Client) refuse(req *pending, kind string) {
 	c.reply(req.reply(false, false))
 	c.log.Warn("codex: unreadable request declined", "kind", kind)
 }
 
 func (c *Client) register(req *pending, kind string) {
+	if req.foreign {
+		c.reply(req.reply(false, false))
+		c.log.Warn("codex: request from another thread declined", "kind", kind)
+		return
+	}
 	if req.id == "" {
 		req.id = newID()
 	}
@@ -317,7 +448,7 @@ func (c *Client) register(req *pending, kind string) {
 		c.log.Warn("codex: repeated request id declined", "kind", kind)
 		return
 	}
-	if c.finished || c.closing || len(c.pending) >= maxPending {
+	if c.finished || c.closing || len(c.pending) >= maxPending || (req.agent != "" && c.subs[req.agent] == nil) {
 		c.mu.Unlock()
 		c.reply(req.reply(false, false))
 		c.log.Warn("codex: request declined without a card", "kind", kind)
@@ -325,8 +456,11 @@ func (c *Client) register(req *pending, kind string) {
 	}
 	c.pending[req.id] = req
 	c.byRPC[key] = req.id
-	tool := req.tool
-	c.emitLocked(agent.Event{Type: agent.Permission, Request: &agent.Request{ID: req.id, Tool: tool, Options: req.options()}})
+	r := &agent.Request{ID: req.id, Tool: req.tool, Options: req.options()}
+	for _, a := range req.asked {
+		r.Questions = append(r.Questions, a.question)
+	}
+	c.emitLocked(agent.Event{Type: agent.Permission, Request: r, Agent: req.agent})
 	c.mu.Unlock()
 	c.log.Info("codex: request", "kind", kind, "whole", req.whole)
 }

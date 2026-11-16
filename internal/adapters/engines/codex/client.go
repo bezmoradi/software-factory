@@ -29,29 +29,36 @@ const (
 	ReasonAgentExited    = "agent-exited"
 	ReasonThreadClosed   = "thread-closed"
 	ReasonBadMessage     = "bad-message"
+	ReasonNotReading     = "not-reading"
 )
 
 const (
-	SignInNone       = "none"
-	SignInChatGPT    = "chatgpt"
-	SignInAPIKey     = "apiKey"
-	SignInBedrock    = "amazonBedrock"
-	SignInGCP        = "gcp"
-	SignInUnknown    = "unknown"
-	signInNotChecked = ""
+	SignInNone    = "none"
+	SignInChatGPT = "chatgpt"
+	SignInAPIKey  = "apiKey"
+	SignInBedrock = "amazonBedrock"
+	SignInGCP     = "gcp"
+	SignInUnknown = "unknown"
 )
 
 const (
 	maxQueued  = 4096
+	maxQueuedB = 64 << 20
+	maxHeld    = 64 << 20
 	maxPending = 32
 	maxItems   = 2048
 	maxReplies = 256
 	maxPrompt  = 1 << 20
+	maxWriteB  = 64 << 20
 	clientName = "software_factory"
 	clientText = "Software Factory"
 )
 
-const signInHelp = "Codex isn't signed in. Sign in inside the agent container with Codex's own login, then start the session again: docker compose exec -it agent codex login --device-auth"
+const resumeLost = "Codex couldn't restore its earlier conversation; this is a new one."
+
+func signInHelp() string {
+	return "Codex isn't signed in. Sign in inside the session's container with Codex's own login, then wake the session again: the session's sign-in panel shows the docker exec command that runs codex login --device-auth there."
+}
 
 var (
 	ErrClosed         = errors.New("codex: session closed")
@@ -78,10 +85,15 @@ func (e *RPCError) Error() string {
 }
 
 type Config struct {
-	Cwd           string
-	MCPServers    map[string]json.RawMessage
-	ClientVersion string
-	Logger        shared.Logger
+	Cwd                   string
+	MCPServers            map[string]json.RawMessage
+	DeveloperInstructions string
+	ClientVersion         string
+	Thread                string
+	Logger                shared.Logger
+	RateWindows           func(plan string, w []session.RateWindow)
+	Model                 string
+	Effort                string
 }
 
 var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -89,12 +101,18 @@ var serverName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 var (
 	_ agent.Session            = (*Client)(nil)
 	_ session.AttachingSession = (*Client)(nil)
+	_ session.ThreadedSession  = (*Client)(nil)
+	_ session.SteeringSession  = (*Client)(nil)
 )
 
 type Client struct {
-	rw  io.ReadWriteCloser
-	log shared.Logger
-	wmu sync.Mutex
+	rw      io.ReadWriteCloser
+	log     shared.Logger
+	wmu     sync.Mutex
+	wq      [][]byte
+	wqBytes int
+	wclosed bool
+	wwake   chan struct{}
 
 	mu        sync.Mutex
 	nextID    int64
@@ -103,9 +121,14 @@ type Client struct {
 	byRPC     map[string]string
 	items     map[string]*item
 	doneTurns map[string]bool
+	subs      map[string]*subagent
+	subCount  int
 	threadID  string
 	turnID    string
 	signIn    string
+	plan      string
+	rates     rateLimits
+	rateHook  func(plan string, w []session.RateWindow)
 	signedOut bool
 	violated  bool
 	closing   bool
@@ -114,6 +137,8 @@ type Client struct {
 	overflow  bool
 	unknown   int
 	queue     []agent.Event
+	queuedB   int
+	held      int
 
 	wake    chan struct{}
 	events  chan agent.Event
@@ -121,6 +146,10 @@ type Client struct {
 	done    chan struct{}
 	quit    chan struct{}
 	once    sync.Once
+
+	nextModel  string
+	nextEffort string
+	models     []session.AgentModel
 }
 
 func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, error) {
@@ -129,26 +158,8 @@ func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, err
 		_ = rw.Close()
 		return nil, err
 	}
-	c := &Client{
-		rw:        rw,
-		log:       cfg.Logger,
-		calls:     map[int64]chan envelope{},
-		pending:   map[string]*pending{},
-		byRPC:     map[string]string{},
-		items:     map[string]*item{},
-		doneTurns: map[string]bool{},
-		wake:      make(chan struct{}, 1),
-		events:    make(chan agent.Event),
-		replies:   make(chan any, maxReplies),
-		done:      make(chan struct{}),
-		quit:      make(chan struct{}),
-	}
-	if c.log == nil {
-		c.log = quiet{}
-	}
-	go c.read()
-	go c.pump()
-	go c.replier()
+	c := newClient(rw, cfg)
+	c.nextModel, c.nextEffort = cfg.Model, cfg.Effort
 	if err := c.handshake(ctx, cfg, params); err != nil {
 		close(c.quit)
 		c.finish(ReasonClosed)
@@ -157,8 +168,37 @@ func Start(ctx context.Context, rw io.ReadWriteCloser, cfg Config) (*Client, err
 	return c, nil
 }
 
+func newClient(rw io.ReadWriteCloser, cfg Config) *Client {
+	c := &Client{
+		rw:        rw,
+		log:       cfg.Logger,
+		calls:     map[int64]chan envelope{},
+		pending:   map[string]*pending{},
+		byRPC:     map[string]string{},
+		items:     map[string]*item{},
+		doneTurns: map[string]bool{},
+		subs:      map[string]*subagent{},
+		wake:      make(chan struct{}, 1),
+		wwake:     make(chan struct{}, 1),
+		events:    make(chan agent.Event),
+		replies:   make(chan any, maxReplies),
+		done:      make(chan struct{}),
+		quit:      make(chan struct{}),
+		rateHook:  cfg.RateWindows,
+	}
+	if c.log == nil {
+		c.log = quiet{}
+	}
+	go c.read()
+	go c.pump()
+	go c.replier()
+	go c.writeLoop()
+	return c
+}
+
 func threadParams(cfg Config) (threadStartParams, error) {
 	p := threadStartParams{
+		Model:             cfg.Model,
 		Cwd:               cfg.Cwd,
 		ApprovalPolicy:    policyOnRequest,
 		ApprovalsReviewer: reviewerUser,
@@ -178,6 +218,16 @@ func threadParams(cfg Config) (threadStartParams, error) {
 			p.Config = map[string]json.RawMessage{}
 		}
 		p.Config["mcp_servers."+name] = raw
+	}
+	if cfg.DeveloperInstructions != "" {
+		raw, err := json.Marshal(cfg.DeveloperInstructions)
+		if err != nil {
+			return p, fmt.Errorf("%w: %w", ErrConfig, err)
+		}
+		if p.Config == nil {
+			p.Config = map[string]json.RawMessage{}
+		}
+		p.Config["developer_instructions"] = raw
 	}
 	return p, nil
 }
@@ -210,39 +260,85 @@ func (c *Client) handshake(ctx context.Context, cfg Config, params threadStartPa
 	if json.Unmarshal(raw, &acct) != nil {
 		return ErrProtocol
 	}
+	var plan struct {
+		Account *struct {
+			PlanType string `json:"planType"`
+		} `json:"account"`
+	}
 	c.mu.Lock()
 	c.signIn = signInName(acct.Account)
+	if json.Unmarshal(raw, &plan) == nil && plan.Account != nil && c.signIn == SignInChatGPT {
+		c.plan = plan.Account.PlanType
+	}
 	if acct.Account == nil && acct.RequiresOpenaiAuth {
 		c.signedOut = true
-		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp})
+		c.emitLocked(agent.Event{Type: agent.Failed, Reason: ReasonNotSignedIn, Text: signInHelp()})
 		c.mu.Unlock()
 		c.log.Warn("codex: not signed in")
 		return nil
 	}
 	c.mu.Unlock()
+	c.readModels(ctx)
+	if cfg.Thread != "" {
+		resumed, err := c.resume(ctx, cfg.Thread, params)
+		if err != nil || resumed {
+			return err
+		}
+	}
 	raw, err = c.call(ctx, methodThreadStart, params)
 	if err != nil {
 		return err
 	}
-	var ts struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-		ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
-		ApprovalsReviewer json.RawMessage `json:"approvalsReviewer"`
-		Sandbox           struct {
-			Type string `json:"type"`
-		} `json:"sandbox"`
-	}
+	var ts threadReply
 	if json.Unmarshal(raw, &ts) != nil || ts.Thread.ID == "" || len(ts.Thread.ID) > maxIDLen {
 		return ErrProtocol
 	}
 	c.mu.Lock()
 	c.threadID = ts.Thread.ID
+	if cfg.Thread != "" {
+		c.emitLocked(agent.Event{Type: agent.Notice, Text: resumeLost})
+	}
 	c.checkSettingsLocked(ts.ApprovalPolicy, ts.ApprovalsReviewer)
 	c.mu.Unlock()
 	c.log.Info("codex: thread started", "sandbox", sandboxName(ts.Sandbox.Type))
+	c.watchRates()
 	return nil
+}
+
+func (c *Client) resume(ctx context.Context, thread string, params threadStartParams) (bool, error) {
+	if !session.ThreadPattern.MatchString(thread) {
+		c.log.Warn("codex: saved thread id unreadable, starting a new thread")
+		return false, nil
+	}
+	raw, err := c.call(ctx, methodThreadResume, threadResumeParams{ThreadID: thread, ExcludeTurns: true, threadStartParams: params})
+	if rerr, ok := errors.AsType[*RPCError](err); ok {
+		c.log.Info("codex: thread not resumed", "code", rerr.Code)
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var ts threadReply
+	if json.Unmarshal(raw, &ts) != nil || ts.Thread.ID != thread {
+		c.log.Warn("codex: resumed thread unreadable, starting a new thread")
+		return false, nil
+	}
+	c.mu.Lock()
+	c.threadID = thread
+	c.checkSettingsLocked(ts.ApprovalPolicy, ts.ApprovalsReviewer)
+	c.mu.Unlock()
+	c.log.Info("codex: thread resumed", "sandbox", sandboxName(ts.Sandbox.Type))
+	c.watchRates()
+	return true, nil
+}
+
+func (c *Client) ThreadID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session.ThreadPattern.MatchString(c.threadID) {
+		return c.threadID
+	}
+	return ""
 }
 
 func signInName(acct *struct {
@@ -266,12 +362,6 @@ func sandboxName(t string) string {
 	return "unknown"
 }
 
-func (c *Client) SignIn() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.signIn
-}
-
 func (c *Client) Events() <-chan agent.Event {
 	return c.events
 }
@@ -283,34 +373,81 @@ func (c *Client) Prompt(ctx context.Context, text string) error {
 func (c *Client) TakesImages() bool { return true }
 
 func (c *Client) PromptWith(ctx context.Context, text string, parts []session.Attachment) error {
-	var images []any
-	for _, p := range parts {
-		if p.Image {
-			images = append(images, localImage{Type: "localImage", Path: p.Path})
-		}
-	}
-	return c.prompt(ctx, strings.TrimSpace(session.AttachedNote(parts, true)+"\n\n"+text), images)
+	return c.prompt(ctx, text, parts)
 }
 
-func (c *Client) prompt(ctx context.Context, text string, images []any) error {
+func inputOf(text string, parts []session.Attachment) ([]any, error) {
+	if len(parts) > 0 {
+		text = strings.TrimSpace(session.AttachedNote(parts, true) + "\n\n" + text)
+	}
 	if len(text) > maxPrompt {
-		return ErrTooLong
+		return nil, ErrTooLong
+	}
+	input := []any{textInput{Type: "text", Text: text, TextElements: []string{}}}
+	for _, p := range parts {
+		if p.Image {
+			input = append(input, localImage{Type: "localImage", Path: p.Path})
+		}
+	}
+	return input, nil
+}
+
+func (c *Client) Steer(ctx context.Context, text string, parts []session.Attachment) error {
+	input, err := inputOf(text, parts)
+	if err != nil {
+		return err
 	}
 	c.mu.Lock()
 	thread, err := c.usableLocked()
+	turn := c.turnID
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if turn == "" {
+		return session.ErrSteerRefused
+	}
+	raw, err := c.call(ctx, methodTurnSteer, turnSteerParams{ThreadID: thread, Input: input, ExpectedTurnID: turn})
+	if rerr, ok := errors.AsType[*RPCError](err); ok {
+		c.log.Info("codex: steer refused", "code", rerr.Code)
+		return session.ErrSteerRefused
+	}
+	if err != nil {
+		return err
+	}
+	var res struct {
+		TurnID string `json:"turnId"`
+	}
+	if json.Unmarshal(raw, &res) != nil || res.TurnID != turn {
+		c.log.Warn("codex: steer answer names another turn")
+	}
+	return nil
+}
+
+func (c *Client) prompt(ctx context.Context, text string, parts []session.Attachment) error {
+	input, err := inputOf(text, parts)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	thread, err := c.usableLocked()
+	model, effort := c.nextModel, c.nextEffort
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	raw, err := c.call(ctx, methodTurnStart, turnStartParams{
 		ThreadID:          thread,
-		Input:             append([]any{textInput{Type: "text", Text: text, TextElements: []string{}}}, images...),
+		Input:             input,
 		ApprovalPolicy:    policyOnRequest,
 		ApprovalsReviewer: reviewerUser,
+		Model:             model,
+		Effort:            effort,
 	})
 	if err != nil {
 		return err
 	}
+	c.sentSettings(model, effort)
 	var res struct {
 		Turn struct {
 			ID     string `json:"id"`
@@ -380,6 +517,16 @@ func (c *Client) Answer(ctx context.Context, requestID string, a agent.Answer) e
 	if p == nil {
 		c.mu.Unlock()
 		return ErrUnknownRequest
+	}
+	if p.kind == kindQuestion {
+		msg, err := p.answered(a.Answers)
+		if err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		c.dropPendingLocked(p)
+		c.mu.Unlock()
+		return c.write(msg)
 	}
 	allow, err := p.choice(a)
 	if err == nil && allow {
@@ -457,11 +604,55 @@ func (c *Client) write(v any) error {
 	}
 	b = append(b, '\n')
 	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if _, err := c.rw.Write(b); err != nil {
-		return fmt.Errorf("%w: %w", ErrClosed, err)
+	if c.wclosed {
+		c.wmu.Unlock()
+		return ErrClosed
+	}
+	if c.wqBytes+len(b) > maxWriteB {
+		c.wmu.Unlock()
+		c.log.Warn("codex: the agent stopped reading its input")
+		go c.finish(ReasonNotReading)
+		return ErrClosed
+	}
+	c.wq = append(c.wq, b)
+	c.wqBytes += len(b)
+	c.wmu.Unlock()
+	select {
+	case c.wwake <- struct{}{}:
+	default:
 	}
 	return nil
+}
+
+func (c *Client) writeLoop() {
+	for {
+		b, ok := c.nextWrite()
+		if !ok {
+			select {
+			case <-c.wwake:
+				continue
+			case <-c.done:
+				return
+			}
+		}
+		if _, err := c.rw.Write(b); err != nil {
+			go c.finish(ReasonAgentExited)
+			return
+		}
+	}
+}
+
+func (c *Client) nextWrite() ([]byte, bool) {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	if c.wclosed || len(c.wq) == 0 {
+		return nil, false
+	}
+	b := c.wq[0]
+	c.wq[0] = nil
+	c.wq = c.wq[1:]
+	c.wqBytes -= len(b)
+	return b, true
 }
 
 func (c *Client) reply(v any) {
@@ -535,6 +726,10 @@ func (c *Client) finish(reason string) {
 		c.ended = true
 		c.signalLocked()
 		c.mu.Unlock()
+		c.wmu.Lock()
+		c.wclosed = true
+		c.wq, c.wqBytes = nil, 0
+		c.wmu.Unlock()
 		close(c.done)
 		_ = c.rw.Close()
 		c.log.Info("codex: session ended", "reason", reason)
@@ -545,7 +740,8 @@ func (c *Client) emitLocked(ev agent.Event) {
 	if c.overflow || c.ended {
 		return
 	}
-	if len(c.queue) >= maxQueued {
+	size := eventSize(ev)
+	if len(c.queue) >= maxQueued || c.queuedB+size > maxQueuedB {
 		c.overflow = true
 		c.queue = append(c.queue, agent.Event{Type: agent.Failed, Reason: ReasonOverflow})
 		c.signalLocked()
@@ -554,7 +750,33 @@ func (c *Client) emitLocked(ev agent.Event) {
 		return
 	}
 	c.queue = append(c.queue, ev)
+	c.queuedB += size
 	c.signalLocked()
+}
+
+func eventSize(ev agent.Event) int {
+	n := len(ev.Text) + len(ev.Reason) + len(ev.Mode) + len(ev.Agent)
+	if ev.Tool != nil {
+		n += toolSize(*ev.Tool)
+	}
+	if ev.Request != nil {
+		n += len(ev.Request.ID) + toolSize(ev.Request.Tool)
+		for _, o := range ev.Request.Options {
+			n += len(o.ID) + len(o.Kind) + len(o.Name)
+		}
+		n += 64 * len(ev.Request.Questions)
+	}
+	for _, cmd := range ev.Commands {
+		n += len(cmd.Name) + len(cmd.Description)
+	}
+	for _, a := range ev.Agents {
+		n += len(a.ID) + len(a.Name) + len(a.Status)
+	}
+	return n
+}
+
+func toolSize(t agent.Tool) int {
+	return len(t.ID) + len(t.Title) + len(t.Kind) + len(t.Status) + len(t.Input)
 }
 
 func (c *Client) signalLocked() {
@@ -584,6 +806,7 @@ func (c *Client) pump() {
 		ev := c.queue[0]
 		c.queue[0] = agent.Event{}
 		c.queue = c.queue[1:]
+		c.queuedB = max(0, c.queuedB-eventSize(ev))
 		c.mu.Unlock()
 		select {
 		case c.events <- ev:

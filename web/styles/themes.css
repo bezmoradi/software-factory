@@ -44,6 +44,17 @@
   --activity-badge-ink: #ffffff;
   --link: #3794ff;
   --line-number: #8a9090;
+  --diff-added-bg: #0d3631;
+  --diff-removed-bg: #18313b;
+  --diff-ink: #93a1a1;
+  --diff-meta: #8e9e9f;
+  --diff-no: #949a9a;
+  --diff-plus: #8ea300;
+  --diff-minus: #ef706d;
+  --syn-keyword: #8ea300;
+  --syn-string: #2dada3;
+  --syn-comment: #8e9e9f;
+  --syn-number: #e175a9;
 }
 [data-theme="dark-modern"] {
   --label: "Dark Modern";
@@ -95,6 +106,17 @@
   --activity-badge-ink: #ffffff;
   --link: #4daafc;
   --line-number: #828891;
+  --diff-added-bg: #292e2a;
+  --diff-removed-bg: #312625;
+  --diff-ink: #cccccc;
+  --diff-meta: #9d9d9d;
+  --diff-no: #92979f;
+  --diff-plus: #81b88b;
+  --diff-minus: #d47767;
+  --syn-keyword: #569cd6;
+  --syn-string: #ce9178;
+  --syn-comment: #71a35a;
+  --syn-number: #b5cea8;
 }
 [data-theme="github-dark"] {
   --label: "GitHub Dark Default";
@@ -146,6 +168,17 @@
   --activity-badge-ink: #ffffff;
   --link: #2f81f7;
   --line-number: #767e89;
+  --diff-added-bg: #12221d;
+  --diff-removed-bg: #25171c;
+  --diff-ink: #e6edf3;
+  --diff-meta: #808892;
+  --diff-no: #818892;
+  --diff-plus: #3fb950;
+  --diff-minus: #f85149;
+  --syn-keyword: #ff7b72;
+  --syn-string: #a5d6ff;
+  --syn-comment: #8b949e;
+  --syn-number: #79c0ff;
 }
 [data-theme="one-dark-pro"] {
   --label: "One Dark Pro";
@@ -195,6 +228,17 @@
   --activity-badge-ink: #f8fafd;
   --link: #61afef;
   --line-number: #8e95a3;
+  --diff-added-bg: #313a3d;
+  --diff-removed-bg: #39343a;
+  --diff-ink: #abb2bf;
+  --diff-meta: #abb2bf;
+  --diff-no: #9fa5b1;
+  --diff-plus: #81b88b;
+  --diff-minus: #db8c7f;
+  --syn-keyword: #cf8ce2;
+  --syn-string: #98c379;
+  --syn-comment: #a0a3ab;
+  --syn-number: #d19a66;
 }
 [data-theme="dracula"] {
   --label: "Dracula";
@@ -244,6 +288,17 @@
   --activity-badge-ink: #282a36;
   --link: #3794ff;
   --line-number: #8692b7;
+  --diff-added-bg: #31383f;
+  --diff-removed-bg: #3e2e39;
+  --diff-ink: #f8f8f2;
+  --diff-meta: #babbba;
+  --diff-no: #99a3c2;
+  --diff-plus: #81b88b;
+  --diff-minus: #ff6f6f;
+  --syn-keyword: #ff79c6;
+  --syn-string: #f1fa8c;
+  --syn-comment: #99a3c4;
+  --syn-number: #bd93f9;
 }
 [data-theme="solarized-light"] {
   --label: "Solarized Light";
@@ -291,6 +346,17 @@
   --activity-badge-ink: #002b36;
   --link: #006ab1;
   --line-number: #237893;
+  --diff-added-bg: #ece9cd;
+  --diff-removed-bg: #f5decd;
+  --diff-ink: #4d6066;
+  --diff-meta: #5b6565;
+  --diff-no: #1f6b83;
+  --diff-plus: #4e6d0b;
+  --diff-minus: #ad0707;
+  --syn-keyword: #596600;
+  --syn-string: #1c6c66;
+  --syn-comment: #596666;
+  --syn-number: #b4276b;
 }
 [data-theme="light-modern"] {
   --label: "Light Modern";
@@ -341,6 +407,17 @@
   --activity-badge-ink: #ffffff;
   --link: #005fb8;
   --line-number: #6e7681;
+  --diff-added-bg: #eef2e7;
+  --diff-removed-bg: #f7e6e6;
+  --diff-ink: #3b3b3b;
+  --diff-meta: #3b3b3b;
+  --diff-no: #606770;
+  --diff-plus: #51730b;
+  --diff-minus: #ad0707;
+  --syn-keyword: #0000ff;
+  --syn-string: #a31515;
+  --syn-comment: #007600;
+  --syn-number: #08734b;
 }
 [data-theme="github-light"] {
   --label: "GitHub Light Default";
@@ -391,4 +468,15 @@
   --activity-badge-ink: #ffffff;
   --link: #0969da;
   --line-number: #6d757e;
+  --diff-added-bg: #e8f2eb;
+  --diff-removed-bg: #fae9ea;
+  --diff-ink: #1f2328;
+  --diff-meta: #636a73;
+  --diff-no: #646b73;
+  --diff-plus: #197b35;
+  --diff-minus: #cb212d;
+  --syn-keyword: #cb212d;
+  --syn-string: #0a3069;
+  --syn-comment: #626a73;
+  --syn-number: #0550ae;
 }

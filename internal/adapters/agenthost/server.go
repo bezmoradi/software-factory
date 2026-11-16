@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -44,16 +45,21 @@ type Config struct {
 	Git          string
 	MaxProcesses int
 	Review       bool
-	KeyFile      string
 	Environ      []string
 	Logger       shared.Logger
 }
 
 const ReviewRunTimeout = 25 * time.Minute
 
-const KeyHeader = "X-SF-Host-Key"
+const (
+	KeyHeader = "X-SF-Host-Key"
+	KeyRoute  = "/v1/key"
+	keyDigits = 64
+)
 
-var reviewRoutes = map[string]bool{"/healthz": true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true}
+var reviewRoutes = map[string]bool{"/healthz": true, KeyRoute: true, "/v1/run": true, "/v1/sign-in": true, "/v1/login": true, "/v1/api-key": true, "/v1/agents": true,
+	reviewRunRoute: true,
+}
 
 type Server struct {
 	cfg   Config
@@ -64,6 +70,12 @@ type Server struct {
 	runs  int
 	login *login
 	wtMu  sync.Mutex
+
+	agentsMu sync.Mutex
+	boot     string
+	rulesMu  sync.Mutex
+	commands int
+	key      []byte
 }
 
 type commandJSON struct {
@@ -82,11 +94,18 @@ type runReply struct {
 }
 
 type worktreeJSON struct {
-	Repo   string `json:"repo"`
-	Name   string `json:"name"`
-	Branch string `json:"branch,omitempty"`
-	Base   string `json:"base,omitempty"`
-	Force  bool   `json:"force,omitempty"`
+	Repo     string        `json:"repo"`
+	Name     string        `json:"name"`
+	Branch   string        `json:"branch,omitempty"`
+	Base     string        `json:"base,omitempty"`
+	Force    bool          `json:"force,omitempty"`
+	Identity *identityJSON `json:"identity,omitempty"`
+	Existing bool          `json:"existing,omitempty"`
+}
+
+type identityJSON struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type worktreeReply struct {
@@ -144,7 +163,7 @@ func New(cfg Config) (*Server, error) {
 	if log == nil {
 		log = quiet{}
 	}
-	return &Server{cfg: cfg, log: log, procs: map[string]*process{}}, nil
+	return &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID()}, nil
 }
 
 func randomID() string {
@@ -202,16 +221,33 @@ func (a *answer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (s *Server) logRefused(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := &answer{ResponseWriter: w}
-		next(a, r)
-		if a.why == "" || a.why == "browser" || a.why == "key" || a.why == "process" {
-			return
+		id := engineRequest(r)
+		if id != "" {
+			r = r.WithContext(shared.WithRequest(r.Context(), id))
 		}
+		started := time.Now()
+		next(a, r)
 		path := r.URL.Path
 		if _, known := routes[path]; !known {
 			path = "other"
 		}
-		s.log.Warn("agent-host request refused", "path", path, "status", a.status, "why", a.why)
+		log := shared.Tagged(s.log, id)
+		if a.why == "" || a.why == "browser" || a.why == "key" || a.why == "process" {
+			if id != "" && path != "/healthz" {
+				log.Info("agent-host request", "path", path, "status", a.status, "duration", time.Since(started).Round(time.Millisecond).String())
+			}
+			return
+		}
+		log.Warn("agent-host request refused", "path", path, "status", a.status, "why", a.why)
 	}
+}
+
+func engineRequest(r *http.Request) string {
+	values := r.Header.Values(shared.RequestHeader)
+	if len(values) != 1 || !shared.ValidRequest(values[0]) {
+		return ""
+	}
+	return values[0]
 }
 
 func isJSON(r *http.Request) bool {
@@ -220,13 +256,17 @@ func isJSON(r *http.Request) bool {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) *problem {
+	return decodeWithin(w, r, v, MaxControlBody)
+}
+
+func decodeWithin(w http.ResponseWriter, r *http.Request, v any, limit int64) *problem {
 	if !isJSON(r) {
 		return fail(http.StatusUnsupportedMediaType, "type", "agent-host takes only application/json.")
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxControlBody))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return fail(http.StatusRequestEntityTooLarge, "body", fmt.Sprintf("The request is over agent-host's limit of %d KiB.", MaxControlBody>>10))
+			return fail(http.StatusRequestEntityTooLarge, "body", fmt.Sprintf("The request is over agent-host's limit of %d KiB.", limit>>10))
 		}
 		return fail(http.StatusBadRequest, "body", "agent-host couldn't read the request.")
 	}
@@ -243,22 +283,68 @@ var routes = map[string]string{
 	"/v1/processes":        "",
 	"/v1/processes/stop":   http.MethodPost,
 	"/v1/run":              http.MethodPost,
+	KeyRoute:               http.MethodPost,
 	"/v1/sign-in":          http.MethodPost,
 	"/v1/login":            http.MethodPost,
 	"/v1/api-key":          http.MethodPost,
+	"/v1/agents":           http.MethodPost,
 	"/v1/trust":            http.MethodPost,
 	"/v1/worktrees":        http.MethodPost,
 	"/v1/worktrees/remove": http.MethodPost,
+	identityRoute:          http.MethodPost,
+	allowRulesRoute:        http.MethodPost,
+	removeRuleRoute:        http.MethodPost,
+	homeRoute:              http.MethodPost,
+	reviewRunRoute:         http.MethodPost,
+	projectCommandRoute:    http.MethodPost,
+	screenshotsRemoveRoute: http.MethodPost,
+	clearRoute:             http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
-	data, err := os.ReadFile(s.cfg.KeyFile)
-	key := strings.TrimSpace(string(data))
-	if err != nil || len(key) < 32 {
+	values := r.Header.Values(KeyHeader)
+	s.mu.Lock()
+	want := s.key
+	s.mu.Unlock()
+	if want == nil || len(values) != 1 {
 		return false
 	}
+	sum := sha256.Sum256([]byte(values[0]))
+	return subtle.ConstantTimeCompare(sum[:], want) == 1
+}
+
+func (s *Server) takeKey(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Review {
+		refuse(w, fail(http.StatusNotFound, "route", ""))
+		return
+	}
 	values := r.Header.Values(KeyHeader)
-	return len(values) == 1 && subtle.ConstantTimeCompare([]byte(values[0]), []byte(key)) == 1
+	if len(values) != 1 || len(values[0]) != keyDigits || !hexDigits(values[0]) {
+		refuse(w, fail(http.StatusBadRequest, "key", "The key is 64 hexadecimal digits in one header."))
+		return
+	}
+	if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
+		refuse(w, fail(http.StatusBadRequest, "body", "This route takes no body."))
+		return
+	}
+	sum := sha256.Sum256([]byte(values[0]))
+	s.mu.Lock()
+	taken := s.key != nil
+	if !taken {
+		s.key = sum[:]
+	}
+	s.mu.Unlock()
+	if taken {
+		s.log.Warn("agent-host request refused", "why", "key-taken")
+		refuse(w, fail(http.StatusConflict, "key-taken", "This agent-host already has its key."))
+		return
+	}
+	send(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func hexDigits(v string) bool {
+	_, err := hex.DecodeString(v)
+	return err == nil && strings.ToLower(v) == v
 }
 
 func (s *Server) Handler() http.Handler {
@@ -275,7 +361,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if ok && s.cfg.Review && !reviewRoutes[r.URL.Path] {
 		ok = false
 	}
-	if ok && s.cfg.KeyFile != "" && r.URL.Path != "/healthz" && !s.keyed(r) {
+	if ok && s.cfg.Review && r.URL.Path != "/healthz" && r.URL.Path != KeyRoute && !s.keyed(r) {
 		s.log.Warn("agent-host request refused", "why", "key")
 		refuse(w, fail(http.StatusUnauthorized, "key", ""))
 		return
@@ -291,7 +377,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/processes" {
 		switch r.Method {
 		case http.MethodGet:
-			send(w, http.StatusOK, map[string]any{"processes": s.list()})
+			send(w, http.StatusOK, map[string]any{"processes": s.list(), "boot": s.boot})
 		case http.MethodPost:
 			s.start(w, r)
 		default:
@@ -306,6 +392,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/healthz":
 		send(w, http.StatusOK, map[string]string{"status": "ok"})
+	case KeyRoute:
+		s.takeKey(w, r)
 	case "/v1/processes/stop":
 		var q stopJSON
 		if p := decode(w, r, &q); p != nil {
@@ -330,6 +418,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, out)
+	case reviewRunRoute:
+		s.reviewRun(w, r)
+	case projectCommandRoute:
+		s.projectCommand(w, r)
 	case "/v1/sign-in":
 		var q signInJSON
 		if p := decode(w, r, &q); p != nil {
@@ -372,7 +464,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			refuse(w, p)
 			return
 		}
-		if p := s.apiKeyStep(q); p != nil {
+		if p := s.apiKeyStep(r.Context(), q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case "/v1/agents":
+		var q agentsJSON
+		if p := decodeWithin(w, r, &q, MaxAgentsBody); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.agentsStep(r.Context(), q); p != nil {
 			refuse(w, p)
 			return
 		}
@@ -395,7 +498,68 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			refuse(w, p)
 			return
 		}
-		if p := s.removeWorktree(r.Context(), q); p != nil {
+		aside, p := s.removeWorktree(r.Context(), q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, worktreeRemoveReply{OK: true, SetAside: aside})
+	case clearRoute:
+		s.clear(w, r)
+	case screenshotsRemoveRoute:
+		var q screenshotsRemoveJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		removed, p := s.removeScreenshots(q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, screenshotsRemoveReply{OK: true, Removed: removed})
+	case allowRulesRoute:
+		var q allowRulesJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		out, p := s.allowRules(q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, out)
+	case removeRuleRoute:
+		var q removeRuleJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.removeRule(q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case homeRoute:
+		var q homeJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		out, p := s.homeSettings(r.Context(), q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, out)
+	case identityRoute:
+		var q worktreeJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.worktreeIdentity(r.Context(), q); p != nil {
 			refuse(w, p)
 			return
 		}

@@ -1,0 +1,4 @@
+services:
+  helper:
+    environment:
+      SF_BOX_RUNTIME: runsc

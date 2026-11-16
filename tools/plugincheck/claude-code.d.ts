@@ -54,6 +54,12 @@ export interface ContextBreakdown {
   gridRows: ContextSquare[][]
 }
 
+export interface RateLimit {
+  kind: string
+  percentUsed: number
+  resetsAt: string
+}
+
 export interface SessionUsage {
   context: { tokens: number; breakdown?: ContextBreakdown }
 }
@@ -151,7 +157,7 @@ export interface TurnChunk {
 export interface Events {
   'session.start': [{ source?: string }, unknown]
   'session.end': [{ reason?: string }, unknown]
-  'session.measure': [{ context: { tokens: number } }, unknown]
+  'session.measure': [{ context: { tokens: number }; rateLimits?: RateLimit[]; changed?: string[] }, unknown]
   'session.compact': [
     { agentId?: string; trigger: string },
     { skip: string; tokensBefore?: undefined; tokensAfter?: undefined } | { skip?: undefined; tokensBefore?: number; tokensAfter?: number },
@@ -168,7 +174,10 @@ export interface Events {
   'tool.call': [{ tool: string; tool_use_id?: string; agentId?: string; [arg: string]: unknown }, ToolCallResult]
   'classic.SessionStart': [{ source?: string }, { additionalContext?: string[] }]
   'classic.UserPromptSubmit': [{ permission_mode: PermissionMode; prompt: string }, unknown]
-  'classic.Stop': [{ permission_mode: PermissionMode }, unknown]
+  'classic.Stop': [
+    { permission_mode: PermissionMode; stop_hook_active: boolean; last_assistant_message?: string },
+    { block?: string; preventContinuation?: true; stopReason?: string; additionalContext?: string[] },
+  ]
   'classic.StopFailure': [{ error: string; permission_mode?: PermissionMode }, unknown]
   'classic.PermissionRequest': [
     { tool_name: string; tool_input: unknown; permission_mode?: string; agent_id?: string; permission_suggestions?: PermissionUpdate[] },
@@ -188,10 +197,19 @@ export type Hook<K extends keyof Events> = (
   next: Next<Events[K][0], Events[K][1]>,
 ) => Events[K][1] | Promise<Events[K][1]>
 
+export interface TurnStepInput {
+  turnId: string
+  index: number
+  model: string
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number
+  messageCount: number
+  agentId?: string
+}
+
 export type StepHook = (
   $: EngineInterface,
-  e: { turnId: string; agentId?: string },
-  next: ((e: { turnId: string; agentId?: string }) => AsyncIterable<TurnChunk>) & { readonly called: boolean },
+  e: TurnStepInput,
+  next: ((e: TurnStepInput) => AsyncIterable<TurnChunk>) & { readonly called: boolean },
 ) => AsyncIterable<TurnChunk>
 
 export interface Registration<H> {

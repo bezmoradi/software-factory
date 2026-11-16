@@ -18,6 +18,7 @@ type Agent struct {
 	Version string
 	Command string
 	Builds  map[string]Build
+	Source  Source
 }
 
 var Pinned = []Agent{
@@ -42,6 +43,7 @@ var Pinned = []Agent{
 	},
 	{
 		ID: "codex", Name: "Codex CLI", Version: "0.167.1", Command: "codex",
+		Source: Source{Repository: "https://github.com/openai/codex", Workflow: ".github/workflows/rust-release.yml", Ref: "refs/tags/rust-v0.167.1"},
 		Builds: map[string]Build{
 			"amd64": {
 				Packages: []Package{
@@ -61,6 +63,11 @@ var Pinned = []Agent{
 	},
 }
 
+const (
+	MinimumReviewerClaudeCode = ""
+	MinimumReviewerKnackpack  = ""
+)
+
 type Plugin struct {
 	ID       string
 	Name     string
@@ -71,6 +78,6 @@ type Plugin struct {
 }
 
 var PinnedPlugins = []Plugin{
-	{ID: "knackpack", Name: "knackpack", Version: "0.24.0", URL: "https://github.com/bezmoradi/knackpack.git", Commit: "08ceae2d62b0198266f5f792347b2ec568e22adc"},
+	{ID: "knackpack", Name: "knackpack", Version: "0.26.0", URL: "https://github.com/bezmoradi/knackpack.git", Commit: "7a501d3f1296f632b4cbd7ab825174c1e48daf93"},
 	{ID: "spec-kit", Name: "specify-cli", Version: "1.4.0", URL: "https://github.com/github/spec-kit.git", Commit: "0019fa14d12f45edabc2cc3176c9168a68bd0f97", Manifest: PyProject},
 }

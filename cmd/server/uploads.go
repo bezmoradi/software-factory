@@ -9,23 +9,23 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useUploads(reg *session.Registry, getenv func(string) string, logger shared.Logger) error {
+func useUploads(reg *session.Registry, getenv func(string) string, logger shared.Logger) (*page.UploadDir, error) {
 	dir := getenv("SF_UPLOADS")
 	if dir == "" {
 		logger.Info("uploads", "event", "off")
-		return nil
+		return nil, nil
 	}
 	agent := getenv("SF_AGENT_UPLOADS")
 	if agent == "" {
 		agent = dir
 	}
 	if !filepath.IsAbs(dir) || !filepath.IsAbs(agent) {
-		return fmt.Errorf("SF_UPLOADS and SF_AGENT_UPLOADS must be absolute paths")
+		return nil, fmt.Errorf("SF_UPLOADS and SF_AGENT_UPLOADS must be absolute paths")
 	}
 	files, err := page.NewUploadDir(dir, agent)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	reg.UseUploads(files)
-	return nil
+	return &files, nil
 }

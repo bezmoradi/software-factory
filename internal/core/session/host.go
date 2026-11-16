@@ -43,8 +43,10 @@ func (e *HostError) Error() string {
 const HostDirty = "dirty"
 
 type Host interface {
-	AddWorktree(ctx context.Context, repo, name, branch, base string) (string, error)
-	RemoveWorktree(ctx context.Context, repo, name string, force bool) error
+	AddWorktree(ctx context.Context, repo, name, branch, base string, id CommitIdentity) (string, error)
+	AddExistingWorktree(ctx context.Context, repo, name, branch string, id CommitIdentity) (string, error)
+	SetIdentity(ctx context.Context, repo, name string, id CommitIdentity) error
+	RemoveWorktree(ctx context.Context, repo, name string, force bool) (string, error)
 	Run(ctx context.Context, c Command) (RunResult, error)
 	Start(ctx context.Context, c Command) (Process, error)
 	Stop(ctx context.Context, id string) error
@@ -62,6 +64,9 @@ type Launch struct {
 	AskingModes []string
 	MCP         *MCPServer
 	Version     string
+	Thread      string
+	Model       string
+	Effort      string
 }
 
 type Opener interface {

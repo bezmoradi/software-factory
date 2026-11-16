@@ -1,11 +1,13 @@
 package files
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
@@ -16,6 +18,7 @@ const (
 	maxSnapshotBytes   = 8 << 30
 	maxLinkTarget      = 4096
 	maxLinkHops        = 40
+	streamAbove        = 1 << 20
 )
 
 type planned struct {
@@ -102,6 +105,10 @@ func dotGit(name string) bool {
 	return n == ".git" || n == "git~1"
 }
 
+func unsafeRune(r rune) bool {
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
+}
+
 func fold(p string) string {
 	return strings.ToLower(p)
 }
@@ -119,7 +126,7 @@ func (p *plan) walk(tree, prefix string, depth int) error {
 		if dotGit(e.name) {
 			return unsafe("the tree has a .git entry at %s", short(prefix+e.name))
 		}
-		if !utf8.ValidString(e.name) || strings.ContainsAny(e.name, "\\") {
+		if !utf8.ValidString(e.name) || strings.ContainsAny(e.name, "\\") || strings.ContainsFunc(e.name, unsafeRune) {
 			return unsafe("the tree has a name the snapshot can't hold at %s", short(prefix+e.name))
 		}
 		path, err := p.r.join(prefix, e.name)
@@ -221,14 +228,6 @@ func (p *plan) write(root *os.Root) error {
 				return unsafe("%s can't be created: %v", short(it.path), cause(err))
 			}
 		case push.ModeFile, push.ModeExecutable:
-			data, err := p.r.blob(it.sha)
-			if err != nil {
-				return err
-			}
-			total += int64(len(data))
-			if total > maxSnapshotBytes {
-				return fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
-			}
 			perm := os.FileMode(0o644)
 			if it.mode == push.ModeExecutable {
 				perm = 0o755
@@ -237,11 +236,15 @@ func (p *plan) write(root *os.Root) error {
 			if err != nil {
 				return unsafe("%s can't be created: %v", short(it.path), cause(err))
 			}
-			_, werr := f.Write(data)
+			n, err := p.copyBlob(it.sha, f, total)
 			cerr := f.Close()
-			if werr != nil || cerr != nil {
+			if err != nil {
+				return err
+			}
+			if cerr != nil {
 				return unsafe("%s can't be written", short(it.path))
 			}
+			total += n
 		}
 	}
 	for _, it := range p.items {
@@ -253,4 +256,36 @@ func (p *plan) write(root *os.Root) error {
 		}
 	}
 	return nil
+}
+
+func (p *plan) copyBlob(sha string, f *os.File, total int64) (int64, error) {
+	if pr, err := p.r.store.probe(sha); err == nil && pr.whole && !pr.cached && pr.size > streamAbove {
+		if total+pr.size > maxSnapshotBytes {
+			return 0, fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
+		}
+		_, ok, err := p.r.store.streamWhole(context.Background(), sha, pr, f)
+		if err != nil {
+			return 0, unsafe("a file can't be written: %v", cause(err))
+		}
+		if ok {
+			return pr.size, nil
+		}
+		if err := f.Truncate(0); err != nil {
+			return 0, unsafe("a file can't be written: %v", cause(err))
+		}
+		if _, err := f.Seek(0, 0); err != nil {
+			return 0, unsafe("a file can't be written: %v", cause(err))
+		}
+	}
+	data, err := p.r.blob(sha)
+	if err != nil {
+		return 0, err
+	}
+	if total+int64(len(data)) > maxSnapshotBytes {
+		return 0, fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
+	}
+	if _, err := f.Write(data); err != nil {
+		return 0, unsafe("a file can't be written")
+	}
+	return int64(len(data)), nil
 }

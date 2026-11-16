@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -55,6 +56,9 @@ func (l *login) end() {
 }
 
 func (s *Server) loginStep(ctx context.Context, q loginJSON) (loginReply, *problem) {
+	if !filepath.IsAbs(q.Cwd) || !s.inside(filepath.Clean(q.Cwd)) {
+		return loginReply{}, fail(http.StatusConflict, "box", "This agent-host serves another container's workspace.")
+	}
 	switch q.Step {
 	case "start":
 		return s.loginStart(ctx, q.commandJSON)
@@ -131,7 +135,7 @@ func (s *Server) loginStart(ctx context.Context, q commandJSON) (loginReply, *pr
 	s.mu.Lock()
 	s.login = l
 	s.mu.Unlock()
-	s.log.Info("agent-host login", "step", "start", "command", filepath.Base(q.Argv[0]))
+	shared.For(ctx, s.log).Info("agent-host login", "step", "start", "command", filepath.Base(q.Argv[0]))
 	wait := time.NewTimer(loginLinkWait)
 	defer wait.Stop()
 	select {
@@ -184,7 +188,7 @@ func (s *Server) loginCode(ctx context.Context, code string) *problem {
 	}
 	s.loginDrop()
 	<-l.done
-	s.log.Info("agent-host login", "step", "code", "exit", l.exit, "refused", refused)
+	shared.For(ctx, s.log).Info("agent-host login", "step", "code", "exit", l.exit, "refused", refused)
 	if refused || l.exit != 0 {
 		return fail(http.StatusUnprocessableEntity, "login", "Claude Code didn't accept the code. Start again, sign in, and paste the newest code.")
 	}

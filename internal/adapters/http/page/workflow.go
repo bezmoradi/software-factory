@@ -7,26 +7,31 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 const MaxApproveBody = 1 << 20
 
 var (
-	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true}
+	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true, allowCommitRoute: true, commitRewriteRoute: true}
 	approveRoutes  = map[string]bool{"/api/approve-plan": true, "/api/approve-requirements": true}
 	hash256        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	workTypeID     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 )
 
 type workDocJSON struct {
-	Path     string `json:"path"`
-	Text     string `json:"text"`
-	Hash     string `json:"hash"`
-	Approved bool   `json:"approved"`
-	Changed  bool   `json:"changed"`
-	Clipped  bool   `json:"clipped"`
-	Previous string `json:"previous,omitempty"`
+	Path       string `json:"path"`
+	Text       string `json:"text"`
+	Hash       string `json:"hash"`
+	Approved   bool   `json:"approved"`
+	Changed    bool   `json:"changed"`
+	Clipped    bool   `json:"clipped"`
+	Previous   string `json:"previous,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	ApprovedAt string `json:"approvedAt,omitempty"`
+	Reported   bool   `json:"reported,omitempty"`
+	OnBase     bool   `json:"onBase,omitempty"`
 }
 
 type workTypeJSON struct {
@@ -52,6 +57,8 @@ type gateReviewerJSON struct {
 	Override    string `json:"override"`
 	Since       string `json:"since"`
 	Incremental bool   `json:"incremental"`
+	SetAside    string `json:"setAside,omitempty"`
+	Summary     string `json:"summary,omitempty"`
 }
 
 type gateJSON struct {
@@ -87,13 +94,16 @@ type gateJSON struct {
 	FlagsRead    bool               `json:"flagsRead"`
 	LFS          []string           `json:"lfs"`
 	Handoff      bool               `json:"handoff"`
+	Catalog      string             `json:"catalog"`
+	CatalogWhy   string             `json:"catalogWhy,omitempty"`
 }
 
 func docJSON(d *session.WorkDoc) *workDocJSON {
 	if d == nil {
 		return nil
 	}
-	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous}
+	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
+		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase}
 }
 
 func typesJSON(list []workflow.WorkType) []workTypeJSON {
@@ -118,7 +128,8 @@ func gateOf(v session.GateView) gateJSON {
 		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
 		Research: v.Research, Tasks: v.TasksNeeded, TasksWritten: v.TasksWritten, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
-		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff}
+		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
@@ -127,7 +138,7 @@ func gateOf(v session.GateView) gateJSON {
 	}
 	for _, r := range v.Reviewers {
 		out.Reviewers = append(out.Reviewers, gateReviewerJSON{Type: r.Agent, Role: string(r.Role), Name: r.Name, Why: r.Why, State: r.State, Verdict: r.Verdict,
-			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != ""})
+			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != "", SetAside: r.SetAside, Summary: r.Summary})
 	}
 	return out
 }
@@ -173,10 +184,10 @@ func teamOf(v session.TeamView) teamViewJSON {
 		}
 		rules := make([]map[string]string, 0, len(s.FileRules))
 		for _, f := range s.FileRules {
-			rules = append(rules, map[string]string{"pattern": f.Pattern, "agent": f.Agent})
+			rules = append(rules, map[string]string{"pattern": f.Pattern, "agent": f.Agent, "instruction": f.Instruction})
 		}
 		out.Setup = map[string]any{"adapter": string(s.Adapter), "types": typesJSON(s.Types), "defaultType": s.DefaultType, "roles": roles,
-			"agents": nonNil(s.Agents), "fileRules": rules, "rounds": s.Rounds}
+			"agents": nonNil(s.Agents), "fileRules": rules, "rounds": s.Rounds, "protect": nonNil(s.Protect)}
 	}
 	return out
 }
@@ -189,13 +200,15 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	sid := str(body["sid"], 80)
 	switch path {
 	case allowFileRoute, flagRemoveRoute:
-		s.flag(w, path, sid, body)
+		s.flag(r.Context(), w, path, sid, body)
+	case allowCommitRoute, commitRewriteRoute:
+		s.commitFlag(r.Context(), w, path, sid, body)
 	case "/api/gate":
 		if !keysWithin(body, "sid") || sid == "" {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		v, err := s.cfg.Work.View(sid)
+		v, err := s.cfg.Work.View(r.Context(), sid)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -208,8 +221,8 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.cfg.Work.SetType(sid, size)
-		s.logger.Info("work type", "ok", err == nil)
+		err := s.cfg.Work.SetType(r.Context(), sid, size)
+		shared.For(r.Context(), s.logger).Info("work type", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/approve-plan", "/api/approve-requirements":
 		hash, okHash := body["hash"].(string)
@@ -218,8 +231,8 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.cfg.Work.Approve(sid, path == "/api/approve-plan", hash, text)
-		s.logger.Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
+		err := s.cfg.Work.Approve(r.Context(), sid, path == "/api/approve-plan", hash, text)
+		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/team":
 		repo, okPath := body["path"].(string)
@@ -275,7 +288,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 				return
 			}
 			err := s.cfg.Work.SetProjectOption(repo, op, on)
-			s.logger.Info("project setting", "op", op, "on", on, "ok", err == nil)
+			shared.For(r.Context(), s.logger).Info("project setting", "op", op, "on", on, "ok", err == nil)
 			reply(w, err, http.StatusOK)
 			return
 		case "rounds":
@@ -299,15 +312,15 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 				return
 			}
 			err := s.cfg.Work.SetAutoFindings(repo, on)
-			s.logger.Info("project setting", "op", op, "ok", err == nil)
+			shared.For(r.Context(), s.logger).Info("project setting", "op", op, "ok", err == nil)
 			reply(w, err, http.StatusOK)
 			return
 		default:
 			send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine keeps a project's review rounds, default work type, automatic findings, pull request comments and push hold only."})
 			return
 		}
-		err := s.cfg.Work.SetProject(repo, op, rounds, kind)
-		s.logger.Info("project setting", "op", op, "ok", err == nil)
+		err := s.cfg.Work.SetProject(r.Context(), repo, op, rounds, kind)
+		shared.For(r.Context(), s.logger).Info("project setting", "op", op, "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	}
 }

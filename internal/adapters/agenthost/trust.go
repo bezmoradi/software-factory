@@ -25,6 +25,7 @@ const (
 	screenNone trustScreen = iota
 	screenStyle
 	screenNotes
+	screenRenderer
 	screenQuestion
 	screenUnknown
 	screenReady
@@ -39,6 +40,8 @@ func screenOf(screen string) trustScreen {
 		return screenStyle
 	case strings.Contains(t, "press enter to continue"):
 		return screenNotes
+	case strings.Contains(t, "try the new fullscreen renderer"):
+		return screenRenderer
 	case strings.Contains(t, "enter to confirm"):
 		return screenUnknown
 	case strings.Contains(t, "for shortcuts"), strings.Contains(t, "❯ try \""), strings.Contains(t, "/effort"):

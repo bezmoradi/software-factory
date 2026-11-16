@@ -1,4 +1,5 @@
-import { button, el, emit, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
+import { scrolledText } from './cards.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
 
 const STATES: Record<string, [string, string]> = {
@@ -14,6 +15,26 @@ const STATES: Record<string, [string, string]> = {
 }
 
 const KINDS: Record<string, string> = { issue: 'Issue', 'pull-request': 'Pull request', comment: 'Comment' }
+
+const COMMENT_SAID: Record<string, string> = {
+  waiting: 'Software Factory held this comment after the push instead of posting it under your token, as this project\'s settings ask, because it looks like it holds a secret.',
+  posting: 'Software Factory is posting this under your token after the push, as this project\'s settings ask.',
+  denied: 'You denied posting this comment.',
+  failed: 'Software Factory couldn\'t post this comment.',
+  commented: 'Software Factory posted this under your token after the push, as this project\'s settings ask.',
+}
+
+const FROM_SAID: Record<string, string> = {
+  '': 'The agent asked for this. Its text is shown exactly as written; read it before you approve, since the engine posts it under your token.',
+  page: 'You asked for this on the page, and the engine wrote it from its records: the branch, its commit messages, which the agent wrote, and the approved requirements\' title. Read it before you approve, since the engine posts it under your token.',
+  findings: 'You asked for this from a finding that didn\'t block a passing review. The finding\'s text is the reviewer\'s, as it wrote it; read it before you approve, since the engine posts it under your token.',
+}
+
+type ForgeAnswer = HTMLElementEventMap['sf-forge-answer']['detail']
+
+function secretKey(f: SessionForge): string {
+  return JSON.stringify([f.card, f.secretAt ?? '', f.secretLine ?? ''])
+}
 
 function clock(ms: number): string {
   return ms ? new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
@@ -31,6 +52,8 @@ function safeLink(url: string): string {
 class SfForgePanel extends HTMLElement {
   #key = ''
   #drafts = new Map<string, boolean>()
+  #confirmed = new Set<string>()
+  #observers: ResizeObserver[] = []
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -40,6 +63,8 @@ class SfForgePanel extends HTMLElement {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
+    for (const observer of this.#observers) observer.disconnect()
+    this.#observers = []
     const list = value?.forge ?? []
     this.hidden = !list.length
     if (!value || !list.length) {
@@ -48,22 +73,24 @@ class SfForgePanel extends HTMLElement {
     }
     const focused = focusedKey(this)
     for (const card of [...this.#drafts.keys()]) if (!list.some(f => f.card === card && f.state === 'waiting')) this.#drafts.delete(card)
+    const flagged = new Set(list.filter(f => f.state === 'waiting' && f.secretAt).map(secretKey))
+    for (const key of [...this.#confirmed]) if (!flagged.has(key)) this.#confirmed.delete(key)
     const parts: Node[] = [el('h2', 'label', 'Issues and pull requests')]
     for (const f of [...list].reverse()) parts.push(this.#card(f, value))
     this.replaceChildren(...parts)
     refocus(this, focused)
   }
 
-  #comment(f: SessionForge): HTMLElement {
+  #comment(f: SessionForge, value: ForgePanelView): HTMLElement {
     const box = el('div', 'forge-card')
     const [word, tone] = STATES[f.state] ?? [f.state, 'warn']
     const head = el('div', 'row forge-head')
     head.append(el('span', `tag ${tone}`, word), el('span', 'small', `Comment on pull request #${f.number} in ${shown(f.repo)}`), el('span', 'small muted forge-time', clock(f.at || f.asked)))
-    box.append(head, el('p', 'small muted', f.state === 'posting' ? 'Software Factory is posting this under your token after the push, as this project\'s settings ask.' : 'Software Factory posted this under your token after the push, as this project\'s settings ask.'))
-    const body = el('pre', 'forge-body', shown(f.body))
-    body.tabIndex = 0
-    body.setAttribute('aria-label', `The comment on pull request #${f.number}`)
-    box.append(body)
+    box.append(head)
+    const said = COMMENT_SAID[f.state]
+    if (said) box.append(el('p', 'small muted', said))
+    if (f.body) box.append(...this.#body(unspoofed(f.body), `The comment on pull request #${f.number}`))
+    if (f.state === 'waiting') box.append(...this.#waiting(f, value, 'Post comment', () => ({ card: f.card, approve: true, confirmed: !!f.secretAt })))
     if (f.url && f.state === 'commented') {
       const line = el('p', 'small forge-link')
       const href = safeLink(f.url)
@@ -81,7 +108,7 @@ class SfForgePanel extends HTMLElement {
   }
 
   #card(f: SessionForge, value: ForgePanelView): HTMLElement {
-    if (f.kind === 'comment') return this.#comment(f)
+    if (f.kind === 'comment') return this.#comment(f, value)
     const box = el('div', 'forge-card')
     const pull = f.kind === 'pull-request'
     const [word, tone] = STATES[f.state] ?? [f.state, 'warn']
@@ -92,11 +119,8 @@ class SfForgePanel extends HTMLElement {
     box.append(head, el('p', 'forge-title', shown(f.title)))
     if (pull) box.append(el('p', 'small muted forge-refs', `From ${shown(f.head)} into ${shown(f.base)}`))
     if (f.state === 'waiting' || f.state === 'sending') {
-      box.append(el('p', 'small muted', 'The agent asked for this. Its text is shown exactly as written; read it before you approve, since the engine posts it under your token.'))
-      const body = el('pre', 'forge-body', f.body ? shown(f.body) : '(no body)')
-      body.tabIndex = 0
-      body.setAttribute('aria-label', `Body of the ${pull ? 'pull request' : 'issue'}`)
-      box.append(body)
+      box.append(el('p', 'small muted', FROM_SAID[f.from ?? ''] ?? FROM_SAID['']!))
+      box.append(...this.#body(f.body ? unspoofed(f.body) : '(no body)', `Body of the ${pull ? 'pull request' : 'issue'}`))
     }
     if (f.number && f.url) {
       const line = el('p', 'small forge-link')
@@ -111,28 +135,85 @@ class SfForgePanel extends HTMLElement {
       } else line.append(label)
       box.append(line)
     }
+    if (f.reason && f.state === 'waiting' && pull) box.append(el('p', 'small bad', `Asking again: ${shown(f.reason)}.`))
     if (f.reason && (f.state === 'failed' || f.state === 'denied' || f.state === 'opened' || f.state === 'unclear')) box.append(el('p', `small ${f.state === 'failed' ? 'bad' : 'muted'}`, shown(f.reason)))
-    if (pull && f.draft && f.state === 'opened') box.append(el('p', 'small muted', 'It opened as a draft: mark it ready for review on GitHub when you want reviews.'))
+    if (pull && f.draft && f.state === 'opened') box.append(el('p', 'small muted', 'It opened as a draft: mark it ready for review under Pull request, or on GitHub, when you want reviews.'))
     if (f.state === 'unclear') box.append(this.#matches(f))
     if (f.state === 'waiting') {
-      const off = value.answering || !!value.disabled
-      const draft = pull ? this.#draftBox(f, off) : null
-      const approve = button(pull ? 'Open pull request' : 'Open issue', 'primary small', () => {
-        if (off) return
-        emit(this, 'sf-forge-answer', pull ? { card: f.card, approve: true, draft: this.#drafts.get(f.card) ?? true } : { card: f.card, approve: true })
-      }, 'button', `approve:${f.card}`)
-      approve.title = `The engine opens it on ${shown(f.host)} with your saved token`
-      const deny = button('Deny', 'small', () => {
-        if (!off) emit(this, 'sf-forge-answer', { card: f.card, approve: false })
-      }, 'button', `deny:${f.card}`)
-      for (const b of [approve, deny]) b.setAttribute('aria-disabled', String(off))
-      const actions = el('div', 'actions forge-actions')
-      if (draft) actions.append(draft)
-      actions.append(approve, deny)
-      box.append(actions)
-      if (value.disabled) box.append(el('p', 'small muted', shown(value.disabled)))
+      const confirmed = f.secretAt ? { confirmed: true } : {}
+      box.append(...this.#waiting(f, value, pull ? (f.reason ? 'Open pull request at the new commit' : 'Open pull request') : 'Open issue', () => pull ? { card: f.card, approve: true, draft: this.#drafts.get(f.card) ?? true, ...confirmed } : { card: f.card, approve: true, ...confirmed }, pull, `The engine opens it on ${shown(f.host)} with your saved token`))
     }
     return box
+  }
+
+  #body(text: string, name: string): Node[] {
+    const [box, more, observer] = scrolledText(text, name, 'forge-body')
+    this.#observers.push(observer)
+    return [box, more]
+  }
+
+  #waiting(f: SessionForge, value: ForgePanelView, text: string, answer: () => ForgeAnswer, draft = false, title = ''): Node[] {
+    const off = value.answering || !!value.disabled
+    const key = secretKey(f)
+    const parts: Node[] = []
+    const actions = el('div', 'actions forge-actions')
+    if (draft) actions.append(this.#draftBox(f, off))
+    let check: HTMLInputElement | null = null
+    let why: HTMLElement | null = null
+    const approve = button(text, 'primary small', () => {
+      if (off) return
+      if (check && !check.checked) {
+        if (why) why.hidden = false
+        return void check.focus()
+      }
+      emit(this, 'sf-forge-answer', answer())
+    }, 'button', `approve:${f.card}`)
+    if (title) approve.title = title
+    const deny = button('Deny', 'small', () => {
+      if (!off) emit(this, 'sf-forge-answer', { card: f.card, approve: false })
+    }, 'button', `deny:${f.card}`)
+    deny.setAttribute('aria-disabled', String(off))
+    const sync = () => {
+      const waits = !!check && !check.checked
+      approve.setAttribute('aria-disabled', String(off || waits))
+      if (why && waits) approve.setAttribute('aria-describedby', why.id)
+      else approve.removeAttribute('aria-describedby')
+      if (why && !waits) why.hidden = true
+    }
+    if (f.secretAt) {
+      const box = el('div', 'forge-secret')
+      box.append(el('p', 'small bad', `This looks like a secret: ${shown(f.secretAt)}.`))
+      if (f.secretLine) {
+        const line = el('pre', 'forge-body', shown(f.secretLine))
+        line.tabIndex = 0
+        line.setAttribute('aria-label', `The line that looks like a secret, ${shown(f.secretAt)}`)
+        box.append(line)
+      }
+      const label = el('label', 'check small')
+      const input = el('input')
+      input.type = 'checkbox'
+      input.checked = this.#confirmed.has(key)
+      input.disabled = off
+      input.dataset.key = `secret:${f.card}`
+      input.addEventListener('change', () => {
+        if (input.checked) this.#confirmed.add(key)
+        else this.#confirmed.delete(key)
+        sync()
+      })
+      label.append(input, 'I checked it: this isn\'t a secret, and it can go to the git host')
+      box.append(label)
+      check = input
+      why = el('p', 'small warn forge-why', 'Tick the box above to continue.')
+      why.id = `forge-why-${encodeURIComponent(f.card)}`
+      why.hidden = true
+      parts.push(box)
+    }
+    actions.append(approve, deny)
+    parts.push(actions)
+    if (why) parts.push(why)
+    sync()
+    if (value.disabled) parts.push(el('p', 'small muted', shown(value.disabled)))
+    return parts
   }
 
   #draftBox(f: SessionForge, off: boolean): HTMLLabelElement {

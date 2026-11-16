@@ -10,6 +10,7 @@ type Role string
 const (
 	BugHunter  Role = "bug-hunter"
 	Simplicity Role = "simplicity"
+	NoRole     Role = ""
 )
 
 var Roles = []Role{BugHunter, Simplicity}

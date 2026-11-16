@@ -1,0 +1,15 @@
+x-release-image: &release-image
+  image: ghcr.io/bezmoradi/software-factory@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  pull_policy: missing
+
+services:
+  engine:
+    <<: *release-image
+    build: !reset null
+  helper:
+    <<: *release-image
+    group_add: !reset []
+    volumes: !override
+      - helper-key:/run/sf-helper:ro
+  egress:
+    <<: *release-image

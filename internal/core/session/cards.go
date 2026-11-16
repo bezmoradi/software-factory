@@ -30,6 +30,9 @@ type card struct {
 	answer    any
 	answered  bool
 	at        time.Time
+	tool      string
+	hash      string
+	away      bool
 }
 
 func (r *Registry) indexCard(sid string, ev map[string]any) bool {
@@ -77,6 +80,9 @@ func (r *Registry) indexCard(sid string, ev map[string]any) bool {
 		always:    always != "",
 		auto:      kind == "permission" && ev["auto"] == true,
 		questions: questions,
+	}
+	if kind == "permission" {
+		r.cards[id].tool, r.cards[id].hash = toolKindOf(ev), shownInputHash(ev)
 	}
 	return true
 }

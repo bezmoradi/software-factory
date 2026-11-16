@@ -2,6 +2,7 @@ package gate
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,11 +16,13 @@ type heredoc struct {
 }
 
 type parsed struct {
-	cmds   [][]string
-	bodies []string
-	fed    *bool
-	said   *bool
-	code   *bool
+	cmds      [][]string
+	bodies    []string
+	fed       *bool
+	said      *bool
+	code      *bool
+	downloads *bool
+	fedHazard bool
 }
 
 var (
@@ -278,6 +281,26 @@ func shellParse(s string, start, depth int, out *parsed) (int, bool) {
 		return 0, false
 	}
 	return i, true
+}
+
+func shellScriptAt(args []string) (int, bool) {
+	at := slices.IndexFunc(args, shellCommandC.MatchString)
+	if at < 0 {
+		return 0, false
+	}
+	j := at + 1
+	for j < len(args) && optionLike.MatchString(args[j]) {
+		if args[j] == "--" {
+			j++
+			break
+		}
+		if shellValueOpts[args[j]] {
+			j += 2
+		} else {
+			j++
+		}
+	}
+	return j, true
 }
 
 func printed(words []string) string {

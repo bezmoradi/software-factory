@@ -49,14 +49,37 @@ export function agentWord(agent?: string): string {
   return AGENT_WORDS[agent] ?? agentNames.get(agent) ?? 'The agent'
 }
 
-export function attachCommand(id: string): string {
-  return `docker compose exec -it agent claude attach ${id}`
+const COMPOSE = /^docker compose( -p ([a-z0-9][a-z0-9_-]*))?$/
+const BOX = /^[0-9a-f]{16}$/
+let compose = 'docker compose'
+let stack = 'software-factory'
+
+export function setCompose(value: unknown): void {
+  const m = typeof value === 'string' ? COMPOSE.exec(value) : null
+  compose = m ? m[0] : 'docker compose'
+  stack = m?.[2] ?? 'software-factory'
 }
 
-export function logsCommand(id: string): string {
-  return `docker compose exec agent claude logs ${id}`
+export function composeCommand(rest: string): string {
+  return `${compose} ${rest}`
 }
 
-export function signInStep(agent?: string): string {
-  return agent === 'codex' ? 'docker compose exec -it agent codex login --device-auth' : 'docker compose exec -it agent claude, then /login'
+export function boxContainer(box: string): string {
+  return BOX.test(box) ? `${stack}-box-${box}` : ''
+}
+
+export function attachCommand(id: string, box: string): string {
+  const name = boxContainer(box)
+  return name ? `docker exec -it ${name} claude attach ${id}` : ''
+}
+
+export function logsCommand(id: string, box: string): string {
+  const name = boxContainer(box)
+  return name ? `docker exec ${name} claude logs ${id}` : ''
+}
+
+export function signInStep(agent: string | undefined, box: string | undefined): string {
+  const name = boxContainer(box ?? '')
+  if (!name) return "the session's sign-in panel, which Wake opens"
+  return agent === 'codex' ? `docker exec -it ${name} codex login --device-auth` : `docker exec -it ${name} claude, then /login`
 }

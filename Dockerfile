@@ -9,11 +9,12 @@ COPY README.md ./
 RUN mkdir -p internal/adapters/http/page/dist && npm --prefix web run build
 
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9 AS go
+SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
-COPY configs/ configs/
+COPY configs/*.go configs/
 COPY internal/ internal/
 COPY tools/ tools/
 COPY --from=page /src/internal/adapters/http/page/dist/ internal/adapters/http/page/dist/
@@ -48,10 +49,13 @@ RUN apt-get update \
  && groupadd --gid 10000 sf \
  && useradd --uid 10001 --gid sf --no-create-home --home-dir /var/lib/software-factory --shell /usr/sbin/nologin engine \
  && useradd --uid 10002 --gid sf --no-create-home --home-dir /home/agent --shell /bin/bash agent \
- && useradd --uid 10003 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
+ && groupadd --gid 10003 egress \
+ && useradd --uid 10003 --gid egress --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
  && useradd --uid 10004 --user-group --no-create-home --home-dir /home/reviewer --shell /bin/bash reviewer \
+ && useradd --uid 10005 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin helper \
  && install -d -o engine -g sf -m 0700 /var/lib/software-factory \
  && install -d -o engine -g sf -m 2775 /workspace /workspace/repos /workspace/worktrees \
+ && install -d -o engine -g sf -m 0755 /workspace/s \
  && install -d -o engine -g sf -m 0755 /opt/software-factory/agents /opt/software-factory/agents/bin \
  && install -d -o agent -g sf -m 0700 /home/agent /run/sf \
  && install -d -o reviewer -g reviewer -m 0700 /home/reviewer \
@@ -60,6 +64,7 @@ RUN apt-get update \
 COPY --from=go /out/software-factory /usr/local/bin/software-factory
 COPY --chown=root:root --chmod=a=rX,u+w plugin/.claude-plugin/plugin.json /opt/software-factory/plugin/.claude-plugin/plugin.json
 COPY --chown=root:root --chmod=a=rX,u+w plugin/hooks/ /opt/software-factory/plugin/hooks/
+COPY --chown=root:root --chmod=a=rX,u+w configs/claude-code/managed-settings.json /etc/claude-code/managed-settings.json
 COPY --from=go /out/licenses/ /usr/share/doc/software-factory/go/
 COPY --from=page /src/web/node_modules/typescript/LICENSE /src/web/node_modules/typescript/NOTICE.txt /usr/share/doc/software-factory/typescript/
 COPY LICENSE /usr/share/doc/software-factory/LICENSE
@@ -75,6 +80,10 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/software-factory"]
 
 FROM base AS dev
+USER root
+RUN install -d -m 0755 /usr/share/software-factory \
+ && install -m 0444 /dev/null /usr/share/software-factory/dev-image
+USER engine
 COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
 COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
 
@@ -87,5 +96,27 @@ COPY --from=fakes /out/sf-gitserver /usr/local/bin/sf-gitserver
 USER gitsrv
 EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/sf-gitserver"]
+
+FROM base AS browser
+USER root
+RUN sed -i \
+      -e 's#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/20261103T013555Z#' \
+      -e 's#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/20261103T013555Z#' \
+      /etc/apt/sources.list.d/debian.sources \
+ && ! grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --no-install-recommends \
+      chromium=156.0.8078.79-1~deb13u1 \
+      chromium-common=156.0.8078.79-1~deb13u1 \
+      fonts-liberation=1:2.1.5-3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && install -d -m 0755 /etc/chromium.d \
+ && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/software-factory \
+ && chmod 0644 /etc/chromium.d/software-factory
+USER engine
+
+FROM browser AS dev-browser
+COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
+COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
 
 FROM base AS runtime

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 func (f *Forges) Reconcile(ctx context.Context, open AuditOpen) int {
@@ -12,7 +14,7 @@ func (f *Forges) Reconcile(ctx context.Context, open AuditOpen) int {
 	}
 	list, err := open.Open()
 	if err != nil {
-		f.cfg.Logger.Warn("forge reconcile", "event", "audit-unreadable")
+		shared.For(ctx, f.cfg.Logger).Warn("forge reconcile", "event", "audit-unreadable")
 		return 0
 	}
 	done := 0
@@ -32,7 +34,7 @@ func (f *Forges) Reconcile(ctx context.Context, open AuditOpen) int {
 		}
 	}
 	if done > 0 {
-		f.cfg.Logger.Info("forge reconcile", "event", "settled", "count", done)
+		shared.For(ctx, f.cfg.Logger).Info("forge reconcile", "event", "settled", "count", done)
 	}
 	return done
 }
@@ -106,7 +108,7 @@ func (f *Forges) repoOf(e AuditEntry) (ForgeRepo, bool) {
 func (f *Forges) resend(ctx context.Context, e AuditEntry) bool {
 	repo, ok := f.repoOf(e)
 	if !ok {
-		f.cfg.Logger.Warn("forge reconcile", "event", "skipped", "why", "repository")
+		shared.For(ctx, f.cfg.Logger).Warn("forge reconcile", "event", "skipped", "why", "repository")
 		return false
 	}
 	word, title := wordOf(e.Kind), titleOf(e.Reason)
@@ -115,7 +117,7 @@ func (f *Forges) resend(ctx context.Context, e AuditEntry) bool {
 	if e.Kind == string(ForgePull) {
 		link, open, err := f.cfg.API.OpenPull(rctx, repo, e.Branch)
 		if err != nil {
-			f.cfg.Logger.Warn("forge reconcile", "event", "host-unreachable")
+			shared.For(ctx, f.cfg.Logger).Warn("forge reconcile", "event", "host-unreachable")
 			return false
 		}
 		if open {
@@ -133,7 +135,7 @@ func (f *Forges) resend(ctx context.Context, e AuditEntry) bool {
 	}
 	issues, err := f.cfg.API.RecentIssues(rctx, repo)
 	if err != nil {
-		f.cfg.Logger.Warn("forge reconcile", "event", "host-unreachable")
+		shared.For(ctx, f.cfg.Logger).Warn("forge reconcile", "event", "host-unreachable")
 		return false
 	}
 	matches := matchesOf(issues, e.Time, e.Hash)

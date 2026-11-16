@@ -1,9 +1,11 @@
 import { button, el, visible } from '../lib/dom.ts'
-import type { SignIn } from '../types.ts'
+import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
+import { icon } from './icon.ts'
+import { GATEWAY_WARNING } from './egress-panel.ts'
+import { when } from './usage.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
-type Target = 'agents' | 'reviewers'
 
 interface Answer {
   ok: boolean
@@ -36,9 +38,24 @@ function safeLink(v: unknown): string {
   }
 }
 
-function describe(s: SignIn | null): string {
-  if (!s) return 'Not checked yet.'
-  return s.method === 'not-signed-in' ? 'Not signed in.' : `Signed in: ${visible(s.words)}.`
+const RECHECK_MS = 15000
+const BUSY = 'All 8 reviewer containers are in use, so the sign-in wasn’t checked again; it checks again shortly.'
+
+function stale(s: SignIn | null, busy = false): boolean {
+  return !!s?.stale && (!!s.busy || busy)
+}
+
+function notCurrent(s: SignIn): string {
+  const before = s.method === 'not-signed-in' ? 'not signed in' : `signed in: ${visible(s.words)}`
+  return `Not current: the sign-in or key changed after the last check${s.checkedAt ? `, checked ${when(s.checkedAt)}` : ''}, which found it ${before}.`
+}
+
+function describe(s: SignIn | null, busy = false): string {
+  if (!s) return busy ? `The reviewers are busy. ${BUSY}` : 'Not checked yet.'
+  if (stale(s, busy)) return `${notCurrent(s)} ${BUSY}`
+  const said = s.method === 'not-signed-in' ? 'Not signed in.' : `Signed in: ${visible(s.words)}.`
+  const at = s.checkedAt ? `${said} Checked ${when(s.checkedAt)}.` : said
+  return s.busy || busy ? `${at} ${BUSY}` : at
 }
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
@@ -69,13 +86,15 @@ class Row {
   private waiting = false
   private starting = 0
   private signIn: SignIn | null = null
+  private current = true
   private readonly post: Post
-  private readonly target: Target
+  private readonly target: string
 
-  constructor(post: Post, target: Target, title: string) {
+  constructor(post: Post, target: string, title: string) {
     this.post = post
     this.target = target
     this.say.setAttribute('role', 'status')
+    this.status.setAttribute('role', 'status')
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
     this.unready()
@@ -87,10 +106,11 @@ class Row {
       this.link,
       codeForm,
     )
-    const [keyLabel, key] = field('api-key', 'API key from the Claude Console', true)
+    const agents = target !== 'reviewers'
+    const [keyLabel, key] = field('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', true)
     this.key = key
     this.apiKey.append(
-      el('p', 'small muted', `Billed per use. Software Factory saves the key in the ${target === 'agents' ? 'agent' : 'reviewer'} container for Claude Code and never shows it again.`),
+      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
       this.form(keyLabel, () => void this.finishKey()),
     )
     this.kinds.addEventListener('sf-expand', e => {
@@ -112,16 +132,22 @@ class Row {
   }
 
   private paint() {
-    const m = this.signIn?.method ?? ''
+    const m = this.current ? this.signIn?.method ?? '' : ''
     this.kinds.items = [
       { id: 'subscription', title: 'Subscription', note: 'Claude Pro, Max or Ultra', state: m === 'subscription' ? 'In use' : '', good: true, panel: this.subscription },
-      { id: 'api-key', title: 'API key', note: 'Claude Console', state: PER_USE.includes(m) ? 'In use' : '', good: true, panel: this.apiKey },
+      { id: 'api-key', title: 'API key', note: this.target === 'reviewers' ? 'Claude Console' : 'Claude Console or company gateway', state: PER_USE.includes(m) ? 'In use' : '', good: true, panel: this.apiKey },
     ]
   }
 
-  show(s: SignIn | null) {
+  pending(s: SignIn) {
+    this.status.textContent = `${s.stale ? notCurrent(s) : describe(s)} Checking again…`
+  }
+
+  show(s: SignIn | null, busy = false) {
     this.signIn = s
-    this.status.textContent = describe(s)
+    this.current = !stale(s, busy)
+    this.status.textContent = describe(s, busy)
+    if (s?.method === 'gateway' && this.current) this.status.textContent += ` ${GATEWAY_WARNING}.`
     this.paint()
   }
 
@@ -203,7 +229,7 @@ export interface SignInState {
 
 function signedIn(v: unknown): boolean | null {
   const s = signInOf(v)
-  return s ? s.method !== 'not-signed-in' : null
+  return s && !s.stale ? s.method !== 'not-signed-in' : null
 }
 
 export async function signInState(post: Post): Promise<SignInState | null> {
@@ -220,24 +246,29 @@ export async function signInState(post: Post): Promise<SignInState | null> {
   return { agents, reviewers: a.body.reviewer === true ? signedIn(a.body.reviewers) : true }
 }
 
-export async function claudeLogin(post: Post, closed?: () => void): Promise<void> {
+export async function claudeLogin(post: Post, closed?: () => void, known?: SignIn | null): Promise<void> {
   const d = el('dialog', 'consent login surface')
-  d.setAttribute('aria-label', 'Sign Claude Code in')
-  const agents = new Row(post, 'agents', 'Claude Code for the agents')
+  d.setAttribute('aria-label', 'Sign Claude Code in for the reviewers')
   const reviewers = new Row(post, 'reviewers', 'Claude Code for the reviewers')
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  let open = true
+  let again = 0
   const close = () => {
-    agents.cancel()
+    open = false
+    clearTimeout(again)
     reviewers.cancel()
     d.close()
     d.remove()
     closed?.()
+    if (opener?.isConnected) opener.focus()
   }
   const actions = el('div', 'row consent-actions')
   actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
+  const heading = el('h2', 'label', 'Sign Claude Code in for the reviewers')
+  heading.tabIndex = -1
   d.append(
-    el('h2', 'label', 'Sign Claude Code in'),
-    el('p', 'small', 'The agents and the reviewers each run their own Claude Code, so each signs in once, with a subscription or an API key. Sessions and reviews then start only on the kind you signed in with here.'),
-    agents.node,
+    heading,
+    el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
     reviewers.node,
     actions,
   )
@@ -247,8 +278,88 @@ export async function claudeLogin(post: Post, closed?: () => void): Promise<void
   })
   document.body.append(d)
   d.showModal()
-  const a = await call(post, { step: 'status' })
-  agents.show(signInOf(a.body.agents))
-  if (a.body.reviewer === true) reviewers.show(signInOf(a.body.reviewers))
-  else reviewers.node.remove()
+  heading.focus()
+  if (known) reviewers.pending(known)
+  const refresh = async (): Promise<void> => {
+    const a = await call(post, { step: 'status' })
+    if (!open) return
+    if (a.body.reviewer !== true) return void reviewers.node.remove()
+    const busy = a.body.reviewersBusy === true
+    reviewers.show(signInOf(a.body.reviewers), busy)
+    if (busy) again = window.setTimeout(() => void refresh(), RECHECK_MS)
+  }
+  await refresh()
+}
+
+export function commandBlock(command: string): HTMLElement {
+  const block = el('div', 'setup-code')
+  const copy = button('', 'setup-copy', () => {
+    void navigator.clipboard.writeText(command).then(() => {
+      copy.replaceChildren(icon('check'))
+      copy.setAttribute('aria-label', 'Copied')
+      copy.title = 'Copied'
+      setTimeout(() => {
+        copy.replaceChildren(icon('copy'))
+        copy.setAttribute('aria-label', 'Copy the command')
+        copy.title = 'Copy'
+      }, 1500)
+    }, () => { copy.title = 'Couldn’t copy: select the command and copy it' })
+  })
+  copy.append(icon('copy'))
+  copy.setAttribute('aria-label', 'Copy the command')
+  copy.title = 'Copy'
+  block.append(el('code', '', visible(command)), copy)
+  return block
+}
+
+const BOX = /^[0-9a-f]{16}$/
+
+export function boxSignIn(post: Post, needs: Needs, name: string): Promise<boolean> {
+  const box = needs.box ?? ''
+  if (!BOX.test(box)) return Promise.resolve(false)
+  const target = `box:${box}`
+  return new Promise(resolve => {
+    const d = el('dialog', 'consent login surface')
+    d.setAttribute('aria-label', `Sign ${visible(name)} in for this session`)
+    const status = el('p', 'small', describe(needs.signIn ?? null))
+    status.setAttribute('role', 'status')
+    const row = needs.code ? new Row(post, target, `${visible(name)} in this session’s container`) : null
+    const done = (answer: boolean) => {
+      row?.cancel()
+      d.close()
+      d.remove()
+      resolve(answer)
+    }
+    const check = async () => {
+      status.textContent = 'Checking…'
+      const a = await call(post, { step: 'status', target })
+      const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
+      const first = each[0] !== null && typeof each[0] === 'object' ? each[0] as Record<string, unknown> : {}
+      const s = signInOf(first.signIn)
+      status.textContent = a.ok ? (row ? '' : describe(s)) : typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.'
+      row?.show(s)
+    }
+    const parts: Node[] = [
+      el('h2', 'label', `Sign ${visible(name)} in for this session`),
+      el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
+    ]
+    if (row) {
+      status.textContent = ''
+      row.show(needs.signIn ?? null)
+      parts.push(row.node, status)
+    } else {
+      parts.push(status)
+      if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
+    }
+    const actions = el('div', 'row consent-actions')
+    actions.append(button('Check again', 'ghost small', () => void check()), el('span', 'spacer'), button('Cancel', 'ghost small', () => done(false)), button('Continue', 'primary small', () => done(true)))
+    parts.push(actions)
+    d.append(...parts)
+    d.addEventListener('cancel', e => {
+      e.preventDefault()
+      done(false)
+    })
+    document.body.append(d)
+    d.showModal()
+  })
 }

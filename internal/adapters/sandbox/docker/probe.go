@@ -4,23 +4,34 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
-	ReportVersion = 1
+	ReportVersion = 2
 	dialFor       = 3 * time.Second
 	answerFor     = 10 * time.Second
 	maxReason     = 64
+	MarkerHeader  = "Software-Factory-Probe"
+	RequestHeader = "Software-Factory-Request"
+)
+
+var (
+	markerPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	GatewayPorts  = []string{"22", "80", "443", "2375", "3000", "8080"}
 )
 
 type ProbeConfig struct {
@@ -29,6 +40,9 @@ type ProbeConfig struct {
 	Addrs    []string
 	Outside  string
 	Front    string
+	Marker   string
+	Request  string
+	Gateway  string
 	Dial     time.Duration
 }
 
@@ -53,6 +67,8 @@ func DirectCheck(address string) string { return "direct:" + address }
 
 func FrontCheck(front, name string) string { return "front:" + front + ">" + name }
 
+func GatewayCheck(address string) string { return "gateway:" + address }
+
 func Expected(cfg ProbeConfig) []string {
 	var out []string
 	for _, h := range cfg.GitHosts {
@@ -62,11 +78,19 @@ func Expected(cfg ProbeConfig) []string {
 		out = append(out, DirectCheck(a))
 	}
 	if cfg.Outside != "" {
-		out = append(out, ProxyCheck(cfg.Outside, "443"))
+		out = append(out, ProxyCheck(cfg.Outside, "443"), DNSCheck(cfg.Outside), DNSCheck(RandomLabel(cfg.Outside)))
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
 			out = append(out, FrontCheck(cfg.Front, h))
+		}
+	}
+	for _, a := range OutwardUDP {
+		out = append(out, UDPCheck(a))
+	}
+	if cfg.Gateway != "" {
+		for _, port := range GatewayPorts {
+			out = append(out, GatewayCheck(net.JoinHostPort(cfg.Gateway, port)))
 		}
 	}
 	return out
@@ -93,10 +117,24 @@ func Probe(ctx context.Context, cfg ProbeConfig, d Dialer) Report {
 	}
 	if cfg.Outside != "" {
 		jobs = append(jobs, job{ProxyCheck(cfg.Outside, "443"), func() Result { return throughProxy(ctx, d, cfg, cfg.Outside, "443") }})
+		servers := nameServers()
+		random := randomHex(8) + "." + cfg.Outside
+		jobs = append(jobs,
+			job{DNSCheck(cfg.Outside), func() Result { return lookupOutside(ctx, d, servers, cfg.Outside, cfg.Outside) }},
+			job{DNSCheck(RandomLabel(cfg.Outside)), func() Result { return lookupOutside(ctx, d, servers, random, "a random name under "+cfg.Outside) }})
+	}
+	for _, a := range OutwardUDP {
+		jobs = append(jobs, job{UDPCheck(a), func() Result { return udpOut(ctx, d, cfg, a) }})
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
 			jobs = append(jobs, job{FrontCheck(cfg.Front, h), func() Result { return fronted(ctx, d, cfg, h) }})
+		}
+	}
+	if cfg.Gateway != "" {
+		for _, port := range GatewayPorts {
+			address := net.JoinHostPort(cfg.Gateway, port)
+			jobs = append(jobs, job{GatewayCheck(address), func() Result { return gateway(ctx, d, cfg, address) }})
 		}
 	}
 	results := make([]Result, len(jobs))
@@ -116,11 +154,36 @@ func direct(ctx context.Context, d Dialer, cfg ProbeConfig, address string) Resu
 	ctx, cancel := context.WithTimeout(ctx, cfg.Dial)
 	defer cancel()
 	conn, err := d.DialContext(ctx, "tcp", address)
-	if err != nil {
+	if err == nil {
+		_ = conn.Close()
+		return Result{Detail: "the probed container reached " + address + " directly"}
+	}
+	var dnsErr *net.DNSError
+	switch {
+	case errors.As(err, &dnsErr):
+		return Result{OK: true, Detail: "the name in " + address + " doesn't resolve in the probed container"}
+	case NoRoute(err):
 		return Result{OK: true, Detail: "no route to " + address}
 	}
-	_ = conn.Close()
-	return Result{Detail: "the agent container reached " + address + " directly"}
+	return Result{Detail: "a direct dial to " + address + " failed with " + errWord(err) + " instead of finding no route, so packets may leave the probed container"}
+}
+
+func gateway(ctx context.Context, d Dialer, cfg ProbeConfig, address string) Result {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Dial)
+	defer cancel()
+	conn, err := d.DialContext(ctx, "tcp", address)
+	if err == nil {
+		_ = conn.Close()
+		return Result{Detail: "the session's container reached its network's gateway at " + address}
+	}
+	var ne net.Error
+	switch {
+	case NoRoute(err):
+		return Result{OK: true, Detail: "no route to the gateway at " + address}
+	case errors.As(err, &ne) && ne.Timeout():
+		return Result{OK: true, Detail: "nothing answered at the gateway " + address}
+	}
+	return Result{Detail: "a dial to the network's gateway at " + address + " failed with " + errWord(err) + ", so something holds that address on the session's network"}
 }
 
 func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port string) Result {
@@ -133,7 +196,7 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target); err != nil {
+	if _, err := io.WriteString(conn, connectLine(target, cfg.Marker, cfg.Request)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
@@ -149,6 +212,17 @@ func throughProxy(ctx context.Context, d Dialer, cfg ProbeConfig, host, port str
 		return Result{OK: true, Detail: "the egress proxy refused " + target + " (" + reasonWord(string(body)) + ")"}
 	}
 	return Result{Detail: fmt.Sprintf("the egress proxy answered %d for %s, not a refusal", resp.StatusCode, target)}
+}
+
+func connectLine(target, marker, request string) string {
+	line := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
+	if marker != "" {
+		line += MarkerHeader + ": " + marker + "\r\n"
+	}
+	if marker != "" && shared.ValidRequest(request) {
+		line += RequestHeader + ": " + request + "\r\n"
+	}
+	return line + "\r\n"
 }
 
 type counted struct {
@@ -172,7 +246,7 @@ func fronted(ctx context.Context, d Dialer, cfg ProbeConfig, name string) Result
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(answerFor))
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", front, front); err != nil {
+	if _, err := io.WriteString(conn, connectLine(front, cfg.Marker, cfg.Request)); err != nil {
 		return Result{Detail: "the egress proxy at " + cfg.Proxy + " didn't answer"}
 	}
 	br := bufio.NewReader(conn)
@@ -225,6 +299,9 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	addrs := fs.String("addr", "", "comma-separated ip:port addresses of git hosts")
 	outside := fs.String("outside", "", "a host outside the allowlist")
 	front := fs.String("front", "", "an allowed host to send other TLS names through")
+	marker := fs.String("marker", "", "the engine's marker for this run, sent with every request to the proxy")
+	gw := fs.String("gateway", "", "the address of the session network's gateway, which must not answer")
+	request := fs.String("request", "", "the engine's request id for the action that runs this check, sent beside the marker")
 	if err := fs.Parse(args); err != nil {
 		return ProbeConfig{}, err
 	}
@@ -234,7 +311,19 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	if _, _, err := net.SplitHostPort(*proxy); err != nil {
 		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -proxy must be host:port")
 	}
-	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front}
+	if *marker != "" && !markerPattern.MatchString(*marker) {
+		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -marker must be 32 lowercase hex digits")
+	}
+	if *request != "" && !shared.ValidRequest(*request) {
+		return ProbeConfig{}, fmt.Errorf("sandbox-probe: -request must be 16 lowercase hex digits")
+	}
+	if *gw != "" {
+		a, err := netip.ParseAddr(*gw)
+		if err != nil || !a.Is4() {
+			return ProbeConfig{}, fmt.Errorf("sandbox-probe: -gateway must be an IPv4 address")
+		}
+	}
+	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker, Request: *request, Gateway: *gw}
 	for _, a := range cfg.Addrs {
 		if _, err := netip.ParseAddrPort(a); err != nil {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: %q isn't ip:port", a)

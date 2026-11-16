@@ -5,8 +5,9 @@ const (
 	ResultForgotten = "forgotten"
 )
 
-func (w *Work) holdOf(name string) HoldSettings {
-	return w.load().Projects[name].Hold
+func (w *Work) holdOf(name string) (HoldSettings, error) {
+	st, err := w.read()
+	return st.Projects[name].Hold, err
 }
 
 func (w *Work) SetHold(path string, h HoldSettings) error {

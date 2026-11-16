@@ -20,6 +20,8 @@ type Setup struct {
 	Agents      []string
 	FileRules   []FileRule
 	Rounds      int
+	Protect     []string
+	Catalog     Catalog
 }
 
 func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string) {
@@ -61,13 +63,107 @@ func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string)
 			roles[r] = a
 		}
 	}
-	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds}, problems
+	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect)}, problems
 }
 
 type Requirement struct {
-	Agent string
-	Role  review.Role
-	Why   string
+	Agent    string
+	Role     review.Role
+	Why      string
+	Runs     int
+	Advisory bool
+	Missing  bool
+}
+
+func (q Requirement) RunCount() int {
+	return min(max(q.Runs, 1), review.MaxRuns)
+}
+
+const (
+	MaxAdvisory  = 5
+	MaxDeeper    = 5
+	MaxDepthSize = 10000000
+)
+
+type Depth struct {
+	Advisory  []string
+	Runs      map[string]int
+	MaxFiles  int
+	MaxLines  int
+	Extra     []string
+	ExtraRuns int
+}
+
+func (d Depth) Sized() bool {
+	return (d.MaxFiles > 0 || d.MaxLines > 0) && (len(d.Extra) > 0 || d.ExtraRuns > 1)
+}
+
+func (d Depth) Problem() string {
+	if len(d.Advisory) > MaxAdvisory || len(d.Extra) > MaxDeeper {
+		return "a project names at most 5 advisory roles and 5 extra roles above the size"
+	}
+	for _, a := range append(slices.Clone(d.Advisory), d.Extra...) {
+		if !agentName.MatchString(a) {
+			return "each role is an agent name: letters, digits and . _ : @ -, at most 120 characters"
+		}
+	}
+	if len(d.Runs) > 20 {
+		return "a project sets repeated runs for at most 20 roles"
+	}
+	for a, n := range d.Runs {
+		if !agentName.MatchString(a) || n < 1 || n > review.MaxRuns {
+			return "a role runs 1 to 3 times per commit"
+		}
+	}
+	if d.ExtraRuns < 0 || d.ExtraRuns > review.MaxRuns || d.MaxFiles < 0 || d.MaxLines < 0 || d.MaxFiles > MaxDepthSize || d.MaxLines > MaxDepthSize {
+		return "a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times"
+	}
+	return ""
+}
+
+func AgentName(s string) bool {
+	return agentName.MatchString(s)
+}
+
+func Deepen(required []Requirement, d Depth, above bool, why string) []Requirement {
+	out := make([]Requirement, 0, len(required)+len(d.Extra))
+	for _, q := range required {
+		q.Runs = max(q.RunCount(), min(max(d.Runs[q.Agent], 1), review.MaxRuns))
+		out = append(out, q)
+	}
+	if !above || !d.Sized() {
+		return out
+	}
+	for _, a := range d.Extra {
+		if a != "" && !slices.ContainsFunc(out, func(x Requirement) bool { return x.Agent == a }) {
+			out = append(out, Requirement{Agent: a, Why: why, Runs: min(max(d.Runs[a], 1), review.MaxRuns)})
+		}
+	}
+	if d.ExtraRuns > 1 {
+		for i := range out {
+			out[i].Runs = max(out[i].Runs, min(d.ExtraRuns, review.MaxRuns))
+		}
+	}
+	return out
+}
+
+func Advisory(required []Requirement, d Depth) []Requirement {
+	var out []Requirement
+	for _, a := range d.Advisory {
+		if a == "" || slices.ContainsFunc(required, func(x Requirement) bool { return x.Agent == a }) || slices.ContainsFunc(out, func(x Requirement) bool { return x.Agent == a }) {
+			continue
+		}
+		out = append(out, Requirement{Agent: a, Why: "Advisory for this project: it only warns, and never counts for the push", Advisory: true, Runs: 1})
+	}
+	return out
+}
+
+func RunTotal(list []Requirement) int {
+	n := 0
+	for _, q := range list {
+		n += q.RunCount()
+	}
+	return n
 }
 
 func Effective(t WorkType, files []string, listed bool) (WorkType, string) {
@@ -103,13 +199,12 @@ func Required(s Setup, t WorkType, files []string) []Requirement {
 	if t.Profile() == Exploring {
 		return out
 	}
-	for _, rule := range fileReviewers {
-		for _, f := range files {
-			if rule.re.MatchString(f) {
-				add(Requirement{Agent: rule.agent, Why: "This branch changes " + clip(f, 120)})
-				break
-			}
-		}
+	byCatalog := ""
+	if s.Catalog.State == CatalogUsed {
+		byCatalog = ", which knackpack's catalog sends to this reviewer"
+	}
+	for _, m := range s.Catalog.matches(files) {
+		add(Requirement{Agent: m.agent, Why: "This branch changes " + clip(m.file, 120) + byCatalog})
 	}
 	for _, rule := range s.FileRules {
 		re, ok := globRegexp(rule.Pattern, false)

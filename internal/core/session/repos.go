@@ -76,11 +76,13 @@ type Cloned struct {
 }
 
 type FetchRequest struct {
-	Name   string
-	URL    string
-	Token  string
-	Branch string
-	Have   []string
+	Name    string
+	URL     string
+	Token   string
+	Branch  string
+	Have    []string
+	Present func(sha string) bool
+	Read    func()
 }
 
 type Fetched struct {
@@ -138,6 +140,23 @@ type Repos struct {
 	wg       sync.WaitGroup
 	sessions func(name string) int
 	hosts    func()
+	removed  []func(ProjectID)
+	fetched  func(ctx context.Context, name, branch, commit string)
+
+	delivers  map[string]*sync.Mutex
+	fetches   map[string]uint64
+	delivered map[string]fetchDone
+}
+
+type fetchDone struct {
+	seq    uint64
+	commit string
+}
+
+func (c *Repos) OnFetched(f func(ctx context.Context, name, branch, commit string)) {
+	c.mu.Lock()
+	c.fetched = f
+	c.mu.Unlock()
 }
 
 func (c *Repos) UseSessions(count func(name string) int) {
@@ -149,6 +168,12 @@ func (c *Repos) UseSessions(count func(name string) int) {
 func (c *Repos) OnHosts(changed func()) {
 	c.mu.Lock()
 	c.hosts = changed
+	c.mu.Unlock()
+}
+
+func (c *Repos) OnRemoved(forget func(ProjectID)) {
+	c.mu.Lock()
+	c.removed = append(c.removed, forget)
 	c.mu.Unlock()
 }
 
@@ -334,8 +359,18 @@ func validToken(t string) bool {
 	return true
 }
 
+const BaseFolder = "base"
+
+func RepoFolder(workspace, name string) string {
+	return filepath.Join(workspace, BaseFolder, name)
+}
+
+func OldRepoFolder(workspace, name string) string {
+	return filepath.Join(workspace, "repos", name)
+}
+
 func (c *Repos) path(name string) string {
-	return filepath.Join(c.cfg.Workspace, "repos", name)
+	return RepoFolder(c.cfg.Workspace, name)
 }
 
 func (c *Repos) List() ([]Repository, error) {
@@ -508,14 +543,27 @@ func (c *Repos) clone(k Cloning) {
 
 func (c *Repos) Remove(name string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	id, err := c.removeLocked(name)
+	hooks := slices.Clone(c.removed)
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, forget := range hooks {
+		forget(id)
+	}
+	return nil
+}
+
+func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
-		return explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return ProjectID{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
 	}
+	at := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	kept := slices.DeleteFunc(slices.Clone(recs), func(r Record) bool { return r.Name == name })
 	if len(kept) == len(recs) {
-		return explained(notFound("repository"), "That repository is no longer in the list.")
+		return ProjectID{}, explained(notFound("repository"), "That repository is no longer in the list.")
 	}
 	if c.sessions != nil {
 		if n := c.sessions(name); n > 0 {
@@ -523,14 +571,14 @@ func (c *Repos) Remove(name string) error {
 			if n > 1 {
 				what = "its " + strconv.Itoa(n) + " sessions"
 			}
-			return explained(conflict("sessions"), "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
+			return ProjectID{}, explained(conflict("sessions"), "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
 		}
 	}
 	if err := c.cfg.Records.Save(kept); err != nil {
-		return explained(conflict("records"), "The engine couldn't save its list of repositories.")
+		return ProjectID{}, explained(conflict("records"), "The engine couldn't save its list of repositories.")
 	}
 	c.cfg.Logger.Info("repository", "event", "removed")
-	return nil
+	return ProjectID{Name: name, URL: recs[at].URL}, nil
 }
 
 func (c *Repos) SaveToken(host, token string) (TokenInfo, error) {
@@ -581,6 +629,29 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", explained(conflict("tokens"), "The engine couldn't read its saved tokens.")
 	}
+	var mine uint64
+	read := func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if mine != 0 {
+			return
+		}
+		if c.fetches == nil {
+			c.fetches = map[string]uint64{}
+		}
+		c.fetches[rec.Name]++
+		mine = c.fetches[rec.Name]
+	}
+	c.mu.Lock()
+	if c.delivers == nil {
+		c.delivers = map[string]*sync.Mutex{}
+	}
+	deliver := c.delivers[rec.Name]
+	if deliver == nil {
+		deliver = &sync.Mutex{}
+		c.delivers[rec.Name] = deliver
+	}
+	c.mu.Unlock()
 	path := c.path(rec.Name)
 	var have []string
 	if sha1Hex.MatchString(rec.Commit) {
@@ -589,10 +660,14 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 		}
 	}
 	fctx, cancel := context.WithTimeout(ctx, c.cfg.FetchFor)
-	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have})
+	present := func(sha string) bool {
+		_, err := c.cfg.Commits.Commit(path, sha)
+		return err == nil
+	}
+	got, err := c.cfg.Remote.Fetch(fctx, FetchRequest{Name: rec.Name, URL: rec.URL, Token: token, Branch: rec.Branch, Have: have, Present: present, Read: read})
 	cancel()
 	if err != nil {
-		c.cfg.Logger.Warn("repository", "event", "fetch-failed")
+		shared.For(ctx, c.cfg.Logger).Warn("repository", "event", "fetch-failed")
 		return "", explained(conflict("fetch"), "The engine couldn't fetch the main branch of "+rec.URL+", so no session started: "+clip(err.Error(), 600))
 	}
 	if !sha1Hex.MatchString(got.Commit) || !push.ValidBranch(got.Branch) {
@@ -601,17 +676,34 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	if _, err := c.cfg.Commits.Commit(path, got.Commit); err != nil {
 		return "", explained(conflict("fetch"), "The fetched commit "+got.Commit[:12]+" couldn't be read back from the clone.")
 	}
-	if got.Commit != rec.Commit {
-		c.mu.Lock()
-		if recs, err := c.cfg.Records.Load(); err == nil {
-			if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name }); j >= 0 {
-				recs[j].Commit = got.Commit
-				_ = c.cfg.Records.Save(recs)
-			}
-		}
+	read()
+	deliver.Lock()
+	defer deliver.Unlock()
+	c.mu.Lock()
+	last := c.delivered[rec.Name]
+	if last.seq > mine {
 		c.mu.Unlock()
+		shared.For(ctx, c.cfg.Logger).Info("repository", "event", "older-fetch-ignored")
+		return last.commit, nil
 	}
-	c.cfg.Logger.Info("repository", "event", "fetched")
+	if c.delivered == nil {
+		c.delivered = map[string]fetchDone{}
+	}
+	c.delivered[rec.Name] = fetchDone{seq: mine, commit: got.Commit}
+	if recs, err := c.cfg.Records.Load(); err == nil {
+		if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name }); j >= 0 && recs[j].Commit != got.Commit {
+			recs[j].Commit = got.Commit
+			_ = c.cfg.Records.Save(recs)
+		}
+	}
+	c.mu.Unlock()
+	shared.For(ctx, c.cfg.Logger).Info("repository", "event", "fetched")
+	c.mu.Lock()
+	fetched := c.fetched
+	c.mu.Unlock()
+	if fetched != nil {
+		fetched(ctx, rec.Name, got.Branch, got.Commit)
+	}
 	return got.Commit, nil
 }
 
@@ -652,4 +744,119 @@ func (c *Repos) Main(name string) (string, error) {
 		return "", nil
 	}
 	return rec.Commit, nil
+}
+
+func (c *Repos) cloneMissing(r Record) bool {
+	if !sha1Hex.MatchString(r.Commit) {
+		return true
+	}
+	_, err := c.cfg.Commits.Commit(c.path(r.Name), r.Commit)
+	return err != nil
+}
+
+func (c *Repos) NeedClone() []string {
+	recs, err := c.cfg.Records.Load()
+	if err != nil {
+		return nil
+	}
+	c.mu.Lock()
+	busy := map[string]bool{}
+	for _, k := range c.cloning {
+		busy[k.Name] = true
+	}
+	c.mu.Unlock()
+	var out []string
+	for _, r := range recs {
+		if !busy[r.Name] && c.cloneMissing(r) {
+			out = append(out, r.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (c *Repos) Reclone(name string) (Cloning, error) {
+	c.mu.Lock()
+	recs, err := c.cfg.Records.Load()
+	if err != nil {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+	}
+	i := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
+	if i < 0 {
+		c.mu.Unlock()
+		return Cloning{}, explained(notFound("repository"), "That project is no longer in the list.")
+	}
+	rec := recs[i]
+	if _, busy := c.cloning[rec.URL]; busy {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("cloning"), "That repository is being cloned already.")
+	}
+	if len(c.cloning) >= MaxClones {
+		c.mu.Unlock()
+		return Cloning{}, explained(limited("clones"), "Wait for a clone to finish before starting another.")
+	}
+	if !c.cloneMissing(rec) {
+		c.mu.Unlock()
+		return Cloning{}, explained(conflict("cloned"), "That project's clone is in the workspace already.")
+	}
+	k := Cloning{URL: rec.URL, Name: rec.Name, StartedAt: c.cfg.Now()}
+	c.cloning[rec.URL] = k
+	c.wg.Add(1)
+	c.mu.Unlock()
+	c.cfg.Logger.Info("repository", "event", "reclone-started")
+	c.frame("cloning", k.URL, k.Name, "")
+	go c.recloned(k)
+	return k, nil
+}
+
+func (c *Repos) recloned(k Cloning) {
+	defer c.wg.Done()
+	ctx, cancel := context.WithTimeout(c.cfg.Base, c.cfg.CloneFor)
+	defer cancel()
+	fail := func(message string) {
+		c.mu.Lock()
+		delete(c.cloning, k.URL)
+		c.mu.Unlock()
+		c.cfg.Logger.Warn("repository", "event", "reclone-failed")
+		c.frame("failed", k.URL, k.Name, message)
+	}
+	host, _ := HostOf(k.URL)
+	token, _, err := c.cfg.Tokens.Token(host)
+	if err != nil {
+		fail("The engine couldn't read its saved tokens.")
+		return
+	}
+	only := func(n string) bool { return n != k.Name }
+	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: only})
+	if err != nil {
+		fail("The clone of " + k.URL + " failed: " + clip(err.Error(), 600))
+		return
+	}
+	if done.Name != k.Name || !push.ValidBranch(done.Branch) || !sha1Hex.MatchString(done.Commit) {
+		fail("The clone finished with a name, branch or commit the engine doesn't accept.")
+		return
+	}
+	if _, err := c.cfg.Commits.Commit(c.path(done.Name), done.Commit); err != nil {
+		fail("The clone finished, but its commit " + done.Commit[:12] + " couldn't be read back from it.")
+		return
+	}
+	c.mu.Lock()
+	recs, err := c.cfg.Records.Load()
+	if err == nil {
+		if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == k.Name && r.URL == k.URL }); j >= 0 {
+			recs[j].Branch, recs[j].Commit = done.Branch, done.Commit
+			err = c.cfg.Records.Save(recs)
+		}
+	}
+	delete(c.cloning, k.URL)
+	c.mu.Unlock()
+	if err != nil {
+		c.cfg.Logger.Warn("repository", "event", "record-failed")
+		c.frame("failed", k.URL, done.Name, "The clone finished, but the engine couldn't record it.")
+		return
+	}
+	c.cfg.Logger.Info("repository", "event", "recloned")
+	c.frame("added", k.URL, done.Name, "")
+	c.hostsChanged()
 }

@@ -22,3 +22,24 @@ func forgeWaiting(list []ForgeView) int {
 	}
 	return n
 }
+
+func (v *FollowView) clone() *FollowView {
+	out := *v
+	out.Checks = slices.Clone(v.Checks)
+	out.Comments = slices.Clone(v.Comments)
+	return &out
+}
+
+func (r *Registry) SetFollow(sid string, v *FollowView) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a := r.admitted[sid]
+	if a == nil {
+		return
+	}
+	if v != nil {
+		v = v.clone()
+	}
+	a.follow = v
+	r.announce(r.now())
+}

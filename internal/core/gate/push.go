@@ -231,19 +231,7 @@ func allOptions(args []string) bool {
 }
 
 func (s scan) shellPushes(args []string, text string, loose bool, depth int, p *parsed) bool {
-	if at := slices.IndexFunc(args, shellCommandC.MatchString); at >= 0 {
-		j := at + 1
-		for j < len(args) && optionLike.MatchString(args[j]) {
-			if args[j] == "--" {
-				j++
-				break
-			}
-			if shellValueOpts[args[j]] {
-				j += 2
-			} else {
-				j++
-			}
-		}
+	if j, ok := shellScriptAt(args); ok {
 		if j < len(args) {
 			return s.pushes(args[j], depth+1)
 		}

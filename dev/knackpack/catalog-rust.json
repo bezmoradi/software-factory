@@ -1,0 +1,385 @@
+{
+  "format": "knackpack-catalog/1",
+  "agents": [
+    {
+      "name": "go-code-reviewer",
+      "kind": "reviewer",
+      "summary": "Go backend changes: security, isolation, errors, concurrency, performance.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "(^|/)go\\.mod$|\\.go$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "python-code-reviewer",
+      "kind": "reviewer",
+      "summary": "Python services, workers, libraries and CLIs.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "(^|/)(pyproject\\.toml|setup\\.(py|cfg)|Pipfile(\\.lock)?|poetry\\.lock|uv\\.lock|pdm\\.lock|pylock(\\.[^/]+)?\\.toml|pixi\\.(toml|lock)|tox\\.ini|\\.python-version|MANIFEST\\.in|(\\.?ruff|pyrightconfig|mypy|pytest)\\.(toml|ini|json)|\\.flake8|[^/]*(requirements|constraints)[^/]*\\.(txt|in|lock))$|(^|/)requirements/[^/]*\\.(txt|in)$|\\.(py[iwx]?|pxd|ipynb)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "docker-reviewer",
+      "kind": "reviewer",
+      "summary": "Dockerfiles, Compose files and image builds.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "(?i)(^|/)(Dockerfile|Containerfile)(\\.[^/]*)?$|\\.Dockerfile$|(^|/)docker-bake\\.hcl$|(^|/)(docker-)?compose[^/]*\\.ya?ml$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "kubernetes-reviewer",
+      "kind": "reviewer",
+      "summary": "Kubernetes manifests, Kustomize overlays and Helm charts.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "(^|/)(Chart\\.yaml|kustomization\\.ya?ml)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "react-code-reviewer",
+      "kind": "reviewer",
+      "summary": "React components, hooks and framework boundaries.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.(jsx|tsx)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "terraform-reviewer",
+      "kind": "reviewer",
+      "summary": "Terraform and OpenTofu changes and their state.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.(tf|tofu|tfvars)$|\\.tftest\\.hcl$|(^|/)terragrunt\\.hcl$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "database-reviewer",
+      "kind": "reviewer",
+      "summary": "Schemas, migrations and data access.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "(^|/)(migrations?|migrate|alembic)/|\\.sql$|(^|/)schema\\.(prisma|rb)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "typescript-code-reviewer",
+      "kind": "reviewer",
+      "summary": "TypeScript types, tsconfig and declarations.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.(ts|tsx|mts|cts)$|(^|/)tsconfig[^/]*\\.json$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "css-code-reviewer",
+      "kind": "reviewer",
+      "summary": "Stylesheets against the project's browser targets.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.(css|scss|sass|less)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "ui-code-reviewer",
+      "kind": "reviewer",
+      "summary": "Front-end UI: visual quality, accessibility, responsive behavior.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.(html?|css|scss|sass|less|jsx|tsx|vue|svelte|tmpl|jinja2?|erb)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "rust-code-reviewer",
+      "kind": "reviewer",
+      "summary": "Rust crates: ownership, unsafe code, errors and concurrency.",
+      "appliesTo": {
+        "always": false,
+        "paths": [
+          "\\.rs$",
+          "(^|/)Cargo\\.(toml|lock)$"
+        ]
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "adversarial-reviewer",
+      "kind": "reviewer",
+      "summary": "Tries to break the change and proves each finding.",
+      "appliesTo": {
+        "always": true,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "slop-reviewer",
+      "kind": "reviewer",
+      "summary": "Maintenance cost the change adds without a reason.",
+      "appliesTo": {
+        "always": true,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "security-reviewer",
+      "kind": "reviewer",
+      "summary": "Security gate built on OWASP ASVS 5.0.0.",
+      "appliesTo": {
+        "always": true,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "architecture-reviewer",
+      "kind": "reviewer",
+      "summary": "Boundaries, coupling, consistency and failure handling.",
+      "appliesTo": {
+        "always": true,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "design-pattern-reviewer",
+      "kind": "reviewer",
+      "summary": "Whether one design approach fits the problem.",
+      "appliesTo": {
+        "always": true,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": true,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    },
+    {
+      "name": "adjudicator",
+      "kind": "adjudicator",
+      "summary": "Checks one claim about a change.",
+      "appliesTo": {
+        "always": false,
+        "paths": []
+      },
+      "modes": [],
+      "verdict": "knackpack-verdict/1",
+      "findings": [
+        "knackpack-findings/1",
+        "knackpack-finding/1"
+      ],
+      "canBlock": false,
+      "needs": {
+        "network": false,
+        "browser": false,
+        "runsCode": "trusted-only"
+      }
+    }
+  ]
+}

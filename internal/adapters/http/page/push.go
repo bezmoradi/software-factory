@@ -8,6 +8,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/gate"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 var writeTools = map[string]bool{"Write": true, "Edit": true, "MultiEdit": true, "NotebookEdit": true}
@@ -48,7 +49,7 @@ func (s *Server) pushRequest(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(pushFor):
 		answer = push.Reply{Decision: push.DecisionHeld, Reason: "the engine is still deciding or pushing this commit; end your turn and don't call factory_push again: Software Factory's page shows the result"}
 	}
-	s.logger.Info("push request", "side", "agent", "result", string(answer.Decision))
+	shared.For(r.Context(), s.logger).Info("push request", "side", "agent", "result", string(answer.Decision))
 	send(w, http.StatusOK, map[string]string{"result": string(answer.Decision), "reason": answer.Reason})
 }
 
@@ -109,8 +110,12 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	advice := gate.Check(tool, input, top, paths, false)
 	held := ""
 	if s.cfg.Work != nil && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
-		held = s.cfg.Work.EditHold(sid, top, paths)
+		held = s.cfg.Work.EditHold(r.Context(), sid, top, paths)
 	}
-	s.refused(sid, adviceKinds{pushes: advice.Pushes, remote: advice.Waits, protected: advice.Protected != ""})
-	send(w, http.StatusOK, map[string]any{"kind": string(advice.Kind), "waits": advice.Waits, "pushes": advice.Pushes, "protected": advice.Protected, "held": held})
+	guarded := ""
+	if s.cfg.Work != nil && held == "" && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
+		guarded = s.cfg.Work.Guarded(sid, top, paths)
+	}
+	s.refused(sid, adviceKinds{pushes: advice.Pushes, remote: advice.Waits, protected: advice.Protected != "", cloud: advice.Cloud != ""})
+	send(w, http.StatusOK, map[string]any{"kind": string(advice.Kind), "waits": advice.Waits, "pushes": advice.Pushes, "protected": advice.Protected, "held": held, "cloud": advice.Cloud, "irreversible": advice.Undone, "guarded": guarded})
 }

@@ -1,6 +1,7 @@
 package push
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -64,6 +65,6 @@ type Object struct {
 }
 
 type GitReader interface {
-	IsAncestor(repo, ancestor, commit string) (bool, error)
+	IsAncestor(ctx context.Context, repo, ancestor, commit string) (bool, error)
 	ObjectsToSend(repo, commit string, remoteHas []string) ([]Object, error)
 }

@@ -45,6 +45,10 @@ type SignIn struct {
 	Method    SignInMethod
 	Endpoint  string
 	CheckedAt time.Time
+	Plan      string
+	ExpiresAt time.Time
+	Busy      bool
+	Stale     bool
 }
 
 func (s SignIn) Costs() bool {
@@ -112,7 +116,9 @@ type Expectations interface {
 
 const ReviewerAgent = "reviewer"
 
-const ReviewerSignInStep = "press Sign Claude Code in under Finish setting up on the Welcome page, or run docker compose exec -it reviewer claude, then /login"
+func ReviewerSignInStep() string {
+	return "open Reviewers' sign-in under Start on the Welcome page"
+}
 
 const signInFor = 30 * time.Second
 
@@ -123,8 +129,9 @@ type SignInStatus struct {
 }
 
 type Expected struct {
-	Store Expectations
-	mu    sync.Mutex
+	Store   Expectations
+	mu      sync.Mutex
+	cleared map[string]time.Time
 }
 
 func (e *Expected) Of(agent string) Expect {
@@ -162,7 +169,56 @@ func (e *Expected) All() map[string]Expect {
 	return out
 }
 
-var errNoExpectations = errors.New("this engine keeps no sign-in expectations")
+var (
+	errNoExpectations   = errors.New("this engine keeps no sign-in expectations")
+	errManyExpectations = errors.New("signin.json holds as many session containers' sign-ins as the engine records")
+)
+
+func (e *Expected) Lookup(key string) (Expect, bool) {
+	if e == nil || e.Store == nil {
+		return ExpectAny, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	all, err := e.Store.Load()
+	if err != nil {
+		return ExpectAny, false
+	}
+	x, ok := all[key]
+	return x, ok && ValidExpect(x)
+}
+
+func (e *Expected) Prune(keep func(box string) bool) error {
+	if e == nil || e.Store == nil {
+		return errNoExpectations
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	all, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	n := len(all)
+	for k := range all {
+		if box, ok := TargetBox(k); ok && !keep(box) {
+			delete(all, k)
+		}
+	}
+	if len(all) == n {
+		return nil
+	}
+	return e.Store.Save(all)
+}
+
+func boxKeys(all map[string]Expect) int {
+	n := 0
+	for k := range all {
+		if _, ok := TargetBox(k); ok {
+			n++
+		}
+	}
+	return n
+}
 
 func (e *Expected) Set(agent string, x Expect) error {
 	if e == nil || e.Store == nil {
@@ -177,12 +233,35 @@ func (e *Expected) Set(agent string, x Expect) error {
 	if all == nil {
 		all = map[string]Expect{}
 	}
+	_, had := all[agent]
+	if _, box := TargetBox(agent); box && x != ExpectAny && !had && boxKeys(all) >= MaxBoxRecords {
+		return errManyExpectations
+	}
 	if x == ExpectAny {
+		if e.cleared == nil {
+			e.cleared = map[string]time.Time{}
+		}
+		e.cleared[agent] = time.Now()
+		if !had {
+			return nil
+		}
 		delete(all, agent)
 	} else {
 		all[agent] = x
 	}
 	return e.Store.Save(all)
+}
+
+func (e *Expected) AdoptChecked(agent string, s SignIn) Expect {
+	if e != nil {
+		e.mu.Lock()
+		at, ok := e.cleared[agent]
+		e.mu.Unlock()
+		if ok && !s.CheckedAt.After(at) {
+			return e.Of(agent)
+		}
+	}
+	return e.Adopt(agent, s.Method)
 }
 
 func (e *Expected) Adopt(agent string, m SignInMethod) Expect {

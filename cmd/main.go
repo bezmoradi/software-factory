@@ -38,6 +38,7 @@ func run(args []string, logger shared.Logger) error {
 	if err := server.ApplyUmask(os.Getenv); err != nil {
 		return err
 	}
+	server.ApplyComposeProject(os.Getenv, logger)
 	switch role {
 	case "":
 		return server.Serve(ctx, logger)
@@ -45,12 +46,16 @@ func run(args []string, logger shared.Logger) error {
 		return server.ServeEgress(ctx, args[1:], logger)
 	case "agent-host":
 		return server.ServeAgentHost(ctx, args[1:], logger)
+	case "box-helper":
+		return server.ServeHelper(ctx, args[1:], logger)
 	case "mcp":
 		return server.ServeMCP(ctx, args[1:])
 	case "sandbox-probe":
 		return server.ServeProbe(ctx, args[1:], os.Stdout)
 	case "install-agents":
 		return server.InstallAgents(ctx, args[1:], logger)
+	case "check-pins":
+		return server.CheckPins(ctx, args[1:], os.Stdout)
 	}
 	return fmt.Errorf("unknown role %q", role)
 }

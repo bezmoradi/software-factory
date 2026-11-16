@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -83,6 +84,13 @@ func (c *Client) WithKey(key string) *Client {
 	return c
 }
 
+func (c *Client) GiveKey(ctx context.Context) error {
+	if len(c.key) != keyDigits {
+		return &session.HostError{Code: "key", Message: "the engine has no key to give this agent-host"}
+	}
+	return c.call(ctx, http.MethodPost, KeyRoute, nil, nil)
+}
+
 func hostError(status int, body []byte) error {
 	var p problemJSON
 	if json.Unmarshal(body, &p) != nil || p.Error == "" {
@@ -119,6 +127,9 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	if c.key != "" {
 		req.Header.Set(KeyHeader, c.key)
 	}
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -147,9 +158,16 @@ func wire(cmd session.Command) commandJSON {
 	return commandJSON{Argv: cmd.Argv, Cwd: cmd.Dir, Pass: cmd.Pass, Env: cmd.Env, TimeoutMs: cmd.Timeout.Milliseconds()}
 }
 
-func (c *Client) AddWorktree(ctx context.Context, repo, name, branch, base string) (string, error) {
+func identityOf(id session.CommitIdentity) *identityJSON {
+	if !id.Set() {
+		return nil
+	}
+	return &identityJSON{Name: id.Name, Email: id.Email}
+}
+
+func (c *Client) AddWorktree(ctx context.Context, repo, name, branch, base string, id session.CommitIdentity) (string, error) {
 	var out worktreeReply
-	if err := c.call(ctx, http.MethodPost, "/v1/worktrees", worktreeJSON{Repo: repo, Name: name, Branch: branch, Base: base}, &out); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/worktrees", worktreeJSON{Repo: repo, Name: name, Branch: branch, Base: base, Identity: identityOf(id)}, &out); err != nil {
 		return "", err
 	}
 	if !strings.HasPrefix(out.Path, "/") || strings.ContainsRune(out.Path, 0) || len(out.Path) > 1000 {
@@ -158,8 +176,33 @@ func (c *Client) AddWorktree(ctx context.Context, repo, name, branch, base strin
 	return out.Path, nil
 }
 
-func (c *Client) RemoveWorktree(ctx context.Context, repo, name string, force bool) error {
-	return c.call(ctx, http.MethodPost, "/v1/worktrees/remove", worktreeJSON{Repo: repo, Name: name, Force: force}, nil)
+func (c *Client) AddExistingWorktree(ctx context.Context, repo, name, branch string, id session.CommitIdentity) (string, error) {
+	var out worktreeReply
+	if err := c.call(ctx, http.MethodPost, "/v1/worktrees", worktreeJSON{Repo: repo, Name: name, Branch: branch, Existing: true, Identity: identityOf(id)}, &out); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(out.Path, "/") || strings.ContainsRune(out.Path, 0) || len(out.Path) > 1000 {
+		return "", &session.HostError{Code: "reply", Message: "agent-host answered an unusable worktree path"}
+	}
+	return out.Path, nil
+}
+
+func (c *Client) SetIdentity(ctx context.Context, repo, name string, id session.CommitIdentity) error {
+	q := identityOf(id)
+	if q == nil {
+		return &session.HostError{Code: "identity", Message: "there's no name and email to set"}
+	}
+	return c.call(ctx, http.MethodPost, identityRoute, worktreeJSON{Repo: repo, Name: name, Identity: q}, nil)
+}
+
+func (c *Client) RemoveWorktree(ctx context.Context, repo, name string, force bool) (string, error) {
+	var out struct {
+		SetAside string `json:"setAside"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/v1/worktrees/remove", worktreeJSON{Repo: repo, Name: name, Force: force}, &out); err != nil {
+		return "", err
+	}
+	return out.SetAside, nil
 }
 
 func (c *Client) Run(ctx context.Context, cmd session.Command) (session.RunResult, error) {
@@ -253,15 +296,47 @@ type ProcessInfo struct {
 }
 
 func (c *Client) Processes(ctx context.Context) ([]ProcessInfo, error) {
+	_, list, err := c.processes(ctx)
+	return list, err
+}
+
+func (c *Client) processes(ctx context.Context) (string, []ProcessInfo, error) {
 	var out struct {
 		Processes []processJSON `json:"processes"`
+		Boot      string        `json:"boot"`
 	}
 	if err := c.call(ctx, http.MethodGet, "/v1/processes", nil, &out); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	list := make([]ProcessInfo, 0, len(out.Processes))
 	for _, p := range out.Processes {
 		list = append(list, ProcessInfo{ID: p.ID, Command: p.Command, Running: p.Running, Exit: p.Exit})
 	}
-	return list, nil
+	return out.Boot, list, nil
+}
+
+var _ session.HostLife = (*Client)(nil)
+
+func (c *Client) Boot(ctx context.Context) (string, error) {
+	boot, _, err := c.processes(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !processID.MatchString(boot) {
+		return "", &session.HostError{Code: "reply", Message: "agent-host answered no usable boot id"}
+	}
+	return boot, nil
+}
+
+func (c *Client) Exited(ctx context.Context, id string) (bool, error) {
+	_, list, err := c.processes(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range list {
+		if p.ID == id {
+			return !p.Running && p.Exit != nil, nil
+		}
+	}
+	return false, nil
 }

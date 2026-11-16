@@ -35,22 +35,72 @@ type Limits struct {
 }
 
 type Proxy struct {
-	policy   Policy
+	policy   Source
 	limits   Limits
 	resolver Resolver
 	dialer   Dialer
 	logger   shared.Logger
+	marks    Marks
 	slots    chan struct{}
+	mu       sync.Mutex
+	tunnels  map[*tunnel]struct{}
+	logs     *logGate
 }
 
-func New(policy Policy, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger) *Proxy {
+type tunnel struct {
+	host   string
+	cancel context.CancelCauseFunc
+}
+
+var errRevoked = errors.New("the host is no longer allowed")
+
+const sweepEvery = 10 * time.Second
+
+func New(policy Source, limits Limits, resolver Resolver, dialer Dialer, logger shared.Logger, marks Marks) *Proxy {
 	return &Proxy{
 		policy:   policy,
 		limits:   limits,
 		resolver: resolver,
 		dialer:   dialer,
 		logger:   logger,
+		marks:    marks,
 		slots:    make(chan struct{}, max(limits.MaxConns, 0)),
+		tunnels:  map[*tunnel]struct{}{},
+		logs:     newLogGate(),
+	}
+}
+
+func (p *Proxy) sweep(ctx context.Context) {
+	t := time.NewTicker(sweepEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			policy := p.policy.Current()
+			p.mu.Lock()
+			for tn := range p.tunnels {
+				if policy.Check(tn.host) != "" {
+					tn.cancel(errRevoked)
+				}
+			}
+			p.mu.Unlock()
+		}
+	}
+}
+
+func (p *Proxy) track(ctx context.Context, host string) (context.Context, func()) {
+	tctx, cancel := context.WithCancelCause(ctx)
+	tn := &tunnel{host: host, cancel: cancel}
+	p.mu.Lock()
+	p.tunnels[tn] = struct{}{}
+	p.mu.Unlock()
+	return tctx, func() {
+		p.mu.Lock()
+		delete(p.tunnels, tn)
+		p.mu.Unlock()
+		cancel(nil)
 	}
 }
 
@@ -59,6 +109,9 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 	defer stop()
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	sweepCtx, stopSweep := context.WithCancel(ctx)
+	defer stopSweep()
+	wg.Go(func() { p.sweep(sweepCtx) })
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -74,8 +127,9 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 				p.handle(ctx, conn)
 			})
 		default:
+			subnet := subnetOf(conn)
 			_ = conn.Close()
-			p.refused(ReasonLimit, "")
+			p.refused(subnet, ReasonLimit, "")
 		}
 	}
 }
@@ -91,19 +145,29 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		p.refuse(conn, http.StatusBadRequest, ReasonBadRequest, "")
 		return
 	}
+	mark := markOf(req)
+	tag := p.marks.requestTag(req, mark)
+	marks := p.marks.from(subnetOf(conn))
 	if req.Method != http.MethodConnect {
-		p.refuse(conn, http.StatusForbidden, ReasonMethod, "")
+		marks.note(mark, requestedTarget(req.RequestURI), "", ReasonMethod)
+		if req.URL != nil {
+			p.marks.saw(logged(req.URL.Hostname()), ReasonMethod)
+		}
+		p.refuse(conn, http.StatusForbidden, ReasonMethod, "", tag...)
 		return
 	}
 	host, reason := p.target(req.RequestURI)
 	if reason != "" {
 		requested, _, _ := net.SplitHostPort(req.RequestURI)
-		p.refuse(conn, http.StatusForbidden, reason, logged(requested))
+		marks.note(mark, requestedTarget(req.RequestURI), "", reason)
+		p.refuse(conn, http.StatusForbidden, reason, logged(requested), tag...)
 		return
 	}
+	target := net.JoinHostPort(host, "443")
 	upstream, status, reason := p.connect(ctx, host)
 	if reason != "" {
-		p.refuse(conn, status, reason, host)
+		marks.note(mark, target, "", reason)
+		p.refuse(conn, status, reason, host, tag...)
 		return
 	}
 	defer func() { _ = upstream.Close() }()
@@ -114,11 +178,14 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	pending := bytes.NewReader(early)
 	hello, name, err := readClientHello(io.MultiReader(pending, conn))
 	if err != nil {
-		p.refused(helloReason(err), host)
+		marks.note(mark, target, "", helloReason(err))
+		p.refused(subnetOf(conn), helloReason(err), host, tag...)
 		return
 	}
 	if normalize(name) != host {
-		p.refused(ReasonSNIMismatch, host, "sni", logged(name))
+		marks.note(mark, target, logged(name), ReasonSNIMismatch)
+		p.marks.saw(logged(name), ReasonSNIMismatch)
+		p.logRefused(subnetOf(conn), ReasonSNIMismatch, host, append([]any{"sni", logged(name)}, tag...)...)
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
@@ -129,9 +196,11 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	if !stop() {
 		return
 	}
-	p.logger.Info("egress", "event", "allowed")
-	end := relay(ctx, conn, upstream, p.limits)
-	p.logger.Info("egress", "event", "closed", "reason", end)
+	p.logger.Info("egress", append([]any{"event", "allowed", "host", host}, tag...)...)
+	tctx, done := p.track(ctx, host)
+	defer done()
+	end := relay(tctx, conn, upstream, p.limits)
+	p.logger.Info("egress", append([]any{"event", "closed", "reason", end}, tag...)...)
 }
 
 func (p *Proxy) target(authority string) (string, string) {
@@ -142,7 +211,7 @@ func (p *Proxy) target(authority string) (string, string) {
 	if port != "443" {
 		return "", ReasonPort
 	}
-	if reason := p.policy.Check(host); reason != "" {
+	if reason := p.policy.Current().Check(host); reason != "" {
 		return "", reason
 	}
 	return normalize(host), ""
@@ -183,20 +252,77 @@ func helloReason(err error) string {
 	}
 }
 
-func (p *Proxy) refuse(conn net.Conn, status int, reason, host string) {
-	p.refused(reason, host)
+func (p *Proxy) refuse(conn net.Conn, status int, reason, host string, more ...any) {
+	p.refused(subnetOf(conn), reason, host, more...)
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 	body := reason + "\n"
 	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), len(body), body)
 }
 
-func (p *Proxy) refused(reason, host string, more ...any) {
+func (p *Proxy) refused(subnet, reason, host string, more ...any) {
+	p.marks.saw(host, reason)
+	p.logRefused(subnet, reason, host, more...)
+}
+
+func (p *Proxy) logRefused(subnet, reason, host string, more ...any) {
+	ok, skipped := p.logs.allow(subnet, time.Now())
+	if !ok {
+		return
+	}
 	args := []any{"event", "refused", "reason", reason}
 	if host != "" {
 		args = append(args, "host", host)
 	}
+	if skipped > 0 {
+		args = append(args, "unlogged_before", skipped)
+	}
 	p.logger.Warn("egress", append(args, more...)...)
+}
+
+const (
+	logWindow  = time.Minute
+	logsPerKey = 20
+	maxLogKeys = 256
+)
+
+type logCount struct {
+	start   time.Time
+	logged  int
+	skipped int
+}
+
+type logGate struct {
+	mu   sync.Mutex
+	keys map[string]*logCount
+}
+
+func newLogGate() *logGate {
+	return &logGate{keys: map[string]*logCount{}}
+}
+
+func (g *logGate) allow(key string, now time.Time) (bool, int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	c := g.keys[key]
+	if c == nil {
+		if len(g.keys) >= maxLogKeys {
+			clear(g.keys)
+		}
+		c = &logCount{start: now}
+		g.keys[key] = c
+	}
+	if now.Sub(c.start) >= logWindow {
+		c.start, c.logged = now, 0
+	}
+	if c.logged >= logsPerKey {
+		c.skipped++
+		return false, 0
+	}
+	c.logged++
+	skipped := c.skipped
+	c.skipped = 0
+	return true, skipped
 }
 
 func logged(host string) string {
@@ -227,7 +353,13 @@ func relay(ctx context.Context, client, upstream net.Conn, limits Limits) string
 	defer idle.Stop()
 	total := time.AfterFunc(limits.Total, func() { end("total") })
 	defer total.Stop()
-	stop := context.AfterFunc(ctx, func() { end("shutdown") })
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(context.Cause(ctx), errRevoked) {
+			end("revoked")
+			return
+		}
+		end("shutdown")
+	})
 	defer stop()
 	touch := func() { idle.Reset(limits.Idle) }
 	var wg sync.WaitGroup

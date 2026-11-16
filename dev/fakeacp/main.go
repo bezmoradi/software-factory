@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,9 +41,11 @@ var (
 	prompt  json.RawMessage
 	servers []string
 	stdio   []stdioServer
+	cwd     string
+	calls   int
 )
 
-var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments"}
+var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split"}
 
 const noteMarker = "[Software Factory] "
 
@@ -55,7 +59,28 @@ func toolNamed(text string) string {
 	return found
 }
 
+func splitArgs(text string) map[string]any {
+	var tasks []map[string]string
+	for l := range strings.SplitSeq(text, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(l), "task:")
+		if !ok {
+			continue
+		}
+		title, message, _ := strings.Cut(rest, "|")
+		tasks = append(tasks, map[string]string{"title": strings.TrimSpace(title), "message": strings.TrimSpace(message)})
+	}
+	if len(tasks) == 0 {
+		for i, part := range []string{"the data model", "the page", "the documentation"} {
+			tasks = append(tasks, map[string]string{"title": fmt.Sprintf("Part %d: %s", i+1, part), "message": "Build " + part + " for the goal the fake agent split."})
+		}
+	}
+	return map[string]any{"tasks": tasks}
+}
+
 func toolArgs(tool, text string) map[string]any {
+	if tool == "factory_split" {
+		return splitArgs(text)
+	}
 	if tool != "factory_issue" && tool != "factory_pull_request" {
 		return map[string]any{}
 	}
@@ -150,7 +175,7 @@ func chunk(text string) {
 }
 
 func main() {
-	if authStatus(os.Args[1:]) {
+	if authStatus(os.Args[1:]) || authLogin(os.Args[1:]) {
 		return
 	}
 	in := bufio.NewScanner(os.Stdin)
@@ -165,21 +190,48 @@ func main() {
 			reply(m.ID, map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{"promptCapabilities": map[string]any{"image": os.Getenv("FAKE_ACP_NO_IMAGES") == ""}}, "authMethods": []any{}})
 		case m.Method == "session/new":
 			var p struct {
+				Cwd        string        `json:"cwd"`
 				MCPServers []stdioServer `json:"mcpServers"`
 			}
 			_ = json.Unmarshal(m.Params, &p)
+			cwd = p.Cwd
 			for _, s := range p.MCPServers {
 				servers = append(servers, s.Name)
 			}
 			stdio = p.MCPServers
-			reply(m.ID, map[string]any{"sessionId": session, "modes": map[string]any{"currentModeId": "yolo", "availableModes": []any{
+			created := map[string]any{"sessionId": session, "modes": map[string]any{"currentModeId": mode, "availableModes": []any{
 				map[string]any{"id": "default", "name": "Default"}, map[string]any{"id": "yolo", "name": "YOLO"},
-			}}})
+			}}}
+			if offersConfigMode() {
+				created["configOptions"] = configOptions()
+			}
+			reply(m.ID, created)
+		case m.Method == "session/set_config_option":
+			var p struct {
+				ConfigID string `json:"configId"`
+				Value    string `json:"value"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			if p.ConfigID != "mode" || (p.Value != "default" && p.Value != "yolo") {
+				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32602, "message": "Invalid params"}})
+				continue
+			}
+			if !ignoresSetMode() {
+				mode = p.Value
+			}
+			reply(m.ID, map[string]any{"configOptions": configOptions()})
+			commandsUpdate()
 		case m.Method == "session/set_mode":
 			reply(m.ID, map[string]any{})
-			update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{
-				map[string]any{"name": "test", "description": "Run the tests"},
-			}})
+			if !ignoresSetMode() {
+				var p struct {
+					ModeID string `json:"modeId"`
+				}
+				_ = json.Unmarshal(m.Params, &p)
+				mode = p.ModeID
+				update(map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": p.ModeID})
+			}
+			commandsUpdate()
 		case m.Method == "session/prompt":
 			promptFor(m)
 		case m.Method == "session/cancel":
@@ -210,6 +262,30 @@ func main() {
 			send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32601, "message": "Method not found"}})
 		}
 	}
+}
+
+var mode = "yolo"
+
+func configOptions() []any {
+	return []any{map[string]any{"id": "mode", "name": "Mode", "category": "mode", "type": "select", "currentValue": mode, "options": []any{
+		map[string]any{"value": "default", "name": "Default"}, map[string]any{"value": "yolo", "name": "YOLO"},
+	}}}
+}
+
+func commandsUpdate() {
+	update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{
+		map[string]any{"name": "test", "description": "Run the tests"},
+	}})
+}
+
+func offersConfigMode() bool {
+	_, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".sf-fake-config-mode"))
+	return err == nil
+}
+
+func ignoresSetMode() bool {
+	_, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".sf-fake-ignore-set-mode"))
+	return err == nil
 }
 
 func received(params json.RawMessage) string {
@@ -268,7 +344,66 @@ func splitNote(text string) (string, string) {
 	return note, rest
 }
 
+func scripted(id json.RawMessage, text string) bool {
+	lines := strings.Split(text, "\n")
+	said, done := false, false
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "say:") {
+			said = true
+		}
+	}
+	if !said {
+		return false
+	}
+	for _, l := range lines {
+		key, value, _ := strings.Cut(strings.TrimSpace(l), ":")
+		value = strings.TrimSpace(value)
+		calls++
+		callID := fmt.Sprintf("script-%d", calls)
+		switch key {
+		case "run":
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": value}})
+		case "fail":
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "failed", "rawInput": map[string]any{"command": value}})
+		case "cost":
+			if usd, err := strconv.ParseFloat(value, 64); err == nil {
+				update(map[string]any{"sessionUpdate": "usage_update", "used": 1200, "size": 200000, "cost": map[string]any{"amount": usd, "currency": "USD"}})
+			}
+		case "edit":
+			file := filepath.Join(cwd, filepath.Clean("/"+value))
+			status := "completed"
+			if f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0); err != nil {
+				status = "failed"
+			} else {
+				_, _ = f.WriteString("\n")
+				_ = f.Close()
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Edit " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "write":
+			file := filepath.Join(cwd, filepath.Clean("/"+value))
+			status := "completed"
+			if err := os.WriteFile(file, []byte("ok\n"), 0o644); err != nil {
+				status = "failed"
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "say":
+			chunk(value + "\n")
+		case "done":
+			done = true
+		}
+	}
+	reply(id, map[string]any{"stopReason": "end_turn"})
+	if done {
+		time.Sleep(300 * time.Millisecond)
+		os.Exit(0)
+	}
+	return true
+}
+
 func answer(id json.RawMessage, text string) bool {
+	if scripted(id, text) {
+		return true
+	}
 	if tool := toolNamed(text); tool != "" {
 		args := toolArgs(tool, text)
 		go func() {
@@ -288,9 +423,11 @@ func answer(id json.RawMessage, text string) bool {
 func promptFor(m message) {
 	text := promptText(m.Params)
 	if strings.HasPrefix(text, noteMarker) {
-		var note string
-		note, text = splitNote(text)
-		chunk("The fake agent got a note: " + note + "\n\n")
+		for strings.HasPrefix(text, noteMarker) {
+			var note string
+			note, text = splitNote(text)
+			chunk("The fake agent got a note: " + note + "\n\n")
+		}
 		if !answer(m.ID, text) {
 			reply(m.ID, map[string]any{"stopReason": "end_turn"})
 		}

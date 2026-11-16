@@ -1,7 +1,10 @@
 package files
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"path"
 	"slices"
 
@@ -16,26 +19,54 @@ const (
 
 var _ session.PushContents = Reader{}
 
-func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedSet, error) {
+func (Reader) Pushed(ctx context.Context, repoPath, base, head string, reviewed []string, budget int64) (session.PushedSet, error) {
 	return with(repoPath, func(r *repo) (session.PushedSet, error) {
 		out := session.PushedSet{Complete: true, Attributes: map[string][]byte{}}
-		commits, err := newCommits(r, head, base)
+		commits, err := newCommits(ctx, r, head, base)
 		if err != nil {
 			return out, err
 		}
 		if len(commits) > maxScanCommits {
 			commits, out.Complete = commits[:maxScanCommits], false
 		}
+		hc, err := r.commit(head)
+		if err != nil {
+			return out, err
+		}
+		read := []string{hc.Tree}
+		for _, sha := range append([]string{base}, reviewed...) {
+			if sha == "" {
+				continue
+			}
+			if c, err := r.commit(sha); err == nil {
+				read = append(read, c.Tree)
+			}
+		}
 		seen := map[string]bool{}
 		dirs := map[string]bool{"": true}
 		left := budget
+		for _, commit := range slices.Backward(commits) {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
+			pc, size, err := pushedCommit(r, commit.SHA)
+			if err != nil {
+				return out, err
+			}
+			if size > left {
+				out.Complete = false
+				continue
+			}
+			left -= size
+			out.Commits = append(out.Commits, pc)
+		}
 		for _, c := range commits {
 			found, err := introduced(r, c)
 			if err != nil {
 				return out, err
 			}
 			for _, ch := range found {
-				key := ch.Path + "\x00" + ch.NewSHA
+				key := ch.Path + "\x00" + ch.NewSHA + "\x00" + string(ch.NewMode)
 				if seen[key] {
 					continue
 				}
@@ -47,6 +78,9 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 					dirs[d] = true
 				}
 				f := session.PushedFile{Path: ch.Path, SHA: ch.NewSHA, Mode: ch.NewMode}
+				if f.Reviewed, err = heldIn(r, read, ch); err != nil {
+					return out, err
+				}
 				if ch.NewMode == push.ModeSubmodule {
 					out.Files = append(out.Files, f)
 					continue
@@ -66,10 +100,6 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 				}
 				out.Files = append(out.Files, f)
 			}
-		}
-		hc, err := r.commit(head)
-		if err != nil {
-			return out, err
 		}
 		for d := range dirs {
 			name := ".gitattributes"
@@ -97,23 +127,23 @@ func (Reader) Pushed(repoPath, base, head string, budget int64) (session.PushedS
 	})
 }
 
-func newCommits(r *repo, head, base string) ([]push.Commit, error) {
-	have := map[string]bool{}
-	if base != "" {
-		queue := []string{base}
-		for len(queue) > 0 && len(have) < maxMergeWalk {
-			sha := queue[0]
-			queue = queue[1:]
-			if have[sha] {
-				continue
-			}
-			have[sha] = true
-			c, err := r.commit(sha)
-			if err != nil {
-				return nil, err
-			}
-			queue = append(queue, c.Parents...)
+func heldIn(r *repo, trees []string, ch push.Change) (bool, error) {
+	for _, tree := range trees {
+		at, err := lookup(r.tree, tree, ch.Path)
+		if err != nil {
+			return false, err
 		}
+		if at != nil && at.sha == ch.NewSHA && at.mode == ch.NewMode {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func newCommits(ctx context.Context, r *repo, head, base string) ([]push.Commit, error) {
+	have, err := reachable(ctx, r, base, maxMergeWalk)
+	if err != nil {
+		return nil, err
 	}
 	var out []push.Commit
 	queued := map[string]bool{head: true}
@@ -173,4 +203,55 @@ func introduced(r *repo, c push.Commit) ([]push.Change, error) {
 		})
 	}
 	return kept, nil
+}
+
+func pushedCommit(r *repo, sha string) (session.PushedCommit, int64, error) {
+	o, err := r.store.read(sha)
+	if err != nil {
+		return session.PushedCommit{}, 0, err
+	}
+	if o.kind != kindCommit {
+		return session.PushedCommit{}, 0, fmt.Errorf("%w: %s is a %s, not a commit", push.ErrNotFound, sha, o.kind)
+	}
+	if len(o.data) > maxCommitObject {
+		return session.PushedCommit{}, 0, fmt.Errorf("%w: commit %s is over %d MiB, more than the engine reads in one commit", push.ErrTooLarge, sha, maxCommitObject>>20)
+	}
+	header, message, _ := bytes.Cut(o.data, []byte("\n\n"))
+	c := session.PushedCommit{SHA: sha, Message: string(message)}
+	var other [][]byte
+	for i, line := range bytes.Split(header, []byte("\n")) {
+		if i == 0 && bytes.HasPrefix(line, []byte("tree ")) {
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("parent ")); ok && validSHA(string(rest)) {
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("author ")); ok && c.AuthorName == "" && c.AuthorEmail == "" {
+			c.AuthorName, c.AuthorEmail = identity(rest)
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("committer ")); ok && c.CommitterName == "" && c.CommitterEmail == "" {
+			c.CommitterName, c.CommitterEmail = identity(rest)
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(line, []byte("encoding ")); ok {
+			c.Encodings = append(c.Encodings, string(rest))
+		}
+		other = append(other, line)
+	}
+	c.Headers = string(bytes.Join(other, []byte("\n")))
+	return c, int64(len(o.data)), nil
+}
+
+func identity(line []byte) (string, string) {
+	open := bytes.IndexByte(line, '<')
+	end := bytes.LastIndexByte(line, '>')
+	if open < 0 || end < open {
+		return string(line), ""
+	}
+	name := bytes.TrimSpace(line[:open])
+	if tail := bytes.TrimSpace(line[end+1:]); len(tail) > 0 {
+		name = slices.Concat(name, []byte(" "), tail)
+	}
+	return string(name), string(line[open+1 : end])
 }

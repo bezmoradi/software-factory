@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/gate"
+	"github.com/bezmoradi/software-factory/internal/core/level"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -35,7 +36,7 @@ var (
 )
 
 type WorkFiles interface {
-	ChangedFiles(repo, from, to string) ([]push.Change, error)
+	ChangedFiles(ctx context.Context, repo, from, to string) ([]push.Change, error)
 	ReadFile(repo, commit, path string) (push.File, error)
 }
 
@@ -56,6 +57,7 @@ type ProjectSettings struct {
 	Findings  bool
 	PRComment bool
 	Hold      HoldSettings
+	Depth     workflow.Depth
 }
 
 type SavedApproval struct {
@@ -87,20 +89,29 @@ type WorkStore interface {
 }
 
 type WorkConfig struct {
-	Targets   func(sid string) (PushTarget, bool)
-	Heads     Heads
-	History   History
-	Files     WorkFiles
-	Repos     WorkRepos
-	Reported  func(sid string) (Workflow, bool)
-	Reviews   ReviewEntries
-	Store     WorkStore
-	Installed func() []string
-	Contents  PushContents
-	Audit     Audit
-	Tell      func(sid, text string) error
-	Now       func() time.Time
-	Logger    shared.Logger
+	Targets    func(sid string) (PushTarget, bool)
+	Heads      Heads
+	History    History
+	Files      WorkFiles
+	Bounded    BoundedFiles
+	Repos      WorkRepos
+	Reported   func(sid string) (Workflow, bool)
+	Reviews    ReviewEntries
+	Store      WorkStore
+	Installed  func() []string
+	Contents   PushContents
+	Audit      Audit
+	Tell       func(sid, text string) error
+	Now        func() time.Time
+	DocsInRepo bool
+	Logger     shared.Logger
+
+	RoleAgents RoleAgents
+	Changes    ChangeReader
+	Level      func(sid string) (level.Result, bool)
+	Catalog    func() workflow.Catalog
+
+	ApprovalMoved func(sid string, at func(commit string) (ApprovalGiven, bool))
 }
 
 type workApproval struct {
@@ -128,16 +139,22 @@ type Work struct {
 	scanMu   sync.Mutex
 	scans    map[string]scanned
 	scanKeys []string
+	sizeMu   sync.Mutex
+	sizes    map[string]changeSize
 }
 
 type WorkDoc struct {
-	Path     string
-	Text     string
-	Hash     string
-	Clipped  bool
-	Approved bool
-	Changed  bool
-	Previous string
+	Path       string
+	Text       string
+	Hash       string
+	Clipped    bool
+	Approved   bool
+	Changed    bool
+	Previous   string
+	Commit     string
+	ApprovedAt string
+	Reported   bool
+	OnBase     bool
 }
 
 type WorkReviewer struct {
@@ -152,6 +169,8 @@ type WorkReviewer struct {
 	Capped   bool
 	Override string
 	Since    string
+	SetAside string
+	Summary  string
 }
 
 type GateView struct {
@@ -185,6 +204,8 @@ type GateView struct {
 	FlagsRead     bool
 	LFS           []string
 	Handoff       bool
+	Catalog       workflow.CatalogState
+	CatalogWhy    string
 }
 
 type TeamView struct {
@@ -212,36 +233,42 @@ type ProjectInfo struct {
 }
 
 type WorkFacts struct {
-	Type     workflow.WorkType
-	Required []workflow.Requirement
-	Items    []string
-	Rounds   int
-	Refusal  string
-	Hold     HoldSettings
+	Type          workflow.WorkType
+	Required      []workflow.Requirement
+	Items         []string
+	NeedsApproval bool
+	Rounds        int
+	Refusal       string
+	Hold          HoldSettings
+	Approval      ApprovalGiven
 }
 
 type WorkPage interface {
-	View(sid string) (GateView, error)
-	SetType(sid, id string) error
-	Approve(sid string, plan bool, hash, text string) error
+	View(ctx context.Context, sid string) (GateView, error)
+	SetType(ctx context.Context, sid, id string) error
+	Approve(ctx context.Context, sid string, plan bool, hash, text string) error
 	Team(ctx context.Context, path string) (TeamView, error)
 	ApproveTeam(ctx context.Context, path, sha string) (TeamView, error)
 	ForgetTeam(path string) (TeamView, error)
 	Project(name string) ProjectInfo
-	SetProject(path, op string, rounds int, kind string) error
+	SetProject(ctx context.Context, path, op string, rounds int, kind string) error
 	SetAutoFindings(path string, on bool) error
 	SetProjectOption(path, op string, on bool) error
 	SetHold(path string, h HoldSettings) error
-	AllowFile(sid, path, reason string) error
-	AskRemove(sid, path string) error
-	EditHold(sid, top string, paths []string) string
+	AllowFile(ctx context.Context, sid, path, reason string) error
+	AskRemove(ctx context.Context, sid, path string) error
+	AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error
+	AskRewrite(ctx context.Context, sid, commit string, field CommitField) error
+	EditHold(ctx context.Context, sid, top string, paths []string) string
+	Guarded(sid, top string, paths []string) string
+	ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error)
 }
 
 var _ WorkPage = (*Work)(nil)
 
 func NewWork(cfg WorkConfig) (*Work, error) {
-	if cfg.Targets == nil || cfg.Heads == nil || cfg.History == nil || cfg.Files == nil || cfg.Repos == nil || cfg.Store == nil {
-		return nil, errors.New("work: need the sessions, the hash-checked reader, the repositories and the state file")
+	if cfg.Targets == nil || cfg.Heads == nil || cfg.History == nil || cfg.Files == nil || cfg.Repos == nil || cfg.Store == nil || cfg.Level == nil {
+		return nil, errors.New("work: need the sessions, the hash-checked reader, the repositories, the state file and the sessions' levels")
 	}
 	if cfg.Reported == nil {
 		cfg.Reported = func(string) (Workflow, bool) { return Workflow{}, false }
@@ -249,13 +276,17 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 	if cfg.Installed == nil {
 		cfg.Installed = func() []string { return nil }
 	}
+	if cfg.Catalog == nil {
+		cfg.Catalog = workflow.NoCatalog
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}}, nil
+	cfg.Audit = masking(cfg.Audit)
+	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}}, nil
 }
 
 func textHash(s string) string {
@@ -264,6 +295,11 @@ func textHash(s string) string {
 }
 
 func (w *Work) load() WorkState {
+	st, _ := w.read()
+	return st
+}
+
+func (w *Work) read() (WorkState, error) {
 	w.store.Lock()
 	defer w.store.Unlock()
 	st, err := w.cfg.Store.Load()
@@ -279,7 +315,7 @@ func (w *Work) load() WorkState {
 	if st.Sessions == nil {
 		st.Sessions = map[string]SavedWork{}
 	}
-	return st
+	return st, err
 }
 
 func (w *Work) change(fn func(*WorkState) error) error {
@@ -367,6 +403,7 @@ func (w *Work) readTeam(r Repository) teamRead {
 	}
 	out.text = string(f.Data)
 	team, problems := workflow.ParseTeam(out.text)
+	problems = append(problems, instructionProblems(team)...)
 	problems = append(problems, workflow.AgentProblems(team, w.cfg.Installed())...)
 	out.team, out.problems = team, problems
 	if len(problems) > 0 {
@@ -426,6 +463,10 @@ func (w *Work) setupFor(name string, claude bool) setupOf {
 		team = &t
 	}
 	out.setup, out.problems = workflow.SetupOf(team, personal, adapter)
+	out.setup.Catalog = w.cfg.Catalog()
+	if w.cfg.RoleAgents != nil {
+		maps.Copy(out.setup.Roles, w.cfg.RoleAgents.RolesFor(name))
+	}
 	out.rounds = out.setup.Rounds
 	if _, ok := typeIn(out.setup.Types, personal.Type); ok {
 		out.project = personal.Type
@@ -499,7 +540,7 @@ func (w *Work) session(sid string) (workSession, bool) {
 	return c, true
 }
 
-func (w *Work) SetType(sid, id string) error {
+func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	ws, ok := w.session(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
@@ -513,18 +554,33 @@ func (w *Work) SetType(sid, id string) error {
 	}
 	w.mu.Unlock()
 	w.persist(sid)
+	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("work type", "type", id)
 	return nil
 }
 
 type workDocs struct {
-	req      *WorkDoc
-	plan     *WorkDoc
-	research string
-	tasks    bool
-	dir      string
-	held     bool
-	reported bool
+	req       *WorkDoc
+	plan      *WorkDoc
+	research  string
+	tasks     bool
+	dir       string
+	held      bool
+	reported  bool
+	shownReq  *WorkDoc
+	shownPlan *WorkDoc
+	baseReq   *WorkDoc
+	basePlan  *WorkDoc
+}
+
+func (d *workDocs) onBranch(files []string, listed bool) {
+	changed := func(doc *WorkDoc) bool { return listed && slices.Contains(files, doc.Path) }
+	if d.req != nil && !changed(d.req) {
+		d.baseReq, d.req = d.req, nil
+	}
+	if d.plan != nil && !changed(d.plan) {
+		d.basePlan, d.plan = d.plan, nil
+	}
 }
 
 func docFrom(d *Doc) *WorkDoc {
@@ -551,7 +607,38 @@ func shownDoc(path, text string) *WorkDoc {
 	return d
 }
 
+func (w *Work) committedKnackpack(sid, repo, head string) workDocs {
+	out := workDocs{held: true}
+	if rep, ok := w.cfg.Reported(sid); ok {
+		out.shownReq, out.shownPlan = docFrom(rep.Requirements), docFrom(rep.Plan)
+		if rep.Research != nil {
+			out.research = rep.Research.Path
+		}
+	}
+	if head == "" {
+		return out
+	}
+	names := workflow.Adapters[workflow.Knackpack].Documents
+	feature, _ := w.readDoc(repo, head, names.Feature)
+	out.dir = workflow.KnackpackFeatureDir([]byte(feature))
+	if out.dir == "" {
+		return out
+	}
+	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Requirements); ok {
+		out.req = shownDoc(out.dir+"/"+names.Requirements, t)
+		out.req.Commit = head
+	}
+	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Plan); ok {
+		out.plan = shownDoc(out.dir+"/"+names.Plan, t)
+		out.plan.Commit = head
+	}
+	return out
+}
+
 func (w *Work) docs(sid string, adapter workflow.AdapterID, repo, head string, files []string, tasks bool) workDocs {
+	if adapter == workflow.Knackpack && w.cfg.DocsInRepo {
+		return w.committedKnackpack(sid, repo, head)
+	}
 	if adapter == workflow.Knackpack {
 		rep, ok := w.cfg.Reported(sid)
 		if !ok {
@@ -575,6 +662,7 @@ func (w *Work) docs(sid string, adapter workflow.AdapterID, repo, head string, f
 	}
 	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Requirements); ok {
 		out.req = shownDoc(out.dir+"/"+names.Requirements, t)
+		out.req.Commit = head
 	}
 	if _, ok := w.readDoc(repo, head, out.dir+"/"+names.Research); ok {
 		out.research = out.dir + "/" + names.Research
@@ -588,6 +676,7 @@ func (w *Work) docs(sid string, adapter workflow.AdapterID, repo, head string, f
 			text = plan + "\n\n---\n\n# " + out.dir + "/" + names.Tasks + "\n\n" + taskText
 		}
 		out.plan = shownDoc(out.dir+"/"+names.Plan, text)
+		out.plan.Commit = head
 	}
 	return out
 }
@@ -615,13 +704,14 @@ type gathered struct {
 	built     bool
 	required  []workflow.Requirement
 	items     []string
+	toApprove bool
 	headError string
 	scan      scanned
 	flags     []FlagView
 	flagsRead bool
 }
 
-func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main string) gathered {
+func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
 	g := gathered{ws: ws, t: t, head: head, main: main}
 	g.setup = w.setupFor(ws.repo, ws.claude)
 	g.adapter = g.setup.setup.Adapter
@@ -633,7 +723,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	g.chosen = kind
 	if head != "" {
 		if main != "" {
-			base, err := w.cfg.History.MergeBase(t.Repo, head, main)
+			base, err := w.cfg.History.MergeBase(ctx, t.Repo, head, main)
 			if err != nil {
 				g.note = "the engine couldn't find where the branch leaves the main branch"
 			}
@@ -645,7 +735,7 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 			g.listed = true
 		}
 		if g.listed {
-			changes, err := w.cfg.Files.ChangedFiles(t.Repo, g.base, head)
+			changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, g.base, head)
 			if err != nil {
 				g.listed = false
 				g.note = "the engine's reader couldn't compare the branch with the main branch"
@@ -662,6 +752,9 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	}
 	tasks := slices.Contains(kind.Steps, workflow.Tasks)
 	g.docs = w.docs(sid, g.adapter, t.Repo, head, g.files, tasks)
+	if g.docs.held {
+		g.docs.onBranch(g.files, g.listed)
+	}
 	feature := g.chosen.Profile() == workflow.Feature
 	counts := func(a *workApproval, d *WorkDoc) bool {
 		if a == nil {
@@ -679,11 +772,11 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	if g.eff.Profile() == workflow.Feature && g.planOk {
 		g.planBase = ws.plan.Commit
 		if head != "" && head != g.planBase {
-			in, err := w.cfg.History.IsAncestor(t.Repo, g.planBase, head)
+			in, err := w.cfg.History.IsAncestor(ctx, t.Repo, g.planBase, head)
 			g.built = err == nil && in
 		}
 	}
-	g.required = workflow.Required(g.setup.setup, g.eff, g.files)
+	g.required = w.deepened(ctx, t, workflow.Required(g.setup.setup, g.eff, g.files), g.base, head, g.listed)
 	planFile := ""
 	if g.docs.plan != nil {
 		planFile = g.docs.plan.Path
@@ -693,27 +786,26 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	var flagged []workflow.Flag
 	if head != "" {
 		if g.listed {
-			g.scan = w.scanOf(t.Repo, g.base, head)
+			g.scan = w.scanOf(ctx, t.Repo, g.base, head, w.reviewedOn(t.Branch, head))
 		}
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
 		for _, f := range g.scan.flags {
-			v := FlagView{Flag: f, Allowed: allowedFlag(f, ws.allowed)}
+			v := FlagView{Flag: f, Shown: f.maskedPath(), Allowed: allowedFlag(f, ws.allowed)}
 			g.flags = append(g.flags, v)
-			flagged = append(flagged, workflow.Flag{Path: Escape([]byte(f.Path)), Why: f.Why, Allowed: v.Allowed})
+			flagged = append(flagged, workflow.Flag{Path: f.Label(), Why: f.Why, Allowed: v.Allowed})
 		}
 	}
-	g.items = workflow.Items(workflow.Progress{
+	g.items, g.toApprove = workflow.Items(workflow.Progress{
 		Chosen: g.chosen.Profile(), Effective: g.eff, Adapter: g.adapter,
 		FilesListed: g.listed || head == "", FilesNote: g.note, FlagsRead: flagsRead, Flagged: flagged,
 		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile, TasksWritten: g.docs.tasks,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
 	})
-	if installed := w.cfg.Installed(); len(installed) > 0 {
-		for _, q := range g.required {
-			if q.Role == "" && !slices.Contains(installed, q.Agent) {
-				g.items = append(g.items, "a review by "+q.Agent+", which no plugin installed in the reviewer image provides")
-			}
+	g.required = w.notInstalled(g.required)
+	for _, q := range g.required {
+		if q.Missing {
+			g.items = append(g.items, "a review by "+q.Agent+", which no plugin installed in the reviewer image provides")
 		}
 	}
 	for _, p := range g.setup.problems {
@@ -722,14 +814,22 @@ func (w *Work) gather(sid string, ws workSession, t PushTarget, head, main strin
 	return g
 }
 
-func (w *Work) PushFacts(sid string, t PushTarget, head, main string) (WorkFacts, bool) {
+func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool) {
 	ws, ok := w.session(sid)
 	if !ok {
 		return WorkFacts{}, false
 	}
-	g := w.gather(sid, ws, t, head, main)
-	return WorkFacts{Type: g.eff, Required: g.required, Items: g.items, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: w.holdOf(t.Name)}, true
+	g := w.gather(ctx, sid, ws, t, head, main)
+	hold, err := w.holdOf(t.Name)
+	items := g.items
+	if err != nil {
+		items = append(slices.Clone(items), workUnreadItem)
+	}
+	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold,
+		Approval: w.givenOf(g)}, true
 }
+
+const workUnreadItem = "project settings the engine can read: it couldn't read them (work.json), so it can't tell this project's push hold, review rounds or work type"
 
 func lfsRefusal(paths []string) string {
 	if len(paths) == 0 {
@@ -737,7 +837,7 @@ func lfsRefusal(paths []string) string {
 	}
 	shown := make([]string, 0, 5)
 	for _, p := range paths[:min(len(paths), 5)] {
-		shown = append(shown, Escape([]byte(p)))
+		shown = append(shown, Escape([]byte(maskLines(p, true))))
 	}
 	more := ""
 	if len(paths) > 5 {
@@ -746,7 +846,7 @@ func lfsRefusal(paths []string) string {
 	return "this push carries files the commit's .gitattributes give to Git LFS (" + strings.Join(shown, ", ") + more + "), and the engine's push sends git objects only, so the remote would get LFS pointers without their content; take those files out of Git LFS in .gitattributes, or push this work another way"
 }
 
-func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow.Requirement {
+func (w *Work) Reviewers(ctx context.Context, sid string, t PushTarget, base, head string) []workflow.Requirement {
 	ws, ok := w.session(sid)
 	if !ok {
 		ws = workSession{repo: t.Name, claude: true, typeID: DefaultWorkType}
@@ -756,13 +856,14 @@ func (w *Work) Reviewers(sid string, t PushTarget, base, head string) []workflow
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
 	}
-	changes, err := w.cfg.Files.ChangedFiles(t.Repo, base, head)
+	changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, base, head)
 	var files []string
 	for _, c := range changes {
 		files = append(files, c.Path)
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
-	return workflow.Required(setup.setup, eff, files)
+	required := w.notInstalled(w.deepened(ctx, t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
+	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
 func ReviewerName(q workflow.Requirement) string {
@@ -772,7 +873,7 @@ func ReviewerName(q workflow.Requirement) string {
 	return strings.TrimPrefix(q.Agent, "knackpack:")
 }
 
-func (w *Work) current(sid string) (gathered, error) {
+func (w *Work) current(ctx context.Context, sid string) (gathered, error) {
 	ws, ok := w.session(sid)
 	if !ok {
 		return gathered{}, explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
@@ -787,14 +888,14 @@ func (w *Work) current(sid string) (gathered, error) {
 		head, headError = "", "the engine couldn't read the session's branch "+t.Branch
 	}
 	main, _ := w.cfg.Repos.Main(t.Name)
-	g := w.gather(sid, ws, t, head, main)
+	g := w.gather(ctx, sid, ws, t, head, main)
 	g.headError = headError
 	return g, nil
 }
 
-func (w *Work) facts(g gathered) workflow.Facts {
+func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	f := workflow.Facts{Profile: g.chosen.Profile(), Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
-		UsesArtifacts: g.adapter == workflow.SpecKit, PlanCommand: workflow.Adapters[g.adapter].Commands[workflow.Plan]}
+		UsesArtifacts: g.docs.held, PlanCommand: workflow.Adapters[g.adapter].Commands[workflow.Plan]}
 	if g.docs.req != nil {
 		f.ReqHash = g.docs.req.Hash
 	}
@@ -807,12 +908,16 @@ func (w *Work) facts(g gathered) workflow.Facts {
 	if f.UsesArtifacts {
 		f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Plan, workflow.Tasks}, g.docs.dir)
 		if !g.reqOk {
-			f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Define}, g.docs.dir)
+			dir := g.docs.dir
+			if g.adapter == workflow.Knackpack {
+				dir = ""
+			}
+			f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Define}, dir)
 		}
 		if f.ReqBaseline != "" && g.head != "" {
 			if f.ReqBaseline == g.head {
 				f.ArtifactsOnly = true
-			} else if changes, err := w.cfg.Files.ChangedFiles(g.t.Repo, f.ReqBaseline, g.head); err == nil {
+			} else if changes, err := w.cfg.Files.ChangedFiles(ctx, g.t.Repo, f.ReqBaseline, g.head); err == nil {
 				paths := make([]string, 0, len(changes))
 				for _, c := range changes {
 					paths = append(paths, c.Path)
@@ -824,11 +929,11 @@ func (w *Work) facts(g gathered) workflow.Facts {
 	return f
 }
 
-func (w *Work) Approve(sid string, plan bool, hash, text string) error {
+func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text string) error {
 	if !sha256Hex.MatchString(hash) || textHash(text) != hash {
 		return explained(invalid("hash"), "The text the page showed doesn't match its hash. Reload the page and read it again.")
 	}
-	g, err := w.current(sid)
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -836,7 +941,15 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	if plan {
 		doc, what = g.docs.plan, "plan"
 	}
+	onBase := g.docs.baseReq
+	if plan {
+		onBase = g.docs.basePlan
+	}
 	switch {
+	case doc == nil && onBase != nil:
+		return explained(conflict("on base"), "The "+what+" text is from an earlier task, already on the base branch, so it can't be approved here. The session's own commits must add or change it.")
+	case doc == nil && g.docs.held && g.adapter == workflow.Knackpack:
+		return explained(conflict("not committed"), "The engine counts only the "+what+" text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve.")
 	case doc == nil:
 		return explained(conflict("nothing"), "There's no "+what+" to approve yet.")
 	case doc.Clipped:
@@ -846,7 +959,7 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	case g.head == "":
 		return explained(conflict("head"), "The "+what+" weren't approved: the engine couldn't read the session's branch.")
 	}
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	kind := workflow.ApproveRequirements
 	if plan {
 		kind = workflow.ApprovePlan
@@ -870,6 +983,7 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	w.mu.Unlock()
 	w.persist(sid)
 	w.approved(sid, g.t, g.head, plan, hash)
+	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("approved", "what", what)
 	if next := nextStep(g, plan); next != "" && w.cfg.Tell != nil {
 		if err := w.cfg.Tell(sid, next); err != nil {
@@ -879,15 +993,38 @@ func (w *Work) Approve(sid string, plan bool, hash, text string) error {
 	return nil
 }
 
-func (w *Work) EditHold(sid, top string, paths []string) string {
+func (w *Work) RecheckApproval(sid string) {
+	w.recheckApproval(context.Background(), sid)
+}
+
+func (w *Work) recheckApproval(ctx context.Context, sid string) {
+	if w.cfg.ApprovalMoved != nil {
+		w.cfg.ApprovalMoved(sid, func(commit string) (ApprovalGiven, bool) { return w.approvalAt(ctx, sid, commit) })
+	}
+}
+
+func (w *Work) approvalAt(ctx context.Context, sid, commit string) (ApprovalGiven, bool) {
+	t, ok := w.cfg.Targets(sid)
+	if !ok {
+		return ApprovalGiven{}, false
+	}
+	ws, ok := w.session(sid)
+	if !ok {
+		return ApprovalGiven{}, false
+	}
+	main, _ := w.cfg.Repos.Main(t.Name)
+	return w.givenOf(w.gather(ctx, sid, ws, t, commit, main)), true
+}
+
+func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) string {
 	if top == "" {
 		return ""
 	}
-	g, err := w.current(sid)
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return ""
 	}
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	for _, p := range paths {
 		rel, err := filepath.Rel(top, p)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
@@ -900,7 +1037,7 @@ func (w *Work) EditHold(sid, top string, paths []string) string {
 	return ""
 }
 
-const implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push."
+const implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push. Each commit message says what changed and why."
 
 func nextStep(g gathered, plan bool) string {
 	steps := g.eff.Steps
@@ -926,11 +1063,25 @@ func nextStep(g gathered, plan bool) string {
 	return ""
 }
 
+const WorkNotInstalled = "not-installed"
+
+func (w *Work) notInstalled(list []workflow.Requirement) []workflow.Requirement {
+	installed := w.cfg.Installed()
+	if len(installed) == 0 {
+		return list
+	}
+	for i, q := range list {
+		list[i].Missing = q.Role == "" && !slices.Contains(installed, q.Agent)
+	}
+	return list
+}
+
 func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	var entries map[review.Key]ReviewEntry
 	if w.cfg.Reviews != nil {
 		entries, _ = w.cfg.Reviews.Entries()
 	}
+	w.givenOf(g).hold(entries, g.t.Branch, g.head)
 	records := map[review.Key]review.Record{}
 	for k, e := range entries {
 		records[k] = e.Record
@@ -939,12 +1090,18 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	var out []WorkReviewer
 	var missing []string
 	for _, q := range g.required {
-		r := WorkReviewer{Agent: q.Agent, Role: q.Role, Name: ReviewerName(q), Why: q.Why, State: "none", Limit: limit}
-		rd := RoundOf(entries, g.t.Branch, q.Agent)
+		r := WorkReviewer{Agent: q.Agent, Role: q.Role, Name: ReviewerName(q), Why: q.Why, State: "none", Limit: limit, Summary: g.setup.setup.Catalog.Summary(q.Agent)}
+		rd := RoundOf(entries, g.t.Branch, q.Agent, false)
 		r.Round, r.Capped = rd.Count, rd.Capped(limit)
 		k := review.Key{Commit: g.head, Branch: g.t.Branch, Agent: q.Agent}
-		if e, ok := entries[k]; ok {
+		if e, complete, ok := pooledEntry(entries, k, q.RunCount()); ok {
 			r.State, r.Verdict, r.Override, r.Since = string(e.Record.State), e.Record.Verdict, e.Record.Override, e.Since
+			if e.Record.Channel == review.ApprovalChanged && e.Record.State == review.Unknown {
+				r.SetAside = e.Record.Held
+			}
+			if !complete && e.Record.State == review.Pass {
+				r.State = "none"
+			}
 		} else {
 			for key := range entries {
 				if key.Branch == g.t.Branch && key.Agent == q.Agent {
@@ -953,9 +1110,12 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 				}
 			}
 		}
-		if g.head != "" {
-			offer := review.Offer{Agent: q.Agent, Source: "plugin", Plugin: ReviewProvider}
-			if why := review.Problem(records, k, &offer); why != "" {
+		if q.Missing {
+			r.State = WorkNotInstalled
+		}
+		if g.head != "" && !q.Missing {
+			offer := offerFor(w.cfg.RoleAgents, q.Agent)
+			if why, _ := review.Pooled(records, k, q.RunCount(), &offer); why != "" {
 				if r.Capped {
 					why = gate.CappedItem(q.Agent, rd.Count)
 				}
@@ -967,8 +1127,8 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 	return out, missing
 }
 
-func (w *Work) View(sid string) (GateView, error) {
-	g, err := w.current(sid)
+func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return GateView{}, err
 	}
@@ -982,18 +1142,44 @@ func (w *Work) View(sid string) (GateView, error) {
 		if g.reqWas && g.ws.req != nil {
 			c.Previous = g.ws.req.Text
 		}
+		if g.docs.held && g.ws.req != nil {
+			c.ApprovedAt = g.ws.req.Commit
+		}
+		v.Requirements = &c
+	} else if d := g.docs.baseReq; d != nil {
+		c := *d
+		c.OnBase, c.Changed = true, g.reqWas
+		v.Requirements = &c
+	} else if d := g.docs.shownReq; d != nil {
+		c := *d
+		c.Reported, c.Changed = true, g.reqWas
 		v.Requirements = &c
 	}
 	if d := g.docs.plan; d != nil {
 		c := *d
 		c.Approved, c.Changed = g.planOk, g.planWas
+		if g.docs.held && g.ws.plan != nil {
+			c.ApprovedAt = g.ws.plan.Commit
+		}
+		v.Plan = &c
+	} else if d := g.docs.basePlan; d != nil {
+		c := *d
+		c.OnBase, c.Changed = true, g.planWas
+		v.Plan = &c
+	} else if d := g.docs.shownPlan; d != nil {
+		c := *d
+		c.Reported, c.Changed = true, g.planWas
 		v.Plan = &c
 	}
 	feature := g.chosen.Profile() == workflow.Feature
 	v.Define = (feature && g.reqOk) || (!feature && g.docs.req != nil)
 	reviewers, missing := w.reviewerStates(g)
 	v.Reviewers = reviewers
-	v.Flagged, v.FlagsRead, v.LFS = g.flags, g.flagsRead, g.scan.lfs
+	v.Catalog, v.CatalogWhy = g.setup.setup.Catalog.State, g.setup.setup.Catalog.Reason
+	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
+	for _, p := range g.scan.lfs {
+		v.LFS = append(v.LFS, maskLines(p, true))
+	}
 	for _, r := range reviewers {
 		v.Handoff = v.Handoff || r.Capped
 	}
@@ -1007,9 +1193,13 @@ func (w *Work) View(sid string) (GateView, error) {
 	if !g.eff.Push {
 		v.Missing = append(v.Missing, "a work type that pushes, picked on the page")
 	}
+	lv, _ := w.cfg.Level(sid)
+	if item := gate.SandboxItem(lv); item != "" {
+		v.Missing = append(v.Missing, item)
+	}
 	v.Missing = append(v.Missing, missing...)
 	v.Allowed = len(v.Missing) == 0
-	f := w.facts(g)
+	f := w.facts(ctx, g)
 	v.Waiting = workflow.ImplementWait(workflow.Build{Profile: g.eff.Profile(), Head: g.head != "", PlanOk: g.planOk,
 		Built: g.built, Commits: len(g.files), CommitsRead: g.listed, NoBase: g.main == ""})
 	v.Holds = map[string]string{
@@ -1019,11 +1209,31 @@ func (w *Work) View(sid string) (GateView, error) {
 	}
 	if feature && v.Requirements != nil && !g.reqOk {
 		v.Holds["approveRequirements"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApproveRequirements, Hash: v.Requirements.Hash})
+		if v.Requirements.Reported {
+			v.Holds["approveRequirements"] = notCommitted("requirements")
+		}
+		if v.Requirements.OnBase {
+			v.Holds["approveRequirements"] = fromBase("requirements")
+		}
 	}
 	if v.Plan != nil && !g.planOk {
 		v.Holds["approvePlan"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApprovePlan, Hash: v.Plan.Hash})
+		if v.Plan.Reported {
+			v.Holds["approvePlan"] = notCommitted("plan")
+		}
+		if v.Plan.OnBase {
+			v.Holds["approvePlan"] = fromBase("plan")
+		}
 	}
 	return v, nil
+}
+
+func fromBase(what string) string {
+	return "This " + what + " text is from an earlier task, already on the base branch, so it isn't approvable here. The engine counts only text the session's own commits added or changed."
+}
+
+func notCommitted(what string) string {
+	return "This is the " + what + " text as the agent reported it, and it isn't committed on the session's branch. The engine counts an approval only of committed text, so ask the agent to commit it first."
 }
 
 func (w *Work) teamView(r Repository) TeamView {
@@ -1095,11 +1305,13 @@ func (w *Work) ApproveTeam(ctx context.Context, path, sha string) (TeamView, err
 		return TeamView{}, err
 	}
 	w.teamAudit(r.Name, AuditApproveTeam, sha)
-	w.cfg.Logger.Info("team file approved")
+	w.recheckProject(ctx, r.Name)
+	shared.For(ctx, w.cfg.Logger).Info("team file approved")
 	return w.teamView(r), nil
 }
 
 func (w *Work) ForgetTeam(path string) (TeamView, error) {
+	ctx := context.Background()
 	r, err := w.repoByPath(path)
 	if err != nil {
 		return TeamView{}, err
@@ -1114,6 +1326,7 @@ func (w *Work) ForgetTeam(path string) (TeamView, error) {
 	}
 	if forgotten != "" {
 		w.teamAudit(r.Name, AuditForgetTeam, forgotten)
+		w.recheckProject(ctx, r.Name)
 	}
 	w.cfg.Logger.Info("team file forgotten")
 	return w.teamView(r), nil
@@ -1146,7 +1359,7 @@ func (w *Work) Project(name string) ProjectInfo {
 	return out
 }
 
-func (w *Work) SetProject(path, op string, rounds int, kind string) error {
+func (w *Work) SetProject(ctx context.Context, path, op string, rounds int, kind string) error {
 	r, err := w.repoByPath(path)
 	if err != nil {
 		return err
@@ -1165,7 +1378,7 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 	default:
 		return explained(invalid("op"), "The engine keeps a project's review rounds and default work type only.")
 	}
-	return w.change(func(st *WorkState) error {
+	if err := w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]
 		if op == "rounds" {
 			p.Rounds = rounds
@@ -1174,20 +1387,67 @@ func (w *Work) SetProject(path, op string, rounds int, kind string) error {
 		}
 		st.Projects[r.Name] = p
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if op == "type" {
+		w.recheckProject(ctx, r.Name)
+	}
+	return nil
 }
 
-func (w *Work) scanOf(repo, base, head string) scanned {
+func (w *Work) recheckProject(ctx context.Context, name string) {
+	w.mu.Lock()
+	var sids []string
+	for sid, s := range w.sessions {
+		if s != nil && s.repo == name {
+			sids = append(sids, sid)
+		}
+	}
+	w.mu.Unlock()
+	for _, sid := range sids {
+		w.recheckApproval(ctx, sid)
+	}
+}
+
+func (w *Work) reviewedOn(branch, head string) []string {
+	if w.cfg.Reviews == nil {
+		return nil
+	}
+	entries, err := w.cfg.Reviews.Entries()
+	if err != nil {
+		return nil
+	}
+	latest := map[string]time.Time{}
+	for k, e := range entries {
+		if k.Branch != branch || k.Commit == head || e.Record.State != review.Pass && e.Record.State != review.Block {
+			continue
+		}
+		if at, ok := latest[k.Commit]; !ok || e.StartedAt.After(at) {
+			latest[k.Commit] = e.StartedAt
+		}
+	}
+	out := slices.Collect(maps.Keys(latest))
+	slices.SortFunc(out, func(a, b string) int {
+		if c := latest[b].Compare(latest[a]); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	return out[:min(len(out), maxReviewedTrees)]
+}
+
+func (w *Work) scanOf(ctx context.Context, repo, base, head string, reviewed []string) scanned {
 	if w.cfg.Contents == nil {
 		return scanned{}
 	}
-	key := repo + "\x00" + base + "\x00" + head
+	key := repo + "\x00" + base + "\x00" + head + "\x00" + strings.Join(reviewed, ",")
 	w.scanMu.Lock()
 	defer w.scanMu.Unlock()
 	if c, ok := w.scans[key]; ok {
 		return c
 	}
-	set, err := w.cfg.Contents.Pushed(repo, base, head, FlagBudget)
+	set, err := w.cfg.Contents.Pushed(ctx, repo, base, head, reviewed, FlagBudget)
 	if err != nil {
 		w.cfg.Logger.Warn("flag scan", "event", "unreadable")
 		return scanned{}
@@ -1202,49 +1462,68 @@ func (w *Work) scanOf(repo, base, head string) scanned {
 	return out
 }
 
-func (w *Work) flagged(sid, path string) (gathered, Flag, error) {
-	g, err := w.current(sid)
+func (w *Work) flagged(ctx context.Context, sid, path string) (gathered, Flag, error) {
+	g, err := w.current(ctx, sid)
 	if err != nil {
 		return g, Flag{}, err
 	}
 	for _, f := range g.flags {
-		if f.Path == path {
+		if f.Commit == "" && f.Path == path {
 			return g, f.Flag, nil
 		}
 	}
 	return g, Flag{}, explained(conflict("not flagged"), "That file isn't flagged on this branch any more.")
 }
 
-func (w *Work) AllowFile(sid, path, reason string) error {
+func (w *Work) flaggedCommit(ctx context.Context, sid, commit string, field CommitField) (gathered, Flag, error) {
+	g, err := w.current(ctx, sid)
+	if err != nil {
+		return g, Flag{}, err
+	}
+	for _, f := range g.flags {
+		if f.Commit != "" && f.Commit == commit && f.Field == field {
+			return g, f.Flag, nil
+		}
+	}
+	return g, Flag{}, explained(conflict("not flagged"), "That commit's "+FieldWords[field]+" isn't flagged on this branch any more.")
+}
+
+func (w *Work) allow(sid string, f Flag) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.sessions[sid]
+	if s == nil {
+		return explained(conflict("not started here"), "Only a session this engine started has flagged items here.")
+	}
+	if s.allowed == nil {
+		s.allowed = map[string]map[string]bool{}
+	}
+	set := s.allowed[f.key()]
+	if set == nil {
+		set = map[string]bool{}
+		s.allowed[f.key()] = set
+	}
+	for _, v := range f.Versions {
+		set[v] = true
+	}
+	return nil
+}
+
+func (w *Work) AllowFile(ctx context.Context, sid, path, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
 		return explained(invalid("reason"), "Allowing a flagged file needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
 	}
-	g, f, err := w.flagged(sid, path)
+	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
 	if f.Full || len(f.Versions) == 0 {
 		return explained(conflict("versions"), "This file has more than 20 flagged versions on the branch, the most the gate lists, so it can't be allowed. Take it out of the commits that hold it.")
 	}
-	w.mu.Lock()
-	s := w.sessions[sid]
-	if s == nil {
-		w.mu.Unlock()
-		return explained(conflict("not started here"), "Only a session this engine started has flagged files here.")
+	if err := w.allow(sid, f); err != nil {
+		return err
 	}
-	if s.allowed == nil {
-		s.allowed = map[string]map[string]bool{}
-	}
-	set := s.allowed[f.Path]
-	if set == nil {
-		set = map[string]bool{}
-		s.allowed[f.Path] = set
-	}
-	for _, v := range f.Versions {
-		set[v] = true
-	}
-	w.mu.Unlock()
 	w.persist(sid)
 	if w.cfg.Audit != nil {
 		e := AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: g.t.Name, Branch: g.t.Branch, Commit: g.head, By: ByPage, Kind: AuditAllowFile,
@@ -1257,15 +1536,15 @@ func (w *Work) AllowFile(sid, path, reason string) error {
 	return nil
 }
 
-func (w *Work) AskRemove(sid, path string) error {
+func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 	if w.cfg.Tell == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message.")
 	}
-	_, f, err := w.flagged(sid, path)
+	_, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
-	text := "The software factory's push gate flagged the file " + strconv.Quote(Escape([]byte(f.Path))) + " on this branch: " + f.Why + ". " +
+	text := "The software factory's push gate flagged the file " + strconv.Quote(f.Label()) + " on this branch: " + f.Why + ". " +
 		"Remove it from the branch: take it out of every commit on this branch that holds it, since deleting it in a new commit still pushes the earlier ones, " +
 		"and add it to .gitignore so it isn't committed again. Change nothing else, don't push, and tell me when it's done."
 	if err := w.cfg.Tell(sid, text); err != nil {
@@ -1275,6 +1554,61 @@ func (w *Work) AskRemove(sid, path string) error {
 		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
 	}
 	w.cfg.Logger.Info("flag", "event", "asked", "kind", string(f.Kind))
+	return nil
+}
+
+func (w *Work) AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error {
+	clean := gate.Reason(reason)
+	if clean == "" {
+		return explained(invalid("reason"), "Allowing a flagged commit needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
+	}
+	g, f, err := w.flaggedCommit(ctx, sid, commit, field)
+	if err != nil {
+		return err
+	}
+	if err := w.allow(sid, f); err != nil {
+		return err
+	}
+	w.persist(sid)
+	if w.cfg.Audit != nil {
+		e := AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: g.t.Name, Branch: g.t.Branch, Commit: g.head, By: ByPage, Kind: AuditAllowCommit,
+			Result: "allowed", Reason: "the developer allowed the " + FieldWords[f.Field] + " of commit " + f.Commit + ", flagged because " + f.Why, Blobs: []string{f.Commit}, PersonReason: clean}
+		if err := w.cfg.Audit.Append(e); err != nil {
+			w.cfg.Logger.Warn("flag", "event", "audit-not-written")
+		}
+	}
+	w.cfg.Logger.Info("flag", "event", "allowed", "kind", "commit", "field", string(f.Field))
+	return nil
+}
+
+func (w *Work) AskRewrite(ctx context.Context, sid, commit string, field CommitField) error {
+	if w.cfg.Tell == nil {
+		return explained(conflict("no session"), "This engine can't send the session a message.")
+	}
+	_, f, err := w.flaggedCommit(ctx, sid, commit, field)
+	if err != nil {
+		return err
+	}
+	how := "reword its message"
+	switch f.Field {
+	case FieldAuthorName, FieldAuthorEmail:
+		how = "set its author to the name and email you commit with"
+	case FieldCommitterName, FieldCommitterEmail:
+		how = "commit it again with the committer name and email you commit with"
+	case FieldHeaders:
+		how = "commit it again without the extra headers"
+	}
+	text := "The software factory's push gate flagged the " + FieldWords[f.Field] + " of commit " + f.Commit + " on this branch: " + f.Why + ". " +
+		"Rewrite that commit so its " + FieldWords[f.Field] + " no longer holds it: " + how + ", and keep every file as it is. " +
+		"Rewrite only commits that aren't on the remote branch yet, since the engine never forces a push; if this one is already there, don't rewrite it and tell me, since only the developer can allow it then. " +
+		"Don't repeat the flagged text anywhere, change nothing else, don't push, and tell me when it's done."
+	if err := w.cfg.Tell(sid, text); err != nil {
+		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
+			return e
+		}
+		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
+	}
+	w.cfg.Logger.Info("flag", "event", "asked-rewrite", "field", string(f.Field))
 	return nil
 }
 

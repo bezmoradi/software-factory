@@ -14,6 +14,7 @@ type Adapter struct {
 	Agents        map[review.Role]string
 	Artifacts     map[Step][]string
 	RootArtifacts map[Step][]string
+	AnyFolder     string
 	Documents     Documents
 }
 
@@ -31,6 +32,13 @@ var Adapters = map[AdapterID]Adapter{
 	Knackpack: {
 		Commands: map[Step]string{Define: "/knackpack:challenge-requirements", Plan: "/knackpack:plan-implementation", Review: "/knackpack:handoff"},
 		Agents:   defaultAgents,
+		Artifacts: map[Step][]string{
+			Define: {"REQUIREMENTS.md"},
+			Plan:   {"PLAN.md"},
+		},
+		RootArtifacts: map[Step][]string{Define: {KnackpackFeature}, Plan: {KnackpackFeature}},
+		AnyFolder:     ".knackpack/*",
+		Documents:     Documents{Feature: KnackpackFeature, Requirements: "REQUIREMENTS.md", Plan: "PLAN.md"},
 	},
 	SpecKit: {
 		Commands: map[Step]string{Define: "/speckit-specify", Plan: "/speckit-plan", Tasks: "/speckit-tasks", Implement: "/speckit-implement"},

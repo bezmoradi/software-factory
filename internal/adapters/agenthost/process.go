@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
@@ -341,15 +343,7 @@ func (c *capped) Write(p []byte) (int, error) {
 }
 
 func (s *Server) run(ctx context.Context, q commandJSON) (runReply, *problem) {
-	timeout := DefaultRunTimeout
-	longest := MaxRunTimeout
-	if s.cfg.Review {
-		longest = ReviewRunTimeout
-	}
-	if q.TimeoutMs > 0 {
-		timeout = min(time.Duration(q.TimeoutMs)*time.Millisecond, longest)
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, s.runTimeout(q))
 	defer cancel()
 	cmd, p := s.prepare(ctx, q)
 	if p != nil {
@@ -381,6 +375,6 @@ func (s *Server) run(ctx context.Context, q commandJSON) (runReply, *problem) {
 	if err != nil && !errors.As(err, &exitErr) && !errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
 		return runReply{}, fail(http.StatusUnprocessableEntity, "start", "The command couldn't start.")
 	}
-	s.log.Info("agent-host run", "command", filepath.Base(q.Argv[0]), "exit", code)
+	shared.For(ctx, s.log).Info("agent-host run", "command", filepath.Base(q.Argv[0]), "exit", code)
 	return runReply{Code: code, Stdout: string(stdout.buf), Stderr: string(stderr.buf), TimedOut: ctx.Err() != nil}, nil
 }

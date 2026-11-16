@@ -22,7 +22,7 @@ var fileReviewers = []fileReviewer{
 
 var (
 	docFile         = regexp.MustCompile(`(?i)\.(md|markdown|rst|adoc)$|(^|/)(LICENSE|NOTICE|AUTHORS|CONTRIBUTORS|COPYING|README|CHANGELOG|CHANGES|HISTORY)(\.(md|markdown|txt|rst|adoc))?$`)
-	instructionFile = regexp.MustCompile(`(?i)(^|/)(\.claude|\.codex|\.agents?|agents|skills|commands|rules|prompts)/|(^|/)(CLAUDE|AGENTS)(\.[^/]*)?\.md$`)
+	instructionFile = regexp.MustCompile(`(?i)(^|/)(\.claude|\.codex|\.agents?|agents|skills|commands|rules|prompts|\.github/instructions)/|(^|/)(CLAUDE|AGENTS|GEMINI)(\.[^/]*)?\.md$|(^|/)\.github/copilot-instructions\.md$|(^|/)\.(cursor|windsurf)rules$`)
 )
 
 func DocFile(path string) bool {

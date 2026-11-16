@@ -22,6 +22,7 @@ const (
 	maxCommitObject = 1 << 20
 	maxTagObject    = 1 << 20
 	maxKeptMessage  = 4 << 10
+	maxParents      = 256
 )
 
 type entry struct {
@@ -63,6 +64,9 @@ func parseCommit(sha string, data []byte) (push.Commit, error) {
 		}
 		if !validSHA(string(p)) {
 			return push.Commit{}, bad
+		}
+		if len(c.Parents) >= maxParents {
+			return push.Commit{}, fmt.Errorf("%w: commit %s has more than %d parents, more than the engine reads in one commit", push.ErrTooLarge, sha, maxParents)
 		}
 		c.Parents = append(c.Parents, string(p))
 	}
@@ -202,6 +206,12 @@ func (r *repo) heldTree(sha string) ([]entry, func(), error) {
 		return nil, nil, err
 	}
 	return list, release, nil
+}
+
+func (r *repo) blobWithin(sha string, limit, baseLimit int64, inter *int64) ([]byte, error) {
+	r.store.cap, r.store.baseCap, r.store.inter = limit, baseLimit, inter
+	defer func() { r.store.cap, r.store.baseCap, r.store.inter = 0, 0, nil }()
+	return r.blob(sha)
 }
 
 func (r *repo) blob(sha string) ([]byte, error) {

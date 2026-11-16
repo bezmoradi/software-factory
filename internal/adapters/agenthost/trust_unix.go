@@ -115,6 +115,11 @@ func (s *Server) answerTrust(parent context.Context, q commandJSON, answer bool)
 				if !press("\r") {
 					return false, stuck()
 				}
+			case screenRenderer:
+				time.Sleep(keyPause)
+				if !press("\x1b[B", "\r") {
+					return false, stuck()
+				}
 			case screenQuestion:
 				if !answer {
 					return true, nil

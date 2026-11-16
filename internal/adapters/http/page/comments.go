@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const commentsRoute = "/comments-request"
@@ -30,6 +31,6 @@ func (s *Server) commentsRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.ForgeFor + writeFor))
 	answer := s.cfg.Forge.Comments(context.WithoutCancel(r.Context()), sid)
-	s.logger.Info("review comments request", "side", "agent", "result", answer.Result)
+	shared.For(r.Context(), s.logger).Info("review comments request", "side", "agent", "result", answer.Result)
 	send(w, http.StatusOK, map[string]string{"result": answer.Result, "reason": answer.Reason})
 }

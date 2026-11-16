@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
@@ -53,6 +54,7 @@ var (
 	errBinary  = errors.New("binary")
 	errMissing = errors.New("missing")
 	errLink    = errors.New("link")
+	errCommit  = errors.New("commit")
 )
 
 func hiddenPath(parts []string) bool {
@@ -82,26 +84,23 @@ func (c *checkout) Close() { _ = c.root.Close() }
 
 func (s *Server) checkout(sid string) (*checkout, error) {
 	dir, ok := s.reg.Worktree(sid)
-	if !ok || s.cfg.Workspace == "" {
+	if !ok {
 		return nil, errOutside
 	}
-	worktrees := filepath.Join(s.cfg.Workspace, "worktrees")
-	if filepath.Dir(dir) != worktrees || !worktreeName.MatchString(filepath.Base(dir)) {
+	return openCheckout(s.cfg.OpenTree, s.cfg.Workspace, dir)
+}
+
+var boxWorktree = regexp.MustCompile(`^/.+?/` + session.BoxesFolder + `/([0-9a-f]{16})/worktrees/(sf-[0-9a-f]{8})$`)
+
+func openCheckout(open func(string) (*os.Root, error), workspace, dir string) (*checkout, error) {
+	if workspace == "" || open == nil {
 		return nil, errOutside
 	}
-	ws, err := os.OpenRoot(s.cfg.Workspace)
-	if err != nil {
+	m := boxWorktree.FindStringSubmatch(dir)
+	if m == nil || !worktreeName.MatchString(m[2]) || dir != session.BoxWorktree(workspace, m[1], m[2]) {
 		return nil, errOutside
 	}
-	defer func() { _ = ws.Close() }()
-	rel := path.Join("worktrees", filepath.Base(dir))
-	for _, p := range []string{"worktrees", rel} {
-		info, err := ws.Lstat(p)
-		if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			return nil, errOutside
-		}
-	}
-	root, err := ws.OpenRoot(rel)
+	root, err := open(dir)
 	if err != nil {
 		return nil, errOutside
 	}
@@ -381,7 +380,7 @@ func (c *checkout) same(list []string, name string, size int64, sum string) stri
 }
 
 func fileError(err error) string {
-	for _, e := range []error{errOutside, errSecret, errLarge, errBinary, errLink} {
+	for _, e := range []error{errOutside, errSecret, errLarge, errBinary, errLink, errCommit} {
 		if errors.Is(err, e) {
 			return e.Error()
 		}
@@ -392,13 +391,17 @@ func fileError(err error) string {
 func (s *Server) files(w http.ResponseWriter, route string, body map[string]any) {
 	sid := str(body["sid"], 80)
 	allowed := map[string][]string{
-		"/api/file":       {"sid", "path"},
-		"/api/file-check": {"sid", "paths"},
+		"/api/file":       {"sid", "path", "commit"},
+		"/api/file-check": {"sid", "paths", "commit"},
 		"/api/files":      {"sid", "q"},
 		"/api/file-match": {"sid", "name", "size", "sha256"},
 	}
 	if !keysWithin(body, allowed[route]...) || sid == "" {
 		refuse(w, http.StatusBadRequest, "fields")
+		return
+	}
+	if _, ok := body["commit"]; ok {
+		s.commitFiles(w, route, sid, body)
 		return
 	}
 	c, err := s.checkout(sid)
@@ -461,5 +464,125 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 		}
 		s.logger.Info("file match")
 		send(w, http.StatusOK, map[string]string{"path": c.same(s.lists.of(c).list, name, size, sum)})
+	}
+}
+
+func commitPath(given string) (string, error) {
+	if given == "" || len(given) > maxFilePath || strings.ContainsAny(given, "\x00\r\n\\") || !utf8.ValidString(given) {
+		return "", errMissing
+	}
+	if strings.HasPrefix(given, "/") {
+		return "", errOutside
+	}
+	rel := path.Clean(given)
+	if rel != given || !filepath.IsLocal(rel) || rel == "." || slices.Contains(strings.Split(rel, "/"), "..") {
+		return "", errOutside
+	}
+	if hiddenPath(strings.Split(rel, "/")) {
+		return "", errSecret
+	}
+	return rel, nil
+}
+
+func shownAt(f push.File, err error) (string, error) {
+	switch {
+	case errors.Is(err, push.ErrTooLarge):
+		return "", errLarge
+	case err != nil:
+		return "", errMissing
+	case f.Mode == push.ModeSymlink:
+		return "", errLink
+	case f.Mode != push.ModeFile && f.Mode != push.ModeExecutable:
+		return "", errMissing
+	case len(f.Data) > MaxFileShown:
+		return "", errLarge
+	case bytes.IndexByte(f.Data, 0) >= 0:
+		return "", errBinary
+	}
+	return strings.ToValidUTF8(string(f.Data), "�"), nil
+}
+
+func (s *Server) commitTexts(sid, commit string, given []string) ([]string, []string, []error) {
+	rels := make([]string, len(given))
+	errs := make([]error, len(given))
+	texts := make([]string, len(given))
+	var asked []string
+	var at []int
+	for i, g := range given {
+		if rels[i], errs[i] = commitPath(g); errs[i] == nil {
+			asked = append(asked, rels[i])
+			at = append(at, i)
+		}
+	}
+	if len(asked) == 0 {
+		return rels, texts, errs
+	}
+	reads, err := s.cfg.Work.ReviewedFiles(sid, commit, asked, MaxFileShown)
+	for k, i := range at {
+		switch {
+		case err != nil:
+			errs[i] = errCommit
+		case k < len(reads):
+			texts[i], errs[i] = shownAt(reads[k].File, reads[k].Err)
+		default:
+			errs[i] = errMissing
+		}
+	}
+	return rels, texts, errs
+}
+
+func (s *Server) commitFiles(w http.ResponseWriter, route, sid string, body map[string]any) {
+	commit, ok := body["commit"].(string)
+	if !ok || !commitHex.MatchString(commit) {
+		refuse(w, http.StatusBadRequest, "commit")
+		return
+	}
+	if s.cfg.Work == nil {
+		if route == "/api/file" {
+			send(w, http.StatusUnprocessableEntity, problem{Error: errCommit.Error()})
+			return
+		}
+		refuse(w, http.StatusConflict, "unverified")
+		return
+	}
+	switch route {
+	case "/api/file":
+		given, ok := body["path"].(string)
+		if !ok || given == "" || len(given) > maxFilePath {
+			refuse(w, http.StatusBadRequest, "path")
+			return
+		}
+		rels, texts, errs := s.commitTexts(sid, commit, []string{given})
+		s.logger.Info("file read", "ok", errs[0] == nil, "at", "commit")
+		if errs[0] != nil {
+			send(w, http.StatusUnprocessableEntity, problem{Error: fileError(errs[0])})
+			return
+		}
+		send(w, http.StatusOK, map[string]string{"path": rels[0], "text": texts[0], "commit": commit})
+	case "/api/file-check":
+		list, ok := body["paths"].([]any)
+		if !ok || len(list) == 0 || len(list) > maxChecked {
+			refuse(w, http.StatusBadRequest, "paths")
+			return
+		}
+		paths := make([]string, 0, len(list))
+		for _, v := range list {
+			p, ok := v.(string)
+			if !ok || p == "" || len(p) > maxFilePath {
+				refuse(w, http.StatusBadRequest, "paths")
+				return
+			}
+			paths = append(paths, p)
+		}
+		_, _, errs := s.commitTexts(sid, commit, paths)
+		found := []string{}
+		for i, p := range paths {
+			if errs[i] == nil {
+				found = append(found, p)
+			}
+		}
+		send(w, http.StatusOK, map[string]any{"found": found})
+	default:
+		refuse(w, http.StatusBadRequest, "fields")
 	}
 }

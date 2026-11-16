@@ -1,12 +1,12 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el } from '../lib/dom.ts'
 import { icon } from './icon.ts'
-import './accordion.ts'
-import type { AgentLogin, SignInState } from './login.ts'
+import type { SignInState } from './login.ts'
 
 export interface SetupState {
   signIn: SignInState | null
   projects: number | null
   sessions: number
+  identity: boolean | null
 }
 
 interface Step {
@@ -18,68 +18,8 @@ interface Step {
   rows?: HTMLElement
 }
 
-const VENDORS: Record<string, string> = { claude: 'Anthropic', codex: 'OpenAI' }
-
-function stateWords(a: AgentLogin): string {
-  if (a.signedIn === true) return 'Signed in'
-  if (a.signedIn === false) return 'Not signed in'
-  return 'Couldn’t be checked'
-}
-
-function agentPanel(a: AgentLogin): HTMLElement {
-  const panel = el('div', 'setup-agent-panel')
-  if (a.signedIn) {
-    panel.append(el('p', 'small muted', `${visible(a.name)} is signed in.`))
-    return panel
-  }
-  if (a.id === 'claude') {
-    panel.append(el('p', 'small muted', 'Sign in with a Claude subscription or an API key from the Claude Console.'))
-    const go = button('Sign in', 'primary small')
-    go.dataset.start = 'login'
-    panel.append(go)
-    return panel
-  }
-  if (a.step.startsWith('docker compose ')) {
-    panel.append(el('p', 'small muted', 'Run this in a terminal, in the Software Factory folder, then open the link it prints and enter the code it shows.'))
-    const block = el('div', 'setup-code')
-    const copy = button('', 'setup-copy', () => {
-      void navigator.clipboard.writeText(a.step).then(() => {
-        copy.replaceChildren(icon('check'))
-        copy.setAttribute('aria-label', 'Copied')
-        copy.title = 'Copied'
-        setTimeout(() => {
-          copy.replaceChildren(icon('copy'))
-          copy.setAttribute('aria-label', 'Copy the command')
-          copy.title = 'Copy'
-        }, 1500)
-      }, () => { copy.title = 'Couldn’t copy: select the command and copy it' })
-    })
-    copy.append(icon('copy'))
-    copy.setAttribute('aria-label', 'Copy the command')
-    copy.title = 'Copy'
-    block.append(el('code', '', visible(a.step)), copy)
-    panel.append(block)
-    return panel
-  }
-  if (a.step) panel.append(el('p', 'small muted', visible(a.step)))
-  return panel
-}
-
 class SfSetup extends HTMLElement {
   #key = ''
-  readonly #agents = el('sf-accordion', 'setup-agents')
-
-  #agentList(agents: AgentLogin[]): HTMLElement {
-    this.#agents.items = agents.map(a => ({
-      id: a.id,
-      title: visible(a.name),
-      note: VENDORS[a.id] ?? '',
-      state: stateWords(a),
-      good: a.signedIn === true,
-      panel: agentPanel(a),
-    }))
-    return this.#agents
-  }
 
   set state(v: SetupState) {
     const key = JSON.stringify(v)
@@ -93,20 +33,16 @@ class SfSetup extends HTMLElement {
       this.hidden = true
       return
     }
-    const agents = v.signIn.agents
     const steps: Step[] = [
       {
-        title: 'Sign an agent in',
-        done: agents.some(a => a.signedIn === true),
-        why: agents.length
-          ? 'Sessions run on your own account with each agent’s vendor. One agent is enough to start; open one to sign it in.'
-          : 'No agent is switched on in this engine.',
-        rows: agents.length ? this.#agentList(agents) : undefined,
+        title: 'You’ll sign in to each session when you start it',
+        done: true,
+        why: 'Each session runs in its own container, on your own account with its agent’s vendor.',
       },
       {
         title: 'Sign the reviewers in',
         done: v.signIn.reviewers === true,
-        why: 'Every push waits for reviews, which run on Claude Code in the reviewers’ own container, signed in separately from the agents.',
+        why: 'Every push waits for reviews, which run on Claude Code in short-lived reviewer containers of their own, signed in separately from the agents.',
         action: 'Sign Claude Code in',
         start: 'login',
       },
@@ -117,6 +53,13 @@ class SfSetup extends HTMLElement {
         action: 'Add project',
         start: 'add',
       },
+      ...(v.identity === null ? [] : [{
+        title: 'Set the name and email agents commit with',
+        done: v.identity,
+        why: 'No session starts until they are set: an agent with none may commit with the email of its sign-in, which a push makes public. For GitHub, use your noreply address.',
+        action: 'Set name and email',
+        start: 'identity',
+      }]),
       {
         title: 'Start a session',
         done: v.sessions > 0,

@@ -22,6 +22,7 @@ const (
 	maxDisplay   = 80
 	maxPath      = 1000
 	maxRelPath   = 4096
+	maxAside     = 200
 )
 
 var (
@@ -53,14 +54,32 @@ type runJSON struct {
 	Name      string    `json:"name"`
 	Branch    string    `json:"branch"`
 	Cwd       string    `json:"cwd"`
+	Box       string    `json:"box,omitempty"`
 	Display   string    `json:"display,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	Sandboxed bool      `json:"sandboxed,omitempty"`
 
 	InterruptedAt  time.Time `json:"interruptedAt,omitzero"`
+	InTurnSince    time.Time `json:"inTurnSince,omitzero"`
 	AgentVersion   string    `json:"agentVersion,omitempty"`
 	EngineVersion  string    `json:"engineVersion,omitempty"`
 	WorkflowCommit string    `json:"workflowCommit,omitempty"`
+	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
+	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
+
+	CodexThread string `json:"codexThread,omitempty"`
+
+	Origin     string      `json:"origin,omitempty"`
+	Earlier    []stintJSON `json:"earlier,omitempty"`
+	HandedTo   string      `json:"handedTo,omitempty"`
+	HandedHead string      `json:"handedHead,omitempty"`
+
+	Group       string `json:"group,omitempty"`
+	GroupKind   string `json:"groupKind,omitempty"`
+	HistoryOnly bool   `json:"historyOnly,omitempty"`
+	RmDone      bool   `json:"rmDone,omitempty"`
+	Aside       string `json:"aside,omitempty"`
+	Owner       string `json:"owner,omitempty"`
 }
 
 type sessionsJSON struct {
@@ -93,7 +112,8 @@ func runOf(r runJSON) (session.SavedRun, bool) {
 	}
 	return session.SavedRun{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 		Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt, Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt,
-		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID)}, true
+		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
+		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)}, true
 }
 
 func (s Sessions) Load() ([]session.SavedRun, error) {
@@ -110,9 +130,20 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 	seen := map[string]bool{}
 	for _, r := range f.Sessions {
 		v, ok := runOf(r)
+		v.CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		if !ok || seen[v.SID] || len(out) >= maxSessions {
 			continue
 		}
+		v.InTurnSince = r.InTurnSince
+		v.HistoryOnly = r.HistoryOnly
+		v.RmDone = r.RmDone
+		if cleanText(r.Aside, maxAside) {
+			v.Aside = r.Aside
+		}
+		if session.ValidBox(r.Box) {
+			v.Box = r.Box
+		}
+		lineageInto(&v, r)
 		seen[v.SID] = true
 		out = append(out, v)
 	}
@@ -120,12 +151,25 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 }
 
 func (s Sessions) Save(runs []session.SavedRun) error {
+	owner := ownerIn(s.Dir)
 	defer s.lock()()
 	f := sessionsJSON{Version: 1, Sessions: make([]runJSON, 0, len(runs))}
 	for _, r := range runs {
-		f.Sessions = append(f.Sessions, runJSON{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
+		f.Sessions = append(f.Sessions, runJSON{Owner: owner, SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
-			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID)})
+			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
+			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
+		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
+		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
+		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
+		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
+		f.Sessions[len(f.Sessions)-1].RmDone = r.RmDone
+		if cleanText(r.Aside, maxAside) {
+			f.Sessions[len(f.Sessions)-1].Aside = r.Aside
+		}
+		if session.ValidBox(r.Box) {
+			f.Sessions[len(f.Sessions)-1].Box = r.Box
+		}
 	}
 	return write(s.Dir, sessionsFile, f)
 }

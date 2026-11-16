@@ -15,12 +15,17 @@ const (
 )
 
 const (
-	methodInitialize    = "initialize"
-	methodInitialized   = "initialized"
-	methodAccountRead   = "account/read"
-	methodThreadStart   = "thread/start"
-	methodTurnStart     = "turn/start"
-	methodTurnInterrupt = "turn/interrupt"
+	methodInitialize     = "initialize"
+	methodInitialized    = "initialized"
+	methodAccountRead    = "account/read"
+	methodRateLimitsRead = "account/rateLimits/read"
+	methodThreadStart    = "thread/start"
+	methodThreadResume   = "thread/resume"
+	methodThreadRead     = "thread/read"
+	methodTurnStart      = "turn/start"
+	methodTurnSteer      = "turn/steer"
+	methodTurnInterrupt  = "turn/interrupt"
+	methodModelList      = "model/list"
 
 	methodCommandApproval   = "item/commandExecution/requestApproval"
 	methodFileApproval      = "item/fileChange/requestApproval"
@@ -85,7 +90,6 @@ var quietNotifications = map[string]bool{
 	methodMcpProgress:       true,
 	methodTurnDiff:          true,
 	methodAccountUpdated:    true,
-	methodRateLimits:        true,
 	methodMcpStartup:        true,
 	methodWarning:           true,
 	methodConfigWarning:     true,
@@ -144,11 +148,33 @@ type initializeParams struct {
 }
 
 type threadStartParams struct {
+	Model             string                     `json:"model,omitempty"`
 	Cwd               string                     `json:"cwd"`
 	ApprovalPolicy    string                     `json:"approvalPolicy"`
 	ApprovalsReviewer string                     `json:"approvalsReviewer"`
 	Sandbox           string                     `json:"sandbox"`
 	Config            map[string]json.RawMessage `json:"config,omitempty"`
+}
+
+type threadResumeParams struct {
+	ThreadID     string `json:"threadId"`
+	ExcludeTurns bool   `json:"excludeTurns"`
+	threadStartParams
+}
+
+type threadReadParams struct {
+	ThreadID string `json:"threadId"`
+}
+
+type threadReply struct {
+	Thread struct {
+		ID string `json:"id"`
+	} `json:"thread"`
+	ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+	ApprovalsReviewer json.RawMessage `json:"approvalsReviewer"`
+	Sandbox           struct {
+		Type string `json:"type"`
+	} `json:"sandbox"`
 }
 
 type textInput struct {
@@ -167,6 +193,14 @@ type turnStartParams struct {
 	Input             []any  `json:"input"`
 	ApprovalPolicy    string `json:"approvalPolicy"`
 	ApprovalsReviewer string `json:"approvalsReviewer"`
+	Model             string `json:"model,omitempty"`
+	Effort            string `json:"effort,omitempty"`
+}
+
+type turnSteerParams struct {
+	ThreadID       string `json:"threadId"`
+	Input          []any  `json:"input"`
+	ExpectedTurnID string `json:"expectedTurnId"`
 }
 
 type turnInterruptParams struct {
@@ -198,8 +232,12 @@ type legacyReply struct {
 	} `json:"decision"`
 }
 
+type userInputAnswer struct {
+	Answers []string `json:"answers"`
+}
+
 type userInputReply struct {
-	Answers map[string]struct{} `json:"answers"`
+	Answers map[string]userInputAnswer `json:"answers"`
 }
 
 var errLineTooLong = errors.New("codex: line over the limit")

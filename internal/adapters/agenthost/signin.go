@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 type signInJSON struct {
@@ -16,14 +18,19 @@ type signInJSON struct {
 }
 
 type signInReply struct {
-	Method   string `json:"method"`
-	Endpoint string `json:"endpoint,omitempty"`
+	Method    string `json:"method"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	Plan      string `json:"plan,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 type claudeStatus struct {
-	LoggedIn    bool   `json:"loggedIn"`
-	AuthMethod  string `json:"authMethod"`
-	APIProvider string `json:"apiProvider"`
+	LoggedIn         bool    `json:"loggedIn"`
+	AuthMethod       string  `json:"authMethod"`
+	APIProvider      string  `json:"apiProvider"`
+	LoginExpiresAt   *string `json:"loginExpiresAt"`
+	PlanTier         *string `json:"planTier"`
+	SubscriptionType *string `json:"subscriptionType"`
 }
 
 const firstPartyHost = "api.anthropic.com"
@@ -59,7 +66,23 @@ func ClaudeSignIn(jsonOut, textOut string) session.SignIn {
 	default:
 		out.Method = session.SignInUnknown
 	}
+	if out.Method == session.SignInSubscription {
+		out.Plan = session.CleanPlan(planOf(st))
+		if st.LoginExpiresAt != nil {
+			out.ExpiresAt = session.CleanExpiry(*st.LoginExpiresAt)
+		}
+	}
 	return out
+}
+
+func planOf(st claudeStatus) string {
+	if st.PlanTier != nil && *st.PlanTier != "" {
+		return *st.PlanTier
+	}
+	if st.SubscriptionType != nil {
+		return *st.SubscriptionType
+	}
+	return ""
 }
 
 func lastObject(s string) string {
@@ -130,8 +153,15 @@ func (s *Server) signIn(ctx context.Context, q signInJSON) (signInReply, *proble
 	default:
 		return signInReply{}, fail(http.StatusBadRequest, "kind", "")
 	}
-	s.log.Info("agent-host sign-in", "kind", q.Kind, "method", string(res.Method))
-	return signInReply{Method: string(res.Method), Endpoint: res.Endpoint}, nil
+	shared.For(ctx, s.log).Info("agent-host sign-in", "kind", q.Kind, "method", string(res.Method))
+	return signInReply{Method: string(res.Method), Endpoint: res.Endpoint, Plan: res.Plan, ExpiresAt: expiryText(res.ExpiresAt)}, nil
+}
+
+func expiryText(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 var _ session.SignInChecker = (*Client)(nil)
@@ -141,5 +171,9 @@ func (c *Client) SignIn(ctx context.Context, cmd session.Command, kind string) (
 	if err := c.call(ctx, http.MethodPost, "/v1/sign-in", signInJSON{commandJSON: wire(cmd), Kind: kind}, &out); err != nil {
 		return session.SignIn{}, err
 	}
-	return session.SignIn{Method: session.MethodOf(out.Method), Endpoint: session.CleanEndpoint(out.Endpoint)}, nil
+	in := session.SignIn{Method: session.MethodOf(out.Method), Endpoint: session.CleanEndpoint(out.Endpoint)}
+	if in.Method == session.SignInSubscription {
+		in.Plan, in.ExpiresAt = session.CleanPlan(out.Plan), session.CleanExpiry(out.ExpiresAt)
+	}
+	return in, nil
 }

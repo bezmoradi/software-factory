@@ -5,16 +5,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/net/netutil"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
+	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
@@ -27,7 +30,6 @@ type AgentHostConfig struct {
 	Git          string
 	MaxProcesses int
 	Review       bool
-	KeyFile      string
 }
 
 func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostConfig, error) {
@@ -38,15 +40,14 @@ func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostC
 		return fallback
 	}
 	fs := flag.NewFlagSet("agent-host", flag.ContinueOnError)
-	listen := fs.String("listen", env("SF_AGENT_HOST_LISTEN", ":8090"), "control and stdio listen address on the agent network")
+	listen := fs.String("listen", env("SF_AGENT_HOST_LISTEN", "127.0.0.1:8090"), "control and stdio listen address: loopback unless set, and Compose sets :8090 for the container networks")
 	workspace := fs.String("workspace", env("SF_WORKSPACE", ""), "the workspace folder: repositories in repos/, worktrees in worktrees/")
 	agentsBin := fs.String("agents-bin", env("SF_AGENTS_BIN", DefaultAgentsDir+"/bin"), "the installed agents' folder, put first on their PATH, or off")
 	socket := fs.String("plugin-socket", env(agenthost.SocketVariable, agenthost.DefaultSocket), "the plugin's Unix socket, or off")
 	engine := fs.String("engine", env("SF_ENGINE_AGENT_ADDRESS", "engine:8081"), "the engine's agent listener, host:port")
 	git := fs.String("git", env("SF_GIT", "git"), "the git program for worktrees")
 	maxProcs := fs.String("max-processes", env("SF_AGENT_HOST_MAX_PROCESSES", strconv.Itoa(agenthost.DefaultMaxProcs)), "most agent processes at once")
-	mode := fs.String("mode", env("SF_AGENT_HOST_MODE", "agent"), "agent, or review in the reviewer container")
-	keyFile := fs.String("key-file", env("SF_AGENT_HOST_KEY_FILE", ""), "a file holding the key every request but /healthz must carry, written by the engine; empty for none")
+	mode := fs.String("mode", env("SF_AGENT_HOST_MODE", "agent"), "agent, or review in a reviewer container, which takes its key once from the engine")
 	if err := fs.Parse(args); err != nil {
 		return AgentHostConfig{}, err
 	}
@@ -77,12 +78,6 @@ func ParseAgentHostConfig(args []string, getenv func(string) string) (AgentHostC
 		}
 		cfg.AgentsBin = filepath.Clean(*agentsBin)
 	}
-	if *keyFile != "" {
-		if !filepath.IsAbs(*keyFile) {
-			return AgentHostConfig{}, errors.New("agent-host: -key-file must be an absolute path")
-		}
-		cfg.KeyFile = filepath.Clean(*keyFile)
-	}
 	if *socket != "off" && !cfg.Review {
 		if !filepath.IsAbs(*socket) || len(*socket) > agenthost.MaxSocketPath {
 			return AgentHostConfig{}, fmt.Errorf("agent-host: the plugin socket must be an absolute path of at most %d bytes, or off", agenthost.MaxSocketPath)
@@ -105,7 +100,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 	}
 	host, err := agenthost.New(agenthost.Config{
 		Workspace: cfg.Workspace, AgentsBin: cfg.AgentsBin, PluginSocket: cfg.PluginSocket, Git: cfg.Git, MaxProcesses: cfg.MaxProcesses,
-		Review: cfg.Review, KeyFile: cfg.KeyFile, Environ: os.Environ(), Logger: logger,
+		Review: cfg.Review, Environ: os.Environ(), Logger: logger,
 	})
 	if err != nil {
 		return err
@@ -133,7 +128,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 		go func() { errs <- agenthost.ServeRelay(ctx, sock, relay) }()
 	}
 	srv := &http.Server{
-		Handler:           host.Handler(),
+		Handler:           bodyDeadline(host.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 		MaxHeaderBytes:    16 << 10,
@@ -172,5 +167,32 @@ func ServeMCP(ctx context.Context, args []string) error {
 		socket = agenthost.DefaultSocket
 	}
 	ask := agenthost.SocketAsker(socket, os.Getenv("SF_PUSH_TOKEN"))
-	return agenthost.NewMCP(ask, Version, os.Stdout).Serve(ctx, os.Stdin)
+	return agenthost.NewMCP(ask, Version, os.Stdout).Screenshots(os.Getenv(session.ScreenshotsVariable)).Serve(ctx, os.Stdin)
+}
+
+const bodyFor = 30 * time.Second
+
+func bodyDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Body != http.NoBody {
+			rc := http.NewResponseController(w)
+			_ = rc.SetReadDeadline(time.Now().Add(bodyFor))
+			r.Body = &deadlineBody{ReadCloser: r.Body, rc: rc}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type deadlineBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	once sync.Once
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.once.Do(func() { _ = b.rc.SetReadDeadline(time.Time{}) })
+	}
+	return n, err
 }

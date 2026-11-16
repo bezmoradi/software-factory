@@ -131,9 +131,9 @@ func (p *Plugins) PluginPath(id string) (string, error) {
 	case running:
 		return "", fmt.Errorf("the engine is installing %s %s into the agents volume; try again once it's done", pl.Name, pl.Version)
 	case failed != "":
-		return "", fmt.Errorf("%s %s isn't installed: %s Run docker compose exec engine software-factory install-agents to try again", pl.Name, pl.Version, failed)
+		return "", fmt.Errorf("%s %s isn't installed: %s Run %s exec engine software-factory install-agents to try again", pl.Name, pl.Version, failed, session.Compose())
 	}
-	return "", fmt.Errorf("%s %s isn't installed yet; run docker compose exec engine software-factory install-agents", pl.Name, pl.Version)
+	return "", fmt.Errorf("%s %s isn't installed yet; run %s exec engine software-factory install-agents", pl.Name, pl.Version, session.Compose())
 }
 
 func (p *Plugins) InstallMissing(ctx context.Context, report func(string)) error {
@@ -192,6 +192,7 @@ func (p *Plugins) install(ctx context.Context, pl Plugin, report func(string)) e
 		return err
 	}
 	defer unlock()
+	removeLeftovers(base)
 	if p.Installed(pl.ID) {
 		report(fmt.Sprintf("%s %s is already installed.", pl.Name, pl.Version))
 		return nil

@@ -18,13 +18,14 @@ import (
 const (
 	binDir    = ".sf-dev/bin"
 	binName   = "software-factory"
-	image     = "software-factory:local"
 	pollEvery = 500 * time.Millisecond
 	settle    = 300 * time.Millisecond
 )
 
 var (
 	compose  = []string{"compose", "-f", "compose.yaml", "-f", "compose.live.yaml"}
+	images   = []string{"software-factory:local", "software-factory:dev"}
+	live     = []string{"engine", "egress"}
 	roots    = []string{"cmd", "configs", "internal", "tools", "web", "go.mod", "go.sum", "README.md", "compose.yaml", "plugin", "Dockerfile"}
 	skipDirs = map[string]bool{"node_modules": true, "dist": true, ".git": true}
 	watched  = map[string]bool{".go": true, ".ts": true, ".css": true, ".html": true, ".svg": true, ".json": true, ".md": true, ".mod": true, ".sum": true, ".yaml": true}
@@ -69,7 +70,7 @@ func run(ctx context.Context) error {
 	say("Software Factory is running the code in this folder: %s", url)
 	say("Watching for changes. Ctrl-C stops watching and leaves the stack running; make up goes back to the image.")
 	say("Stop make dev before a pull, a branch switch or a checkout of code you haven't read: whatever is in this folder runs as the engine, which holds your git tokens.")
-	say("The Dockerfile and plugin/ come from the %s image as the last make up built it.", image)
+	say("The Dockerfile, plugin/, configs/claude-code/ and the box helper come from the %s images as they were last built.", strings.Join(images, " and "))
 	openPage(url)
 	var owed change
 	head := checkedOut()
@@ -80,7 +81,7 @@ func run(ctx context.Context) error {
 		}
 		seen = next
 		if c.image {
-			say("The Dockerfile and plugin/ are built into the image, which make dev doesn't rebuild: press Ctrl-C, run make up, then make dev again.")
+			say("The Dockerfile, plugin/ and configs/claude-code/ are built into the images, which make dev doesn't rebuild: press Ctrl-C, run docker %s build, then make dev again.", strings.Join(compose, " "))
 		}
 		if !c.page && !c.code {
 			continue
@@ -108,7 +109,7 @@ func run(ctx context.Context) error {
 		if pageOnly {
 			say("Only the page changed, so only the engine was restarted. The page reloads itself once it reconnects.")
 		} else {
-			say("Restarted all four containers with the new code. The page reloads itself once it reconnects.")
+			say("Restarted the engine and egress with the new code; each session's container runs it from its next start or wake, and each reviewer container from its start. The page reloads itself once it reconnects.")
 		}
 	}
 }
@@ -202,7 +203,7 @@ func diff(before, after map[string]stamp) change {
 }
 
 func inImage(p string) bool {
-	return p == "Dockerfile" || strings.HasPrefix(p, "plugin"+string(filepath.Separator))
+	return p == "Dockerfile" || strings.HasPrefix(p, "plugin"+string(filepath.Separator)) || strings.HasPrefix(p, filepath.Join("configs", "claude-code")+string(filepath.Separator))
 }
 
 func build(ctx context.Context, arch string, c change) error {
@@ -230,13 +231,29 @@ func build(ctx context.Context, arch string, c change) error {
 }
 
 func start(ctx context.Context, first, engineOnly bool) error {
-	args := append(append([]string{}, compose...), "up", "-d", "--wait", "--force-recreate")
-	if engineOnly {
-		args = append(args, "--no-deps", "engine")
+	if first {
+		for _, image := range images {
+			if cmd(ctx, nil, "docker", "image", "inspect", "--format", "{{.Id}}", image) != nil {
+				say("The %s image isn't built yet; building the images once.", image)
+				if err := cmd(ctx, nil, "docker", append(append([]string{}, compose...), "build")...); err != nil {
+					return err
+				}
+				break
+			}
+		}
+		if err := socketGroup(ctx); err != nil {
+			return err
+		}
 	}
-	if first && cmd(ctx, nil, "docker", "image", "inspect", "--format", "{{.Id}}", image) != nil {
-		say("The %s image isn't built yet; building it once.", image)
-		args = append(args, "--build")
+	if err := copyBinary(ctx); err != nil {
+		return err
+	}
+	args := append(append([]string{}, compose...), "up", "-d", "--wait", "--force-recreate", "--remove-orphans")
+	switch {
+	case engineOnly:
+		args = append(args, "--no-deps", "engine")
+	case !first:
+		args = append(append(args, "--no-deps"), live...)
 	}
 	c := exec.Command("docker", args...)
 	c.Stdout = os.Stdout
@@ -254,6 +271,39 @@ func start(ctx context.Context, first, engineOnly bool) error {
 		say("Letting the restart finish before stopping, so no container is left half-recreated…")
 		return <-done
 	}
+}
+
+func socketGroup(ctx context.Context) error {
+	if os.Getenv("SF_DOCKER_GID") != "" {
+		return nil
+	}
+	socket := os.Getenv("SF_DOCKER_SOCKET")
+	if socket == "" {
+		socket = "/var/run/docker.sock"
+	}
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-v", socket+":/s:ro", "--entrypoint", "stat", images[0], "-c", "%g", "/s").Output()
+	gid := strings.TrimSpace(string(out))
+	if err != nil || gid == "" || strings.Trim(gid, "0123456789") != "" {
+		return errors.New("the group that owns Docker's socket couldn't be read: set SF_DOCKER_GID to it, then run make dev again")
+	}
+	say("SF_DOCKER_GID=%s, the group that owns Docker's socket as containers see it.", gid)
+	return os.Setenv("SF_DOCKER_GID", gid)
+}
+
+func copyBinary(ctx context.Context) error {
+	bin, err := os.Open(filepath.Join(binDir, binName))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = bin.Close() }()
+	c := exec.CommandContext(ctx, "docker", append(append([]string{}, compose...), "run", "--rm", "-T", "dev-bin")...)
+	c.Stdin = bin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("copying the binary into the dev-bin volume failed: %w", err)
+	}
+	return nil
 }
 
 func address(ctx context.Context) string {

@@ -3,12 +3,16 @@ package session
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 const (
-	maxReviewModels  = 4
-	maxReviewDenials = 20
+	maxReviewModels    = 4
+	maxReviewDenials   = 20
+	maxBraceExpansions = 8
 )
 
 var (
@@ -58,10 +62,68 @@ func instructionRead(tool string, v any) bool {
 			break
 		}
 	}
-	if pattern, _ := in["pattern"].(string); tool == "Glob" && pattern != "" && pattern != target && !strings.HasPrefix(pattern, "/") && !strings.HasPrefix(pattern, "~") {
-		target = strings.TrimSuffix(target, "/") + "/" + pattern
+	pattern, _ := in["pattern"].(string)
+	if tool != "Glob" || pattern == "" {
+		return instructionPath(target)
 	}
+	base := ""
+	if target != pattern {
+		base = strings.TrimSuffix(target, "/") + "/"
+	}
+	alternatives, ok := braceExpansions(pattern)
+	if !ok {
+		return false
+	}
+	for _, a := range alternatives {
+		t := a
+		if !strings.HasPrefix(a, "/") && !strings.HasPrefix(a, "~") {
+			t = base + a
+		}
+		if !instructionPath(t) {
+			return false
+		}
+	}
+	return true
+}
+
+func instructionPath(target string) bool {
 	return target != "" && !strings.Contains(target, "..") && instructionTarget.MatchString(target)
+}
+
+func braceExpansions(s string) ([]string, bool) {
+	if strings.ContainsRune(s, '\\') {
+		return nil, false
+	}
+	out := []string{""}
+	for {
+		start, end := strings.IndexByte(s, '{'), strings.IndexByte(s, '}')
+		if start < 0 {
+			if end >= 0 {
+				return nil, false
+			}
+			for i := range out {
+				out[i] += s
+			}
+			return out, true
+		}
+		if end < start {
+			return nil, false
+		}
+		alts := strings.Split(s[start+1:end], ",")
+		if len(alts) < 2 || len(out)*len(alts) > maxBraceExpansions || strings.ContainsRune(s[start+1:end], '{') {
+			return nil, false
+		}
+		next := make([]string, 0, len(out)*len(alts))
+		for _, prefix := range out {
+			for _, alt := range alts {
+				if alt == "" {
+					return nil, false
+				}
+				next = append(next, prefix+s[:start]+alt)
+			}
+		}
+		out, s = next, s[end+1:]
+	}
 }
 
 func (r *Reviews) audited(t ReviewTarget, e ReviewEntry) {
@@ -72,10 +134,17 @@ func (r *Reviews) audited(t ReviewTarget, e ReviewEntry) {
 	if t.Auto {
 		by = ByAgent
 	}
+	reason := e.Reason
+	if e.Key.Number() > 1 {
+		reason = strings.TrimSuffix("run "+strconv.Itoa(e.Key.Number())+" of this role on the commit; "+reason, "; ")
+	}
+	if e.Record.Advisory {
+		reason = strings.TrimSuffix("an advisory role, which never counts for the push; "+reason, "; ")
+	}
 	ae := AuditEntry{Time: r.cfg.Now(), Session: t.SID, Repository: t.Name, Branch: t.Branch, Commit: e.Key.Commit, By: by, Kind: AuditReview,
-		Result: string(e.Record.State), Reason: e.Reason, Reviewer: e.Key.Agent, Verdict: e.Record.Verdict,
-		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: slices.Clone(e.Models)}
+		Result: string(e.Record.State), Reason: reason, Reviewer: e.Key.Agent, Verdict: e.Record.Verdict,
+		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: slices.Clone(e.Models), Req: t.Req}
 	if err := r.cfg.Audit.Append(ae); err != nil {
-		r.cfg.Logger.Warn("review", "event", "audit-not-written")
+		shared.Tagged(r.cfg.Logger, t.Req).Warn("review", "event", "audit-not-written")
 	}
 }
