@@ -153,7 +153,6 @@ func (s Source) Tags(ctx context.Context) ([]string, error) {
 
 type releaseJSON struct {
 	TagName    string `json:"tag_name"`
-	Body       string `json:"body"`
 	Draft      bool   `json:"draft"`
 	PreRelease bool   `json:"prerelease"`
 }
@@ -164,5 +163,5 @@ func (s Source) Release(ctx context.Context, tag string) (session.ReleaseNotes, 
 	if err != nil || !found {
 		return session.ReleaseNotes{}, err
 	}
-	return session.ReleaseNotes{Found: true, Tag: r.TagName, Body: r.Body, Draft: r.Draft, PreRelease: r.PreRelease}, nil
+	return session.ReleaseNotes{Found: true, Tag: r.TagName, Draft: r.Draft, PreRelease: r.PreRelease}, nil
 }

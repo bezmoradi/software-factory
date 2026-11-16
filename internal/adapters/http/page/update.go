@@ -14,9 +14,7 @@ const (
 )
 
 type updateReleaseJSON struct {
-	Version       string `json:"version"`
-	Digest        string `json:"digest"`
-	DigestProblem string `json:"digestProblem"`
+	Version string `json:"version"`
 }
 
 type updateJSON struct {
@@ -33,7 +31,7 @@ type updateJSON struct {
 func updateJSONOf(v session.UpdateView) updateJSON {
 	out := updateJSON{Running: v.Running, Check: v.Check, Forced: v.Forced, Unreadable: v.Unreadable, Development: v.Development, Result: v.Result, Checked: millis(v.Checked)}
 	if v.Version != "" {
-		out.Update = &updateReleaseJSON{Version: v.Version, Digest: v.Digest, DigestProblem: v.DigestProblem}
+		out.Update = &updateReleaseJSON{Version: v.Version}
 	}
 	return out
 }

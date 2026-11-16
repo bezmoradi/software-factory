@@ -6,8 +6,6 @@ type Post = (path: string, body: unknown) => Promise<Response>
 
 interface Release {
   version: string
-  digest: string
-  digestProblem: string
 }
 
 export interface UpdateView {
@@ -23,7 +21,7 @@ export interface UpdateView {
 const ROUTE = '/api/update'
 const REPO = 'https://github.com/bezmoradi/software-factory'
 const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/
-const DIGEST = /^sha256:[0-9a-f]{64}$/
+const INSTALL_COMMAND = 'curl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh'
 const KIND = /^[a-z][a-z-]{0,40}$/
 const RELOAD_MS = 60 * 60 * 1000
 const SOON_MS = 15_000
@@ -40,9 +38,7 @@ function releaseOf(v: unknown): Release | null {
   if (v === null || typeof v !== 'object') return null
   const r = v as Record<string, unknown>
   if (typeof r.version !== 'string' || !VERSION.test(r.version)) return null
-  const digest = typeof r.digest === 'string' && DIGEST.test(r.digest) ? r.digest : ''
-  const problem = r.digestProblem === 'missing' || r.digestProblem === 'malformed' || r.digestProblem === 'several' ? r.digestProblem : ''
-  return { version: r.version, digest, digestProblem: digest ? '' : problem || 'missing' }
+  return { version: r.version }
 }
 
 export function updateOf(v: unknown): UpdateView | null {
@@ -99,11 +95,6 @@ export async function loadUpdate(): Promise<void> {
   await call({})
 }
 
-export function installCommand(version: string, digest: string): string {
-  const compose = `ghcr.io/bezmoradi/software-factory-compose@${digest}`
-  return `docker compose version --short | awk -F. 'NR==1{v=$0;sub(/^v/,"");ok=(($1+0>5)||($1+0==5&&($2+0>7||($2+0==7&&$3+0>=1))))}END{if(!ok){print "Stopped: this install needs Docker Compose 5.7.1 or later, and docker compose version --short gave: " v;exit 1}}' && cosign verify ${compose} --certificate-identity https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v${version} --certificate-oidc-issuer https://token.actions.githubusercontent.com && g=\${SF_DOCKER_GID:-0} s=\${SF_DOCKER_SOCKET:-/var/run/docker.sock} && { case "$s" in /*) [ "$(printf '%s.' "$g" | tr -d 0-9)" = . ] && [ "$(printf '%s:' "$s" | tr -d A-Za-z0-9._/-)" = : ];; *) false;; esac || { echo "Stopped: SF_DOCKER_GID must be digits, and SF_DOCKER_SOCKET an absolute path of letters, digits and . _ / -"; false; }; } && printf 'services:\\n  helper:\\n    group_add: ["%s"]\\n    volumes:\\n      - "%s:/var/run/docker.sock"\\n' "$g" "$s" > software-factory-socket.yaml && docker compose -p software-factory -f oci://${compose} -f software-factory-socket.yaml up -d --wait --remove-orphans -y`
-}
-
 function link(href: string, text: string): HTMLAnchorElement {
   const a = el('a', '', text)
   a.href = href
@@ -136,29 +127,13 @@ function oneLine(command: string, name: string): HTMLElement {
   return block
 }
 
-function releaseSteps(r: Release): HTMLElement {
+function releaseSteps(): HTMLElement {
   const box = el('section', 'update-steps')
-  const tag = `v${r.version}`
-  box.append(el('h3', 'update-subhead', 'If you installed a release'))
-  if (r.digest) {
-    box.append(
-      para('small', 'In a terminal, go to the folder that holds ', code('software-factory-socket.yaml'), ', the one you installed from. It needs Docker Compose 5.7.1 or later and cosign.'),
-      para('small', 'On Linux, first set the group of Docker’s socket:'),
-      oneLine('export SF_DOCKER_GID=$(stat -c %g /var/run/docker.sock)', 'The Linux command'),
-      para('small', 'Then run this command there, on one line:'),
-      commandBlock(installCommand(r.version, r.digest)),
-      para('small muted', code('cosign verify'), ' checks that the Compose file was signed by the release workflow for the tag ', code(tag), ', and the rest runs only if it was. The version comes from the repository’s tags, which only the owner can create, and the digest from the release’s notes.'),
-    )
-    return box
-  }
-  const why = r.digestProblem === 'several'
-    ? 'The release’s notes name more than one Compose digest, so the page can’t tell which one to use and doesn’t fill in the command.'
-    : r.digestProblem === 'malformed'
-      ? 'The release’s notes name a Compose digest the engine doesn’t accept as one (a sha256: digest of 64 lowercase hex digits), so the page doesn’t fill in the command.'
-      : 'The release’s notes carry no Compose digest, so the page can’t fill in the command.'
   box.append(
-    para('small warn', why),
-    para('small', 'Take the install command from the ', link(`${REPO}/blob/${tag}/README.md#run-it-with-docker`, `README at ${tag}`), ', with ', code(r.version), ' as the version and the digest of ', code('ghcr.io/bezmoradi/software-factory-compose'), ' from the ', link(`${REPO}/releases/tag/${tag}`, 'release’s notes'), ', and run it in the folder that holds ', code('software-factory-socket.yaml'), '.'),
+    el('h3', 'update-subhead', 'If you installed a release'),
+    para('small', 'Run the install command again in a terminal. It installs the newest release, which may be newer than the one named here:'),
+    oneLine(INSTALL_COMMAND, 'The install command'),
+    para('small muted', 'It replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
   )
   return box
 }
@@ -228,7 +203,7 @@ export function openUpdate(): void {
   const actions = el('div', 'row consent-actions')
   actions.append(later, el('span', 'spacer'), button('Close', 'primary small', close))
   const tag = `v${r.version}`
-  const steps = development ? [sourceSteps(true), releaseSteps(r)] : [releaseSteps(r), sourceSteps(false)]
+  const steps = development ? [sourceSteps(true), releaseSteps()] : [releaseSteps(), sourceSteps(false)]
   d.append(
     head,
     para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),

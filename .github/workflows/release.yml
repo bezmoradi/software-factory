@@ -23,7 +23,6 @@ jobs:
       attestations: write
     env:
       IMAGE: ghcr.io/bezmoradi/software-factory
-      COMPOSE_ARTIFACT: ghcr.io/bezmoradi/software-factory-compose
       COMPOSE_VERSION: v5.7.1
       COMPOSE_SHA256: af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf
       COSIGN_VERSION: v3.1.4
@@ -32,7 +31,6 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       image-digest: ${{ steps.image.outputs.digest }}
-      compose-digest: ${{ steps.compose.outputs.digest }}
     steps:
       - name: Only the owner releases
         env:
@@ -73,14 +71,6 @@ jobs:
           echo "$COMPOSE_SHA256  $RUNNER_TEMP/docker-compose" | sha256sum --check --strict
           mkdir -p "$HOME/.docker/cli-plugins"
           install -m 0755 "$RUNNER_TEMP/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
-      - name: Compose 5.7.1 or later
-        run: |
-          have=$(docker compose version --short)
-          lowest=$(printf '%s\n%s\n' 5.7.1 "${have#v}" | sort -V | head -n 1)
-          if [ "$lowest" != 5.7.1 ]; then
-            echo "::error::Reading the Compose file back by digest needs Compose 5.7.1 or later, the first that checks what it downloads against the digest; docker compose is $have."
-            exit 1
-          fi
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
@@ -106,20 +96,19 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          for ref in "$IMAGE:$VERSION" "$COMPOSE_ARTIFACT:$VERSION"; do
-            if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
-              echo "::error::$ref is already published; a version is released once."
+          ref="$IMAGE:$VERSION"
+          if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
+            echo "::error::$ref is already published; a version is released once."
+            exit 1
+          fi
+          case "$out" in
+            *"$ref: not found") ;;
+            *)
+              printf '%s\n' "$out"
+              echo "::error::Couldn't tell whether $ref is already published, so the release stops."
               exit 1
-            fi
-            case "$out" in
-              *"$ref: not found") ;;
-              *)
-                printf '%s\n' "$out"
-                echo "::error::Couldn't tell whether $ref is already published, so the release stops."
-                exit 1
-                ;;
-            esac
-          done
+              ;;
+          esac
       - name: Build and push the image for linux/amd64 and linux/arm64, by digest only
         id: image
         env:
@@ -163,17 +152,21 @@ jobs:
             esac
             docker image rm "$IMAGE@$IMAGE_DIGEST" >/dev/null
           done
-      - name: Check the Compose file with the image's digest
+      - name: Write and check the release's files
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
-          mkdir "$RUNNER_TEMP/release" "$RUNNER_TEMP/empty"
-          sh scripts/release-compose.sh "$IMAGE" "$IMAGE_DIGEST" "$RUNNER_TEMP/release/compose.release.yaml"
-          docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" config --format json > "$RUNNER_TEMP/local.json"
-          if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/local.json"; then
-            echo "::error::The Compose file to publish isn't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
+          files="$RUNNER_TEMP/release"
+          mkdir "$files"
+          cp compose.yaml "$files/compose.yaml"
+          sh scripts/release-compose.sh "$IMAGE" "$IMAGE_DIGEST" "$files/compose.release.yaml"
+          (cd "$files" && docker compose -f compose.yaml -f compose.release.yaml config --format json) > "$RUNNER_TEMP/release.json"
+          if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/release.json"; then
+            echo "::error::The release's compose.yaml and compose.release.yaml aren't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
+          sh scripts/release-install.sh "$VERSION" "$files/compose.yaml" "$files/compose.release.yaml" "$files/install.sh"
       - name: Sign the image
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -188,24 +181,6 @@ jobs:
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
-      - name: Publish the Compose file, read it back by digest, and sign it
-        id: compose
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-        run: |
-          docker compose -f compose.yaml -f "$RUNNER_TEMP/release/compose.release.yaml" publish -y "$COMPOSE_ARTIFACT:$VERSION"
-          digest=$(docker buildx imagetools inspect "$COMPOSE_ARTIFACT:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
-          printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
-          (cd "$RUNNER_TEMP/empty" && docker compose -f "oci://$COMPOSE_ARTIFACT@$digest" config --format json) > "$RUNNER_TEMP/published.json"
-          if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/published.json"; then
-            echo "::error::$COMPOSE_ARTIFACT@$digest, read back, isn't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
-            exit 1
-          fi
-          identity="https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION"
-          cosign sign --yes "$COMPOSE_ARTIFACT@$digest"
-          cosign verify "$COMPOSE_ARTIFACT@$digest" --certificate-identity "$identity" --certificate-oidc-issuer "$ISSUER" >/dev/null
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Tag the signed image with the version
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -217,6 +192,15 @@ jobs:
             echo "::error::$IMAGE:$VERSION points at $got, not the signed $IMAGE_DIGEST."
             exit 1
           fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            ${{ runner.temp }}/release/install.sh
+            ${{ runner.temp }}/release/compose.yaml
+            ${{ runner.temp }}/release/compose.release.yaml
+          if-no-files-found: error
+          retention-days: 1
 
   sbom:
     name: SBOMs
@@ -306,41 +290,48 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Create the GitHub release with the install command
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release
+      - name: Create the GitHub release with the install command and its files
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.release.outputs.version }}
           IMAGE_DIGEST: ${{ needs.release.outputs.image-digest }}
-          COMPOSE_DIGEST: ${{ needs.release.outputs.compose-digest }}
         run: |
           printf '%s\n' "$VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'
           [ "$TAG" = "v$VERSION" ]
-          if printf '%s\n' "$IMAGE_DIGEST" "$COMPOSE_DIGEST" | grep -Eqvx 'sha256:[0-9a-f]{64}'; then
-            echo "::error::The release job's digests aren't sha256 digests."
+          if ! printf '%s\n' "$IMAGE_DIGEST" | grep -Eqx 'sha256:[0-9a-f]{64}'; then
+            echo "::error::The release job's image digest isn't a sha256 digest."
             exit 1
           fi
+          files="$RUNNER_TEMP/release"
           image=ghcr.io/bezmoradi/software-factory@$IMAGE_DIGEST
-          compose=ghcr.io/bezmoradi/software-factory-compose@$COMPOSE_DIGEST
+          compose_sum=$(sha256sum "$files/compose.yaml" | cut -d ' ' -f 1)
+          release_sum=$(sha256sum "$files/compose.release.yaml" | cut -d ' ' -f 1)
+          if [ "$(grep -cxF "version='$VERSION'" "$files/install.sh")" != 1 ] ||
+            [ "$(grep -cxF "compose_sha256='$compose_sum'" "$files/install.sh")" != 1 ] ||
+            [ "$(grep -cxF "release_sha256='$release_sum'" "$files/install.sh")" != 1 ] ||
+            [ "$(grep -cxF "  image: $image" "$files/compose.release.yaml")" != 1 ]; then
+            echo "::error::The files to attach don't match: install.sh must carry $VERSION and the SHA-256 of both Compose files, and compose.release.yaml must name $image."
+            exit 1
+          fi
           identity="--certificate-identity https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION --certificate-oidc-issuer https://token.actions.githubusercontent.com"
           fence='```'
           cat > "$RUNNER_TEMP/notes.md" <<EOF
-          Software Factory $VERSION.
+          Software Factory $VERSION, for linux/amd64 and linux/arm64.
 
-          Anyone who can edit these notes can change them, so take the version from the newest \`v*\` tag on the repository's tags page (<https://github.com/bezmoradi/software-factory/tags>), which only the owner can create, and only the digests from here. Put them into the install command in the README at that tag (<https://github.com/bezmoradi/software-factory/blob/$TAG/README.md#run-it-with-docker>), and check that its identity and repositories read exactly as there. A digest from another version then fails \`cosign verify\`, since the identity names the tag.
-
-          - Image: \`$image\` (tag \`$VERSION\`), for linux/amd64 and linux/arm64.
-          - Compose file: \`$compose\` (tag \`$VERSION\`).
-
-          Install or upgrade with Docker Compose 5.7.1 or later and cosign; earlier Compose doesn't check the Compose file it downloads against the digest cosign checked. Run it from a folder you keep: it writes \`software-factory-socket.yaml\` there, which gives the box helper Docker's socket, and so control of Docker, which is close to control of the computer. The command stops unless Compose is 5.7.1 or later, then checks the Compose file's signature, and runs Compose only if it passes:
+          Install it, or upgrade to the newest release, with Docker Engine 28 or later and Docker Compose 2.24.4 or later:
 
           ${fence}bash
-          docker compose version --short | awk -F. 'NR==1{v=\$0;sub(/^v/,"");ok=((\$1+0>5)||(\$1+0==5&&(\$2+0>7||(\$2+0==7&&\$3+0>=1))))}END{if(!ok){print "Stopped: this install needs Docker Compose 5.7.1 or later, and docker compose version --short gave: " v;exit 1}}' && cosign verify $compose $identity && g=\${SF_DOCKER_GID:-0} s=\${SF_DOCKER_SOCKET:-/var/run/docker.sock} && { case "\$s" in /*) [ "\$(printf '%s.' "\$g" | tr -d 0-9)" = . ] && [ "\$(printf '%s:' "\$s" | tr -d A-Za-z0-9._/-)" = : ];; *) false;; esac || { echo "Stopped: SF_DOCKER_GID must be digits, and SF_DOCKER_SOCKET an absolute path of letters, digits and . _ / -"; false; }; } && printf 'services:\n  helper:\n    group_add: ["%s"]\n    volumes:\n      - "%s:/var/run/docker.sock"\n' "\$g" "\$s" > software-factory-socket.yaml && docker compose -p software-factory -f oci://$compose -f software-factory-socket.yaml up -d --wait --remove-orphans -y
+          curl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh
           ${fence}
 
-          Then open <http://127.0.0.1:7799>. Running \`docker compose -f oci://…\` on its own skips the check.
+          The script keeps its files in \`~/software-factory\` (or \`SF_HOME\`): it downloads this release's \`compose.yaml\` and \`compose.release.yaml\` from here, checks them against the SHA-256 sums it carries, writes \`software-factory-socket.yaml\`, which gives the box helper Docker's socket, and so control of Docker, which is close to control of the computer, and starts the Compose project \`software-factory\`, keeping its volumes. Then open <http://127.0.0.1:7799>. To install this version rather than the newest, run this release's own script: \`curl -fsSL https://github.com/bezmoradi/software-factory/releases/download/$TAG/install.sh | sh\`.
 
-          Optional checks: the image's signature, and its build provenance and SBOMs (linux/amd64 and linux/arm64), with gh signed in:
+          Optional checks, with cosign and a signed-in gh: the image's signature by this repository's release workflow for $TAG, and its build provenance and SBOMs:
 
           ${fence}bash
           cosign verify $image $identity
@@ -348,6 +339,7 @@ jobs:
           gh attestation verify oci://$image -R bezmoradi/software-factory --predicate-type https://spdx.dev/Document/v2.3
           ${fence}
 
-          The signatures cover the engine image and the Compose file, not the agents the engine downloads at first start, which it checks against their pinned integrity hashes and npm provenance.
+          Image: \`$image\` (tag \`$VERSION\`), the one \`compose.release.yaml\` names. The signature covers the image, not the files attached here, which GitHub serves, and not the agents the engine downloads at first start, which it checks against their pinned integrity hashes and npm provenance.
           EOF
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Software Factory $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Software Factory $VERSION" --notes-file "$RUNNER_TEMP/notes.md" \
+            "$files/install.sh" "$files/compose.yaml" "$files/compose.release.yaml"
