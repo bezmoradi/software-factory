@@ -565,24 +565,32 @@ function saveCheckpoints() {
     sessionStorage.setItem(SAVED_KEY, JSON.stringify(Object.fromEntries(checkpointed)))
   } catch {}
 }
+const MAX_TAB_LINE = 10_000_000
 const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
 
 function saveTabs() {
   try {
-    sessionStorage.setItem(TABS_KEY, JSON.stringify({ tabs: openTabs.slice(1), active: current.key }))
+    const lines = Object.fromEntries(openTabs.flatMap(k => {
+      const line = k.startsWith('f:') ? files.get(k)?.line ?? 0 : 0
+      return line > 0 ? [[k, line]] : []
+    }))
+    sessionStorage.setItem(TABS_KEY, JSON.stringify({ tabs: openTabs.slice(1), active: current.key, lines }))
   } catch {}
 }
 
 function restoreTabs() {
-  let saved: { tabs?: unknown; active?: unknown } | null = null
+  let saved: { tabs?: unknown; active?: unknown; lines?: unknown } | null = null
   try {
     saved = JSON.parse(sessionStorage.getItem(TABS_KEY) || 'null')
   } catch {}
   const tabs = Array.isArray(saved?.tabs) ? [...new Set((saved.tabs as unknown[]).filter((k): k is string => typeof k === 'string' && TAB_KEY.test(k)))].slice(0, 50) : []
+  const lines = saved?.lines && typeof saved.lines === 'object' ? (saved.lines as Record<string, unknown>) : {}
   for (const k of tabs) {
     if (!k.startsWith('f:')) continue
     const { path, commit } = fileKey(k)
-    files.set(k, { path, ...(commit ? { commit } : {}) })
+    const line = lines[k]
+    const at = typeof line === 'number' && Number.isInteger(line) && line > 0 && line <= MAX_TAB_LINE ? line : 0
+    files.set(k, { path, ...(commit ? { commit } : {}), ...(at ? { line: at } : {}) })
   }
   openTabs = ['overview', ...tabs]
   const active = typeof saved?.active === 'string' && openTabs.includes(saved.active) ? saved.active : 'overview'

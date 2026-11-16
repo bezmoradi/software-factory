@@ -246,7 +246,7 @@ class SfPushPanel extends HTMLElement {
       if (passed.size) {
         const lead = `${passed.size === 1 ? 'A review this card lists has' : `${passed.size} reviews this card lists have`} passed since it was made`
         const live = !!p.expires && p.expires > Date.now()
-        const note = el('p', 'small muted', live ? `${lead}; the engine is checking the push again, so this list is about to change.` : `${lead}, but this card has expired, so nothing checks it again by itself: press Push to check the push again.`)
+        const note = el('p', 'small muted', live ? `${lead}; the engine is checking the push again, so this list is about to change.` : `${lead}, but this card has expired, so nothing checks it again by itself: press Push in the Reviews section above to check the push again.`)
         note.setAttribute('role', 'status')
         box.append(note)
       }
@@ -260,7 +260,7 @@ class SfPushPanel extends HTMLElement {
       box.append(list)
     }
     if (p.expires && p.expires <= Date.now()) {
-      box.append(el('p', 'small warn', `This card expired at ${when(p.expires)}, so Allow and Deny no longer apply to it. Press Push to check the push again.`))
+      box.append(el('p', 'small warn', `This card expired at ${when(p.expires)}, so Allow and Deny no longer apply to it. Press Push in the Reviews section above to check the push again.`))
       if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))
       return box
     }

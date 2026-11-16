@@ -1,4 +1,4 @@
-import { button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 import { agentModels, effortOptions, modelOptions } from './session-work.ts'
 import type { AgentModels } from './session-work.ts'
@@ -661,7 +661,11 @@ class SfProjects extends HTMLElement {
         this.#render()
       }, 'button', `row:${p.path}:keep`))
     } else {
-      if (!this.#forms.has(p.path)) acts.append(button('New session', 'ghost small', () => this.#open(p.path), 'button', `row:${p.path}:new`))
+      if (!this.#forms.has(p.path)) {
+        const start = button('New session', 'ghost small', () => this.#open(p.path), 'button', `row:${p.path}:new`)
+        start.setAttribute('aria-label', `New session in ${visible(p.name)}`)
+        acts.append(start)
+      }
       acts.append(...this.#menu(p))
     }
     head.append(acts)
