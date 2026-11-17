@@ -1,4 +1,4 @@
-import { api, exchange, trade, upload } from './api.ts'
+import { api, exchange, trade } from './api.ts'
 import { claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
@@ -54,7 +54,7 @@ import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
 import { initUpdates } from './components/update.ts'
 import { sendState } from './api.ts'
-import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, scroller, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
+import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
@@ -1581,7 +1581,7 @@ startLayout({ jumpLatest: () => composer.jump('latest') })
 
 const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain } = startSessionActions({ reply, loadGate, loadProjects, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
 
-const composer = startComposer({ current, sessions, state, scroller, send, say, toast, api, upload })
+const composer = startComposer({ send })
 const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
 const { connect, applySession } = startStream({ onEvent, began, markCheckpoint })
 startTopBar()

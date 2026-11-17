@@ -3,6 +3,10 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --rail: 2.2rem;
   --dot: .55rem;
+  --compact-height: max(28px, 1.6rem);
+  --compact-font: .8125rem;
+  --compact-line: 1.25;
+  --compact-radius: 4px;
 }
 :root[data-scale="80"] { font-size: 88%; }
 :root[data-scale="90"] { font-size: 99%; }
@@ -121,7 +125,7 @@ a.link { text-decoration: none; }
 .textbox[aria-invalid="true"] { border-color: var(--bad); }
 .textbox[aria-invalid="true"]:focus-visible { border-color: var(--bad); box-shadow: inset 0 0 0 1px var(--bad); }
 .field-error { margin: 0; }
-.field-row > :is(.textbox, button), .field-row > :is(.dispatch-picks, .dispatch-actions) > :is(.textbox, button) { box-sizing: border-box; min-height: max(28px, 1.6rem); font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+.field-row > :is(.textbox, button), .field-row > :is(.dispatch-picks, .dispatch-actions) > :is(.textbox, button) { box-sizing: border-box; min-height: var(--compact-height); font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 .field-row > .textbox, .field-row > .dispatch-picks > .textbox { padding: 0 .6rem; }
 .field-row > button, .field-row > .dispatch-actions > button { padding: 0 .75rem; }
 @supports (appearance: base-select) {
@@ -392,8 +396,10 @@ sf-reviews .review-message, sf-reviewer-checks .review-message { margin: .35rem 
 .path .unchecked .mark::after { content: '!'; width: auto; height: auto; border-radius: 0; background: none; color: var(--warn-ink); font-size: .625rem; font-weight: 700; line-height: 1; }
 @keyframes spin { to { transform: rotate(1turn); } }
 :where(button[aria-busy="true"]) { position: relative; }
-button[aria-busy="true"] { cursor: progress; opacity: 1; -webkit-text-fill-color: transparent; }
-button[aria-busy="true"] :is(sf-icon, svg, .icon, .stop-mark) { opacity: 0; }
+button[aria-busy="true"] { cursor: progress; opacity: 1; animation: busy-label 0s .3s forwards; }
+button[aria-busy="true"] :is(sf-icon, svg, .icon, .stop-mark) { animation: busy-out 0s .3s forwards; }
+@keyframes busy-label { to { -webkit-text-fill-color: transparent; } }
+@keyframes busy-out { to { opacity: 0; } }
 button[aria-busy="true"]::before { content: ""; position: absolute; inset: 0; box-sizing: border-box; width: .75rem; height: .75rem; margin: auto; border: 1.5px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; opacity: 0; animation: spin .8s linear infinite, busy-in .2s ease-out .3s forwards; }
 @keyframes busy-in { to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::before { border-inline-end-color: currentColor; border-style: dotted; animation: busy-in .2s ease-out .3s forwards; } }
@@ -423,20 +429,20 @@ button[aria-busy="true"]::before { content: ""; position: absolute; inset: 0; bo
 .stacked > p { margin: 0; }
 .stacked .field { display: grid; gap: .2rem; }
 .stacked .field > label { color: var(--ink); }
-.stacked :is(.textbox, button:not(.link)) { width: 100%; min-height: max(28px, 1.6rem); font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+.stacked :is(.textbox, button:not(.link)) { width: 100%; min-height: var(--compact-height); font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 .stacked .textbox { padding: 0 .6rem; font-family: var(--mono); }
 .stacked button:not(.link) { padding: .25rem .75rem; }
 .stacked > button.link { justify-self: start; }
 :is(.stacked > button.link, button.add-more) { min-height: 24px; padding: 0; }
 .token-help { display: inline-block; }
-button.add-host { width: 100%; min-height: max(28px, 1.6rem); padding: .25rem .75rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+button.add-host { width: 100%; min-height: var(--compact-height); padding: .25rem .75rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 .stacked .form-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 .stacked .form-actions > button:not(.link) { flex: none; width: auto; padding: .25rem .9rem; }
 .stacked .form-actions > button.primary { flex: 1 1 auto; }
 sf-secret { position: relative; display: flex; min-width: 0; }
 sf-secret > .textbox, .stacked sf-secret > .textbox { flex: 1 1 auto; width: auto; min-width: 0; padding-inline-end: 2.5rem; }
 sf-secret:focus-within > .textbox { border-color: var(--focus, var(--accent)); box-shadow: inset 0 0 0 1px var(--focus, var(--accent)); }
-sf-secret > .secret-toggle, .stacked sf-secret > .secret-toggle { position: absolute; inset-block: 0; inset-inline-end: .25rem; width: auto; min-width: 24px; min-height: 24px; height: 24px; margin: auto 0; padding: .1rem; border: 0; color: var(--soft); }
+sf-secret > .secret-toggle, .stacked sf-secret > .secret-toggle { position: absolute; inset-block: 0; inset-inline-end: .25rem; width: auto; min-width: 24px; min-height: 24px; height: max(24px, 1.2rem); margin: auto 0; padding: .1rem; border: 0; color: var(--soft); }
 sf-secret > .secret-toggle:hover { color: var(--ink); background: var(--hover); }
 .token-scopes { margin: .35rem 0 .75rem; }
 .host-list { list-style: none; margin: 0 0 .5rem; padding: 0; }
@@ -727,12 +733,15 @@ form.dispatch > .field-row { margin-bottom: .25rem; }
 :is(form.dispatch > details, form.dispatch > sf-issue-picker > details)[open] { padding-bottom: .25rem; }
 form.dispatch .opts { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 form.dispatch .opts input { flex: 1 1 12rem; min-width: 0; }
-form.dispatch .opts select { flex: none; }
+form.dispatch .opts select { flex: none; max-width: 100%; }
 form.dispatch :is(.dispatch-picks, .dispatch-actions) { display: grid; grid-auto-flow: column; gap: .5rem; flex: none; max-width: 100%; }
 form.dispatch .dispatch-picks { grid-auto-columns: minmax(0, 1fr); }
 form.dispatch .dispatch-picks > select { width: 100%; min-width: 10.5em; }
 form.dispatch .dispatch-actions { grid-auto-columns: minmax(5.5rem, 1fr); margin-inline-start: auto; }
 form.dispatch .dispatch-actions > button { width: 100%; }
+@container (max-width: 22rem) {
+  form.dispatch .dispatch-picks { grid-auto-flow: row; flex: 1 1 100%; }
+}
 #size { flex: 1; min-width: 0; justify-content: space-between; }
 .size-row { gap: .5rem; margin: 0 0 .75rem; }
 .team-row, .team-view { margin: 0 0 .75rem; }
@@ -930,8 +939,8 @@ dialog.login :is(a, button).button { display: inline-block; min-height: 24px; pa
 dialog.login a.button:hover { background: var(--button-hover); }
 dialog.login .login-code { gap: .5rem; align-items: end; margin-top: .25rem; }
 dialog.login .login-code .login-field { display: grid; flex: 1; gap: .2rem; min-width: 0; }
-dialog.login .login-code > button { box-sizing: border-box; min-height: max(28px, 1.6rem); }
-dialog.login .login-code .textbox { box-sizing: border-box; min-width: 0; min-height: max(28px, 1.6rem); padding-block: 0; padding-inline-start: .6rem; font-family: var(--mono); font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+dialog.login .login-code > button { box-sizing: border-box; min-height: var(--compact-height); }
+dialog.login .login-code .textbox { box-sizing: border-box; min-width: 0; min-height: var(--compact-height); padding-block: 0; padding-inline-start: .6rem; font-family: var(--mono); font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 dialog.login p.bad { color: var(--bad-ink); }
 dialog.login .login-kinds { margin: .6rem 0 .35rem; }
 dialog.login .login-panel p { margin: 0; }
@@ -942,7 +951,7 @@ dialog.identity { width: min(32rem, calc(100vw - 2rem)); margin-block: 8vh auto;
 dialog.identity p { margin: .35rem 0; }
 dialog.identity .identity-form { display: grid; gap: .6rem; margin-top: .6rem; }
 dialog.identity .identity-form .field { display: grid; gap: .2rem; }
-dialog.identity .identity-form .textbox { box-sizing: border-box; min-width: 0; min-height: max(28px, 1.6rem); padding: 0 .6rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+dialog.identity .identity-form .textbox { box-sizing: border-box; min-width: 0; min-height: var(--compact-height); padding: 0 .6rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 sf-forge-panel { display: block; margin-bottom: 1.6rem; }
 body.side-full #side > sf-forge-panel { padding-top: 1.25rem; border-top: 1px solid var(--line); }
 sf-forge-panel .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
@@ -1141,7 +1150,7 @@ sf-team-rules > h3 { margin: 0 0 .25rem; }
 sf-lineage { display: block; }
 .dispatch .start-from { display: grid; gap: .2rem; margin-top: .4rem; max-width: 28rem; }
 .dispatch .start-from select { width: 100%; }
-form.dispatch :is(.start-from select, .caps-fields > .textbox) { box-sizing: border-box; min-height: max(28px, 1.6rem); padding: 0 .6rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
+form.dispatch :is(.start-from select, .caps-fields > .textbox) { box-sizing: border-box; min-height: var(--compact-height); padding: 0 .6rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 form.dispatch .advanced-settings { display: block; }
 form.dispatch .advanced-settings > :not(summary) { margin-top: .5rem; }
 sf-pull-follow { display: block; margin-bottom: 1.6rem; }
@@ -1155,7 +1164,7 @@ sf-pull-follow .forge-body, sf-issue-picker .forge-body { max-height: 20rem; ove
 sf-pull-follow .pull-findings { margin-top: .6rem; padding-top: .5rem; border-top: 1px solid var(--line); }
 sf-pull-follow .pull-settings { margin-top: .8rem; }
 sf-pull-follow .pull-settings-form { display: grid; gap: .4rem; margin-top: .4rem; }
-sf-pull-follow .pull-settings-form .textbox { box-sizing: border-box; min-width: 0; min-height: max(28px, 1.6rem); padding: 0 .6rem; font-size: .8125rem; border-radius: 4px; }
+sf-pull-follow .pull-settings-form .textbox { box-sizing: border-box; min-width: 0; min-height: var(--compact-height); padding: 0 .6rem; font-size: var(--compact-font); border-radius: var(--compact-radius); }
 sf-issue-picker { display: block; }
 sf-issue-picker .issue-items { margin: .3rem 0; }
 sf-issue-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }

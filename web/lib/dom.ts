@@ -45,6 +45,11 @@ export function focusedKey(root: HTMLElement): string {
   return a instanceof HTMLElement && root.contains(a) ? a.dataset.key || '' : ''
 }
 
+export function around<T>(list: readonly T[], item: T): T[] {
+  const at = list.indexOf(item)
+  return at < 0 ? [] : [...list.slice(at + 1), ...list.slice(0, at).reverse()]
+}
+
 export function refocus(root: HTMLElement, key: string, fallback: (key: string) => string[] = () => []): void {
   if (!key) return
   const a = document.activeElement
@@ -90,7 +95,9 @@ export function field(label: string, control: HTMLElement, help?: string, cls = 
 const TONES = ['bad', 'warn', 'ok', 'muted'] as const
 export type Tone = typeof TONES[number]
 
-export function statusLine<K extends 'p' | 'span' = 'p'>(cls = 'small', tag: K = 'p' as K): HTMLElementTagNameMap[K] {
+export function statusLine(cls?: string): HTMLParagraphElement
+export function statusLine(cls: string, tag: 'span'): HTMLSpanElement
+export function statusLine(cls = 'small', tag: 'p' | 'span' = 'p'): HTMLParagraphElement | HTMLSpanElement {
   const line = el(tag, cls)
   line.setAttribute('role', 'status')
   return line
@@ -182,11 +189,61 @@ if (typeof document !== 'undefined') {
   document.addEventListener('submit', refuseBusy, true)
 }
 
+const BUSY_SAID = 'Working…'
+const BUSY_SHOWN_AFTER_MS = 300
+const busyLines = new WeakMap<Element, HTMLSpanElement>()
+const busyWaits = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>()
+const busySaid = new Map<HTMLButtonElement, HTMLSpanElement>()
+
+function busyLine(b: HTMLButtonElement): HTMLSpanElement {
+  const layer = b.closest('dialog[open]') ?? document.body
+  let line = busyLines.get(layer)
+  if (!line?.isConnected) {
+    line = statusLine('sr-only', 'span')
+    layer.append(line)
+    busyLines.set(layer, line)
+  }
+  return line
+}
+
+function sayBusy(line: HTMLSpanElement): void {
+  const lines = new Set([line])
+  for (const [b, at] of busySaid) {
+    if (b.isConnected && resting.has(b)) continue
+    busySaid.delete(b)
+    lines.add(at)
+  }
+  const speaking = new Set(busySaid.values())
+  for (const at of lines) sayIfChanged(at, speaking.has(at) ? BUSY_SAID : '')
+}
+
+function busyStarted(b: HTMLButtonElement): void {
+  if (busyWaits.has(b) || busySaid.has(b)) return
+  const line = busyLine(b)
+  busyWaits.set(b, setTimeout(() => {
+    busyWaits.delete(b)
+    if (!b.isConnected || !resting.has(b)) return
+    busySaid.set(b, line)
+    sayBusy(line)
+  }, BUSY_SHOWN_AFTER_MS))
+}
+
+function busyEnded(b: HTMLButtonElement): void {
+  clearTimeout(busyWaits.get(b))
+  busyWaits.delete(b)
+  const line = busySaid.get(b)
+  busySaid.delete(b)
+  if (line) sayBusy(line)
+}
+
+if (typeof document !== 'undefined' && document.body) busyLines.set(document.body, document.body.appendChild(statusLine('sr-only', 'span')))
+
 export function busy(b: HTMLButtonElement, on: boolean): void {
   if (on) {
     if (!resting.has(b)) resting.set(b, b.getAttribute('aria-disabled'))
     b.setAttribute('aria-busy', 'true')
     b.setAttribute('aria-disabled', 'true')
+    busyStarted(b)
     return
   }
   if (!resting.has(b)) return
@@ -195,6 +252,7 @@ export function busy(b: HTMLButtonElement, on: boolean): void {
   b.removeAttribute('aria-busy')
   if (before === null) b.removeAttribute('aria-disabled')
   else b.setAttribute('aria-disabled', before)
+  busyEnded(b)
 }
 
 export async function whileBusy<T>(b: HTMLButtonElement, work: () => Promise<T>): Promise<T> {

@@ -49,13 +49,43 @@
       }
     },
     {
-      "name": "composer-no-page-modules",
+      "name": "composer-only-shared-modules",
       "severity": "error",
       "from": {
         "path": "^composer\\.[jt]s$"
       },
       "to": {
-        "pathNot": "^((components|lib)/[^/]+|types|api)\\.[jt]s$"
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "navigation-layout-session-actions-only-shared-modules",
+      "severity": "error",
+      "from": {
+        "path": "^(navigation|layout|session-actions)\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "stream-only-shared-modules-and-navigation",
+      "severity": "error",
+      "from": {
+        "path": "^stream\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state|navigation)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "palette-items-only-shared-modules-layout-navigation-session-actions",
+      "severity": "error",
+      "from": {
+        "path": "^palette-items\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state|layout|navigation|session-actions)\\.[jt]s$"
       }
     },
     {

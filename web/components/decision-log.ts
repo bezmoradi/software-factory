@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { around, busy, button, el, field, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 
 const MAX_NAME = 120
 const MAX_TEXT = 500
@@ -223,8 +223,7 @@ class SfDecisionLog extends HTMLElement {
     const cut = key.indexOf(':')
     const kind = cut < 0 ? '' : key.slice(0, cut)
     const id = cut < 0 ? this.#formFor : key.slice(cut + 1)
-    const at = this.#order.indexOf(id)
-    const others = at < 0 ? [] : [...this.#order.slice(at + 1), ...this.#order.slice(0, at).reverse()]
+    const others = around(this.#order, id)
     const same = kind === 'decision-remove' ? kind : 'decision-edit'
     return [`decision-edit:${id}`, ...others.flatMap(o => [`${same}:${o}`, `decision-edit:${o}`]), 'decision-again']
   }

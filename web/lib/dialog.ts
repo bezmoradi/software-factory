@@ -16,7 +16,6 @@ export interface ModalOptions {
 
 export interface Modal {
   dialog: HTMLDialogElement
-  heading: HTMLHeadingElement
   close(): void
   onClose(fn: () => void): void
 }
@@ -66,7 +65,6 @@ export function modal(o: ModalOptions): Modal {
   }
   const handle: Modal = {
     dialog: d,
-    heading,
     close: () => {
       if (d.open) d.close()
       finish()

@@ -1,36 +1,21 @@
+import { api, upload } from './api.ts'
+import { current, say, scroller, sessions, state, toast, type Session } from './app-state.ts'
 import { button, byId, el } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { agentWord } from './lib/format.ts'
 import { icon } from './components/icon.ts'
-import type { Toast } from './components/toasts.ts'
-import type { Catalog, SessionInfo } from './types.ts'
 
-interface ComposerSession {
-  sid: string
-  info: Pick<SessionInfo, 'agent' | 'project' | 'verified'>
-  view: { readonly pinned: boolean }
-  catalog: Catalog | null
+interface ComposerDeps {
+  send: (text: string, images: string[], s: Session, pressed: boolean, files: string[]) => Promise<boolean>
 }
 
-interface ComposerDeps<S extends ComposerSession> {
-  current: { (): S | null; readonly key: string }
-  sessions: ReadonlyMap<string, S>
-  state: { readonly connected: boolean }
-  scroller: HTMLElement
-  send: (text: string, images: string[], s: S, pressed: boolean, files: string[]) => Promise<boolean>
-  say: (message: string) => void
-  toast: (t: Toast) => void
-  api: (path: string, body: unknown) => Promise<Response>
-  upload: (blob: Blob, sid: string, name?: string) => Promise<Response>
-}
-
-interface Composer<S extends ComposerSession> {
+interface Composer {
   swapDraft: (from: string, to: string) => void
   dropDraft: (key: string) => void
   grow: () => void
   paintJump: () => void
   jump: (to: 'start' | 'latest') => void
-  paint: (s: S | null, blocked: boolean) => void
+  paint: (s: Session | null, blocked: boolean) => void
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -67,7 +52,7 @@ async function sha256(data: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-export function startComposer<S extends ComposerSession>({ current, sessions, state, scroller, send, say, toast, api, upload }: ComposerDeps<S>): Composer<S> {
+export function startComposer({ send }: ComposerDeps): Composer {
   const drafts = new Map<string, Draft>()
   const sending = new Set<string>()
 
@@ -349,7 +334,7 @@ export function startComposer<S extends ComposerSession>({ current, sessions, st
     if (key === current.key) text.focus()
   })
 
-  function paint(s: S | null, blocked: boolean) {
+  function paint(s: Session | null, blocked: boolean) {
     byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').view = s?.info.project && s.info.verified ? { repo: s.info.project, disabled: !state.connected } : null
     if (text.disabled !== blocked) text.disabled = blocked
     const placeholder = blocked ? 'Answer the card above to keep going' : 'Type a message and press Enter'

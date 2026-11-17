@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
@@ -164,10 +164,7 @@ class SfAllowRules extends HTMLElement {
     if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
     replaceKeeping(this, parts)
-    refocus(this, focused, key => {
-      const at = before.indexOf(key)
-      return [...(at < 0 ? [] : [...before.slice(at + 1), ...before.slice(0, at).reverse()]), 'rules-again']
-    })
+    refocus(this, focused, key => [...around(before, key), 'rules-again'])
   }
 }
 

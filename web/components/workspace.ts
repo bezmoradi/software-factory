@@ -1,4 +1,4 @@
-import { actionButton, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -141,9 +141,7 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
   const settle = (sid: string, before: string[], offer: HTMLButtonElement | null) => {
     if (!lost()) return
     if (offer?.isConnected) return offer.focus()
-    const at = before.indexOf(sid)
-    const near = at < 0 ? [] : [...before.slice(at + 1), ...before.slice(0, at).reverse()]
-    refocus(list, `delete:${sid}`, () => near.map(s => `delete:${s}`))
+    refocus(list, `delete:${sid}`, () => around(before, sid).map(s => `delete:${s}`))
     if (lost()) listHeading.focus()
   }
 

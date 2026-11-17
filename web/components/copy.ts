@@ -6,8 +6,6 @@ const COPIED = 'Copied'
 const FAILED = 'Couldn’t copy: select the text and copy it'
 
 class SfCopy extends HTMLElement {
-  static observedAttributes = ['label']
-
   text = ''
 
   readonly #button = button('', 'setup-copy')
@@ -18,8 +16,8 @@ class SfCopy extends HTMLElement {
   constructor() {
     super()
     this.#status.setAttribute('aria-live', 'polite')
+    this.#button.setAttribute('aria-label', 'Copy the command')
     this.#button.addEventListener('click', () => void this.#copy())
-    this.#name()
     this.#rest()
   }
 
@@ -31,14 +29,6 @@ class SfCopy extends HTMLElement {
   disconnectedCallback() {
     this.#tries++
     this.#rest()
-  }
-
-  attributeChangedCallback() {
-    this.#name()
-  }
-
-  #name() {
-    this.#button.setAttribute('aria-label', this.getAttribute('label') ?? 'Copy the command')
   }
 
   #rest() {
