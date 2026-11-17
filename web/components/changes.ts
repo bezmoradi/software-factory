@@ -1,4 +1,4 @@
-import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes } from '../types.ts'
@@ -252,6 +252,8 @@ class SfChanges extends HTMLElement {
   #branchCommits = new Map<string, Changes['commits']>()
   #comments = new Map<string, LineComment[]>()
   #sending = false
+  #diffGroup = el('details')
+  #diffSummary = el('summary', 'small')
   #lines = el('div', 'diff-lines small')
   #status = statusLine('sr-only', 'span')
   #panel = el('div', 'line-comments small')
@@ -264,6 +266,8 @@ class SfChanges extends HTMLElement {
 
   constructor() {
     super()
+    this.#diffSummary.dataset.key = 'group:diff'
+    this.#diffGroup.addEventListener('toggle', () => this.#open.set('diff', this.#diffGroup.open))
     this.#lines.tabIndex = 0
     this.#lines.setAttribute('role', 'region')
     this.#lines.addEventListener('click', e => {
@@ -276,7 +280,6 @@ class SfChanges extends HTMLElement {
     this.#box.setAttribute('aria-label', 'Comment on the chosen line')
     this.#box.disabled = true
     this.#box.addEventListener('keydown', e => {
-      if (this.#box.readOnly) return
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         this.#addComment()
@@ -318,14 +321,7 @@ class SfChanges extends HTMLElement {
     this.#target.textContent = `Commenting on ${where}.`
     this.#status.textContent = `${where}: ${visible(r.text.slice(1))}`
     this.#box.disabled = false
-    this.#holdBox(this.#sending)
     if (focusBox) this.#box.focus()
-  }
-
-  #holdBox(on: boolean) {
-    this.#box.readOnly = on
-    if (on) this.#box.setAttribute('aria-disabled', 'true')
-    else this.#box.removeAttribute('aria-disabled')
   }
 
   #keys(e: KeyboardEvent) {
@@ -388,7 +384,6 @@ class SfChanges extends HTMLElement {
       text: commentMessage(mine),
       done: (ok: boolean) => {
         this.#sending = false
-        this.#holdBox(false)
         if (ok) {
           const kept = (this.#comments.get(branch) ?? []).filter(c => !mine.includes(c))
           if (kept.length) this.#comments.set(branch, kept)
@@ -647,11 +642,12 @@ class SfChanges extends HTMLElement {
       this.#diff = value.diff
       this.#paintDiff()
       const cutAt = value.clipped ? [...this.#rows].reverse().find(r => r.file)?.file ?? '' : ''
-      const summary = el('summary', 'small', value.clipped ? `Diff (cut short at 1 MiB${cutAt ? `, in ${visible(cutAt)}` : ''})` : 'Diff')
-      summary.dataset.key = 'group:diff'
+      this.#diffSummary.textContent = value.clipped ? `Diff (cut short at 1 MiB${cutAt ? `, in ${visible(cutAt)}` : ''})` : 'Diff'
       const notes: HTMLElement[] = []
       if (this.#layout.highlight && this.#rows.length > MAX_HIGHLIGHT) notes.push(el('p', 'small muted', `Highlighting is off for a diff of more than ${MAX_HIGHLIGHT.toLocaleString()} lines, to keep the page quick.`))
-      parts.push(remembered(this.#open, 'diff', true, summary, ...notes, this.#lines, this.#status, this.#panel))
+      this.#diffGroup.open = this.#open.get('diff') ?? true
+      replaceKeeping(this.#diffGroup, [this.#diffSummary, ...notes, this.#lines, this.#status, this.#panel])
+      parts.push(this.#diffGroup)
     } else {
       this.#rows = []
       this.#diff = ''
@@ -661,7 +657,7 @@ class SfChanges extends HTMLElement {
     }
     this.#paintList()
     if (!value.commits.length) parts.push(el('p', 'small muted', from === 'fork' ? 'No commits beyond the base branch.' : 'No commits since the commit compared with.'))
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

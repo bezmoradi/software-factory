@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
@@ -218,7 +218,7 @@ class SfProjectCaps extends HTMLElement {
 
 class SfSessionLimits extends HTMLElement {
   #stop = () => {}
-  #said = statusLine('small warn')
+  #said = statusLine('small warn status-slot')
   #raise = new Map<string, HTMLInputElement>()
   #edit = new CapsInputs('Caps for this session')
   #editing = false
@@ -242,7 +242,7 @@ class SfSessionLimits extends HTMLElement {
 
   paint() {
     if (this.contains(document.activeElement) && document.activeElement instanceof HTMLInputElement) {
-      if (this.#said.textContent && this.#said.parentNode !== this) this.append(this.#said)
+      if (this.#said.parentNode !== this) this.append(this.#said)
       return this.#hold()
     }
     const focused = focusedKey(this)
@@ -283,9 +283,9 @@ class SfSessionLimits extends HTMLElement {
       parts.push(box)
     }
     if (sid && !s?.reached) parts.push(this.#editor(s))
-    if (this.#said.textContent) parts.push(this.#said)
+    parts.push(this.#said)
     this.hidden = !sid
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     this.#hold()
     refocus(this, focused, key => [...(LIMIT_NEXT[key] ?? []), 'caps-edit'])
   }

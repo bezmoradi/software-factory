@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { actionButton, el, focusedKey, refocus, statusLine, visible } from '../lib/dom.ts'
+import { actionButton, el, focusedKey, refocus, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 
 export interface CapsValues {
   money: number
@@ -237,7 +237,7 @@ export function expiryText(e: Expiry): string {
 
 class SfUsage extends HTMLElement {
   #stop = () => {}
-  #said = statusLine('small warn')
+  #said = statusLine('small warn status-slot')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
@@ -275,10 +275,11 @@ class SfUsage extends HTMLElement {
     }
     for (const e of view.expiry) if (e.what === 'sign-in') parts.push(el('p', 'notice warn small', expiryText(e)))
     if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so it counts every session as at its cap: it refuses messages, starts no automatic review, and saves no change. Fix or remove the file, then restart the engine."))
-    if (this.#said.textContent) parts.push(this.#said)
-    if (parts.length && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
-    this.hidden = !parts.length
-    this.replaceChildren(...parts)
+    const shown = parts.length > 0 || !!this.#said.textContent
+    if (shown && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
+    parts.push(this.#said)
+    this.hidden = !shown
+    replaceKeeping(this, parts)
     refocus(this, focused, key => [heads.get(key) ?? ''])
   }
 

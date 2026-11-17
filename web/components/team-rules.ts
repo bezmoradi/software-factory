@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { el, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { el, replaceKeeping, say, sayWhenShown, shown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 
 interface TeamRules {
@@ -34,12 +34,13 @@ function readRules(body: unknown): TeamRules | null {
 
 class SfTeamRules extends HTMLElement {
   #path = ''
-  #status = statusLine()
+  #status = statusLine('small status-slot')
 
   set path(value: string) {
     if (value === this.#path) return
     this.#path = value
-    this.replaceChildren(el('h3', 'label', 'Team rules from main'), el('p', 'small muted', 'Reading the team file on the main branch…'))
+    say(this.#status, '')
+    replaceKeeping(this, [el('h3', 'label', 'Team rules from main'), el('p', 'small muted', 'Reading the team file on the main branch…'), this.#status])
     if (value) void this.#load(value)
   }
 
@@ -49,8 +50,8 @@ class SfTeamRules extends HTMLElement {
     if (path !== this.#path) return
     const parts: HTMLElement[] = [el('h3', 'label', 'Team rules from main')]
     if (!res || !res.ok) {
-      say(this.#status, typeof body?.message === 'string' ? visible(body.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
-      return this.replaceChildren(...parts, this.#status)
+      replaceKeeping(this, [...parts, this.#status])
+      return sayWhenShown(this.#status, typeof body?.message === 'string' ? visible(body.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
     }
     const v = readRules(body)
     if (!v || !v.present) return this.replaceChildren(...parts, el('p', 'small muted', 'The main branch has no software-factory.json, so no team rules apply.'))

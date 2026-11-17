@@ -1,4 +1,4 @@
-import { actionButton, button, el, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, button, el, sayWhenShown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -104,7 +104,9 @@ export async function stateNotices(post: Post, target: HTMLElement): Promise<voi
   const lines = view.drops.map(droppedLine)
   if (view.last?.state === 'applied' && view.needClone.length) lines.push(`${view.needClone.length === 1 ? '1 imported project needs' : `${view.needClone.length} imported projects need`} a clone: open Export and import to clone ${view.needClone.length === 1 ? 'it' : 'them'} again.`)
   if (view.last?.state === 'refused' && view.last.why) lines.push(`The last import was refused: ${visible(view.last.why)}`)
-  target.replaceChildren(...lines.map(l => el('p', 'small warn', l)))
+  const said = lines.map(() => el('p', 'small warn'))
+  target.replaceChildren(...said)
+  lines.forEach((l, i) => sayWhenShown(said[i]!, l, 'warn'))
   target.hidden = lines.length === 0
 }
 
