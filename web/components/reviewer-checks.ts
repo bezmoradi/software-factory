@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, remembered, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, remembered, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 interface CheckRun {
   state: string
@@ -125,7 +125,7 @@ class SfReviewerChecks extends HTMLElement {
     if (!value) {
       window.clearTimeout(this.#timer)
       this.#timer = 0
-      this.replaceChildren()
+      this.#paint()
       return
     }
     this.#paint()
@@ -215,7 +215,10 @@ class SfReviewerChecks extends HTMLElement {
 
   #paint() {
     const target = this.#target
-    if (!target) return this.replaceChildren()
+    if (!target) {
+      this.#status.textContent = ''
+      return this.replaceChildren()
+    }
     const focused = focusedKey(this)
     const v = this.#view
     const off = target.disabled || this.#busy !== ''
@@ -234,7 +237,7 @@ class SfReviewerChecks extends HTMLElement {
       parts.push(list)
     }
     parts.push(this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

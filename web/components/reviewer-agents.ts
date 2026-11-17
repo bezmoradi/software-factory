@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 
 interface AgentFileView {
   name: string
@@ -217,7 +217,7 @@ class SfReviewerAgents extends HTMLElement {
       }
     }
     parts.push(this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused, key => key === 'agent-file' ? Object.keys(v?.roleNames ?? {}).map(role => `role:${role}`) : ['agent-file'])
   }
 }

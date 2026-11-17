@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 const MAX_NAME = 60
 const MAX_TEXT = 20000
@@ -208,7 +208,7 @@ class SfSavedPrompts extends HTMLElement {
       parts.push(add)
     }
     parts.push(this.#status)
-    this.#panel.replaceChildren(...parts)
+    replaceKeeping(this.#panel, parts)
     refocus(this.#panel, focused)
   }
 

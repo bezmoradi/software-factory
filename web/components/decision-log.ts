@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, refocus, say, shown, statusLine } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 
 const MAX_NAME = 120
 const MAX_TEXT = 500
@@ -263,7 +263,7 @@ class SfDecisionLog extends HTMLElement {
     }, 'button', 'decision-again')
     this.#hold(again)
     parts.push(again, this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     this.#order = v?.entries.map(e => e.id) ?? []
     this.#formFor = this.#editing
     refocus(this, focused, () => near)

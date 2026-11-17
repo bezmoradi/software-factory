@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, shown, statusLine } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 
 interface RoleNumbers {
   role: string
@@ -202,7 +202,7 @@ class SfProjectMetrics extends HTMLElement {
     const again = button('Count again', 'link small', () => void this.#read(), 'button', 'metrics-again')
     if (this.#busy) busy(again, true)
     parts.push(again, this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

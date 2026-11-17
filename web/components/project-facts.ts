@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import type { WorkflowRun } from '../types.ts'
 
 interface Protection {
@@ -220,7 +220,7 @@ class SfProjectFacts extends HTMLElement {
     if (this.#busy && this.#op === 'read') busy(again, true)
     else if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

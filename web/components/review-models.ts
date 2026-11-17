@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { el, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
+import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 
 interface RoleModel {
   name: string
@@ -133,7 +133,7 @@ class SfReviewModels extends HTMLElement {
       parts.push(row)
     }
     parts.push(this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }
