@@ -61,6 +61,81 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   return b
 }
 
+let fields = 0
+
+function labelTarget(control: HTMLElement): HTMLElement {
+  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement || control instanceof HTMLButtonElement) return control
+  return control.querySelector<HTMLElement>('input, select, textarea') ?? control
+}
+
+export function field(label: string, control: HTMLElement, help?: string, cls = 'field'): HTMLDivElement {
+  const target = labelTarget(control)
+  if (!target.id) target.id = `field-${++fields}`
+  const box = el('div', cls)
+  const name = el('label', 'small', label)
+  name.htmlFor = target.id
+  box.append(name, control)
+  if (help) {
+    const note = el('p', 'small muted', help)
+    note.id = `${target.id}-help`
+    const described = (target.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
+    if (!described.includes(note.id)) target.setAttribute('aria-describedby', [...described, note.id].join(' '))
+    box.append(note)
+  }
+  return box
+}
+
+const TONES = ['bad', 'warn', 'ok', 'muted'] as const
+export type Tone = typeof TONES[number]
+
+export function statusLine<K extends 'p' | 'span' = 'p'>(cls = 'small', tag: K = 'p' as K): HTMLElementTagNameMap[K] {
+  const line = el(tag, cls)
+  line.setAttribute('role', 'status')
+  return line
+}
+
+const pending = new WeakMap<HTMLElement, { text: string; tone: Tone | undefined }>()
+
+function toned(line: HTMLElement, tone: Tone | undefined): void {
+  pending.delete(line)
+  for (const t of TONES) line.classList.toggle(t, t === tone)
+}
+
+export function say(line: HTMLElement, text: string, tone?: Tone): void {
+  toned(line, tone)
+  line.textContent = text
+}
+
+export function sayIfChanged(line: HTMLElement, text: string, tone?: Tone): void {
+  toned(line, tone)
+  if (line.textContent !== text) line.textContent = text
+}
+
+export function sayWhenShown(line: HTMLElement, text: string, tone?: Tone): void {
+  const waiting = pending.get(line)
+  if (waiting && waiting.text === text) {
+    waiting.tone = tone
+    return
+  }
+  if (!text || line.isConnected && !line.closest('[hidden]')) return sayIfChanged(line, text, tone)
+  say(line, '', tone)
+  const next = { text, tone }
+  pending.set(line, next)
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (pending.get(line) === next) say(line, next.text, next.tone)
+  }))
+}
+
+export function replaceKeeping(parent: Element, parts: Node[]): void {
+  const kept = new Set(parts)
+  for (const child of [...parent.childNodes]) if (!kept.has(child)) child.remove()
+  let at = parent.firstChild
+  for (const part of parts) {
+    if (part === at) at = at.nextSibling
+    else parent.insertBefore(part, at)
+  }
+}
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)

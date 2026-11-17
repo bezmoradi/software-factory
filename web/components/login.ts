@@ -1,4 +1,4 @@
-import { busy, button, el, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
@@ -62,9 +62,7 @@ function describe(s: SignIn | null, busy = false): string {
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
 
-function field(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
-  const box = el('div', 'login-field')
-  const label = el('label', 'small', words)
+function secretField(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
   const input = el('input', 'textbox')
   input.type = 'password'
   input.name = name
@@ -72,10 +70,7 @@ function field(name: string, words: string, what: string, autocomplete: AutoFill
   input.spellcheck = false
   input.required = true
   input.maxLength = 512
-  const hidden = secret(input, what)
-  label.htmlFor = input.id
-  box.append(label, hidden)
-  return [box, input]
+  return [field(words, secret(input, what), undefined, 'login-field'), input]
 }
 
 function busyButton(text: string): { node: HTMLButtonElement; busy: (on: boolean) => void } {
@@ -85,10 +80,10 @@ function busyButton(text: string): { node: HTMLButtonElement; busy: (on: boolean
 
 class Row {
   readonly node = el('section', 'login-row')
-  private readonly status = el('p', 'small', '')
+  private readonly status = statusLine('small status-slot')
   private readonly kinds = el('sf-accordion', 'login-kinds')
-  private readonly subscriptionSaid = el('p', 'small', '')
-  private readonly keySaid = el('p', 'small', '')
+  private readonly subscriptionSaid = statusLine('small status-slot')
+  private readonly keySaid = statusLine('small status-slot')
   private readonly codeGo = busyButton('Complete sign-in')
   private readonly keyGo = busyButton('Save key')
   private readonly link = el('a', 'button primary small', 'Sign in')
@@ -108,16 +103,10 @@ class Row {
     this.post = post
     this.target = target
     this.signedIn = signedIn
-    for (const said of [this.subscriptionSaid, this.keySaid]) {
-      said.setAttribute('role', 'status')
-      said.hidden = true
-    }
-    this.status.setAttribute('role', 'status')
-    this.status.hidden = true
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
     this.unready()
-    const [codeLabel, code] = field('code', 'Code from claude.com', 'code', 'one-time-code')
+    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
     const codeForm = this.form(codeLabel, this.codeGo.node, () => void this.finishCode())
     this.subscription.append(
@@ -127,7 +116,7 @@ class Row {
       this.subscriptionSaid,
     )
     const agents = target !== 'reviewers'
-    const [keyLabel, key] = field('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
+    const [keyLabel, key] = secretField('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
     this.key = key
     this.apiKey.append(
       el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
@@ -165,8 +154,7 @@ class Row {
     this.current = !stale(s, busy)
     const worth = stale(s, busy) || !!s?.busy || busy
     const gateway = s?.method === 'gateway' && this.current ? `${GATEWAY_WARNING}.` : ''
-    this.status.textContent = [worth ? describe(s, busy) : '', gateway].filter(Boolean).join(' ')
-    this.status.hidden = !this.status.textContent
+    say(this.status, [worth ? describe(s, busy) : '', gateway].filter(Boolean).join(' '))
     this.paint()
   }
 
@@ -176,9 +164,7 @@ class Row {
   }
 
   private note(said: HTMLElement, text: string, bad = false) {
-    said.textContent = text
-    said.classList.toggle('bad', bad)
-    said.hidden = !text
+    say(said, text, bad ? 'bad' : undefined)
   }
 
   private async begin() {
@@ -314,8 +300,8 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
   if (!BOX.test(box)) return Promise.resolve(false)
   const target = `box:${box}`
   return new Promise(resolve => {
-    const status = el('p', 'small', describe(needs.signIn ?? null))
-    status.setAttribute('role', 'status')
+    const status = statusLine()
+    if (!needs.code) say(status, describe(needs.signIn ?? null))
     let finished = false
     let answer = false
     const done = (yes: boolean) => {
@@ -329,10 +315,10 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       tell(`${visible(name)} is signed in for this session with ${how}.`)
     }) : null
     const check = async (): Promise<boolean | null> => {
-      status.textContent = 'Checking…'
+      say(status, 'Checking…')
       const a = await call(post, { step: 'status', target })
       if (!a.ok) {
-        status.textContent = typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.'
+        say(status, typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.')
         return null
       }
       const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
@@ -340,8 +326,8 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       const s = signInOf(first.signIn)
       row?.show(s)
       const ready = signedIn(first.signIn)
-      if (ready === false) status.textContent = row ? 'Not signed in yet. Sign in above, then press Continue.' : `${describe(s)} Run the command below, then press Continue.`
-      else status.textContent = row ? '' : describe(s)
+      if (ready === false) say(status, row ? 'Not signed in yet. Sign in above, then press Continue.' : `${describe(s)} Run the command below, then press Continue.`)
+      else say(status, row ? '' : describe(s))
       return ready
     }
     const proceed = async () => {
@@ -351,7 +337,6 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
     ]
     if (row) {
-      status.textContent = ''
       row.show(needs.signIn ?? null)
       parts.push(row.node, status)
     } else {

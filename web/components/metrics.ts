@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, shown, statusLine } from '../lib/dom.ts'
 
 interface RoleNumbers {
   role: string
@@ -104,12 +104,7 @@ class SfProjectMetrics extends HTMLElement {
   #project = ''
   #view: MetricsView | null = null
   #busy = false
-  #status = el('p', 'small')
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
+  #status = statusLine()
 
   set project(value: string) {
     if (value === this.#project) return
@@ -129,8 +124,7 @@ class SfProjectMetrics extends HTMLElement {
     this.#busy = false
     const body = await res?.json().catch(() => null) as Record<string, unknown> | null
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof body?.message === 'string' && body.message ? shown(body.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof body?.message === 'string' && body.message ? shown(body.message) : 'The engine didn\'t answer. Try again.', 'warn')
     } else {
       const v = readView(body)
       if (v) this.#view = v

@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -54,14 +54,13 @@ class SfScreenshots extends HTMLElement {
   #details = el('details', 'screenshots')
   #summary = el('summary', 'small')
   #list = el('ul', 'small list screenshot-list')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #figure = el('figure', 'screenshot-view')
   #img = el('img')
   #caption = el('figcaption', 'small muted')
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#img.decoding = 'async'
     this.#figure.append(this.#img, this.#caption)
     this.#figure.hidden = true

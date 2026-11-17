@@ -1,4 +1,4 @@
-import { actionButton, button, el } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -24,8 +24,7 @@ function save(text: string) {
 
 export function openDiagnostics(post: Post): void {
   let generation = 0
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  const say = statusLine()
   const shown = el('pre', 'diagnostics-text')
   shown.tabIndex = 0
   shown.setAttribute('aria-label', 'The whole diagnostics file')

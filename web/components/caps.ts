@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { actionButton, busy, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
@@ -126,12 +126,11 @@ class SfCapsFields extends HTMLElement {
   #project = ''
   #built = false
 
-  #note = el('p', 'small muted')
+  #note = statusLine('small muted')
 
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      this.#note.setAttribute('role', 'status')
       this.#invalid(false)
       this.replaceChildren(this.#inputs.box, this.#note)
     }
@@ -171,7 +170,7 @@ class SfCapsFields extends HTMLElement {
 class SfProjectCaps extends HTMLElement {
   #inputs = new CapsInputs('Caps for new sessions in this project')
   #project = ''
-  #said = el('p', 'small')
+  #said = statusLine()
   #save = button('Save caps', 'small', () => void this.#store())
   #saving = false
   #built = false
@@ -180,7 +179,6 @@ class SfProjectCaps extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      this.#said.setAttribute('role', 'status')
       const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs.')
       this.#inputs.box.append(this.#save)
       this.replaceChildren(el('h3', 'label', 'Caps'), note, this.#inputs.box, this.#said)
@@ -206,8 +204,7 @@ class SfProjectCaps extends HTMLElement {
   async #store() {
     const v = this.#inputs.value()
     if (!v) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.'
+      say(this.#said, 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.', 'warn')
       return
     }
     this.#saving = true
@@ -221,7 +218,7 @@ class SfProjectCaps extends HTMLElement {
 
 class SfSessionLimits extends HTMLElement {
   #stop = () => {}
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn')
   #raise = new Map<string, HTMLInputElement>()
   #edit = new CapsInputs('Caps for this session')
   #editing = false
@@ -233,7 +230,6 @@ class SfSessionLimits extends HTMLElement {
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Caps and limits for this session')
-    this.#said.setAttribute('role', 'status')
     if (!this.#edit.box.querySelector('button')) this.#edit.box.append(this.#editSave)
     this.#stop = watchLimits(this)
     this.paint()

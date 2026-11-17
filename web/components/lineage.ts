@@ -1,4 +1,4 @@
-import { button, el, emit, visible } from '../lib/dom.ts'
+import { button, el, emit, replaceKeeping, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
 import { agentWord, shortSha } from '../lib/format.ts'
 import { limitsNow, watchLimits, when } from './usage.ts'
 import type { Lineage, SessionInfo, Starter } from '../types.ts'
@@ -31,6 +31,8 @@ export interface LineageView {
 class SfLineage extends HTMLElement {
   #view: LineageView | null = null
   #stop = () => {}
+  #handedSaid = statusLine('status-slot')
+  #handedBox = el('div', 'notice small status-box')
 
   connectedCallback() {
     this.#stop = watchLimits(this)
@@ -48,33 +50,32 @@ class SfLineage extends HTMLElement {
 
   paint() {
     const v = this.#view
+    const l = v?.info.lineage
+    const handed = l?.handedTo ? l : null
     const parts: HTMLElement[] = []
-    if (v) {
-      const l = v.info.lineage
-      if (l?.handedTo) parts.push(this.#handed(l))
-      else {
-        if (l) {
-          const said = this.#history(v.info, l)
-          if (said) parts.push(said)
-        }
-        const offer = this.#limitOffer(v)
-        if (offer) parts.push(offer)
+    if (v && !handed) {
+      if (l) {
+        const said = this.#history(v.info, l)
+        if (said) parts.push(said)
       }
+      const offer = this.#limitOffer(v)
+      if (offer) parts.push(offer)
     }
-    this.hidden = !parts.length
-    this.replaceChildren(...parts)
+    this.#handed(handed)
+    this.hidden = !parts.length && !handed
+    replaceKeeping(this, [this.#handedBox, ...parts])
   }
 
-  #handed(l: Lineage): HTMLElement {
-    const box = el('div', 'notice small')
-    box.setAttribute('role', 'status')
-    const at = sha(l.last)
-    box.append(el('p', '', `This branch, ${visible(l.branch)}, continues in another session${at ? ` from commit ${at}` : ''}. This session is stopped and its worktree removed, so it can't wake; it keeps its conversation for reading.`))
-    if (l.handedTo) {
-      const to = l.handedTo
-      box.append(button('Open that session', 'ghost small', () => emit(this, 'sf-open-session', { sid: to })))
+  #handed(l: Lineage | null): void {
+    if (!l?.handedTo) {
+      sayIfChanged(this.#handedSaid, '')
+      replaceKeeping(this.#handedBox, [this.#handedSaid])
+      return
     }
-    return box
+    const to = l.handedTo
+    const at = sha(l.last)
+    sayIfChanged(this.#handedSaid, `This branch, ${visible(l.branch)}, continues in another session${at ? ` from commit ${at}` : ''}. This session is stopped and its worktree removed, so it can't wake; it keeps its conversation for reading.`)
+    replaceKeeping(this.#handedBox, [this.#handedSaid, button('Open that session', 'ghost small', () => emit(this, 'sf-open-session', { sid: to }))])
   }
 
   #history(info: SessionInfo, l: Lineage): HTMLElement | null {

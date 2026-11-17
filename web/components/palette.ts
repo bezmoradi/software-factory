@@ -1,4 +1,4 @@
-import { button, el, settleFocus, visible } from '../lib/dom.ts'
+import { button, el, settleFocus, statusLine, visible } from '../lib/dom.ts'
 import { modal, reopen } from '../lib/dialog.ts'
 
 export interface PaletteItem {
@@ -50,8 +50,7 @@ export function openPalette(list: () => PaletteItem[]): void {
   listbox.id = 'palette-list'
   listbox.setAttribute('role', 'listbox')
   listbox.setAttribute('aria-label', 'Commands')
-  const said = el('p', 'sr-only')
-  said.setAttribute('role', 'status')
+  const said = statusLine('sr-only')
   const hint = el('p', 'small muted palette-hint', 'Up and Down arrows choose, Enter runs, Escape closes. Each action asks what its own button asks.')
   let shown: PaletteItem[] = []
   let at = -1

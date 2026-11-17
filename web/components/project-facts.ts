@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import type { WorkflowRun } from '../types.ts'
 
 interface Protection {
@@ -79,12 +79,7 @@ class SfProjectFacts extends HTMLElement {
   #busy = false
   #op = ''
   #gen = 0
-  #status = el('p', 'small')
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
+  #status = statusLine()
 
   set repo(value: string) {
     if (value === this.#repo) return
@@ -109,8 +104,7 @@ class SfProjectFacts extends HTMLElement {
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown } | null
       if (!current()) return false
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }

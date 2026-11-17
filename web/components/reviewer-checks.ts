@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, remembered, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, remembered, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 interface CheckRun {
   state: string
@@ -102,15 +102,10 @@ class SfReviewerChecks extends HTMLElement {
   #view: ChecksView | null = null
   #busy = ''
   #cost = ''
-  #status = el('p', 'small')
+  #status = statusLine()
   #timer = 0
   #key = ''
   #open = new Map<string, boolean>()
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
 
   connectedCallback() {
     if (this.#target && !this.#timer) this.#poll()
@@ -150,8 +145,7 @@ class SfReviewerChecks extends HTMLElement {
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: { cost?: unknown } } | null
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       if (problem?.needs?.cost === true && typeof body.agent === 'string') this.#cost = body.agent
       this.#paint()
       return false
@@ -169,8 +163,7 @@ class SfReviewerChecks extends HTMLElement {
     this.#status.textContent = ''
     this.#paint()
     if (await this.#call({ op: 'check', agent, ...(costOk ? { costOk: true } : {}) })) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = 'The check started. It reviews a change with a planted defect and a clean one, like a real review, so it takes about as long.'
+      say(this.#status, 'The check started. It reviews a change with a planted defect and a clean one, like a real review, so it takes about as long.', 'ok')
       this.#paint()
     }
   }

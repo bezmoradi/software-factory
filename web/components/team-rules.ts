@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { el, shown, visible } from '../lib/dom.ts'
+import { el, say, shown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 
 interface TeamRules {
@@ -34,12 +34,7 @@ function readRules(body: unknown): TeamRules | null {
 
 class SfTeamRules extends HTMLElement {
   #path = ''
-  #status = el('p', 'small')
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
+  #status = statusLine()
 
   set path(value: string) {
     if (value === this.#path) return
@@ -54,8 +49,7 @@ class SfTeamRules extends HTMLElement {
     if (path !== this.#path) return
     const parts: HTMLElement[] = [el('h3', 'label', 'Team rules from main')]
     if (!res || !res.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = typeof body?.message === 'string' ? visible(body.message) : 'The engine didn’t answer. Check that it is running.'
+      say(this.#status, typeof body?.message === 'string' ? visible(body.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
       return this.replaceChildren(...parts, this.#status)
     }
     const v = readRules(body)

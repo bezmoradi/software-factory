@@ -1,4 +1,4 @@
-import { busy, button, el, emit, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
@@ -89,6 +89,8 @@ class SfPushPanel extends HTMLElement {
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
   #answered = ''
+  #heldCard = el('div', 'push-card')
+  #passedSaid = statusLine('small muted status-slot')
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -127,6 +129,7 @@ class SfPushPanel extends HTMLElement {
       this.replaceChildren()
       this.#card = ''
       this.#reason = null
+      sayIfChanged(this.#passedSaid, '', 'muted')
       return
     }
     const focused = this.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key ?? '' : ''
@@ -141,12 +144,13 @@ class SfPushPanel extends HTMLElement {
     else if (p.result) parts.push(this.#result(p))
     const facts = p.running ? null : changeFacts(p, value.checks ?? [])
     if (facts) parts.push(facts)
-    if (p.card && !p.running) parts.push(this.#held(p, value))
+    if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''
       this.#reason = null
+      sayIfChanged(this.#passedSaid, '', 'muted')
     }
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     if (focused) this.querySelector<HTMLElement>(`[data-key="${CSS.escape(focused)}"]`)?.focus()
   }
 
@@ -256,6 +260,12 @@ class SfPushPanel extends HTMLElement {
     return box
   }
 
+  #heldInPlace(p: SessionPush, value: PushPanelView): HTMLElement {
+    const fresh = this.#held(p, value)
+    replaceKeeping(this.#heldCard, [this.#passedSaid, ...fresh.childNodes])
+    return this.#heldCard
+  }
+
   #held(p: SessionPush, value: PushPanelView): HTMLElement {
     const box = el('div', 'push-card')
     const passed = new Set(value.passedSince ?? [])
@@ -264,11 +274,7 @@ class SfPushPanel extends HTMLElement {
     const failed = p.missing.filter(m => blocked.has(m))
     const still = p.missing.filter(m => !passed.has(m) && !blocked.has(m))
     const expired = !!p.expires && p.expires <= Date.now()
-    if (done.length && !expired) {
-      const note = el('p', 'small muted', `${done.length === 1 ? 'A review this card lists has' : `${done.length} reviews this card lists have`} passed since it was made; the engine is checking the push again, so these lists are about to change.`)
-      note.setAttribute('role', 'status')
-      box.append(note)
-    }
+    sayIfChanged(this.#passedSaid, done.length && !expired ? `${done.length === 1 ? 'A review this card lists has' : `${done.length} reviews this card lists have`} passed since it was made; the engine is checking the push again, so these lists are about to change.` : '', 'muted')
     const listed = (heading: string, tone: string, items: string[]) => {
       if (!items.length) return
       box.append(el('p', `small ${tone}`, heading))
@@ -295,10 +301,7 @@ class SfPushPanel extends HTMLElement {
       this.#reason.id = 'push-reason'
     }
     const input = this.#reason
-    const label = el('label', 'small', p.needsReason ? 'Your reason for allowing it with items missing (the audit file keeps it), or a note for Deny' : 'A note (optional)')
-    label.htmlFor = input.id
-    const row = el('div', 'row field-row')
-    row.append(label, input)
+    const row = field(p.needsReason ? 'Your reason for allowing it with items missing (the audit file keeps it), or a note for Deny' : 'A note (optional)', input, undefined, 'row field-row')
     const off = value.answering || !!value.disabled || p.running
     const answer = (allow: boolean) => () => {
       if (off) return

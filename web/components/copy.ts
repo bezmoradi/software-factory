@@ -1,4 +1,4 @@
-import { button, copyText, el, visible } from '../lib/dom.ts'
+import { button, copyText, el, statusLine, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 const COPIED_FOR_MS = 1500
@@ -11,13 +11,12 @@ class SfCopy extends HTMLElement {
   text = ''
 
   readonly #button = button('', 'setup-copy')
-  readonly #status = el('span', 'sr-only')
+  readonly #status = statusLine('sr-only', 'span')
   #revert: ReturnType<typeof setTimeout> | undefined
   #tries = 0
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#status.setAttribute('aria-live', 'polite')
     this.#button.addEventListener('click', () => void this.#copy())
     this.#name()

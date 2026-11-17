@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -136,7 +136,7 @@ export class BenchmarkField {
   #path: string
   #list = el('div', 'issue-list')
   #picked = el('div', 'issue-picked')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #page = 1
   #more = false
   #busy = false
@@ -153,7 +153,6 @@ export class BenchmarkField {
     this.#path = path
     const summary = el('summary', 'small', 'Benchmark: start from a merged pull request')
     const intro = el('p', 'small muted', "Lists the repository's merged pull requests with your saved token. Pick one to read its description; Start then begins at its base commit with the description as the first message, framed as its author's task description, not as instructions, and the comparison shows the result next to the merged diff. With Start with both, both agents get it.")
-    this.#status.setAttribute('role', 'status')
     this.box.append(summary, intro, this.#status, this.#list, this.#picked)
     this.box.addEventListener('toggle', () => {
       if (this.box.open && !this.#loaded && !this.#busy) void this.#load(1)
@@ -166,8 +165,7 @@ export class BenchmarkField {
     if (!c) return null
     if (c.refused || !HASH.test(c.hash) || !SHA.test(c.pull.base)) {
       this.box.open = true
-      this.#status.textContent = c.refused ? "This pull request's description can't be sent to an agent. Clear it, or pick another." : 'Read the pull request again before starting from it.'
-      this.#status.className = 'small bad'
+      say(this.#status, c.refused ? "This pull request's description can't be sent to an agent. Clear it, or pick another." : 'Read the pull request again before starting from it.', 'bad')
       return 'refused'
     }
     return { number: c.pull.number, hash: c.hash, base: c.pull.base }
@@ -176,13 +174,11 @@ export class BenchmarkField {
   async #load(page: number) {
     if (this.#busy) return
     this.#busy = true
-    this.#status.className = 'small muted'
-    this.#status.textContent = 'Reading the merged pull requests…'
+    say(this.#status, 'Reading the merged pull requests…', 'muted')
     const a = await pairCall({ op: 'merged-list', path: this.#path, page })
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = told(a.body, "The merged pull requests couldn't be read.")
+      say(this.#status, told(a.body, "The merged pull requests couldn't be read."), 'bad')
       return
     }
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
@@ -219,13 +215,11 @@ export class BenchmarkField {
   async #pick(number: number) {
     if (this.#busy) return
     this.#busy = true
-    this.#status.className = 'small muted'
-    this.#status.textContent = `Reading pull request #${number}…`
+    say(this.#status, `Reading pull request #${number}…`, 'muted')
     const a = await pairCall({ op: 'merged-read', path: this.#path, number })
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = told(a.body, "The pull request couldn't be read.")
+      say(this.#status, told(a.body, "The pull request couldn't be read."), 'bad')
       return
     }
     this.#chosen = { pull: a.body.pull as MergedPull, refused: typeof a.body.refused === 'string' ? a.body.refused : '', clipped: a.body.clipped === true, hash: typeof a.body.hash === 'string' ? a.body.hash : '' }
@@ -266,7 +260,7 @@ export class PairField {
   agent = el('select', 'textbox')
   model = el('select', 'textbox')
   message = el('textarea', 'textbox')
-  said = el('p', 'small bad')
+  said = statusLine('small bad')
   #starters: Starter[]
 
   constructor(starters: Starter[], models: [string, string][]) {
@@ -298,7 +292,6 @@ export class PairField {
     this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
     const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and the agents' cost estimates; keep one and delete the other.")
     this.said.hidden = true
-    this.said.setAttribute('role', 'status')
     this.box.append(summary, check, row, name, this.message, note, this.said)
     const sync = () => {
       const plugin = this.#starters.find(a => a.id === this.agent.value)?.method === 'plugin'

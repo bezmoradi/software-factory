@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, refocus, say, shown, statusLine } from '../lib/dom.ts'
 
 const MAX_NAME = 120
 const MAX_TEXT = 500
@@ -71,7 +71,7 @@ class SfDecisionLog extends HTMLElement {
   #busy = false
   #doing = ''
   #editing = ''
-  #status = el('p', 'small')
+  #status = statusLine()
   #adding = el('textarea', 'textbox')
   #name = el('input', 'textbox')
   #text = el('textarea', 'textbox')
@@ -80,7 +80,6 @@ class SfDecisionLog extends HTMLElement {
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#adding.rows = 2
     this.#adding.maxLength = MAX_TEXT
     this.#adding.id = `decision-add-${this.#n}`
@@ -121,8 +120,7 @@ class SfDecisionLog extends HTMLElement {
     this.#busy = false
     const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof answer?.message === 'string' && answer.message ? shown(answer.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof answer?.message === 'string' && answer.message ? shown(answer.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }
@@ -137,8 +135,7 @@ class SfDecisionLog extends HTMLElement {
     if (!text || this.#busy) return
     if (await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add')) {
       this.#adding.value = ''
-      this.#status.className = 'small muted'
-      this.#status.textContent = 'Added. New sessions get it with their first message.'
+      say(this.#status, 'Added. New sessions get it with their first message.', 'muted')
     }
   }
 
@@ -157,21 +154,20 @@ class SfDecisionLog extends HTMLElement {
     const text = this.#text.value.trim()
     if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)) {
       this.#editing = ''
-      this.#status.className = 'small muted'
-      this.#status.textContent = 'Saved. It stays through every rebuild of the log.'
+      say(this.#status, 'Saved. It stays through every rebuild of the log.', 'muted')
       this.#paint()
     }
   }
 
   #form(e: Entry): HTMLElement {
     const box = el('div', 'field')
-    const field = (label: string, input: HTMLElement & { id: string }) => {
+    const labelled = (label: string, input: HTMLElement & { id: string }) => {
       const l = el('label', 'small', label)
       l.htmlFor = input.id
       box.append(l, input)
     }
-    field('Name', this.#name)
-    field(e.added ? 'Text' : 'Your wording (optional)', this.#text)
+    labelled('Name', this.#name)
+    labelled(e.added ? 'Text' : 'Your wording (optional)', this.#text)
     const row = el('div', 'row field-row')
     const hide = el('label', 'small', 'Hide it from new sessions')
     hide.htmlFor = this.#hidden.id
@@ -222,12 +218,10 @@ class SfDecisionLog extends HTMLElement {
     else {
       if (v.auditSince) parts.push(el('p', 'small muted', `The audit file goes back to ${day(v.auditSince)}; older decisions have rotated out.`))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
-      const addLabel = el('label', 'small', 'Add an entry')
-      addLabel.htmlFor = this.#adding.id
       const add = button('Add', 'small', () => void this.#add(), 'button', 'decision-add')
       this.#hold(add)
-      const addBox = el('div', 'field')
-      addBox.append(addLabel, this.#adding, add)
+      const addBox = field('Add an entry', this.#adding)
+      addBox.append(add)
       parts.push(addBox)
       if (!v.entries.length) parts.push(el('p', 'small muted', 'No decisions in the window yet.'))
       else {

@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
+import type { Tone } from '../lib/dom.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
 
 type Answer = { ok: boolean; status: number; body: Record<string, unknown> }
@@ -69,7 +70,8 @@ class SfPullFollow extends HTMLElement {
   #view: PullFollowView | null = null
   #key = ''
   #busy = ''
-  #status = new Map<string, [string, string]>()
+  #status = new Map<string, [string, Tone | undefined]>()
+  #said = statusLine('small status-slot')
   #findings = new Map<string, Findings>()
   #loading = ''
   #settings = new Map<string, Settings>()
@@ -89,7 +91,7 @@ class SfPullFollow extends HTMLElement {
     if (value) void this.#loadFindings(value)
   }
 
-  #say(sid: string, text: string, tone: string) {
+  #say(sid: string, text: string, tone?: Tone) {
     if (text) this.#status.set(sid, [text, tone])
     else this.#status.delete(sid)
   }
@@ -98,7 +100,7 @@ class SfPullFollow extends HTMLElement {
     const v = this.#view
     if (!v || this.#busy || v.disabled) return null
     this.#busy = op
-    this.#say(v.sid, '', '')
+    this.#say(v.sid, '')
     this.#paint()
     const a = await call(path, body)
     this.#busy = ''
@@ -145,14 +147,11 @@ class SfPullFollow extends HTMLElement {
     if (f?.note) parts.push(el('p', 'small warn', shown(f.note)))
     parts.push(...this.#findingsPart(v))
     const said = this.#status.get(v.sid)
-    if (said) {
-      const p = el('p', `small ${said[1]}`, said[0])
-      p.setAttribute('role', 'status')
-      parts.push(p)
-    }
+    sayIfChanged(this.#said, said?.[0] ?? '', said?.[1])
+    parts.push(this.#said)
     if (v.disabled) parts.push(el('p', 'small muted', v.disabled))
     parts.push(this.#settingsPart(v))
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 

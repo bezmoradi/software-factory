@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { el, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
 
 interface RoleModel {
   name: string
@@ -41,13 +41,8 @@ class SfReviewModels extends HTMLElement {
   #target: ReviewModelsTarget | null = null
   #view: ReviewModelsView | null = null
   #busy = false
-  #status = el('p', 'small')
+  #status = statusLine()
   #key = ''
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
 
   set view(value: ReviewModelsTarget | null) {
     const key = JSON.stringify(value)
@@ -77,15 +72,13 @@ class SfReviewModels extends HTMLElement {
     this.#busy = false
     if (project !== this.#target?.project) return
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       return this.#paint()
     }
     const v = readView(await res.json().catch(() => null))
     if (v) this.#view = v
     if (ok) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = ok
+      say(this.#status, ok, 'ok')
     }
     this.#paint()
   }

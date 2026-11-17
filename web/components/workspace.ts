@@ -1,4 +1,4 @@
-import { actionButton, busy, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -78,8 +78,7 @@ function viewOf(body: Record<string, unknown>): View {
 }
 
 export function openWorkspace(post: Post, labelOf: (sid: string) => string, deleted: (sid: string) => void): void {
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  const say = statusLine()
   const space = el('div', 'workspace-space')
   const list = el('ul', 'list workspace-list')
   const listHeading = el('h3', 'label', 'Sessions')

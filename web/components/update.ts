@@ -1,4 +1,4 @@
-import { actionButton, button, el } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
 import { commandBlock } from './copy.ts'
@@ -181,8 +181,7 @@ export function openUpdate(): void {
   cross.setAttribute('aria-label', 'Close')
   cross.title = 'Close'
   cross.append(icon('close'))
-  const said = el('p', 'small warn')
-  said.setAttribute('role', 'status')
+  const said = statusLine('small warn')
   const later = actionButton('Remind me later', 'ghost small', async () => {
     const a = await call({ later: r.version })
     if (a.ok) return m.close()
@@ -248,7 +247,7 @@ class SfUpdateSetting extends HTMLElement {
   #label = el('label', 'notify-pref small')
   #note = el('p', 'small muted')
   #off = el('span', 'update-off', '(off)')
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn')
   #busy = false
 
   connectedCallback() {
@@ -261,7 +260,6 @@ class SfUpdateSetting extends HTMLElement {
         if (this.#busy || this.#box.getAttribute('aria-disabled') === 'true') e.preventDefault()
       })
       this.#box.addEventListener('change', () => void this.#change())
-      this.#said.setAttribute('role', 'status')
       this.#off.setAttribute('aria-hidden', 'true')
       this.#label.append(this.#box, el('span', '', 'Check for updates'), this.#off)
       const set = el('fieldset', 'themes')

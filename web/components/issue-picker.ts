@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
 
 type Issue = { number: number; title: string; body?: string; url: string; author: string; labels: string[]; created: number; open: boolean }
 
@@ -29,7 +29,7 @@ class SfIssuePicker extends HTMLElement {
   #label = el('input', 'textbox')
   #list = el('div', 'issue-list')
   #picked = el('div', 'issue-picked')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #page = 1
   #more = false
   #busy = false
@@ -52,8 +52,7 @@ class SfIssuePicker extends HTMLElement {
     this.#loaded = false
     this.#issues = []
     this.#chosen = null
-    this.#status.className = 'small muted'
-    this.#status.textContent = ''
+    say(this.#status, '', 'muted')
     this.#list.replaceChildren()
     this.#paintPicked()
     this.#stale = !this.isConnected
@@ -82,7 +81,6 @@ class SfIssuePicker extends HTMLElement {
       this.#run(this.#listButton, () => this.#load(1))
     })
     row.append(name, this.#label, this.#listButton)
-    this.#status.setAttribute('role', 'status')
     this.#details.append(summary, intro, row, this.#status, this.#list, this.#picked)
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open && !this.#loaded && !this.#busy) void this.#load(1)
@@ -101,8 +99,7 @@ class SfIssuePicker extends HTMLElement {
     if (!this.#chosen) return null
     if (this.#chosen.refused || !HASH.test(this.#chosen.hash)) {
       this.#details.open = true
-      this.#status.textContent = this.#chosen.refused ? 'This issue can\'t be sent to an agent. Clear it, or pick another.' : 'Read the issue again before starting from it.'
-      this.#status.className = 'small bad'
+      say(this.#status, this.#chosen.refused ? 'This issue can\'t be sent to an agent. Clear it, or pick another.' : 'Read the issue again before starting from it.', 'bad')
       return 'refused'
     }
     return { issue: this.#chosen.issue.number, issueHash: this.#chosen.hash }
@@ -112,15 +109,13 @@ class SfIssuePicker extends HTMLElement {
     if (this.#busy || !this.path) return
     this.#busy = true
     const gen = this.#gen
-    this.#status.className = 'small muted'
-    this.#status.textContent = 'Reading the open issues…'
+    say(this.#status, 'Reading the open issues…', 'muted')
     const label = this.#label.value.trim()
     const a = await call({ op: 'list', path: this.path, page, ...(label ? { label } : {}) })
     if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = said(a.body, "The open issues couldn't be read.")
+      say(this.#status, said(a.body, "The open issues couldn't be read."), 'bad')
       return
     }
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
@@ -158,14 +153,12 @@ class SfIssuePicker extends HTMLElement {
     if (this.#busy) return
     this.#busy = true
     const gen = this.#gen
-    this.#status.className = 'small muted'
-    this.#status.textContent = `Reading issue #${number}…`
+    say(this.#status, `Reading issue #${number}…`, 'muted')
     const a = await call({ op: 'read', path: this.path, number })
     if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = said(a.body, "The issue couldn't be read.")
+      say(this.#status, said(a.body, "The issue couldn't be read."), 'bad')
       return
     }
     const issue = a.body.issue as Issue

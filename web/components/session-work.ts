@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
 
 export interface AgentModel {
   id: string
@@ -145,7 +145,7 @@ class SfSessionWork extends HTMLElement {
   #view: WorkView | null = null
   #busy = false
   #busyKey = ''
-  #status = el('p', 'small')
+  #status = statusLine()
   #model = el('select', 'textbox')
   #effort = el('select', 'textbox')
   #add = el('textarea', 'textbox')
@@ -160,7 +160,6 @@ class SfSessionWork extends HTMLElement {
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#model.id = 'work-model'
     this.#model.dataset.key = 'work-model'
     this.#effort.id = 'work-effort'
@@ -252,15 +251,13 @@ class SfSessionWork extends HTMLElement {
     this.#busy = false
     if (sid !== this.#target?.sid) return false
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       this.#paint()
       return false
     }
     const v = readView(await res.json().catch(() => null))
     if (v) this.#view = v
-    this.#status.className = 'small muted'
-    this.#status.textContent = ok
+    say(this.#status, ok, 'muted')
     this.#paint()
     return true
   }

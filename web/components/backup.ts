@@ -1,4 +1,4 @@
-import { actionButton, button, el, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -145,8 +145,7 @@ function fileName(res: Response): string {
 
 export function openBackup(post: Post, send: Send): void {
   let generation = 0
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  const say = statusLine()
   const body = el('div', 'backup-body')
   const exportButton = button('Export', 'primary small')
   const picker = el('input')

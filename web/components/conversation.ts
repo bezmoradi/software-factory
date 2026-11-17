@@ -1,4 +1,4 @@
-import { button, el, emit, shown, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, emit, shown, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { plural } from '../lib/format.ts'
 import type { CardEvent, CardHost, ClaimMark, ContextView, SessionEvent, TurnMarks } from '../types.ts'
 import './markdown.ts'
@@ -99,8 +99,7 @@ class SfConversation extends HTMLElement {
     this.#heading = el('h2', 'sr-only', 'Waiting on you')
     this.#heading.hidden = true
     this.#needs.append(this.#heading)
-    this.#said = el('p', 'sr-only')
-    this.#said.setAttribute('role', 'status')
+    this.#said = statusLine('sr-only')
     this.append(this.#timeline, this.#needs, this.#said)
   }
 

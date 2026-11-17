@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, shown, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
@@ -67,12 +67,7 @@ class SfAllowRules extends HTMLElement {
   #view: RulesView | null = null
   #busy = ''
   #gen = 0
-  #status = el('p', 'small')
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
+  #status = statusLine()
 
   set repo(value: string) {
     if (value === this.#repo) return
@@ -94,8 +89,7 @@ class SfAllowRules extends HTMLElement {
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown } | null
       if (!current()) return false
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }
@@ -113,8 +107,7 @@ class SfAllowRules extends HTMLElement {
     const body: Record<string, unknown> = { op: 'remove', repo: this.#repo, box: r.box, place: r.place, rule: r.rule }
     if (r.worktree) body.worktree = r.worktree
     if (await this.#call(body)) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = `Removed ${visible(r.rule)} from ${visible(r.path)}. The next matching call shows a card again.`
+      say(this.#status, `Removed ${visible(r.rule)} from ${visible(r.path)}. The next matching call shows a card again.`, 'ok')
       this.#paint()
     }
   }

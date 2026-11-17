@@ -1,4 +1,4 @@
-import { el, visible } from '../lib/dom.ts'
+import { el, statusLine, visible } from '../lib/dom.ts'
 import type { Check, CheckStatus } from '../types.ts'
 
 const NOTES: Record<string, [string, string] | undefined> & { none: [string, string] } = {
@@ -21,8 +21,7 @@ class SfCheck extends HTMLElement {
     const row = el('div', 'row')
     row.append(el('span', '', visible(value.name)), el('span', 'spacer'))
     this.#note = el('div', 'small muted', NOTES.none[0])
-    this.#said = el('span', 'sr-only')
-    this.#said.setAttribute('role', 'status')
+    this.#said = statusLine('sr-only', 'span')
     const meta = el('div', 'small muted', [value.type, value.why].filter(Boolean).map(x => visible(x ?? '')).join(' · '))
     this.replaceChildren(row, meta, this.#note, this.#said)
   }

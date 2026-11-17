@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 
@@ -54,7 +54,7 @@ function isView(v: unknown): v is LessonsView {
 class SfLessons extends HTMLElement {
   #project = ''
   #view: LessonsView | null = null
-  #said = el('p', 'small')
+  #said = statusLine()
   #body = el('div', 'lessons-body')
   #timer = 0
   #busy = ''
@@ -67,7 +67,6 @@ class SfLessons extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      this.#said.setAttribute('role', 'status')
       this.replaceChildren(
         el('h3', 'label', 'Lessons from reviews'),
         el('p', 'small muted', 'The engine counts the blocking findings of this project\'s reviews by reviewer, file and title, with case, numbers and punctuation left out. That matching is approximate: two different findings can count as one, and a reworded finding counts as a new one. Nothing here changes a file or a review on its own.'),
@@ -113,14 +112,12 @@ class SfLessons extends HTMLElement {
         const ok = await consentFor(problem.needs, project, 'suggesting instruction lines')
         if (ok?.costOk) return this.#call({ ...body, costOk: true })
       }
-      this.#said.className = 'small warn'
-      this.#said.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#said, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }
     if (body.op === 'suggest') {
-      this.#said.className = 'small muted'
-      this.#said.textContent = 'The run started in a reviewer container. Its lines show here when it ends.'
+      say(this.#said, 'The run started in a reviewer container. Its lines show here when it ends.', 'muted')
       return this.#call({ op: 'read', name: project })
     }
     const v: unknown = await res.json().catch(() => null)
@@ -222,8 +219,7 @@ class SfLessons extends HTMLElement {
       this.#doing = 'approve'
       void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
         if (!ok) return
-        this.#said.className = 'small muted'
-        this.#said.textContent = 'Sent to the session as a note with its next message.'
+        say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
       })
     })
     const decline = button('Decline', 'small ghost', () => {
@@ -232,8 +228,7 @@ class SfLessons extends HTMLElement {
       this.#doing = 'decline'
       void whileBusy(decline, () => this.#call({ op: 'decline', name: this.#project, id: x.id })).then(ok => {
         if (!ok) return
-        this.#said.className = 'small muted'
-        this.#said.textContent = 'Declined. Nothing was sent or changed.'
+        say(this.#said, 'Declined. Nothing was sent or changed.', 'muted')
       })
     })
     if (held && this.#doing === 'approve') busy(approve, true)

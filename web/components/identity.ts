@@ -1,4 +1,4 @@
-import { button, el, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { actionRow, modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -28,8 +28,7 @@ export async function identityState(post: Post): Promise<CommitIdentity | null |
   return a.ok ? identityOf(a.body.identity) : undefined
 }
 
-function field(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLLabelElement, HTMLInputElement] {
-  const label = el('label', 'small', words)
+function textField(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
   const input = el('input', 'textbox')
   input.type = type
   input.name = name
@@ -38,25 +37,23 @@ function field(name: string, words: string, type: string, max: number, value: st
   input.required = true
   input.maxLength = max
   input.value = value
-  label.append(input)
-  return [label, input]
+  return [field(words, input), input]
 }
 
 export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity) => void): void {
   const form = el('form', 'identity-form')
-  const [nameLabel, name] = field('name', 'Name', 'text', 100, current?.name ?? '', 'name')
-  const [emailLabel, email] = field('email', 'Email', 'email', 254, current?.email ?? '', 'email')
-  const why = el('p', 'small warn')
-  why.setAttribute('role', 'status')
+  const [nameField, name] = textField('name', 'Name', 'text', 100, current?.name ?? '', 'name')
+  const [emailField, email] = textField('email', 'Email', 'email', 254, current?.email ?? '', 'email')
+  const why = statusLine('small warn status-slot')
   const save = button('Save', 'primary small', undefined, 'submit')
-  form.append(nameLabel, emailLabel, why, actionRow([], [button('Cancel', 'ghost small', () => m.close()), save]))
+  form.append(nameField, emailField, why, actionRow([], [button('Cancel', 'ghost small', () => m.close()), save]))
   form.addEventListener('submit', e => {
     e.preventDefault()
     if (!form.reportValidity()) return
     void whileBusy(save, () => call(post, { op: 'set', name: name.value, email: email.value })).then(a => {
       const id = identityOf(a.body.identity)
       if (!a.ok || !id) {
-        why.textContent = typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.'
+        say(why, typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.', 'warn')
         return
       }
       m.close()

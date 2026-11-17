@@ -1,4 +1,4 @@
-import { el, visible } from '../lib/dom.ts'
+import { el, statusLine, visible } from '../lib/dom.ts'
 
 const SETTING_KEY = 'sf-notify'
 const SEEN_KEY = 'sf-notified'
@@ -101,14 +101,13 @@ export function watchNotify(list: Watched[]): void {
 
 class SfNotify extends HTMLElement {
   #box = el('input')
-  #said = el('p', 'small muted')
+  #said = statusLine('small muted')
 
   connectedCallback() {
     if (this.childElementCount) return
     this.#box.type = 'checkbox'
     this.#box.checked = on
     this.#box.addEventListener('change', () => void this.#change())
-    this.#said.setAttribute('role', 'status')
     const label = el('label', 'notify-pref small')
     label.append(this.#box, el('span', '', 'Desktop notifications'))
     const legend = el('legend', 'label', 'Notifications')

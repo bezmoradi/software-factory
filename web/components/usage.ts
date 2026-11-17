@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { actionButton, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { actionButton, el, focusedKey, refocus, statusLine, visible } from '../lib/dom.ts'
 
 export interface CapsValues {
   money: number
@@ -237,12 +237,11 @@ export function expiryText(e: Expiry): string {
 
 class SfUsage extends HTMLElement {
   #stop = () => {}
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Usage limits')
-    this.#said.setAttribute('role', 'status')
     this.#stop = watchLimits(this)
     this.paint()
   }

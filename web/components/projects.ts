@@ -1,4 +1,4 @@
-import { busy, button, el, emit, focusedKey, pageCrumb, refocus, rovingKeys, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, field, focusedKey, pageCrumb, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
 import { agentModels, effortOptions, modelOptions } from './session-work.ts'
@@ -68,14 +68,6 @@ const TOKEN_HOSTS: Record<string, TokenHelp> = {
   },
 }
 
-function field(label: string, input: HTMLInputElement | HTMLSelectElement): HTMLElement {
-  const box = el('div', 'field')
-  const name = el('label', 'small', label)
-  name.htmlFor = input.id
-  box.append(name, input)
-  return box
-}
-
 function tokenShape(host: string, value: string): string {
   const v = value.trim()
   if (!v) return ''
@@ -85,11 +77,7 @@ function tokenShape(host: string, value: string): string {
 }
 
 function secretField(label: string, input: HTMLInputElement): HTMLElement {
-  const box = el('div', 'field')
-  const name = el('label', 'small', label)
-  name.htmlFor = input.id
-  box.append(name, secret(input, 'token'))
-  return box
+  return field(label, secret(input, 'token'))
 }
 
 function actions(...buttons: HTMLElement[]): HTMLElement[] {
@@ -307,6 +295,8 @@ class SfProjects extends HTMLElement {
   #forms = new Map<string, DispatchForm>()
   #removing = ''
   #message: { path: string; text: string; bad: boolean } = { path: '', text: '', bad: false }
+  #messageLine = statusLine('small status-slot')
+  #cloningSaid = new Map<string, HTMLSpanElement>()
   #busy = false
   #add = el('input', 'textbox')
   #pending = new Map<'repo' | 'token', { key: string; after?: () => void }>()
@@ -862,8 +852,12 @@ class SfProjects extends HTMLElement {
     const name = el('span', 'name')
     name.append(el('span', 'title', k.name))
     who.append(name, urlText(k.url))
-    const status = el('span', 'acts small muted', 'Cloning…')
-    status.setAttribute('role', 'status')
+    let status = this.#cloningSaid.get(k.name)
+    if (!status) {
+      status = statusLine('acts small muted status-slot', 'span')
+      this.#cloningSaid.set(k.name, status)
+    }
+    sayWhenShown(status, 'Cloning…', 'muted')
     row.append(el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, status)
     li.append(row)
     return li
@@ -1059,11 +1053,9 @@ class SfProjects extends HTMLElement {
     const sub = el('p', 'small muted page-intro', 'Your repositories. Each session works on its own branch, started from the latest main.')
     const parts: HTMLElement[] = [head, sub]
     if (!empty && this.#addingRepo) parts.push(addControl(true))
-    if (this.#message.path === '' && this.#message.text) {
-      const note = el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text)
-      note.setAttribute('role', 'status')
-      parts.push(note)
-    }
+    const message = this.#message.path === '' ? this.#message.text : ''
+    sayIfChanged(this.#messageLine, message, this.#message.bad ? 'bad' : 'muted')
+    parts.push(this.#messageLine)
     if (empty) {
       const box = el('div', 'projects-empty')
       const media = el('div', 'projects-empty-icon')
@@ -1081,6 +1073,7 @@ class SfProjects extends HTMLElement {
       parts.push(actions)
     }
     const cloning = this.#view.cloning ?? []
+    for (const name of this.#cloningSaid.keys()) if (!cloning.some(k => k.name === name)) this.#cloningSaid.delete(name)
     if (projects.length || cloning.length) {
       const ul = el('ul', 'boxlist projects')
       const rows = [...projects.map(p => ({ name: p.name, row: () => this.#row(p) })), ...cloning.map(k => ({ name: k.name, row: () => this.#cloningRow(k) }))]
@@ -1091,7 +1084,7 @@ class SfProjects extends HTMLElement {
     const side = this.#tokens()
     if (this.#slot) this.#slot.replaceChildren(...side)
     else parts.push(...side)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     this.#applyPending()
     const open = this.#menuOpen
     if (open) {

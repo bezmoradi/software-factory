@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, whileBusy } from '../lib/dom.ts'
+import { button, el, field, say, statusLine, whileBusy } from '../lib/dom.ts'
 
 const MAX = 300
 
@@ -20,7 +20,7 @@ class SfProjectCommands extends HTMLElement {
   #check = el('input', 'textbox')
   #setup = el('input', 'textbox')
   #save = button('Save commands', 'small', () => void this.#store())
-  #said = el('p', 'small')
+  #said = statusLine()
   #loaded = ''
   #built = false
 
@@ -31,23 +31,12 @@ class SfProjectCommands extends HTMLElement {
     }
     this.#built = true
     const n = ++serial
-    this.#said.setAttribute('role', 'status')
     for (const [input, id, holder] of [[this.#check, `check-command-${n}`, 'make check'], [this.#setup, `setup-command-${n}`, 'npm ci']] as const) {
       input.id = id
       input.placeholder = holder
       input.spellcheck = false
       input.autocomplete = 'off'
       input.maxLength = MAX
-    }
-    const field = (label: string, input: HTMLInputElement, help: string) => {
-      const box = el('div', 'field')
-      const name = el('label', 'small', label)
-      name.htmlFor = input.id
-      const note = el('p', 'small muted', help)
-      note.id = `${input.id}-help`
-      input.setAttribute('aria-describedby', note.id)
-      box.append(name, input, note)
-      return box
     }
     this.replaceChildren(
       el('h3', 'label', 'Check and setup commands'),
@@ -73,8 +62,7 @@ class SfProjectCommands extends HTMLElement {
     const res = await api('/api/project-commands', { op: 'read', name: project }).catch(() => null)
     if (project !== this.#project) return
     if (!res || !res.ok) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = await problemOf(res)
+      say(this.#said, await problemOf(res), 'warn')
       return
     }
     const body = await res.json().catch(() => null) as { check?: unknown; setup?: unknown } | null
@@ -87,18 +75,15 @@ class SfProjectCommands extends HTMLElement {
     const check = this.#check.value.trim()
     const setup = this.#setup.value.trim()
     if (bytes(check) > MAX || bytes(setup) > MAX || /[\r\n]/.test(check + setup)) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = `Each command is one line of at most ${MAX} bytes.`
+      say(this.#said, `Each command is one line of at most ${MAX} bytes.`, 'warn')
       return
     }
     const res = await whileBusy(this.#save, () => api('/api/project-commands', { op: 'set', name: this.#project, check, setup }).catch(() => null))
     if (!res || !res.ok) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = await problemOf(res)
+      say(this.#said, await problemOf(res), 'warn')
       return
     }
-    this.#said.className = 'small muted'
-    this.#said.textContent = 'Saved. New turns and new sessions use them.'
+    say(this.#said, 'Saved. New turns and new sessions use them.', 'muted')
   }
 }
 

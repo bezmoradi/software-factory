@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
 
 interface AgentFileView {
   name: string
@@ -48,7 +48,7 @@ class SfReviewerAgents extends HTMLElement {
   #busy = false
   #removing = ''
   #file = el('input')
-  #status = el('p', 'small')
+  #status = statusLine()
   #loaded = ''
   #key = ''
 
@@ -63,7 +63,6 @@ class SfReviewerAgents extends HTMLElement {
       if (this.#busy) e.preventDefault()
     })
     this.#file.addEventListener('change', () => void this.#upload())
-    this.#status.setAttribute('role', 'status')
   }
 
   set view(value: ReviewerAgentsTarget | null) {
@@ -96,8 +95,7 @@ class SfReviewerAgents extends HTMLElement {
     this.#busy = false
     if (project !== this.#target?.project) return false
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       this.#paint()
       return false
     }
@@ -120,19 +118,16 @@ class SfReviewerAgents extends HTMLElement {
     if (!file || this.#busy) return
     const max = this.#view?.maxBytes || 0
     if (max && file.size > max) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = `The engine refused ${visible(file.name)}: it is over ${Math.floor(max / 1024)} KiB.`
+      say(this.#status, `The engine refused ${visible(file.name)}: it is over ${Math.floor(max / 1024)} KiB.`, 'warn')
       return this.#paint()
     }
     const text = await file.text().catch(() => null)
     if (text === null) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = `The page couldn't read ${visible(file.name)}.`
+      say(this.#status, `The page couldn't read ${visible(file.name)}.`, 'warn')
       return this.#paint()
     }
     if (await this.#call({ op: 'add', text })) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = `Added ${visible(file.name)}. Pick it for a role below; reviews run with it from the next review on.`
+      say(this.#status, `Added ${visible(file.name)}. Pick it for a role below; reviews run with it from the next review on.`, 'ok')
       this.#paint()
     }
   }
@@ -142,16 +137,14 @@ class SfReviewerAgents extends HTMLElement {
     const done = await this.#call({ op: 'remove', name })
     this.#removing = ''
     if (done) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = `Removed ${visible(name)}. Its roles fall back to knackpack's agents.`
+      say(this.#status, `Removed ${visible(name)}. Its roles fall back to knackpack's agents.`, 'ok')
       this.#paint()
     }
   }
 
   async #pick(role: string, name: string) {
     if (await this.#call({ op: 'role', role, name })) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses knackpack's agent again.`
+      say(this.#status, name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses knackpack's agent again.`, 'ok')
       this.#paint()
     }
   }
@@ -170,13 +163,10 @@ class SfReviewerAgents extends HTMLElement {
       el('p', '', 'The body is your own instructions. They run in a trusted reviewer container, with read-only tools, on the code under review, so write them as you would a reviewer you trust. The engine writes the file into that container for each review, never from the repository.'),
       el('p', '', 'Its reply must end with a line of its own, Verdict: pass or Verdict: block. A last line knackpack-verdict/1: pass or knackpack-verdict/1: block counts too. Anything else counts as no verdict, and a push still needs every required role passing.'),
     )
-    const label = el('label', 'small', 'Add an agent file')
-    label.htmlFor = this.#file.id
     this.#file.disabled = target.disabled || (!!v && v.files.length >= v.limit)
     if (this.#busy) this.#file.setAttribute('aria-disabled', 'true')
     else this.#file.removeAttribute('aria-disabled')
-    const add = el('div', 'row field-row')
-    add.append(label, this.#file)
+    const add = field('Add an agent file', this.#file, undefined, 'row field-row')
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer agents for this project'), help, add]
     if (v && v.files.length >= v.limit) parts.push(el('p', 'small muted', `This project keeps ${v.limit} agent files, its limit. Remove one to add another.`))
     if (v?.files.length) {
@@ -222,12 +212,8 @@ class SfReviewerAgents extends HTMLElement {
           }
           void this.#pick(role, select.value)
         })
-        const row = el('div', 'row field-row')
         const name = v.roleNames[role] ?? role
-        const l = el('label', 'small', `The ${name} role uses`)
-        l.htmlFor = select.id
-        row.append(l, select)
-        parts.push(row)
+        parts.push(field(`The ${name} role uses`, select, undefined, 'row field-row'))
       }
     }
     parts.push(this.#status)

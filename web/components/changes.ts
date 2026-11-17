@@ -1,4 +1,4 @@
-import { busy, button, el, emit, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes } from '../types.ts'
@@ -253,19 +253,17 @@ class SfChanges extends HTMLElement {
   #comments = new Map<string, LineComment[]>()
   #sending = false
   #lines = el('div', 'diff-lines small')
-  #status = el('span', 'sr-only')
+  #status = statusLine('sr-only', 'span')
   #panel = el('div', 'line-comments small')
   #target = el('p', 'small muted')
   #box = el('textarea', 'textbox')
   #list = el('ul', 'list line-comment-list')
-  #said = el('p', 'small')
+  #said = statusLine()
   #add = button('Add comment', 'ghost small', () => this.#addComment())
   #send = button('Send comments', 'primary small', () => this.#sendComments())
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
-    this.#said.setAttribute('role', 'status')
     this.#lines.tabIndex = 0
     this.#lines.setAttribute('role', 'region')
     this.#lines.addEventListener('click', e => {
@@ -532,18 +530,8 @@ class SfChanges extends HTMLElement {
     commitPick.addEventListener('change', () => {
       if (SHA.test(commitPick.value)) emit(this, 'sf-compare-point', { from: 'commit', commit: commitPick.value })
     })
-    const fromField = el('div', 'field-inline')
-    const fromLabel = el('label', 'small', 'Compare with')
-    fromLabel.htmlFor = pick.id
-    fromField.append(fromLabel, pick)
-    bar.append(fromField)
-    if (from === 'commit') {
-      const commitField = el('div', 'field-inline')
-      const commitLabel = el('label', 'small', 'Changes after')
-      commitLabel.htmlFor = commitPick.id
-      commitField.append(commitLabel, commitPick)
-      bar.append(commitField)
-    }
+    bar.append(field('Compare with', pick, undefined, 'field-inline'))
+    if (from === 'commit') bar.append(field('Changes after', commitPick, undefined, 'field-inline'))
     const group = el('div', 'segmented')
     group.setAttribute('role', 'group')
     group.setAttribute('aria-label', 'Diff layout')

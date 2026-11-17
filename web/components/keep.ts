@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
 
@@ -62,7 +62,7 @@ class SfKeep extends HTMLElement {
   #loading = 0
   #busy = false
   #confirm = false
-  #status = el('p', 'small')
+  #status = statusLine()
   #details = el('details', 'session-work')
   #summary = el('summary', 'small')
   #opened: boolean | null = null
@@ -70,7 +70,6 @@ class SfKeep extends HTMLElement {
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open !== this.#shown) {
         this.#opened = this.#details.open
@@ -130,8 +129,7 @@ class SfKeep extends HTMLElement {
       this.#confirm = true
       this.#status.textContent = ''
     } else {
-      this.#status.className = 'small warn'
-      this.#status.textContent = visible(v?.refusal || 'The branch can’t be restored now.')
+      say(this.#status, visible(v?.refusal || 'The branch can’t be restored now.'), 'warn')
     }
     this.#paint()
   }
@@ -141,23 +139,20 @@ class SfKeep extends HTMLElement {
     if (!sid || this.#busy) return
     this.#busy = true
     this.#confirm = false
-    this.#status.className = 'small muted'
-    this.#status.textContent = 'Restoring the branch…'
+    say(this.#status, 'Restoring the branch…', 'muted')
     this.#paint()
     const res = await api(ROUTE, { op: 'restore', sid }).catch(() => null)
     this.#busy = false
     if (sid !== this.#target?.sid) return
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       void this.refresh(sid)
       return
     }
     const v = readView(await res.json().catch(() => null))
     if (v) this.#view = v
     const at = v?.commit ? ` at ${shortSha(v.commit)}` : ''
-    this.#status.className = 'small ok'
-    this.#status.textContent = `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`
+    say(this.#status, `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, 'ok')
     this.#paint()
   }
 

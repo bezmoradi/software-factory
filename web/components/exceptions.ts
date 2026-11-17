@@ -1,4 +1,4 @@
-import { actionButton, button, el, visible } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { shortSha } from '../lib/format.ts'
 
@@ -70,8 +70,7 @@ function until(expires: number, now: number): string {
 
 export function openExceptions(post: Post, labelOf: (sid: string) => string): void {
   let generation = 0
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  const say = statusLine()
   const body = el('div', 'exceptions-body')
 
   const paint = (v: Record<string, unknown>) => {

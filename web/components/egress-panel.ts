@@ -1,4 +1,4 @@
-import { actionButton, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, button, el, field, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { secret } from './secret.ts'
 
@@ -118,8 +118,7 @@ const REASONS: Record<string, string> = {
 }
 
 export function openEgress(post: Post): void {
-  const say = el('p', 'small warn')
-  say.setAttribute('role', 'status')
+  const say = statusLine('small warn')
   const intro = el('p', 'small', 'Agents and reviewers reach the internet only through egress, which allows HTTPS to the hosts below and refuses every git host: the engine pushes for them. A change here takes effect at once, without a restart.')
   const startNote = el('p', 'small muted')
   const pending = el('p', 'small bad')
@@ -165,8 +164,7 @@ export function openEgress(post: Post): void {
   gwKey.spellcheck = false
   gwKey.autocomplete = 'off'
   const gwNote = el('p', 'small muted')
-  const gwSay = el('p', 'small')
-  gwSay.setAttribute('role', 'status')
+  const gwSay = statusLine()
   const listsNote = el('p', 'small muted')
   let view: EgressView | null = null
   let gwFilled: { url: string; agents: boolean; reviewers: boolean } | null = null
@@ -378,11 +376,7 @@ export function openEgress(post: Post): void {
   aLabel.append(gwAgents, el('span', '', 'Claude Code sessions'))
   const rLabel = el('label', 'small row')
   rLabel.append(gwReviewers, el('span', '', 'Reviewers'))
-  const keyField = el('div', 'egress-key')
-  const keyBox = secret(gwKey, 'key')
-  const keyLabel = el('label', 'small', 'Key or token (leave empty to keep the saved one)')
-  keyLabel.htmlFor = gwKey.id
-  keyField.append(keyLabel, keyBox)
+  const keyField = field('Key or token (leave empty to keep the saved one)', secret(gwKey, 'key'), undefined, 'egress-key')
   const gwActions = el('div', 'row')
   const saveGatewayButton = button('Save gateway', 'ghost small', undefined, 'submit')
   gwActions.append(saveGatewayButton, actionButton('Remove key', 'ghost small', removeKey), actionButton('Remove gateway', 'ghost small', () => saveGateway(true)))

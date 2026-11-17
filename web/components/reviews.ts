@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, fileLink, repoPath, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, fileLink, replaceKeeping, repoPath, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
@@ -90,7 +90,9 @@ class SfReviews extends HTMLElement {
   #button: HTMLButtonElement | null = null
   #push: HTMLButtonElement | null = null
   #again: HTMLButtonElement | null = null
-  #said: HTMLSpanElement | null = null
+  #said = statusLine('sr-only', 'span')
+  #head = el('div', 'row reviews-head')
+  #pushSaid = statusLine('small push-said status-slot', 'span')
   #reasons = new Map<string, string>()
   #opened = new Set<string>()
   #wholes = new Map<string, Promise<WholeReport | string>>()
@@ -170,16 +172,14 @@ class SfReviews extends HTMLElement {
     p.setAttribute('aria-disabled', String(pushOff))
     if (value.pushing) busy(p, true)
     p.title = 'Asks the engine to push this session\'s branch at its latest commit: the gate checks the reviews and the remote\'s main branch first'
-    const head = el('div', 'row reviews-head')
-    head.append(el('h2', 'label', 'Reviews'), el('span', 'spacer'), b)
-    if (again) head.append(again)
-    if (value.pushSaid) {
-      const said = el('span', `small ${value.pushSaid.tone} push-said`, value.pushSaid.text)
-      said.setAttribute('role', 'status')
-      head.append(said)
-    }
-    if (!value.pushed) head.append(p)
-    const parts: Node[] = [head]
+    const heading: Node[] = [el('h2', 'label', 'Reviews'), el('span', 'spacer'), b]
+    if (again) heading.push(again)
+    const tone = value.pushSaid?.tone
+    sayIfChanged(this.#pushSaid, value.pushSaid?.text ?? '', tone === 'warn' || tone === 'bad' ? tone : undefined)
+    heading.push(this.#pushSaid)
+    if (!value.pushed) heading.push(p)
+    replaceKeeping(this.#head, heading)
+    const parts: Node[] = [this.#head]
     const note = value.disabled || r?.note || ''
     const described: string[] = []
     if (note) {
@@ -254,10 +254,8 @@ class SfReviews extends HTMLElement {
     this.#last = value
     this.#explainBox = this.#explain(value)
     parts.push(this.#explainBox)
-    this.#said ??= el('span', 'sr-only')
-    this.#said.setAttribute('role', 'status')
     parts.push(this.#said)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     this.#button = b
     this.#push = p
     this.#again = again

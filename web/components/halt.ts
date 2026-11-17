@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, rovingKeys, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, rovingKeys, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 export interface HaltView {
@@ -222,6 +222,8 @@ class SfHalt extends HTMLElement {
 }
 
 class SfHaltBanner extends HTMLElement {
+  #said = statusLine('halt-row bad small status-slot')
+
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Stop and pause')
@@ -252,13 +254,9 @@ class SfHaltBanner extends HTMLElement {
       row.append(el('p', '', `Away mode is on for ${which}: each new permission card is denied with the note “${AWAY_NOTE}”. Issue, pull request and push cards still wait for you.`), held(button('Turn away mode off', 'small', () => void send(view.awayAll ? { op: 'away', on: false } : { op: 'away', on: false, sid: session!.sid }, 'away-off'), 'button', 'away-off'), 'away-off'))
       parts.push(row)
     }
-    if (said) {
-      const p = el('p', 'halt-row bad small', said)
-      p.setAttribute('role', 'status')
-      parts.push(p)
-    }
-    this.hidden = !parts.length
-    this.replaceChildren(...parts)
+    sayWhenShown(this.#said, said, 'bad')
+    this.hidden = !parts.length && !said
+    replaceKeeping(this, [...parts, this.#said])
     refocus(this, focused)
     handOff(focused)
   }

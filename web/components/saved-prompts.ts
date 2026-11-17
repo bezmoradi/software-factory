@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 const MAX_NAME = 60
 const MAX_TEXT = 20000
@@ -37,7 +37,7 @@ class SfSavedPrompts extends HTMLElement {
   #inside = false
   #toggle = button('Saved prompts', 'ghost small', undefined, 'button', 'saved-prompts-toggle')
   #panel = el('div', 'saved-prompts surface')
-  #status = el('p', 'small')
+  #status = statusLine()
   #name = el('input', 'textbox')
   #text = el('textarea', 'textbox')
   draft: () => string = () => ''
@@ -51,7 +51,6 @@ class SfSavedPrompts extends HTMLElement {
     this.#toggle.popoverTargetElement = this.#panel
     this.#toggle.setAttribute('aria-haspopup', 'dialog')
     this.#toggle.title = "Prompts saved for this project: insert one into the message box, or edit and delete them"
-    this.#status.setAttribute('role', 'status')
     this.#name.maxLength = MAX_NAME
     this.#name.required = true
     this.#name.dataset.key = 'name'
@@ -121,8 +120,7 @@ class SfSavedPrompts extends HTMLElement {
     this.#busy = false
     const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
     if (!res || !res.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = typeof answer?.message === 'string' ? visible(answer.message) : 'The engine didn’t answer. Check that it is running.'
+      say(this.#status, typeof answer?.message === 'string' ? visible(answer.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
       this.#paint()
       return false
     }
@@ -141,8 +139,7 @@ class SfSavedPrompts extends HTMLElement {
     if (!text.trim()) return this.#text.reportValidity()
     const ok = await this.#call({ op: 'save', repo: v.repo, ...(e.id ? { id: e.id } : {}), name, text })
     if (!ok) return
-    this.#status.className = 'small ok'
-    this.#status.textContent = `Saved “${visible(name)}”.`
+    say(this.#status, `Saved “${visible(name)}”.`, 'ok')
     this.#editing = null
     this.#paint()
     this.#toggleFocus()
@@ -222,8 +219,7 @@ class SfSavedPrompts extends HTMLElement {
     if (this.#deleting === p.id) {
       const yes = button('Delete', 'danger small', () => void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(ok => {
         if (ok) {
-          this.#status.className = 'small ok'
-          this.#status.textContent = `Deleted “${visible(p.name)}”.`
+          say(this.#status, `Deleted “${visible(p.name)}”.`, 'ok')
         }
         this.#deleting = ''
         this.#paint()

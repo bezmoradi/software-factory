@@ -1,4 +1,4 @@
-import { button, el, emit, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
+import { button, el, emit, field, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
 import { agentWord, label, plural, signInStep } from '../lib/format.ts'
 import { bySessionOrder, isRunning, loginNeeded, sessionKey, sessionLink, sessionRow, sessionTable, sharing, titled } from './session-list.ts'
 import type { AskEvent, CardEvent, OverviewSession, PermissionEvent, SessionInfo } from '../types.ts'
@@ -66,7 +66,7 @@ class SfOverview extends HTMLElement {
   #search = el('input', 'textbox')
   #chips = el('div', 'filter-chips')
   #clear = button('Clear', 'ghost small', () => this.clear(), 'button', 'filter:clear')
-  #shown = el('p', 'small muted filter-count')
+  #shown = statusLine('small muted filter-count')
   #body = el('div')
 
   constructor() {
@@ -90,18 +90,14 @@ class SfOverview extends HTMLElement {
         this.#set('', this.#states)
       }
     })
-    const field = el('div', 'filter-search')
-    const name = el('label', 'small', 'Search sessions')
-    name.htmlFor = this.#search.id
-    field.append(name, this.#search)
+    const search = field('Search sessions', this.#search, undefined, 'filter-search')
     this.#chips.setAttribute('role', 'group')
     this.#chips.setAttribute('aria-label', 'Show sessions that are')
-    this.#shown.setAttribute('role', 'status')
     this.#tools.setAttribute('role', 'search')
     this.#tools.setAttribute('aria-label', 'Sessions')
     const row = el('div', 'filter-row')
     row.append(this.#chips, this.#clear)
-    this.#tools.append(field, row, this.#shown)
+    this.#tools.append(search, row, this.#shown)
   }
 
   #followHash = () => {

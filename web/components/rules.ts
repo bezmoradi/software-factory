@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, shown, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, emit, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
@@ -50,7 +50,7 @@ class SfRules extends HTMLElement {
   #view: RulesView | null = null
   #details = el('details', 'rules-panel')
   #body = el('div', 'rules-body')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #loaded = ''
   #pending = ''
   #gen = 0
@@ -59,7 +59,6 @@ class SfRules extends HTMLElement {
     super()
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
-    this.#status.setAttribute('role', 'status')
     const refresh = button('Refresh', 'ghost small', () => void whileBusy(refresh, () => this.#load(true)), 'button', 'rules:refresh')
     const head = el('div', 'row rules-head')
     head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'), refresh)
