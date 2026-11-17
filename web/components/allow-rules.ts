@@ -132,6 +132,7 @@ class SfAllowRules extends HTMLElement {
   #paint() {
     if (!this.#repo) return this.replaceChildren()
     const focused = focusedKey(this)
+    const before = [...this.querySelectorAll<HTMLElement>('[data-key^="remove:"]')].map(b => b.dataset.key ?? '')
     const parts: HTMLElement[] = [
       el('p', 'small', 'Saved "don\'t ask again" rules'),
       el('p', 'small muted', 'The allow rules Claude Code saved when a card\'s "don\'t ask again" was chosen, in the session\'s worktree (.claude/settings.local.json), and those in the clone folder\'s .claude/settings.local.json, which a live run of Claude Code 2.1.322 didn\'t apply in a worktree, and the agents\' user settings, including any written there another way. Agents can write these files too, so this is a report of what is in them, not a control: an agent can add a rule again, and Remove changes only the file it names. Rules marked wide allow much more than one command.'),
@@ -163,7 +164,10 @@ class SfAllowRules extends HTMLElement {
     if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
-    refocus(this, focused)
+    refocus(this, focused, key => {
+      const at = before.indexOf(key)
+      return [...(at < 0 ? [] : [...before.slice(at + 1), ...before.slice(0, at).reverse()]), 'rules-again']
+    })
   }
 }
 

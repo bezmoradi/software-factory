@@ -77,6 +77,8 @@ class SfDecisionLog extends HTMLElement {
   #text = el('textarea', 'textbox')
   #hidden = el('input')
   #n = ++serial
+  #order: string[] = []
+  #formFor = ''
 
   constructor() {
     super()
@@ -93,6 +95,10 @@ class SfDecisionLog extends HTMLElement {
     this.#text.placeholder = 'Your own wording; empty keeps the engine\'s line'
     this.#hidden.type = 'checkbox'
     this.#hidden.id = `decision-hidden-${this.#n}`
+    this.#adding.dataset.key = 'decision-adding'
+    this.#name.dataset.key = 'decision-name'
+    this.#text.dataset.key = 'decision-text'
+    this.#hidden.dataset.key = 'decision-hidden'
   }
 
   set project(value: string) {
@@ -213,9 +219,20 @@ class SfDecisionLog extends HTMLElement {
     return li
   }
 
+  #near(key: string): string[] {
+    const cut = key.indexOf(':')
+    const kind = cut < 0 ? '' : key.slice(0, cut)
+    const id = cut < 0 ? this.#formFor : key.slice(cut + 1)
+    const at = this.#order.indexOf(id)
+    const others = at < 0 ? [] : [...this.#order.slice(at + 1), ...this.#order.slice(0, at).reverse()]
+    const same = kind === 'decision-remove' ? kind : 'decision-edit'
+    return [`decision-edit:${id}`, ...others.flatMap(o => [`${same}:${o}`, `decision-edit:${o}`]), 'decision-again']
+  }
+
   #paint() {
     if (!this.#project) return this.replaceChildren()
     const focused = focusedKey(this)
+    const near = focused ? this.#near(focused) : []
     const parts: HTMLElement[] = [el('h3', 'label', 'Decision log')]
     parts.push(el('p', 'small muted', 'Built by the engine from its own records: requirements and plans you approved, by date and approval hash; verdicts you overrode, pushes you allowed or denied, with your reasons; and pull requests merged. It holds no agent text, so an approval shows only its kind and date until you name it. Each new session gets the log with its first message, as one engine note of at most 4 KiB, newest kept. Your names, wording, hidden entries and own entries are kept apart and survive each rebuild; a token-shaped reason is withheld.'))
     const v = this.#view
@@ -247,7 +264,9 @@ class SfDecisionLog extends HTMLElement {
     this.#hold(again)
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
-    refocus(this, focused)
+    this.#order = v?.entries.map(e => e.id) ?? []
+    this.#formFor = this.#editing
+    refocus(this, focused, () => near)
   }
 }
 
