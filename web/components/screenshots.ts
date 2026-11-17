@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { isRecord } from '../lib/json.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -13,10 +14,6 @@ interface Shot {
 }
 
 const MAX_DATA = 34 << 20
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v)
-}
 
 function shotsOf(v: unknown): Shot[] {
   if (!isRecord(v) || !Array.isArray(v.screenshots)) return []
@@ -48,24 +45,25 @@ class SfScreenshots extends HTMLElement {
   #shots: Shot[] = []
   #loading = 0
   #opening = 0
+  #reading = false
   #url = ''
   #shown = ''
   #details = el('details', 'screenshots')
   #summary = el('summary', 'small')
   #list = el('ul', 'small list screenshot-list')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #figure = el('figure', 'screenshot-view')
   #img = el('img')
   #caption = el('figcaption', 'small muted')
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#img.decoding = 'async'
     this.#figure.append(this.#img, this.#caption)
     this.#figure.hidden = true
     const refresh = button('Refresh', 'ghost small', () => {
-      if (this.#target) void this.refresh(this.#target.sid)
+      const sid = this.#target?.sid
+      if (sid) void whileBusy(refresh, () => this.refresh(sid))
     })
     this.#details.append(this.#summary, el('p', 'small muted', 'Images the agent saved in its screenshots folder, newest first. The engine reads each one, checks it is a PNG, JPEG or GIF of at most 10 MiB and 8,192 pixels a side, and shows it again as a PNG.'), this.#list, refresh, this.#status, this.#figure)
   }
@@ -76,6 +74,9 @@ class SfScreenshots extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.#opening++
+    if (this.#reading) this.#status.textContent = ''
+    this.#reading = false
     this.#drop()
   }
 
@@ -114,23 +115,29 @@ class SfScreenshots extends HTMLElement {
   #paint() {
     this.hidden = this.#shots.length === 0
     this.#summary.textContent = `Screenshots (${this.#shots.length})`
+    const focused = focusedKey(this.#list)
     this.#list.replaceChildren(...this.#shots.map(s => {
       const li = el('li')
-      const open = button(visible(s.name), 'link', () => void this.#open(s.name))
+      const open = button(visible(s.name), 'link', () => void whileBusy(open, () => this.#open(s.name)), 'button', `shot:${s.name}`)
       open.setAttribute('aria-pressed', String(s.name === this.#shown))
       li.append(open, el('span', 'muted', ` ${size(s.size)} · ${new Date(s.at).toLocaleString()}`))
       return li
     }))
+    refocus(this.#list, focused)
   }
 
   async #open(name: string) {
     const sid = this.#target?.sid
     if (!sid) return
     const n = ++this.#opening
+    const current = () => n === this.#opening && sid === this.#target?.sid && this.isConnected
+    this.#reading = true
     this.#status.textContent = 'Reading the screenshot…'
     const res = await api('/api/screenshot', { sid, name }).catch(() => null)
-    if (n !== this.#opening || sid !== this.#target?.sid) return
+    if (!current()) return
     const body = res ? await res.json().catch(() => null) as unknown : null
+    if (!current()) return
+    this.#reading = false
     if (!res || !res.ok || !isRecord(body) || body.type !== 'image/png' || typeof body.data !== 'string') {
       const why = isRecord(body) && typeof body.message === 'string' ? body.message : 'The engine didn\'t show that screenshot.'
       this.#status.textContent = visible(why)

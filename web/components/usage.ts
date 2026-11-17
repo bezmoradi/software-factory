@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { actionButton, el, focusedKey, refocus, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 
 export interface CapsValues {
   money: number
@@ -237,12 +237,11 @@ export function expiryText(e: Expiry): string {
 
 class SfUsage extends HTMLElement {
   #stop = () => {}
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn status-slot')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Usage limits')
-    this.#said.setAttribute('role', 'status')
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -252,18 +251,23 @@ class SfUsage extends HTMLElement {
   }
 
   paint() {
+    const focused = focusedKey(this)
+    const heads = new Map<string, string>()
     const parts: Node[] = []
     for (const m of view.meter) {
       if (m.sid) continue
       const box = el('section', 'usage-side')
       const head = el('h3', 'label', visible(m.label))
+      head.tabIndex = -1
+      head.dataset.key = `side:${m.side}`
       if (m.plan) head.append(el('span', 'muted small', ` · plan ${visible(m.plan)}`))
       box.append(head)
       for (const w of m.windows) {
         box.append(windowLine(w))
+        heads.set(`continue:${m.side}:${w.kind}`, `side:${m.side}`)
         if (w.near) {
           const ask = el('div', 'usage-ask small')
-          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), button('Keep them running', 'ghost small', () => void this.#continue(m.side, w.kind)))
+          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`))
           box.append(ask)
         } else if (w.continued) box.append(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
       }
@@ -271,10 +275,12 @@ class SfUsage extends HTMLElement {
     }
     for (const e of view.expiry) if (e.what === 'sign-in') parts.push(el('p', 'notice warn small', expiryText(e)))
     if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so it counts every session as at its cap: it refuses messages, starts no automatic review, and saves no change. Fix or remove the file, then restart the engine."))
-    if (this.#said.textContent) parts.push(this.#said)
-    if (parts.length && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
-    this.hidden = !parts.length
-    this.replaceChildren(...parts)
+    const shown = parts.length > 0 || !!this.#said.textContent
+    if (shown && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
+    parts.push(this.#said)
+    this.hidden = !shown
+    replaceKeeping(this, parts)
+    refocus(this, focused, key => [heads.get(key) ?? ''])
   }
 
   async #continue(side: string, kind: string) {

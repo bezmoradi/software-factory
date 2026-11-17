@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { button, el, emit, focusedKey, opener, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { confirmDialog } from '../lib/dialog.ts'
 import { label, shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import { agentName } from './lineage.ts'
@@ -68,28 +69,9 @@ function elapsed(from: number | undefined): string {
 }
 
 export function confirmBoth(): Promise<boolean> {
-  return new Promise(resolve => {
-    const back = opener()
-    const d = el('dialog', 'consent surface')
-    d.setAttribute('aria-label', 'Start both sessions')
-    const done = (answer: boolean) => {
-      d.close()
-      back()
-      d.remove()
-      resolve(answer)
-    }
-    const actions = el('div', 'row consent-actions')
-    actions.append(el('span', 'spacer'), button('Cancel', 'ghost small', () => done(false)), button('Start both', 'primary small', () => done(true)))
-    d.append(el('h2', 'label', 'Start both sessions?'),
-      el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
-      actions)
-    d.addEventListener('cancel', e => {
-      e.preventDefault()
-      done(false)
-    })
-    document.body.append(d)
-    d.showModal()
-  })
+  return confirmDialog('Start both sessions?', [
+    el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
+  ], 'Start both', 'primary')
 }
 
 function diffBox(c: Changes, what: string): HTMLElement {
@@ -121,6 +103,8 @@ class SfCompare extends HTMLElement {
   #note = ''
   #diffs = new Map<string, Changes | string>()
   #busy = false
+  #busyKey = ''
+  #diffLoading = new Set<string>()
 
   connectedCallback() {
     if (!this.#view) this.hidden = true
@@ -139,7 +123,7 @@ class SfCompare extends HTMLElement {
       this.#diffs.clear()
     }
     const rows = value && id ? value.sessions.filter(s => members.includes(s.sid)).map(s => [s.sid, s.info.running, s.info.review, s.cost, s.total, label(s.info)]) : []
-    const key = JSON.stringify([pairKey, rows, value?.disabled, this.#note, this.#busy, [...this.#diffs.keys()], this.#pair])
+    const key = JSON.stringify([pairKey, rows, value?.disabled, this.#note, this.#busy, this.#busyKey, [...this.#diffs.keys()], [...this.#diffLoading], this.#pair])
     if (key === this.#key) return
     this.#key = key
     this.paint()
@@ -198,10 +182,11 @@ class SfCompare extends HTMLElement {
     }
     if (!m.sid) {
       col.append(el('p', 'small warn', "This session didn't start."))
-      const b = button(this.#busy ? 'Starting…' : 'Start it', 'small', () => {
+      const b = button('Start it', 'small', () => {
         if (!this.#busy && !v.disabled) void this.#startSecond(p, m)
       }, 'button', `next:${p.id}`)
       b.setAttribute('aria-disabled', String(this.#busy || !!v.disabled))
+      if (this.#busy && this.#busyKey === b.dataset.key) busy(b, true)
       col.append(b)
       return col
     }
@@ -256,8 +241,12 @@ class SfCompare extends HTMLElement {
       if (this.#busy || v.disabled) return
       void (async () => {
         this.#busy = true
+        this.#busyKey = `keep:${sid}`
+        this.#key = ''
+        this.view = this.#view
         const a = await call({ op: 'keep', pair: p.id, sid })
         this.#busy = false
+        this.#busyKey = ''
         this.#note = a.ok ? '' : said(a.body, "The choice wasn't saved.")
         if (a.ok) p.kept = sid
         this.#key = ''
@@ -265,16 +254,19 @@ class SfCompare extends HTMLElement {
       })()
     }, 'button', `keep:${sid}`)
     b.setAttribute('aria-disabled', String(this.#busy || !!v.disabled))
+    if (this.#busy && this.#busyKey === `keep:${sid}`) busy(b, true)
     return b
   }
 
   #diffButton(key: string, load: () => Promise<Response>): HTMLButtonElement {
     const shownNow = this.#diffs.has(key)
-    return button(shownNow ? 'Hide the diff' : 'Show the diff', 'small ghost', () => {
+    const b = button(shownNow ? 'Hide the diff' : 'Show the diff', 'small ghost', () => {
       if (this.#diffs.has(key)) this.#diffs.delete(key)
       else
         void (async () => {
+          this.#diffLoading.add(key)
           const res = await load().catch(() => null)
+          this.#diffLoading.delete(key)
           const body = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
           const changes = body.changes as Changes | undefined
           this.#diffs.set(key, res?.ok && changes && Array.isArray(changes.files) ? changes : said(body, "The diff couldn't be read."))
@@ -284,15 +276,19 @@ class SfCompare extends HTMLElement {
       this.#key = ''
       this.view = this.#view
     }, 'button', `diff:${key}`)
+    if (this.#diffLoading.has(key)) busy(b, true)
+    return b
   }
 
   async #startSecond(p: PairRecord, m: PairMember) {
     if (!this.next) return
     this.#busy = true
+    this.#busyKey = `next:${p.id}`
     this.#key = ''
     this.view = this.#view
     const sid = await this.next(p.id, m.agent)
     this.#busy = false
+    this.#busyKey = ''
     this.#note = sid ? '' : "The second session didn't start."
     this.#pairKey = ''
     this.#key = ''

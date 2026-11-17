@@ -36,6 +36,9 @@ func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *sess
 		wc.RoleAgents = agentFiles
 	}
 	w, err := session.NewWork(wc)
+	if err == nil {
+		repos.UseProjectData(w)
+	}
 	if err == nil && reviews != nil {
 		reg.OnDocsReported(w.RecheckApproval)
 	}

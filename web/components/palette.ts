@@ -1,4 +1,5 @@
-import { button, el, settleFocus, visible } from '../lib/dom.ts'
+import { button, el, settleFocus, statusLine, visible } from '../lib/dom.ts'
+import { modal, reopen } from '../lib/dialog.ts'
 
 export interface PaletteItem {
   id: string
@@ -30,18 +31,9 @@ function score(item: PaletteItem, words: string[]): number {
   return (name.startsWith(words[0]!) ? 4 : 0) + (words.every(w => name.includes(w)) ? 2 : 0) + 1
 }
 
-let open: HTMLDialogElement | null = null
-
 export function openPalette(list: () => PaletteItem[]): void {
-  if (open) {
-    open.querySelector<HTMLInputElement>('input')?.focus()
-    return
-  }
-  const back = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  if (reopen('palette')) return
   const items = list()
-  const d = el('dialog', 'palette surface')
-  d.setAttribute('aria-label', 'Command palette')
-  open = d
   const input = el('input', 'textbox palette-input')
   input.type = 'text'
   input.id = 'palette-input'
@@ -58,8 +50,7 @@ export function openPalette(list: () => PaletteItem[]): void {
   listbox.id = 'palette-list'
   listbox.setAttribute('role', 'listbox')
   listbox.setAttribute('aria-label', 'Commands')
-  const said = el('p', 'sr-only')
-  said.setAttribute('role', 'status')
+  const said = statusLine('sr-only')
   const hint = el('p', 'small muted palette-hint', 'Up and Down arrows choose, Enter runs, Escape closes. Each action asks what its own button asks.')
   let shown: PaletteItem[] = []
   let at = -1
@@ -83,12 +74,6 @@ export function openPalette(list: () => PaletteItem[]): void {
       if (!shown[i]!.off) return mark(i)
     }
   }
-  const close = () => {
-    d.close()
-    d.remove()
-    open = null
-    if (back?.isConnected) back.focus()
-  }
   const run = (i: number) => {
     const item = shown[i]
     if (!item) return
@@ -96,7 +81,7 @@ export function openPalette(list: () => PaletteItem[]): void {
       said.textContent = `${visible(item.label)} isn't available: ${visible(item.off)}`
       return
     }
-    close()
+    m.close()
     item.run()
     settleFocus()
   }
@@ -155,17 +140,16 @@ export function openPalette(list: () => PaletteItem[]): void {
       run(at)
     }
   })
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'palette',
+    consent: false,
+    title: 'Command palette',
+    headingClass: 'sr-only',
+    body: [name, input, listbox, said, hint],
+    focus: input,
+    single: 'palette',
+    backdropCloses: true,
   })
-  d.addEventListener('click', e => {
-    if (e.target === d) close()
-  })
-  d.append(name, input, listbox, said, hint)
-  document.body.append(d)
-  d.showModal()
-  input.focus()
   paint()
 }
 
@@ -195,11 +179,6 @@ export function shortcutList(): Shortcut[] {
 }
 
 export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) => void): void {
-  const back = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const d = el('dialog', 'consent shortcuts surface')
-  d.setAttribute('aria-labelledby', 'shortcuts-title')
-  const title = el('h2', 'label', 'Keyboard shortcuts')
-  title.id = 'shortcuts-title'
   const table = el('table', 'shortcut-table small')
   const caption = el('caption', 'sr-only', 'Keys, what they do and where')
   const headRow = el('tr')
@@ -229,24 +208,17 @@ export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) =>
   box.addEventListener('change', () => setQuestion(box.checked))
   toggle.append(box, ' Open this list with the ? key')
   const note = el('p', 'small muted', 'None of these replaces a key the browser or a screen reader uses: the palette key is the browser’s search shortcut only while this page has focus, and ? works only outside text fields. A screen reader in browse mode keeps every key it uses for itself.')
-  const close = () => {
-    d.close()
-    d.remove()
-    if (back?.isConnected) back.focus()
-  }
-  const actions = el('div', 'row consent-actions')
-  actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
-  })
+  const closeButton = button('Close', 'ghost small', () => m.close())
   const wrap = el('div', 'shortcut-wrap')
   wrap.tabIndex = 0
   wrap.setAttribute('role', 'region')
   wrap.setAttribute('aria-label', 'Keyboard shortcuts')
   wrap.append(table)
-  d.append(title, wrap, toggle, note, actions)
-  document.body.append(d)
-  d.showModal()
-  actions.querySelector('button')?.focus()
+  const m = modal({
+    kind: 'shortcuts',
+    title: 'Keyboard shortcuts',
+    body: [wrap, toggle, note],
+    actions: [closeButton],
+    focus: closeButton,
+  })
 }

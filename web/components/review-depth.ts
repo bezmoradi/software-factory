@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, field, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 
 interface DepthView {
   advisory: string[]
@@ -65,8 +65,14 @@ class SfReviewDepth extends HTMLElement {
   #lines = el('input', 'textbox')
   #extra = el('input', 'textbox')
   #extraRuns: HTMLSelectElement = runSelect('', 1, 3)
-  #save = button('Save review settings', 'small', () => void this.#store())
-  #said = el('p', 'small')
+  #save = button('Save review settings', 'small', () => void this.#store(), 'button', 'depth-save')
+  #said = statusLine()
+  #again = button('Read again', 'link small', () => {
+    if (this.#reading) return
+    say(this.#said, '')
+    void whileBusy(this.#again, () => this.#load())
+  }, 'button', 'depth-again')
+  #reading = 0
 
   connectedCallback() {
     if (this.#built) {
@@ -75,7 +81,6 @@ class SfReviewDepth extends HTMLElement {
     }
     this.#built = true
     this.#n = ++serial
-    this.#said.setAttribute('role', 'status')
     this.#summary.setAttribute('aria-live', 'polite')
     const ids: [HTMLInputElement, string, string][] = [[this.#advisory, 'advisory', 'knackpack:security-reviewer'], [this.#files, 'files', '0'], [this.#lines, 'lines', '0'], [this.#extra, 'extra', 'knackpack:architecture-reviewer']]
     for (const [input, id, holder] of ids) {
@@ -91,16 +96,6 @@ class SfReviewDepth extends HTMLElement {
     this.#advisory.maxLength = 700
     this.#extra.maxLength = 700
     this.#extraRuns.id = `depth-extra-runs-${this.#n}`
-    const field = (label: string, input: HTMLElement, help: string) => {
-      const box = el('div', 'field')
-      const name = el('label', 'small', label)
-      name.htmlFor = input.id
-      const note = el('p', 'small muted', help)
-      note.id = `${input.id}-help`
-      input.setAttribute('aria-describedby', note.id)
-      box.append(name, input, note)
-      return box
-    }
     this.replaceChildren(
       el('h3', 'label', 'Review depth'),
       el('p', 'small muted', 'These settings come only from this page, never from the repository or the team file, and they only add reviews: a work type\'s required roles always run. Each run uses the reviewers\' sign-in.'),
@@ -156,21 +151,34 @@ class SfReviewDepth extends HTMLElement {
   async #load() {
     const path = this.#path
     if (!path) return
-    const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
-    if (path !== this.#path) return
-    if (!res || !res.ok) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = await problemOf(res)
-      return
+    this.#reading++
+    this.#again.setAttribute('aria-disabled', 'true')
+    try {
+      const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
+      if (path !== this.#path) return
+      if (!res || !res.ok) {
+        say(this.#said, await problemOf(res), 'warn')
+        return this.#retry(true)
+      }
+      const body: unknown = await res.json().catch(() => null)
+      if (!isDepth(body)) {
+        say(this.#said, 'The engine\'s answer couldn\'t be read. Try again.', 'warn')
+        return this.#retry(true)
+      }
+      this.#show(body)
+      this.#loaded = path
+      this.#retry(false)
+    } finally {
+      if (!--this.#reading) this.#again.removeAttribute('aria-disabled')
     }
-    const body: unknown = await res.json().catch(() => null)
-    if (!isDepth(body)) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = 'The engine\'s answer couldn\'t be read. Try again.'
-      return
-    }
-    this.#show(body)
-    this.#loaded = path
+  }
+
+  #retry(on: boolean) {
+    if (on === (this.#again.parentNode === this)) return
+    if (on) return this.#said.after(this.#again)
+    const focused = focusedKey(this)
+    this.#again.remove()
+    refocus(this, focused, () => ['depth-save'])
   }
 
   async #store() {
@@ -183,8 +191,7 @@ class SfReviewDepth extends HTMLElement {
     const maxFiles = count(this.#files)
     const maxLines = count(this.#lines)
     if (!advisory || !extra || advisory.length > 5 || extra.length > 5 || maxFiles < 0 || maxLines < 0) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = 'Name at most 5 agents in each list, separated by commas, and give each size as a whole number, 0 to switch it off.'
+      say(this.#said, 'Name at most 5 agents in each list, separated by commas, and give each size as a whole number, 0 to switch it off.', 'warn')
       return
     }
     const runs: Record<string, number> = {}
@@ -193,18 +200,14 @@ class SfReviewDepth extends HTMLElement {
       if (s.dataset.agent && n > 1) runs[s.dataset.agent] = n
     }
     const extraRuns = Number(this.#extraRuns.value) > 1 ? Number(this.#extraRuns.value) : 0
-    this.#save.disabled = true
-    const res = await api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null)
-    this.#save.disabled = false
+    const res = await whileBusy(this.#save, () => api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null))
     if (!res || !res.ok) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = await problemOf(res)
+      say(this.#said, await problemOf(res), 'warn')
       return
     }
     const body: unknown = await res.json().catch(() => null)
     if (isDepth(body)) this.#show(body)
-    this.#said.className = 'small muted'
-    this.#said.textContent = 'Saved. The next review uses them.'
+    say(this.#said, 'Saved. The next review uses them.', 'muted')
   }
 }
 

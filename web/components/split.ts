@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import { label } from '../lib/format.ts'
 import type { SessionInfo, SplitCard } from '../types.ts'
 
@@ -38,7 +38,7 @@ class SfSplit extends HTMLElement {
   #key = ''
   #editing = new Map<string, { title: string; message: string }>()
   #pressed = new Map<string, number>()
-  #busy = new Set<string>()
+  #busy = new Map<string, string>()
   #notes = new Map<string, { text: string; bad: boolean }>()
 
   connectedCallback() {
@@ -140,7 +140,7 @@ class SfSplit extends HTMLElement {
   #actions(v: SplitPanelView, c: SplitCard): HTMLElement {
     const off = !!v.disabled || this.#busy.has(c.card)
     const row = el('div', 'actions forge-actions')
-    const start = button(this.#busy.has(c.card) ? 'Starting…' : 'Start', 'primary small', () => {
+    const start = button('Start', 'primary small', () => {
       if (off) return
       this.#pressed.set(c.card, GOAL_LIMIT + 1)
       void this.#start(c)
@@ -157,6 +157,8 @@ class SfSplit extends HTMLElement {
       if (!off) void this.#call(c, { op: 'dismiss', sid: v.sid, card: c.card }, '')
     }, 'button', `dismiss:${c.card}`)
     for (const b of [edit, dismiss]) b.setAttribute('aria-disabled', String(off))
+    if (this.#busy.get(c.card) === 'start') busy(start, true)
+    if (this.#busy.get(c.card) === 'dismiss') busy(dismiss, true)
     row.append(start, edit, dismiss)
     return row
   }
@@ -178,11 +180,13 @@ class SfSplit extends HTMLElement {
     title.addEventListener('input', keep)
     message.addEventListener('input', keep)
     const row = el('div', 'actions')
-    row.append(button('Save', 'primary small', undefined, 'submit', `save:${c.card}`), button('Cancel', 'small ghost', () => {
+    const save = button('Save', 'primary small', undefined, 'submit', `save:${c.card}`)
+    if (this.#busy.get(c.card) === 'edit') busy(save, true)
+    row.append(button('Cancel', 'small ghost', () => {
       this.#editing.delete(c.card)
       this.#key = ''
       this.view = this.#view
-    }))
+    }), save)
     form.append(title, message, row)
     form.addEventListener('submit', e => {
       e.preventDefault()
@@ -196,7 +200,7 @@ class SfSplit extends HTMLElement {
   }
 
   async #call(c: SplitCard, body: Record<string, unknown>, done: string): Promise<boolean> {
-    this.#busy.add(c.card)
+    this.#busy.set(c.card, typeof body.op === 'string' ? body.op : '')
     this.#key = ''
     this.view = this.#view
     const res = await api('/api/split', body).catch(() => null)
@@ -214,7 +218,7 @@ class SfSplit extends HTMLElement {
   async #start(c: SplitCard) {
     const v = this.#view
     if (!v || !this.start || this.#busy.has(c.card)) return
-    this.#busy.add(c.card)
+    this.#busy.set(c.card, 'start')
     this.#notes.delete(c.card)
     this.#key = ''
     this.paint()

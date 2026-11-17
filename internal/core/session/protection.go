@@ -39,9 +39,14 @@ type ProtectionReader interface {
 	Protection(ctx context.Context, r ForgeRepo, branch string) (Protection, error)
 }
 
+type LookupState struct {
+	Projects map[string]bool
+	Removed  []RemovedProject[bool]
+}
+
 type LookupStore interface {
-	Load() ([]string, error)
-	Save([]string) error
+	Load() (LookupState, error)
+	Save(LookupState) error
 }
 
 type ProjectFactsView struct {
@@ -73,11 +78,14 @@ type ProjectFactsConfig struct {
 }
 
 type ProjectFacts struct {
-	cfg    ProjectFactsConfig
-	mu     sync.Mutex
-	loaded bool
-	on     map[string]bool
+	cfg     ProjectFactsConfig
+	mu      sync.Mutex
+	loaded  bool
+	on      map[string]bool
+	removed []RemovedProject[bool]
 }
+
+var _ ProjectData = (*ProjectFacts)(nil)
 
 func NewProjectFacts(cfg ProjectFactsConfig) *ProjectFacts {
 	if cfg.Now == nil {
@@ -89,25 +97,75 @@ func NewProjectFacts(cfg ProjectFactsConfig) *ProjectFacts {
 	return &ProjectFacts{cfg: cfg, on: map[string]bool{}}
 }
 
-func (f *ProjectFacts) loadLocked() {
+func (f *ProjectFacts) loadLocked() error {
 	if f.loaded || f.cfg.Lookups == nil {
-		return
+		return nil
 	}
-	list, err := f.cfg.Lookups.Load()
+	st, err := f.cfg.Lookups.Load()
 	if err != nil {
-		f.cfg.Logger.Warn("project facts", "event", "lookups-unreadable")
-		return
+		f.cfg.Logger.Warn("project facts", "event", "lookups-unreadable", "err", err.Error())
+		return err
 	}
 	f.loaded = true
-	for _, name := range list {
-		f.on[name] = true
+	for name, on := range st.Projects {
+		if on {
+			f.on[name] = true
+		}
 	}
+	f.removed = slices.Clone(st.Removed)
+	return nil
+}
+
+func (f *ProjectFacts) projectData(event, name string, fn func(st *LookupState) bool) {
+	if f.cfg.Lookups == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.loadLocked(); err != nil {
+		projectDataNotSaved(f.cfg.Logger, "project facts", name, err)
+		return
+	}
+	st := LookupState{Projects: maps.Clone(f.on), Removed: slices.Clone(f.removed)}
+	if !fn(&st) {
+		return
+	}
+	if err := f.cfg.Lookups.Save(st); err != nil {
+		projectDataNotSaved(f.cfg.Logger, "project facts", name, err)
+		return
+	}
+	f.on, f.removed = st.Projects, st.Removed
+	f.cfg.Logger.Info("project facts", "event", event)
+}
+
+func (f *ProjectFacts) ParkProject(id ProjectID) {
+	f.projectData("lookups-parked", id.Name, func(st *LookupState) bool {
+		var parked bool
+		st.Removed, _, parked = parkProject(st.Projects, st.Removed, id)
+		return parked
+	})
+}
+
+func (f *ProjectFacts) RestoreProject(id ProjectID) {
+	f.projectData("lookups-restored", id.Name, func(st *LookupState) bool {
+		var changed bool
+		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
+		return changed
+	})
+}
+
+func (f *ProjectFacts) KeepProjects(names []string) {
+	f.projectData("lookups-unlisted-set-aside", "", func(st *LookupState) bool {
+		var n int
+		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
+		return n > 0
+	})
 }
 
 func (f *ProjectFacts) LookupsOn(project string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.loadLocked()
+	_ = f.loadLocked()
 	return f.on[project]
 }
 
@@ -120,8 +178,7 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.loadLocked()
-	if !f.loaded {
+	if f.loadLocked() != nil {
 		return explained(conflict("records"), "The engine couldn't read its package lookup setting.")
 	}
 	next := map[string]bool{}
@@ -134,12 +191,7 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 	if len(next) > MaxLookupProjects {
 		return explained(conflict("full"), "The package lookup is on for too many projects.")
 	}
-	list := make([]string, 0, len(next))
-	for k := range next {
-		list = append(list, k)
-	}
-	slices.Sort(list)
-	if err := f.cfg.Lookups.Save(list); err != nil {
+	if err := f.cfg.Lookups.Save(LookupState{Projects: next, Removed: slices.Clone(f.removed)}); err != nil {
 		return explained(conflict("records"), "The engine couldn't save the package lookup setting.")
 	}
 	f.on = next

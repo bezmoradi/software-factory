@@ -537,7 +537,7 @@ class SfMarkdown extends HTMLElement {
     this.#frame = 0
     paint(this, this.#text, this.#exact)
     this.#reach()
-    emit(this, 'sf-paint')
+    emit(this, 'sf-markdown-painted')
   }
 
   #reach() {

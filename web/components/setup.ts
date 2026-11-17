@@ -35,11 +35,6 @@ class SfSetup extends HTMLElement {
     }
     const steps: Step[] = [
       {
-        title: 'You’ll sign in to each session when you start it',
-        done: true,
-        why: 'Each session runs in its own container, on your own account with its agent’s vendor.',
-      },
-      {
         title: 'Sign the reviewers in',
         done: v.signIn.reviewers === true,
         why: 'Every push waits for reviews, which run on Claude Code in short-lived reviewer containers of their own, signed in separately from the agents.',
@@ -63,7 +58,7 @@ class SfSetup extends HTMLElement {
       {
         title: 'Start a session',
         done: v.sessions > 0,
-        why: 'Pick a project and an agent. Each session works on its own branch.',
+        why: 'Pick a project and an agent. Each session works on its own branch, in its own container, and you sign its agent in with your own account when it starts.',
         action: 'New session',
         start: 'session',
       },

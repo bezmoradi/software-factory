@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown, visible } from '../lib/dom.ts'
+import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
@@ -66,16 +66,14 @@ class SfAllowRules extends HTMLElement {
   #repo = ''
   #view: RulesView | null = null
   #busy = ''
-  #status = el('p', 'small')
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
+  #gen = 0
+  #status = statusLine()
 
   set repo(value: string) {
     if (value === this.#repo) return
     this.#repo = value
+    this.#gen++
+    this.#busy = ''
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
@@ -83,30 +81,34 @@ class SfAllowRules extends HTMLElement {
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
+    const gen = ++this.#gen
+    const current = () => gen === this.#gen
     const res = await api('/api/allow-rules', body).catch(() => null)
+    if (!current()) return false
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown } | null
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      if (!current()) return false
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }
     const v = readView(await res.json().catch(() => null))
+    if (!current()) return false
     if (v) this.#view = v
     this.#paint()
     return true
   }
 
   async #remove(r: SavedRule) {
+    if (this.#busy) return
     this.#busy = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
     this.#status.textContent = ''
     this.#paint()
     const body: Record<string, unknown> = { op: 'remove', repo: this.#repo, box: r.box, place: r.place, rule: r.rule }
     if (r.worktree) body.worktree = r.worktree
     if (await this.#call(body)) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = `Removed ${visible(r.rule)} from ${visible(r.path)}. The next matching call shows a card again.`
+      say(this.#status, `Removed ${visible(r.rule)} from ${visible(r.path)}. The next matching call shows a card again.`, 'ok')
       this.#paint()
     }
   }
@@ -118,8 +120,9 @@ class SfAllowRules extends HTMLElement {
     what.append(el('code', '', shown(r.rule)))
     for (const why of r.wide) what.append(' ', el('span', 'tag warn', `Wide: ${visible(why)}`))
     const key = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
-    const remove = button(this.#busy === key ? 'Removing…' : 'Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
-    remove.disabled = this.#busy !== ''
+    const remove = button('Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
+    if (this.#busy === key) busy(remove, true)
+    else if (this.#busy) remove.setAttribute('aria-disabled', 'true')
     remove.setAttribute('aria-label', `Remove the rule ${visible(r.rule)} from ${visible(r.path)}`)
     row.append(what, remove)
     li.append(row)
@@ -129,6 +132,7 @@ class SfAllowRules extends HTMLElement {
   #paint() {
     if (!this.#repo) return this.replaceChildren()
     const focused = focusedKey(this)
+    const before = [...this.querySelectorAll<HTMLElement>('[data-key^="remove:"]')].map(b => b.dataset.key ?? '')
     const parts: HTMLElement[] = [
       el('p', 'small', 'Saved "don\'t ask again" rules'),
       el('p', 'small muted', 'The allow rules Claude Code saved when a card\'s "don\'t ask again" was chosen, in the session\'s worktree (.claude/settings.local.json), and those in the clone folder\'s .claude/settings.local.json, which a live run of Claude Code 2.1.322 didn\'t apply in a worktree, and the agents\' user settings, including any written there another way. Agents can write these files too, so this is a report of what is in them, not a control: an agent can add a rule again, and Remove changes only the file it names. Rules marked wide allow much more than one command.'),
@@ -153,13 +157,14 @@ class SfAllowRules extends HTMLElement {
       }
     }
     const again = button('Read again', 'link small', () => {
+      if (this.#busy) return
       this.#status.textContent = ''
-      void this.#call({ op: 'list', repo: this.#repo })
+      void whileBusy(again, () => this.#call({ op: 'list', repo: this.#repo }))
     }, 'button', 'rules-again')
-    again.disabled = this.#busy !== ''
+    if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
-    this.replaceChildren(...parts)
-    refocus(this, focused)
+    replaceKeeping(this, parts)
+    refocus(this, focused, key => [...around(before, key), 'rules-again'])
   }
 }
 

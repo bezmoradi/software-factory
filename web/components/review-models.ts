@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 
 interface RoleModel {
   name: string
@@ -41,13 +41,8 @@ class SfReviewModels extends HTMLElement {
   #target: ReviewModelsTarget | null = null
   #view: ReviewModelsView | null = null
   #busy = false
-  #status = el('p', 'small')
+  #status = statusLine()
   #key = ''
-
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
-  }
 
   set view(value: ReviewModelsTarget | null) {
     const key = JSON.stringify(value)
@@ -77,15 +72,13 @@ class SfReviewModels extends HTMLElement {
     this.#busy = false
     if (project !== this.#target?.project) return
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       return this.#paint()
     }
     const v = readView(await res.json().catch(() => null))
     if (v) this.#view = v
     if (ok) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = ok
+      say(this.#status, ok, 'ok')
     }
     this.#paint()
   }
@@ -94,7 +87,7 @@ class SfReviewModels extends HTMLElement {
     const v = this.#view
     if (!this.#target?.project || !v) return this.replaceChildren()
     const focused = focusedKey(this)
-    const off = this.#target.disabled || this.#busy
+    const off = this.#target.disabled
     const parts: HTMLElement[] = [el('p', 'small', 'Model and effort for each review role'), el('p', 'small muted', 'The default passes no --model or --effort, so the role\'s agent file decides. Each review shows the model it ran with.')]
     for (const [role, r] of Object.entries(v.roles)) {
       const model = el('select', 'textbox')
@@ -119,10 +112,20 @@ class SfReviewModels extends HTMLElement {
         return o
       }))
       effort.value = v.efforts.includes(r.effort) ? r.effort : ''
-      const save = () => void this.#call({ op: 'set', role, model: model.value, effort: effort.value }, `The ${visible(r.name)} role runs with ${model.value || 'the default model'}${effort.value ? ` at ${effort.value} effort` : ''} from the next review on.`)
+      const shownModel = model.value
+      const shownEffort = effort.value
+      const save = () => {
+        if (this.#busy) {
+          model.value = shownModel
+          effort.value = shownEffort
+          return
+        }
+        void this.#call({ op: 'set', role, model: model.value, effort: effort.value }, `The ${visible(r.name)} role runs with ${model.value || 'the default model'}${effort.value ? ` at ${effort.value} effort` : ''} from the next review on.`)
+      }
       model.addEventListener('change', save)
       effort.addEventListener('change', save)
       model.disabled = effort.disabled = off
+      if (this.#busy) for (const s of [model, effort]) s.setAttribute('aria-disabled', 'true')
       const label = el('label', 'small', `The ${visible(r.name)} role runs on`)
       label.htmlFor = model.id
       const row = el('div', 'row field-row')
@@ -130,7 +133,7 @@ class SfReviewModels extends HTMLElement {
       parts.push(row)
     }
     parts.push(this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

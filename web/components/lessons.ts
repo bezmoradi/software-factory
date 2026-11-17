@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 
@@ -54,25 +54,36 @@ function isView(v: unknown): v is LessonsView {
 class SfLessons extends HTMLElement {
   #project = ''
   #view: LessonsView | null = null
-  #said = el('p', 'small')
+  #said = statusLine()
   #body = el('div', 'lessons-body')
+  #again = button('Read again', 'link small', () => {
+    if (this.#reads) return
+    say(this.#said, '')
+    void whileBusy(this.#again, () => this.#call({ op: 'read', name: this.#project }))
+  }, 'button', 'lessons-again')
   #timer = 0
   #busy = ''
+  #doing = ''
   #chosen = new Map<string, string>()
   #built = false
+  #gen = 0
+  #reads = 0
 
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      this.#said.setAttribute('role', 'status')
+      const heading = el('h3', 'label', 'Lessons from reviews')
+      heading.tabIndex = -1
+      heading.dataset.key = 'lessons-heading'
       this.replaceChildren(
-        el('h3', 'label', 'Lessons from reviews'),
+        heading,
         el('p', 'small muted', 'The engine counts the blocking findings of this project\'s reviews by reviewer, file and title, with case, numbers and punctuation left out. That matching is approximate: two different findings can count as one, and a reworded finding counts as a new one. Nothing here changes a file or a review on its own.'),
         this.#body,
         this.#said,
       )
     }
-    if (this.#project) void this.#call({ op: 'read', name: this.#project })
+    if (this.#project && !this.#view && !this.#reads) void this.#call({ op: 'read', name: this.#project })
+    else this.#poll()
   }
 
   disconnectedCallback() {
@@ -96,8 +107,14 @@ class SfLessons extends HTMLElement {
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const project = this.#project
     if (!project) return false
+    const gen = ++this.#gen
+    const read = body.op === 'read'
+    if (read) this.#reads++
+    this.#hold()
     const res = await api('/api/lessons', body).catch(() => null)
-    if (project !== this.#project) return false
+    if (read) this.#reads--
+    this.#hold()
+    if (project !== this.#project || (read && gen !== this.#gen)) return false
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: Needs } | null
@@ -105,21 +122,35 @@ class SfLessons extends HTMLElement {
         const ok = await consentFor(problem.needs, project, 'suggesting instruction lines')
         if (ok?.costOk) return this.#call({ ...body, costOk: true })
       }
-      this.#said.className = 'small warn'
-      this.#said.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#said, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
+      if (read) this.#retry(true)
       return false
     }
     if (body.op === 'suggest') {
-      this.#said.className = 'small muted'
-      this.#said.textContent = 'The run started in a reviewer container. Its lines show here when it ends.'
+      say(this.#said, 'The run started in a reviewer container. Its lines show here when it ends.', 'muted')
       return this.#call({ op: 'read', name: project })
     }
     const v: unknown = await res.json().catch(() => null)
+    if (project !== this.#project || (read && gen !== this.#gen)) return false
     if (isView(v)) this.#view = v
     this.#paint()
+    if (read && isView(v)) this.#retry(false)
     this.#poll()
     return true
+  }
+
+  #hold() {
+    if (this.#reads) this.#again.setAttribute('aria-disabled', 'true')
+    else this.#again.removeAttribute('aria-disabled')
+  }
+
+  #retry(on: boolean) {
+    if (on === (this.#again.parentNode === this)) return
+    if (on) return this.#said.after(this.#again)
+    const focused = focusedKey(this)
+    this.#again.remove()
+    refocus(this, focused, () => ['lessons-suggest', 'lessons-heading'])
   }
 
   #paint() {
@@ -143,13 +174,13 @@ class SfLessons extends HTMLElement {
     const run = v.run
     const running = run?.state === 'running' || this.#busy === 'suggest'
     if (v.offered > 0 || running) {
-      const b = button(running ? 'Suggesting…' : 'Suggest lines', 'small', () => {
+      const b = button('Suggest lines', 'small', () => {
         if (b.getAttribute('aria-disabled') === 'true') return
         this.#busy = 'suggest'
         this.#paint()
         void this.#call({ op: 'suggest', name: this.#project })
-      })
-      b.setAttribute('aria-disabled', String(running))
+      }, 'button', 'lessons-suggest')
+      if (running) busy(b, true)
       b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)
     }
@@ -200,9 +231,9 @@ class SfLessons extends HTMLElement {
     }
     pick.value = this.#chosen.get(x.id) ?? ''
     pick.addEventListener('change', () => this.#chosen.set(x.id, pick.value))
-    const busy = this.#busy === x.id
+    const held = this.#busy === x.id
     const approve = button('Approve', 'small', () => {
-      if (busy) return
+      if (held) return
       if (!pick.value) {
         pick.setAttribute('aria-invalid', 'true')
         pick.focus()
@@ -210,23 +241,25 @@ class SfLessons extends HTMLElement {
       }
       pick.removeAttribute('aria-invalid')
       this.#busy = x.id
-      void this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value }).then(ok => {
+      this.#doing = 'approve'
+      void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
         if (!ok) return
-        this.#said.className = 'small muted'
-        this.#said.textContent = 'Sent to the session as a note with its next message.'
+        say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
       })
-    })
+    }, 'button', `lessons-approve:${this.#project}:${x.id}`)
     const decline = button('Decline', 'small ghost', () => {
-      if (busy) return
+      if (held) return
       this.#busy = x.id
-      void this.#call({ op: 'decline', name: this.#project, id: x.id }).then(ok => {
+      this.#doing = 'decline'
+      void whileBusy(decline, () => this.#call({ op: 'decline', name: this.#project, id: x.id })).then(ok => {
         if (!ok) return
-        this.#said.className = 'small muted'
-        this.#said.textContent = 'Declined. Nothing was sent or changed.'
+        say(this.#said, 'Declined. Nothing was sent or changed.', 'muted')
       })
-    })
-    approve.setAttribute('aria-disabled', String(busy))
-    decline.setAttribute('aria-disabled', String(busy))
+    }, 'button', `lessons-decline:${this.#project}:${x.id}`)
+    if (held && this.#doing === 'approve') busy(approve, true)
+    else approve.setAttribute('aria-disabled', String(held))
+    if (held && this.#doing === 'decline') busy(decline, true)
+    else decline.setAttribute('aria-disabled', String(held))
     row.append(label, pick, approve, decline)
     li.append(row)
     return li

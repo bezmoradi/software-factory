@@ -72,9 +72,14 @@ type LessonProject struct {
 	Lines    []LessonLine
 }
 
+type LessonState struct {
+	Projects map[string]LessonProject
+	Removed  []RemovedProject[LessonProject]
+}
+
 type LessonStore interface {
-	Load() (map[string]LessonProject, error)
-	Save(map[string]LessonProject) error
+	Load() (LessonState, error)
+	Save(LessonState) (int, error)
 	Dropped(n int)
 }
 
@@ -131,7 +136,10 @@ type Lessons struct {
 	runs    map[string]LessonRun
 }
 
-var _ LessonsPage = (*Lessons)(nil)
+var (
+	_ LessonsPage = (*Lessons)(nil)
+	_ ProjectData = (*Lessons)(nil)
+)
 
 func NewLessons(cfg LessonsConfig) (*Lessons, error) {
 	if cfg.Store == nil || cfg.Reviews == nil {
@@ -254,35 +262,45 @@ func (r *Reviews) learned(t ReviewTarget, e ReviewEntry) {
 }
 
 func (l *Lessons) load() map[string]LessonProject {
-	all, err := l.cfg.Store.Load()
+	st, err := l.cfg.Store.Load()
 	if err != nil {
 		l.cfg.Logger.Warn("lessons", "event", "records-unreadable")
 		return nil
 	}
-	if all == nil {
-		all = map[string]LessonProject{}
+	if st.Projects == nil {
+		st.Projects = map[string]LessonProject{}
 	}
-	return all
+	return st.Projects
 }
 
 func (l *Lessons) change(fn func(all map[string]LessonProject) error) error {
+	return l.changeState(func(st *LessonState) error { return fn(st.Projects) }, func(error) {})
+}
+
+func (l *Lessons) changeState(fn func(st *LessonState) error, failed func(err error)) error {
 	l.store.Lock()
 	defer l.store.Unlock()
-	all, err := l.cfg.Store.Load()
+	st, err := l.cfg.Store.Load()
 	if err != nil {
 		l.cfg.Logger.Warn("lessons", "event", "records-unreadable")
+		failed(err)
 		return explained(conflict("records"), "The engine couldn't read its lessons from reviews.")
 	}
-	if all == nil {
-		all = map[string]LessonProject{}
+	if st.Projects == nil {
+		st.Projects = map[string]LessonProject{}
 	}
 	l.dropped = 0
-	if err := fn(all); err != nil {
+	if err := fn(&st); err != nil {
 		return err
 	}
-	if err := l.cfg.Store.Save(all); err != nil {
+	trimmed, err := l.cfg.Store.Save(st)
+	if err != nil {
 		l.cfg.Logger.Warn("lessons", "event", "records-not-saved")
+		failed(err)
 		return explained(conflict("records"), "The engine couldn't save its lessons from reviews.")
+	}
+	if trimmed > 0 {
+		l.cfg.Logger.Warn("lessons", "event", "removed-trimmed-to-fit", "records", trimmed)
 	}
 	if l.dropped > 0 {
 		l.cfg.Store.Dropped(l.dropped)
@@ -344,6 +362,51 @@ func keptProjects(all map[string]LessonProject, keep string) int {
 		delete(all, oldest)
 	}
 	return dropped
+}
+
+var errUnchanged = errors.New("unchanged")
+
+func (l *Lessons) ParkProject(id ProjectID) {
+	l.mu.Lock()
+	delete(l.runs, id.Name)
+	l.mu.Unlock()
+	l.projectData("parked", id.Name, func(st *LessonState) bool {
+		var parked bool
+		var dropped []RemovedProject[LessonProject]
+		st.Removed, dropped, parked = parkProject(st.Projects, st.Removed, id)
+		for _, r := range dropped {
+			l.dropped += len(r.Data.Findings) + len(r.Data.Lines)
+		}
+		return parked
+	})
+}
+
+func (l *Lessons) RestoreProject(id ProjectID) {
+	l.projectData("restored", id.Name, func(st *LessonState) bool {
+		var changed bool
+		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
+		return changed
+	})
+}
+
+func (l *Lessons) KeepProjects(names []string) {
+	l.projectData("unlisted-set-aside", "", func(st *LessonState) bool {
+		var n int
+		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
+		return n > 0
+	})
+}
+
+func (l *Lessons) projectData(event, name string, fn func(st *LessonState) bool) {
+	err := l.changeState(func(st *LessonState) error {
+		if !fn(st) {
+			return errUnchanged
+		}
+		return nil
+	}, func(err error) { projectDataNotSaved(l.cfg.Logger, "lessons", name, err) })
+	if err == nil {
+		l.cfg.Logger.Info("lessons", "event", event)
+	}
 }
 
 func settledBy(p LessonProject, id string) bool {

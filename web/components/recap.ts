@@ -32,22 +32,32 @@ class SfRecap extends HTMLElement {
   #sid = ''
   #loading = false
   #seenAt = 0
+  #hiddenAt = 0
+  #every = 0
 
-  constructor() {
-    super()
-    const mark = () => {
-      if (this.#sid && !this.#loading) void this.#seen(this.#sid)
-    }
-    setInterval(() => {
-      if (!document.hidden) mark()
+  #mark = () => {
+    if (this.#sid && !this.#loading) void this.#seen(this.#sid)
+  }
+
+  #visibility = () => {
+    if (document.hidden) {
+      this.#hiddenAt = Date.now()
+      this.#mark()
+    } else if (this.#sid && !this.#loading && this.#hiddenAt && Date.now() - this.#hiddenAt > AWAY_MS) void this.#load(this.#sid)
+  }
+
+  connectedCallback() {
+    window.clearInterval(this.#every)
+    this.#every = window.setInterval(() => {
+      if (!document.hidden) this.#mark()
     }, SEEN_EVERY_MS)
-    let hiddenAt = 0
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        hiddenAt = Date.now()
-        mark()
-      } else if (this.#sid && !this.#loading && hiddenAt && Date.now() - hiddenAt > AWAY_MS) void this.#load(this.#sid)
-    })
+    document.addEventListener('visibilitychange', this.#visibility)
+  }
+
+  disconnectedCallback() {
+    window.clearInterval(this.#every)
+    this.#every = 0
+    document.removeEventListener('visibilitychange', this.#visibility)
   }
 
   set post(p: Post) {

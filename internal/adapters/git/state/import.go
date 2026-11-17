@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -413,7 +414,7 @@ func workOff(in, out string, report *session.ImportReport) error {
 	if n := len(st.Teams); n > 0 {
 		report.Off = append(report.Off, plural(n, "team file approval")+" kept for display only: approve the team file again")
 	}
-	st.Teams = map[string]session.TeamApproval{}
+	st.Teams, st.RemovedTeams = map[string]session.TeamApproval{}, nil
 	for name, p := range st.Projects {
 		if p.Findings {
 			report.Off = append(report.Off, name+": sending blocking findings to the agent on its own is off")
@@ -426,6 +427,10 @@ func workOff(in, out string, report *session.ImportReport) error {
 		}
 		p.Findings, p.PRComment, p.Depth = false, false, workflow.Depth{}
 		st.Projects[name] = p
+	}
+	for i := range st.Removed {
+		p := &st.Removed[i].Data
+		p.Findings, p.PRComment, p.Depth = false, false, workflow.Depth{}
 	}
 	approvals := 0
 	for sid, w := range st.Sessions {
@@ -456,21 +461,28 @@ func pairsHistory(in, out string, report *session.ImportReport) error {
 }
 
 func lessonsShown(in, out string, report *session.ImportReport) error {
-	all, err := NewLessons(in).Load()
+	st, err := NewLessons(in).Load()
 	if err != nil {
 		return err
 	}
 	dropped := 0
-	for name, p := range all {
+	settled := func(p session.LessonProject) session.LessonProject {
 		n := len(p.Lines)
 		p.Lines = slices.DeleteFunc(p.Lines, func(l session.LessonLine) bool { return l.State == session.LessonOffered })
 		dropped += n - len(p.Lines)
-		all[name] = p
+		return p
+	}
+	for name, p := range st.Projects {
+		st.Projects[name] = settled(p)
+	}
+	for i, r := range st.Removed {
+		st.Removed[i].Data = settled(r.Data)
 	}
 	if dropped > 0 {
 		report.Off = append(report.Off, plural(dropped, "suggested instruction line")+" not yet approved dropped; ask for suggestions again")
 	}
-	return NewLessons(out).Save(all)
+	_, err = NewLessons(out).Save(st)
+	return err
 }
 
 func egressAgents(in, out string) error {
@@ -553,11 +565,11 @@ func offLines(name, in string) []string {
 			out = append(out, plural(n, "pull request follow")+" kept for display only; nothing is followed")
 		}
 	case lookupsFile:
-		list, err := NewPackageLookups(in).Load()
+		st, err := NewPackageLookups(in).Load()
 		if err != nil {
 			return nil
 		}
-		for _, p := range list {
+		for _, p := range slices.Sorted(maps.Keys(st.Projects)) {
 			out = append(out, p+": public-registry lookups are off; turn them on again on the push card")
 		}
 	case signInFile:

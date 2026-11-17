@@ -1,0 +1,161 @@
+{
+  "forbidden": [
+    {
+      "name": "lib-only-lib-and-types",
+      "severity": "error",
+      "from": {
+        "path": "^lib/"
+      },
+      "to": {
+        "pathNot": "^(lib/[^/]+|types)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "components-only-components-lib-types-api",
+      "severity": "error",
+      "from": {
+        "path": "^components/"
+      },
+      "to": {
+        "pathNot": "^(components/[^/]+|lib/[^/]+|types|api)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "types-imports-nothing",
+      "severity": "error",
+      "from": {
+        "path": "^types\\.[jt]s$"
+      },
+      "to": {}
+    },
+    {
+      "name": "api-only-types",
+      "severity": "error",
+      "from": {
+        "path": "^api\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^types\\.[jt]s$"
+      }
+    },
+    {
+      "name": "app-state-no-page-modules",
+      "severity": "error",
+      "from": {
+        "path": "^app-state\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "composer-only-shared-modules",
+      "severity": "error",
+      "from": {
+        "path": "^composer\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "navigation-layout-session-actions-only-shared-modules",
+      "severity": "error",
+      "from": {
+        "path": "^(navigation|layout|session-actions)\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "stream-only-shared-modules-and-navigation",
+      "severity": "error",
+      "from": {
+        "path": "^stream\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state|navigation)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "palette-items-only-shared-modules-layout-navigation-session-actions",
+      "severity": "error",
+      "from": {
+        "path": "^palette-items\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^((components|lib)/[^/]+|types|api|app-state|layout|navigation|session-actions)\\.[jt]s$"
+      }
+    },
+    {
+      "name": "nothing-imports-app",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "path": "^app\\.[jt]s$"
+      }
+    },
+    {
+      "name": "no-cycles",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "circular": true
+      }
+    },
+    {
+      "name": "imports-resolve",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "couldNotResolve": true
+      }
+    },
+    {
+      "name": "imports-only-served-folders-and-names",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "pathNot": "^((components|lib)/)?[a-z][a-z0-9-]*\\.[jt]s$"
+      }
+    },
+    {
+      "name": "no-orphans",
+      "severity": "error",
+      "from": {
+        "orphan": true,
+        "pathNot": "^types\\.[jt]s$"
+      },
+      "to": {}
+    },
+    {
+      "name": "reachable-from-app",
+      "severity": "error",
+      "from": {
+        "path": "^app\\.[jt]s$"
+      },
+      "to": {
+        "pathNot": "^(app|types)\\.[jt]s$",
+        "reachable": false
+      }
+    }
+  ],
+  "options": {
+    "moduleSystems": [
+      "es6"
+    ],
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "enhancedResolveOptions": {
+      "extensions": [
+        ""
+      ],
+      "mainFiles": [],
+      "mainFields": [],
+      "exportsFields": [],
+      "conditionNames": []
+    }
+  }
+}

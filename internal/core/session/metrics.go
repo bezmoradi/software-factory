@@ -27,6 +27,7 @@ type MetricsConfig struct {
 	Runs     func() ([]SavedRun, error)
 	Caps     func() (CapsState, error)
 	Follows  func() (FollowRecord, error)
+	Spans    func(repo string) []ProjectSpan
 	Now      func() time.Time
 }
 
@@ -133,9 +134,15 @@ func (m *Metrics) Metrics(repo string) (MetricsView, error) {
 	if len(entries) > 0 {
 		v.AuditSince = entries[0].Time
 	}
+	owned := func(e AuditEntry) bool { return e.Repository == repo }
+	if m.cfg.Spans != nil {
+		spans := m.cfg.Spans(repo)
+		owned = func(e AuditEntry) bool { return inSpans(spans, e.Repository, e.Time) }
+	}
+	entries = slices.DeleteFunc(entries, func(e AuditEntry) bool { return !owned(e) })
 	branches := map[string]bool{}
 	for _, e := range entries {
-		if e.Repository == repo && e.Branch != "" {
+		if e.Branch != "" {
 			branches[e.Branch] = true
 		}
 	}
@@ -179,9 +186,6 @@ func (m *Metrics) fromAudit(v *MetricsView, entries []AuditEntry) map[string]tim
 	firstPush := map[string]time.Time{}
 	reviewed := map[string]map[string]bool{}
 	for _, e := range entries {
-		if e.Repository != v.Repo {
-			continue
-		}
 		switch e.Kind {
 		case "", AuditPush:
 			switch e.Result {

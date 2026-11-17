@@ -1,6 +1,7 @@
-import { button, el } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
-import { commandBlock } from './login.ts'
+import { commandBlock } from './copy.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -21,7 +22,7 @@ export interface UpdateView {
 const ROUTE = '/api/update'
 const REPO = 'https://github.com/bezmoradi/software-factory'
 const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/
-const INSTALL_COMMAND = 'curl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh'
+const SIGNER = '-R bezmoradi/software-factory --signer-workflow bezmoradi/software-factory/.github/workflows/release.yml'
 const KIND = /^[a-z][a-z-]{0,40}$/
 const RELOAD_MS = 60 * 60 * 1000
 const SOON_MS = 15_000
@@ -85,6 +86,10 @@ async function call(body: Record<string, unknown>): Promise<{ ok: boolean; messa
   return { ok: false, message: message || 'The engine didn’t take that. Try again once the page is connected.' }
 }
 
+export function developmentBuild(): boolean {
+  return view?.development === true
+}
+
 export function initUpdates(p: Post): void {
   post = p
   clearInterval(timer)
@@ -113,27 +118,39 @@ function code(text: string): HTMLElement {
   return el('code', '', text)
 }
 
-function oneLine(command: string, name: string): HTMLElement {
-  const block = commandBlock(command)
+function oneLine(command: string, what: string): HTMLElement {
+  const block = commandBlock(command, `Copy the ${what}`)
   block.classList.add('update-oneline')
   const text = block.querySelector('code')
   if (!text) return block
   const scroll = el('div', 'update-scroll')
   scroll.tabIndex = 0
   scroll.setAttribute('role', 'region')
-  scroll.setAttribute('aria-label', name)
+  scroll.setAttribute('aria-label', `The ${what}`)
   text.replaceWith(scroll)
   scroll.append(text)
   return block
 }
 
-function releaseSteps(): HTMLElement {
+function releaseSteps(version: string): HTMLElement {
+  const tag = `v${version}`
+  const script = `${REPO}/releases/download/${tag}/install.sh`
   const box = el('section', 'update-steps')
+  const steps = el('ol', 'small update-list')
+  const download = el('li')
+  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'download command'))
+  const verify = el('li')
+  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command'))
+  const run = el('li')
+  run.append(para('', 'Run it:'), commandBlock('sh install.sh', 'Copy the run command'))
+  steps.append(download, verify, run)
   box.append(
     el('h3', 'update-subhead', 'If you installed a release'),
-    para('small', 'Run the install command again in a terminal. It installs the newest release, which may be newer than the one named here:'),
-    oneLine(INSTALL_COMMAND, 'The install command'),
-    para('small muted', 'It replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
+    para('small', `Run release ${version}’s install command in a terminal:`),
+    oneLine(`curl -fsSL ${script} | sh`, 'install command'),
+    para('small', 'Or check the script before it runs, with a signed-in gh:'),
+    steps,
+    para('small muted', 'Either way, the script replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
   )
   return box
 }
@@ -142,9 +159,9 @@ function sourceSteps(development: boolean): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const pull = el('li')
-  pull.append(para('', 'Get the new code:'), commandBlock('git pull'))
+  pull.append(para('', 'Get the new code:'), commandBlock('git pull', 'Copy the pull command'))
   const up = el('li')
-  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up'))
+  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up', 'Copy the rebuild command'))
   steps.append(pull, up)
   box.append(
     el('h3', 'update-subhead', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
@@ -171,55 +188,36 @@ export function openUpdate(): void {
   if (!view || !r) return
   const running = view.running
   const development = view.development
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const d = el('dialog', 'consent update surface')
   const title = `Update to Software Factory ${r.version}`
-  d.setAttribute('aria-label', title)
-  const close = () => {
-    d.close()
-    d.remove()
-    const back = opener?.isConnected ? opener : document.getElementById('palette-open')
-    back?.focus()
-  }
-  const heading = el('h2', 'update-title', title)
-  heading.tabIndex = -1
-  const cross = button('', 'ghost icon-button update-x', close)
+  const cross = button('', 'ghost icon-button update-x', () => m.close())
   cross.setAttribute('aria-label', 'Close')
   cross.title = 'Close'
   cross.append(icon('close'))
-  const head = el('div', 'update-head')
-  head.append(heading, cross)
-  const said = el('p', 'small warn')
-  said.setAttribute('role', 'status')
-  const later = button('Remind me later', 'ghost small', () => {
-    later.disabled = true
-    void call({ later: r.version }).then(a => {
-      later.disabled = false
-      if (a.ok) return close()
-      said.textContent = a.message
-    })
+  const said = statusLine('small warn')
+  const later = actionButton('Remind me later', 'ghost small', async () => {
+    const a = await call({ later: r.version })
+    if (a.ok) return m.close()
+    said.textContent = a.message
   })
   later.title = `Hides this until a release newer than ${r.version} is out`
-  const actions = el('div', 'row consent-actions')
-  actions.append(later, el('span', 'spacer'), button('Close', 'primary small', close))
   const tag = `v${r.version}`
-  const steps = development ? [sourceSteps(true), releaseSteps()] : [releaseSteps(), sourceSteps(false)]
-  d.append(
-    head,
-    para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
-    para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
-    ...steps,
-    keepsAndStops(),
-    said,
-    actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const steps = development ? [sourceSteps(true), releaseSteps(r.version)] : [releaseSteps(r.version), sourceSteps(false)]
+  const m = modal({
+    kind: 'update',
+    title,
+    headingClass: 'update-title',
+    header: { cls: 'update-head', after: [cross] },
+    body: [
+      para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
+      para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
+      ...steps,
+      keepsAndStops(),
+      said,
+    ],
+    lead: [later],
+    actions: [button('Close', 'primary small', () => m.close())],
+    focus: 'heading',
   })
-  document.body.append(d)
-  d.showModal()
-  heading.focus()
 }
 
 class SfUpdate extends HTMLElement {
@@ -261,7 +259,7 @@ class SfUpdateSetting extends HTMLElement {
   #label = el('label', 'notify-pref small')
   #note = el('p', 'small muted')
   #off = el('span', 'update-off', '(off)')
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn')
   #busy = false
 
   connectedCallback() {
@@ -274,7 +272,6 @@ class SfUpdateSetting extends HTMLElement {
         if (this.#busy || this.#box.getAttribute('aria-disabled') === 'true') e.preventDefault()
       })
       this.#box.addEventListener('change', () => void this.#change())
-      this.#said.setAttribute('role', 'status')
       this.#off.setAttribute('aria-hidden', 'true')
       this.#label.append(this.#box, el('span', '', 'Check for updates'), this.#off)
       const set = el('fieldset', 'themes')

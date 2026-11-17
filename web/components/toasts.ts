@@ -1,4 +1,3 @@
-import { lastFailedRequest } from '../api.ts'
 import { button, el } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
@@ -20,23 +19,28 @@ class SfToasts extends HTMLElement {
   #timers = new Map<HTMLElement, number>()
   #held = false
   #count = 0
+  #ready = false
+  #onSync = () => this.#sync()
 
   connectedCallback() {
-    if (this.hasAttribute('role')) return
-    this.setAttribute('role', 'region')
-    this.setAttribute('aria-label', 'Notifications')
-    this.setAttribute('aria-live', 'polite')
-    this.setAttribute('aria-relevant', 'additions text')
-    const sync = () => this.#sync()
-    this.addEventListener('pointerenter', sync)
-    this.addEventListener('pointerleave', sync)
-    this.addEventListener('focusin', sync)
-    this.addEventListener('focusout', () => queueMicrotask(sync))
-    document.addEventListener('visibilitychange', sync)
+    for (const [name, value] of [['role', 'region'], ['aria-label', 'Notifications'], ['aria-live', 'polite'], ['aria-relevant', 'additions text']] as const) {
+      if (!this.hasAttribute(name)) this.setAttribute(name, value)
+    }
+    document.addEventListener('visibilitychange', this.#onSync)
+    if (this.#ready) return
+    this.#ready = true
+    this.addEventListener('pointerenter', this.#onSync)
+    this.addEventListener('pointerleave', this.#onSync)
+    this.addEventListener('focusin', this.#onSync)
+    this.addEventListener('focusout', () => queueMicrotask(this.#onSync))
     this.addEventListener('keydown', e => {
       const item = (e.target as Element).closest<HTMLElement>('.toast')
       if (e.key === 'Escape' && item) this.#close(item)
     })
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener('visibilitychange', this.#onSync)
   }
 
   show({ id, title, description = '', tone = 'info', action, timeout = STAY[tone] }: Toast): string {
@@ -55,9 +59,7 @@ class SfToasts extends HTMLElement {
     else item.removeAttribute('role')
     const body = el('div', 'toast-body')
     body.append(el('p', 'toast-title', title))
-    const failedID = tone === 'bad' ? lastFailedRequest() : ''
-    const told = failedID && !`${title} ${description}`.includes(failedID) ? `${description}${description ? ' ' : ''}Request id ${failedID}.` : description
-    if (told) body.append(el('p', 'toast-text', told))
+    if (description) body.append(el('p', 'toast-text', description))
     const shown = item
     if (action) body.append(button(action.label, 'link toast-action', () => { this.#close(shown); action.run() }))
     const close = button('', 'ghost icon-button toast-close', () => this.#close(shown))

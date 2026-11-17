@@ -1,4 +1,4 @@
-import { el } from '../lib/dom.ts'
+import { el, emit, replaceKeeping } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 export interface AccordionItem {
@@ -10,10 +10,19 @@ export interface AccordionItem {
   panel: HTMLElement
 }
 
+interface Box {
+  details: HTMLDetailsElement
+  summary: HTMLElement
+  title: HTMLSpanElement
+  note: HTMLSpanElement
+  state: HTMLSpanElement
+}
+
 let made = 0
 
 class SfAccordion extends HTMLElement {
   #items: AccordionItem[] = []
+  #boxes = new Map<string, Box>()
   #open = ''
   readonly #name = `sf-accordion-${++made}`
 
@@ -27,26 +36,42 @@ class SfAccordion extends HTMLElement {
     this.#render()
   }
 
-  #render() {
-    const all = this.#items.map(item => {
-      const d = el('details', 'accordion-item')
-      d.name = this.#name
-      d.open = item.id === this.#open
-      const summary = el('summary', 'accordion-head')
-      summary.append(icon('chevron', 'icon accordion-chevron'), el('span', 'accordion-title', item.title))
-      if (item.note) summary.append(el('span', 'small muted', item.note))
-      summary.append(el('span', 'spacer'))
-      if (item.state) summary.append(el('span', `small ${item.good ? 'ok' : 'muted'}`, item.state))
-      item.panel.classList.add('accordion-panel')
-      d.append(summary, item.panel)
-      d.addEventListener('toggle', () => {
-        if (d.open === (this.#open === item.id)) return
-        this.#open = d.open ? item.id : ''
-        this.dispatchEvent(new CustomEvent('sf-expand', { detail: this.#open }))
-      })
-      return d
+  #box(id: string): Box {
+    const kept = this.#boxes.get(id)
+    if (kept) return kept
+    const details = el('details', 'accordion-item')
+    details.name = this.#name
+    details.open = id === this.#open
+    const summary = el('summary', 'accordion-head')
+    const box = { details, summary, title: el('span', 'accordion-title'), note: el('span', 'small muted'), state: el('span', 'small') }
+    summary.append(icon('chevron', 'icon accordion-chevron'), box.title, box.note, el('span', 'spacer'), box.state)
+    details.append(summary)
+    details.addEventListener('toggle', () => {
+      if (details.open === (this.#open === id)) return
+      this.#open = details.open ? id : ''
+      emit(this, 'sf-expand', this.#open)
     })
-    this.replaceChildren(...all)
+    this.#boxes.set(id, box)
+    return box
+  }
+
+  #render() {
+    const ids = new Set(this.#items.map(i => i.id))
+    for (const id of this.#boxes.keys()) if (!ids.has(id)) this.#boxes.delete(id)
+    const all = this.#items.map(item => {
+      const box = this.#box(item.id)
+      if (box.title.textContent !== item.title) box.title.textContent = item.title
+      if (box.note.textContent !== (item.note ?? '')) box.note.textContent = item.note ?? ''
+      box.note.hidden = !item.note
+      if (box.state.textContent !== (item.state ?? '')) box.state.textContent = item.state ?? ''
+      box.state.hidden = !item.state
+      box.state.classList.toggle('ok', !!item.good)
+      box.state.classList.toggle('muted', !item.good)
+      item.panel.classList.add('accordion-panel')
+      replaceKeeping(box.details, [box.summary, item.panel])
+      return box.details
+    })
+    replaceKeeping(this, all)
   }
 }
 

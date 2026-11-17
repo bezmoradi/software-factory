@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, remembered, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, remembered, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 interface CheckRun {
   state: string
@@ -102,14 +102,13 @@ class SfReviewerChecks extends HTMLElement {
   #view: ChecksView | null = null
   #busy = ''
   #cost = ''
-  #status = el('p', 'small')
+  #status = statusLine()
   #timer = 0
   #key = ''
   #open = new Map<string, boolean>()
 
-  constructor() {
-    super()
-    this.#status.setAttribute('role', 'status')
+  connectedCallback() {
+    if (this.#target && !this.#timer) this.#poll()
   }
 
   disconnectedCallback() {
@@ -126,7 +125,7 @@ class SfReviewerChecks extends HTMLElement {
     if (!value) {
       window.clearTimeout(this.#timer)
       this.#timer = 0
-      this.replaceChildren()
+      this.#paint()
       return
     }
     this.#paint()
@@ -146,8 +145,7 @@ class SfReviewerChecks extends HTMLElement {
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: { cost?: unknown } } | null
-      this.#status.className = 'small warn'
-      this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       if (problem?.needs?.cost === true && typeof body.agent === 'string') this.#cost = body.agent
       this.#paint()
       return false
@@ -165,8 +163,7 @@ class SfReviewerChecks extends HTMLElement {
     this.#status.textContent = ''
     this.#paint()
     if (await this.#call({ op: 'check', agent, ...(costOk ? { costOk: true } : {}) })) {
-      this.#status.className = 'small ok'
-      this.#status.textContent = 'The check started. It reviews a change with a planted defect and a clean one, like a real review, so it takes about as long.'
+      say(this.#status, 'The check started. It reviews a change with a planted defect and a clean one, like a real review, so it takes about as long.', 'ok')
       this.#paint()
     }
   }
@@ -201,10 +198,10 @@ class SfReviewerChecks extends HTMLElement {
       what.append(...this.#replies(r, c))
     }
     const actions = el('div', 'row')
-    const word = this.#busy === r.agent ? 'Starting…' : 'Check now'
-    const now = button(word, 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
-    now.disabled = off || r.running || c?.result === 'running'
-    now.setAttribute('aria-label', `${word}: the ${visible(r.roleName)}`)
+    const now = button('Check now', 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
+    now.setAttribute('aria-label', `Check now: the ${visible(r.roleName)}`)
+    if (this.#busy === r.agent) busy(now, true)
+    else now.disabled = off || r.running || c?.result === 'running'
     actions.append(now)
     if (this.#cost === r.agent) {
       const pay = button('Check now, it costs money', 'small', () => void this.#check(r.agent, true), 'button', `pay:${r.agent}`)
@@ -218,7 +215,10 @@ class SfReviewerChecks extends HTMLElement {
 
   #paint() {
     const target = this.#target
-    if (!target) return this.replaceChildren()
+    if (!target) {
+      this.#status.textContent = ''
+      return this.replaceChildren()
+    }
     const focused = focusedKey(this)
     const v = this.#view
     const off = target.disabled || this.#busy !== ''
@@ -237,7 +237,7 @@ class SfReviewerChecks extends HTMLElement {
       parts.push(list)
     }
     parts.push(this.#status)
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

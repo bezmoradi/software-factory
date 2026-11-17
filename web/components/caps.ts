@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
@@ -10,6 +10,8 @@ const KINDS: { kind: 'money' | 'time' | 'turns'; key: keyof CapsValues; label: s
 ]
 
 let fieldSerial = 0
+
+const LIMIT_NEXT: Record<string, string[]> = { wake: ['wake-cancel'], 'wake-cancel': ['wake'] }
 
 function amount(kind: string, v: number): string {
   if (kind === 'money') return `$${v.toFixed(2)}`
@@ -42,9 +44,21 @@ function capName(kind: string): string {
   return kind === 'money' ? 'spending cap' : kind === 'time' ? 'time cap' : 'turn cap'
 }
 
+function savedCaps(project: string): CapsValues | null {
+  return limitsNow().projects.get(project) ?? null
+}
+
+function fillKey(project: string): string {
+  const c = savedCaps(project)
+  return JSON.stringify([project, c ? [c.money, c.minutes, c.turns] : null])
+}
+
 class CapsInputs {
   readonly box = el('div', 'caps-fields field-row')
   readonly inputs = new Map<keyof CapsValues, HTMLInputElement>()
+  #key = ''
+  #project = ''
+  #raw = ''
 
   constructor(label: string) {
     this.box.setAttribute('role', 'group')
@@ -71,6 +85,21 @@ class CapsInputs {
     }
   }
 
+  fill(project: string, force = false) {
+    const key = fillKey(project)
+    if (key === this.#key && !force) return
+    const edited = !force && project === this.#project && this.#rawNow() !== this.#raw
+    this.#key = key
+    this.#project = project
+    if (edited) return
+    this.set(savedCaps(project))
+    this.#raw = this.#rawNow()
+  }
+
+  #rawNow(): string {
+    return JSON.stringify([...this.inputs.values()].map(i => i.value))
+  }
+
   value(): CapsValues | null {
     const out: CapsValues = { money: 0, minutes: 0, turns: 0 }
     for (const k of KINDS) {
@@ -95,13 +124,16 @@ export function saveSessionCaps(sid: string, caps: CapsValues): Promise<string> 
 class SfCapsFields extends HTMLElement {
   #inputs = new CapsInputs('Caps for this session')
   #project = ''
+  #built = false
 
-  #note = el('p', 'small muted')
+  #note = statusLine('small muted')
 
   connectedCallback() {
-    this.#note.setAttribute('role', 'status')
-    this.#invalid(false)
-    this.replaceChildren(this.#inputs.box, this.#note)
+    if (!this.#built) {
+      this.#built = true
+      this.#invalid(false)
+      this.replaceChildren(this.#inputs.box, this.#note)
+    }
     this.#fill()
   }
 
@@ -124,7 +156,7 @@ class SfCapsFields extends HTMLElement {
   }
 
   #fill() {
-    this.#inputs.set(limitsNow().projects.get(this.#project) ?? null)
+    this.#inputs.fill(this.#project)
   }
 
   get value(): CapsValues | null | 'invalid' {
@@ -138,15 +170,20 @@ class SfCapsFields extends HTMLElement {
 class SfProjectCaps extends HTMLElement {
   #inputs = new CapsInputs('Caps for new sessions in this project')
   #project = ''
-  #said = el('p', 'small')
+  #said = statusLine()
   #save = button('Save caps', 'small', () => void this.#store())
+  #saving = false
+  #built = false
   #stop = () => {}
 
   connectedCallback() {
-    this.#said.setAttribute('role', 'status')
-    const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs.')
-    this.#inputs.box.append(this.#save)
-    this.replaceChildren(el('h3', 'label', 'Caps'), note, this.#inputs.box, this.#said)
+    if (!this.#built) {
+      this.#built = true
+      const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs.')
+      this.#inputs.box.append(this.#save)
+      this.replaceChildren(el('h3', 'label', 'Caps'), note, this.#inputs.box, this.#said)
+    }
+    this.#stop()
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -161,19 +198,19 @@ class SfProjectCaps extends HTMLElement {
   }
 
   paint() {
-    if (!this.#save.disabled && !this.contains(document.activeElement)) this.#inputs.set(limitsNow().projects.get(this.#project) ?? null)
+    if (!this.#saving && !this.contains(document.activeElement)) this.#inputs.fill(this.#project)
   }
 
   async #store() {
     const v = this.#inputs.value()
     if (!v) {
-      this.#said.className = 'small warn'
-      this.#said.textContent = 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.'
+      say(this.#said, 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.', 'warn')
       return
     }
-    this.#save.disabled = true
-    const problem = await limitsCall({ op: 'project', name: this.#project, ...v })
-    this.#save.disabled = false
+    this.#saving = true
+    const problem = await whileBusy(this.#save, () => limitsCall({ op: 'project', name: this.#project, ...v }))
+    this.#saving = false
+    if (!problem) this.#inputs.fill(this.#project, true)
     this.#said.className = problem ? 'small warn' : 'small muted'
     this.#said.textContent = problem || 'Saved.'
   }
@@ -181,17 +218,20 @@ class SfProjectCaps extends HTMLElement {
 
 class SfSessionLimits extends HTMLElement {
   #stop = () => {}
-  #said = el('p', 'small warn')
+  #said = statusLine('small warn status-slot')
   #raise = new Map<string, HTMLInputElement>()
   #edit = new CapsInputs('Caps for this session')
   #editing = false
   #busy = false
+  #busyKey = ''
+  #held = new WeakSet<HTMLButtonElement>()
+  #dimmed = new WeakSet<HTMLButtonElement>()
+  #editSave = button('Save caps', 'small', () => void this.#saveEdit(), 'button', 'caps-save')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Caps and limits for this session')
-    this.#said.setAttribute('role', 'status')
-    if (!this.#edit.box.querySelector('button')) this.#edit.box.append(button('Save caps', 'small', () => void this.#saveEdit()))
+    if (!this.#edit.box.querySelector('button')) this.#edit.box.append(this.#editSave)
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -201,9 +241,14 @@ class SfSessionLimits extends HTMLElement {
   }
 
   paint() {
-    if (this.contains(document.activeElement) && document.activeElement instanceof HTMLInputElement) return
+    if (this.contains(document.activeElement) && document.activeElement instanceof HTMLInputElement) {
+      if (this.#said.parentNode !== this) this.append(this.#said)
+      return this.#hold()
+    }
+    const focused = focusedKey(this)
     const sid = limitsSession()
     const v = limitsNow()
+    this.#prune(v.sessions)
     const s = sid ? v.sessions.get(sid) : undefined
     const parts: Node[] = []
     if (s?.reached) parts.push(this.#reached(s))
@@ -216,7 +261,7 @@ class SfSessionLimits extends HTMLElement {
       const w = meterFor(p.side, sid)?.windows.find(x => x.kind === p.kind)
       if (!w) continue
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind))))
+      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind), 'continue'), 'button', 'continue'))
       parts.push(box)
       pausedShown = true
       break
@@ -225,23 +270,46 @@ class SfSessionLimits extends HTMLElement {
     const near = pausedShown ? undefined : own?.windows.find(w => w.near)
     if (own && near) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind))))
+      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind), 'continue'), 'button', 'continue'))
       parts.push(box)
     }
     if (s?.wakeAt) {
       const box = el('div', 'notice small')
-      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false })))
+      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false }, 'wake-cancel'), 'button', 'wake-cancel'))
       parts.push(box)
     } else if (s?.wakeOffer) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true })))
+      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true }, 'wake'), 'button', 'wake'))
       parts.push(box)
     }
     if (sid && !s?.reached) parts.push(this.#editor(s))
-    if (this.#said.textContent) parts.push(this.#said)
+    parts.push(this.#said)
     this.hidden = !sid
-    this.replaceChildren(...parts)
-    for (const b of this.querySelectorAll('button')) b.disabled = this.#busy
+    replaceKeeping(this, parts)
+    this.#hold()
+    refocus(this, focused, key => [...(LIMIT_NEXT[key] ?? []), 'caps-edit'])
+  }
+
+  #hold() {
+    for (const b of this.querySelectorAll('button')) {
+      const held = this.#busy && !!b.dataset.key && b.dataset.key === this.#busyKey
+      if (this.#busy && !held) {
+        if (!this.#dimmed.has(b) && b.getAttribute('aria-disabled') !== 'true') {
+          b.setAttribute('aria-disabled', 'true')
+          this.#dimmed.add(b)
+        }
+      } else if (this.#dimmed.delete(b)) b.removeAttribute('aria-disabled')
+      if (held) {
+        busy(b, true)
+        this.#held.add(b)
+      } else if (this.#held.delete(b)) busy(b, false)
+    }
+  }
+
+  #prune(sessions: Map<string, SessionLimits>) {
+    const live = new Set<string>()
+    for (const s of sessions.values()) if (s.reached) live.add(s.sid + s.reached)
+    for (const key of this.#raise.keys()) if (!live.has(key)) this.#raise.delete(key)
   }
 
   #reached(s: SessionLimits): HTMLElement {
@@ -261,7 +329,7 @@ class SfSessionLimits extends HTMLElement {
     }
     input.min = String(usedOf(s.reached, s))
     const row = el('div', 'field-row')
-    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind: s.reached, value: Number(input!.value) })), button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid })))
+    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind: s.reached, value: Number(input!.value) }, 'raise'), 'button', 'raise'), button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid }, 'stop'), 'button', 'stop'))
     box.append(row)
     return box
   }
@@ -272,7 +340,10 @@ class SfSessionLimits extends HTMLElement {
     const what = st.failing ? `the same failing command ran ${st.count} times` : `${visible(st.tool)} repeated ${st.count} times`
     box.append(el('p', '', `Looks stuck: ${what} in its last few calls.`))
     if (st.detail) box.append(el('code', 'caps-detail', visible(st.detail)))
-    box.append(button('Interrupt', 'small', () => void api('/api/interrupt', { sid }).catch(() => null)))
+    const interrupt = button('Interrupt', 'small', () => {
+      if (!this.#busy) void whileBusy(interrupt, () => api('/api/interrupt', { sid }).catch(() => null))
+    }, 'button', 'interrupt')
+    box.append(interrupt)
     return box
   }
 
@@ -300,11 +371,14 @@ class SfSessionLimits extends HTMLElement {
       this.#editing = d.open
       if (d.open) this.#edit.set(s?.caps ?? null)
     })
-    d.append(el('summary', '', s?.caps && capsSet(s.caps) ? 'Change caps' : 'Set caps'), this.#edit.box)
+    const summary = el('summary', '', s?.caps && capsSet(s.caps) ? 'Change caps' : 'Set caps')
+    summary.dataset.key = 'caps-edit'
+    d.append(summary, this.#edit.box)
     return d
   }
 
   async #saveEdit() {
+    if (this.#busy) return
     const sid = limitsSession()
     const v = this.#edit.value()
     if (!sid || !v) {
@@ -312,15 +386,18 @@ class SfSessionLimits extends HTMLElement {
       return this.paint()
     }
     this.#editing = false
-    await this.#call({ op: 'session', sid, ...v })
+    await this.#call({ op: 'session', sid, ...v }, 'caps-save')
   }
 
-  async #call(body: Record<string, unknown>) {
+  async #call(body: Record<string, unknown>, key: string) {
+    if (this.#busy) return
     this.#busy = true
+    this.#busyKey = key
     this.#said.textContent = ''
     this.paint()
     this.#said.textContent = await limitsCall(body)
     this.#busy = false
+    busy(this.#editSave, false)
     this.paint()
   }
 }

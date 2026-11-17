@@ -44,12 +44,12 @@ func textFields(w http.ResponseWriter, body map[string]any, limit int, keys ...s
 	return out, true
 }
 
-func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) {
+func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Repos == nil {
 		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no workspace, so it can't add repositories."})
 		return
 	}
-	switch path {
+	switch r.URL.Path {
 	case "/api/add-repo":
 		f, ok := textFields(w, body, 4096, "url")
 		if !ok {
@@ -73,14 +73,18 @@ func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) 
 		if !ok {
 			return
 		}
-		info, err := s.cfg.Repos.SaveToken(f["host"], f["token"])
+		info, err := s.cfg.Repos.SaveToken(r.Context(), f["host"], f["token"])
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
 		s.reg.Limits().TokenSaved(info.Host)
-		send(w, http.StatusOK, map[string]any{"ok": true, "host": hostJSON{Host: info.Host, SavedAt: millis(info.SavedAt)}})
+		answer := map[string]any{"ok": true, "host": hostJSON{Host: info.Host, SavedAt: millis(info.SavedAt)}}
+		if info.Warning != "" {
+			answer["warning"] = info.Warning
+		}
+		send(w, http.StatusOK, answer)
 	case "/api/remove-token":
 		f, ok := textFields(w, body, 4096, "host")
 		if !ok {

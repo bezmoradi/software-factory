@@ -1,4 +1,5 @@
-import { button, el, opener } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -22,16 +23,8 @@ function save(text: string) {
 }
 
 export function openDiagnostics(post: Post): void {
-  const back = opener()
-  const d = el('dialog', 'consent diagnostics surface')
-  d.setAttribute('aria-label', 'Diagnostics')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  let generation = 0
+  const say = statusLine()
   const shown = el('pre', 'diagnostics-text')
   shown.tabIndex = 0
   shown.setAttribute('aria-label', 'The whole diagnostics file')
@@ -43,10 +36,12 @@ export function openDiagnostics(post: Post): void {
   })
   saveButton.disabled = true
   const load = async () => {
+    const mine = ++generation
     saveButton.disabled = true
     say.textContent = 'Building the file…'
     const res = await post(ROUTE, {}).catch(() => null)
     const parsed: unknown = res ? await res.json().catch(() => null) : null
+    if (mine !== generation) return
     const got = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
     if (!res || !res.ok || typeof got.text !== 'string') {
       say.textContent = typeof got.message === 'string' && got.message ? got.message : 'The engine didn’t build the file.'
@@ -57,19 +52,19 @@ export function openDiagnostics(post: Post): void {
     say.textContent = 'This is the whole file. Read it before you save it.'
     saveButton.disabled = false
   }
-  const actions = el('div', 'row consent-actions')
-  actions.append(saveButton, button('Build again', 'ghost small', () => void load()), el('span', 'spacer'), button('Close', 'ghost small', close))
-  d.append(
-    el('h2', 'label', 'Diagnostics'),
-    el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),
-    el('p', 'small muted', 'It holds no repository name, host, path, address, token, prompt or log text, and the page never sends it anywhere: you save it and choose where it goes.'),
-    say, shown, actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'diagnostics',
+    title: 'Diagnostics',
+    body: [
+      el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),
+      el('p', 'small muted', 'It holds no repository name, host, path, address, token, prompt or log text, and the page never sends it anywhere: you save it and choose where it goes.'),
+      say, shown,
+    ],
+    lead: [saveButton, actionButton('Build again', 'ghost small', load)],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
+  m.onClose(() => {
+    generation++
+  })
   void load()
 }

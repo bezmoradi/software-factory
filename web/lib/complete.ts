@@ -1,4 +1,4 @@
-import { el } from './dom.ts'
+import { el, sayIfChanged, statusLine } from './dom.ts'
 import type { Catalog, CatalogEntry } from '../types.ts'
 
 const SHOWN = 30
@@ -42,15 +42,13 @@ export function complete(text: HTMLTextAreaElement, menu: HTMLElement, { catalog
   let timer = 0
   let told = 0
   let toldActive = -1
-  const said = document.createElement('span')
-  said.className = 'sr-only'
-  said.setAttribute('role', 'status')
+  const said = statusLine('sr-only', 'span')
   menu.after(said)
   const tell = (n: number) => {
     const line = !n ? '' : n !== told ? `${n} suggestion${n === 1 ? '' : 's'}: use the up and down arrows, then Tab or Enter` : active !== toldActive ? `${items[active]?.label ?? ''}, ${active + 1} of ${n}` : said.textContent
     told = n
     toldActive = n ? active : -1
-    if (said.textContent !== line) said.textContent = line
+    sayIfChanged(said, line)
   }
 
   const close = () => {

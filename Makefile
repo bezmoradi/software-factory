@@ -58,6 +58,25 @@ TSC := web/node_modules/.bin/tsc
 
 web-check:
 	@npm --prefix web run check
+	@$(MAKE) --no-print-directory web-arch
+
+DEPCRUISE := web/node_modules/.bin/depcruise
+WEB_ARCH_MIN_MODULES := 80
+WEB_ARCH_MIN_IMPORTS := 250
+
+web-arch:
+	@out="$$(mktemp -d "$${TMPDIR:-/tmp}/web-arch.XXXXXX")" || exit 1; \
+	trap 'rm -rf "$$out"' EXIT; \
+	$(TSC) -p web/tsconfig.json --outDir "$$out" || exit 1; \
+	report="$$(cd "$$out" && "$(CURDIR)/$(DEPCRUISE)" --config "$(CURDIR)/web/.dependency-cruiser.json" --output-type err . 2>&1)"; \
+	rc=$$?; \
+	printf '%s\n' "$$report"; \
+	if [ $$rc -ne 0 ]; then echo 'web-arch: failed; the rules are in web/.dependency-cruiser.json'; exit 1; fi; \
+	counts="$$(printf '%s\n' "$$report" | sed -n 's/.*(\([0-9][0-9]*\) modules, \([0-9][0-9]*\) dependencies cruised)$$/\1 \2/p')"; \
+	set -- $$counts; \
+	if [ "$${1:-0}" -lt $(WEB_ARCH_MIN_MODULES) ] || [ "$${2:-0}" -lt $(WEB_ARCH_MIN_IMPORTS) ]; then \
+		echo "web-arch: found $${1:-no} modules and $${2:-no} imports, below the floor of $(WEB_ARCH_MIN_MODULES) modules and $(WEB_ARCH_MIN_IMPORTS) imports; the check is effectively off, refusing to pass"; exit 1; \
+	fi
 
 plugin-check:
 	@$(TSC) -p tools/plugincheck/tsconfig.json
@@ -91,12 +110,16 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79
 SHELLCHECK_IMAGE := docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
 MARKDOWNLINT_IMAGE := docker.io/davidanson/markdownlint-cli2:v0.18.1@sha256:173cb697a255a8a985f2c6a83b4f7a8b3c98f4fb382c71c45f1c52e4d4fed63a
 TYPOS_VERSION := 1.52.0
+INSTRUCTIONS_MAX_BYTES := 16700
 
 no-tests:
 	@sh scripts/check-no-tests.sh
 
 files:
 	@sh scripts/check-files.sh
+
+instructions:
+	@sh scripts/check-instructions.sh $(INSTRUCTIONS_MAX_BYTES)
 
 review-workflow:
 	@sh scripts/check-review-workflow.sh
@@ -128,4 +151,4 @@ spelling:
 	@typos --version | grep -qx 'typos-cli $(TYPOS_VERSION)' || echo "spelling: CI runs typos $(TYPOS_VERSION); this is $$(typos --version)"
 	@sh scripts/files.sh | xargs -0 typos --config .typos.toml
 
-.PHONY: up dev down cross-build no-comments no-tests files review-workflow workflows shell markdown links secrets spelling
+.PHONY: up dev down cross-build no-comments no-tests files instructions review-workflow workflows shell markdown links secrets spelling

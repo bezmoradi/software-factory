@@ -1,4 +1,4 @@
-import { button, el, emit, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes } from '../types.ts'
@@ -252,20 +252,22 @@ class SfChanges extends HTMLElement {
   #branchCommits = new Map<string, Changes['commits']>()
   #comments = new Map<string, LineComment[]>()
   #sending = false
+  #diffGroup = el('details')
+  #diffSummary = el('summary', 'small')
   #lines = el('div', 'diff-lines small')
-  #status = el('span', 'sr-only')
+  #status = statusLine('sr-only', 'span')
   #panel = el('div', 'line-comments small')
   #target = el('p', 'small muted')
   #box = el('textarea', 'textbox')
   #list = el('ul', 'list line-comment-list')
-  #said = el('p', 'small')
+  #said = statusLine()
   #add = button('Add comment', 'ghost small', () => this.#addComment())
   #send = button('Send comments', 'primary small', () => this.#sendComments())
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
-    this.#said.setAttribute('role', 'status')
+    this.#diffSummary.dataset.key = 'group:diff'
+    this.#diffGroup.addEventListener('toggle', () => this.#open.set('diff', this.#diffGroup.open))
     this.#lines.tabIndex = 0
     this.#lines.setAttribute('role', 'region')
     this.#lines.addEventListener('click', e => {
@@ -318,7 +320,7 @@ class SfChanges extends HTMLElement {
     const where = `${visible(r.file)} line ${r.line}${r.kind === 'removed' ? ', a removed line' : r.kind === 'added' ? ', an added line' : ''}`
     this.#target.textContent = `Commenting on ${where}.`
     this.#status.textContent = `${where}: ${visible(r.text.slice(1))}`
-    this.#box.disabled = this.#sending
+    this.#box.disabled = false
     if (focusBox) this.#box.focus()
   }
 
@@ -366,8 +368,10 @@ class SfChanges extends HTMLElement {
       li.append(words, el('span', 'spacer'), drop)
       return li
     }))
-    this.#send.disabled = this.#sending || !mine.length
-    this.#send.textContent = this.#sending ? 'Sending…' : mine.length ? `Send ${mine.length} ${plural(mine.length, 'comment')}` : 'Send comments'
+    busy(this.#send, false)
+    this.#send.disabled = !mine.length
+    this.#send.textContent = mine.length ? `Send ${mine.length} ${plural(mine.length, 'comment')}` : 'Send comments'
+    if (this.#sending) busy(this.#send, true)
   }
 
   #sendComments() {
@@ -376,20 +380,19 @@ class SfChanges extends HTMLElement {
     const branch = this.#branch
     this.#sending = true
     this.#paintList()
-    this.dispatchEvent(new CustomEvent('sf-line-comments', {
-      bubbles: true,
-      detail: {
-        text: commentMessage(mine),
-        done: (ok: boolean) => {
-          this.#sending = false
-          if (ok) {
-            this.#comments.delete(branch)
-            this.#said.textContent = 'Sent to the agent as one message.'
-          } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
-          this.#paintList()
-        },
+    emit(this, 'sf-line-comments', {
+      text: commentMessage(mine),
+      done: (ok: boolean) => {
+        this.#sending = false
+        if (ok) {
+          const kept = (this.#comments.get(branch) ?? []).filter(c => !mine.includes(c))
+          if (kept.length) this.#comments.set(branch, kept)
+          else this.#comments.delete(branch)
+          this.#said.textContent = kept.length ? `Sent to the agent as one message. ${kept.length} ${plural(kept.length, 'comment')} added since ${kept.length === 1 ? 'is' : 'are'} kept here.` : 'Sent to the agent as one message.'
+        } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
+        this.#paintList()
       },
-    }))
+    })
   }
 
   #fileHeader(r: DiffRow, files: Map<string, ChangeFile>): HTMLElement {
@@ -530,18 +533,8 @@ class SfChanges extends HTMLElement {
     commitPick.addEventListener('change', () => {
       if (SHA.test(commitPick.value)) emit(this, 'sf-compare-point', { from: 'commit', commit: commitPick.value })
     })
-    const fromField = el('div', 'field-inline')
-    const fromLabel = el('label', 'small', 'Compare with')
-    fromLabel.htmlFor = pick.id
-    fromField.append(fromLabel, pick)
-    bar.append(fromField)
-    if (from === 'commit') {
-      const commitField = el('div', 'field-inline')
-      const commitLabel = el('label', 'small', 'Changes after')
-      commitLabel.htmlFor = commitPick.id
-      commitField.append(commitLabel, commitPick)
-      bar.append(commitField)
-    }
+    bar.append(field('Compare with', pick, undefined, 'field-inline'))
+    if (from === 'commit') bar.append(field('Changes after', commitPick, undefined, 'field-inline'))
     const group = el('div', 'segmented')
     group.setAttribute('role', 'group')
     group.setAttribute('aria-label', 'Diff layout')
@@ -649,11 +642,12 @@ class SfChanges extends HTMLElement {
       this.#diff = value.diff
       this.#paintDiff()
       const cutAt = value.clipped ? [...this.#rows].reverse().find(r => r.file)?.file ?? '' : ''
-      const summary = el('summary', 'small', value.clipped ? `Diff (cut short at 1 MiB${cutAt ? `, in ${visible(cutAt)}` : ''})` : 'Diff')
-      summary.dataset.key = 'group:diff'
+      this.#diffSummary.textContent = value.clipped ? `Diff (cut short at 1 MiB${cutAt ? `, in ${visible(cutAt)}` : ''})` : 'Diff'
       const notes: HTMLElement[] = []
       if (this.#layout.highlight && this.#rows.length > MAX_HIGHLIGHT) notes.push(el('p', 'small muted', `Highlighting is off for a diff of more than ${MAX_HIGHLIGHT.toLocaleString()} lines, to keep the page quick.`))
-      parts.push(remembered(this.#open, 'diff', true, summary, ...notes, this.#lines, this.#status, this.#panel))
+      this.#diffGroup.open = this.#open.get('diff') ?? true
+      replaceKeeping(this.#diffGroup, [this.#diffSummary, ...notes, this.#lines, this.#status, this.#panel])
+      parts.push(this.#diffGroup)
     } else {
       this.#rows = []
       this.#diff = ''
@@ -663,7 +657,7 @@ class SfChanges extends HTMLElement {
     }
     this.#paintList()
     if (!value.commits.length) parts.push(el('p', 'small muted', from === 'fork' ? 'No commits beyond the base branch.' : 'No commits since the commit compared with.'))
-    this.replaceChildren(...parts)
+    replaceKeeping(this, parts)
     refocus(this, focused)
   }
 }

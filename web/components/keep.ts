@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
 
@@ -27,10 +28,6 @@ interface KeepView {
 export interface KeepTarget {
   sid: string
   disabled: string
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v)
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -62,7 +59,7 @@ class SfKeep extends HTMLElement {
   #loading = 0
   #busy = false
   #confirm = false
-  #status = el('p', 'small')
+  #status = statusLine()
   #details = el('details', 'session-work')
   #summary = el('summary', 'small')
   #opened: boolean | null = null
@@ -70,7 +67,6 @@ class SfKeep extends HTMLElement {
 
   constructor() {
     super()
-    this.#status.setAttribute('role', 'status')
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open !== this.#shown) {
         this.#opened = this.#details.open
@@ -110,6 +106,7 @@ class SfKeep extends HTMLElement {
     if (!res || !res.ok) {
       if (res && res.status !== 404 && res.status !== 501) return
       this.#view = null
+      this.#status.textContent = ''
       this.hidden = true
       this.replaceChildren()
       return
@@ -123,6 +120,7 @@ class SfKeep extends HTMLElement {
   async #ask() {
     const sid = this.#target?.sid
     if (!sid || this.#busy) return
+    this.#opened ??= this.#details.open
     await this.refresh(sid)
     if (sid !== this.#target?.sid) return
     const v = this.#view
@@ -130,8 +128,7 @@ class SfKeep extends HTMLElement {
       this.#confirm = true
       this.#status.textContent = ''
     } else {
-      this.#status.className = 'small warn'
-      this.#status.textContent = visible(v?.refusal || 'The branch can’t be restored now.')
+      say(this.#status, visible(v?.refusal || 'The branch can’t be restored now.'), 'warn')
     }
     this.#paint()
   }
@@ -141,23 +138,20 @@ class SfKeep extends HTMLElement {
     if (!sid || this.#busy) return
     this.#busy = true
     this.#confirm = false
-    this.#status.className = 'small muted'
-    this.#status.textContent = 'Restoring the branch…'
+    say(this.#status, 'Restoring the branch…', 'muted')
     this.#paint()
     const res = await api(ROUTE, { op: 'restore', sid }).catch(() => null)
     this.#busy = false
     if (sid !== this.#target?.sid) return
     if (!res || !res.ok) {
-      this.#status.className = 'small warn'
-      this.#status.textContent = await problemOf(res)
+      say(this.#status, await problemOf(res), 'warn')
       void this.refresh(sid)
       return
     }
     const v = readView(await res.json().catch(() => null))
     if (v) this.#view = v
     const at = v?.commit ? ` at ${shortSha(v.commit)}` : ''
-    this.#status.className = 'small ok'
-    this.#status.textContent = `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`
+    say(this.#status, `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, 'ok')
     this.#paint()
   }
 
@@ -192,18 +186,19 @@ class SfKeep extends HTMLElement {
       parts.push(el('p', 'small', `Restore branch moves ${visible(v.branch)} to ${shortSha(v.commit)} and has agent-host remove the session’s worktree and add it again at that commit. A running session is stopped first, and a worktree with changes that aren’t committed is left as it is.`))
       const row = el('div', 'row')
       row.append(
-        button('Restore branch now', 'primary small', () => void this.#restore(), 'button', 'keep-confirm'),
         button('Cancel', 'ghost small', () => {
           this.#confirm = false
           this.#paint()
         }, 'button', 'keep-cancel'),
+        button('Restore branch now', 'primary small', () => void this.#restore(), 'button', 'keep-confirm'),
       )
       parts.push(row)
     } else {
-      const go = button(this.#busy ? 'Restoring…' : 'Restore branch', 'small', () => {
-        if (!off) void this.#ask()
+      const go = button('Restore branch', 'small', () => {
+        if (!off) void whileBusy(go, () => this.#ask())
       }, 'button', 'keep-restore')
       go.setAttribute('aria-disabled', String(off))
+      if (this.#busy) busy(go, true)
       const why = t.disabled || (!v.commit ? v.refusal : '')
       if (why) {
         go.title = visible(why)
@@ -222,7 +217,7 @@ class SfKeep extends HTMLElement {
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? (!!v.why || (!!v.commit && !v.holds))
     this.#details.open = this.#shown
-    this.#details.replaceChildren(this.#summary, ...parts)
+    replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
     this.hidden = false
     refocus(this, focused, () => ['keep-restore'])

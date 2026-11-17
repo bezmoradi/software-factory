@@ -61,11 +61,25 @@ type sessionWorkJSON struct {
 	Owner        string              `json:"owner,omitempty"`
 }
 
+type removedSettingsJSON struct {
+	Project string `json:"project"`
+	URL     string `json:"url"`
+	projectSettingsJSON
+}
+
+type removedTeamJSON struct {
+	Project string `json:"project"`
+	URL     string `json:"url"`
+	teamJSON
+}
+
 type workJSON struct {
-	Version  int                            `json:"version"`
-	Teams    map[string]teamJSON            `json:"teams"`
-	Projects map[string]projectSettingsJSON `json:"projects"`
-	Sessions map[string]sessionWorkJSON     `json:"sessions,omitempty"`
+	Version      int                            `json:"version"`
+	Teams        map[string]teamJSON            `json:"teams"`
+	Projects     map[string]projectSettingsJSON `json:"projects"`
+	Removed      []removedSettingsJSON          `json:"removed,omitempty"`
+	RemovedTeams []removedTeamJSON              `json:"removedTeams,omitempty"`
+	Sessions     map[string]sessionWorkJSON     `json:"sessions,omitempty"`
 }
 
 func (s Work) lock() func() {
@@ -74,6 +88,23 @@ func (s Work) lock() func() {
 	}
 	s.mu.Lock()
 	return s.mu.Unlock
+}
+
+func projectSettingsOf(p projectSettingsJSON) session.ProjectSettings {
+	v := session.ProjectSettings{Findings: p.AutoFindings, PRComment: p.PRComment}
+	if p.Rounds >= 1 && p.Rounds <= 20 {
+		v.Rounds = p.Rounds
+	}
+	if typeName.MatchString(p.Type) {
+		v.Type = p.Type
+	}
+	v.Hold = holdOf(p.Hold)
+	v.Depth = depthOf(p.Depth)
+	return v
+}
+
+func projectSettingsJSONOf(p session.ProjectSettings, owner string) projectSettingsJSON {
+	return projectSettingsJSON{Owner: owner, Rounds: p.Rounds, Type: p.Type, AutoFindings: p.Findings, PRComment: p.PRComment, Hold: holdJSONOf(p.Hold), Depth: depthJSONOf(p.Depth)}
 }
 
 func (s Work) Load() (session.WorkState, error) {
@@ -93,19 +124,21 @@ func (s Work) Load() (session.WorkState, error) {
 		}
 	}
 	for name, p := range f.Projects {
-		if !repoName.MatchString(name) {
-			continue
+		if repoName.MatchString(name) {
+			out.Projects[name] = projectSettingsOf(p)
 		}
-		v := session.ProjectSettings{Findings: p.AutoFindings, PRComment: p.PRComment}
-		if p.Rounds >= 1 && p.Rounds <= 20 {
-			v.Rounds = p.Rounds
+	}
+	for _, r := range f.Removed {
+		id := session.ProjectID{Name: r.Project, URL: r.URL}
+		if repoName.MatchString(r.Project) && removedID(id) && session.RoomForRemoved(out.Removed, id) {
+			out.Removed = append(out.Removed, session.RemovedProject[session.ProjectSettings]{ID: id, Data: projectSettingsOf(r.projectSettingsJSON)})
 		}
-		if typeName.MatchString(p.Type) {
-			v.Type = p.Type
+	}
+	for _, r := range f.RemovedTeams {
+		id := session.ProjectID{Name: r.Project, URL: r.URL}
+		if repoName.MatchString(r.Project) && teamSHA.MatchString(r.SHA) && removedID(id) && session.RoomForRemoved(out.RemovedTeams, id) {
+			out.RemovedTeams = append(out.RemovedTeams, session.RemovedProject[session.TeamApproval]{ID: id, Data: session.TeamApproval{SHA: r.SHA, At: r.ApprovedAt}})
 		}
-		v.Hold = holdOf(p.Hold)
-		v.Depth = depthOf(p.Depth)
-		out.Projects[name] = v
 	}
 	for sid, w := range f.Sessions {
 		if v, ok := sessionWorkOf(sid, w); ok && len(out.Sessions) < maxSessions {
@@ -123,7 +156,17 @@ func (s Work) Save(st session.WorkState) error {
 		f.Teams[name] = teamJSON{Owner: owner, SHA: t.SHA, ApprovedAt: t.At.UTC()}
 	}
 	for name, p := range st.Projects {
-		f.Projects[name] = projectSettingsJSON{Owner: owner, Rounds: p.Rounds, Type: p.Type, AutoFindings: p.Findings, PRComment: p.PRComment, Hold: holdJSONOf(p.Hold), Depth: depthJSONOf(p.Depth)}
+		f.Projects[name] = projectSettingsJSONOf(p, owner)
+	}
+	for _, r := range st.Removed {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) {
+			f.Removed = append(f.Removed, removedSettingsJSON{Project: r.ID.Name, URL: r.ID.URL, projectSettingsJSON: projectSettingsJSONOf(r.Data, owner)})
+		}
+	}
+	for _, r := range st.RemovedTeams {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) {
+			f.RemovedTeams = append(f.RemovedTeams, removedTeamJSON{Project: r.ID.Name, URL: r.ID.URL, Owner: owner, SHA: r.Data.SHA, ApprovedAt: r.Data.At.UTC()})
+		}
 	}
 	if len(st.Sessions) > 0 {
 		f.Sessions = map[string]sessionWorkJSON{}

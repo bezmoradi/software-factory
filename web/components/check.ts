@@ -1,4 +1,4 @@
-import { el, visible } from '../lib/dom.ts'
+import { el, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import type { Check, CheckStatus } from '../types.ts'
 
 const NOTES: Record<string, [string, string] | undefined> & { none: [string, string] } = {
@@ -12,24 +12,21 @@ const UNKNOWN = "Finished, but its reply had no verdict the engine recognizes"
 
 class SfCheck extends HTMLElement {
   #check: Check | null = null
-  #note: HTMLDivElement | null = null
-  #said: HTMLSpanElement | null = null
+  #note = el('div', 'small muted', NOTES.none[0])
+  #said = statusLine('sr-only', 'span')
   #sid = ''
 
   set check(value: Check) {
     this.#check = value
     const row = el('div', 'row')
     row.append(el('span', '', visible(value.name)), el('span', 'spacer'))
-    this.#note = el('div', 'small muted', NOTES.none[0])
-    this.#said = el('span', 'sr-only')
-    this.#said.setAttribute('role', 'status')
     const meta = el('div', 'small muted', [value.type, value.why].filter(Boolean).map(x => visible(x ?? '')).join(' · '))
-    this.replaceChildren(row, meta, this.#note, this.#said)
+    replaceKeeping(this, [row, meta, this.#note, this.#said])
   }
 
   set status(value: CheckStatus | undefined) {
     const { gate = null, sid = '' } = value ?? {}
-    if (!this.#note) return
+    if (!this.#check) return
     const moved = sid !== this.#sid
     this.#sid = sid
     const state = gate?.state ?? 'none'
@@ -45,7 +42,7 @@ class SfCheck extends HTMLElement {
     this.#note.className = `small ${tone}`
     if (this.#note.textContent !== text) {
       this.#note.textContent = text
-      if (!moved && ['pass', 'block', 'unknown', 'failed'].includes(state) && this.#said) this.#said.textContent = `${this.#check?.name ?? 'Review'}: ${text}`
+      if (!moved && ['pass', 'block', 'unknown', 'failed'].includes(state)) this.#said.textContent = `${this.#check?.name ?? 'Review'}: ${text}`
     }
   }
 }

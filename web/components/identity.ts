@@ -1,4 +1,5 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { actionRow, modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -27,8 +28,7 @@ export async function identityState(post: Post): Promise<CommitIdentity | null |
   return a.ok ? identityOf(a.body.identity) : undefined
 }
 
-function field(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLLabelElement, HTMLInputElement] {
-  const label = el('label', 'small', words)
+function textField(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
   const input = el('input', 'textbox')
   input.type = type
   input.name = name
@@ -37,54 +37,37 @@ function field(name: string, words: string, type: string, max: number, value: st
   input.required = true
   input.maxLength = max
   input.value = value
-  label.append(input)
-  return [label, input]
+  return [field(words, input), input]
 }
 
 export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity) => void): void {
-  const back = opener()
-  const d = el('dialog', 'consent identity surface')
-  d.setAttribute('aria-label', 'The name and email agents commit with')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
   const form = el('form', 'identity-form')
-  const [nameLabel, name] = field('name', 'Name', 'text', 100, current?.name ?? '', 'name')
-  const [emailLabel, email] = field('email', 'Email', 'email', 254, current?.email ?? '', 'email')
-  const why = el('p', 'small warn')
-  why.setAttribute('role', 'status')
+  const [nameField, name] = textField('name', 'Name', 'text', 100, current?.name ?? '', 'name')
+  const [emailField, email] = textField('email', 'Email', 'email', 254, current?.email ?? '', 'email')
+  const why = statusLine('small warn status-slot')
   const save = button('Save', 'primary small', undefined, 'submit')
-  const actions = el('div', 'row consent-actions')
-  actions.append(el('span', 'spacer'), button('Cancel', 'ghost small', close), save)
-  form.append(nameLabel, emailLabel, why, actions)
+  form.append(nameField, emailField, why, actionRow([], [button('Cancel', 'ghost small', () => m.close()), save]))
   form.addEventListener('submit', e => {
     e.preventDefault()
     if (!form.reportValidity()) return
-    save.disabled = true
-    void call(post, { op: 'set', name: name.value, email: email.value }).then(a => {
-      save.disabled = false
+    void whileBusy(save, () => call(post, { op: 'set', name: name.value, email: email.value })).then(a => {
       const id = identityOf(a.body.identity)
       if (!a.ok || !id) {
-        why.textContent = typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.'
+        say(why, typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.', 'warn')
         return
       }
-      close()
+      m.close()
       saved(id)
     })
   })
-  d.append(
-    el('h2', 'label', 'The name and email agents commit with'),
-    el('p', 'small', 'Every agent commits with this name and email, in each session’s worktree, so it never falls back to the email of its sign-in. They become public when the engine pushes. For GitHub, use your noreply address, which keeps your own email private: ID+USERNAME@users.noreply.github.com, shown under Settings, Emails, “Keep my email addresses private”.'),
-    el('p', 'small muted', 'A session started after you save uses it at once; a stopped session picks it up when you wake it. A running session keeps the name and email it started with.'),
-    form,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'identity',
+    title: 'The name and email agents commit with',
+    body: [
+      el('p', 'small', 'Every agent commits with this name and email, in each session’s worktree, so it never falls back to the email of its sign-in. They become public when the engine pushes. For GitHub, use your noreply address, which keeps your own email private: ID+USERNAME@users.noreply.github.com, shown under Settings, Emails, “Keep my email addresses private”.'),
+      el('p', 'small muted', 'A session started after you save uses it at once; a stopped session picks it up when you wake it. A running session keeps the name and email it started with.'),
+      form,
+    ],
+    focus: name,
   })
-  document.body.append(d)
-  d.showModal()
-  name.focus()
 }

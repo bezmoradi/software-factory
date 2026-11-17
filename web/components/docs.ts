@@ -66,6 +66,7 @@ class SfDocs extends HTMLElement {
   #pinned = false
   #scroller: HTMLElement | null = null
   #frame = 0
+  #sized = new ResizeObserver(() => this.#mark(this.#current))
 
   #onScroll = () => {
     if (!this.#frame) this.#frame = requestAnimationFrame(() => {
@@ -98,11 +99,15 @@ class SfDocs extends HTMLElement {
     this.#scroller = this.closest<HTMLElement>('.scroller')
     this.#scroller?.addEventListener('scroll', this.#onScroll, { passive: true })
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart']) addEventListener(type, this.#unpin, { passive: true, capture: true })
+    if (this.#toc) this.#sized.observe(this.#toc)
   }
 
   disconnectedCallback() {
     this.#scroller?.removeEventListener('scroll', this.#onScroll)
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart']) removeEventListener(type, this.#unpin, { capture: true })
+    this.#sized.disconnect()
+    cancelAnimationFrame(this.#frame)
+    this.#frame = 0
   }
 
   set session(view: string) {
@@ -185,6 +190,7 @@ class SfDocs extends HTMLElement {
     const list = sections(this.#text)
     this.#entries = []
     this.#current = -1
+    this.#sized.disconnect()
     if (!list.length) {
       this.#nav = null
       this.#toc = null
@@ -196,12 +202,14 @@ class SfDocs extends HTMLElement {
     nav.setAttribute('aria-label', 'Docs sections')
     const toc = el('ul', 'docs-toc')
     const body = el('div', 'docs-body')
-    body.append(pageCrumb('Docs'))
+    const head = el('div', 'page-head')
+    head.append(pageCrumb('Docs'))
+    body.append(head)
     for (const s of list) {
       const part = el('section', 'docs-section')
       part.dataset.doc = s.id
       const md = el('sf-markdown')
-      md.addEventListener('sf-paint', () => addPageLinks(part, this.#session))
+      md.addEventListener('sf-markdown-painted', () => addPageLinks(part, this.#session))
       md.text = s.body
       part.append(md)
       body.append(part)
@@ -222,9 +230,7 @@ class SfDocs extends HTMLElement {
     nav.append(el('p', 'label docs-label', 'Contents'), toc)
     this.#nav = nav
     this.#toc = toc
-    new ResizeObserver(() => {
-      if (this.#toc === toc) this.#mark(this.#current)
-    }).observe(toc)
+    if (this.isConnected) this.#sized.observe(toc)
     this.replaceChildren(body)
     this.#placeNav()
     requestAnimationFrame(() => {

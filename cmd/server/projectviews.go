@@ -34,10 +34,12 @@ func useProjectViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *s
 	}
 	audit := state.NewAudit(cfg.StateDir)
 	follows := state.NewPRFollows(cfg.StateDir)
-	srv.UseMetrics(session.NewMetrics(session.MetricsConfig{Repos: parts.repos, Audit: audit, Reviews: state.Reviews{Dir: cfg.StateDir}.Load,
-		Imported: state.ImportedReviews(cfg.StateDir), Runs: state.NewSessions(cfg.StateDir).Load, Caps: state.NewCaps(cfg.StateDir).Load, Follows: follows.Load}))
 	decisions := session.NewDecisionLog(session.DecisionLogConfig{Store: state.NewDecisionLog(cfg.StateDir), Audit: audit, Writer: audit, Follows: follows.Load,
 		Repos: parts.repos, Note: reg.NoteFor(session.DecisionNoteSource), Logger: logger})
+	srv.UseMetrics(session.NewMetrics(session.MetricsConfig{Repos: parts.repos, Audit: audit, Reviews: state.Reviews{Dir: cfg.StateDir}.Load,
+		Imported: state.ImportedReviews(cfg.StateDir), Runs: state.NewSessions(cfg.StateDir).Load, Caps: state.NewCaps(cfg.StateDir).Load, Follows: follows.Load,
+		Spans: decisions.Spans}))
+	parts.repos.UseProjectData(decisions)
 	srv.UseDecisionLog(decisions)
 	if parts.dispatcher != nil {
 		parts.dispatcher.UseDecisionLog(decisions)

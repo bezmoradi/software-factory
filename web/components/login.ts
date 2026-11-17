@@ -1,7 +1,9 @@
-import { button, el, visible } from '../lib/dom.ts'
+import { busy, button, el, field, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
-import { icon } from './icon.ts'
+import { secret } from './secret.ts'
+import { commandBlock } from './copy.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
 
@@ -60,25 +62,33 @@ function describe(s: SignIn | null, busy = false): string {
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
 
-function field(name: string, words: string, secret: boolean): [HTMLLabelElement, HTMLInputElement] {
-  const label = el('label', 'small', words)
+function secretField(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
   const input = el('input', 'textbox')
-  input.type = secret ? 'password' : 'text'
+  input.type = 'password'
   input.name = name
-  input.autocomplete = 'off'
+  input.autocomplete = autocomplete
   input.spellcheck = false
   input.required = true
   input.maxLength = 512
-  label.append(input)
-  return [label, input]
+  return [field(words, secret(input, what), undefined, 'login-field'), input]
+}
+
+function sending(input: HTMLInputElement, on: boolean) {
+  input.readOnly = on
+  if (on) input.setAttribute('aria-disabled', 'true')
+  else input.removeAttribute('aria-disabled')
 }
 
 class Row {
   readonly node = el('section', 'login-row')
-  private readonly status = el('p', 'small', 'Checking…')
+  private readonly status = statusLine('small status-slot')
   private readonly kinds = el('sf-accordion', 'login-kinds')
-  private readonly say = el('p', 'small', '')
+  private readonly subscriptionSaid = statusLine('small status-slot')
+  private readonly keySaid = statusLine('small status-slot')
+  private readonly codeGo = button('Complete sign-in', 'primary small', undefined, 'submit')
+  private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
+  private readonly linkSaid = statusLine('small muted status-slot')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly subscription = el('div', 'login-panel')
@@ -89,41 +99,42 @@ class Row {
   private current = true
   private readonly post: Post
   private readonly target: string
+  private readonly signedIn: (how: string) => void
 
-  constructor(post: Post, target: string, title: string) {
+  constructor(post: Post, target: string, signedIn: (how: string) => void) {
     this.post = post
     this.target = target
-    this.say.setAttribute('role', 'status')
-    this.status.setAttribute('role', 'status')
+    this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
-    this.unready()
-    const [codeLabel, code] = field('code', 'Code from claude.com', false)
+    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
-    const codeForm = this.form(codeLabel, () => void this.finishCode())
+    const codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(
-      el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Finish.'),
-      this.link,
+      el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
+      this.linkSaid,
       codeForm,
+      this.subscriptionSaid,
     )
     const agents = target !== 'reviewers'
-    const [keyLabel, key] = field('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', true)
+    const [keyLabel, key] = secretField('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
     this.key = key
     this.apiKey.append(
       el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
-      this.form(keyLabel, () => void this.finishKey()),
+      this.form(keyLabel, this.keyGo, () => void this.finishKey()),
+      this.keySaid,
     )
     this.kinds.addEventListener('sf-expand', e => {
       if (e.detail === 'subscription') void this.begin()
       else this.cancel()
     })
     this.paint()
-    this.node.append(el('h3', 'label', title), this.status, this.kinds, this.say)
+    this.node.append(this.status, this.kinds)
   }
 
-  private form(label: HTMLLabelElement, done: () => void): HTMLFormElement {
+  private form(label: HTMLElement, go: HTMLButtonElement, done: () => void): HTMLFormElement {
     const form = el('form', 'row login-code')
-    form.append(label, button('Finish', 'primary small', undefined, 'submit'))
+    form.append(label, go)
     form.addEventListener('submit', e => {
       e.preventDefault()
       done()
@@ -139,72 +150,86 @@ class Row {
     ]
   }
 
-  pending(s: SignIn) {
-    this.status.textContent = `${s.stale ? notCurrent(s) : describe(s)} Checking again…`
-  }
-
   show(s: SignIn | null, busy = false) {
     this.signIn = s
     this.current = !stale(s, busy)
-    this.status.textContent = describe(s, busy)
-    if (s?.method === 'gateway' && this.current) this.status.textContent += ` ${GATEWAY_WARNING}.`
+    const worth = stale(s, busy) || !!s?.busy || busy
+    const gateway = s?.method === 'gateway' && this.current ? `${GATEWAY_WARNING}.` : ''
+    say(this.status, [worth ? describe(s, busy) : '', gateway].filter(Boolean).join(' '))
     this.paint()
   }
 
-  private unready() {
+  private unready(said = '') {
+    sayIfChanged(this.linkSaid, said)
     this.link.removeAttribute('href')
-    this.link.setAttribute('aria-disabled', 'true')
+    if (!this.link.parentNode) return
+    const focused = document.activeElement === this.link
+    this.link.remove()
+    if (focused) this.code.focus({ preventScroll: true })
   }
 
-  private note(text: string, bad = false) {
-    this.say.textContent = text
-    this.say.classList.toggle('bad', bad)
+  private ready(href: string) {
+    sayIfChanged(this.linkSaid, '')
+    this.link.href = href
+    if (!this.link.parentNode) this.linkSaid.after(this.link)
   }
 
-  private async begin() {
+  private note(said: HTMLElement, text: string, bad = false) {
+    say(said, text, bad ? 'bad' : undefined)
+  }
+
+  private async begin(keepNote = false) {
     const mine = ++this.starting
-    this.unready()
-    this.note('')
+    this.unready('Getting the sign-in link…')
+    if (!keepNote) this.note(this.subscriptionSaid, '')
     const a = await call(this.post, { step: 'start', target: this.target })
     if (mine !== this.starting) return
     const link = safeLink(a.body.url)
-    if (!a.ok || !link) return this.note(typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+    if (!a.ok || !link) {
+      sayIfChanged(this.linkSaid, '')
+      return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+    }
     this.waiting = true
-    this.link.href = link
-    this.link.removeAttribute('aria-disabled')
-    this.note('')
+    this.ready(link)
+    if (!keepNote) this.note(this.subscriptionSaid, '')
   }
 
   private async finishCode() {
     const code = this.code.value.trim()
-    if (!code || !this.waiting) return
-    this.code.disabled = true
-    this.note('Checking the code…')
+    if (!code || !this.waiting || this.code.readOnly) return
+    sending(this.code, true)
+    busy(this.codeGo, true)
+    this.note(this.subscriptionSaid, '')
     const a = await call(this.post, { step: 'code', target: this.target, code })
     this.code.value = ''
-    this.code.disabled = false
+    this.code.type = 'password'
+    sending(this.code, false)
+    busy(this.codeGo, false)
     this.waiting = false
     this.unready()
     if (!a.ok) {
-      this.note(typeof a.body.message === 'string' ? a.body.message : 'That didn’t work.', true)
-      if (this.kinds.open === 'subscription') void this.begin()
+      this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'That didn’t work.', true)
+      if (this.kinds.open === 'subscription') void this.begin(true)
       return
     }
-    this.note('Signed in with your subscription.')
     this.show(signInOf(a.body.signIn))
+    this.signedIn('your subscription')
   }
 
   private async finishKey() {
     const key = this.key.value.trim()
-    if (!key) return
-    this.key.disabled = true
-    this.note('Saving the key…')
+    if (!key || this.key.readOnly) return
+    sending(this.key, true)
+    busy(this.keyGo, true)
+    this.note(this.keySaid, '')
     const a = await call(this.post, { step: 'key', target: this.target, key })
     this.key.value = ''
-    this.key.disabled = false
-    if (!a.ok) return this.note(typeof a.body.message === 'string' ? a.body.message : 'The key wasn’t saved. Try again.', true)
-    this.note('Signed in with your API key.')
+    this.key.type = 'password'
+    sending(this.key, false)
+    busy(this.keyGo, false)
+    if (!a.ok) return this.note(this.keySaid, typeof a.body.message === 'string' ? a.body.message : 'The key wasn’t saved. Try again.', true)
     this.show(signInOf(a.body.signIn))
+    this.signedIn('your API key')
   }
 
   cancel() {
@@ -246,40 +271,30 @@ export async function signInState(post: Post): Promise<SignInState | null> {
   return { agents, reviewers: a.body.reviewer === true ? signedIn(a.body.reviewers) : true }
 }
 
-export async function claudeLogin(post: Post, closed?: () => void, known?: SignIn | null): Promise<void> {
-  const d = el('dialog', 'consent login surface')
-  d.setAttribute('aria-label', 'Sign Claude Code in for the reviewers')
-  const reviewers = new Row(post, 'reviewers', 'Claude Code for the reviewers')
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+export async function claudeLogin(post: Post, tell: (title: string) => void, closed?: () => void, known?: SignIn | null): Promise<void> {
+  const reviewers = new Row(post, 'reviewers', how => {
+    m.close()
+    tell(`Claude Code for the reviewers is signed in with ${how}.`)
+  })
   let open = true
   let again = 0
-  const close = () => {
+  const m = modal({
+    kind: 'login',
+    title: 'Sign Claude Code in for the reviewers',
+    body: [
+      el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
+      reviewers.node,
+    ],
+    actions: [button('Close', 'ghost small', () => m.close())],
+    focus: 'heading',
+  })
+  m.onClose(() => {
     open = false
     clearTimeout(again)
     reviewers.cancel()
-    d.close()
-    d.remove()
     closed?.()
-    if (opener?.isConnected) opener.focus()
-  }
-  const actions = el('div', 'row consent-actions')
-  actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
-  const heading = el('h2', 'label', 'Sign Claude Code in for the reviewers')
-  heading.tabIndex = -1
-  d.append(
-    heading,
-    el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
-    reviewers.node,
-    actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
   })
-  document.body.append(d)
-  d.showModal()
-  heading.focus()
-  if (known) reviewers.pending(known)
+  if (known) reviewers.show(known)
   const refresh = async (): Promise<void> => {
     const a = await call(post, { step: 'status' })
     if (!open) return
@@ -291,75 +306,67 @@ export async function claudeLogin(post: Post, closed?: () => void, known?: SignI
   await refresh()
 }
 
-export function commandBlock(command: string): HTMLElement {
-  const block = el('div', 'setup-code')
-  const copy = button('', 'setup-copy', () => {
-    void navigator.clipboard.writeText(command).then(() => {
-      copy.replaceChildren(icon('check'))
-      copy.setAttribute('aria-label', 'Copied')
-      copy.title = 'Copied'
-      setTimeout(() => {
-        copy.replaceChildren(icon('copy'))
-        copy.setAttribute('aria-label', 'Copy the command')
-        copy.title = 'Copy'
-      }, 1500)
-    }, () => { copy.title = 'Couldn’t copy: select the command and copy it' })
-  })
-  copy.append(icon('copy'))
-  copy.setAttribute('aria-label', 'Copy the command')
-  copy.title = 'Copy'
-  block.append(el('code', '', visible(command)), copy)
-  return block
-}
-
 const BOX = /^[0-9a-f]{16}$/
 
-export function boxSignIn(post: Post, needs: Needs, name: string): Promise<boolean> {
+export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: string) => void): Promise<boolean> {
   const box = needs.box ?? ''
   if (!BOX.test(box)) return Promise.resolve(false)
   const target = `box:${box}`
   return new Promise(resolve => {
-    const d = el('dialog', 'consent login surface')
-    d.setAttribute('aria-label', `Sign ${visible(name)} in for this session`)
-    const status = el('p', 'small', describe(needs.signIn ?? null))
-    status.setAttribute('role', 'status')
-    const row = needs.code ? new Row(post, target, `${visible(name)} in this session’s container`) : null
-    const done = (answer: boolean) => {
-      row?.cancel()
-      d.close()
-      d.remove()
-      resolve(answer)
+    const status = statusLine()
+    if (!needs.code) say(status, describe(needs.signIn ?? null))
+    let finished = false
+    let answer = false
+    const done = (yes: boolean) => {
+      if (finished) return
+      finished = true
+      answer = yes
+      m.close()
     }
-    const check = async () => {
-      status.textContent = 'Checking…'
+    const row = needs.code ? new Row(post, target, how => {
+      done(true)
+      tell(`${visible(name)} is signed in for this session with ${how}.`)
+    }) : null
+    const check = async (): Promise<boolean | null> => {
+      say(status, 'Checking…')
       const a = await call(post, { step: 'status', target })
+      if (!a.ok) {
+        say(status, typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.')
+        return null
+      }
       const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
       const first = each[0] !== null && typeof each[0] === 'object' ? each[0] as Record<string, unknown> : {}
       const s = signInOf(first.signIn)
-      status.textContent = a.ok ? (row ? '' : describe(s)) : typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.'
       row?.show(s)
+      const ready = signedIn(first.signIn)
+      if (ready === false) say(status, row ? 'Not signed in yet. Sign in above, then press Continue.' : `${describe(s)} Run the command below, then press Continue.`)
+      else say(status, row ? '' : describe(s))
+      return ready
+    }
+    const proceed = async () => {
+      if (await check() !== false) done(true)
     }
     const parts: Node[] = [
-      el('h2', 'label', `Sign ${visible(name)} in for this session`),
       el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
     ]
     if (row) {
-      status.textContent = ''
       row.show(needs.signIn ?? null)
       parts.push(row.node, status)
     } else {
       parts.push(status)
       if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
     }
-    const actions = el('div', 'row consent-actions')
-    actions.append(button('Check again', 'ghost small', () => void check()), el('span', 'spacer'), button('Cancel', 'ghost small', () => done(false)), button('Continue', 'primary small', () => done(true)))
-    parts.push(actions)
-    d.append(...parts)
-    d.addEventListener('cancel', e => {
-      e.preventDefault()
-      done(false)
+    const go = button('Continue', 'primary small', () => void whileBusy(go, proceed))
+    const m = modal({
+      kind: 'login',
+      title: `Sign ${visible(name)} in for this session`,
+      body: parts,
+      actions: [button('Cancel', 'ghost small', () => done(false)), go],
     })
-    document.body.append(d)
-    d.showModal()
+    m.onClose(() => {
+      finished = true
+      row?.cancel()
+      resolve(answer)
+    })
   })
 }

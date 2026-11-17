@@ -1,4 +1,5 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -77,21 +78,17 @@ function viewOf(body: Record<string, unknown>): View {
 }
 
 export function openWorkspace(post: Post, labelOf: (sid: string) => string, deleted: (sid: string) => void): void {
-  const back = opener()
-  const d = el('dialog', 'consent workspace surface')
-  d.setAttribute('aria-label', 'Workspace')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  const say = statusLine()
   const space = el('div', 'workspace-space')
   const list = el('ul', 'list workspace-list')
-  const busy = new Set<string>()
+  const listHeading = el('h3', 'label', 'Sessions')
+  listHeading.tabIndex = -1
+  const deleting = new Set<string>()
+  let order: string[] = []
 
   const paint = (v: View) => {
+    const key = focusedKey(list)
+    order = v.sessions.map(r => r.sid)
     space.replaceChildren()
     if (v.spaceKnown) {
       const used = v.total ? Math.round(((v.total - v.free) / v.total) * 100) : 0
@@ -113,62 +110,78 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       head.append(el('span', 'small', size))
       li.append(head)
       const acts = el('div', 'row')
-      const del = button(busy.has(r.sid) ? 'Deleting…' : 'Delete session', 'ghost small', () => void remove(r))
+      const del = button('Delete session', 'ghost small', () => void whileBusy(del, () => remove(r)), 'button', `delete:${r.sid}`)
       del.setAttribute('aria-label', `Delete the session ${visible(name)} and its worktree`)
-      if (!r.deletable || busy.has(r.sid)) del.disabled = true
+      if (!r.deletable) del.disabled = true
+      else if (deleting.has(r.sid)) busy(del, true)
       acts.append(del)
       if (!r.deletable && r.why) acts.append(el('span', 'small muted', visible(r.why)))
       li.append(acts)
       list.append(li)
     }
+    refocus(list, key)
   }
 
-  const reload = async () => {
-    say.textContent = 'Counting…'
+  const reload = async (keepSaid = false) => {
+    if (!keepSaid) say.textContent = 'Counting…'
     const a = await call(post, { op: 'view' })
     if (!a.ok) {
       say.textContent = text(a.body.message) ? visible(text(a.body.message)) : 'The workspace status didn’t load.'
       return
     }
-    say.textContent = ''
+    if (!keepSaid) say.textContent = ''
     paint(viewOf(a.body))
   }
 
+  const lost = () => {
+    const a = document.activeElement
+    return m.dialog.open && (!(a instanceof HTMLElement) || a === document.body || !a.isConnected)
+  }
+
+  const settle = (sid: string, before: string[], offer: HTMLButtonElement | null) => {
+    if (!lost()) return
+    if (offer?.isConnected) return offer.focus()
+    refocus(list, `delete:${sid}`, () => around(before, sid).map(s => `delete:${s}`))
+    if (lost()) listHeading.focus()
+  }
+
   const remove = async (r: Row, offer: { flag: string; value: string } | null = null) => {
-    if (busy.has(r.sid)) return
-    busy.add(r.sid)
+    if (deleting.has(r.sid)) return
+    deleting.add(r.sid)
+    const before = order
     say.textContent = 'Deleting…'
     const a = await call(post, offer ? { op: 'delete', sid: r.sid, flag: offer.flag, value: offer.value } : { op: 'delete', sid: r.sid })
-    busy.delete(r.sid)
+    deleting.delete(r.sid)
     if (a.ok) {
       say.textContent = 'Deleted, with its worktree.'
       deleted(r.sid)
-      return void reload()
+      await reload(true)
+      return settle(r.sid, before, null)
     }
     const message = text(a.body.message) ? visible(text(a.body.message)) : 'The session wasn’t deleted.'
     const o = a.body.offer
+    let anyway: HTMLButtonElement | null = null
     if (o && typeof o === 'object' && typeof (o as Record<string, unknown>).flag === 'string' && typeof (o as Record<string, unknown>).value === 'string') {
       const next = { flag: (o as Record<string, string>).flag!, value: (o as Record<string, string>).value! }
-      say.replaceChildren(el('span', '', `${message} `), button('Delete anyway', 'ghost small', () => void remove(r, next)))
+      anyway = actionButton('Delete anyway', 'ghost small', () => remove(r, next))
+      say.replaceChildren(el('span', '', `${message} `), anyway)
     } else say.textContent = message
-    void reload()
+    await reload(true)
+    settle(r.sid, before, anyway)
   }
 
-  const actions = el('div', 'row consent-actions')
-  actions.append(button('Refresh', 'ghost small', () => void reload()), el('span', 'spacer'), button('Close', 'ghost small', close))
-  d.append(
-    el('h2', 'label', 'Workspace'),
-    el('p', 'small', 'Clones and session worktrees share the workspace volume. Sizes count the files in each worktree without following links, and stop counting at 200,000 entries.'),
-    space,
-    el('h3', 'label', 'Sessions'),
-    el('p', 'small muted', 'A stopped session can be deleted here when its branch is pushed or on main, so nothing is lost. A session with commits that aren’t pushed can be deleted only from its own menu.'),
-    list, say, actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'workspace',
+    title: 'Workspace',
+    body: [
+      el('p', 'small', 'Clones and session worktrees share the workspace volume. Sizes count the files in each worktree without following links, and stop counting at 200,000 entries.'),
+      space,
+      listHeading,
+      el('p', 'small muted', 'A stopped session can be deleted here when its branch is pushed or on main, so nothing is lost. A session with commits that aren’t pushed can be deleted only from its own menu.'),
+      list, say,
+    ],
+    lead: [actionButton('Refresh', 'ghost small', () => reload())],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
   void reload()
 }

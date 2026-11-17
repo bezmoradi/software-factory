@@ -1,4 +1,5 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, button, el, sayWhenShown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Send = (file: Blob) => Promise<Response>
@@ -103,7 +104,9 @@ export async function stateNotices(post: Post, target: HTMLElement): Promise<voi
   const lines = view.drops.map(droppedLine)
   if (view.last?.state === 'applied' && view.needClone.length) lines.push(`${view.needClone.length === 1 ? '1 imported project needs' : `${view.needClone.length} imported projects need`} a clone: open Export and import to clone ${view.needClone.length === 1 ? 'it' : 'them'} again.`)
   if (view.last?.state === 'refused' && view.last.why) lines.push(`The last import was refused: ${visible(view.last.why)}`)
-  target.replaceChildren(...lines.map(l => el('p', 'small warn', l)))
+  const said = lines.map(() => el('p', 'small warn'))
+  target.replaceChildren(...said)
+  lines.forEach((l, i) => sayWhenShown(said[i]!, l, 'warn'))
   target.hidden = lines.length === 0
 }
 
@@ -143,16 +146,8 @@ function fileName(res: Response): string {
 }
 
 export function openBackup(post: Post, send: Send): void {
-  const back = opener()
-  const d = el('dialog', 'consent backup surface')
-  d.setAttribute('aria-label', 'Export and import')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
-  const say = el('p', 'small')
-  say.setAttribute('role', 'status')
+  let generation = 0
+  const say = statusLine()
   const body = el('div', 'backup-body')
   const exportButton = button('Export', 'primary small')
   const picker = el('input')
@@ -171,17 +166,16 @@ export function openBackup(post: Post, send: Send): void {
       const ul = el('ul', 'list')
       for (const name of v.needClone) {
         const li = el('li', 'row')
-        const b = button('Clone again', 'ghost small', () => {
-          b.disabled = true
-          void post(CLONE, { name }).then(async res => {
-            const parsed: unknown = await res.json().catch(() => ({}))
-            const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-            say.textContent = res.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : text(r.message) ? visible(text(r.message)) : 'The clone didn’t start.'
-            if (!res.ok) b.disabled = false
-          }).catch(() => {
+        const b = actionButton('Clone again', 'ghost small', async () => {
+          const res = await post(CLONE, { name }).catch(() => null)
+          if (!res) {
             say.textContent = 'The engine didn’t answer.'
-            b.disabled = false
-          })
+            return
+          }
+          const parsed: unknown = await res.json().catch(() => ({}))
+          const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+          say.textContent = res.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : text(r.message) ? visible(text(r.message)) : 'The clone didn’t start.'
+          if (res.ok) b.disabled = true
         })
         li.append(el('code', '', visible(name)), el('span', 'spacer'), b)
         ul.append(li)
@@ -199,16 +193,17 @@ export function openBackup(post: Post, send: Send): void {
   }
 
   const reload = async () => {
+    const mine = ++generation
     say.textContent = 'Loading…'
     const { view, message } = await load(post)
+    if (mine !== generation) return
     say.textContent = message
     if (view) paint(view)
   }
 
-  exportButton.addEventListener('click', () => {
-    exportButton.disabled = true
+  exportButton.addEventListener('click', () => void whileBusy(exportButton, () => {
     say.textContent = 'Exporting…'
-    void post(EXPORT, {}).then(async res => {
+    return post(EXPORT, {}).then(async res => {
       if (!res.ok) {
         const parsed: unknown = await res.json().catch(() => ({}))
         const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
@@ -220,10 +215,8 @@ export function openBackup(post: Post, send: Send): void {
       say.textContent = `Saved ${fileName(res)} (${Math.ceil(blob.size / 1024).toLocaleString()} KiB).`
     }).catch(() => {
       say.textContent = 'The export was cut off. Try again.'
-    }).finally(() => {
-      exportButton.disabled = false
     })
-  })
+  }))
 
   picker.addEventListener('change', () => {
     const file = picker.files?.[0]
@@ -233,40 +226,39 @@ export function openBackup(post: Post, send: Send): void {
       say.textContent = 'That file is larger than 256 MiB, more than an import takes.'
       return
     }
-    importButton.disabled = true
     say.textContent = `Importing ${visible(file.name)}…`
-    void send(file).then(async res => {
+    void whileBusy(importButton, () => send(file).then(async res => {
       const parsed: unknown = await res.json().catch(() => ({}))
       const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
       if (!res.ok) {
         say.textContent = text(r.message) ? visible(text(r.message)) : res.status === 413 ? 'That file is larger than an import takes.' : 'The import didn’t finish.'
-        importButton.disabled = false
         return
       }
       const report = reportOf(r.report)
+      generation++
       say.textContent = 'Imported. The engine restarts to finish; the page reconnects once it’s back.'
+      importButton.disabled = true
       if (report) body.replaceChildren(...reportNodes(report))
     }).catch(() => {
       say.textContent = 'The import was cut off. Try again.'
-      importButton.disabled = false
-    })
+    }))
   })
 
-  const actions = el('div', 'row consent-actions')
-  actions.append(button('Refresh', 'ghost small', () => void reload()), el('span', 'spacer'), button('Close', 'ghost small', close))
   const transfer = el('div', 'row')
   transfer.append(exportButton, importButton, picker)
-  d.append(
-    el('h2', 'label', 'Export and import'),
-    el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
-    el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),
-    transfer, importWhy, say, body, actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'backup',
+    title: 'Export and import',
+    body: [
+      el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
+      el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),
+      transfer, importWhy, say, body,
+    ],
+    lead: [actionButton('Refresh', 'ghost small', reload)],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
+  m.onClose(() => {
+    generation++
+  })
   void reload()
 }

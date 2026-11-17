@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, shown, visible } from '../lib/dom.ts'
+import { button, el, emit, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
@@ -50,16 +50,16 @@ class SfRules extends HTMLElement {
   #view: RulesView | null = null
   #details = el('details', 'rules-panel')
   #body = el('div', 'rules-body')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #loaded = ''
-  #loading = false
+  #pending = ''
+  #gen = 0
 
   constructor() {
     super()
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
-    this.#status.setAttribute('role', 'status')
-    const refresh = button('Refresh', 'ghost small', () => void this.#load(true), 'button', 'rules:refresh')
+    const refresh = button('Refresh', 'ghost small', () => void whileBusy(refresh, () => this.#load(true)), 'button', 'rules:refresh')
     const head = el('div', 'row rules-head')
     head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'), refresh)
     this.#details.append(summary, head, this.#status, this.#body)
@@ -77,6 +77,8 @@ class SfRules extends HTMLElement {
     this.#view = v
     this.hidden = !v
     if (same) return
+    this.#gen++
+    this.#pending = ''
     this.#loaded = ''
     this.#body.replaceChildren()
     this.#status.textContent = ''
@@ -104,8 +106,9 @@ class SfRules extends HTMLElement {
 
   async #load(force: boolean) {
     const v = this.#view
-    if (!v || this.#loading || (!force && this.#loaded === v.sid)) return
-    this.#loading = true
+    if (!v || (!force && (this.#loaded === v.sid || this.#pending === v.sid))) return
+    const gen = ++this.#gen
+    this.#pending = v.sid
     this.#status.textContent = 'Reading what the engine holds…'
     const [rules, egress, team, exceptions] = await Promise.all([
       v.repo ? call('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
@@ -113,8 +116,8 @@ class SfRules extends HTMLElement {
       v.path ? call('/api/team', { path: v.path, op: 'read' }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
       call('/api/exceptions', {}),
     ])
-    this.#loading = false
-    if (this.#view?.sid !== v.sid) return
+    if (gen !== this.#gen || this.#view?.sid !== v.sid) return
+    this.#pending = ''
     this.#loaded = v.sid
     this.#status.textContent = `Read at ${when(Date.now())}.`
     this.#body.replaceChildren(this.#fixed(v), this.#saved(v, rules), this.#hosts(egress), this.#limits(v, team), this.#away(v), this.#register(v, exceptions))

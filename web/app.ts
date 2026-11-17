@@ -1,22 +1,23 @@
-import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts'
-import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
+import { api, exchange, trade } from './api.ts'
+import { claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { button, el, emit, fileLink, repoPath, settleFocus, shown, visible, visibleCommand } from './lib/dom.ts'
-import { complete } from './lib/complete.ts'
+import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
-import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
+import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
-import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
-import { placeMenu, sessionState, warnings } from './components/overview.ts'
-import type { AgentInfo, Catalog, CardHost, CatalogEntry, ChangeFrom, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
+import { paintPath, type Step, type Turn } from './lib/path.ts'
+import { placeMenu } from './lib/menu.ts'
+import { isRecord } from './lib/json.ts'
+import { sessionState } from './components/session-list.ts'
+import { warnings } from './components/overview.ts'
+import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
-import { icon } from './components/icon.ts'
 import './components/check.ts'
 import './components/gate.ts'
-import type { Spot } from './components/conversation.ts'
 import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
@@ -37,9 +38,8 @@ import './components/setup.ts'
 import './components/tabs.ts'
 import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
-import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
+import { money } from './components/consent.ts'
 import { openAway, setHalt, setHaltSession } from './components/halt.ts'
-import { isMac, openPalette, openShortcuts, paletteKey, typing, type PaletteItem } from './components/palette.ts'
 import './components/rules.ts'
 import { onNotifyOpen, watchNotify } from './components/notify.ts'
 import './components/recap.ts'
@@ -52,68 +52,22 @@ import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
-import { initUpdates, loadUpdate } from './components/update.ts'
+import { initUpdates } from './components/update.ts'
 import { sendState } from './api.ts'
+import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
+import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
+import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
+import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
+import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
+import { startPalette } from './palette-items.ts'
 
-interface Session {
-  sid: string
-  info: SessionInfo
-  view: HTMLElementTagNameMap['sf-conversation']
-  epoch: string
-  seq: number
-  replayAt: number
-  rebase: boolean
-  gate: GateEvent | null
-  gateKey: string
-  gateAt: number
-  workflow: WorkflowEvent | null
-  workflowSeq: number
-  planfile: PlanFileEvent | null
-  agents: AgentInfo[]
-  intent: IntentRecord | null
-  catalog: Catalog | null
-  total: number
-  cost: number
-  changes: Changes | null
-  changesKey: string
-  changesAt: number
-  compare: { from: ChangeFrom; commit: string }
-  forkStart: Started
-  busy: boolean
-  step: Step
-  compacting: string
-  context: { tokens: number; level: string } | null
-  asked: { requirements?: { hash: string; at: number }; plan?: { hash: string; at: number } }
-  refused: { requirements?: { hash: string; text: string }; plan?: { hash: string; text: string } }
-  audit: { key: string; entries: AuditEntry[]; refusals: Record<string, number> } | null
-  auditSeen: number
-  lastAt?: number
-}
-
-interface AuditEntry {
-  time: number
-  kind: string
-  by: string
-  result: string
-  commit: string
-  reviewer?: string
-  verdict?: string
-  path?: string
-  reason: string
-  personReason?: string
-  missing?: string[]
-  session?: string
-  branch?: string
-  from?: string
-  fromRef?: string
-  source?: string
-}
+setPainter(paint)
 
 const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 'session-wake': 'Session woken', 'session-stop': 'Session stopped', 'session-fork': 'Session forked', 'session-delete': 'Session deleted' }
 const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
 
 function lifecycleLine(e: AuditEntry): string {
-  const what = LIFECYCLE[e.kind] ?? visible(e.kind)
+  const what = Object.hasOwn(LIFECYCLE, e.kind) ? LIFECYCLE[e.kind] : visible(e.kind)
   const ref = e.from === 'pull-request' ? `${START_FROM[e.from]}${visible(e.fromRef ?? '')}` : e.from && Object.hasOwn(START_FROM, e.from) ? `${START_FROM[e.from]}${e.fromRef ? ` ${visible(e.fromRef)}` : ''}${e.source ? ` ${visible(e.source).slice(0, 8)}` : ''}` : ''
   const branch = e.kind === 'session-delete' || e.kind === 'session-fork' ? ` (${visible(e.branch ?? '')})` : ''
   return `${what}${branch}${ref ? ` ${ref}` : ''}`
@@ -130,56 +84,14 @@ const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned:
 const HIDDEN_RESULTS = ['sending', 'posting']
 const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
 
-function stepOf(text: string): Step {
-  const skill = /^\s*(?:<command-name>\s*)?\/?(?:knackpack:(challenge-requirements|plan-implementation)|speckit-(specify|plan|tasks))\b/.exec(text)
-  return skill?.[1] === 'challenge-requirements' || skill?.[2] === 'specify' ? 'define' : skill?.[1] === 'plan-implementation' || skill?.[2] === 'plan' ? 'plan' : skill?.[2] === 'tasks' ? 'tasks' : ''
-}
-
 
 const COMMIT_ASK = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore. Each commit message says what changed and why."
 
 function checkOf(r: Reviewer): Check {
   return { type: r.type, name: r.name, why: r.why ?? '' }
 }
-const ACTIVE = ['pending', 'running', 'waiting']
 const RESET_NOTE = 'The session restarted, so what came before this point is shown only as far as the agent kept it.'
 
-const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-
-const topBar = document.querySelector<HTMLElement>('body > .bar')
-const BAR_STEPS = ['fit-brand', 'fit-compact', 'fit-tight']
-let barFitQueued = false
-
-function barFits(bar: HTMLElement): boolean {
-  const style = getComputedStyle(bar)
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-  let need = 0
-  let shown = 0
-  for (const c of bar.children) {
-    if (!c.getClientRects().length) continue
-    shown++
-    if (c.id === 'state') need += (document.body.classList.contains('live') ? 8 : 6) * rem
-    else if (c.id !== 'title' && !c.classList.contains('spacer')) need += c.getBoundingClientRect().width
-  }
-  need += (parseFloat(style.columnGap) || 0) * Math.max(0, shown - 1)
-  return need <= bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
-}
-
-function fitBar() {
-  barFitQueued = false
-  if (!topBar) return
-  topBar.classList.remove(...BAR_STEPS)
-  for (const step of BAR_STEPS) {
-    if (barFits(topBar)) return
-    topBar.classList.add(step)
-  }
-}
-
-function queueBarFit() {
-  if (barFitQueued) return
-  barFitQueued = true
-  requestAnimationFrame(fitBar)
-}
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
 const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
 const reviewModels = el('sf-review-models')
@@ -189,33 +101,9 @@ const modelMenu = button('Switch model…', '')
 modelMenu.setAttribute('role', 'menuitem')
 modelMenu.hidden = true
 byId('menu-wake').after(modelMenu)
-const scroller = byId('scroller')
-const toast = (t: Toast) => byId<HTMLElementTagNameMap['sf-toasts']>('toasts').show(t)
-const sessions = new Map<string, Session>()
-const state = { connected: false, note: '', stream: '', supervisor: '' }
 let reviewer: ReviewerView | null = null
 let starterNames = new Map<string, string>()
 let projectsAt = 0
-const WIDE_REM = 52
-let wide: boolean | null = null
-let sideAt = ''
-let sideFull = false
-let sideScroll = 0
-const rootRem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-let frameRem = byId('frame').clientWidth / rootRem()
-let retry = 1000
-let lost = 0
-const sending = new Set<string>()
-const armed = new Set<string>()
-const removals = new Map<string, { message: string; offer: { flag: string; value: string } | null }>()
-const busyManage = new Map<string, { action: string; at: number }>()
-const reviewAsking = new Set<string>()
-const pushAsking = new Set<string>()
-const pushWatched = new Map<string, number>()
-const pushSaid = new Map<string, { text: string; tone: string }>()
-const PUSH_SAID: Record<string, { text: string; tone: string }> = { held: { text: 'Held', tone: 'warn' }, denied: { text: 'Denied', tone: 'bad' }, refused: { text: 'Not pushed', tone: 'bad' } }
-const answerAsking = new Set<string>()
-let paintQueued = false
 
 const checks = new Map<string, { check: Check; node: HTMLElementTagNameMap['sf-check']; li: HTMLLIElement }>()
 
@@ -247,41 +135,12 @@ function syncChecks(list: Reviewer[]): { check: Check; node: HTMLElementTagNameM
   return out
 }
 
-function ensure(sid: string): Session {
-  let s = sessions.get(sid)
-  if (s) return s
-  const view = el('sf-conversation')
-  view.dataset.sid = sid
-  view.away = true
-  view.scroller = scroller
-  byId('conversations').append(view)
-  s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, step: '', compacting: '', changes: null, forkStart: null, changesKey: '', changesAt: 0, compare: { from: 'fork', commit: '' }, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
-  sessions.set(sid, s)
-  return s
-}
-
-function startedOf(s: Session): Started {
-  if (s.changes && s.changes.from && s.changes.from !== 'fork') return s.forkStart
-  return !s.changes ? null : s.changes.noBase ? 'nobase' : s.changes.commits.length > 0
-}
-
-function inTurn(s: Session): boolean {
-  return s.busy || !!s.info.busy
-}
-
 function stageOff(s: Session): string {
   if (!state.connected) return 'Step buttons are available once the page reconnects to the engine.'
   if (!controllable(s)) return 'Step buttons are off: this session is read-only on this page.'
   return inTurn(s) ? `Step buttons are available when ${agentWord(s.info.agent)} finishes.` : ''
 }
 
-function working(s: Session): boolean {
-  return inTurn(s) || !!s.compacting || s.agents.some(a => a.status === 'running')
-}
-
-const ASKED_MS = 30000
-
-const stepping = new Map<string, number>()
 const ran = new Map<string, Set<Step>>()
 
 function began(s: Session) {
@@ -296,91 +155,6 @@ function turnOf(s: Session): Turn {
   const busy = state.connected && inTurn(s)
   const awaiting: Step = gate?.size === 'feature' && gate.requirements?.hash && !gate.requirements.approved ? 'define' : gate?.effective === 'feature' && gate.planDoc && !gate.planDoc.approved ? 'plan' : ''
   return { ran: ran.get(s.sid) ?? new Set<Step>(), running: busy ? s.step || awaiting : '', busy }
-}
-
-function once(s: Session | null | undefined, what: string, run: () => Promise<boolean>) {
-  if (!s) return
-  const key = `${s.sid}:${what}`
-  const at = stepping.get(key) ?? 0
-  if (at && Date.now() - at < ASKED_MS) return
-  const now = Date.now()
-  stepping.set(key, now)
-  void run().then(ok => {
-    if (!ok && stepping.get(key) === now) stepping.delete(key)
-  })
-}
-
-function reviewsActive(s: Session): boolean {
-  const required = s.gate?.reviewers ?? []
-  return required.some(r => r.state === 'running' || ACTIVE.includes(s.agents.filter(a => a.type === r.type).at(-1)?.status ?? ''))
-}
-
-function pickingSize(s: Session) {
-  return !!(state.connected && s.gate && s.gate.chosen === false && s.view.blank && controllable(s))
-}
-
-function controllable(s: Session) {
-  const i = s?.info
-  return !!i && i.controlled && i.verified && i.running && i.live && !i.disputed && !i.outdated
-}
-
-function sleeping(s: Session | null) {
-  const i = s?.info
-  return !!i && i.kind === 'background' && i.verified === true && !i.running && !i.live && /^[0-9a-f]{8}$/.test(i.id || '')
-}
-
-function current(): Session | null {
-  return current.key.startsWith('s/') ? sessions.get(current.key.slice(2)) || null : null
-}
-
-function changesSession(): Session | null {
-  return current.key.startsWith('c:') ? sessions.get(current.key.slice(2)) || null : current()
-}
-
-function openChanges(s: Session) {
-  go(`c:${s.sid}`)
-  requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff())
-}
-current.key = 'overview'
-
-function requestReplay(s: Session, force = false) {
-  if (!state.stream || !s.info.live || s.info.disputed) return
-  if (!force && Date.now() - s.replayAt < 3000) return
-  s.replayAt = Date.now()
-  void api('/api/replay', { stream: state.stream, sid: s.sid, epoch: s.epoch, since: s.seq }).catch(() => null)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function updateSessions(list: unknown) {
-  const seen = new Set<string>()
-  for (const entry of Array.isArray(list) ? (list as unknown[]) : []) {
-    if (!isRecord(entry) || typeof entry.sid !== 'string') continue
-    const info = entry as unknown as SessionInfo
-    seen.add(info.sid)
-    const s = ensure(info.sid)
-    const was = s.info
-    const could = controllable(s)
-    s.info = info
-    if (info.live && (!was.live || was.disputed)) requestReplay(s, true)
-    else if (info.live && !info.disputed && s.epoch && info.epoch === s.epoch && (info.lastSeq ?? 0) > s.seq) requestReplay(s)
-    if (info.live && !was.live && current() === s && byId('hint').textContent?.startsWith('Waking')) say('')
-    if (info.live && !was.live) byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`wake:${info.sid}`)
-    if (Boolean(info.running) !== Boolean(was.running)) s.auditSeen++
-    if (could !== controllable(s)) s.view.refreshCards(controllable(s))
-  }
-  for (const s of [...sessions.values()]) {
-    if (seen.has(s.sid)) continue
-    if (openTabs.includes(`s/${s.sid}`)) {
-      s.info = { ...s.info, live: false, running: false, verified: false, busy: false }
-      continue
-    }
-    sessions.delete(s.sid)
-    s.view.remove()
-  }
-  schedulePaint()
 }
 
 function onEvent(ev: StreamEvent) {
@@ -466,128 +240,6 @@ function onEvent(ev: StreamEvent) {
   applySession(s, ev)
 }
 
-function applySession(s: Session, ev: SessionEvent) {
-  s.lastAt = typeof ev.ts === 'number' && Number.isFinite(ev.ts) && ev.ts > 0 ? Math.min(ev.ts, Date.now()) : Date.now()
-  s.view.who = agentWord(s.info.agent)
-  const attach = isClaude(s.info) && /^[0-9a-f]{8}$/.test(s.info.id || '') ? attachCommand(s.info.id!, s.info.box ?? '') : ''
-  const card = ev.type === 'plan' || ev.type === 'permission' || ev.type === 'ask' ? { ...ev, attach, who: agentWord(s.info.agent) } : ev
-  s.view.apply(card, controllable(s))
-  switch (ev.type) {
-    case 'workflow':
-      s.workflow = ev
-      s.workflowSeq++
-      s.intent = ev.intent ? { found: true, title: ev.intent.title, status: ev.intent.status, agreed: ev.intent.agreed, assumed: ev.intent.assumed, open: ev.intent.open, built: ev.intent.built } : null
-      break
-    case 'planfile':
-      if (typeof ev.path === 'string' && typeof ev.text === 'string' && typeof ev.hash === 'string' && /^[0-9a-f]{64}$/.test(ev.hash)) s.planfile = ev
-      break
-    case 'agents':
-      s.agents = Array.isArray(ev.agents) ? ev.agents.filter(a => isRecord(a) && typeof a.id === 'string' && typeof a.type === 'string' && typeof a.status === 'string' && (a.description === undefined || typeof a.description === 'string')) : []
-      break
-    case 'intent':
-      s.intent = ev.record
-      break
-    case 'audit':
-    case 'refusal':
-      s.auditSeen++
-      break
-    case 'catalog':
-      s.catalog = { commands: entries(ev.commands), agents: entries(ev.agents) }
-      break
-    case 'busy':
-      s.busy = true
-      break
-    case 'idle':
-      s.busy = false
-      s.step = ''
-      break
-    case 'prompt':
-      s.step = typeof ev.text === 'string' ? stepOf(ev.text) : ''
-      began(s)
-      break
-    case 'command': {
-      const kind = ev.approval === 'requirements' || ev.approval === 'plan' ? ev.approval : null
-      const hash = kind && s.asked[kind]?.hash
-      if (kind && ev.failed && hash && typeof ev.text === 'string') s.refused[kind] = { hash, text: ev.text }
-      if (kind) delete s.asked[kind]
-      break
-    }
-    case 'tool':
-      if (ev.tool === 'Skill' && typeof ev.summary === 'string' && stepOf(ev.summary)) s.step = stepOf(ev.summary)
-      began(s)
-      break
-    case 'compact':
-      s.compacting = ev.state === 'start' ? (ev.trigger === 'auto' ? 'Claude Code is compacting the conversation on its own…' : 'Compacting the conversation…') : ''
-      break
-    case 'usage':
-      if (typeof ev.total === 'number' && ev.total >= 0) s.total = ev.total
-      if (typeof ev.costUsd === 'number' && ev.costUsd >= 0 && Number.isFinite(ev.costUsd)) s.cost = ev.costUsd
-      break
-    case 'control':
-      s.info = { ...s.info, controlled: ev.on === true }
-      s.view.refreshCards(controllable(s))
-      break
-    case 'mode':
-      s.info = { ...s.info, mode: typeof ev.mode === 'string' ? ev.mode : '' }
-      break
-    case 'context':
-      const known = (ev.level === 'warn' || ev.level === 'stop') && typeof ev.tokens === 'number' && Number.isFinite(ev.tokens)
-      s.context = known ? { tokens: ev.tokens, level: ev.level } : null
-      if (!known) markCheckpoint(s.sid, '')
-      break
-  }
-  schedulePaint()
-}
-
-function entries(list: unknown): CatalogEntry[] {
-  return Array.isArray(list) ? (list as unknown[]).filter((e): e is CatalogEntry => isRecord(e) && typeof e.name === 'string' && typeof e.description === 'string').map(e => ({ name: e.name, description: e.description })) : []
-}
-
-function flushPaint() {
-  if (!paintQueued) return
-  paintQueued = false
-  paint()
-}
-
-function schedulePaint() {
-  if (paintQueued) return
-  paintQueued = true
-  requestAnimationFrame(flushPaint)
-  if (document.hidden) setTimeout(flushPaint, 100)
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && paintQueued) setTimeout(flushPaint, 100)
-})
-
-let openTabs = ['overview']
-let recent: string[] = []
-const scrolls = new Map<string, number>()
-const spots = new Map<string, Spot | null>()
-
-function go(key: string) {
-  if (key === current.key) return
-  scrolls.set(current.key, scroller.scrollTop)
-  const leaving = current()
-  if (leaving) spots.set(current.key, leaving.view.spot())
-  const from = current.key
-  current.key = key
-  swapDraft(from, key)
-  armed.clear()
-  if (!openTabs.includes(key)) openTabs = [...openTabs, key]
-  recent = [key, ...recent.filter(k => k !== key)]
-  if (key !== focusFile) focusFile = ''
-  if (key.startsWith('f:')) loadFile(key)
-  paint()
-  grow()
-  const view = current()?.view
-  scroller.scrollTop = view?.pinned ? scroller.scrollHeight : scrolls.get(key) ?? (key.startsWith('s/') ? scroller.scrollHeight : 0)
-  if (view && !view.pinned) view.restore(spots.get(key))
-  paintJump()
-  settleFocus()
-}
-
-const TABS_KEY = 'sf-tabs'
 const SAVED_KEY = 'sf-checkpointed'
 const checkpointed = new Map<string, string>()
 try {
@@ -607,66 +259,12 @@ function saveCheckpoints() {
     sessionStorage.setItem(SAVED_KEY, JSON.stringify(Object.fromEntries(checkpointed)))
   } catch {}
 }
-const MAX_TAB_LINE = 10_000_000
-const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
-
-function saveTabs() {
-  try {
-    const lines = Object.fromEntries(openTabs.flatMap(k => {
-      const line = k.startsWith('f:') ? files.get(k)?.line ?? 0 : 0
-      return line > 0 ? [[k, line]] : []
-    }))
-    sessionStorage.setItem(TABS_KEY, JSON.stringify({ tabs: openTabs.slice(1), active: current.key, lines }))
-  } catch {}
-}
-
-function restoreTabs() {
-  let saved: { tabs?: unknown; active?: unknown; lines?: unknown } | null = null
-  try {
-    saved = JSON.parse(sessionStorage.getItem(TABS_KEY) || 'null')
-  } catch {}
-  const tabs = Array.isArray(saved?.tabs) ? [...new Set((saved.tabs as unknown[]).filter((k): k is string => typeof k === 'string' && TAB_KEY.test(k)))].slice(0, 50) : []
-  const lines = saved?.lines && typeof saved.lines === 'object' ? (saved.lines as Record<string, unknown>) : {}
-  for (const k of tabs) {
-    if (!k.startsWith('f:')) continue
-    const { path, commit } = fileKey(k)
-    const line = lines[k]
-    const at = typeof line === 'number' && Number.isInteger(line) && line > 0 && line <= MAX_TAB_LINE ? line : 0
-    files.set(k, { path, ...(commit ? { commit } : {}), ...(at ? { line: at } : {}) })
-  }
-  openTabs = ['overview', ...tabs]
-  const active = typeof saved?.active === 'string' && openTabs.includes(saved.active) ? saved.active : 'overview'
-  current.key = active
-  recent = [active, ...[...openTabs].reverse().filter(k => k !== active && k !== 'overview')].filter(k => k !== 'overview')
-}
-
-function pruneTabs() {
-  const sidOf = (k: string) => (k.startsWith('s/') || k.startsWith('c:') ? k.slice(2) : k.startsWith('f:') ? k.slice(2, k.indexOf(':', 2)) : '')
-  for (const k of openTabs) if (sidOf(k) && !sessions.has(sidOf(k))) closeTab(k)
-  if (current.key.startsWith('f:') && !files.get(current.key)?.text) loadFile(current.key)
-}
-
-function closeTab(key: string) {
-  if (key === 'overview') return
-  openTabs = openTabs.filter(k => k !== key)
-  files.delete(key)
-  recent = recent.filter(k => k !== key && openTabs.includes(k))
-  scrolls.delete(key)
-  dropDraft(key)
-  const owner = key.startsWith('c:') ? `s/${key.slice(2)}` : key.startsWith('f:') ? `s/${key.slice(2, key.indexOf(':', 2))}` : ''
-  if (key === current.key) go(owner && openTabs.includes(owner) ? owner : recent[0] || 'overview')
-  else paint()
-}
-
-function waitingOf(s: Session) {
-  return s.info.live ? s.view.waiting : []
-}
 
 function paint() {
   const s = current()
   setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
   setLimitsSession(s?.info.verified ? s.sid : '')
-  if (current.key.startsWith('s/') && !openTabs.includes(current.key)) openTabs = [...openTabs, current.key]
+  if (current.key.startsWith('s/')) keepTab(current.key)
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
   const shown = list.map(x => ({ ...x.info, busy: working(x), waiting: waitingOf(x) }))
@@ -694,12 +292,7 @@ function paint() {
   void loadProjects()
   byId('live-view').hidden = !s
   byId('composer').hidden = !s
-  byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').view = s?.info.project && s.info.verified ? { repo: s.info.project, disabled: !state.connected } : null
-  const box = byId<HTMLTextAreaElement>('text')
-  const blocked = !!s && waitingOf(s).length > 0
-  if (box.disabled !== blocked) box.disabled = blocked
-  const placeholder = blocked ? 'Answer the card above to keep going' : 'Type a message and press Enter'
-  if (box.placeholder !== placeholder) box.placeholder = placeholder
+  composer.paint(s, !!s && waitingOf(s).length > 0)
   const picking = !!s && pickingSize(s)
   byId('size-pick').hidden = !picking
   if (picking) paintTeamPicks(s)
@@ -731,8 +324,7 @@ function paint() {
   }
   if (s) {
     const st = sessionState({ ...s.info, busy: working(s), needs: waitingOf(s).length })
-    byId('state').textContent = state.connected ? visible(label(s.info)) : 'Disconnected'
-    byId('title').textContent = state.connected ? [st.word, s.info.mode ? `${modeLabel(s.info.mode)} mode` : 'mode unknown', s.sid.slice(0, 8)].join(' · ') : state.note
+    barStatus(state.connected ? [st.word, s.info.mode ? `${modeLabel(s.info.mode)} mode` : 'mode unknown', s.sid.slice(0, 8)].join(' · ') : state.note)
     byId('title').title = s.info.cwd || ''
     paintCrumbs(s)
     byId('usage').textContent = usageText(s)
@@ -755,7 +347,7 @@ function paint() {
       const stage = b.closest<HTMLElement>('li[data-stage]')?.dataset.stage
       const step = b.id === 'tasks-start' ? 'tasks' : stage === 'define' || stage === 'plan' ? stage : ''
       const hold = step && s.gate?.holds ? (s.gate.holds[step] ?? '') : ''
-      b.setAttribute('aria-disabled', String(!!off || !!hold))
+      b.setAttribute('aria-disabled', String(!!off || !!hold || b.getAttribute('aria-busy') === 'true'))
       if (off) b.setAttribute('aria-describedby', 'path-busy')
       else if (hold) b.setAttribute('aria-describedby', `${step === 'tasks' ? 'plan' : step}-detail`)
       else b.removeAttribute('aria-describedby')
@@ -797,8 +389,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
     byId<HTMLElementTagNameMap['sf-split']>('split').view = null
     byId<HTMLElementTagNameMap['sf-compare']>('compare').view = null
-    byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : current.key.startsWith('c:') ? 'Changes' : 'Welcome') : 'Disconnected'
-    byId('title').textContent = state.connected ? '' : state.note
+    barStatus(state.connected ? '' : state.note)
     byId('usage').textContent = ''
     byId('stop').hidden = true
     byId('working').hidden = true
@@ -835,7 +426,7 @@ function paintChangesTab() {
 
 function paintControl(s: Session) {
   const i = s.info
-  const button = byId('control-button')
+  const button = byId<HTMLButtonElement>('control-button')
   let text = ''
   let action = ''
   const claims = i.disputed ? (i.claims || []).filter(c => typeof c === 'string').map(visible) : []
@@ -880,6 +471,7 @@ function paintControl(s: Session) {
   byId('foot-text').classList.toggle('bad', !notice && i.mode === 'bypassPermissions')
   byId('control-text').textContent = text
   button.dataset.action = action === 'Wake it' ? 'wake' : action === 'End both connections' ? 'release' : 'control'
+  busy(button, controlBusy.has(s.sid))
   const labels = [action, button.dataset.action === 'control' && !i.controlled ? 'Confirm control' : '']
   const shown = labels[1] && armed.has(`${s.sid}:control`) ? 1 : 0
   ;[...button.children].forEach((span, n) => {
@@ -897,8 +489,8 @@ function paintManage(s: Session) {
   box.hidden = !managed
   if (!managed) return
   const removal = removals.get(s.sid)
-  const button = byId('manage-button')
-  const force = byId('force-button')
+  const button = byId<HTMLButtonElement>('manage-button')
+  const force = byId<HTMLButtonElement>('force-button')
   const stop = !!i.running
   let pending = busyManage.get(s.sid)
   if (pending && (Date.now() - pending.at > 30000 || (pending.action === 'stop' && !stop))) {
@@ -906,16 +498,18 @@ function paintManage(s: Session) {
     pending = undefined
   }
   button.dataset.action = stop ? 'stop' : 'remove'
-  const labels = stop ? ['Stop session', 'Confirm stop', 'Stopping…'] : ['Delete session', 'Confirm delete', 'Deleting…']
-  const shown = pending ? 2 : armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
+  const labels = stop ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
+  const shown = armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
+  busy(button, !!pending && !pending.force)
+  busy(force, !!pending?.force)
   ;[...button.children].forEach((span, i) => {
     span.textContent = labels[i] ?? ''
     span.classList.toggle('off', i !== shown)
   })
   button.classList.toggle('danger', shown === 1)
   force.classList.toggle('danger', armed.has(`${s.sid}:force`))
-  ;(button as HTMLButtonElement).disabled = !!pending
-  ;(force as HTMLButtonElement).disabled = !!pending
+  button.disabled = !!pending?.force
+  force.disabled = !!pending && !pending.force
   const note = shown === 1 ? (stop ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.') : armed.has(`${s.sid}:force`) && removal?.offer ? `Press the button again to ${removal.offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${removal.offer.value}.` : removal?.message || ''
   if (note) {
     byId('foot-text').textContent = note
@@ -925,18 +519,7 @@ function paintManage(s: Session) {
   const offer = !stop && removal?.offer
   force.hidden = !offer
   byId('manage-cancel').hidden = !!pending || (shown !== 1 && !(offer && armed.has(`${s.sid}:force`)))
-  if (offer) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
-}
-
-function confirmed(key: string, prompt = ''): boolean {
-  if (armed.delete(key)) {
-    if (prompt) say('')
-    return true
-  }
-  armed.add(key)
-  if (prompt) say(prompt)
-  schedulePaint()
-  return false
+  if (offer && !pending?.force) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
 }
 
 function paintCheckpoint(s: Session) {
@@ -979,25 +562,6 @@ function forgetSession(sid: string) {
   markCheckpoint(sid, '')
   s.view.remove()
   closeTab(`s/${sid}`)
-}
-
-async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
-  busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now() })
-  schedulePaint()
-  setTimeout(schedulePaint, 30500)
-  const { ok, body: out } = await reply(await api(path, { sid: s.sid, ...body }).catch(() => null))
-  if (!ok || path !== '/api/stop-session') busyManage.delete(s.sid)
-  if (ok) {
-    removals.delete(s.sid)
-    if (path === '/api/remove-session') forgetSession(s.sid)
-    schedulePaint()
-    return ''
-  }
-  const offer = out.offer && typeof out.offer === 'object' ? (out.offer as { flag: string; value: string }) : null
-  const message = typeof out.message === 'string' ? out.message : "That didn't work."
-  removals.set(s.sid, { message, offer })
-  schedulePaint()
-  return offer ? `${message} Open the session to choose what to do with it.` : message
 }
 
 function reviewsOf(s: Session): ReviewsView | null {
@@ -1052,141 +616,6 @@ function forgePanelOf(s: Session): ForgePanelView | null {
   const i = s.info
   if (!i.verified || !Array.isArray(i.forge) || !i.forge.length) return null
   return { forge: i.forge, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
-}
-
-const forgeAsking = new Set<string>()
-
-async function answerForge(s: Session | null, answer: { card: string; approve: boolean; draft?: boolean; confirmed?: boolean }) {
-  if (!s || forgeAsking.has(s.sid)) return
-  forgeAsking.add(s.sid)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/forge-answer', { sid: s.sid, ...answer }).catch(() => null))
-  forgeAsking.delete(s.sid)
-  schedulePaint()
-  const comment = s.info.forge?.find(f => f.card === answer.card)?.kind === 'comment'
-  if (!ok) toast({ id: `forge-answer:${s.sid}`, title: !answer.approve ? "It wasn't denied." : comment ? "It wasn't posted." : "It wasn't opened.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) {
-  if (!s) return
-  const { ok, body: said } = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
-  if (!ok) return void toast({ id: `${route}:${s.sid}`, title, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad' })
-  toast({ title: done, tone: 'ok' })
-  s.auditSeen++
-  void loadGate(s, true)
-  schedulePaint()
-}
-
-function pushedHead(s: Session): boolean {
-  const p = s.info.push
-  const head = s.gate?.head ?? ''
-  return !!p && !p.running && !pushAsking.has(s.sid) && (p.result === 'pushed' || p.result === 'up-to-date') && !!head && p.commit === head
-}
-
-function pushOutcome(s: Session) {
-  const since = pushWatched.get(s.sid)
-  const p = s.info.push
-  if (since === undefined || !p || p.running || pushAsking.has(s.sid) || p.at === since) return
-  pushWatched.delete(s.sid)
-  const said = PUSH_SAID[p.result]
-  if (said) {
-    pushSaid.set(s.sid, said)
-    setTimeout(() => {
-      if (pushSaid.get(s.sid) !== said) return
-      pushSaid.delete(s.sid)
-      schedulePaint()
-    }, 6000)
-  }
-  requestAnimationFrame(() => {
-    if (current() !== s) return
-    const panel = byId('push-panel')
-    const target = panel.querySelector<HTMLElement>('.push-card') ?? panel.querySelector<HTMLElement>('#push-result')
-    if (!target) return
-    target.scrollIntoView({ block: 'nearest' })
-    const lost = !document.activeElement || document.activeElement === document.body
-    if (lost) panel.querySelector<HTMLElement>('#push-result')?.focus({ preventScroll: true })
-  })
-}
-
-async function startPush(s: Session | null) {
-  if (!s || pushAsking.has(s.sid) || s.info.push?.running || pushedHead(s)) return
-  pushAsking.add(s.sid)
-  pushSaid.delete(s.sid)
-  pushWatched.set(s.sid, s.info.push?.at ?? 0)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/push', { sid: s.sid }).catch(() => null))
-  pushAsking.delete(s.sid)
-  if (!ok) pushWatched.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `push:${s.sid}`, title: "The push didn't start.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-async function answerPush(s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }) {
-  if (!s || answerAsking.has(s.sid)) return
-  answerAsking.add(s.sid)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/push-answer', { sid: s.sid, ...answer }).catch(() => null))
-  answerAsking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `push-answer:${s.sid}`, title: answer.allow ? "The push wasn't allowed." : "The push wasn't denied.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-async function startReview(s: Session | null, all: boolean) {
-  if (!s || reviewAsking.has(s.sid) || s.info.review?.running) return
-  reviewAsking.add(s.sid)
-  schedulePaint()
-  const asked = all ? { sid: s.sid, all: true } : { sid: s.sid }
-  let consent: Consent = {}
-  let answer = await reply(await api('/api/review', asked).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the review')
-    if (!more?.costOk) break
-    consent = { costOk: true }
-    answer = await reply(await api('/api/review', { ...asked, ...consent }).catch(() => null))
-  }
-  const { ok, body } = answer
-  reviewAsking.delete(s.sid)
-  schedulePaint()
-  const message = typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.'
-  if (!ok && body.error === 'reviewed') toast({ id: `review:${s.sid}`, title: 'Every review is done.', description: message, tone: 'info' })
-  else if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined })
-}
-
-const testAsking = new Set<string>()
-
-async function startTestList(s: Session | null) {
-  if (!s || testAsking.has(s.sid) || s.info.review?.testList?.state === 'running') return
-  testAsking.add(s.sid)
-  schedulePaint()
-  let answer = await reply(await api('/api/test-list', { sid: s.sid }).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the manual test list')
-    if (!more?.costOk) break
-    answer = await reply(await api('/api/test-list', { sid: s.sid, costOk: true }).catch(() => null))
-  }
-  const { ok, body } = answer
-  testAsking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `test-list:${s.sid}`, title: "The test list wasn't started.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad', timeout: body.needs ? 0 : undefined })
-}
-
-const explainAsking = new Set<string>()
-const planAsking = new Set<string>()
-
-async function startAside(s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) {
-  if (!s || asking.has(s.sid) || running) return
-  asking.add(s.sid)
-  schedulePaint()
-  let answer = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", what)
-    if (!more?.costOk) break
-    answer = await reply(await api(route, { sid: s.sid, ...body, costOk: true }).catch(() => null))
-  }
-  const { ok, body: said } = answer
-  asking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad', timeout: said.needs ? 0 : undefined })
 }
 
 function paintAgents(s: Session) {
@@ -1361,7 +790,7 @@ async function openTeam() {
     if (s) paintTeam(s, s.gate ?? null)
     return
   }
-  await teamOp('read')
+  await whileBusy(byId<HTMLButtonElement>('team-open'), () => teamOp('read'))
 }
 
 function paintExceptions(s: Session) {
@@ -1390,7 +819,7 @@ function paintExceptions(s: Session) {
     const kind = e.kind === 'push' ? (e.personReason && e.result === 'pushed' ? 'allow-push' : '') : e.kind
     const by = e.by === 'agent' ? ', asked by the agent' : e.by === 'agent, after reviews' ? ', asked by the agent, after its reviews' : e.by === 'page' ? ', from the page' : e.by === 'engine' ? ', by the engine' : e.by === 'engine, at start' ? ', by the engine at start' : ''
     const outcome = kind && Object.hasOwn(OUTCOME, e.result) ? `, ${OUTCOME[e.result]}` : ''
-    const what = kind ? `${EXCEPTION[kind] ?? visible(kind)}${outcome}${e.reviewer ? ` (${visible(e.reviewer)}${e.verdict ? `: ${visible(e.verdict)}` : ''})` : e.path ? ` (${visible(e.path)})` : ''}` : HISTORY[e.result] ?? `Push ${visible(e.result)}`
+    const what = kind ? `${Object.hasOwn(EXCEPTION, kind) ? EXCEPTION[kind] : visible(kind)}${outcome}${e.reviewer ? ` (${visible(e.reviewer)}${e.verdict ? `: ${visible(e.verdict)}` : ''})` : e.path ? ` (${visible(e.path)})` : ''}` : Object.hasOwn(HISTORY, e.result) ? HISTORY[e.result] : `Push ${visible(e.result)}`
     const said = kind ? visible(e.personReason || e.reason) : e.result === 'held' ? `${e.missing?.length ?? 0} missing` : e.result === 'pushed' || e.result === 'up-to-date' ? '' : e.result === 'denied' && e.personReason ? `“${visible(e.personReason)}”` : visible(e.reason)
     const li = el('li', kind ? 'warn' : '')
     const at = el('time', 'history-time', e.time ? when(e.time) : '')
@@ -1420,7 +849,9 @@ function labelOfSid(sid: string): string {
   return x ? label(x.info) : ''
 }
 
-function projectOf(cwd: string): Project | null {
+function projectOf(info: SessionInfo): Project | null {
+  if (info.project) return projectList.find(p => p.name === info.project) ?? null
+  const cwd = info.cwd || ''
   return projectList.filter(p => cwd === p.path || cwd.startsWith(`${p.path}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null
 }
 
@@ -1479,17 +910,6 @@ async function loadProjects(force = false) {
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
 }
 
-const files = new Map<string, FileView>()
-const FILE_ERRORS: Record<string, string> = {
-  outside: "Only files inside this session's project open here.",
-  secret: "This file can hold secrets, so the page doesn't show it.",
-  large: 'This file is over 512 KB, too large to show here.',
-  binary: "This isn't a text file.",
-  missing: "This file isn't there anymore.",
-  link: "This path goes through a symbolic link, which the page doesn't follow.",
-  commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
-}
-
 function twinRole(i: SessionInfo): string {
   return i.lineage?.handedTo ? 'earlier' : i.lineage?.earlier?.length ? 'took over' : ''
 }
@@ -1510,77 +930,6 @@ function sessionTwin(x: Session): { description: string; short: string } {
   if (twins.some(y => twinWords(y.info) === words)) return { description: [words, sid].filter(Boolean).join(', '), short: sid }
   const role = twinRole(x.info)
   return { description: words, short: role && twins.every(y => twinRole(y.info) !== role) ? role : words }
-}
-
-function fileLabel(key: string): string {
-  const path = files.get(key)?.path ?? key
-  const commit = files.get(key)?.commit
-  const name = baseName(path)
-  const twin = openTabs.some(k => k !== key && k.startsWith('f:') && baseName(files.get(k)?.path ?? k) === name)
-  const parts = path.split('/').filter(Boolean)
-  const label = twin && parts.length > 1 ? `${name} · ${parts[parts.length - 2]}` : name
-  return commit ? `${label} @ ${shortSha(commit)}` : label
-}
-
-function fileKey(key: string): { sid: string; path: string; commit: string } {
-  const at = key.indexOf(':', 2)
-  const rest = key.slice(at + 1)
-  const cut = rest.indexOf('\0')
-  return { sid: key.slice(2, at), path: cut < 0 ? rest : rest.slice(0, cut), commit: cut < 0 ? '' : rest.slice(cut + 1) }
-}
-
-const fileLoads = new Set<string>()
-let focusFile = ''
-
-function loadFile(key: string) {
-  const { sid, path, commit } = fileKey(key)
-  if (fileLoads.has(key) || !sessions.has(sid)) return
-  fileLoads.add(key)
-  void api('/api/file', commit ? { sid, path, commit } : { sid, path }).catch(() => null).then(async res => {
-    const body = res ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null
-    fileLoads.delete(key)
-    if (!openTabs.includes(key)) return
-    const text = res?.ok && typeof body?.text === 'string' ? body.text : undefined
-    const shown = typeof body?.path === 'string' ? body.path : path
-    const old = files.get(key)
-    if (text !== undefined && old?.text === text && old.path === shown) return
-    const at = { ...(commit ? { commit } : {}), ...(old?.line ? { line: old.line } : {}) }
-    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
-    const file = byId<HTMLElementTagNameMap['sf-file']>('file')
-    const refocus = current.key === key && (focusFile === key || file.contains(document.activeElement) || document.activeElement === document.body)
-    paint()
-    if (refocus) file.focusContent()
-  })
-}
-
-function openFile(sid: string, path: string, commit = '', line = 0) {
-  const key = commit ? `f:${sid}:${path}\0${commit}` : `f:${sid}:${path}`
-  const old = files.get(key)
-  if (!old) files.set(key, { path, ...(commit ? { commit } : {}), ...(line ? { line } : {}) })
-  else if (commit) {
-    const next: FileView = { ...old }
-    if (line) next.line = line
-    else delete next.line
-    files.set(key, next)
-  }
-  focusFile = key
-  if (key === current.key) paint()
-  go(key)
-  byId<HTMLElementTagNameMap['sf-file']>('file').focusContent()
-}
-let docsAt = 0
-
-async function loadDocs() {
-  const docs = byId<HTMLElementTagNameMap['sf-docs']>('docs')
-  if (docs.loaded || !state.connected || Date.now() - docsAt < 10000) return
-  docsAt = Date.now()
-  const { ok, body } = await reply(await api('/api/docs', {}).catch(() => null))
-  docs.text = ok && typeof body.text === 'string' ? body.text : ''
-}
-
-function openDocs(id: string, back: { view: string; label: string } | null = null) {
-  go('docs')
-  byId<HTMLElementTagNameMap['sf-docs']>('docs').show(id, back)
 }
 
 async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -1625,240 +974,6 @@ async function markViewed(s: Session | null, d: { path: string; blob: string; vi
   toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
-function say(message: string) {
-  byId('hint').textContent = message
-  if (message && document.body.classList.contains('side-full')) toast({ id: 'say', title: message, tone: 'info' })
-}
-
-async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = []) {
-  if (!s) return false
-  const asleep = sleeping(s)
-  if (asleep && !s.info.controlled) {
-    say('Wake the session first: it was read-only on this page when it stopped.')
-    return false
-  }
-  if (asleep && (images.length || files.length)) {
-    say('Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu.')
-    return false
-  }
-  if (!asleep && !controllable(s)) {
-    say('This session is read-only on this page.')
-    return false
-  }
-  if (text.startsWith('!')) {
-    const line = text.slice(1).trim()
-    toast({ id: 'shell-line', title: "The page doesn't run shell lines.", description: `It sends messages to ${agentWord(s.info.agent)}. Ask it to run the command, or run it yourself in the agent container.`, tone: 'warn', ...(line ? { action: { label: 'Copy the command', run: () => void copy(line) } } : {}) })
-    return false
-  }
-  if (/^\/[^\s/]+(?:\s|$)/.test(text) && (images.length || files.length)) {
-    say("A command can't carry images or files. Send them in a message of their own.")
-    return false
-  }
-  const bypass = s.info.mode === 'bypassPermissions'
-  if (bypass && !pressed && !confirmed(`${s.sid}:bypass`, 'This session runs with bypassPermissions: Claude runs every tool without asking. Press Enter again to send anyway.')) return false
-  say('')
-  const body: { sid: string; text: string; images?: string[]; files?: string[]; confirm?: boolean } = { sid: s.sid, text }
-  if (images.length) body.images = images
-  if (files.length) body.files = files
-  if (bypass) body.confirm = true
-  const name = starterNames.get(s.info.agent ?? '') ?? 'The agent'
-  const answer = asleep ? await withConsent(name, 'the session', consent => api('/api/message', { ...body, ...consent })) : await reply(await api('/api/message', body).catch(() => null))
-  if (!answer.ok) {
-    const why = answer.body.message
-    say(typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.')
-    const action = identityAction(answer.body)
-    if (action) toast({ id: 'identity-needed', title: 'The session didn’t wake.', description: 'Set the name and email agents commit with first.', tone: 'bad', timeout: 0, action })
-    return false
-  }
-  if (asleep) {
-    say(s.info.live ? '' : `Waking the session. The message goes to ${agentWord(s.info.agent)} once it reconnects, if that happens within 2 minutes.`)
-  }
-  if (s.context && /^\/knackpack:checkpoint(?:\s|$)/.test(text)) {
-    markCheckpoint(s.sid, s.context.level)
-    schedulePaint()
-  }
-  return true
-}
-
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-const MAX_SIDE = 1568
-const MAX_IMAGE = 2.5 * 1024 * 1024
-const MAX_DROP = 10 * 1024 * 1024
-
-interface Draft {
-  text: string
-  images: { blob: Blob; url: string }[]
-  files: File[]
-}
-const drafts = new Map<string, Draft>()
-
-function draftOf(key: string): Draft {
-  let d = drafts.get(key)
-  if (!d) {
-    d = { text: '', images: [], files: [] }
-    drafts.set(key, d)
-  }
-  return d
-}
-
-function dropDraft(key: string) {
-  for (const item of drafts.get(key)?.images ?? []) URL.revokeObjectURL(item.url)
-  drafts.delete(key)
-}
-
-function swapDraft(from: string, to: string) {
-  if (from.startsWith('s/')) {
-    const d = draftOf(from)
-    d.text = text.value
-    if (!d.text && !d.images.length && !d.files.length) drafts.delete(from)
-  }
-  text.value = drafts.get(to)?.text ?? ''
-  paintAttached()
-}
-
-async function shrink(file: File): Promise<Blob | null> {
-  if (file.type === 'image/gif') return file
-  const bitmap = await createImageBitmap(file).catch(() => null)
-  if (!bitmap) return null
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height))
-  if (scale === 1 && file.size <= MAX_IMAGE) {
-    bitmap.close()
-    return file
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  bitmap.close()
-  const encode = (type: string, quality: number) => new Promise<Blob | null>(resolve => canvas.toBlob(resolve, type, quality))
-  const blob = await encode(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9)
-  return blob && blob.size > MAX_IMAGE ? encode('image/jpeg', 0.85) : blob
-}
-
-function paintAttached() {
-  const attached = drafts.get(current.key)?.images ?? []
-  const files = drafts.get(current.key)?.files ?? []
-  const box = byId('attachments')
-  box.replaceChildren()
-  for (const file of files) {
-    const chip = el('div', 'file-chip')
-    chip.title = `${agentWord(current()?.info.agent)} gets a read-only copy of ${file.name}, deleted when the session ends. Changes don't reach your file.`
-    const remove = button('×', 'ghost', () => {
-      files.splice(files.indexOf(file), 1)
-      paintAttached()
-      text.focus()
-    })
-    remove.setAttribute('aria-label', `Remove ${file.name}`)
-    chip.append(icon('file'), el('span', 'file-chip-name', file.name), el('span', 'file-chip-note', 'copy'), remove)
-    box.append(chip)
-  }
-  attached.forEach((item, i) => {
-    const figure = el('figure', 'thumb')
-    const img = el('img')
-    img.src = item.url
-    img.alt = `Pasted image ${i + 1}`
-    const remove = button('×', 'ghost', () => {
-      URL.revokeObjectURL(item.url)
-      attached.splice(attached.indexOf(item), 1)
-      paintAttached()
-      text.focus()
-    })
-    remove.setAttribute('aria-label', `Remove image ${i + 1}`)
-    figure.append(img, remove)
-    box.append(figure)
-  })
-  box.hidden = attached.length === 0 && files.length === 0
-}
-
-async function sha256(data: ArrayBuffer): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
-function mention(key: string, path: string) {
-  const token = `@${path} `
-  if (key !== current.key) {
-    const d = draftOf(key)
-    d.text = `${d.text}${d.text && !/\s$/.test(d.text) ? ' ' : ''}${token}`
-    return
-  }
-  const start = text.selectionStart
-  const before = text.value.slice(0, start)
-  text.setRangeText(`${before && !/\s$/.test(before) ? ' ' : ''}${token}`, start, text.selectionEnd, 'end')
-  grow()
-}
-
-async function attachFile(file: File, key: string, sid: string) {
-  if (file.size > MAX_DROP) return say(`${file.name} is larger than 10 MB. Type its path with @ instead.`)
-  const data = await file.arrayBuffer().catch(() => null)
-  if (!data) return say(`The page couldn't read ${file.name}. For a folder, type its path with @ instead.`)
-  const res = await api('/api/file-match', { sid, name: file.name, size: file.size, sha256: await sha256(data) }).catch(() => null)
-  const found: { path?: unknown } | null = res && res.ok ? await res.json().catch(() => null) : null
-  if (typeof found?.path === 'string' && found.path) return mention(key, found.path)
-  const d = draftOf(key)
-  if (d.files.length >= 4) return say('You can attach up to 4 files to a message.')
-  d.files.push(file)
-  toast({ id: `copy:${file.name}`, title: `${file.name} isn’t in this project`, description: `${agentWord(sessions.get(sid)?.info.agent)} gets a read-only copy, deleted when the session ends. Changes don’t reach your file.`, tone: 'info', timeout: 8000 })
-}
-
-async function attach(files: File[]) {
-  const key = current.key
-  const attached = draftOf(key).images
-  const sid = current()?.sid
-  for (const file of files) {
-    if (!IMAGE_TYPES.includes(file.type)) {
-      if (sid) await attachFile(file, key, sid)
-      continue
-    }
-    if (attached.length >= 4) {
-      say('You can attach up to 4 images to a message.')
-      break
-    }
-    const blob = await shrink(file)
-    if (!blob || blob.size > MAX_IMAGE || !IMAGE_TYPES.includes(blob.type)) {
-      say('That image is too large to send, or not one the page can read.')
-      continue
-    }
-    if (drafts.get(key)?.images !== attached) break
-    attached.push({ blob, url: URL.createObjectURL(blob) })
-  }
-  if (key === current.key) {
-    paintAttached()
-    text.focus()
-  }
-}
-
-const SIGN_IN_HINT = 'Press Sign in to use the page in this tab.'
-let fresh = true
-
-function showGone(head: string, detail: string, offerSignIn: boolean, busy = false) {
-  byId('gone').textContent = head
-  byId('gone-detail').textContent = detail
-  byId('gone-progress').hidden = !busy
-  byId('signin').hidden = !offerSignIn
-  document.body.classList.add('out')
-}
-
-let generation = 0
-let reading: ReadableStreamDefaultReader<string> | null = null
-
-function signOut(head: string, detail: string) {
-  generation++
-  void reading?.cancel().catch(() => undefined)
-  reading = null
-  clearTimeout(lost)
-  lost = 0
-  forget()
-  state.connected = false
-  state.stream = ''
-  state.note = head
-  for (const s of sessions.values()) s.view.remove()
-  sessions.clear()
-  showGone(head, detail, true)
-  paint()
-}
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
 async function markSignIn() {
   const state = await signInState(api)
   if (!state) return
@@ -1881,74 +996,6 @@ function identityAction(body: Record<string, unknown>): Toast['action'] {
 async function markIdentity() {
   commitIdentity = await identityState(api)
   schedulePaint()
-}
-
-async function restarted(): Promise<boolean> {
-  const res = await fetch(import.meta.url, { cache: 'no-store' }).catch(() => null)
-  return res?.status === 404
-}
-
-async function connect(): Promise<void> {
-  if (!signedIn()) return signOut('You’re signed out', `The engine didn’t answer. Check that it’s running (${composeCommand('ps')}), then press Sign in.`)
-  const gen = generation
-  let openedAt = 0
-  try {
-    const res = await events()
-    if (gen !== generation) return void res.body?.cancel().catch(() => undefined)
-    if (res.status === 401) {
-      forget()
-      if (!fresh && await restarted()) return location.reload()
-      if (!fresh) return signOut('You were signed out', `The page was opened in another tab, the engine restarted, or the sign-in expired. ${SIGN_IN_HINT}`)
-      fresh = false
-      await trade()
-      return gen === generation ? connect() : undefined
-    }
-    if (res.status === 403) {
-      const body: { wait?: unknown } = await res.json().catch(() => ({}))
-      showGone('Signing in…', 'This takes a few seconds.', false, true)
-      await sleep(Math.max(500, Math.min(20000, Number(body.wait) || 1000)))
-      return gen === generation ? connect() : undefined
-    }
-    if (!res.ok || !res.body) throw new Error(String(res.status))
-    fresh = false
-    clearTimeout(lost)
-    lost = 0
-    document.body.classList.remove('out')
-    state.connected = true
-    state.note = ''
-    openedAt = Date.now()
-    paint()
-    void loadUpdate()
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
-    reading = reader
-    let buf = ''
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done || gen !== generation) break
-      buf += value
-      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
-        const line = buf.slice(0, i)
-        buf = buf.slice(i + 1)
-        if (!line.trim()) continue
-        try {
-          const ev: unknown = JSON.parse(line)
-          if (isRecord(ev) && gen === generation) onEvent(ev as unknown as StreamEvent)
-        } catch {}
-      }
-    }
-  } catch {
-    state.note = 'The engine may have stopped. Retrying…'
-  }
-  if (gen !== generation) return
-  reading = null
-  if (openedAt && Date.now() - openedAt >= 30000) retry = 1000
-  state.connected = false
-  state.stream = ''
-  state.note = state.note || 'Reconnecting…'
-  paint()
-  lost ||= setTimeout(() => showGone('Disconnected from the engine', 'Retrying…', false, true), 3000)
-  setTimeout(connect, retry)
-  retry = Math.min(retry * 2, 10000)
 }
 
 byId('conversations').addEventListener('sf-answer', async e => {
@@ -1974,12 +1021,6 @@ byId('approval').addEventListener('sf-plan-review', e => {
   void startAside(s, '/api/plan-review', planAsking, s?.info.review?.planReview?.state === 'running', 'the plan review', { hash: e.detail.hash })
 })
 byId('reviews').addEventListener('sf-walkthrough-check', e => void checkStep(current(), e.detail))
-async function checkStep(s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) {
-  if (!s) return d.settle(false)
-  const { ok, body } = await reply(await api('/api/walkthrough-check', { sid: s.sid, commit: d.commit, step: d.step, done: d.done }).catch(() => null))
-  d.settle(ok)
-  if (!ok) toast({ id: `walkthrough:${s.sid}`, title: "The step wasn't checked off.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
 async function setExpect(agent: string, expect: Expect) {
   const { ok, body } = await reply(await api('/api/sign-in-expect', { agent, expect }).catch(() => null))
   if (!ok) toast({ id: `expect:${agent}`, title: "What you expect wasn't saved.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
@@ -1987,7 +1028,7 @@ async function setExpect(agent: string, expect: Expect) {
 }
 byId('reviews').addEventListener('sf-push-request', () => void startPush(current()))
 byId('push-panel').addEventListener('sf-push-answer', e => void answerPush(current(), e.detail))
-byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => send(COMMIT_ASK)))
+byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => whilePressed(() => send(COMMIT_ASK))))
 byId('forge-panel').addEventListener('sf-forge-answer', e => void answerForge(current(), e.detail))
 byId('pull-follow').addEventListener('sf-session-deleted', e => forgetSession(e.detail.sid))
 byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(current(), '/api/send-findings', e.detail, "The findings weren't sent.", 'The blocking findings were sent to the session. The push stays held.'))
@@ -2013,8 +1054,9 @@ byId('path').addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
   if (!b || b.getAttribute('aria-disabled') === 'true') return
   const command = b.dataset.command || ''
-  if (command === 'commit') return once(current(), command, () => send(COMMIT_ASK))
-  return once(current(), command, () => send(command))
+  const sent = (text: string) => whileBusy(b, () => send(text)).finally(schedulePaint)
+  if (command === 'commit') return once(current(), command, () => sent(COMMIT_ASK))
+  return once(current(), command, () => sent(command))
 })
 let teamPicks = ''
 
@@ -2038,9 +1080,9 @@ function paintTeamPicks(s: Session) {
 byId('size-pick').addEventListener('click', async e => {
   const b = (e.target as Element).closest<HTMLButtonElement>('button[data-size]')
   const s = current()
-  if (!b || !s) return
+  if (!b || !s || byId('size-pick').querySelector('button[aria-busy="true"]')) return
   const picked = b.dataset.size ?? ''
-  const res = await api('/api/size', { sid: s.sid, size: picked }).catch(() => null)
+  const res = await whileBusy(b, () => api('/api/size', { sid: s.sid, size: picked }).catch(() => null))
   if (!res || !res.ok) return say('The work type did not change. Check that the session is still running.')
   if (s.gate) s.gate = { ...s.gate, workType: picked, chosen: true }
   void loadGate(s, true)
@@ -2059,53 +1101,28 @@ byId('size').addEventListener('change', async () => {
   if (s) void loadGate(s, true)
 })
 byId('team-open').addEventListener('click', () => void openTeam())
-byId('team-approve').addEventListener('click', () => void teamOp('approve'))
-byId('team-forget').addEventListener('click', () => void teamOp('forget'))
-const ASK_WAIT_MS = 15000
-
-function waiting(asked: { hash: string; at: number } | undefined, hash: string): boolean {
-  return asked?.hash === hash && Date.now() - asked.at < ASK_WAIT_MS
-}
-
-async function notThrough(res: Response | null, title: string) {
-  if (res?.ok) return
-  const why = res ? await res.json().then((b: { message?: unknown }) => (typeof b.message === 'string' ? b.message : ''), () => '') : ''
-  toast({ title, description: why ? visible(why) : res ? 'Try again.' : 'Check that the engine is running.', tone: 'bad' })
-}
-async function approve(kind: 'requirements' | 'plan', hash: string) {
-  const s = current()
-  if (!s) return
-  s.asked[kind] = { hash, at: Date.now() }
-  delete s.refused[kind]
-  schedulePaint()
-  setTimeout(schedulePaint, ASK_WAIT_MS)
-  const doc = kind === 'plan' ? s.gate?.planDoc : s.gate?.requirements
-  const res = doc?.hash === hash ? await api(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text }).catch(() => null) : null
-  delete s.asked[kind]
-  void loadGate(s, true)
-  schedulePaint()
-  if (!res?.ok) await notThrough(res, 'The approval did not go through.')
-}
-byId('req-approval').addEventListener('sf-approve', e => void approve('requirements', e.detail.hash))
+byId('team-approve').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-approve'), () => teamOp('approve')))
+byId('team-forget').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-forget'), () => teamOp('forget')))
+byId('req-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('requirements', e.detail.hash)))
 byId('req-approval').addEventListener('sf-revise', e => {
   const s = current()
   if (!s) return
   const note = e.detail.note
-  once(s, `revise-req:${note}`, () => send(`Before going on, change the agreed requirements in this session's intent record: ${note}`, [], s).then(ok => {
+  once(s, `revise-req:${note}`, () => whilePressed(() => send(`Before going on, change the agreed requirements in this session's intent record: ${note}`, [], s).then(ok => {
     if (ok) byId<HTMLElementTagNameMap['sf-approval']>('req-approval').sent(note)
     return ok
-  }))
+  })))
 })
-byId('approval').addEventListener('sf-approve', e => void approve('plan', e.detail.hash))
+byId('approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
 byId('approval').addEventListener('sf-revise', e => {
   const s = current()
   const path = s?.gate?.planDoc?.path
   if (!s || !path) return void toast({ title: "This page doesn't know the plan's file.", description: 'Ask for the change in the conversation instead.', tone: 'warn' })
   const note = e.detail.note
-  once(s, `revise:${note}`, () => send(`Before going on, change the plan in ${path}: ${note}`, [], s).then(ok => {
+  once(s, `revise:${note}`, () => whilePressed(() => send(`Before going on, change the plan in ${path}: ${note}`, [], s).then(ok => {
     if (ok) byId<HTMLElementTagNameMap['sf-approval']>('approval').sent(note)
     return ok
-  }))
+  })))
 })
 byId('project-agents').addEventListener('sf-project-setting', async e => {
   const res = await api('/api/project', e.detail).catch(() => null)
@@ -2117,10 +1134,10 @@ byId('project-agents').addEventListener('sf-project-setting', async e => {
   await loadProjects(true)
   paint()
 })
-byId('checkpoint-button').addEventListener('click', () => once(current(), 'checkpoint', () => send('/knackpack:checkpoint')))
+byId('checkpoint-button').addEventListener('click', () => once(current(), 'checkpoint', () => whileBusy(byId<HTMLButtonElement>('checkpoint-button'), () => send('/knackpack:checkpoint'))))
 byId('stall-stop').addEventListener('click', () => {
   const s = current()
-  if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
+  if (s) void whileBusy(byId<HTMLButtonElement>('stall-stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
 })
 byId('stall-copy').addEventListener('click', () => {
   const command = byId('stall-copy').dataset.command
@@ -2170,63 +1187,6 @@ byId('menu-readonly').addEventListener('click', async () => {
   const res = await api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null)
   if (!res || !res.ok) toast({ title: 'The page could not make this session read-only.', tone: 'bad' })
 })
-async function wakeSession(s: Session) {
-  const name = starterNames.get(s.info.agent ?? '') ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/wake', { sid: s.sid, ...consent }))
-  toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs || identityAction(body) ? 0 : undefined, action: identityAction(body) })
-}
-
-async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
-  const rounds = 3
-  let approve: string | undefined
-  for (let round = 1; round <= rounds; round++) {
-    toast({ id: 'trust', title: 'Answering Claude Code’s trust question…', description: 'This takes a few seconds.', tone: 'info', timeout: 60000 })
-    const trusted = await reply(await api('/api/claude-trust', approve ? { path, approve } : { path }).catch(() => null))
-    const files = (trusted.body.needs as Needs | undefined)?.approval
-    if (trusted.ok || !files) return trusted
-    if (round === rounds) {
-      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.', tone: 'warn', timeout: 0 })
-      return null
-    }
-    const said = typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined
-    toast(approve ? { id: 'trust', title: 'The files changed since you approved them.', description: said, tone: 'warn', timeout: 0 } : { id: 'trust', title: 'Claude Code’s trust question waits for your approval.', tone: 'info', timeout: 5000 })
-    if (!(await approveTrustFiles(files, starterNames.get('claude') ?? 'Claude Code'))) {
-      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The folder stays untrusted.', tone: 'warn', timeout: 5000 })
-      return null
-    }
-    approve = files.hash
-  }
-  return null
-}
-
-async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  let consent: Consent = {}
-  let answer = await reply(await send(consent).catch(() => null))
-  for (let round = 0; !answer.ok && round < 5; round++) {
-    const needs = answer.body.needs as Needs | undefined
-    if (resumable && needs?.box) consent = { ...consent, box: needs.box }
-    if (needs?.signIn && needs.box && !needs.cost) {
-      if (!(await boxSignIn(api, needs, name))) break
-      answer = await reply(await send(consent).catch(() => null))
-      continue
-    }
-    if (needs?.trust) {
-      if (!(await askTrust(needs.trust))) break
-      const trusted = await answerTrust(needs.trust)
-      if (!trusted) break
-      toast({ id: 'trust', title: trusted.ok ? 'Claude Code now trusts this project.' : 'Claude Code’s trust question wasn’t answered.', description: !trusted.ok && typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined, tone: trusted.ok ? 'info' : 'bad', timeout: trusted.ok ? 5000 : 0 })
-      if (!trusted.ok) return trusted
-      answer = await reply(await send(consent).catch(() => null))
-      continue
-    }
-    const more = await consentFor(needs, name, what)
-    if (!more) break
-    consent = { ...consent, ...more }
-    answer = await reply(await send(consent).catch(() => null))
-  }
-  return answer
-}
-
 function usageText(s: Session): string {
   const parts: string[] = []
   if (s.total) parts.push(`${s.total.toLocaleString()} tokens`)
@@ -2262,26 +1222,6 @@ function paintBranchMenu(s: Session) {
   byId('menu-fork').hidden = !forkable(s)
 }
 
-function forkable(s: Session): boolean {
-  return !!(state.connected && s.info.verified && s.info.kind === 'background' && s.info.project)
-}
-
-async function handOver(s: Session, agent: string) {
-  const name = agentName(agent)
-  if (!confirmed(`${s.sid}:handover:${agent}`, `Choose Continue with ${name} again to stop this session and go on with ${name} on the same branch, with the approvals you gave.`)) return
-  toast({ id: `handover:${s.sid}`, title: `Handing ${visible(label(s.info))} over to ${name}…`, description: 'The engine starts the other agent on the same branch in a container of its own, then stops this session and its container.', tone: 'info', timeout: 150000 })
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/handover', { sid: s.sid, agent, ...consent }))
-  toast(ok ? { id: `handover:${s.sid}`, title: `${name} continues the branch.`, description: "It shows in the project's list when it connects; open it there to write its first message. The engine tells it where the branch stands.", tone: 'ok', timeout: 8000 } : { id: `handover:${s.sid}`, title: 'The branch wasn’t handed over.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0, action: identityAction(body) })
-  if (ok) void loadProjects(true)
-}
-
-async function bringMain(s: Session) {
-  toast({ id: `main:${s.sid}`, title: 'Fetching the latest main…', tone: 'info', timeout: 60000 })
-  const { ok, body } = await reply(await api('/api/bring-main', { sid: s.sid }).catch(() => null))
-  const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit.slice(0, 7) : ''
-  toast(ok ? { id: `main:${s.sid}`, title: `Main is now at ${commit} as origin/main in the clone.`, description: 'The engine asked the agent to merge it into its branch and resolve any conflicts.', tone: 'ok' } : { id: `main:${s.sid}`, title: 'The latest main wasn’t brought in.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0 })
-}
-
 byId('session-menu').addEventListener('click', e => {
   const b = (e.target as Element).closest<HTMLButtonElement>('button[data-continue]')
   const s = current()
@@ -2313,7 +1253,7 @@ byId('changes').addEventListener('sf-fork-commit', e => {
 })
 byId('lineage').addEventListener('sf-handover', e => {
   const s = sessions.get(e.detail.sid)
-  if (s) void handOver(s, e.detail.agent)
+  if (s) void whilePressed(() => handOver(s, e.detail.agent))
 })
 byId('lineage').addEventListener('sf-open-session', e => {
   if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
@@ -2332,7 +1272,7 @@ byId<HTMLElementTagNameMap['sf-compare']>('compare').next = startSecond
 byId('compare').addEventListener('sf-delete-session', async e => {
   const s = sessions.get(e.detail.sid)
   if (!s) return
-  const problem = await manage(s, '/api/remove-session', {})
+  const problem = await whilePressed(() => manage(s, '/api/remove-session', {}))
   if (problem) toast({ id: `delete:${s.sid}`, title: `${label(s.info)} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 })
 })
 byId('menu-wake').addEventListener('click', () => {
@@ -2354,7 +1294,7 @@ byId('session-menu').addEventListener('click', async e => {
 })
 
 async function copy(command: string) {
-  const ok = await navigator.clipboard.writeText(command).then(() => true, () => false)
+  const ok = await copyText(command)
   toast(ok ? { id: 'copy', title: `Copied ${command}`, description: 'Run it in a terminal on this computer, in the folder that holds compose.yaml.', tone: 'ok' } : { id: 'copy', title: 'The browser did not allow copying.', description: `Type ${command} in a terminal on this computer, in the folder that holds compose.yaml.`, tone: 'bad' })
 }
 byId('manage-button').addEventListener('click', () => {
@@ -2385,21 +1325,20 @@ byId('control-cancel').addEventListener('click', () => {
 })
 byId('control-button').addEventListener('click', async () => {
   const s = current()
-  if (!s) return
+  if (!s || controlBusy.has(s.sid)) return
   if (byId('control-button').dataset.action === 'release') {
-    const res = await api('/api/release', { sid: s.sid }).catch(() => null)
+    const res = await controlBusyWhile(s, () => api('/api/release', { sid: s.sid }).catch(() => null))
     toast(res && res.ok ? { title: 'Ended both connections.', description: 'The real session reconnects by itself within a few seconds. If the other one comes back too, stop the program that runs it.', tone: 'info', timeout: 10000 } : { title: 'The connections could not be ended.', description: 'Try again, or restart the session.', tone: 'bad' })
     return
   }
-  if (byId('control-button').dataset.action === 'wake') return void wakeSession(s)
+  if (byId('control-button').dataset.action === 'wake') return void controlBusyWhile(s, () => wakeSession(s))
   if (s.info.controlled) {
-    await api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null)
+    await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null))
     return
   }
   if (!confirmed(`${s.sid}:control`)) return
-  const res = await api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null)
+  const res = await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null))
   if (!res || !res.ok) toast({ title: 'The page could not take control of this session.', tone: 'bad' })
-  paint()
 })
 byId('signin').addEventListener('click', async () => {
   showGone('Signing in…', '', false, true)
@@ -2420,11 +1359,7 @@ document.body.addEventListener('sf-file', e => {
   const s = changesSession()
   if (s) openFile(s.sid, e.detail.path, typeof e.detail.commit === 'string' && COMMIT.test(e.detail.commit) ? e.detail.commit : '', typeof e.detail.line === 'number' && Number.isInteger(e.detail.line) && e.detail.line > 0 ? e.detail.line : 0)
 })
-byId('file').addEventListener('sf-reload', () => {
-  if (!current.key.startsWith('f:')) return
-  focusFile = current.key
-  loadFile(current.key)
-})
+byId('file').addEventListener('sf-reload', () => reloadFile())
 const RECHECK_MS = 30000
 const known = new Map<string, Map<string, number | true>>()
 const scanning = new Map<string, ReturnType<typeof setTimeout>>()
@@ -2474,13 +1409,15 @@ function markFiles(view: HTMLElement, sid: string) {
   })
 }
 
-byId('conversations').addEventListener('sf-paint', e => {
+function markFilesSoon(e: Event) {
   const view = (e.target as Element).closest<HTMLElement>('#conversations > *')
   const s = [...sessions.values()].find(x => x.view === view)
   if (!view || !s) return
   clearTimeout(scanning.get(s.sid))
   scanning.set(s.sid, setTimeout(() => markFiles(view, s.sid), 600))
-})
+}
+byId('conversations').addEventListener('sf-markdown-painted', markFilesSoon)
+byId('conversations').addEventListener('sf-tool-path', markFilesSoon)
 const openRef = (e: Event) => {
   const code = (e.target as Element).closest<HTMLElement>('code.file-ref')
   if (!code?.dataset.file) return
@@ -2495,7 +1432,7 @@ byId('session-docs').addEventListener('click', () => {
   const s = current()
   openDocs(byId('session-docs').dataset.doc!, s ? { view: current.key, label: 'session' } : null)
 })
-byId('projects').addEventListener('click', e => {
+for (const id of ['projects', 'projects-side']) byId(id).addEventListener('click', e => {
   const link = (e.target as Element).closest<HTMLElement>('button[data-doc]')
   if (link) openDocs(link.dataset.doc!, { view: 'projects', label: 'Projects' })
 })
@@ -2505,7 +1442,7 @@ byId('welcome').addEventListener('click', e => {
   if (walk) return openDocs(walk.dataset.doc!, { view: 'overview', label: 'Welcome' })
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
-  if (start === 'login') void claudeLogin(api, () => void markSignIn(), reviewer?.signIn ?? null)
+  if (start === 'login') void claudeLogin(api, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
   if (start === 'identity') openIdentity()
   if (start === 'egress') openEgress(api)
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
@@ -2516,19 +1453,38 @@ byId('welcome').addEventListener('click', e => {
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
 async function changeRepo(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
+  try {
+    await changeRepoNow(detail)
+  } finally {
+    projects.settle('repo')
+  }
+}
+async function changeRepoNow(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
   const { ok, body } = detail.op === 'add' ? await reply(await api('/api/add-repo', { url: detail.url }).catch(() => null)) : await reply(await api('/api/remove-repo', { name: detail.name }).catch(() => null))
-  if (!ok) return projects.say('', typeof body.message === 'string' ? body.message : "That didn't work. Try again.", true)
-  if (detail.op === 'add') {
-    projects.added()
-    projects.say('', `Cloning ${typeof body.url === 'string' ? body.url : detail.url}…`)
-  } else projects.say('', '')
+  if (!ok) {
+    const problem = typeof body.message === 'string' ? body.message : "That didn't work. Try again."
+    return detail.op === 'add' ? projects.addFailed(problem) : projects.say('', problem, true)
+  }
+  if (detail.op === 'add') projects.added()
+  projects.say('', '')
   await loadProjects(true)
 }
 async function changeToken(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
+  try {
+    await changeTokenNow(detail)
+  } finally {
+    projects.settle('token')
+  }
+}
+async function changeTokenNow(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
   const { ok, body } = detail.op === 'save' ? await reply(await api('/api/save-token', { host: detail.host, token: detail.token }).catch(() => null)) : await reply(await api('/api/remove-token', { host: detail.host }).catch(() => null))
-  if (!ok) return projects.tokenSaid(typeof body.message === 'string' ? body.message : "That didn't work. Try again.", true)
+  if (!ok) {
+    const where = visible(detail.host.replace(/^https:\/\//, ''))
+    return void toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? `The token for ${where} wasn't saved` : `The token for ${where} wasn't removed`, description: typeof body.message === 'string' ? visible(body.message) : "That didn't work. Try again.", tone: 'bad', timeout: 0 })
+  }
   const saved = isRecord(body.host) && typeof body.host.host === 'string' ? body.host.host : detail.host
-  projects.tokenSaid(detail.op === 'save' ? `Token saved for ${saved}.` : `Token removed for ${detail.host}.`)
+  if (typeof body.warning === 'string' && body.warning) toast({ id: `token:${saved}`, title: `Token saved for ${visible(saved)}, with a warning`, description: visible(body.warning), tone: 'warn', timeout: 0 })
+  projects.tokenDone()
   await loadProjects(true)
 }
 projects.addEventListener('sf-repo', e => void changeRepo(e.detail))
@@ -2536,8 +1492,11 @@ projects.addEventListener('sf-expect', e => void setExpect(e.detail.agent, e.det
 projects.addEventListener('sf-token', e => void changeToken(e.detail))
 projects.addEventListener('sf-session-action', async e => {
   const s = sessions.get(e.detail.sid)
-  const project = s && projectOf(s.info.cwd || '')
-  if (!s || !project) return
+  const project = s && projectOf(s.info)
+  if (!s || !project) {
+    toast({ id: `manage:${e.detail.sid}`, title: e.detail.action === 'stop' ? "The session wasn't stopped" : "The session wasn't deleted", description: 'This page lost track of it. Reload the page and try again.', tone: 'bad', timeout: 0 })
+    return
+  }
   const name = label(s.info)
   projects.say(project.path, e.detail.action === 'stop' ? `Stopping ${name}…` : `Deleting ${name}…`)
   const problem = await manage(s, e.detail.action === 'stop' ? '/api/stop-session' : '/api/remove-session', {})
@@ -2600,17 +1559,7 @@ projects.addEventListener('sf-pair', async e => {
   }
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))
-byId('tabs').addEventListener('sf-move', e => {
-  const { id } = e.detail
-  const from = openTabs.indexOf(id)
-  if (from < 1) return
-  const rest = openTabs.filter(k => k !== id)
-  const to = Math.max(1, Math.min(rest.length, e.detail.index > from ? e.detail.index - 1 : e.detail.index))
-  if (to === from) return
-  rest.splice(to, 0, id)
-  openTabs = rest
-  paint()
-})
+byId('tabs').addEventListener('sf-move', e => moveTab(e.detail.id, e.detail.index))
 byId('overview').addEventListener('sf-counts', e => {
   const { waiting, working, stopped } = e.detail
   const box = byId('counts')
@@ -2628,259 +1577,18 @@ byId('overview').addEventListener('sf-counts', e => {
   item(stopped, 'stopped', 'stopped before finishing')
 })
 
-function placeSide() {
-  const now = frameRem >= WIDE_REM
-  const at = document.body.classList.contains('side-full') ? 'full' : now ? 'frame' : 'narrow'
-  if (at !== sideAt) {
-    sideAt = at
-    const active = document.activeElement
-    if (at === 'frame') byId('frame').append(byId('composer'), byId('side'))
-    else {
-      byId('frame').after(byId('composer'))
-      if (at === 'full') byId('crumbs').parentElement!.after(byId('side'))
-      else byId('side-toggle').after(byId('side'))
-    }
-    if (active instanceof HTMLElement && active !== document.activeElement) active.focus()
-  }
-  if (now === wide) return
-  wide = now
-  document.body.classList.toggle('wide', now)
-  byId<HTMLElementTagNameMap['sf-docs']>('docs').navSlot = now ? byId('docs-side') : null
-  byId<HTMLElementTagNameMap['sf-projects']>('projects').sideSlot = now ? byId('projects-side') : null
-}
+startLayout({ jumpLatest: () => composer.jump('latest') })
 
-function paintSide(s: Session | null) {
-  const full = !!s && sideFull && !byId('path-section').hidden
-  const was = document.body.classList.contains('side-full')
-  if (full && !was) sideScroll = scroller.scrollTop
-  document.body.classList.toggle('side-full', full)
-  placeSide()
-  if (!full && was) scroller.scrollTop = sideScroll
-  const needs = !!(full && s && waitingOf(s).length)
-  byId('side-needs').hidden = !needs
-  const said = needs && s ? `${agentWord(s.info.agent)} needs you in the conversation.` : ''
-  if (byId('side-needs-said').textContent !== said) byId('side-needs-said').textContent = said
-  byId('session-docs').dataset.doc = full ? 'execution-path-with-knackpack' : 'working-in-a-session'
-}
+const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain } = startSessionActions({ reply, loadGate, loadProjects, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
 
-function setSide(full: boolean) {
-  sideFull = full
-  paintSide(current())
-  if (full) scroller.scrollTop = 0
-}
+const composer = startComposer({ send })
+const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
+const { connect, applySession } = startStream({ onEvent, began, markCheckpoint })
+startTopBar()
 
-byId('side-open').addEventListener('click', () => {
-  setSide(true)
-  byId('side-expand').focus()
-})
-byId('side-expand').addEventListener('click', () => {
-  setSide(false)
-  byId('side-open').focus()
-})
-byId('side-back').addEventListener('click', () => {
-  setSide(false)
-  jump('latest')
-})
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape' || e.defaultPrevented || !document.body.classList.contains('side-full')) return
-  if (e.target instanceof HTMLElement && e.target.closest('[popover], select, dialog')) return
-  setSide(false)
-  byId('side-open').focus()
-})
-byId('side-toggle').addEventListener('click', () => {
-  const toggle = byId('side-toggle')
-  const open = toggle.getAttribute('aria-expanded') !== 'true'
-  toggle.setAttribute('aria-expanded', String(open))
-  byId('side').classList.toggle('open', open)
-})
-const measureFrame = () => {
-  frameRem = byId('frame').clientWidth / rootRem()
-  placeSide()
-}
-new ResizeObserver(measureFrame).observe(byId('frame'))
-new MutationObserver(measureFrame).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
-placeSide()
-
-let jumping: ReturnType<typeof setTimeout> | null = null
-const nearEdge = { start: true, end: true }
-
-function watchEdge(edge: 'start' | 'end') {
-  const mark = el('div', 'scroll-edge')
-  mark.setAttribute('aria-hidden', 'true')
-  if (edge === 'start') scroller.prepend(mark)
-  else scroller.append(mark)
-  new IntersectionObserver(entries => {
-    const last = entries[entries.length - 1]
-    if (!last || nearEdge[edge] === last.isIntersecting) return
-    nearEdge[edge] = last.isIntersecting
-    paintJump()
-  }, { root: scroller, rootMargin: edge === 'start' ? '100% 0px 0px 0px' : '0px 0px 100% 0px' }).observe(mark)
-}
-watchEdge('start')
-watchEdge('end')
-
-function paintJump() {
-  const live = current.key.startsWith('s/') && !jumping
-  byId('jump-start').hidden = !live || nearEdge.start
-  byId('jump-latest').hidden = !live || nearEdge.end
-}
-
-function landed() {
-  if (jumping) clearTimeout(jumping)
-  jumping = null
-  paintJump()
-}
-
-function jump(to: 'start' | 'latest') {
-  if (jumping) clearTimeout(jumping)
-  jumping = setTimeout(landed, 2000)
-  paintJump()
-  scroller.scrollTo({ top: to === 'start' ? 0 : scroller.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-}
-
-scroller.addEventListener('scrollend', landed)
-const strip = byId('jump').parentElement!
-const coverEnd = () => {
-  const over = getComputedStyle(strip).position === 'absolute' && strip.offsetHeight ? Math.max(0, Math.ceil(scroller.getBoundingClientRect().bottom - strip.getBoundingClientRect().top)) : 0
-  const pad = over ? `${over}px` : ''
-  const list = byId('conversations')
-  if (list.style.paddingBottom === pad) return
-  list.style.paddingBottom = pad
-  if (current()?.view.pinned) scroller.scrollTop = scroller.scrollHeight
-}
-const covered = new ResizeObserver(coverEnd)
-covered.observe(strip)
-covered.observe(strip.parentElement!)
-covered.observe(scroller)
-if (topBar) {
-  const watch = new ResizeObserver(queueBarFit)
-  for (const node of [topBar, byId('halt'), byId('update'), byId('palette-open')]) watch.observe(node)
-  fitBar()
-}
-byId('jump-start').addEventListener('click', () => jump('start'))
-byId('jump-latest').addEventListener('click', () => jump('latest'))
-document.addEventListener('keydown', e => {
-  if ((e.key !== 'Home' && e.key !== 'End') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !current.key.startsWith('s/')) return
-  if (e.defaultPrevented || (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable], [popover], [role="tablist"], dialog'))) return
-  if (e.target instanceof HTMLElement && e.target !== document.body && e.target.scrollHeight > e.target.clientHeight + 1) return
-  e.preventDefault()
-  jump(e.key === 'Home' ? 'start' : 'latest')
-})
-
-byId('frame').addEventListener('wheel', e => {
-  const side = e.target instanceof Element ? e.target.closest<HTMLElement>('.page-side') : null
-  const still = !!side && side.scrollHeight <= side.clientHeight
-  if (e.target !== e.currentTarget && !still) return
-  scroller.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * scroller.clientHeight : e.deltaY
-}, { passive: true })
-
-const text = byId<HTMLTextAreaElement>('text')
-byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').draft = () => text.value
-byId('saved-prompts').addEventListener('sf-insert-prompt', e => {
-  if (text.disabled) return say('Answer the card above first, then insert the prompt.')
-  text.setRangeText(e.detail.text, text.selectionStart, text.selectionEnd, 'end')
-  text.dispatchEvent(new Event('input', { bubbles: true }))
-  text.focus()
-})
-complete(text, byId('complete'), {
-  catalog: () => current()?.catalog ?? null,
-  files: async q => {
-    const s = current()
-    if (!s) return { files: [], cut: false }
-    const res = await api('/api/files', { sid: s.sid, q })
-    const body: { files?: unknown; cut?: unknown } | null = res.ok ? await res.json() : null
-    const files = Array.isArray(body?.files) ? (body.files as unknown[]).filter((f): f is string => typeof f === 'string') : []
-    return { files, cut: body?.cut === true }
-  },
-})
-const grow = () => {
-  if (!text.offsetParent) return
-  text.style.height = 'auto'
-  text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`
-}
-text.addEventListener('input', grow)
-text.addEventListener('paste', e => {
-  const files = [...(e.clipboardData?.items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter((f): f is File => !!f)
-  if (!files.length) return
-  e.preventDefault()
-  void attach(files)
-})
-document.addEventListener('dragover', e => {
-  if (![...(e.dataTransfer?.items || [])].some(i => i.kind === 'file')) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = current() ? 'copy' : 'none'
-})
-document.addEventListener('drop', e => {
-  const all = [...(e.dataTransfer?.files || [])]
-  if (!all.length) return
-  e.preventDefault()
-  if (!current() || text.disabled) return
-  const items = [...(e.dataTransfer?.items || [])].filter(i => i.kind === 'file')
-  const folders = items.filter(i => i.webkitGetAsEntry()?.isDirectory).length
-  const files = items.length ? items.filter(i => !i.webkitGetAsEntry()?.isDirectory).map(i => i.getAsFile()).filter((f): f is File => !!f) : all
-  if (files.length) void attach(files)
-  if (folders) say('A folder can’t be dropped here. Type its path with @ instead.')
-})
-text.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    byId<HTMLFormElement>('composer').requestSubmit()
-  }
-})
-byId('composer').addEventListener('submit', async e => {
-  e.preventDefault()
-  const s = current()
-  const key = current.key
-  const value = text.value.trim()
-  const attached = [...(drafts.get(key)?.images ?? [])]
-  const files = [...(drafts.get(key)?.files ?? [])]
-  if (text.disabled) return
-  if (!s || (!value && !attached.length && !files.length) || !state.connected || sending.has(key)) return
-  sending.add(key)
-  const sent = async (blob: Blob, name = '') => {
-    const res = await upload(blob, s.sid, name).catch(() => null)
-    const body: { id?: unknown } | null = res && res.ok ? await res.json().catch(() => null) : null
-    return body && typeof body.id === 'string' ? body.id : ''
-  }
-  const ids: string[] = []
-  for (const item of attached) {
-    const id = await sent(item.blob)
-    if (!id) break
-    ids.push(id)
-  }
-  const fids: string[] = []
-  if (ids.length === attached.length) {
-    for (const file of files) {
-      const id = await sent(file, file.name)
-      if (!id) break
-      fids.push(id)
-    }
-  }
-  if (ids.length !== attached.length) say('An image did not go through. Try again, or check that the session is still running.')
-  else if (fids.length !== files.length) say('A file did not go through. Try again, or check that the session is still running.')
-  else if (await send(value, ids, s, false, fids)) {
-    const d = drafts.get(key)
-    if (d) {
-      for (const item of attached) {
-        URL.revokeObjectURL(item.url)
-        if (d.images.includes(item)) d.images.splice(d.images.indexOf(item), 1)
-      }
-      for (const file of files) if (d.files.includes(file)) d.files.splice(d.files.indexOf(file), 1)
-      if (d.text.trim() === value) d.text = ''
-      if (!d.text && !d.images.length && !d.files.length) drafts.delete(key)
-    }
-    if (key === current.key) {
-      if (text.value.trim() === value) text.value = ''
-      grow()
-      paintAttached()
-    }
-  }
-  sending.delete(key)
-  if (key === current.key) text.focus()
-})
 byId('stop').addEventListener('click', () => {
   const s = current()
-  if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
+  if (s) void whileBusy(byId<HTMLButtonElement>('stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
 })
 byId('rules').addEventListener('sf-rules-open', e => {
   const s = current()
@@ -2903,123 +1611,15 @@ byId('rules').addEventListener('sf-rules-open', e => {
   projects.showPanel(p.path, 'rules')
 })
 
-function openSessionPanel(which: 'changes' | 'rules') {
-  const s = current()
-  if (which === 'changes' && s) return openChanges(s)
-  setSide(true)
-  if (!document.body.classList.contains('side-full') && !document.body.classList.contains('wide')) {
-    byId('side-toggle').setAttribute('aria-expanded', 'true')
-    byId('side').classList.add('open')
-  }
-  requestAnimationFrame(() => {
-    if (which === 'changes') byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff()
-    else byId<HTMLElementTagNameMap['sf-rules']>('rules').open()
-  })
-}
-
-function sessionActions(s: Session): PaletteItem[] {
-  const name = visible(label(s.info))
-  const group = `This session: ${name}`
-  const offline = !state.connected ? 'the page isn’t connected to the engine' : ''
-  const rv = reviewsOf(s)
-  const noReview = !rv ? 'reviews and pushes run for a session this engine started in a project of your list' : rv.disabled
-  const out: PaletteItem[] = []
-  out.push({ id: 'wake', group, label: 'Wake the session', detail: 'Asks for any sign-in or cost confirmation, as Wake does', off: offline || (!sleeping(s) ? 'it isn’t a stopped Claude Code background session' : ''), run: () => void wakeSession(s) })
-  out.push({ id: 'turn', group, label: 'Stop the turn', off: offline || (byId('stop').hidden ? 'no turn is running that this page controls' : ''), run: () => byId('stop').click() })
-  const manageBox = byId('manage')
-  const manageButton = byId<HTMLButtonElement>('manage-button')
-  const stopping = manageButton.dataset.action !== 'remove'
-  out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || (manageBox.hidden ? 'only a Claude Code background session this engine started is stopped or deleted here' : manageButton.disabled ? 'it is already being stopped or deleted' : ''), run: () => {
-    for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
-    manageButton.click()
-    manageButton.focus()
-  } })
-  out.push({ id: 'review', group, label: 'Review', detail: 'Runs the required reviewers, asking for cost confirmation when the sign-in is per use', off: offline || noReview || (s.info.review?.running || reviewAsking.has(s.sid) ? 'a review is running' : ''), run: () => void startReview(s, false) })
-  out.push({ id: 'push', group, label: 'Push', detail: 'The gate checks the reviews first; a held push waits on its card', off: offline || noReview || (rv?.pushing ? 'a push is being decided' : rv?.pushed ? 'the latest commit is already pushed' : ''), run: () => void startPush(s) })
-  out.push({ id: 'changes', group, label: 'Open Changes', detail: 'The diff, its comparison points and viewed marks', off: !s.changes ? 'the engine hasn’t sent this session’s changes yet' : '', run: () => openSessionPanel('changes') })
-  out.push({ id: 'rules', group, label: 'What this session may and may not do', off: !s.info.verified ? 'only a session this engine started has this view' : '', run: () => openSessionPanel('rules') })
-  return out
-}
-
-function paletteItems(): PaletteItem[] {
-  const items: PaletteItem[] = []
-  const s = current()
-  if (s) items.push(...sessionActions(s))
-  for (const x of [...sessions.values()].sort((a, b) => (b.info.startedAt || 0) - (a.info.startedAt || 0))) {
-    const st = sessionState({ ...x.info, busy: working(x), needs: waitingOf(x).length })
-    items.push({ id: `s:${x.sid}`, group: 'Sessions', label: visible(label(x.info)), detail: [st.word, x.info.project, x.info.lineage?.branch].filter(Boolean).map(t => visible(String(t))).join(' · '), run: () => go(`s/${x.sid}`) })
-  }
-  for (const p of projectList) {
-    items.push({ id: `p:${p.path}`, group: 'Projects', label: visible(p.name), detail: 'Open the project', run: () => {
-      go('projects')
-      projects.reveal(p.path, true)
-    } })
-    items.push({ id: `start:${p.path}`, group: 'Projects', label: `Start a session in ${visible(p.name)}`, detail: 'Opens the new-session form', off: !state.connected ? 'the page isn’t connected to the engine' : '', run: () => {
-      go('projects')
-      projects.startIn(p.path)
-    } })
-  }
-  const panel = (id: string, title: string, run: () => void, off = '') => items.push({ id, group: 'Views and panels', label: title, off, run })
-  const needsEngine = !state.connected ? 'the page isn’t connected to the engine' : ''
-  panel('v:welcome', 'Welcome', () => go('overview'))
-  panel('v:search', 'Search and filter sessions', () => {
-    go('overview')
-    byId<HTMLElementTagNameMap['sf-overview']>('overview').focusSearch()
-  })
-  panel('v:projects', 'Projects', () => go('projects'))
-  panel('v:docs', 'Docs', () => openDocs(''))
-  panel('v:egress', 'Network access', () => openEgress(api), needsEngine)
-  panel('v:workspace', 'Workspace and disk space', () => openWorkspace(api, labelOfSid, forgetSession), needsEngine)
-  panel('v:exceptions', 'Register of exceptions', () => openExceptions(api, labelOfSid), needsEngine)
-  panel('v:backup', 'Export and import', () => openBackup(api, sendState), needsEngine)
-  panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(api), needsEngine)
-  panel('v:identity', 'Name and email for commits', () => openIdentity(), needsEngine)
-  panel('v:away', 'Away mode', () => openAway(), needsEngine)
-  panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
-  panel('v:keys', 'Keyboard shortcuts', () => showShortcuts())
-  return items
-}
-
-function showShortcuts() {
-  const root = document.documentElement
-  openShortcuts(root.dataset.keys !== 'off', on => {
-    root.dataset.keys = on ? 'on' : 'off'
-    void api('/api/prefs', { keys: root.dataset.keys }).catch(() => null)
-  })
-}
-
-const paletteButton = byId('palette-open')
-if (isMac) {
-  paletteButton.setAttribute('aria-keyshortcuts', 'Meta+K')
-  paletteButton.title = 'Command palette (⌘K)'
-}
-paletteButton.addEventListener('click', () => openPalette(paletteItems))
-byId('shortcuts-open').addEventListener('click', () => {
-  byId('prefs').hidePopover()
-  showShortcuts()
-})
-document.addEventListener('keydown', e => {
-  if (e.defaultPrevented || e.isComposing) return
-  const modal = document.querySelector('dialog[open]:not(.palette)')
-  if (paletteKey(e)) {
-    if (modal) return
-    e.preventDefault()
-    openPalette(paletteItems)
-    return
-  }
-  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey || modal || document.querySelector('dialog.palette[open]')) return
-  if (document.documentElement.dataset.keys === 'off' || typing(e.target)) return
-  e.preventDefault()
-  showShortcuts()
-})
+startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
 restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
 onNotifyOpen(sid => {
   if (sessions.has(sid)) go(`s/${sid}`)
 })
 byId('disconnect').addEventListener('click', async () => {
+  await whileBusy(byId<HTMLButtonElement>('disconnect'), () => api('/api/disconnect', {}).catch(() => null))
   if (byId('account').matches(':popover-open')) byId('account').hidePopover()
-  await api('/api/disconnect', {}).catch(() => null)
   signOut('Disconnected', SIGN_IN_HINT)
 })
 paint()

@@ -21,6 +21,7 @@ import (
 	gitpush "github.com/bezmoradi/software-factory/internal/adapters/git/push"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/tokencheck"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
@@ -273,12 +274,19 @@ func repositories(base context.Context, cfg PageConfig, reg *session.Registry, l
 	if cfg.DevGitCA != "" {
 		logger.Warn("development git CA trusted for clones and fetches", "variable", "SF_DEV_GIT_CA")
 	}
+	var checker session.TokenChecker
+	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {
+		checker = tokencheck.Checker{Client: client}
+	} else {
+		logger.Warn("repository", "event", "token-check-off", "err", err.Error())
+	}
 	return session.NewRepos(session.ReposConfig{
 		Workspace: cfg.Workspace,
 		Records:   state.Repos{Dir: cfg.StateDir},
 		Tokens:    state.NewTokens(cfg.StateDir),
 		Remote:    remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
 		Commits:   files.Reader{},
+		Checker:   checker,
 		Notify:    reg.Notify,
 		Base:      base,
 		Logger:    logger,

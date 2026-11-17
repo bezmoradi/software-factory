@@ -1,4 +1,4 @@
-import { button, el, emit, visible } from '../lib/dom.ts'
+import { button, el, emit, replaceKeeping, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import type { FileView } from '../types.ts'
 import { icon } from './icon.ts'
@@ -12,11 +12,19 @@ const MAX_LINES = 20000
 class SfFile extends HTMLElement {
   #view: FileView | null = null
   #lines: HTMLElement | null = null
+  #note = el('p', 'file-note')
+  #noteSaid = statusLine('', 'span')
+  #retry = button('Try again', 'ghost', () => emit(this, 'sf-reload'))
 
   #onKey = (e: KeyboardEvent) => {
     if (this.hidden || !this.#view || !e.altKey || e.ctrlKey || e.metaKey || e.code !== 'KeyZ') return
     e.preventDefault()
     this.#setWrap(!wrapLines)
+  }
+
+  constructor() {
+    super()
+    this.#note.tabIndex = -1
   }
 
   connectedCallback() {
@@ -60,14 +68,12 @@ class SfFile extends HTMLElement {
     const at = v.line && v.line > 0 ? v.line : 0
     if (v.commit) bar.append(el('span', 'file-at', `as commit ${shortSha(v.commit)} has it${at ? `, line ${at}` : ''}`))
     if (v.note !== undefined || v.text === undefined) {
-      const note = el('p', 'file-note')
-      note.tabIndex = -1
-      note.setAttribute('role', 'status')
-      note.append(el('span', '', v.note ?? `Loading ${visible(v.path)}…`))
-      if (v.note !== undefined) {
-        note.append(button('Try again', 'ghost', () => emit(this, 'sf-reload')))
-      }
-      this.replaceChildren(bar, note)
+      const note = this.#note
+      const retried = v.note === undefined && document.activeElement === this.#retry
+      sayWhenShown(this.#noteSaid, v.note ?? `Loading ${visible(v.path)}…`)
+      replaceKeeping(note, v.note !== undefined ? [this.#noteSaid, this.#retry] : [this.#noteSaid])
+      replaceKeeping(this, [bar, note])
+      if (retried) note.focus({ preventScroll: true })
       return
     }
     const all = v.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')

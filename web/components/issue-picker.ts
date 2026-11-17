@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
 
 type Issue = { number: number; title: string; body?: string; url: string; author: string; labels: string[]; created: number; open: boolean }
 
@@ -19,21 +19,53 @@ function said(body: Record<string, unknown>, fallback: string): string {
   return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
 }
 
+const NAV_KEYS: Record<string, string[]> = { 'issues:newer': ['issues:older'], 'issues:older': ['issues:newer'] }
+
 class SfIssuePicker extends HTMLElement {
-  path = ''
+  #path = ''
+  #gen = 0
+  #stale = true
   #details = el('details', 'issue-picker')
   #label = el('input', 'textbox')
   #list = el('div', 'issue-list')
   #picked = el('div', 'issue-picked')
-  #status = el('p', 'small muted')
+  #status = statusLine('small muted')
   #page = 1
   #more = false
   #busy = false
+  #loaded = false
   #issues: Issue[] = []
   #chosen: Picked | null = null
+  #listButton = button('List open issues', 'small', () => this.#run(this.#listButton, () => this.#load(1)))
+
+  get path(): string {
+    return this.#path
+  }
+
+  set path(value: string) {
+    if (value === this.#path) return
+    this.#path = value
+    this.#gen++
+    this.#busy = false
+    this.#page = 1
+    this.#more = false
+    this.#loaded = false
+    this.#issues = []
+    this.#chosen = null
+    say(this.#status, '', 'muted')
+    this.#list.replaceChildren()
+    this.#paintPicked()
+    this.#stale = !this.isConnected
+    if (this.isConnected) void this.#load(1)
+  }
+
+  #run(b: HTMLButtonElement, work: () => Promise<void>): void {
+    if (this.#busy || !this.path) return
+    void whileBusy(b, work)
+  }
 
   connectedCallback() {
-    if (this.#details.isConnected) return
+    if (this.#details.parentNode === this) return this.#resume()
     const id = `issue-label-${++serial}`
     const summary = el('summary', 'small', 'From an issue')
     const intro = el('p', 'small muted', "Lists the repository's open issues with your saved token, newest first. Pick one to read it in full; Start then sends it as the session's first message, framed as the author's task description, not as instructions.")
@@ -46,23 +78,28 @@ class SfIssuePicker extends HTMLElement {
     this.#label.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return
       e.preventDefault()
-      void this.#load(1)
+      this.#run(this.#listButton, () => this.#load(1))
     })
-    row.append(name, this.#label, button('List open issues', 'small', () => void this.#load(1)))
-    this.#status.setAttribute('role', 'status')
+    row.append(name, this.#label, this.#listButton)
     this.#details.append(summary, intro, row, this.#status, this.#list, this.#picked)
     this.#details.addEventListener('toggle', () => {
-      if (this.#details.open && !this.#issues.length && !this.#busy) void this.#load(1)
+      if (this.#details.open && !this.#loaded && !this.#busy) void this.#load(1)
     })
     this.append(this.#details)
+    this.#resume()
+  }
+
+  #resume() {
+    if (!this.#stale) return
+    this.#stale = false
+    void this.#load(1)
   }
 
   chosen(): { issue: number; issueHash: string } | null | 'refused' {
     if (!this.#chosen) return null
     if (this.#chosen.refused || !HASH.test(this.#chosen.hash)) {
       this.#details.open = true
-      this.#status.textContent = this.#chosen.refused ? 'This issue can\'t be sent to an agent. Clear it, or pick another.' : 'Read the issue again before starting from it.'
-      this.#status.className = 'small bad'
+      say(this.#status, this.#chosen.refused ? 'This issue can\'t be sent to an agent. Clear it, or pick another.' : 'Read the issue again before starting from it.', 'bad')
       return 'refused'
     }
     return { issue: this.#chosen.issue.number, issueHash: this.#chosen.hash }
@@ -71,48 +108,57 @@ class SfIssuePicker extends HTMLElement {
   async #load(page: number) {
     if (this.#busy || !this.path) return
     this.#busy = true
-    this.#status.className = 'small muted'
-    this.#status.textContent = 'Reading the open issues…'
+    const gen = this.#gen
+    say(this.#status, 'Reading the open issues…', 'muted')
     const label = this.#label.value.trim()
     const a = await call({ op: 'list', path: this.path, page, ...(label ? { label } : {}) })
+    if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = said(a.body, "The open issues couldn't be read.")
+      say(this.#status, said(a.body, "The open issues couldn't be read."), 'bad')
       return
     }
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
     this.#more = a.body.more === true
     this.#issues = Array.isArray(a.body.issues) ? (a.body.issues as Issue[]) : []
+    this.#loaded = true
     this.#status.textContent = this.#issues.length ? `Page ${this.#page} of the open issues${label ? ` labeled ${shown(label)}` : ''} in ${shown(String(a.body.repo ?? ''))}.` : `No open issues${label ? ` labeled ${shown(label)}` : ''} on this page.`
     this.#paintList()
   }
 
   #paintList() {
+    const focused = focusedKey(this.#list)
     const ul = el('ul', 'list issue-items')
     for (const i of this.#issues) {
       const li = el('li', '')
-      const pick = button(`#${i.number} ${shown(i.title)}`, 'link', () => void this.#pick(i.number))
+      const pick = button(`#${i.number} ${shown(i.title)}`, 'link', () => this.#run(pick, () => this.#pick(i.number)), 'button', `issue:${i.number}`)
       pick.setAttribute('aria-pressed', String(this.#chosen?.issue.number === i.number))
       li.append(pick, el('span', 'small muted', ` by ${shown(i.author)}${i.labels.length ? `, ${i.labels.map(shown).join(', ')}` : ''}`))
       ul.append(li)
     }
     const nav = el('div', 'actions')
-    if (this.#page > 1) nav.append(button('Newer', 'small ghost', () => void this.#load(this.#page - 1)))
-    if (this.#more) nav.append(button('Older', 'small ghost', () => void this.#load(this.#page + 1)))
+    if (this.#page > 1) {
+      const newer = button('Newer', 'small ghost', () => this.#run(newer, () => this.#load(this.#page - 1)), 'button', 'issues:newer')
+      nav.append(newer)
+    }
+    if (this.#more) {
+      const older = button('Older', 'small ghost', () => this.#run(older, () => this.#load(this.#page + 1)), 'button', 'issues:older')
+      nav.append(older)
+    }
     this.#list.replaceChildren(ul, nav)
+    refocus(this.#list, focused, key => NAV_KEYS[key] ?? [])
   }
 
   async #pick(number: number) {
     if (this.#busy) return
     this.#busy = true
-    this.#status.className = 'small muted'
-    this.#status.textContent = `Reading issue #${number}…`
+    const gen = this.#gen
+    say(this.#status, `Reading issue #${number}…`, 'muted')
     const a = await call({ op: 'read', path: this.path, number })
+    if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      this.#status.className = 'small bad'
-      this.#status.textContent = said(a.body, "The issue couldn't be read.")
+      say(this.#status, said(a.body, "The issue couldn't be read."), 'bad')
       return
     }
     const issue = a.body.issue as Issue

@@ -7,6 +7,8 @@ export function el(tag: string, cls?: string, text?: string): HTMLElement {
   return node
 }
 
+export const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+
 const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
 
 export function visible(text: string): string {
@@ -43,6 +45,11 @@ export function focusedKey(root: HTMLElement): string {
   return a instanceof HTMLElement && root.contains(a) ? a.dataset.key || '' : ''
 }
 
+export function around<T>(list: readonly T[], item: T): T[] {
+  const at = list.indexOf(item)
+  return at < 0 ? [] : [...list.slice(at + 1), ...list.slice(0, at).reverse()]
+}
+
 export function refocus(root: HTMLElement, key: string, fallback: (key: string) => string[] = () => []): void {
   if (!key) return
   const a = document.activeElement
@@ -58,6 +65,260 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   b.type = type
   if (key) b.dataset.key = key
   if (onClick) b.addEventListener('click', onClick)
+  return b
+}
+
+let fields = 0
+
+function labelTarget(control: HTMLElement): HTMLElement {
+  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement || control instanceof HTMLButtonElement) return control
+  return control.querySelector<HTMLElement>('input, select, textarea') ?? control
+}
+
+export function field(label: string, control: HTMLElement, help?: string, cls = 'field'): HTMLDivElement {
+  const target = labelTarget(control)
+  if (!target.id) target.id = `field-${++fields}`
+  const box = el('div', cls)
+  const name = el('label', 'small', label)
+  name.htmlFor = target.id
+  box.append(name, control)
+  if (help) {
+    const note = el('p', 'small muted', help)
+    note.id = `${target.id}-help`
+    const described = (target.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
+    if (!described.includes(note.id)) target.setAttribute('aria-describedby', [...described, note.id].join(' '))
+    box.append(note)
+  }
+  return box
+}
+
+const TONES = ['bad', 'warn', 'ok', 'muted'] as const
+export type Tone = typeof TONES[number]
+
+export function statusLine(cls?: string): HTMLParagraphElement
+export function statusLine(cls: string, tag: 'span'): HTMLSpanElement
+export function statusLine(cls = 'small', tag: 'p' | 'span' = 'p'): HTMLParagraphElement | HTMLSpanElement {
+  const line = el(tag, cls)
+  line.setAttribute('role', 'status')
+  return line
+}
+
+const pending = new WeakMap<HTMLElement, { text: string; tone: Tone | undefined }>()
+
+function toned(line: HTMLElement, tone: Tone | undefined): void {
+  pending.delete(line)
+  for (const t of TONES) line.classList.toggle(t, t === tone)
+}
+
+export function say(line: HTMLElement, text: string, tone?: Tone): void {
+  toned(line, tone)
+  line.textContent = text
+}
+
+export function sayIfChanged(line: HTMLElement, text: string, tone?: Tone): void {
+  toned(line, tone)
+  if (line.textContent !== text) line.textContent = text
+}
+
+function onScreen(line: HTMLElement): boolean {
+  if (!line.isConnected || line.closest('[hidden]')) return false
+  for (let box = line.closest('details'); box; box = box.parentElement?.closest('details') ?? null) {
+    if (!box.open && !box.querySelector(':scope > summary')?.contains(line)) return false
+  }
+  return true
+}
+
+export function sayWhenShown(line: HTMLElement, text: string, tone?: Tone): void {
+  const waiting = pending.get(line)
+  if (waiting && waiting.text === text) {
+    waiting.tone = tone
+    return
+  }
+  if (!text || onScreen(line)) return sayIfChanged(line, text, tone)
+  say(line, '', tone)
+  const next = { text, tone }
+  pending.set(line, next)
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (pending.get(line) === next) say(line, next.text, next.tone)
+  }))
+}
+
+export function replaceKeeping(parent: Element, parts: Node[]): void {
+  const kept = new Set(parts)
+  for (const child of [...parent.childNodes]) if (!kept.has(child)) child.remove()
+  let at = parent.firstChild
+  for (const part of parts) {
+    if (part === at) at = at.nextSibling
+    else parent.insertBefore(part, at)
+  }
+}
+
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const resting = new WeakMap<HTMLButtonElement, string | null>()
+let lastPressed: HTMLButtonElement | null = null
+
+export function pressed(): HTMLButtonElement | null {
+  return lastPressed
+}
+
+function refuseBusy(e: Event): void {
+  const t = e.target
+  if (!(t instanceof Element)) return
+  if (e.type === 'click') {
+    lastPressed = t.closest('button')
+    setTimeout(() => {
+      lastPressed = null
+    })
+  }
+  if (busyWorks.size) checkBusy()
+  const held = e.type === 'submit' ? t.querySelector('button[type="submit"][aria-busy="true"]') : t.closest('button[aria-busy="true"]')
+  if (!held) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', refuseBusy, true)
+  document.addEventListener('submit', refuseBusy, true)
+}
+
+const BUSY_SAID = 'Working…'
+const BUSY_SHOWN_AFTER_MS = 300
+const BUSY_CHECKED_EVERY_MS = 500
+const busyLines = new WeakMap<Element, HTMLSpanElement>()
+const busySince = new WeakMap<HTMLButtonElement, number>()
+
+type BusyWork = {
+  layer: Element
+  key: string | HTMLButtonElement
+  line: HTMLSpanElement
+  since: number
+  shown: boolean
+  wait: ReturnType<typeof setTimeout>
+}
+
+const busyWorks = new Set<BusyWork>()
+let busyChecks: ReturnType<typeof setInterval> | undefined
+
+function busyLayer(b: Element): Element {
+  return b.closest('dialog[open]') ?? document.body
+}
+
+function busyLine(layer: Element): HTMLSpanElement {
+  let line = busyLines.get(layer)
+  if (!line?.isConnected) {
+    line = statusLine('sr-only', 'span')
+    layer.append(line)
+    busyLines.set(layer, line)
+  }
+  return line
+}
+
+function busyKey(b: HTMLButtonElement): string | HTMLButtonElement {
+  if (b.dataset.key) return `button[data-key="${CSS.escape(b.dataset.key)}"]`
+  if (b.id) return `button[id="${CSS.escape(b.id)}"]`
+  return b
+}
+
+function busyHolders(work: BusyWork): HTMLButtonElement[] {
+  const found = typeof work.key === 'string' ? work.layer.querySelectorAll<HTMLButtonElement>(work.key) : [work.key]
+  return [...found].filter(b => resting.has(b) && b.isConnected && busyLayer(b) === work.layer)
+}
+
+function sayBusy(lines: Iterable<HTMLSpanElement>): void {
+  const speaking = new Set<HTMLSpanElement>()
+  for (const work of busyWorks) if (work.shown) speaking.add(work.line)
+  for (const line of lines) sayIfChanged(line, speaking.has(line) ? BUSY_SAID : '')
+}
+
+function checkBusy(): void {
+  const ended = new Set<HTMLSpanElement>()
+  for (const work of busyWorks) {
+    if (busyHolders(work).length) continue
+    busyWorks.delete(work)
+    clearTimeout(work.wait)
+    if (work.shown) ended.add(work.line)
+  }
+  if (!busyWorks.size) {
+    clearInterval(busyChecks)
+    busyChecks = undefined
+  }
+  sayBusy(ended)
+}
+
+function busyStarted(b: HTMLButtonElement): void {
+  if (!b.isConnected || !resting.has(b)) return
+  const layer = busyLayer(b)
+  const key = busyKey(b)
+  const going = [...busyWorks].find(work => work.layer === layer && work.key === key)
+  if (going) {
+    if (going.shown) b.dataset.busyShown = ''
+    return
+  }
+  const work: BusyWork = {
+    layer,
+    key,
+    line: busyLine(layer),
+    since: busySince.get(b) ?? performance.now(),
+    shown: false,
+    wait: setTimeout(() => {
+      if (!busyWorks.has(work)) return
+      const held = busyHolders(work)
+      if (!held.length) return checkBusy()
+      work.shown = true
+      for (const h of held) if ((busySince.get(h) ?? work.since) > work.since) h.dataset.busyShown = ''
+      sayBusy([work.line])
+    }, BUSY_SHOWN_AFTER_MS),
+  }
+  busyWorks.add(work)
+  busyChecks ??= setInterval(checkBusy, BUSY_CHECKED_EVERY_MS)
+}
+
+if (typeof document !== 'undefined' && document.body) busyLines.set(document.body, document.body.appendChild(statusLine('sr-only', 'span')))
+
+export function busy(b: HTMLButtonElement, on: boolean): void {
+  if (on) {
+    if (!resting.has(b)) {
+      resting.set(b, b.getAttribute('aria-disabled'))
+      busySince.set(b, performance.now())
+    }
+    b.setAttribute('aria-busy', 'true')
+    b.setAttribute('aria-disabled', 'true')
+    if (b.isConnected) busyStarted(b)
+    else queueMicrotask(() => busyStarted(b))
+    return
+  }
+  if (!resting.has(b)) return
+  const before = resting.get(b) ?? null
+  resting.delete(b)
+  busySince.delete(b)
+  delete b.dataset.busyShown
+  b.removeAttribute('aria-busy')
+  if (before === null) b.removeAttribute('aria-disabled')
+  else b.setAttribute('aria-disabled', before)
+  if (busyWorks.size) checkBusy()
+}
+
+export async function whileBusy<T>(b: HTMLButtonElement, work: () => Promise<T>): Promise<T> {
+  busy(b, true)
+  try {
+    return await work()
+  } finally {
+    busy(b, false)
+  }
+}
+
+export function actionButton(text: string, cls: string, run: () => Promise<unknown>, type: 'button' | 'submit' = 'button', key = ''): HTMLButtonElement {
+  const b = button(text, cls, undefined, type, key)
+  b.addEventListener('click', () => void whileBusy(b, run))
   return b
 }
 

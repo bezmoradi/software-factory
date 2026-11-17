@@ -623,6 +623,22 @@ export interface Dispatch extends Consent {
   effort?: string
 }
 
+export interface PairAgent {
+  agent: string
+  model?: string
+  effort?: string
+}
+
+export interface PairDispatch {
+  path: string
+  name: string
+  type: string
+  agents: PairAgent[]
+  message?: string
+  benchmark?: { number: number; hash: string; base: string }
+  caps?: { money: number; minutes: number; turns: number }
+}
+
 export interface HelloEvent {
   type: 'hello'
   stream: string
@@ -1082,9 +1098,9 @@ export type PlanAnswer = { choice: 'revise'; note: string } | { choice: 'termina
 export type Answer = AskAnswer | PermissionAnswer | PlanAnswer
 
 export interface CardHost extends HTMLElement {
-  source: CardEvent
-  card: CardEvent
-  error: string
+  source: CardEvent | null
+  set card(value: CardEvent)
+  set error(message: string)
 }
 
 export interface Check {
@@ -1146,10 +1162,12 @@ declare global {
     'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldSetting }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
     'sf-counts': CustomEvent<{ waiting: number; working: number; stopped: number }>
-    'sf-paint': Event
+    'sf-markdown-painted': Event
+    'sf-tool-path': Event
     'sf-repo': CustomEvent<{ op: 'add'; url: string } | { op: 'remove'; name: string }>
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
+    'sf-pair': CustomEvent<PairDispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
     'sf-handover': CustomEvent<{ sid: string; agent: string }>
     'sf-open-session': CustomEvent<{ sid: string }>
