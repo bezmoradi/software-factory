@@ -61,6 +61,15 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   return b
 }
 
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const resting = new WeakMap<HTMLButtonElement, string | null>()
 let lastPressed: HTMLButtonElement | null = null
 

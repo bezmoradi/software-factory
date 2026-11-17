@@ -2,8 +2,8 @@ import { busy, button, el, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
-import { icon } from './icon.ts'
 import { secret } from './secret.ts'
+import { commandBlock } from './copy.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
 
@@ -305,27 +305,6 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
     if (busy) again = window.setTimeout(() => void refresh(), RECHECK_MS)
   }
   await refresh()
-}
-
-export function commandBlock(command: string): HTMLElement {
-  const block = el('div', 'setup-code')
-  const copy = button('', 'setup-copy', () => {
-    void navigator.clipboard.writeText(command).then(() => {
-      copy.replaceChildren(icon('check'))
-      copy.setAttribute('aria-label', 'Copied')
-      copy.title = 'Copied'
-      setTimeout(() => {
-        copy.replaceChildren(icon('copy'))
-        copy.setAttribute('aria-label', 'Copy the command')
-        copy.title = 'Copy'
-      }, 1500)
-    }, () => { copy.title = 'Couldn’t copy: select the command and copy it' })
-  })
-  copy.append(icon('copy'))
-  copy.setAttribute('aria-label', 'Copy the command')
-  copy.title = 'Copy'
-  block.append(el('code', '', visible(command)), copy)
-  return block
 }
 
 const BOX = /^[0-9a-f]{16}$/

@@ -2,7 +2,7 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { busy, button, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { busy, button, copyText, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
@@ -2382,7 +2382,7 @@ byId('session-menu').addEventListener('click', async e => {
 })
 
 async function copy(command: string) {
-  const ok = await navigator.clipboard.writeText(command).then(() => true, () => false)
+  const ok = await copyText(command)
   toast(ok ? { id: 'copy', title: `Copied ${command}`, description: 'Run it in a terminal on this computer, in the folder that holds compose.yaml.', tone: 'ok' } : { id: 'copy', title: 'The browser did not allow copying.', description: `Type ${command} in a terminal on this computer, in the folder that holds compose.yaml.`, tone: 'bad' })
 }
 byId('manage-button').addEventListener('click', () => {

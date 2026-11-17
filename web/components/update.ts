@@ -1,7 +1,7 @@
 import { actionButton, button, el } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
-import { commandBlock } from './login.ts'
+import { commandBlock } from './copy.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
