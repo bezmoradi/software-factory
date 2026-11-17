@@ -1,10 +1,10 @@
-import { button, el, emit, shown, visible } from '../lib/dom.ts'
+import { button, el, emit, say, shown, statusLine, visible } from '../lib/dom.ts'
 import { placeMenu } from '../lib/menu.ts'
 import { icon } from './icon.ts'
 import { age, label, modeLabel, plural } from '../lib/format.ts'
 import type { SessionInfo } from '../types.ts'
 
-const LEVELS: Record<string, { word: string; tone: string } | undefined> = { locked: { word: 'Locked', tone: '' }, held: { word: 'Held', tone: 'warn' }, stopped: { word: 'Stopped', tone: 'bad' } }
+const LEVELS = new Map([['locked', { word: 'Locked', tone: '' }], ['held', { word: 'Held', tone: 'warn' }], ['stopped', { word: 'Stopped', tone: 'bad' }]])
 
 export function sessionState(s: SessionInfo): { dot: string; word: string } {
   if (s.disputed) return { dot: 'dot off', word: 'two connections claim this session' }
@@ -110,6 +110,8 @@ function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
   if (s.kind !== 'background' || !s.verified || !/^[0-9a-f]{8}$/.test(s.id || '')) return [el('span')]
   const action = s.running ? 'stop' : 'remove'
   const words = action === 'stop' ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
+  const armedSaid = action === 'stop' ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.'
+  const said = statusLine('sr-only', 'span')
   const more = button('', 'ghost icon-button', undefined, 'button', `more:${s.sid}`)
   more.setAttribute('aria-label', `More actions for ${visible(label(s))}`)
   more.setAttribute('aria-haspopup', 'menu')
@@ -125,6 +127,7 @@ function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
       item.dataset.armed = 'yes'
       item.classList.add('danger')
       text.textContent = words[1] ?? ''
+      say(said, armedSaid)
       return
     }
     menu.hidePopover()
@@ -141,12 +144,13 @@ function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
       delete item.dataset.armed
       item.classList.remove('danger')
       text.textContent = words[0] ?? ''
+      say(said, '')
       return
     }
     placeMenu(more, menu)
     item.focus()
   })
-  return [more, menu]
+  return [more, menu, said]
 }
 
 export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDivElement {
@@ -165,7 +169,7 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   const st = sessionState(s)
   const name = titled(visible(label(s)))
   const done = !s.running && s.state === 'done'
-  const level = done ? { word: 'Done', tone: '' } : s.level === 'locked' && s.sandboxed === false ? { word: 'Locked, not sandboxed', tone: 'warn' } : LEVELS[s.level ?? '']
+  const level = done ? { word: 'Done', tone: '' } : s.level === 'locked' && s.sandboxed === false ? { word: 'Locked, not sandboxed', tone: 'warn' } : LEVELS.get(s.level ?? '')
   if (level) {
     const tag = el('span', level.tone ? `tag ${level.tone}` : 'tag', level.word)
     tag.title = visible(`${s.levelReason ?? ''}${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)

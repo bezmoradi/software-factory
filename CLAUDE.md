@@ -98,7 +98,7 @@ This file holds only what applies to every change. Claude Code loads it at every
 |---|---|
 | [`dependency-rule.md`](.claude/rules/dependency-rule.md) | The layer rules for Go (`cmd → adapters → core`) and for the page's modules, how `make arch-check` and `make web-arch` enforce them, the stack, adding a feature, and the Go conventions |
 | [`page-server.md`](.claude/rules/page-server.md) | The health probe, the page's routes and the middleware chain |
-| [`web-page.md`](.claude/rules/web-page.md) | Where the page's modules live and how they're named and imported, and the stylesheet layout the engine reads |
+| [`web-page.md`](.claude/rules/web-page.md) | Where the page's modules live and how they're named and imported, the stylesheet layout the engine reads, and the page's accessibility baseline (WCAG 2.2 AA) |
 | [`performance-budgets.md`](.claude/rules/performance-budgets.md) | The page's three time budgets and how to measure them in the containerized Chromium |
 | [`compose-hand-checks.md`](.claude/rules/compose-hand-checks.md) | Hand checks of the Docker stack, Docker-in-Docker, the release's files and check, and what the development fakes do |
 | [`gate-hand-checks.md`](.claude/rules/gate-hand-checks.md) | Hand checks of the trust boundary, the gate, reviews and pushes, with their setup |

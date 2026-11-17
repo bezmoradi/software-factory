@@ -75,8 +75,11 @@ function tokenShape(host: string, value: string): string {
   return ''
 }
 
-function secretField(label: string, input: HTMLInputElement): HTMLElement {
-  return field(label, secret(input, 'token'))
+function blank(...inputs: HTMLInputElement[]) {
+  for (const input of inputs) {
+    input.value = ''
+    input.type = 'password'
+  }
 }
 
 function actions(...buttons: HTMLElement[]): HTMLElement[] {
@@ -298,6 +301,7 @@ class SfProjects extends HTMLElement {
   #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; said: HTMLSpanElement }>()
   #list = el('ul', 'boxlist projects')
   #rows = new Map<string, HTMLLIElement>()
+  #said = new Map<string, HTMLParagraphElement>()
   #busy = false
   #add = el('input', 'textbox')
   #pending = new Map<'repo' | 'token', { key: string; after?: () => void }>()
@@ -307,10 +311,17 @@ class SfProjects extends HTMLElement {
   #tokenValue = el('input', 'textbox')
   #replacing = ''
   #replaceValue = el('input', 'textbox')
-  #tokenHint = el('p', 'small warn field-error')
-  #replaceHint = el('p', 'small warn field-error')
+  #tokenHint = statusLine('small warn field-error status-slot')
+  #replaceHint = statusLine('small warn field-error status-slot')
+  #hostField: HTMLElement
+  #tokenField: HTMLElement
+  #replaceField: HTMLElement
+  #replaceLabel: HTMLLabelElement
+  #tokenForm = stacked()
+  #replaceForm = stacked()
+  #hostList = el('ul', 'host-list')
+  #hostRows = new Map<string, HTMLLIElement>()
   #forgetting = ''
-  #tokenNote = ''
   #tokenFrom = ''
   #addingHost = false
   #hostEdited = false
@@ -379,6 +390,25 @@ class SfProjects extends HTMLElement {
     this.#replaceHint.id = 'token-replace-hint'
     this.#tokenValue.addEventListener('input', () => this.#hint())
     this.#replaceValue.addEventListener('input', () => this.#hint())
+    this.#hostField = field('Host', this.#tokenHost)
+    this.#tokenField = field('Token', secret(this.#tokenValue, 'token'))
+    this.#replaceField = field('New token', secret(this.#replaceValue, 'token'))
+    this.#replaceLabel = this.#replaceField.querySelector('label')!
+    this.#hostList.setAttribute('aria-label', 'Saved git host tokens')
+    this.#tokenForm.addEventListener('submit', e => {
+      e.preventDefault()
+      const host = this.#tokenHost.value.trim()
+      const token = this.#tokenValue.value
+      if (!host) return this.#tokenHost.focus()
+      if (!token) return this.#tokenValue.focus()
+      this.#tokenSend('', { op: 'save', host, token }, 'token-save')
+    })
+    this.#replaceForm.addEventListener('submit', e => {
+      e.preventDefault()
+      const host = this.#replacing
+      const token = this.#replaceValue.value
+      if (host && token) this.#tokenSend(host, { op: 'save', host, token }, `host:${host}:save`)
+    })
   }
 
   connectedCallback() {
@@ -393,8 +423,7 @@ class SfProjects extends HTMLElement {
   #hint() {
     for (const [input, hint, host] of [[this.#tokenValue, this.#tokenHint, this.#tokenHost.value], [this.#replaceValue, this.#replaceHint, this.#replacing]] as const) {
       const text = tokenShape(host, input.value)
-      hint.textContent = text
-      hint.hidden = !text
+      sayIfChanged(hint, text, 'warn')
       if (text) input.setAttribute('aria-describedby', hint.id)
       else input.removeAttribute('aria-describedby')
     }
@@ -408,7 +437,7 @@ class SfProjects extends HTMLElement {
     this.#viewKey = key
     this.#view = value
     const kept = new Set(value.projects.map(p => p.path))
-    for (const m of [this.#rows, this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
+    for (const m of [this.#rows, this.#said, this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
     this.#render()
   }
 
@@ -552,26 +581,21 @@ class SfProjects extends HTMLElement {
     this.#add.focus()
   }
 
-  tokenSaid(text: string, bad = false) {
-    if (bad) {
-      this.#tokenNote = text
-      return this.#render()
-    }
+  tokenDone() {
     if (this.#tokenFrom === '') {
       this.#addingHost = false
       this.#hostEdited = false
       this.#tokenHost.value = ''
-    }
+      blank(this.#tokenValue)
+    } else blank(this.#replaceValue)
     this.#replacing = ''
     this.#forgetting = ''
-    this.#tokenNote = ''
     this.#tokenFrom = ''
     this.#render()
   }
 
   #tokenSend(from: string, detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }, key: string) {
     this.#tokenFrom = from
-    this.#tokenNote = ''
     this.#hold('token', key)
     emit(this, 'sf-token', detail)
   }
@@ -600,13 +624,6 @@ class SfProjects extends HTMLElement {
 
   #focus(key: string) {
     for (const root of [this.#slot, this]) root?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus()
-  }
-
-  #tokenError(from: string): HTMLElement[] {
-    if (!this.#tokenNote || this.#tokenFrom !== from) return []
-    const note = el('p', 'small bad', this.#tokenNote)
-    note.setAttribute('role', 'alert')
-    return [note]
   }
 
   #who(title: HTMLElement, p: Project): Element[] {
@@ -795,7 +812,11 @@ class SfProjects extends HTMLElement {
     if (open) {
       parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
     }
-    if (this.#message.path === p.path && this.#message.text) parts.push(el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text))
+    const said = this.#said.get(p.path) ?? statusLine('small status-slot')
+    this.#said.set(p.path, said)
+    const mine = this.#message.path === p.path
+    sayIfChanged(said, mine ? this.#message.text : '', mine && this.#message.bad ? 'bad' : 'muted')
+    parts.push(said)
     const form = this.#forms.get(p.path)
     if (form) {
       form.caps.project = p.name
@@ -856,7 +877,9 @@ class SfProjects extends HTMLElement {
   }
 
   #hostRow(h: TokenHost): HTMLElement {
-    const li = el('li')
+    const li = this.#hostRows.get(h.host) ?? el('li')
+    this.#hostRows.set(h.host, li)
+    const shownHost = visible(hostName(h.host))
     const row = el('div', 'host-row')
     const who = el('div', 'host-who')
     const name = el('span', 'host-name')
@@ -868,54 +891,48 @@ class SfProjects extends HTMLElement {
     row.append(who)
     if (this.#forgetting !== h.host && this.#replacing !== h.host) {
       const acts = el('span', 'host-acts')
-      acts.append(button('Replace', 'link', () => {
+      const replace = button('Replace', 'link', () => {
         this.#replacing = h.host
         this.#forgetting = ''
         this.#addingHost = false
-        this.#tokenNote = ''
-        this.#replaceValue.value = ''
-        this.#replaceValue.type = 'password'
+        blank(this.#tokenValue, this.#replaceValue)
         this.#render()
         this.#replaceValue.focus()
-      }, 'button', `host:${h.host}:replace`), button('Remove', 'link', () => {
+      }, 'button', `host:${h.host}:replace`)
+      replace.setAttribute('aria-label', `Replace the token for ${shownHost}`)
+      const remove = button('Remove', 'link', () => {
         this.#forgetting = h.host
         this.#replacing = ''
         this.#addingHost = false
-        this.#tokenNote = ''
+        blank(this.#tokenValue, this.#replaceValue)
         this.#render()
         this.#focus(`host:${h.host}:confirm`)
-      }, 'button', `host:${h.host}:remove`))
+      }, 'button', `host:${h.host}:remove`)
+      remove.setAttribute('aria-label', `Remove the token for ${shownHost}`)
+      acts.append(replace, remove)
       row.append(acts)
     }
-    li.append(row)
+    const parts: HTMLElement[] = [row]
     if (this.#forgetting === h.host) {
       const confirm = el('div', 'stacked')
       confirm.append(el('p', 'small muted', 'Remove this token? Clones and fetches from this host go without one.'), ...actions(button('Cancel', 'ghost', () => {
         this.#forgetting = ''
-        this.#tokenNote = ''
         this.#render()
       }, 'button', `host:${h.host}:keep`), button('Remove token', 'danger', () => {
         this.#tokenSend(h.host, { op: 'remove', host: h.host }, `host:${h.host}:confirm`)
-      }, 'button', `host:${h.host}:confirm`)), ...this.#tokenError(h.host))
-      li.append(confirm)
+      }, 'button', `host:${h.host}:confirm`)))
+      parts.push(confirm)
     }
     if (this.#replacing === h.host) {
-      const form = stacked(secretField(`New token for ${hostName(h.host)}`, this.#replaceValue), this.#replaceHint, ...actions(button('Cancel', 'ghost', () => {
+      this.#replaceLabel.textContent = `New token for ${hostName(h.host)}`
+      replaceKeeping(this.#replaceForm, [this.#replaceField, this.#replaceHint, ...actions(button('Cancel', 'ghost', () => {
         this.#replacing = ''
-        this.#replaceValue.value = ''
-        this.#replaceValue.type = 'password'
-        this.#tokenNote = ''
+        blank(this.#replaceValue)
         this.#render()
-      }, 'button', `host:${h.host}:cancel`), button('Save token', 'primary', undefined, 'submit', `host:${h.host}:save`)), ...this.#tokenError(h.host))
-      form.addEventListener('submit', e => {
-        e.preventDefault()
-        const token = this.#replaceValue.value
-        this.#replaceValue.value = ''
-        this.#replaceValue.type = 'password'
-        if (token) this.#tokenSend(h.host, { op: 'save', host: h.host, token }, `host:${h.host}:save`)
-      })
-      li.append(form)
+      }, 'button', `host:${h.host}:cancel`), button('Save token', 'primary', undefined, 'submit', `host:${h.host}:save`))])
+      parts.push(this.#replaceForm)
     }
+    replaceKeeping(li, parts)
     return li
   }
 
@@ -941,22 +958,17 @@ class SfProjects extends HTMLElement {
     const parts: HTMLElement[] = [title, about]
     const offered = [GITHUB, GITLAB, ...(developmentBuild() ? [DEV_HOST] : [])].filter(h => !hosts.some(saved => saved.host === h))
     if (this.#replacing) parts.push(...this.#tokenHelp(this.#replacing))
-    if (hosts.length) {
-      const ul = el('ul', 'host-list')
-      ul.setAttribute('aria-label', 'Saved git host tokens')
-      for (const h of hosts) ul.append(this.#hostRow(h))
-      parts.push(ul)
-    }
+    for (const host of this.#hostRows.keys()) if (!hosts.some(h => h.host === host)) this.#hostRows.delete(host)
+    replaceKeeping(this.#hostList, hosts.map(h => this.#hostRow(h)))
+    if (hosts.length) parts.push(this.#hostList)
     if (hosts.length && !this.#addingHost) {
       if (this.#replacing || this.#forgetting || !offered.length) return parts
       const more = button('Add another host', 'primary add-host', () => {
         this.#addingHost = true
         this.#replacing = ''
         this.#forgetting = ''
-        this.#tokenNote = ''
         this.#hostEdited = false
-        this.#tokenValue.value = ''
-        this.#tokenValue.type = 'password'
+        blank(this.#tokenValue)
         this.#render()
         this.#tokenHost.focus()
       }, 'button', 'token-more')
@@ -976,25 +988,13 @@ class SfProjects extends HTMLElement {
     this.#tokenHost.value = picked
     const cancel = hosts.length ? [button('Cancel', 'ghost', () => {
       this.#addingHost = false
-      this.#tokenValue.value = ''
-      this.#tokenValue.type = 'password'
-      if (this.#tokenFrom === '') this.#tokenNote = ''
+      blank(this.#tokenValue)
       this.#render()
     }, 'button', 'token-cancel')] : []
     const save = picked ? [button('Save token', 'primary', undefined, 'submit', 'token-save')] : []
-    const steps = picked ? [...this.#tokenHelp(picked), secretField('Token', this.#tokenValue), this.#tokenHint] : []
-    const form = stacked(field('Host', this.#tokenHost), ...steps, ...actions(...cancel, ...save), ...this.#tokenError(''))
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      const host = this.#tokenHost.value.trim()
-      const token = this.#tokenValue.value
-      if (!host) return this.#tokenHost.focus()
-      if (!token) return this.#tokenValue.focus()
-      this.#tokenValue.value = ''
-      this.#tokenValue.type = 'password'
-      this.#tokenSend('', { op: 'save', host, token }, 'token-save')
-    })
-    parts.push(form)
+    const steps = picked ? [...this.#tokenHelp(picked), this.#tokenField, this.#tokenHint] : []
+    replaceKeeping(this.#tokenForm, [this.#hostField, ...steps, ...actions(...cancel, ...save)])
+    parts.push(this.#tokenForm)
     return parts
   }
 
@@ -1073,7 +1073,7 @@ class SfProjects extends HTMLElement {
       parts.push(this.#list)
     } else this.#list.replaceChildren()
     const side = this.#tokens()
-    if (this.#slot) this.#slot.replaceChildren(...side)
+    if (this.#slot) replaceKeeping(this.#slot, side)
     else parts.push(...side)
     replaceKeeping(this, parts)
     this.#applyPending()

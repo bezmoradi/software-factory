@@ -946,7 +946,6 @@ dialog.login .login-kinds { margin: .6rem 0 .35rem; }
 dialog.login .login-panel p { margin: 0; }
 dialog.login .login-panel > :is(a, button).button { justify-self: center; }
 dialog.login .login-panel > form { justify-self: stretch; }
-dialog.login button.button[aria-disabled="true"] { box-sizing: content-box; min-height: 0; padding-block-end: max(.1rem, 24px - .1rem - 1.25em); border: 0; opacity: .55; pointer-events: none; }
 dialog.identity { width: min(32rem, calc(100vw - 2rem)); margin-block: 8vh auto; }
 dialog.identity p { margin: .35rem 0; }
 dialog.identity .identity-form { display: grid; gap: .6rem; margin-top: .6rem; }

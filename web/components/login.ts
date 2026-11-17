@@ -1,4 +1,4 @@
-import { busy, button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, field, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
@@ -73,9 +73,10 @@ function secretField(name: string, words: string, what: string, autocomplete: Au
   return [field(words, secret(input, what), undefined, 'login-field'), input]
 }
 
-function busyButton(text: string): { node: HTMLButtonElement; busy: (on: boolean) => void } {
-  const node = button(text, 'primary small', undefined, 'submit')
-  return { node, busy: on => busy(node, on) }
+function sending(input: HTMLInputElement, on: boolean) {
+  input.readOnly = on
+  if (on) input.setAttribute('aria-disabled', 'true')
+  else input.removeAttribute('aria-disabled')
 }
 
 class Row {
@@ -84,10 +85,10 @@ class Row {
   private readonly kinds = el('sf-accordion', 'login-kinds')
   private readonly subscriptionSaid = statusLine('small status-slot')
   private readonly keySaid = statusLine('small status-slot')
-  private readonly codeGo = busyButton('Complete sign-in')
-  private readonly keyGo = busyButton('Save key')
+  private readonly codeGo = button('Complete sign-in', 'primary small', undefined, 'submit')
+  private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
-  private readonly linkSoon = button('Sign in', 'button primary small')
+  private readonly linkSaid = statusLine('small muted status-slot')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly subscription = el('div', 'login-panel')
@@ -106,14 +107,12 @@ class Row {
     this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
-    this.linkSoon.setAttribute('aria-disabled', 'true')
-    this.unready()
     const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
-    const codeForm = this.form(codeLabel, this.codeGo.node, () => void this.finishCode())
+    const codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(
       el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
-      this.linkSoon,
+      this.linkSaid,
       codeForm,
       this.subscriptionSaid,
     )
@@ -122,7 +121,7 @@ class Row {
     this.key = key
     this.apiKey.append(
       el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
-      this.form(keyLabel, this.keyGo.node, () => void this.finishKey()),
+      this.form(keyLabel, this.keyGo, () => void this.finishKey()),
       this.keySaid,
     )
     this.kinds.addEventListener('sf-expand', e => {
@@ -160,56 +159,57 @@ class Row {
     this.paint()
   }
 
-  private unready() {
+  private unready(said = '') {
+    sayIfChanged(this.linkSaid, said)
     this.link.removeAttribute('href')
-    this.swapLink(this.link, this.linkSoon)
+    if (!this.link.parentNode) return
+    const focused = document.activeElement === this.link
+    this.link.remove()
+    if (focused) this.code.focus({ preventScroll: true })
   }
 
   private ready(href: string) {
+    sayIfChanged(this.linkSaid, '')
     this.link.href = href
-    this.swapLink(this.linkSoon, this.link)
-  }
-
-  private swapLink(from: HTMLElement, to: HTMLElement) {
-    if (!from.parentNode) return
-    const focused = document.activeElement === from
-    from.replaceWith(to)
-    if (focused) to.focus({ preventScroll: true })
+    if (!this.link.parentNode) this.linkSaid.after(this.link)
   }
 
   private note(said: HTMLElement, text: string, bad = false) {
     say(said, text, bad ? 'bad' : undefined)
   }
 
-  private async begin() {
+  private async begin(keepNote = false) {
     const mine = ++this.starting
-    this.unready()
-    this.note(this.subscriptionSaid, '')
+    this.unready('Getting the sign-in link…')
+    if (!keepNote) this.note(this.subscriptionSaid, '')
     const a = await call(this.post, { step: 'start', target: this.target })
     if (mine !== this.starting) return
     const link = safeLink(a.body.url)
-    if (!a.ok || !link) return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+    if (!a.ok || !link) {
+      sayIfChanged(this.linkSaid, '')
+      return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+    }
     this.waiting = true
     this.ready(link)
-    this.note(this.subscriptionSaid, '')
+    if (!keepNote) this.note(this.subscriptionSaid, '')
   }
 
   private async finishCode() {
     const code = this.code.value.trim()
-    if (!code || !this.waiting) return
-    this.code.disabled = true
-    this.codeGo.busy(true)
+    if (!code || !this.waiting || this.code.readOnly) return
+    sending(this.code, true)
+    busy(this.codeGo, true)
     this.note(this.subscriptionSaid, '')
     const a = await call(this.post, { step: 'code', target: this.target, code })
     this.code.value = ''
     this.code.type = 'password'
-    this.code.disabled = false
-    this.codeGo.busy(false)
+    sending(this.code, false)
+    busy(this.codeGo, false)
     this.waiting = false
     this.unready()
     if (!a.ok) {
       this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'That didn’t work.', true)
-      if (this.kinds.open === 'subscription') void this.begin()
+      if (this.kinds.open === 'subscription') void this.begin(true)
       return
     }
     this.show(signInOf(a.body.signIn))
@@ -218,15 +218,15 @@ class Row {
 
   private async finishKey() {
     const key = this.key.value.trim()
-    if (!key) return
-    this.key.disabled = true
-    this.keyGo.busy(true)
+    if (!key || this.key.readOnly) return
+    sending(this.key, true)
+    busy(this.keyGo, true)
     this.note(this.keySaid, '')
     const a = await call(this.post, { step: 'key', target: this.target, key })
     this.key.value = ''
     this.key.type = 'password'
-    this.key.disabled = false
-    this.keyGo.busy(false)
+    sending(this.key, false)
+    busy(this.keyGo, false)
     if (!a.ok) return this.note(this.keySaid, typeof a.body.message === 'string' ? a.body.message : 'The key wasn’t saved. Try again.', true)
     this.show(signInOf(a.body.signIn))
     this.signedIn('your API key')

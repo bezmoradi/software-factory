@@ -2,7 +2,7 @@ import { api, exchange, trade } from './api.ts'
 import { claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
@@ -58,7 +58,7 @@ import { armed, changesSession, controllable, current, inTurn, pickingSize, revi
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
-import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, holdBusy, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
+import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
 
 setPainter(paint)
@@ -67,7 +67,7 @@ const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 
 const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
 
 function lifecycleLine(e: AuditEntry): string {
-  const what = LIFECYCLE[e.kind] ?? visible(e.kind)
+  const what = Object.hasOwn(LIFECYCLE, e.kind) ? LIFECYCLE[e.kind] : visible(e.kind)
   const ref = e.from === 'pull-request' ? `${START_FROM[e.from]}${visible(e.fromRef ?? '')}` : e.from && Object.hasOwn(START_FROM, e.from) ? `${START_FROM[e.from]}${e.fromRef ? ` ${visible(e.fromRef)}` : ''}${e.source ? ` ${visible(e.source).slice(0, 8)}` : ''}` : ''
   const branch = e.kind === 'session-delete' || e.kind === 'session-fork' ? ` (${visible(e.branch ?? '')})` : ''
   return `${what}${branch}${ref ? ` ${ref}` : ''}`
@@ -471,7 +471,7 @@ function paintControl(s: Session) {
   byId('foot-text').classList.toggle('bad', !notice && i.mode === 'bypassPermissions')
   byId('control-text').textContent = text
   button.dataset.action = action === 'Wake it' ? 'wake' : action === 'End both connections' ? 'release' : 'control'
-  holdBusy(button, controlBusy.has(s.sid))
+  busy(button, controlBusy.has(s.sid))
   const labels = [action, button.dataset.action === 'control' && !i.controlled ? 'Confirm control' : '']
   const shown = labels[1] && armed.has(`${s.sid}:control`) ? 1 : 0
   ;[...button.children].forEach((span, n) => {
@@ -500,8 +500,8 @@ function paintManage(s: Session) {
   button.dataset.action = stop ? 'stop' : 'remove'
   const labels = stop ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
   const shown = armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
-  holdBusy(button, !!pending && !pending.force)
-  holdBusy(force, !!pending?.force)
+  busy(button, !!pending && !pending.force)
+  busy(force, !!pending?.force)
   ;[...button.children].forEach((span, i) => {
     span.textContent = labels[i] ?? ''
     span.classList.toggle('off', i !== shown)
@@ -819,7 +819,7 @@ function paintExceptions(s: Session) {
     const kind = e.kind === 'push' ? (e.personReason && e.result === 'pushed' ? 'allow-push' : '') : e.kind
     const by = e.by === 'agent' ? ', asked by the agent' : e.by === 'agent, after reviews' ? ', asked by the agent, after its reviews' : e.by === 'page' ? ', from the page' : e.by === 'engine' ? ', by the engine' : e.by === 'engine, at start' ? ', by the engine at start' : ''
     const outcome = kind && Object.hasOwn(OUTCOME, e.result) ? `, ${OUTCOME[e.result]}` : ''
-    const what = kind ? `${EXCEPTION[kind] ?? visible(kind)}${outcome}${e.reviewer ? ` (${visible(e.reviewer)}${e.verdict ? `: ${visible(e.verdict)}` : ''})` : e.path ? ` (${visible(e.path)})` : ''}` : HISTORY[e.result] ?? `Push ${visible(e.result)}`
+    const what = kind ? `${Object.hasOwn(EXCEPTION, kind) ? EXCEPTION[kind] : visible(kind)}${outcome}${e.reviewer ? ` (${visible(e.reviewer)}${e.verdict ? `: ${visible(e.verdict)}` : ''})` : e.path ? ` (${visible(e.path)})` : ''}` : Object.hasOwn(HISTORY, e.result) ? HISTORY[e.result] : `Push ${visible(e.result)}`
     const said = kind ? visible(e.personReason || e.reason) : e.result === 'held' ? `${e.missing?.length ?? 0} missing` : e.result === 'pushed' || e.result === 'up-to-date' ? '' : e.result === 'denied' && e.personReason ? `“${visible(e.personReason)}”` : visible(e.reason)
     const li = el('li', kind ? 'warn' : '')
     const at = el('time', 'history-time', e.time ? when(e.time) : '')
@@ -1484,7 +1484,7 @@ async function changeTokenNow(detail: { op: 'save'; host: string; token: string 
   }
   const saved = isRecord(body.host) && typeof body.host.host === 'string' ? body.host.host : detail.host
   if (typeof body.warning === 'string' && body.warning) toast({ id: `token:${saved}`, title: `Token saved for ${visible(saved)}, with a warning`, description: visible(body.warning), tone: 'warn', timeout: 0 })
-  projects.tokenSaid(detail.op === 'save' ? `Token saved for ${saved}.` : `Token removed for ${detail.host}.`)
+  projects.tokenDone()
   await loadProjects(true)
 }
 projects.addEventListener('sf-repo', e => void changeRepo(e.detail))

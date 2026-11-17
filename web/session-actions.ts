@@ -1,6 +1,6 @@
 import { api } from './api.ts'
 import { armed, controllable, current, paint, say, schedulePaint, sleeping, state, toast, type Session } from './app-state.ts'
-import { busy, byId, pressed, visible, whileBusy } from './lib/dom.ts'
+import { byId, pressed, visible, whileBusy } from './lib/dom.ts'
 import { agentWord, label } from './lib/format.ts'
 import { boxSignIn } from './components/login.ts'
 import { approveTrustFiles, askTrust, consentFor } from './components/consent.ts'
@@ -52,10 +52,6 @@ export const answerAsking = new Set<string>()
 const ASKED_MS = 30000
 
 export const stepping = new Map<string, number>()
-
-export function holdBusy(b: HTMLButtonElement, on: boolean) {
-  if (on !== (b.getAttribute('aria-busy') === 'true')) busy(b, on)
-}
 
 export function once(s: Session | null | undefined, what: string, run: () => Promise<boolean>) {
   if (!s) return
