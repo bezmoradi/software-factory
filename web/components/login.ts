@@ -87,6 +87,7 @@ class Row {
   private readonly codeGo = busyButton('Complete sign-in')
   private readonly keyGo = busyButton('Save key')
   private readonly link = el('a', 'button primary small', 'Sign in')
+  private readonly linkSoon = button('Sign in', 'button primary small')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly subscription = el('div', 'login-panel')
@@ -105,13 +106,14 @@ class Row {
     this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
+    this.linkSoon.setAttribute('aria-disabled', 'true')
     this.unready()
     const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
     const codeForm = this.form(codeLabel, this.codeGo.node, () => void this.finishCode())
     this.subscription.append(
       el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
-      this.link,
+      this.linkSoon,
       codeForm,
       this.subscriptionSaid,
     )
@@ -160,16 +162,19 @@ class Row {
 
   private unready() {
     this.link.removeAttribute('href')
-    this.link.setAttribute('role', 'link')
-    this.link.setAttribute('aria-disabled', 'true')
-    this.link.tabIndex = 0
+    this.swapLink(this.link, this.linkSoon)
   }
 
   private ready(href: string) {
     this.link.href = href
-    this.link.removeAttribute('role')
-    this.link.removeAttribute('aria-disabled')
-    this.link.removeAttribute('tabindex')
+    this.swapLink(this.linkSoon, this.link)
+  }
+
+  private swapLink(from: HTMLElement, to: HTMLElement) {
+    if (!from.parentNode) return
+    const focused = document.activeElement === from
+    from.replaceWith(to)
+    if (focused) to.focus({ preventScroll: true })
   }
 
   private note(said: HTMLElement, text: string, bad = false) {

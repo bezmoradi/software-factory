@@ -276,6 +276,7 @@ class SfChanges extends HTMLElement {
     this.#box.setAttribute('aria-label', 'Comment on the chosen line')
     this.#box.disabled = true
     this.#box.addEventListener('keydown', e => {
+      if (this.#box.readOnly) return
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         this.#addComment()
@@ -316,8 +317,15 @@ class SfChanges extends HTMLElement {
     const where = `${visible(r.file)} line ${r.line}${r.kind === 'removed' ? ', a removed line' : r.kind === 'added' ? ', an added line' : ''}`
     this.#target.textContent = `Commenting on ${where}.`
     this.#status.textContent = `${where}: ${visible(r.text.slice(1))}`
-    this.#box.disabled = this.#sending
+    this.#box.disabled = false
+    this.#holdBox(this.#sending)
     if (focusBox) this.#box.focus()
+  }
+
+  #holdBox(on: boolean) {
+    this.#box.readOnly = on
+    if (on) this.#box.setAttribute('aria-disabled', 'true')
+    else this.#box.removeAttribute('aria-disabled')
   }
 
   #keys(e: KeyboardEvent) {
@@ -380,6 +388,7 @@ class SfChanges extends HTMLElement {
       text: commentMessage(mine),
       done: (ok: boolean) => {
         this.#sending = false
+        this.#holdBox(false)
         if (ok) {
           this.#comments.delete(branch)
           this.#said.textContent = 'Sent to the agent as one message.'

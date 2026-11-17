@@ -1,4 +1,4 @@
-import { button, el, emit, replaceKeeping, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, replaceKeeping, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import type { Overlap, SessionFactsView, Uncommitted } from '../types.ts'
 
 const SHOWN = 20
@@ -34,9 +34,10 @@ class SfSessionFacts extends HTMLElement {
     this.#key = key
     const u = value?.uncommitted ?? null
     const overlaps = value?.overlaps ?? []
-    this.hidden = !value || (!u?.count && !overlaps.length)
-    const parts: HTMLElement[] = [this.#uncommitted(value && !this.hidden && u?.count ? u : null, value?.disabled ?? '')]
-    if (!this.hidden) for (const o of overlaps) parts.push(this.#overlap(o))
+    const hidden = !value || (!u?.count && !overlaps.length)
+    const parts: HTMLElement[] = [this.#uncommitted(value && !hidden && u?.count ? u : null, value?.disabled ?? '')]
+    if (!hidden) for (const o of overlaps) parts.push(this.#overlap(o))
+    this.hidden = hidden
     replaceKeeping(this, parts)
   }
 
@@ -49,7 +50,7 @@ class SfSessionFacts extends HTMLElement {
       return box
     }
     const { count, paths: list, cut } = u
-    sayIfChanged(lead, `${count}${cut ? ' or more' : ''} ${plural(count, 'file', 'files')} changed but not committed; ${plural(count, "it won't", "they won't")} be pushed.`)
+    sayWhenShown(lead, `${count}${cut ? ' or more' : ''} ${plural(count, 'file', 'files')} changed but not committed; ${plural(count, "it won't", "they won't")} be pushed.`)
     const ask = button('Ask the agent to commit them', 'small', () => {
       if (!disabled) emit(this, 'sf-commit-ask')
     }, 'button', 'commit-ask')

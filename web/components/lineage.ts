@@ -1,4 +1,4 @@
-import { button, el, emit, replaceKeeping, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, replaceKeeping, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { agentWord, shortSha } from '../lib/format.ts'
 import { limitsNow, watchLimits, when } from './usage.ts'
 import type { Lineage, SessionInfo, Starter } from '../types.ts'
@@ -85,7 +85,7 @@ class SfLineage extends HTMLElement {
     }
     const to = l.handedTo
     const at = sha(l.last)
-    sayIfChanged(this.#handedSaid, `This branch, ${visible(l.branch)}, continues in another session${at ? ` from commit ${at}` : ''}. This session is stopped and its worktree removed, so it can't wake; it keeps its conversation for reading.`)
+    sayWhenShown(this.#handedSaid, `This branch, ${visible(l.branch)}, continues in another session${at ? ` from commit ${at}` : ''}. This session is stopped and its worktree removed, so it can't wake; it keeps its conversation for reading.`)
     replaceKeeping(this.#handedBox, [this.#handedSaid, button('Open that session', 'ghost small', () => emit(this, 'sf-open-session', { sid: to }))])
   }
 
