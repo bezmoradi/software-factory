@@ -160,7 +160,16 @@ class Row {
 
   private unready() {
     this.link.removeAttribute('href')
+    this.link.setAttribute('role', 'link')
     this.link.setAttribute('aria-disabled', 'true')
+    this.link.tabIndex = 0
+  }
+
+  private ready(href: string) {
+    this.link.href = href
+    this.link.removeAttribute('role')
+    this.link.removeAttribute('aria-disabled')
+    this.link.removeAttribute('tabindex')
   }
 
   private note(said: HTMLElement, text: string, bad = false) {
@@ -176,8 +185,7 @@ class Row {
     const link = safeLink(a.body.url)
     if (!a.ok || !link) return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
     this.waiting = true
-    this.link.href = link
-    this.link.removeAttribute('aria-disabled')
+    this.ready(link)
     this.note(this.subscriptionSaid, '')
   }
 

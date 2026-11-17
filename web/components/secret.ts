@@ -50,7 +50,7 @@ class SfSecret extends HTMLElement {
     this.#toggle.setAttribute('aria-label', `Show ${what}`)
     this.#toggle.setAttribute('aria-pressed', String(shown))
     this.#toggle.setAttribute('aria-controls', input.id)
-    this.#toggle.title = shown ? `Hide ${what}` : `Show ${what}`
+    this.#toggle.title = `Show ${what}`
     this.#toggle.replaceChildren(icon(shown ? 'eye-closed' : 'eye'))
   }
 }

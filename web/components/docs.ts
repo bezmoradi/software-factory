@@ -209,7 +209,7 @@ class SfDocs extends HTMLElement {
       const part = el('section', 'docs-section')
       part.dataset.doc = s.id
       const md = el('sf-markdown')
-      md.addEventListener('sf-paint', () => addPageLinks(part, this.#session))
+      md.addEventListener('sf-markdown-painted', () => addPageLinks(part, this.#session))
       md.text = s.body
       part.append(md)
       body.append(part)

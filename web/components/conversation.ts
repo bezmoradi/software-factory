@@ -104,7 +104,7 @@ class SfConversation extends HTMLElement {
   }
 
   get waiting(): CardEvent[] {
-    return [...this.#cards.values()].filter(n => !answering(n)).map(n => n.source)
+    return [...this.#cards.values()].flatMap(n => (n.source && !answering(n) ? [n.source] : []))
   }
 
   get pinned(): boolean {
@@ -302,7 +302,7 @@ class SfConversation extends HTMLElement {
         this.#fresh.add(call)
         li.title = visible(ev.summary || ev.tool)
         if (ev.id) this.#tools.set(ev.id, li)
-        if (call.querySelector('.tool-path')) emit(li, 'sf-paint')
+        if (call.querySelector('.tool-path')) emit(li, 'sf-tool-path')
         break
       }
       case 'tool_done': {
@@ -394,12 +394,12 @@ class SfConversation extends HTMLElement {
   }
 
   refreshCards(controlled?: boolean): void {
-    for (const node of this.#cards.values()) node.card = { ...node.source, readOnly: !!node.source.readOnly || !controlled }
+    for (const node of this.#cards.values()) if (node.source) node.card = { ...node.source, readOnly: !!node.source.readOnly || !controlled }
   }
 
   #showCard(ev: CardEvent, controlled?: boolean) {
     if (this.#cards.has(ev.id)) return
-    const node = el(CARD_TAGS[ev.type]) as HTMLElement as CardHost
+    const node: CardHost = el(CARD_TAGS[ev.type])
     node.dataset.kind = ev.type
     node.source = ev
     node.card = { ...ev, readOnly: !!ev.readOnly || !controlled }

@@ -105,22 +105,6 @@ const HASH = /^[0-9a-f]{64}$/
 
 type MergedPull = { number: number; title: string; body?: string; author: string; url: string; base: string; head: string; merge: string; merged: number }
 
-export interface PairAgent {
-  agent: string
-  model?: string
-  effort?: string
-}
-
-export interface PairDispatch {
-  path: string
-  name: string
-  type: string
-  agents: PairAgent[]
-  message?: string
-  benchmark?: { number: number; hash: string; base: string }
-  caps?: { money: number; minutes: number; turns: number }
-}
-
 async function pairCall(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
   const res = await api('/api/pair', body).catch(() => null)
   const parsed = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
@@ -323,11 +307,5 @@ export class PairField {
       return 'invalid'
     }
     return { agent: this.agent.value, model: this.model.value, message: bench ? '' : message }
-  }
-}
-
-declare global {
-  interface HTMLElementEventMap {
-    'sf-pair': CustomEvent<PairDispatch>
   }
 }

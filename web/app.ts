@@ -2511,13 +2511,15 @@ function markFiles(view: HTMLElement, sid: string) {
   })
 }
 
-byId('conversations').addEventListener('sf-paint', e => {
+function markFilesSoon(e: Event) {
   const view = (e.target as Element).closest<HTMLElement>('#conversations > *')
   const s = [...sessions.values()].find(x => x.view === view)
   if (!view || !s) return
   clearTimeout(scanning.get(s.sid))
   scanning.set(s.sid, setTimeout(() => markFiles(view, s.sid), 600))
-})
+}
+byId('conversations').addEventListener('sf-markdown-painted', markFilesSoon)
+byId('conversations').addEventListener('sf-tool-path', markFilesSoon)
 const openRef = (e: Event) => {
   const code = (e.target as Element).closest<HTMLElement>('code.file-ref')
   if (!code?.dataset.file) return

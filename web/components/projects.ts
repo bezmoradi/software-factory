@@ -18,8 +18,7 @@ import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTabl
 import { placeMenu } from '../lib/menu.ts'
 import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
 import { developmentBuild } from './update.ts'
-import type { PairAgent } from './start-from.ts'
-import type { Cloning, Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
+import type { Cloning, Expect, PairAgent, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 
 const MODELS: [string, string][] = [['', 'Default model'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
 function options(select: HTMLSelectElement, list: [string, string][]) {

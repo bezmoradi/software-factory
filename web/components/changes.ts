@@ -376,20 +376,17 @@ class SfChanges extends HTMLElement {
     const branch = this.#branch
     this.#sending = true
     this.#paintList()
-    this.dispatchEvent(new CustomEvent('sf-line-comments', {
-      bubbles: true,
-      detail: {
-        text: commentMessage(mine),
-        done: (ok: boolean) => {
-          this.#sending = false
-          if (ok) {
-            this.#comments.delete(branch)
-            this.#said.textContent = 'Sent to the agent as one message.'
-          } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
-          this.#paintList()
-        },
+    emit(this, 'sf-line-comments', {
+      text: commentMessage(mine),
+      done: (ok: boolean) => {
+        this.#sending = false
+        if (ok) {
+          this.#comments.delete(branch)
+          this.#said.textContent = 'Sent to the agent as one message.'
+        } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
+        this.#paintList()
       },
-    }))
+    })
   }
 
   #fileHeader(r: DiffRow, files: Map<string, ChangeFile>): HTMLElement {

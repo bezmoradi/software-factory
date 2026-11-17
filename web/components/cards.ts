@@ -184,6 +184,7 @@ class NoteForm {
 }
 
 class SfAsk extends HTMLElement {
+  source: AskEvent | null = null
   #card: AskEvent | null = null
   #picks = new Map<string, string[]>()
   #notes = new Map<string, NoteForm>()
@@ -277,6 +278,7 @@ class SfAsk extends HTMLElement {
 }
 
 class SfPermission extends HTMLElement {
+  source: PermissionEvent | null = null
   #card: PermissionEvent | null = null
   #note: NoteForm | null = null
 
@@ -329,6 +331,7 @@ class SfPermission extends HTMLElement {
 }
 
 class SfPlan extends HTMLElement {
+  source: PlanEvent | null = null
   #card: PlanEvent | null = null
   #note: NoteForm | null = null
   #open = new Map<string, boolean>()

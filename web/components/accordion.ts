@@ -1,4 +1,4 @@
-import { el } from '../lib/dom.ts'
+import { el, emit } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 export interface AccordionItem {
@@ -42,7 +42,7 @@ class SfAccordion extends HTMLElement {
       d.addEventListener('toggle', () => {
         if (d.open === (this.#open === item.id)) return
         this.#open = d.open ? item.id : ''
-        this.dispatchEvent(new CustomEvent('sf-expand', { detail: this.#open }))
+        emit(this, 'sf-expand', this.#open)
       })
       return d
     })
