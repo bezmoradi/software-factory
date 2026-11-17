@@ -31,6 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       image-digest: ${{ steps.image.outputs.digest }}
+      install-sha256: ${{ steps.files.outputs.install-sha256 }}
     steps:
       - name: Only the owner releases
         env:
@@ -153,6 +154,7 @@ jobs:
             docker image rm "$IMAGE@$IMAGE_DIGEST" >/dev/null
           done
       - name: Write and check the release's files
+        id: files
         env:
           VERSION: ${{ steps.version.outputs.version }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
@@ -167,6 +169,7 @@ jobs:
             exit 1
           fi
           sh scripts/release-install.sh "$VERSION" "$files/compose.yaml" "$files/compose.release.yaml" "$files/install.sh"
+          echo "install-sha256=$(sha256sum "$files/install.sh" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: Sign the image
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -180,6 +183,13 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+          create-storage-record: false
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/install.sh
+            ${{ runner.temp }}/release/compose.yaml
+            ${{ runner.temp }}/release/compose.release.yaml
           create-storage-record: false
       - name: Tag the signed image with the version
         env:
@@ -300,6 +310,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.release.outputs.version }}
           IMAGE_DIGEST: ${{ needs.release.outputs.image-digest }}
+          INSTALL_SHA256: ${{ needs.release.outputs.install-sha256 }}
         run: |
           printf '%s\n' "$VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'
           [ "$TAG" = "v$VERSION" ]
@@ -311,6 +322,11 @@ jobs:
           image=ghcr.io/bezmoradi/software-factory@$IMAGE_DIGEST
           compose_sum=$(sha256sum "$files/compose.yaml" | cut -d ' ' -f 1)
           release_sum=$(sha256sum "$files/compose.release.yaml" | cut -d ' ' -f 1)
+          install_sum=$(sha256sum "$files/install.sh" | cut -d ' ' -f 1)
+          if ! printf '%s\n' "$INSTALL_SHA256" | grep -Eqx '[0-9a-f]{64}' || [ "$install_sum" != "$INSTALL_SHA256" ]; then
+            echo "::error::install.sh isn't the file the release job attested: its SHA-256 is $install_sum, and the release job's is $INSTALL_SHA256."
+            exit 1
+          fi
           if [ "$(grep -cxF "version='$VERSION'" "$files/install.sh")" != 1 ] ||
             [ "$(grep -cxF "compose_sha256='$compose_sum'" "$files/install.sh")" != 1 ] ||
             [ "$(grep -cxF "release_sha256='$release_sum'" "$files/install.sh")" != 1 ] ||
@@ -318,6 +334,7 @@ jobs:
             echo "::error::The files to attach don't match: install.sh must carry $VERSION and the SHA-256 of both Compose files, and compose.release.yaml must name $image."
             exit 1
           fi
+          signer="-R bezmoradi/software-factory --signer-workflow bezmoradi/software-factory/.github/workflows/release.yml --source-ref refs/tags/$TAG"
           identity="--certificate-identity https://github.com/bezmoradi/software-factory/.github/workflows/release.yml@refs/tags/v$VERSION --certificate-oidc-issuer https://token.actions.githubusercontent.com"
           fence='```'
           cat > "$RUNNER_TEMP/notes.md" <<EOF
@@ -331,6 +348,16 @@ jobs:
 
           The script keeps its files in \`~/software-factory\` (or \`SF_HOME\`): it downloads this release's \`compose.yaml\` and \`compose.release.yaml\` from here, checks them against the SHA-256 sums it carries, writes \`software-factory-socket.yaml\`, which gives the box helper Docker's socket, and so control of Docker, which is close to control of the computer, and starts the Compose project \`software-factory\`, keeping its volumes. Then open <http://127.0.0.1:7799>. To install this version rather than the newest, run this release's own script: \`curl -fsSL https://github.com/bezmoradi/software-factory/releases/download/$TAG/install.sh | sh\`.
 
+          To check this release's script before it runs, with a signed-in gh: download it, check that this repository's release workflow built it for $TAG, then run it:
+
+          ${fence}bash
+          curl -fsSLO https://github.com/bezmoradi/software-factory/releases/download/$TAG/install.sh
+          gh attestation verify install.sh $signer
+          sh install.sh
+          ${fence}
+
+          The three files attached here carry that build provenance, so \`gh attestation verify compose.yaml $signer\` checks a Compose file the same way, and the script checks both against the SHA-256 sums it carries.
+
           Optional checks, with cosign and a signed-in gh: the image's signature by this repository's release workflow for $TAG, and its build provenance and SBOMs:
 
           ${fence}bash
@@ -339,7 +366,7 @@ jobs:
           gh attestation verify oci://$image -R bezmoradi/software-factory --predicate-type https://spdx.dev/Document/v2.3
           ${fence}
 
-          Image: \`$image\` (tag \`$VERSION\`), the one \`compose.release.yaml\` names. The signature covers the image, not the files attached here, which GitHub serves, and not the agents the engine downloads at first start, which it checks against their pinned integrity hashes and npm provenance.
+          Image: \`$image\` (tag \`$VERSION\`), the one \`compose.release.yaml\` names. The signature covers the image, and the attestations the image and these three files; neither covers the agents the engine downloads at first start, which it checks against their pinned integrity hashes and npm provenance.
           EOF
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Software Factory $VERSION" --notes-file "$RUNNER_TEMP/notes.md" \
             "$files/install.sh" "$files/compose.yaml" "$files/compose.release.yaml"

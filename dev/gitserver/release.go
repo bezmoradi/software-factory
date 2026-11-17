@@ -89,7 +89,10 @@ func releaseCommand(root string, args []string) error {
 }
 
 func releaseNotes(tag string) string {
-	return "Software Factory " + tag + ".\n\n```bash\ncurl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh\n```\n"
+	script := "https://github.com/bezmoradi/software-factory/releases/download/" + tag + "/install.sh"
+	return "Software Factory " + tag + ".\n\n```bash\ncurl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh\n```\n\n" +
+		"To check this release's script before it runs, with a signed-in gh:\n\n```bash\ncurl -fsSLO " + script + "\n" +
+		"gh attestation verify install.sh -R bezmoradi/software-factory --signer-workflow bezmoradi/software-factory/.github/workflows/release.yml --source-ref refs/tags/" + tag + "\nsh install.sh\n```\n"
 }
 
 type releaseFake struct {

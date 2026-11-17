@@ -22,7 +22,7 @@ export interface UpdateView {
 const ROUTE = '/api/update'
 const REPO = 'https://github.com/bezmoradi/software-factory'
 const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/
-const INSTALL_COMMAND = 'curl -fsSL https://github.com/bezmoradi/software-factory/releases/latest/download/install.sh | sh'
+const SIGNER = '-R bezmoradi/software-factory --signer-workflow bezmoradi/software-factory/.github/workflows/release.yml'
 const KIND = /^[a-z][a-z-]{0,40}$/
 const RELOAD_MS = 60 * 60 * 1000
 const SOON_MS = 15_000
@@ -132,13 +132,25 @@ function oneLine(command: string, name: string): HTMLElement {
   return block
 }
 
-function releaseSteps(): HTMLElement {
+function releaseSteps(version: string): HTMLElement {
+  const tag = `v${version}`
+  const script = `${REPO}/releases/download/${tag}/install.sh`
   const box = el('section', 'update-steps')
+  const steps = el('ol', 'small update-list')
+  const download = el('li')
+  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'The download command'))
+  const verify = el('li')
+  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'The check command'))
+  const run = el('li')
+  run.append(para('', 'Run it:'), commandBlock('sh install.sh'))
+  steps.append(download, verify, run)
   box.append(
     el('h3', 'update-subhead', 'If you installed a release'),
-    para('small', 'Run the install command again in a terminal. It installs the newest release, which may be newer than the one named here:'),
-    oneLine(INSTALL_COMMAND, 'The install command'),
-    para('small muted', 'It replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
+    para('small', `Run release ${version}’s install command in a terminal:`),
+    oneLine(`curl -fsSL ${script} | sh`, 'The install command'),
+    para('small', 'Or check the script before it runs, with a signed-in gh:'),
+    steps,
+    para('small muted', 'Either way, the script replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
   )
   return box
 }
@@ -189,7 +201,7 @@ export function openUpdate(): void {
   })
   later.title = `Hides this until a release newer than ${r.version} is out`
   const tag = `v${r.version}`
-  const steps = development ? [sourceSteps(true), releaseSteps()] : [releaseSteps(), sourceSteps(false)]
+  const steps = development ? [sourceSteps(true), releaseSteps(r.version)] : [releaseSteps(r.version), sourceSteps(false)]
   const m = modal({
     kind: 'update',
     title,
