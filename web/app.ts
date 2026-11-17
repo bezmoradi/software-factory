@@ -2,7 +2,7 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { busy, button, byId, copyText, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { busy, button, byId, copyText, el, emit, fileLink, pressed, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
@@ -11,13 +11,12 @@ import { paintPath, type Step, type Turn } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
 import { sessionState } from './components/session-list.ts'
 import { warnings } from './components/overview.ts'
-import type { CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, Needs, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
+import type { CardHost, CatalogEntry, Changes, Check, Consent, Expect, GateEvent, Needs, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
 import './components/check.ts'
 import './components/gate.ts'
-import type { Spot } from './components/conversation.ts'
 import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
@@ -57,6 +56,7 @@ import { initUpdates, loadUpdate } from './components/update.ts'
 import { sendState } from './api.ts'
 import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, scroller, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, setSide, startLayout, startTopBar } from './layout.ts'
+import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 
 setPainter(paint)
 
@@ -200,11 +200,6 @@ function once(s: Session | null | undefined, what: string, run: () => Promise<bo
   void run().then(ok => {
     if (!ok && stepping.get(key) === now) stepping.delete(key)
   })
-}
-
-function openChanges(s: Session) {
-  go(`c:${s.sid}`)
-  requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff())
 }
 
 function requestReplay(s: Session, force = false) {
@@ -407,34 +402,6 @@ function entries(list: unknown): CatalogEntry[] {
   return Array.isArray(list) ? (list as unknown[]).filter((e): e is CatalogEntry => isRecord(e) && typeof e.name === 'string' && typeof e.description === 'string').map(e => ({ name: e.name, description: e.description })) : []
 }
 
-let openTabs = ['overview']
-let recent: string[] = []
-const scrolls = new Map<string, number>()
-const spots = new Map<string, Spot | null>()
-
-function go(key: string) {
-  if (key === current.key) return
-  scrolls.set(current.key, scroller.scrollTop)
-  const leaving = current()
-  if (leaving) spots.set(current.key, leaving.view.spot())
-  const from = current.key
-  current.key = key
-  composer.swapDraft(from, key)
-  armed.clear()
-  if (!openTabs.includes(key)) openTabs = [...openTabs, key]
-  recent = [key, ...recent.filter(k => k !== key)]
-  if (key !== focusFile) focusFile = ''
-  if (key.startsWith('f:')) loadFile(key)
-  paint()
-  composer.grow()
-  const view = current()?.view
-  scroller.scrollTop = view?.pinned ? scroller.scrollHeight : scrolls.get(key) ?? (key.startsWith('s/') ? scroller.scrollHeight : 0)
-  if (view && !view.pinned) view.restore(spots.get(key))
-  composer.paintJump()
-  settleFocus()
-}
-
-const TABS_KEY = 'sf-tabs'
 const SAVED_KEY = 'sf-checkpointed'
 const checkpointed = new Map<string, string>()
 try {
@@ -454,62 +421,12 @@ function saveCheckpoints() {
     sessionStorage.setItem(SAVED_KEY, JSON.stringify(Object.fromEntries(checkpointed)))
   } catch {}
 }
-const MAX_TAB_LINE = 10_000_000
-const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
-
-function saveTabs() {
-  try {
-    const lines = Object.fromEntries(openTabs.flatMap(k => {
-      const line = k.startsWith('f:') ? files.get(k)?.line ?? 0 : 0
-      return line > 0 ? [[k, line]] : []
-    }))
-    sessionStorage.setItem(TABS_KEY, JSON.stringify({ tabs: openTabs.slice(1), active: current.key, lines }))
-  } catch {}
-}
-
-function restoreTabs() {
-  let saved: { tabs?: unknown; active?: unknown; lines?: unknown } | null = null
-  try {
-    saved = JSON.parse(sessionStorage.getItem(TABS_KEY) || 'null')
-  } catch {}
-  const tabs = Array.isArray(saved?.tabs) ? [...new Set((saved.tabs as unknown[]).filter((k): k is string => typeof k === 'string' && TAB_KEY.test(k)))].slice(0, 50) : []
-  const lines = saved?.lines && typeof saved.lines === 'object' ? (saved.lines as Record<string, unknown>) : {}
-  for (const k of tabs) {
-    if (!k.startsWith('f:')) continue
-    const { path, commit } = fileKey(k)
-    const line = lines[k]
-    const at = typeof line === 'number' && Number.isInteger(line) && line > 0 && line <= MAX_TAB_LINE ? line : 0
-    files.set(k, { path, ...(commit ? { commit } : {}), ...(at ? { line: at } : {}) })
-  }
-  openTabs = ['overview', ...tabs]
-  const active = typeof saved?.active === 'string' && openTabs.includes(saved.active) ? saved.active : 'overview'
-  current.key = active
-  recent = [active, ...[...openTabs].reverse().filter(k => k !== active && k !== 'overview')].filter(k => k !== 'overview')
-}
-
-function pruneTabs() {
-  const sidOf = (k: string) => (k.startsWith('s/') || k.startsWith('c:') ? k.slice(2) : k.startsWith('f:') ? k.slice(2, k.indexOf(':', 2)) : '')
-  for (const k of openTabs) if (sidOf(k) && !sessions.has(sidOf(k))) closeTab(k)
-  if (current.key.startsWith('f:') && !files.get(current.key)?.text) loadFile(current.key)
-}
-
-function closeTab(key: string) {
-  if (key === 'overview') return
-  openTabs = openTabs.filter(k => k !== key)
-  files.delete(key)
-  recent = recent.filter(k => k !== key && openTabs.includes(k))
-  scrolls.delete(key)
-  composer.dropDraft(key)
-  const owner = key.startsWith('c:') ? `s/${key.slice(2)}` : key.startsWith('f:') ? `s/${key.slice(2, key.indexOf(':', 2))}` : ''
-  if (key === current.key) go(owner && openTabs.includes(owner) ? owner : recent[0] || 'overview')
-  else paint()
-}
 
 function paint() {
   const s = current()
   setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
   setLimitsSession(s?.info.verified ? s.sid : '')
-  if (current.key.startsWith('s/') && !openTabs.includes(current.key)) openTabs = [...openTabs, current.key]
+  if (current.key.startsWith('s/')) keepTab(current.key)
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
   const shown = list.map(x => ({ ...x.info, busy: working(x), waiting: waitingOf(x) }))
@@ -1325,17 +1242,6 @@ async function loadProjects(force = false) {
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
 }
 
-const files = new Map<string, FileView>()
-const FILE_ERRORS: Record<string, string> = {
-  outside: "Only files inside this session's project open here.",
-  secret: "This file can hold secrets, so the page doesn't show it.",
-  large: 'This file is over 512 KB, too large to show here.',
-  binary: "This isn't a text file.",
-  missing: "This file isn't there anymore.",
-  link: "This path goes through a symbolic link, which the page doesn't follow.",
-  commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
-}
-
 function twinRole(i: SessionInfo): string {
   return i.lineage?.handedTo ? 'earlier' : i.lineage?.earlier?.length ? 'took over' : ''
 }
@@ -1356,77 +1262,6 @@ function sessionTwin(x: Session): { description: string; short: string } {
   if (twins.some(y => twinWords(y.info) === words)) return { description: [words, sid].filter(Boolean).join(', '), short: sid }
   const role = twinRole(x.info)
   return { description: words, short: role && twins.every(y => twinRole(y.info) !== role) ? role : words }
-}
-
-function fileLabel(key: string): string {
-  const path = files.get(key)?.path ?? key
-  const commit = files.get(key)?.commit
-  const name = baseName(path)
-  const twin = openTabs.some(k => k !== key && k.startsWith('f:') && baseName(files.get(k)?.path ?? k) === name)
-  const parts = path.split('/').filter(Boolean)
-  const label = twin && parts.length > 1 ? `${name} · ${parts[parts.length - 2]}` : name
-  return commit ? `${label} @ ${shortSha(commit)}` : label
-}
-
-function fileKey(key: string): { sid: string; path: string; commit: string } {
-  const at = key.indexOf(':', 2)
-  const rest = key.slice(at + 1)
-  const cut = rest.indexOf('\0')
-  return { sid: key.slice(2, at), path: cut < 0 ? rest : rest.slice(0, cut), commit: cut < 0 ? '' : rest.slice(cut + 1) }
-}
-
-const fileLoads = new Set<string>()
-let focusFile = ''
-
-function loadFile(key: string) {
-  const { sid, path, commit } = fileKey(key)
-  if (fileLoads.has(key) || !sessions.has(sid)) return
-  fileLoads.add(key)
-  void api('/api/file', commit ? { sid, path, commit } : { sid, path }).catch(() => null).then(async res => {
-    const body = res ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null
-    fileLoads.delete(key)
-    if (!openTabs.includes(key)) return
-    const text = res?.ok && typeof body?.text === 'string' ? body.text : undefined
-    const shown = typeof body?.path === 'string' ? body.path : path
-    const old = files.get(key)
-    if (text !== undefined && old?.text === text && old.path === shown) return
-    const at = { ...(commit ? { commit } : {}), ...(old?.line ? { line: old.line } : {}) }
-    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
-    const file = byId<HTMLElementTagNameMap['sf-file']>('file')
-    const refocus = current.key === key && (focusFile === key || file.contains(document.activeElement) || document.activeElement === document.body)
-    paint()
-    if (refocus) file.focusContent()
-  })
-}
-
-function openFile(sid: string, path: string, commit = '', line = 0) {
-  const key = commit ? `f:${sid}:${path}\0${commit}` : `f:${sid}:${path}`
-  const old = files.get(key)
-  if (!old) files.set(key, { path, ...(commit ? { commit } : {}), ...(line ? { line } : {}) })
-  else if (commit) {
-    const next: FileView = { ...old }
-    if (line) next.line = line
-    else delete next.line
-    files.set(key, next)
-  }
-  focusFile = key
-  if (key === current.key) paint()
-  go(key)
-  byId<HTMLElementTagNameMap['sf-file']>('file').focusContent()
-}
-let docsAt = 0
-
-async function loadDocs() {
-  const docs = byId<HTMLElementTagNameMap['sf-docs']>('docs')
-  if (docs.loaded || !state.connected || Date.now() - docsAt < 10000) return
-  docsAt = Date.now()
-  const { ok, body } = await reply(await api('/api/docs', {}).catch(() => null))
-  docs.text = ok && typeof body.text === 'string' ? body.text : ''
-}
-
-function openDocs(id: string, back: { view: string; label: string } | null = null) {
-  go('docs')
-  byId<HTMLElementTagNameMap['sf-docs']>('docs').show(id, back)
 }
 
 async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -2127,11 +1962,7 @@ document.body.addEventListener('sf-file', e => {
   const s = changesSession()
   if (s) openFile(s.sid, e.detail.path, typeof e.detail.commit === 'string' && COMMIT.test(e.detail.commit) ? e.detail.commit : '', typeof e.detail.line === 'number' && Number.isInteger(e.detail.line) && e.detail.line > 0 ? e.detail.line : 0)
 })
-byId('file').addEventListener('sf-reload', () => {
-  if (!current.key.startsWith('f:')) return
-  focusFile = current.key
-  loadFile(current.key)
-})
+byId('file').addEventListener('sf-reload', () => reloadFile())
 const RECHECK_MS = 30000
 const known = new Map<string, Map<string, number | true>>()
 const scanning = new Map<string, ReturnType<typeof setTimeout>>()
@@ -2331,17 +2162,7 @@ projects.addEventListener('sf-pair', async e => {
   }
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))
-byId('tabs').addEventListener('sf-move', e => {
-  const { id } = e.detail
-  const from = openTabs.indexOf(id)
-  if (from < 1) return
-  const rest = openTabs.filter(k => k !== id)
-  const to = Math.max(1, Math.min(rest.length, e.detail.index > from ? e.detail.index - 1 : e.detail.index))
-  if (to === from) return
-  rest.splice(to, 0, id)
-  openTabs = rest
-  paint()
-})
+byId('tabs').addEventListener('sf-move', e => moveTab(e.detail.id, e.detail.index))
 byId('overview').addEventListener('sf-counts', e => {
   const { waiting, working, stopped } = e.detail
   const box = byId('counts')
@@ -2362,6 +2183,7 @@ byId('overview').addEventListener('sf-counts', e => {
 startLayout({ jumpLatest: () => composer.jump('latest') })
 
 const composer = startComposer({ current, sessions, state, scroller, send, say, toast, api, upload })
+const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
 startTopBar()
 
 byId('stop').addEventListener('click', () => {
