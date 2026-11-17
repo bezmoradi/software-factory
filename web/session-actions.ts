@@ -21,7 +21,7 @@ interface SessionActionsDeps {
   forgetSession: (sid: string) => void
 }
 
-interface SessionActions {
+export interface SessionActions {
   send: (text: string, images?: string[], s?: Session | null, pressed?: boolean, files?: string[]) => Promise<boolean>
   manage: (s: Session, path: string, body: Record<string, unknown>) => Promise<string>
   answerForge: (s: Session | null, answer: { card: string; approve: boolean; draft?: boolean; confirmed?: boolean }) => Promise<void>

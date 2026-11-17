@@ -15,7 +15,7 @@ interface NavigationDeps {
   reply: (res: Response | null) => Promise<{ ok: boolean; body: Record<string, unknown> }>
 }
 
-interface Navigation {
+export interface Navigation {
   go: (key: string) => void
   closeTab: (key: string) => void
   pruneTabs: () => void
