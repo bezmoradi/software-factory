@@ -59,6 +59,8 @@ The dependency rule above is checked mechanically by `make arch` ([go-arch-lint]
 If go-arch-lint ever reports a dependency you can't find in your imports, it's almost certainly `deepScan` tracing a dependency-injection call in `cmd` — leave `deepScan: false` (the config enforces the import graph, not data-flow).
 The generated CI pipeline (`.github/workflows/ci.yml`) already runs `make arch-check`, so a boundary violation blocks the build — `arch-check` exits non-zero on a violation and also fails if the linter has been silently disabled. Add it to a pre-push hook too if you want the feedback before you push.
 
+The page's TypeScript has module rules of its own, checked by `make web-arch` ([dependency-cruiser](https://github.com/sverweij/dependency-cruiser), config in `web/.dependency-cruiser.json`), which `make web-check` runs, so CI does too: `web/lib/` imports only `lib/` and `types.ts`; `web/components/` only components, `lib/`, `types.ts` and `api.ts`; `types.ts` imports nothing and `api.ts` only `types.ts`; `app-state.ts` and `composer.ts` import no other top-level module; nothing imports `app.ts`; there are no cycles; every import names an existing file by its exact path, in a served folder and with a served name (see Conventions); and every module but `types.ts` is reachable from `app.ts`. dependency-cruiser reads TypeScript only through the compiler API of TypeScript before 7 or from 7.1, and the page uses 7.0.2, so the check compiles the page into a temporary folder and checks that JavaScript. `import type` lines compile away, so type-only imports aren't checked (none breaks a rule today), and `types.ts`, imported only for types, is exempt from reachability. Once the page is on TypeScript 7.1 or later, cruise `web/` itself with `tsPreCompilationDeps` on and drop the exemption, and type-only imports are checked too. It refuses to pass when it counts fewer than 80 modules or 250 imports (`WEB_ARCH_MIN_MODULES` and `WEB_ARCH_MIN_IMPORTS` in the `Makefile`; its module count lists each imported module twice, 153 for 85 files today, because the config resolves only exact paths), so a parser that silently finds nothing can't pass. dependency-cruiser runs only on Node 22, 24 or 26 and later. As with `.go-arch-lint.yml`, fix a violation by moving code, never by widening a rule.
+
 ## This project's stack
 - HTTP: the standard library's `net/http` — the page server in `internal/adapters/http/page`
 - Datastore: none
@@ -454,7 +456,7 @@ make arch-check    # the layer rules
 make fix-check     # Go's modernizers
 make vuln          # govulncheck
 make pins          # each pinned npm package's build provenance and OSV advisories for the pins, from the npm registry and api.osv.dev
-make web-check     # the page's type check
+make web-check     # the page's type check and module rules (make web-arch)
 make plugin-check  # the plugin's type check
 make plugin-validate  # Claude Code's own plugin validator, offline (needs Docker)
 make cross-build   # build and vet for linux/amd64, linux/arm64 and darwin/arm64
@@ -558,4 +560,5 @@ To release: set `Version` in `cmd/server/server.go`, merge it, tag that commit o
 - Keep everything under `internal/core/**` free of framework, database, and HTTP imports (`make arch` enforces this).
 - Adapters translate between the outside world and domain types; they hold no business rules.
 - Run `gofmt`, `go vet ./...`, `go fix ./...` (Go 1.27 modernizers; preview with `make fix-check`), `make lint` (golangci-lint), and `make arch` before committing.
+- The page's modules live only in `web/`, `web/components/` and `web/lib/`, are named like `^[a-z][a-z0-9-]*\.ts$`, and import each other by exact relative path with the `.ts` extension. `internal/adapters/http/page/assets.go` serves only those folders and `web/styles/`, and only names like `^[a-z][a-z0-9-]*\.(js|css|svg)$`, so a module anywhere else, named otherwise or imported without its extension 404s in the browser and blanks the page while `tsc` still passes; `make web-arch` catches it.
 - The stylesheets' layout is read by code, so keep it: each theme in `web/styles/themes.css` starts on a line of its own as `[data-theme="<id>"] {` (one selector, not indented) and sets `--label` and `--default`; each text size starts a line as `:root[data-scale="<percent>"]`. The engine finds themes and sizes with those patterns (`internal/adapters/http/page/assets.go`, `themeRule` and `scaleRule`) and refuses to save any other, and `web/lib/prefs.ts` matches the same selectors exactly. A theme written another way, such as in a selector list, silently drops out of the picker.

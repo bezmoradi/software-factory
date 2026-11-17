@@ -58,6 +58,25 @@ TSC := web/node_modules/.bin/tsc
 
 web-check:
 	@npm --prefix web run check
+	@$(MAKE) --no-print-directory web-arch
+
+DEPCRUISE := web/node_modules/.bin/depcruise
+WEB_ARCH_MIN_MODULES := 80
+WEB_ARCH_MIN_IMPORTS := 250
+
+web-arch:
+	@out="$$(mktemp -d "$${TMPDIR:-/tmp}/web-arch.XXXXXX")" || exit 1; \
+	trap 'rm -rf "$$out"' EXIT; \
+	$(TSC) -p web/tsconfig.json --outDir "$$out" || exit 1; \
+	report="$$(cd "$$out" && "$(CURDIR)/$(DEPCRUISE)" --config "$(CURDIR)/web/.dependency-cruiser.json" --output-type err . 2>&1)"; \
+	rc=$$?; \
+	printf '%s\n' "$$report"; \
+	if [ $$rc -ne 0 ]; then echo 'web-arch: failed; the rules are in web/.dependency-cruiser.json'; exit 1; fi; \
+	counts="$$(printf '%s\n' "$$report" | sed -n 's/.*(\([0-9][0-9]*\) modules, \([0-9][0-9]*\) dependencies cruised)$$/\1 \2/p')"; \
+	set -- $$counts; \
+	if [ "$${1:-0}" -lt $(WEB_ARCH_MIN_MODULES) ] || [ "$${2:-0}" -lt $(WEB_ARCH_MIN_IMPORTS) ]; then \
+		echo "web-arch: found $${1:-no} modules and $${2:-no} imports, below the floor of $(WEB_ARCH_MIN_MODULES) modules and $(WEB_ARCH_MIN_IMPORTS) imports; the check is effectively off, refusing to pass"; exit 1; \
+	fi
 
 plugin-check:
 	@$(TSC) -p tools/plugincheck/tsconfig.json
