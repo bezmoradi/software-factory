@@ -1,4 +1,4 @@
-import { button, el } from './lib/dom.ts'
+import { button, byId, el } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { agentWord } from './lib/format.ts'
 import { icon } from './components/icon.ts'
@@ -32,8 +32,6 @@ interface Composer<S extends ComposerSession> {
   jump: (to: 'start' | 'latest') => void
   paint: (s: S | null, blocked: boolean) => void
 }
-
-const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const MAX_SIDE = 1568

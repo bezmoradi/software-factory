@@ -7,6 +7,8 @@ export function el(tag: string, cls?: string, text?: string): HTMLElement {
   return node
 }
 
+export const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+
 const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
 
 export function visible(text: string): string {

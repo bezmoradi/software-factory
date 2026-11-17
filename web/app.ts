@@ -2,16 +2,16 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { busy, button, copyText, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { busy, button, byId, copyText, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
-import { paintPath, type Started, type Step, type Turn } from './lib/path.ts'
+import { paintPath, type Step, type Turn } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
 import { sessionState } from './components/session-list.ts'
 import { warnings } from './components/overview.ts'
-import type { AgentInfo, Catalog, CardHost, CatalogEntry, ChangeFrom, Changes, Check, Consent, Expect, FileView, GateEvent, IntentRecord, Needs, PlanFileEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc, WorkflowEvent } from './types.ts'
+import type { CardHost, CatalogEntry, Changes, Check, Consent, Expect, FileView, GateEvent, Needs, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionEvent, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
@@ -55,60 +55,10 @@ import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
 import { initUpdates, loadUpdate } from './components/update.ts'
 import { sendState } from './api.ts'
+import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, scroller, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
+import { barStatus, paintSide, queueBarFit, setSide, startLayout, startTopBar } from './layout.ts'
 
-interface Session {
-  sid: string
-  info: SessionInfo
-  view: HTMLElementTagNameMap['sf-conversation']
-  epoch: string
-  seq: number
-  replayAt: number
-  rebase: boolean
-  gate: GateEvent | null
-  gateKey: string
-  gateAt: number
-  workflow: WorkflowEvent | null
-  workflowSeq: number
-  planfile: PlanFileEvent | null
-  agents: AgentInfo[]
-  intent: IntentRecord | null
-  catalog: Catalog | null
-  total: number
-  cost: number
-  changes: Changes | null
-  changesKey: string
-  changesAt: number
-  compare: { from: ChangeFrom; commit: string }
-  forkStart: Started
-  busy: boolean
-  step: Step
-  compacting: string
-  context: { tokens: number; level: string } | null
-  asked: { requirements?: { hash: string; at: number }; plan?: { hash: string; at: number } }
-  refused: { requirements?: { hash: string; text: string }; plan?: { hash: string; text: string } }
-  audit: { key: string; entries: AuditEntry[]; refusals: Record<string, number> } | null
-  auditSeen: number
-  lastAt?: number
-}
-
-interface AuditEntry {
-  time: number
-  kind: string
-  by: string
-  result: string
-  commit: string
-  reviewer?: string
-  verdict?: string
-  path?: string
-  reason: string
-  personReason?: string
-  missing?: string[]
-  session?: string
-  branch?: string
-  from?: string
-  fromRef?: string
-  source?: string
-}
+setPainter(paint)
 
 const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 'session-wake': 'Session woken', 'session-stop': 'Session stopped', 'session-fork': 'Session forked', 'session-delete': 'Session deleted' }
 const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
@@ -142,54 +92,8 @@ const COMMIT_ASK = "Commit every uncommitted change on this branch, new files in
 function checkOf(r: Reviewer): Check {
   return { type: r.type, name: r.name, why: r.why ?? '' }
 }
-const ACTIVE = ['pending', 'running', 'waiting']
 const RESET_NOTE = 'The session restarted, so what came before this point is shown only as far as the agent kept it.'
 
-const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-
-const topBar = document.querySelector<HTMLElement>('body > .bar')
-const BAR_STEPS = ['fit-brand', 'fit-compact', 'fit-tight']
-let barFitQueued = false
-
-function barStatus(detail: string) {
-  const stateEl = byId('state')
-  const title = byId('title')
-  stateEl.textContent = state.connected ? '' : 'Disconnected'
-  stateEl.hidden = state.connected
-  title.textContent = detail
-  title.hidden = !detail
-}
-
-function barFits(bar: HTMLElement): boolean {
-  const style = getComputedStyle(bar)
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-  let need = 0
-  let shown = 0
-  for (const c of bar.children) {
-    if (!c.getClientRects().length) continue
-    shown++
-    if (c.id === 'state') need += (document.body.classList.contains('live') ? 8 : 6) * rem
-    else if (c.id !== 'title' && !c.classList.contains('spacer')) need += c.getBoundingClientRect().width
-  }
-  need += (parseFloat(style.columnGap) || 0) * Math.max(0, shown - 1)
-  return need <= bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
-}
-
-function fitBar() {
-  barFitQueued = false
-  if (!topBar) return
-  topBar.classList.remove(...BAR_STEPS)
-  for (const step of BAR_STEPS) {
-    if (barFits(topBar)) return
-    topBar.classList.add(step)
-  }
-}
-
-function queueBarFit() {
-  if (barFitQueued) return
-  barFitQueued = true
-  requestAnimationFrame(fitBar)
-}
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
 const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
 const reviewModels = el('sf-review-models')
@@ -199,23 +103,11 @@ const modelMenu = button('Switch model…', '')
 modelMenu.setAttribute('role', 'menuitem')
 modelMenu.hidden = true
 byId('menu-wake').after(modelMenu)
-const scroller = byId('scroller')
-const toast = (t: Toast) => byId<HTMLElementTagNameMap['sf-toasts']>('toasts').show(t)
-const sessions = new Map<string, Session>()
-const state = { connected: false, note: '', stream: '', supervisor: '' }
 let reviewer: ReviewerView | null = null
 let starterNames = new Map<string, string>()
 let projectsAt = 0
-const WIDE_REM = 52
-let wide: boolean | null = null
-let sideAt = ''
-let sideFull = false
-let sideScroll = 0
-const rootRem = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-let frameRem = byId('frame').clientWidth / rootRem()
 let retry = 1000
 let lost = 0
-const armed = new Set<string>()
 const removals = new Map<string, { message: string; offer: { flag: string; value: string } | null }>()
 const busyManage = new Map<string, { action: string; at: number; force: boolean }>()
 const controlBusy = new Set<string>()
@@ -225,7 +117,6 @@ const pushWatched = new Map<string, number>()
 const pushSaid = new Map<string, { text: string; tone: string }>()
 const PUSH_SAID: Record<string, { text: string; tone: string }> = { held: { text: 'Held', tone: 'warn' }, denied: { text: 'Denied', tone: 'bad' }, refused: { text: 'Not pushed', tone: 'bad' } }
 const answerAsking = new Set<string>()
-let paintQueued = false
 
 const checks = new Map<string, { check: Check; node: HTMLElementTagNameMap['sf-check']; li: HTMLLIElement }>()
 
@@ -270,23 +161,10 @@ function ensure(sid: string): Session {
   return s
 }
 
-function startedOf(s: Session): Started {
-  if (s.changes && s.changes.from && s.changes.from !== 'fork') return s.forkStart
-  return !s.changes ? null : s.changes.noBase ? 'nobase' : s.changes.commits.length > 0
-}
-
-function inTurn(s: Session): boolean {
-  return s.busy || !!s.info.busy
-}
-
 function stageOff(s: Session): string {
   if (!state.connected) return 'Step buttons are available once the page reconnects to the engine.'
   if (!controllable(s)) return 'Step buttons are off: this session is read-only on this page.'
   return inTurn(s) ? `Step buttons are available when ${agentWord(s.info.agent)} finishes.` : ''
-}
-
-function working(s: Session): boolean {
-  return inTurn(s) || !!s.compacting || s.agents.some(a => a.status === 'running')
 }
 
 const ASKED_MS = 30000
@@ -324,38 +202,10 @@ function once(s: Session | null | undefined, what: string, run: () => Promise<bo
   })
 }
 
-function reviewsActive(s: Session): boolean {
-  const required = s.gate?.reviewers ?? []
-  return required.some(r => r.state === 'running' || ACTIVE.includes(s.agents.filter(a => a.type === r.type).at(-1)?.status ?? ''))
-}
-
-function pickingSize(s: Session) {
-  return !!(state.connected && s.gate && s.gate.chosen === false && s.view.blank && controllable(s))
-}
-
-function controllable(s: Session) {
-  const i = s?.info
-  return !!i && i.controlled && i.verified && i.running && i.live && !i.disputed && !i.outdated
-}
-
-function sleeping(s: Session | null) {
-  const i = s?.info
-  return !!i && i.kind === 'background' && i.verified === true && !i.running && !i.live && /^[0-9a-f]{8}$/.test(i.id || '')
-}
-
-function current(): Session | null {
-  return current.key.startsWith('s/') ? sessions.get(current.key.slice(2)) || null : null
-}
-
-function changesSession(): Session | null {
-  return current.key.startsWith('c:') ? sessions.get(current.key.slice(2)) || null : current()
-}
-
 function openChanges(s: Session) {
   go(`c:${s.sid}`)
   requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff())
 }
-current.key = 'overview'
 
 function requestReplay(s: Session, force = false) {
   if (!state.stream || !s.info.live || s.info.disputed) return
@@ -557,23 +407,6 @@ function entries(list: unknown): CatalogEntry[] {
   return Array.isArray(list) ? (list as unknown[]).filter((e): e is CatalogEntry => isRecord(e) && typeof e.name === 'string' && typeof e.description === 'string').map(e => ({ name: e.name, description: e.description })) : []
 }
 
-function flushPaint() {
-  if (!paintQueued) return
-  paintQueued = false
-  paint()
-}
-
-function schedulePaint() {
-  if (paintQueued) return
-  paintQueued = true
-  requestAnimationFrame(flushPaint)
-  if (document.hidden) setTimeout(flushPaint, 100)
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && paintQueued) setTimeout(flushPaint, 100)
-})
-
 let openTabs = ['overview']
 let recent: string[] = []
 const scrolls = new Map<string, number>()
@@ -670,10 +503,6 @@ function closeTab(key: string) {
   const owner = key.startsWith('c:') ? `s/${key.slice(2)}` : key.startsWith('f:') ? `s/${key.slice(2, key.indexOf(':', 2))}` : ''
   if (key === current.key) go(owner && openTabs.includes(owner) ? owner : recent[0] || 'overview')
   else paint()
-}
-
-function waitingOf(s: Session) {
-  return s.info.live ? s.view.waiting : []
 }
 
 function paint() {
@@ -1642,11 +1471,6 @@ async function markViewed(s: Session | null, d: { path: string; blob: string; vi
   toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
-function say(message: string) {
-  byId('hint').textContent = message
-  if (message && document.body.classList.contains('side-full')) toast({ id: 'say', title: message, tone: 'info' })
-}
-
 async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = []) {
   if (!s) return false
   const asleep = sleeping(s)
@@ -2535,92 +2359,10 @@ byId('overview').addEventListener('sf-counts', e => {
   item(stopped, 'stopped', 'stopped before finishing')
 })
 
-function placeSide() {
-  const now = frameRem >= WIDE_REM
-  const at = document.body.classList.contains('side-full') ? 'full' : now ? 'frame' : 'narrow'
-  if (at !== sideAt) {
-    sideAt = at
-    const active = document.activeElement
-    if (at === 'frame') byId('frame').append(byId('composer'), byId('side'))
-    else {
-      byId('frame').after(byId('composer'))
-      if (at === 'full') byId('crumbs').parentElement!.after(byId('side'))
-      else byId('side-toggle').after(byId('side'))
-    }
-    if (active instanceof HTMLElement && active !== document.activeElement) active.focus()
-  }
-  if (now === wide) return
-  wide = now
-  document.body.classList.toggle('wide', now)
-  byId<HTMLElementTagNameMap['sf-docs']>('docs').navSlot = now ? byId('docs-side') : null
-  byId<HTMLElementTagNameMap['sf-projects']>('projects').sideSlot = now ? byId('projects-side') : null
-}
-
-function paintSide(s: Session | null) {
-  const full = !!s && sideFull && !byId('path-section').hidden
-  const was = document.body.classList.contains('side-full')
-  if (full && !was) sideScroll = scroller.scrollTop
-  document.body.classList.toggle('side-full', full)
-  placeSide()
-  if (!full && was) scroller.scrollTop = sideScroll
-  const needs = !!(full && s && waitingOf(s).length)
-  byId('side-needs').hidden = !needs
-  const said = needs && s ? `${agentWord(s.info.agent)} needs you in the conversation.` : ''
-  if (byId('side-needs-said').textContent !== said) byId('side-needs-said').textContent = said
-  byId('session-docs').dataset.doc = full ? 'execution-path-with-knackpack' : 'working-in-a-session'
-}
-
-function setSide(full: boolean) {
-  sideFull = full
-  paintSide(current())
-  if (full) scroller.scrollTop = 0
-}
-
-byId('side-open').addEventListener('click', () => {
-  setSide(true)
-  byId('side-expand').focus()
-})
-byId('side-expand').addEventListener('click', () => {
-  setSide(false)
-  byId('side-open').focus()
-})
-byId('side-back').addEventListener('click', () => {
-  setSide(false)
-  composer.jump('latest')
-})
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape' || e.defaultPrevented || !document.body.classList.contains('side-full')) return
-  if (e.target instanceof HTMLElement && e.target.closest('[popover], select, dialog')) return
-  setSide(false)
-  byId('side-open').focus()
-})
-byId('side-toggle').addEventListener('click', () => {
-  const toggle = byId('side-toggle')
-  const open = toggle.getAttribute('aria-expanded') !== 'true'
-  toggle.setAttribute('aria-expanded', String(open))
-  byId('side').classList.toggle('open', open)
-})
-const measureFrame = () => {
-  frameRem = byId('frame').clientWidth / rootRem()
-  placeSide()
-}
-new ResizeObserver(measureFrame).observe(byId('frame'))
-new MutationObserver(measureFrame).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
-placeSide()
+startLayout({ jumpLatest: () => composer.jump('latest') })
 
 const composer = startComposer({ current, sessions, state, scroller, send, say, toast, api, upload })
-if (topBar) {
-  const watch = new ResizeObserver(queueBarFit)
-  for (const node of [topBar, byId('halt'), byId('update'), byId('palette-open')]) watch.observe(node)
-  fitBar()
-}
-
-byId('frame').addEventListener('wheel', e => {
-  const side = e.target instanceof Element ? e.target.closest<HTMLElement>('.page-side') : null
-  const still = !!side && side.scrollHeight <= side.clientHeight
-  if (e.target !== e.currentTarget && !still) return
-  scroller.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * scroller.clientHeight : e.deltaY
-}, { passive: true })
+startTopBar()
 
 byId('stop').addEventListener('click', () => {
   const s = current()
