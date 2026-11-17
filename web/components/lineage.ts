@@ -30,6 +30,7 @@ export interface LineageView {
 
 class SfLineage extends HTMLElement {
   #view: LineageView | null = null
+  #key = ''
   #stop = () => {}
   #handedSaid = statusLine('status-slot')
   #handedBox = el('div', 'notice small status-box')
@@ -48,7 +49,17 @@ class SfLineage extends HTMLElement {
     this.paint()
   }
 
+  #inputs(): string {
+    const v = this.#view
+    const info = v?.info
+    const wake = info ? limitsNow().sessions.get(info.sid)?.wakeOffer ?? 0 : 0
+    return JSON.stringify([info ? [info.sid, info.agent, info.verified, info.lineage, v?.disabled] : null, starters.map(a => [a.id, a.name, a.enabled]), wake, when(wake)])
+  }
+
   paint() {
+    const key = this.#inputs()
+    if (key === this.#key) return
+    this.#key = key
     const v = this.#view
     const l = v?.info.lineage
     const handed = l?.handedTo ? l : null

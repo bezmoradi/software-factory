@@ -107,7 +107,7 @@ class SfDecisionLog extends HTMLElement {
 
   #hold(b: HTMLButtonElement): void {
     if (this.#busy && this.#doing === b.dataset.key) busy(b, true)
-    else b.disabled = this.#busy
+    else if (this.#busy) b.setAttribute('aria-disabled', 'true')
   }
 
   async #call(body: Record<string, unknown>, key: string): Promise<boolean> {
@@ -140,6 +140,7 @@ class SfDecisionLog extends HTMLElement {
   }
 
   #edit(e: Entry) {
+    if (this.#busy) return
     this.#editing = e.id
     this.#name.value = e.name
     this.#text.value = e.text
@@ -150,6 +151,7 @@ class SfDecisionLog extends HTMLElement {
   }
 
   async #save(e: Entry) {
+    if (this.#busy) return
     const name = this.#name.value.trim()
     const text = this.#text.value.trim()
     if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)) {
@@ -174,11 +176,12 @@ class SfDecisionLog extends HTMLElement {
     row.append(this.#hidden, hide)
     const save = button('Save', 'small', () => void this.#save(e), 'button', `decision-save:${e.id}`)
     const cancel = button('Cancel', 'link small', () => {
+      if (this.#busy) return
       this.#editing = ''
       this.#paint()
     }, 'button', `decision-cancel:${e.id}`)
     this.#hold(save)
-    cancel.disabled = this.#busy
+    this.#hold(cancel)
     box.append(row, cancel, save)
     return box
   }
@@ -197,10 +200,12 @@ class SfDecisionLog extends HTMLElement {
     }
     const acts = el('div', 'row')
     const edit = button(e.added ? 'Edit' : 'Name or edit', 'link small', () => this.#edit(e), 'button', `decision-edit:${e.id}`)
-    edit.disabled = this.#busy
+    this.#hold(edit)
     acts.append(edit)
     if (e.added || e.edited) {
-      const remove = button(e.added ? 'Remove' : 'Undo my changes', 'link small', () => void this.#call({ op: 'remove', repo: this.#project, id: e.id }, `decision-remove:${e.id}`), 'button', `decision-remove:${e.id}`)
+      const remove = button(e.added ? 'Remove' : 'Undo my changes', 'link small', () => {
+        if (!this.#busy) void this.#call({ op: 'remove', repo: this.#project, id: e.id }, `decision-remove:${e.id}`)
+      }, 'button', `decision-remove:${e.id}`)
       this.#hold(remove)
       acts.append(remove)
     }
@@ -236,7 +241,9 @@ class SfDecisionLog extends HTMLElement {
       if (v.note) preview.append(el('pre', 'small', shown(v.note)))
       parts.push(preview)
     }
-    const again = button('Read again', 'link small', () => void this.#call({ op: 'read', repo: this.#project }, 'decision-again'), 'button', 'decision-again')
+    const again = button('Read again', 'link small', () => {
+      if (!this.#busy) void this.#call({ op: 'read', repo: this.#project }, 'decision-again')
+    }, 'button', 'decision-again')
     this.#hold(again)
     parts.push(again, this.#status)
     this.replaceChildren(...parts)

@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { actionButton, busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
@@ -225,6 +225,7 @@ class SfSessionLimits extends HTMLElement {
   #busy = false
   #busyKey = ''
   #held = new WeakSet<HTMLButtonElement>()
+  #dimmed = new WeakSet<HTMLButtonElement>()
   #editSave = button('Save caps', 'small', () => void this.#saveEdit(), 'button', 'caps-save')
 
   connectedCallback() {
@@ -292,7 +293,12 @@ class SfSessionLimits extends HTMLElement {
   #hold() {
     for (const b of this.querySelectorAll('button')) {
       const held = this.#busy && !!b.dataset.key && b.dataset.key === this.#busyKey
-      b.disabled = this.#busy && !held
+      if (this.#busy && !held) {
+        if (!this.#dimmed.has(b) && b.getAttribute('aria-disabled') !== 'true') {
+          b.setAttribute('aria-disabled', 'true')
+          this.#dimmed.add(b)
+        }
+      } else if (this.#dimmed.delete(b)) b.removeAttribute('aria-disabled')
       if (held) {
         busy(b, true)
         this.#held.add(b)
@@ -334,7 +340,10 @@ class SfSessionLimits extends HTMLElement {
     const what = st.failing ? `the same failing command ran ${st.count} times` : `${visible(st.tool)} repeated ${st.count} times`
     box.append(el('p', '', `Looks stuck: ${what} in its last few calls.`))
     if (st.detail) box.append(el('code', 'caps-detail', visible(st.detail)))
-    box.append(actionButton('Interrupt', 'small', () => api('/api/interrupt', { sid }).catch(() => null), 'button', 'interrupt'))
+    const interrupt = button('Interrupt', 'small', () => {
+      if (!this.#busy) void whileBusy(interrupt, () => api('/api/interrupt', { sid }).catch(() => null))
+    }, 'button', 'interrupt')
+    box.append(interrupt)
     return box
   }
 
@@ -369,6 +378,7 @@ class SfSessionLimits extends HTMLElement {
   }
 
   async #saveEdit() {
+    if (this.#busy) return
     const sid = limitsSession()
     const v = this.#edit.value()
     if (!sid || !v) {
@@ -380,6 +390,7 @@ class SfSessionLimits extends HTMLElement {
   }
 
   async #call(body: Record<string, unknown>, key: string) {
+    if (this.#busy) return
     this.#busy = true
     this.#busyKey = key
     this.#said.textContent = ''

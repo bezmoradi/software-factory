@@ -181,7 +181,7 @@ class SfSavedPrompts extends HTMLElement {
       const e = this.#editing
       const save = button(e.id ? 'Save changes' : 'Save prompt', 'primary small', () => void this.#save(), 'button', 'save')
       if (this.#busy && this.#busyOp === 'save') busy(save, true)
-      else save.disabled = this.#busy
+      else if (this.#busy) save.setAttribute('aria-disabled', 'true')
       const cancel = button('Cancel', 'ghost small', () => {
         this.#editing = null
         this.#paint()
@@ -217,21 +217,24 @@ class SfSavedPrompts extends HTMLElement {
     const head = el('div', 'row')
     head.append(el('span', 'saved-prompt-name', shown(p.name)), el('span', 'spacer'))
     if (this.#deleting === p.id) {
-      const yes = button('Delete', 'danger small', () => void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(ok => {
-        if (ok) {
-          say(this.#status, `Deleted “${visible(p.name)}”.`, 'ok')
-        }
-        this.#deleting = ''
-        this.#paint()
-        this.#toggleFocus()
-      }), 'button', `yes:${p.id}`)
+      const yes = button('Delete', 'danger small', () => {
+        if (this.#busy) return
+        void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(ok => {
+          if (ok) {
+            say(this.#status, `Deleted “${visible(p.name)}”.`, 'ok')
+          }
+          this.#deleting = ''
+          this.#paint()
+          this.#toggleFocus()
+        })
+      }, 'button', `yes:${p.id}`)
       const no = button('Keep it', 'ghost small', () => {
         this.#deleting = ''
         this.#paint()
         this.#panel.querySelector<HTMLElement>(`[data-key="delete:${p.id}"]`)?.focus()
       }, 'button', `no:${p.id}`)
       if (this.#busy && this.#busyOp === 'remove') busy(yes, true)
-      else yes.disabled = this.#busy
+      else if (this.#busy) yes.setAttribute('aria-disabled', 'true')
       head.append(el('span', 'small warn', 'Delete this prompt?'), yes, no)
       li.append(head)
       return li

@@ -101,6 +101,7 @@ class SfAllowRules extends HTMLElement {
   }
 
   async #remove(r: SavedRule) {
+    if (this.#busy) return
     this.#busy = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
     this.#status.textContent = ''
     this.#paint()
@@ -121,7 +122,7 @@ class SfAllowRules extends HTMLElement {
     const key = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
     const remove = button('Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
     if (this.#busy === key) busy(remove, true)
-    else remove.disabled = this.#busy !== ''
+    else if (this.#busy) remove.setAttribute('aria-disabled', 'true')
     remove.setAttribute('aria-label', `Remove the rule ${visible(r.rule)} from ${visible(r.path)}`)
     row.append(what, remove)
     li.append(row)
@@ -155,10 +156,11 @@ class SfAllowRules extends HTMLElement {
       }
     }
     const again = button('Read again', 'link small', () => {
+      if (this.#busy) return
       this.#status.textContent = ''
       void whileBusy(again, () => this.#call({ op: 'list', repo: this.#repo }))
     }, 'button', 'rules-again')
-    again.disabled = this.#busy !== ''
+    if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
     refocus(this, focused)
