@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -62,7 +63,11 @@ func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 	err = host.Trust(tctx, Command{Argv: []string{spec.Command[0]}, Dir: clone, Pass: spec.Pass, Timeout: trustFor})
 	shared.For(ctx, d.cfg.Logger).Info("claude trust", "repo", repo.Name, "box", box, "ok", err == nil)
 	if err != nil {
-		return explained(conflict("trust"), hostMessage(err))
+		said := strings.TrimSpace(hostMessage(err))
+		if !strings.HasSuffix(said, ".") {
+			said += "."
+		}
+		return explained(conflict("trust"), said+" Trust it in a terminal instead: docker exec -it -w "+clone+" "+BoxContainer(box)+" claude, then choose Yes, I trust this folder.")
 	}
 	return nil
 }

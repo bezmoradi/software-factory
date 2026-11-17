@@ -56,7 +56,7 @@ func (s *Server) answerTrust(parent context.Context, q commandJSON, answer bool)
 	}
 	unconfirmed := func(status int, why string) *problem {
 		s.log.Info("agent-host trust", "step", "check", "ended", why)
-		return fail(status, "trust", "Software Factory couldn't confirm that Claude Code trusts this folder. Trust it in a terminal instead.")
+		return fail(status, "trust", "Software Factory couldn't confirm that Claude Code trusts this folder.")
 	}
 	press := func(keys ...string) bool {
 		for i, k := range keys {
@@ -80,7 +80,7 @@ func (s *Server) answerTrust(parent context.Context, q commandJSON, answer bool)
 			if answered {
 				return true, nil
 			}
-			return false, fail(http.StatusGatewayTimeout, "trust", "Claude Code didn't show its trust question in time. Trust the folder in a terminal instead.")
+			return false, fail(http.StatusGatewayTimeout, "trust", "Claude Code didn't show its trust question in time.")
 		case <-quiet.C:
 			if !answer {
 				return false, unconfirmed(http.StatusGatewayTimeout, "no ready screen")
@@ -88,7 +88,7 @@ func (s *Server) answerTrust(parent context.Context, q commandJSON, answer bool)
 			if answered {
 				return true, nil
 			}
-			return false, fail(http.StatusGatewayTimeout, "trust", "Claude Code didn't show its trust question in time. Trust the folder in a terminal instead.")
+			return false, fail(http.StatusGatewayTimeout, "trust", "Claude Code didn't show its trust question in time.")
 		case chunk, ok := <-chunks:
 			if !ok {
 				if !answer {
@@ -133,10 +133,15 @@ func (s *Server) answerTrust(parent context.Context, q commandJSON, answer bool)
 			case screenReady:
 				return false, nil
 			case screenUnknown:
+				step := "check"
+				if answer {
+					step = "answer"
+				}
+				s.log.Info("agent-host trust", "step", step, "question", questionTitle(screen.String()))
 				if !answer {
 					return false, unconfirmed(http.StatusUnprocessableEntity, "unknown question")
 				}
-				return false, fail(http.StatusUnprocessableEntity, "trust", "Claude Code showed a question Software Factory doesn't know, so it answered nothing. Trust the folder in a terminal instead.")
+				return false, fail(http.StatusUnprocessableEntity, "trust", "Claude Code showed a question Software Factory doesn't know, so it answered nothing.")
 			}
 		}
 	}

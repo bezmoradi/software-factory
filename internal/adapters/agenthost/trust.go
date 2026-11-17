@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
@@ -17,6 +18,8 @@ const (
 	trustAsk    = 12 * time.Second
 	trustCols   = 120
 	trustRows   = 40
+
+	questionTitleMax = 80
 )
 
 type trustScreen int
@@ -42,12 +45,40 @@ func screenOf(screen string) trustScreen {
 		return screenNotes
 	case strings.Contains(t, "try the new fullscreen renderer"):
 		return screenRenderer
-	case strings.Contains(t, "enter to confirm"):
-		return screenUnknown
 	case strings.Contains(t, "for shortcuts"), strings.Contains(t, "❯ try \""), strings.Contains(t, "/effort"):
 		return screenReady
+	case strings.Contains(t, "enter to confirm"):
+		return screenUnknown
 	}
 	return screenNone
+}
+
+func questionTitle(screen string) string {
+	lines := strings.Split(screen, "\n")
+	start := 0
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if len([]rune(t)) >= 10 && strings.Trim(t, "─") == "" {
+			start = i + 1
+		}
+	}
+	for _, l := range lines[start:] {
+		t := strings.Join(strings.Fields(l), " ")
+		if t == "" {
+			continue
+		}
+		t = strings.Map(func(r rune) rune {
+			if unicode.IsPrint(r) {
+				return r
+			}
+			return -1
+		}, t)
+		if r := []rune(t); len(r) > questionTitleMax {
+			t = string(r[:questionTitleMax])
+		}
+		return t
+	}
+	return ""
 }
 
 type trustReply struct {
@@ -72,7 +103,7 @@ func (s *Server) trustStep(ctx context.Context, q commandJSON) (trustReply, *pro
 	}
 	s.log.Info("agent-host trust", "step", "check", "asked again", again)
 	if again {
-		return trustReply{}, fail(http.StatusUnprocessableEntity, "trust", "Claude Code still asks whether you trust this folder, so the answer wasn't saved. Trust it in a terminal instead.")
+		return trustReply{}, fail(http.StatusUnprocessableEntity, "trust", "Claude Code still asks whether you trust this folder, so the answer wasn't saved.")
 	}
 	return trustReply{Trusted: true}, nil
 }
