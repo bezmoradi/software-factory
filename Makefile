@@ -110,12 +110,16 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79
 SHELLCHECK_IMAGE := docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
 MARKDOWNLINT_IMAGE := docker.io/davidanson/markdownlint-cli2:v0.18.1@sha256:173cb697a255a8a985f2c6a83b4f7a8b3c98f4fb382c71c45f1c52e4d4fed63a
 TYPOS_VERSION := 1.52.0
+INSTRUCTIONS_MAX_BYTES := 16700
 
 no-tests:
 	@sh scripts/check-no-tests.sh
 
 files:
 	@sh scripts/check-files.sh
+
+instructions:
+	@sh scripts/check-instructions.sh $(INSTRUCTIONS_MAX_BYTES)
 
 review-workflow:
 	@sh scripts/check-review-workflow.sh
@@ -147,4 +151,4 @@ spelling:
 	@typos --version | grep -qx 'typos-cli $(TYPOS_VERSION)' || echo "spelling: CI runs typos $(TYPOS_VERSION); this is $$(typos --version)"
 	@sh scripts/files.sh | xargs -0 typos --config .typos.toml
 
-.PHONY: up dev down cross-build no-comments no-tests files review-workflow workflows shell markdown links secrets spelling
+.PHONY: up dev down cross-build no-comments no-tests files instructions review-workflow workflows shell markdown links secrets spelling

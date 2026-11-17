@@ -603,7 +603,7 @@ The data lives in these volumes. Only `engine-state` has an export, and nothing 
 
 ## Development
 
-[AGENTS.md](AGENTS.md) has the code layout, the dependency rule, the commands and every CI job. Software Factory has no automated tests: a change is checked with the build, `go vet`, `make lint`, `make arch-check`, `make fix-check`, `make vuln`, `make web-check`, `make plugin-check`, `make plugin-validate` and the other checks AGENTS.md lists, then by trying it with the development overlay.
+[CLAUDE.md](CLAUDE.md) has the code layout and the commands, and indexes the rule files in `.claude/rules/`, such as [the dependency rule](.claude/rules/dependency-rule.md) and [every CI job](.claude/rules/ci.md). Software Factory has no automated tests: a change is checked with the build, `go vet`, `make lint`, `make arch-check`, `make fix-check`, `make vuln`, `make web-check`, `make plugin-check`, `make plugin-validate` and the other checks CLAUDE.md lists, then by trying it with the development overlay.
 
 **The development overlay** is for developing Software Factory itself. Never use it for real work: its reviews are fake.
 
@@ -630,7 +630,7 @@ The fake agent and reviewer report the sign-in written in `$HOME/.sf-fake-signin
 4. Press Review, wait for both reviewers, then Push; with a `BLOCK-REVIEW` file, see the push held, then Deny it and see that the reviews finishing never push it.
 5. Run two sessions at once and check that cards, files and pushes stay with their own session.
 6. Reload the page with a card open, then restart the engine (`docker compose restart engine`): check that the page reloads itself and signs in again, that the session comes back Stopped with its work type and approvals, and that **Wake** continues its conversation.
-7. Make the sandbox check fail ([AGENTS.md](AGENTS.md) "Hand checks with Compose"), and check that starts are refused and every running session shows Held.
+7. Make the sandbox check fail ([Hand checks with Compose](.claude/rules/compose-hand-checks.md)), and check that starts are refused and every running session shows Held.
 8. Inside a session's container, check that `curl --connect-to gitlab.com:443:chatgpt.com:443 https://gitlab.com/` fails, and that `curl https://github.com` is refused.
 9. Run the page's curl checks in [ARCHITECTURE.md](ARCHITECTURE.md#page-security-checks).
 
@@ -652,9 +652,9 @@ For work on the page alone, `make run` runs the engine on your computer without 
 
 1. Open an issue for the change.
 2. Work on a branch, and open a pull request whose description closes the issue, such as `Closes #12`.
-3. CI runs its checks, and Claude reviews every push against `CLAUDE.md` and `ARCHITECTURE.md`. Every problem it confirms blocks the merge, however minor; fix it and push again.
+3. CI runs its checks, and Claude reviews every push against `CLAUDE.md`, the rule files in `.claude/rules/` and `ARCHITECTURE.md`. Every problem it confirms blocks the merge, however minor; fix it and push again.
 
-A pull request that changes the checks themselves (`.github/`, `scripts/`, the `Makefile` or a linter's settings) also needs the owner's `review-override` label after its latest push. AGENTS.md, under "CI", says what each check does.
+A pull request that changes the checks themselves (`.github/`, `scripts/`, the `Makefile` or a linter's settings) also needs the owner's `review-override` label after its latest push. [`.claude/rules/ci.md`](.claude/rules/ci.md) says what each check does.
 
 ## Privacy
 

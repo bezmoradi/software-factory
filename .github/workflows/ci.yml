@@ -187,6 +187,7 @@ jobs:
         with:
           persist-credentials: false
       - run: make files
+      - run: make instructions
 
   spelling:
     name: Spelling
