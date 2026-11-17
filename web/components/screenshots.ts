@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
 import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { isRecord } from '../lib/json.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -13,10 +14,6 @@ interface Shot {
 }
 
 const MAX_DATA = 34 << 20
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v)
-}
 
 function shotsOf(v: unknown): Shot[] {
   if (!isRecord(v) || !Array.isArray(v.screenshots)) return []

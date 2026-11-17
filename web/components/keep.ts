@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
 
@@ -27,10 +28,6 @@ interface KeepView {
 export interface KeepTarget {
   sid: string
   disabled: string
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v)
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '')

@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
+import { isRecord } from '../lib/json.ts'
 
 export interface AgentModel {
   id: string
@@ -52,10 +53,6 @@ export interface SessionWorkTarget {
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const FALLBACK_EFFORTS = ['low', 'medium', 'high']
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v)
-}
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
