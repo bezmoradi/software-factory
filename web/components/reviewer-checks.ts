@@ -112,6 +112,10 @@ class SfReviewerChecks extends HTMLElement {
     this.#status.setAttribute('role', 'status')
   }
 
+  connectedCallback() {
+    if (this.#target && !this.#timer) this.#poll()
+  }
+
   disconnectedCallback() {
     window.clearTimeout(this.#timer)
     this.#timer = 0

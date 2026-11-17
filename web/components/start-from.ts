@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, shown, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, shown, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -194,24 +194,26 @@ export class BenchmarkField {
   }
 
   #paintList() {
+    const focused = focusedKey(this.#list)
     const ul = el('ul', 'list issue-items')
     for (const p of this.#pulls) {
       const li = el('li', '')
-      const pick = button(`#${p.number} ${shown(p.title)}`, 'link', () => this.#run(pick, () => this.#pick(p.number)))
+      const pick = button(`#${p.number} ${shown(p.title)}`, 'link', () => this.#run(pick, () => this.#pick(p.number)), 'button', `pull:${p.number}`)
       pick.setAttribute('aria-pressed', String(this.#chosen?.pull.number === p.number))
       li.append(pick, el('span', 'small muted', ` by ${shown(p.author)}, base ${shortSha(p.base)}`))
       ul.append(li)
     }
     const nav = el('div', 'actions')
     if (this.#page > 1) {
-      const newer = button('Newer', 'small ghost', () => this.#run(newer, () => this.#load(this.#page - 1)))
+      const newer = button('Newer', 'small ghost', () => this.#run(newer, () => this.#load(this.#page - 1)), 'button', 'pulls:newer')
       nav.append(newer)
     }
     if (this.#more) {
-      const older = button('Older', 'small ghost', () => this.#run(older, () => this.#load(this.#page + 1)))
+      const older = button('Older', 'small ghost', () => this.#run(older, () => this.#load(this.#page + 1)), 'button', 'pulls:older')
       nav.append(older)
     }
     this.#list.replaceChildren(ul, nav)
+    refocus(this.#list, focused, key => key === 'pulls:newer' ? ['pulls:older'] : key === 'pulls:older' ? ['pulls:newer'] : [])
   }
 
   async #pick(number: number) {

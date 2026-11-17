@@ -78,6 +78,7 @@ button.danger:not(:disabled, [aria-disabled="true"]):hover { border-color: var(-
 button.small { min-height: 24px; padding: .1rem .6rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; }
 button.mono { font-family: var(--mono); font-size: .75rem; }
 button:disabled, button[aria-disabled="true"] { opacity: .5; cursor: default; }
+:is(select, input, textarea)[aria-disabled="true"] { opacity: .5; cursor: default; }
 button.stack { display: inline-grid; place-content: center; place-items: center; white-space: nowrap; }
 button.stack > span { grid-area: 1 / 1; }
 button.stack > span.off { visibility: hidden; }

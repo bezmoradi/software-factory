@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -48,6 +48,7 @@ class SfScreenshots extends HTMLElement {
   #shots: Shot[] = []
   #loading = 0
   #opening = 0
+  #reading = false
   #url = ''
   #shown = ''
   #details = el('details', 'screenshots')
@@ -77,6 +78,9 @@ class SfScreenshots extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.#opening++
+    if (this.#reading) this.#status.textContent = ''
+    this.#reading = false
     this.#drop()
   }
 
@@ -115,23 +119,29 @@ class SfScreenshots extends HTMLElement {
   #paint() {
     this.hidden = this.#shots.length === 0
     this.#summary.textContent = `Screenshots (${this.#shots.length})`
+    const focused = focusedKey(this.#list)
     this.#list.replaceChildren(...this.#shots.map(s => {
       const li = el('li')
-      const open = button(visible(s.name), 'link', () => void whileBusy(open, () => this.#open(s.name)))
+      const open = button(visible(s.name), 'link', () => void whileBusy(open, () => this.#open(s.name)), 'button', `shot:${s.name}`)
       open.setAttribute('aria-pressed', String(s.name === this.#shown))
       li.append(open, el('span', 'muted', ` ${size(s.size)} · ${new Date(s.at).toLocaleString()}`))
       return li
     }))
+    refocus(this.#list, focused)
   }
 
   async #open(name: string) {
     const sid = this.#target?.sid
     if (!sid) return
     const n = ++this.#opening
+    const current = () => n === this.#opening && sid === this.#target?.sid && this.isConnected
+    this.#reading = true
     this.#status.textContent = 'Reading the screenshot…'
     const res = await api('/api/screenshot', { sid, name }).catch(() => null)
-    if (n !== this.#opening || sid !== this.#target?.sid) return
+    if (!current()) return
     const body = res ? await res.json().catch(() => null) as unknown : null
+    if (!current()) return
+    this.#reading = false
     if (!res || !res.ok || !isRecord(body) || body.type !== 'image/png' || typeof body.data !== 'string') {
       const why = isRecord(body) && typeof body.message === 'string' ? body.message : 'The engine didn\'t show that screenshot.'
       this.#status.textContent = visible(why)

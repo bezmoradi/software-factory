@@ -104,6 +104,7 @@ const PIN_STATES: Record<string, [string, string]> = {
 
 class SfAgentReport extends HTMLElement {
   #timer = 0
+  #gen = 0
   #report: Report | null = null
 
   connectedCallback() {
@@ -112,15 +113,20 @@ class SfAgentReport extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.#gen++
     window.clearTimeout(this.#timer)
     this.#timer = 0
   }
 
   async #load() {
     window.clearTimeout(this.#timer)
+    this.#timer = 0
+    const gen = ++this.#gen
     const res = signedIn() ? await api('/api/agent-report', { op: 'read' }).catch(() => null) : null
+    if (gen !== this.#gen) return
     if (res && res.ok) {
       const r = readReport(await res.json().catch(() => null))
+      if (gen !== this.#gen) return
       if (r) this.#report = r
     }
     this.#paint()

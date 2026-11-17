@@ -52,7 +52,8 @@ class SfRules extends HTMLElement {
   #body = el('div', 'rules-body')
   #status = el('p', 'small muted')
   #loaded = ''
-  #loading = false
+  #pending = ''
+  #gen = 0
 
   constructor() {
     super()
@@ -77,6 +78,8 @@ class SfRules extends HTMLElement {
     this.#view = v
     this.hidden = !v
     if (same) return
+    this.#gen++
+    this.#pending = ''
     this.#loaded = ''
     this.#body.replaceChildren()
     this.#status.textContent = ''
@@ -104,8 +107,9 @@ class SfRules extends HTMLElement {
 
   async #load(force: boolean) {
     const v = this.#view
-    if (!v || this.#loading || (!force && this.#loaded === v.sid)) return
-    this.#loading = true
+    if (!v || (!force && (this.#loaded === v.sid || this.#pending === v.sid))) return
+    const gen = ++this.#gen
+    this.#pending = v.sid
     this.#status.textContent = 'Reading what the engine holds…'
     const [rules, egress, team, exceptions] = await Promise.all([
       v.repo ? call('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
@@ -113,8 +117,8 @@ class SfRules extends HTMLElement {
       v.path ? call('/api/team', { path: v.path, op: 'read' }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
       call('/api/exceptions', {}),
     ])
-    this.#loading = false
-    if (this.#view?.sid !== v.sid) return
+    if (gen !== this.#gen || this.#view?.sid !== v.sid) return
+    this.#pending = ''
     this.#loaded = v.sid
     this.#status.textContent = `Read at ${when(Date.now())}.`
     this.#body.replaceChildren(this.#fixed(v), this.#saved(v, rules), this.#hosts(egress), this.#limits(v, team), this.#away(v), this.#register(v, exceptions))

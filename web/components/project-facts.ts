@@ -78,6 +78,7 @@ class SfProjectFacts extends HTMLElement {
   #view: FactsView | null = null
   #busy = false
   #op = ''
+  #gen = 0
   #status = el('p', 'small')
 
   constructor() {
@@ -88,6 +89,8 @@ class SfProjectFacts extends HTMLElement {
   set repo(value: string) {
     if (value === this.#repo) return
     this.#repo = value
+    this.#gen++
+    this.#busy = false
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
@@ -95,19 +98,24 @@ class SfProjectFacts extends HTMLElement {
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
+    const gen = ++this.#gen
+    const current = () => gen === this.#gen
     this.#busy = true
     this.#op = typeof body.op === 'string' ? body.op : ''
     this.#paint()
     const res = await api('/api/project-facts', body).catch(() => null)
+    if (!current()) return false
     this.#busy = false
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown } | null
+      if (!current()) return false
       this.#status.className = 'small warn'
       this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
       this.#paint()
       return false
     }
     const v = readView(await res.json().catch(() => null))
+    if (!current()) return false
     if (v) this.#view = v
     this.#paint()
     return true
@@ -184,11 +192,15 @@ class SfProjectFacts extends HTMLElement {
     box.type = 'checkbox'
     box.id = `lookups-${this.#repo}`
     box.checked = v.lookups
-    box.disabled = this.#busy
+    if (this.#busy) box.setAttribute('aria-disabled', 'true')
     box.dataset.key = 'lookups'
+    box.addEventListener('click', e => {
+      if (this.#busy) e.preventDefault()
+    })
     const label = el('label', 'small', 'Look up new packages on their public registry (npm, PyPI, proxy.golang.org, crates.io) for the push card')
     label.htmlFor = box.id
     box.addEventListener('change', () => {
+      if (this.#busy) return
       this.#status.textContent = ''
       void this.#call({ op: 'lookups', repo: this.#repo, on: box.checked })
     })
@@ -207,11 +219,12 @@ class SfProjectFacts extends HTMLElement {
     if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Reading the workflows and the main branch\'s protection…' : 'Nothing read yet.'))
     else parts.push(this.#readiness(v), this.#workflows(v), this.#protection(v.protection, v.branch), this.#lookups(v))
     const again = button('Read again', 'link small', () => {
+      if (this.#busy) return
       this.#status.textContent = ''
       void this.#call({ op: 'read', repo: this.#repo })
     }, 'button', 'facts-again')
     if (this.#busy && this.#op === 'read') busy(again, true)
-    else again.disabled = this.#busy
+    else if (this.#busy) again.setAttribute('aria-disabled', 'true')
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
     refocus(this, focused)

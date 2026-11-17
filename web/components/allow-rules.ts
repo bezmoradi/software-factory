@@ -66,6 +66,7 @@ class SfAllowRules extends HTMLElement {
   #repo = ''
   #view: RulesView | null = null
   #busy = ''
+  #gen = 0
   #status = el('p', 'small')
 
   constructor() {
@@ -76,6 +77,8 @@ class SfAllowRules extends HTMLElement {
   set repo(value: string) {
     if (value === this.#repo) return
     this.#repo = value
+    this.#gen++
+    this.#busy = ''
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
@@ -83,16 +86,21 @@ class SfAllowRules extends HTMLElement {
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
+    const gen = ++this.#gen
+    const current = () => gen === this.#gen
     const res = await api('/api/allow-rules', body).catch(() => null)
+    if (!current()) return false
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown } | null
+      if (!current()) return false
       this.#status.className = 'small warn'
       this.#status.textContent = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.'
       this.#paint()
       return false
     }
     const v = readView(await res.json().catch(() => null))
+    if (!current()) return false
     if (v) this.#view = v
     this.#paint()
     return true

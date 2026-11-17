@@ -61,6 +61,8 @@ class SfLessons extends HTMLElement {
   #doing = ''
   #chosen = new Map<string, string>()
   #built = false
+  #gen = 0
+  #reads = 0
 
   connectedCallback() {
     if (!this.#built) {
@@ -73,7 +75,8 @@ class SfLessons extends HTMLElement {
         this.#said,
       )
     }
-    if (this.#project) void this.#call({ op: 'read', name: this.#project })
+    if (this.#project && !this.#view && !this.#reads) void this.#call({ op: 'read', name: this.#project })
+    else this.#poll()
   }
 
   disconnectedCallback() {
@@ -97,8 +100,12 @@ class SfLessons extends HTMLElement {
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const project = this.#project
     if (!project) return false
+    const gen = ++this.#gen
+    const read = body.op === 'read'
+    if (read) this.#reads++
     const res = await api('/api/lessons', body).catch(() => null)
-    if (project !== this.#project) return false
+    if (read) this.#reads--
+    if (project !== this.#project || (read && gen !== this.#gen)) return false
     this.#busy = ''
     if (!res || !res.ok) {
       const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: Needs } | null
@@ -117,6 +124,7 @@ class SfLessons extends HTMLElement {
       return this.#call({ op: 'read', name: project })
     }
     const v: unknown = await res.json().catch(() => null)
+    if (project !== this.#project || (read && gen !== this.#gen)) return false
     if (isView(v)) this.#view = v
     this.#paint()
     this.#poll()

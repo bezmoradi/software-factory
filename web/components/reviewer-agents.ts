@@ -59,6 +59,9 @@ class SfReviewerAgents extends HTMLElement {
     this.#file.accept = '.md,text/markdown,text/plain'
     this.#file.dataset.key = 'agent-file'
     this.#file.setAttribute('aria-describedby', 'reviewer-agent-help')
+    this.#file.addEventListener('click', e => {
+      if (this.#busy) e.preventDefault()
+    })
     this.#file.addEventListener('change', () => void this.#upload())
     this.#status.setAttribute('role', 'status')
   }
@@ -114,7 +117,7 @@ class SfReviewerAgents extends HTMLElement {
   async #upload() {
     const file = this.#file.files?.[0]
     this.#file.value = ''
-    if (!file) return
+    if (!file || this.#busy) return
     const max = this.#view?.maxBytes || 0
     if (max && file.size > max) {
       this.#status.className = 'small warn'
@@ -169,7 +172,9 @@ class SfReviewerAgents extends HTMLElement {
     )
     const label = el('label', 'small', 'Add an agent file')
     label.htmlFor = this.#file.id
-    this.#file.disabled = off || (!!v && v.files.length >= v.limit)
+    this.#file.disabled = target.disabled || (!!v && v.files.length >= v.limit)
+    if (this.#busy) this.#file.setAttribute('aria-disabled', 'true')
+    else this.#file.removeAttribute('aria-disabled')
     const add = el('div', 'row field-row')
     add.append(label, this.#file)
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer agents for this project'), help, add]
@@ -207,8 +212,16 @@ class SfReviewerAgents extends HTMLElement {
           select.append(o)
         }
         select.value = v.files.some(f => f.name === v.roles[role]) ? v.roles[role] ?? '' : ''
-        select.disabled = off
-        select.addEventListener('change', () => void this.#pick(role, select.value))
+        const chosen = select.value
+        select.disabled = target.disabled
+        if (this.#busy) select.setAttribute('aria-disabled', 'true')
+        select.addEventListener('change', () => {
+          if (this.#busy) {
+            select.value = chosen
+            return
+          }
+          void this.#pick(role, select.value)
+        })
         const row = el('div', 'row field-row')
         const name = v.roleNames[role] ?? role
         const l = el('label', 'small', `The ${name} role uses`)
@@ -219,7 +232,7 @@ class SfReviewerAgents extends HTMLElement {
     }
     parts.push(this.#status)
     this.replaceChildren(...parts)
-    refocus(this, focused, () => ['agent-file'])
+    refocus(this, focused, key => key === 'agent-file' ? Object.keys(v?.roleNames ?? {}).map(role => `role:${role}`) : ['agent-file'])
   }
 }
 

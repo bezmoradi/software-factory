@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { actionButton, el, visible } from '../lib/dom.ts'
+import { actionButton, el, focusedKey, refocus, visible } from '../lib/dom.ts'
 
 export interface CapsValues {
   money: number
@@ -252,18 +252,23 @@ class SfUsage extends HTMLElement {
   }
 
   paint() {
+    const focused = focusedKey(this)
+    const heads = new Map<string, string>()
     const parts: Node[] = []
     for (const m of view.meter) {
       if (m.sid) continue
       const box = el('section', 'usage-side')
       const head = el('h3', 'label', visible(m.label))
+      head.tabIndex = -1
+      head.dataset.key = `side:${m.side}`
       if (m.plan) head.append(el('span', 'muted small', ` · plan ${visible(m.plan)}`))
       box.append(head)
       for (const w of m.windows) {
         box.append(windowLine(w))
+        heads.set(`continue:${m.side}:${w.kind}`, `side:${m.side}`)
         if (w.near) {
           const ask = el('div', 'usage-ask small')
-          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind)))
+          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`))
           box.append(ask)
         } else if (w.continued) box.append(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
       }
@@ -275,6 +280,7 @@ class SfUsage extends HTMLElement {
     if (parts.length && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
     this.hidden = !parts.length
     this.replaceChildren(...parts)
+    refocus(this, focused, key => [heads.get(key) ?? ''])
   }
 
   async #continue(side: string, kind: string) {

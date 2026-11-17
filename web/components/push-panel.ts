@@ -83,6 +83,8 @@ function how(p: SessionPush): string {
 class SfPushPanel extends HTMLElement {
   #key = ''
   #expiry = 0
+  #ends = 0
+  #last: PushPanelView | null = null
   #card = ''
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
@@ -90,20 +92,34 @@ class SfPushPanel extends HTMLElement {
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
+    if (this.#ends && !this.#expiry) this.#arm()
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this.#expiry)
+    this.#expiry = 0
+  }
+
+  #arm() {
+    clearTimeout(this.#expiry)
+    this.#expiry = window.setTimeout(() => {
+      this.#expiry = 0
+      this.#ends = 0
+      this.#key = ''
+      this.view = this.#last
+    }, Math.min(Math.max(0, this.#ends - Date.now() + 500), 2 ** 31 - 1))
   }
 
   set view(value: PushPanelView | null) {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
+    this.#last = value
     clearTimeout(this.#expiry)
+    this.#expiry = 0
     const ends = value?.push?.result === 'held' ? value.push.expires ?? 0 : 0
-    if (ends > Date.now()) {
-      this.#expiry = window.setTimeout(() => {
-        this.#key = ''
-        this.view = value
-      }, Math.min(ends - Date.now() + 500, 2 ** 31 - 1))
-    }
+    this.#ends = ends > Date.now() ? ends : 0
+    if (this.#ends) this.#arm()
     const p = value?.push ?? null
     const flagged = (value?.flagged ?? []).filter(f => !f.allowed)
     this.hidden = !p && !flagged.length && value?.flagsRead !== false
