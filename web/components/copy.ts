@@ -21,6 +21,14 @@ class SfCopy extends HTMLElement {
     this.#rest()
   }
 
+  get label(): string {
+    return this.#button.getAttribute('aria-label') ?? ''
+  }
+
+  set label(text: string) {
+    this.#button.setAttribute('aria-label', text)
+  }
+
   connectedCallback() {
     if (this.#button.parentElement !== this) this.append(this.#button)
     if (this.#status.parentElement !== this) this.append(this.#status)
@@ -64,10 +72,11 @@ declare global {
   }
 }
 
-export function commandBlock(command: string): HTMLElement {
+export function commandBlock(command: string, label?: string): HTMLElement {
   const block = el('div', 'setup-code')
   const copy = document.createElement('sf-copy')
   copy.text = command
+  if (label) copy.label = label
   block.append(el('code', '', visible(command)), copy)
   return block
 }

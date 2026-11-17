@@ -246,7 +246,7 @@ class SfLessons extends HTMLElement {
         if (!ok) return
         say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
       })
-    })
+    }, 'button', `lessons-approve:${this.#project}:${x.id}`)
     const decline = button('Decline', 'small ghost', () => {
       if (held) return
       this.#busy = x.id
@@ -255,7 +255,7 @@ class SfLessons extends HTMLElement {
         if (!ok) return
         say(this.#said, 'Declined. Nothing was sent or changed.', 'muted')
       })
-    })
+    }, 'button', `lessons-decline:${this.#project}:${x.id}`)
     if (held && this.#doing === 'approve') busy(approve, true)
     else approve.setAttribute('aria-disabled', String(held))
     if (held && this.#doing === 'decline') busy(decline, true)

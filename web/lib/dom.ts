@@ -178,6 +178,7 @@ function refuseBusy(e: Event): void {
       lastPressed = null
     })
   }
+  if (busyWorks.size) checkBusy()
   const held = e.type === 'submit' ? t.querySelector('button[type="submit"][aria-busy="true"]') : t.closest('button[aria-busy="true"]')
   if (!held) return
   e.preventDefault()
@@ -191,12 +192,27 @@ if (typeof document !== 'undefined') {
 
 const BUSY_SAID = 'Working…'
 const BUSY_SHOWN_AFTER_MS = 300
+const BUSY_CHECKED_EVERY_MS = 500
 const busyLines = new WeakMap<Element, HTMLSpanElement>()
-const busyWaits = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>()
-const busySaid = new Map<HTMLButtonElement, HTMLSpanElement>()
+const busySince = new WeakMap<HTMLButtonElement, number>()
 
-function busyLine(b: HTMLButtonElement): HTMLSpanElement {
-  const layer = b.closest('dialog[open]') ?? document.body
+type BusyWork = {
+  layer: Element
+  key: string | HTMLButtonElement
+  line: HTMLSpanElement
+  since: number
+  shown: boolean
+  wait: ReturnType<typeof setTimeout>
+}
+
+const busyWorks = new Set<BusyWork>()
+let busyChecks: ReturnType<typeof setInterval> | undefined
+
+function busyLayer(b: Element): Element {
+  return b.closest('dialog[open]') ?? document.body
+}
+
+function busyLine(layer: Element): HTMLSpanElement {
   let line = busyLines.get(layer)
   if (!line?.isConnected) {
     line = statusLine('sr-only', 'span')
@@ -206,53 +222,89 @@ function busyLine(b: HTMLButtonElement): HTMLSpanElement {
   return line
 }
 
-function sayBusy(line: HTMLSpanElement): void {
-  const lines = new Set([line])
-  for (const [b, at] of busySaid) {
-    if (b.isConnected && resting.has(b)) continue
-    busySaid.delete(b)
-    lines.add(at)
+function busyKey(b: HTMLButtonElement): string | HTMLButtonElement {
+  if (b.dataset.key) return `button[data-key="${CSS.escape(b.dataset.key)}"]`
+  if (b.id) return `button[id="${CSS.escape(b.id)}"]`
+  return b
+}
+
+function busyHolders(work: BusyWork): HTMLButtonElement[] {
+  const found = typeof work.key === 'string' ? work.layer.querySelectorAll<HTMLButtonElement>(work.key) : [work.key]
+  return [...found].filter(b => resting.has(b) && b.isConnected && busyLayer(b) === work.layer)
+}
+
+function sayBusy(lines: Iterable<HTMLSpanElement>): void {
+  const speaking = new Set<HTMLSpanElement>()
+  for (const work of busyWorks) if (work.shown) speaking.add(work.line)
+  for (const line of lines) sayIfChanged(line, speaking.has(line) ? BUSY_SAID : '')
+}
+
+function checkBusy(): void {
+  const ended = new Set<HTMLSpanElement>()
+  for (const work of busyWorks) {
+    if (busyHolders(work).length) continue
+    busyWorks.delete(work)
+    clearTimeout(work.wait)
+    if (work.shown) ended.add(work.line)
   }
-  const speaking = new Set(busySaid.values())
-  for (const at of lines) sayIfChanged(at, speaking.has(at) ? BUSY_SAID : '')
+  if (!busyWorks.size) {
+    clearInterval(busyChecks)
+    busyChecks = undefined
+  }
+  sayBusy(ended)
 }
 
 function busyStarted(b: HTMLButtonElement): void {
-  if (busyWaits.has(b) || busySaid.has(b)) return
-  const line = busyLine(b)
-  busyWaits.set(b, setTimeout(() => {
-    busyWaits.delete(b)
-    if (!b.isConnected || !resting.has(b)) return
-    busySaid.set(b, line)
-    sayBusy(line)
-  }, BUSY_SHOWN_AFTER_MS))
-}
-
-function busyEnded(b: HTMLButtonElement): void {
-  clearTimeout(busyWaits.get(b))
-  busyWaits.delete(b)
-  const line = busySaid.get(b)
-  busySaid.delete(b)
-  if (line) sayBusy(line)
+  if (!b.isConnected || !resting.has(b)) return
+  const layer = busyLayer(b)
+  const key = busyKey(b)
+  const going = [...busyWorks].find(work => work.layer === layer && work.key === key)
+  if (going) {
+    if (going.shown) b.dataset.busyShown = ''
+    return
+  }
+  const work: BusyWork = {
+    layer,
+    key,
+    line: busyLine(layer),
+    since: busySince.get(b) ?? performance.now(),
+    shown: false,
+    wait: setTimeout(() => {
+      if (!busyWorks.has(work)) return
+      const held = busyHolders(work)
+      if (!held.length) return checkBusy()
+      work.shown = true
+      for (const h of held) if ((busySince.get(h) ?? work.since) > work.since) h.dataset.busyShown = ''
+      sayBusy([work.line])
+    }, BUSY_SHOWN_AFTER_MS),
+  }
+  busyWorks.add(work)
+  busyChecks ??= setInterval(checkBusy, BUSY_CHECKED_EVERY_MS)
 }
 
 if (typeof document !== 'undefined' && document.body) busyLines.set(document.body, document.body.appendChild(statusLine('sr-only', 'span')))
 
 export function busy(b: HTMLButtonElement, on: boolean): void {
   if (on) {
-    if (!resting.has(b)) resting.set(b, b.getAttribute('aria-disabled'))
+    if (!resting.has(b)) {
+      resting.set(b, b.getAttribute('aria-disabled'))
+      busySince.set(b, performance.now())
+    }
     b.setAttribute('aria-busy', 'true')
     b.setAttribute('aria-disabled', 'true')
-    busyStarted(b)
+    if (b.isConnected) busyStarted(b)
+    else queueMicrotask(() => busyStarted(b))
     return
   }
   if (!resting.has(b)) return
   const before = resting.get(b) ?? null
   resting.delete(b)
+  busySince.delete(b)
+  delete b.dataset.busyShown
   b.removeAttribute('aria-busy')
   if (before === null) b.removeAttribute('aria-disabled')
   else b.setAttribute('aria-disabled', before)
-  busyEnded(b)
+  if (busyWorks.size) checkBusy()
 }
 
 export async function whileBusy<T>(b: HTMLButtonElement, work: () => Promise<T>): Promise<T> {

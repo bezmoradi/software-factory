@@ -150,7 +150,7 @@ class SfReviews extends HTMLElement {
       if (b.getAttribute('aria-disabled') === 'true') return
       this.#all = false
       emit(this, 'sf-review', { all: false })
-    })
+    }, 'button', `reviews-run:${value.sid ?? ''}`)
     b.setAttribute('aria-disabled', String(off))
     if (running && !againBusy) busy(b, true)
     b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in a reviewer container each, compared with what the remote\'s main branch lacks'
@@ -158,7 +158,7 @@ class SfReviews extends HTMLElement {
       if (again?.getAttribute('aria-disabled') === 'true') return
       this.#all = true
       emit(this, 'sf-review', { all: true })
-    }) : null
+    }, 'button', `reviews-all:${value.sid ?? ''}`) : null
     if (again) {
       again.setAttribute('aria-disabled', String(off))
       if (againBusy) busy(again, true)
@@ -168,7 +168,7 @@ class SfReviews extends HTMLElement {
     const p = button('Push', 'small', () => {
       if (p.getAttribute('aria-disabled') === 'true') return
       emit(this, 'sf-push-request')
-    })
+    }, 'button', `reviews-push:${value.sid ?? ''}`)
     p.setAttribute('aria-disabled', String(pushOff))
     if (value.pushing) busy(p, true)
     p.title = 'Asks the engine to push this session\'s branch at its latest commit: the gate checks the reviews and the remote\'s main branch first'
@@ -495,7 +495,7 @@ class SfReviews extends HTMLElement {
       }
       input.removeAttribute('aria-invalid')
       emit(this, 'sf-override', { agent: role.agent, commit, reason })
-    })
+    }, 'button', `reviews-override:${value.sid ?? ''}:${commit}:${role.agent}`)
     b.setAttribute('aria-disabled', String(held))
     if (value.overriding === role.agent) busy(b, true)
     b.title = role.runs && role.runs > 1 ? 'Counts every blocking run of this role as passed for this commit only. A new commit needs a new review.' : 'Counts this role as passed for this commit only. A new commit needs a new review.'

@@ -402,7 +402,11 @@ button[aria-busy="true"] :is(sf-icon, svg, .icon, .stop-mark) { animation: busy-
 @keyframes busy-out { to { opacity: 0; } }
 button[aria-busy="true"]::before { content: ""; position: absolute; inset: 0; box-sizing: border-box; width: .75rem; height: .75rem; margin: auto; border: 1.5px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; opacity: 0; animation: spin .8s linear infinite, busy-in .2s ease-out .3s forwards; }
 @keyframes busy-in { to { opacity: 1; } }
+button[aria-busy="true"][data-busy-shown] { animation: busy-label 0s forwards; }
+button[aria-busy="true"][data-busy-shown] :is(sf-icon, svg, .icon, .stop-mark) { animation: busy-out 0s forwards; }
+button[aria-busy="true"][data-busy-shown]::before { animation: spin .8s linear infinite, busy-in 0s forwards; }
 @media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::before { border-inline-end-color: currentColor; border-style: dotted; animation: busy-in .2s ease-out .3s forwards; } }
+@media (prefers-reduced-motion: reduce) { button[aria-busy="true"][data-busy-shown]::before { animation: busy-in 0s forwards; } }
 @media (prefers-reduced-motion: reduce) { .path li.active .mark { border-color: var(--good); animation: none; } }
 .path strong { font-size: .875rem; font-weight: 600; }
 .path li:not(.done, .current) strong { color: var(--soft); }

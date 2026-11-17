@@ -118,15 +118,15 @@ function code(text: string): HTMLElement {
   return el('code', '', text)
 }
 
-function oneLine(command: string, name: string): HTMLElement {
-  const block = commandBlock(command)
+function oneLine(command: string, what: string): HTMLElement {
+  const block = commandBlock(command, `Copy the ${what}`)
   block.classList.add('update-oneline')
   const text = block.querySelector('code')
   if (!text) return block
   const scroll = el('div', 'update-scroll')
   scroll.tabIndex = 0
   scroll.setAttribute('role', 'region')
-  scroll.setAttribute('aria-label', name)
+  scroll.setAttribute('aria-label', `The ${what}`)
   text.replaceWith(scroll)
   scroll.append(text)
   return block
@@ -138,16 +138,16 @@ function releaseSteps(version: string): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const download = el('li')
-  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'The download command'))
+  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'download command'))
   const verify = el('li')
-  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'The check command'))
+  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command'))
   const run = el('li')
-  run.append(para('', 'Run it:'), commandBlock('sh install.sh'))
+  run.append(para('', 'Run it:'), commandBlock('sh install.sh', 'Copy the run command'))
   steps.append(download, verify, run)
   box.append(
     el('h3', 'update-subhead', 'If you installed a release'),
     para('small', `Run release ${version}’s install command in a terminal:`),
-    oneLine(`curl -fsSL ${script} | sh`, 'The install command'),
+    oneLine(`curl -fsSL ${script} | sh`, 'install command'),
     para('small', 'Or check the script before it runs, with a signed-in gh:'),
     steps,
     para('small muted', 'Either way, the script replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
@@ -159,9 +159,9 @@ function sourceSteps(development: boolean): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const pull = el('li')
-  pull.append(para('', 'Get the new code:'), commandBlock('git pull'))
+  pull.append(para('', 'Get the new code:'), commandBlock('git pull', 'Copy the pull command'))
   const up = el('li')
-  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up'))
+  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up', 'Copy the rebuild command'))
   steps.append(pull, up)
   box.append(
     el('h3', 'update-subhead', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
