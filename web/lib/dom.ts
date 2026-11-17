@@ -113,13 +113,21 @@ export function sayIfChanged(line: HTMLElement, text: string, tone?: Tone): void
   if (line.textContent !== text) line.textContent = text
 }
 
+function onScreen(line: HTMLElement): boolean {
+  if (!line.isConnected || line.closest('[hidden]')) return false
+  for (let box = line.closest('details'); box; box = box.parentElement?.closest('details') ?? null) {
+    if (!box.open && !box.querySelector(':scope > summary')?.contains(line)) return false
+  }
+  return true
+}
+
 export function sayWhenShown(line: HTMLElement, text: string, tone?: Tone): void {
   const waiting = pending.get(line)
   if (waiting && waiting.text === text) {
     waiting.tone = tone
     return
   }
-  if (!text || line.isConnected && !line.closest('[hidden]')) return sayIfChanged(line, text, tone)
+  if (!text || onScreen(line)) return sayIfChanged(line, text, tone)
   say(line, '', tone)
   const next = { text, tone }
   pending.set(line, next)

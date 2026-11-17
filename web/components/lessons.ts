@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 
@@ -56,6 +56,11 @@ class SfLessons extends HTMLElement {
   #view: LessonsView | null = null
   #said = statusLine()
   #body = el('div', 'lessons-body')
+  #again = button('Read again', 'link small', () => {
+    if (this.#reads) return
+    say(this.#said, '')
+    void whileBusy(this.#again, () => this.#call({ op: 'read', name: this.#project }))
+  }, 'button', 'lessons-again')
   #timer = 0
   #busy = ''
   #doing = ''
@@ -67,8 +72,11 @@ class SfLessons extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
+      const heading = el('h3', 'label', 'Lessons from reviews')
+      heading.tabIndex = -1
+      heading.dataset.key = 'lessons-heading'
       this.replaceChildren(
-        el('h3', 'label', 'Lessons from reviews'),
+        heading,
         el('p', 'small muted', 'The engine counts the blocking findings of this project\'s reviews by reviewer, file and title, with case, numbers and punctuation left out. That matching is approximate: two different findings can count as one, and a reworded finding counts as a new one. Nothing here changes a file or a review on its own.'),
         this.#body,
         this.#said,
@@ -102,8 +110,10 @@ class SfLessons extends HTMLElement {
     const gen = ++this.#gen
     const read = body.op === 'read'
     if (read) this.#reads++
+    this.#hold()
     const res = await api('/api/lessons', body).catch(() => null)
     if (read) this.#reads--
+    this.#hold()
     if (project !== this.#project || (read && gen !== this.#gen)) return false
     this.#busy = ''
     if (!res || !res.ok) {
@@ -114,6 +124,7 @@ class SfLessons extends HTMLElement {
       }
       say(this.#said, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
+      if (read) this.#retry(true)
       return false
     }
     if (body.op === 'suggest') {
@@ -124,8 +135,22 @@ class SfLessons extends HTMLElement {
     if (project !== this.#project || (read && gen !== this.#gen)) return false
     if (isView(v)) this.#view = v
     this.#paint()
+    if (read && isView(v)) this.#retry(false)
     this.#poll()
     return true
+  }
+
+  #hold() {
+    if (this.#reads) this.#again.setAttribute('aria-disabled', 'true')
+    else this.#again.removeAttribute('aria-disabled')
+  }
+
+  #retry(on: boolean) {
+    if (on === (this.#again.parentNode === this)) return
+    if (on) return this.#said.after(this.#again)
+    const focused = focusedKey(this)
+    this.#again.remove()
+    refocus(this, focused, () => ['lessons-suggest', 'lessons-heading'])
   }
 
   #paint() {
@@ -154,7 +179,7 @@ class SfLessons extends HTMLElement {
         this.#busy = 'suggest'
         this.#paint()
         void this.#call({ op: 'suggest', name: this.#project })
-      })
+      }, 'button', 'lessons-suggest')
       if (running) busy(b, true)
       b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)

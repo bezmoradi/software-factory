@@ -295,7 +295,9 @@ class SfProjects extends HTMLElement {
   #removing = ''
   #message: { path: string; text: string; bad: boolean } = { path: '', text: '', bad: false }
   #messageLine = statusLine('small status-slot')
-  #cloningSaid = new Map<string, HTMLSpanElement>()
+  #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; said: HTMLSpanElement }>()
+  #list = el('ul', 'boxlist projects')
+  #rows = new Map<string, HTMLLIElement>()
   #busy = false
   #add = el('input', 'textbox')
   #pending = new Map<'repo' | 'token', { key: string; after?: () => void }>()
@@ -406,7 +408,7 @@ class SfProjects extends HTMLElement {
     this.#viewKey = key
     this.#view = value
     const kept = new Set(value.projects.map(p => p.path))
-    for (const m of [this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
+    for (const m of [this.#rows, this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
     this.#render()
   }
 
@@ -738,7 +740,8 @@ class SfProjects extends HTMLElement {
   }
 
   #row(p: Project) {
-    const li = el('li', 'boxlist-row')
+    const li = this.#rows.get(p.path) ?? el('li', 'boxlist-row')
+    this.#rows.set(p.path, li)
     const head = el('div', 'row')
     const name = el('span', 'name')
     name.append(el('span', 'title', p.name))
@@ -788,38 +791,28 @@ class SfProjects extends HTMLElement {
       acts.append(...this.#menu(p))
     }
     head.append(acts)
-    li.append(head)
+    const parts: HTMLElement[] = [head]
     if (open) {
-      li.append(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
+      parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
     }
-    if (this.#message.path === p.path && this.#message.text) li.append(el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text))
+    if (this.#message.path === p.path && this.#message.text) parts.push(el('p', `small ${this.#message.bad ? 'bad' : 'muted'}`, this.#message.text))
     const form = this.#forms.get(p.path)
-    if (form) li.append(form.form)
-    const rules = this.#rules.get(p.path)
-    if (rules) li.append(rules)
-    const facts = this.#facts.get(p.path)
-    if (facts) li.append(facts)
-    const caps = this.#caps.get(p.path)
-    if (caps) li.append(caps)
-    const team = this.#team.get(p.path)
-    if (team) li.append(team)
-    const commands = this.#commands.get(p.path)
-    if (commands) li.append(commands)
-    const metrics = this.#metrics.get(p.path)
-    if (metrics) li.append(metrics)
-    const decisions = this.#decisions.get(p.path)
-    if (decisions) li.append(decisions)
-    const depth = this.#depth.get(p.path)
-    if (depth) li.append(depth)
-    const lessons = this.#lessons.get(p.path)
-    if (lessons) li.append(lessons)
+    if (form) {
+      form.caps.project = p.name
+      parts.push(form.form)
+    }
+    for (const m of [this.#rules, this.#facts, this.#caps, this.#team, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) {
+      const panel = m.get(p.path)
+      if (panel) parts.push(panel)
+    }
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')
       this.#expiry.set(p.path, expiry)
     }
     expiry.url = p.url ?? ''
-    li.append(expiry)
+    parts.push(expiry)
+    replaceKeeping(li, parts)
     return li
   }
 
@@ -845,21 +838,21 @@ class SfProjects extends HTMLElement {
   }
 
   #cloningRow(k: Cloning): HTMLElement {
-    const li = el('li', 'boxlist-row')
-    const row = el('div', 'row')
+    const kept = this.#cloning.get(k.name)
+    if (kept?.url === k.url) return kept.li
+    const c = kept ?? { url: k.url, li: el('li', 'boxlist-row'), row: el('div', 'row'), said: statusLine('acts small muted status-slot', 'span') }
+    c.url = k.url
     const who = el('div', 'project-id')
     const name = el('span', 'name')
     name.append(el('span', 'title', k.name))
     who.append(name, urlText(k.url))
-    let status = this.#cloningSaid.get(k.name)
-    if (!status) {
-      status = statusLine('acts small muted status-slot', 'span')
-      this.#cloningSaid.set(k.name, status)
+    replaceKeeping(c.row, [el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, c.said])
+    if (!kept) {
+      c.li.append(c.row)
+      this.#cloning.set(k.name, c)
+      sayWhenShown(c.said, 'Cloning…', 'muted')
     }
-    sayWhenShown(status, 'Cloning…', 'muted')
-    row.append(el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, status)
-    li.append(row)
-    return li
+    return c.li
   }
 
   #hostRow(h: TokenHost): HTMLElement {
@@ -1072,14 +1065,13 @@ class SfProjects extends HTMLElement {
       parts.push(actions)
     }
     const cloning = this.#view.cloning ?? []
-    for (const name of this.#cloningSaid.keys()) if (!cloning.some(k => k.name === name)) this.#cloningSaid.delete(name)
+    for (const name of this.#cloning.keys()) if (!cloning.some(k => k.name === name)) this.#cloning.delete(name)
     if (projects.length || cloning.length) {
-      const ul = el('ul', 'boxlist projects')
       const rows = [...projects.map(p => ({ name: p.name, row: () => this.#row(p) })), ...cloning.map(k => ({ name: k.name, row: () => this.#cloningRow(k) }))]
       rows.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-      for (const r of rows) ul.append(r.row())
-      parts.push(ul)
-    }
+      replaceKeeping(this.#list, rows.map(r => r.row()))
+      parts.push(this.#list)
+    } else this.#list.replaceChildren()
     const side = this.#tokens()
     if (this.#slot) this.#slot.replaceChildren(...side)
     else parts.push(...side)

@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, field, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, field, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 
 interface DepthView {
   advisory: string[]
@@ -65,8 +65,14 @@ class SfReviewDepth extends HTMLElement {
   #lines = el('input', 'textbox')
   #extra = el('input', 'textbox')
   #extraRuns: HTMLSelectElement = runSelect('', 1, 3)
-  #save = button('Save review settings', 'small', () => void this.#store())
+  #save = button('Save review settings', 'small', () => void this.#store(), 'button', 'depth-save')
   #said = statusLine()
+  #again = button('Read again', 'link small', () => {
+    if (this.#reading) return
+    say(this.#said, '')
+    void whileBusy(this.#again, () => this.#load())
+  }, 'button', 'depth-again')
+  #reading = 0
 
   connectedCallback() {
     if (this.#built) {
@@ -145,19 +151,34 @@ class SfReviewDepth extends HTMLElement {
   async #load() {
     const path = this.#path
     if (!path) return
-    const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
-    if (path !== this.#path) return
-    if (!res || !res.ok) {
-      say(this.#said, await problemOf(res), 'warn')
-      return
+    this.#reading++
+    this.#again.setAttribute('aria-disabled', 'true')
+    try {
+      const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
+      if (path !== this.#path) return
+      if (!res || !res.ok) {
+        say(this.#said, await problemOf(res), 'warn')
+        return this.#retry(true)
+      }
+      const body: unknown = await res.json().catch(() => null)
+      if (!isDepth(body)) {
+        say(this.#said, 'The engine\'s answer couldn\'t be read. Try again.', 'warn')
+        return this.#retry(true)
+      }
+      this.#show(body)
+      this.#loaded = path
+      this.#retry(false)
+    } finally {
+      if (!--this.#reading) this.#again.removeAttribute('aria-disabled')
     }
-    const body: unknown = await res.json().catch(() => null)
-    if (!isDepth(body)) {
-      say(this.#said, 'The engine\'s answer couldn\'t be read. Try again.', 'warn')
-      return
-    }
-    this.#show(body)
-    this.#loaded = path
+  }
+
+  #retry(on: boolean) {
+    if (on === (this.#again.parentNode === this)) return
+    if (on) return this.#said.after(this.#again)
+    const focused = focusedKey(this)
+    this.#again.remove()
+    refocus(this, focused, () => ['depth-save'])
   }
 
   async #store() {

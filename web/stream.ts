@@ -25,12 +25,32 @@ let lost = 0
 export const SIGN_IN_HINT = 'Press Sign in to use the page in this tab.'
 let fresh = true
 
+let goneNext: { head: string; detail: string } | null = null
+
+function goneSay(head: string, detail: string) {
+  for (const [id, text] of [['gone', head], ['gone-detail', detail]] as const) {
+    const line = byId(id)
+    if (line.textContent !== text) line.textContent = text
+  }
+}
+
 export function showGone(head: string, detail: string, offerSignIn: boolean, busy = false) {
-  byId('gone').textContent = head
-  byId('gone-detail').textContent = detail
   byId('gone-progress').hidden = !busy
   byId('signin').hidden = !offerSignIn
+  if (goneNext) {
+    goneNext.head = head
+    goneNext.detail = detail
+    return
+  }
+  if (document.body.classList.contains('out')) return goneSay(head, detail)
+  goneSay('', '')
   document.body.classList.add('out')
+  const next = goneNext = { head, detail }
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (goneNext !== next) return
+    goneNext = null
+    goneSay(next.head, next.detail)
+  }))
 }
 
 let generation = 0
@@ -216,6 +236,7 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
       fresh = false
       clearTimeout(lost)
       lost = 0
+      goneNext = null
       document.body.classList.remove('out')
       state.connected = true
       state.note = ''

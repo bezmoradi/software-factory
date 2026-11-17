@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 
 export interface AgentModel {
@@ -243,6 +243,7 @@ class SfSessionWork extends HTMLElement {
     if (!sid) return false
     this.#busy = true
     this.#busyKey = key
+    this.#opened ??= this.#details.open
     this.#paint()
     const res = await api('/api/session-work', { ...body, sid }).catch(() => null)
     this.#busy = false
@@ -393,7 +394,7 @@ class SfSessionWork extends HTMLElement {
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? this.#notable(v)
     this.#details.open = this.#shown
-    this.#details.replaceChildren(this.#summary, ...parts)
+    replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
     refocus(this, focused, () => ['work-add', 'work-queue-add', 'work-model'])
   }

@@ -1,4 +1,4 @@
-import { button, el, emit, field, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, field, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { diffText, lineDiff } from '../lib/diff.ts'
 import { shortSha } from '../lib/format.ts'
 import type { AsideRun, HoldSetting, PlanApproval, ProjectAgents } from '../types.ts'
@@ -85,7 +85,10 @@ class SfApproval extends HTMLElement {
 
   #render() {
     const v = this.#view
-    if (!v) return this.replaceChildren()
+    if (!v) {
+      this.#why.textContent = ''
+      return this.replaceChildren()
+    }
     const reqs = v.kind === 'requirements'
     const what = reqs ? 'the requirements' : 'the plan'
     this.#field.setAttribute('aria-label', `What the agent should change in ${what}`)
@@ -112,15 +115,15 @@ class SfApproval extends HTMLElement {
     const summary = el('summary', 'small', draft ? (reqs ? 'Read the draft requirements' : `Read the draft of ${file}`) : reqs ? 'Read the agreed requirements' : `Read ${file}`)
     summary.dataset.key = 'read'
     const details = remembered(this.#open, v.hash, false, summary, body)
-    if (draft) return this.replaceChildren(details)
-    this.replaceChildren(el('p', `small ${v.approved ? 'ok' : 'warn'}`, status))
-    if (reqs && v.changed && !v.approved) this.append(this.#changes(v))
-    this.append(details)
+    if (draft) return this.#quiet([details])
+    const parts: HTMLElement[] = [el('p', `small ${v.approved ? 'ok' : 'warn'}`, status)]
+    if (reqs && v.changed && !v.approved) parts.push(this.#changes(v))
+    parts.push(details)
     if (!reqs) {
       this.#planBox = this.#planReview(v)
-      this.append(this.#planBox)
+      parts.push(this.#planBox)
     }
-    if (v.approved) return
+    if (v.approved) return this.#quiet(parts)
     const approve = button(reqs ? 'Approve requirements' : 'Approve plan', 'ghost', () => {
       if (!this.#open.has(v.hash)) {
         details.open = true
@@ -147,13 +150,20 @@ class SfApproval extends HTMLElement {
     if (v.hold) approve.setAttribute('aria-disabled', 'true')
     const row = el('div', 'choices field-row')
     row.append(approve)
-    this.append(row)
-    if (v.note) this.append(el('p', 'small muted', v.note))
+    parts.push(row)
+    if (v.note) parts.push(el('p', 'small muted', v.note))
     const why = v.refused || v.hold || ''
     this.#why.id = `${reqs ? 'req' : 'plan'}-approval-why`
     if (why) approve.setAttribute('aria-describedby', this.#why.id)
-    this.append(this.#why, form)
+    this.#why.classList.remove('status-slot')
+    replaceKeeping(this, [...parts, this.#why, form])
     if (this.#why.textContent !== why) this.#why.textContent = why
+  }
+
+  #quiet(parts: HTMLElement[]) {
+    this.#why.textContent = ''
+    this.#why.classList.add('status-slot')
+    replaceKeeping(this, [...parts, this.#why])
   }
 }
 

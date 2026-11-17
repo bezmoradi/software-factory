@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
@@ -106,6 +106,7 @@ class SfKeep extends HTMLElement {
     if (!res || !res.ok) {
       if (res && res.status !== 404 && res.status !== 501) return
       this.#view = null
+      this.#status.textContent = ''
       this.hidden = true
       this.replaceChildren()
       return
@@ -119,6 +120,7 @@ class SfKeep extends HTMLElement {
   async #ask() {
     const sid = this.#target?.sid
     if (!sid || this.#busy) return
+    this.#opened ??= this.#details.open
     await this.refresh(sid)
     if (sid !== this.#target?.sid) return
     const v = this.#view
@@ -215,7 +217,7 @@ class SfKeep extends HTMLElement {
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? (!!v.why || (!!v.commit && !v.holds))
     this.#details.open = this.#shown
-    this.#details.replaceChildren(this.#summary, ...parts)
+    replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
     this.hidden = false
     refocus(this, focused, () => ['keep-restore'])

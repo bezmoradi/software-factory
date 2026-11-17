@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, refocus, say, sayWhenShown, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -244,7 +244,7 @@ export class PairField {
   agent = el('select', 'textbox')
   model = el('select', 'textbox')
   message = el('textarea', 'textbox')
-  said = statusLine('small bad')
+  said = statusLine('small bad status-slot')
   #starters: Starter[]
 
   constructor(starters: Starter[], models: [string, string][]) {
@@ -275,7 +275,6 @@ export class PairField {
     this.message.maxLength = 20000
     this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
     const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and the agents' cost estimates; keep one and delete the other.")
-    this.said.hidden = true
     this.box.append(summary, check, row, name, this.message, note, this.said)
     const sync = () => {
       const plugin = this.#starters.find(a => a.id === this.agent.value)?.method === 'plugin'
@@ -287,15 +286,13 @@ export class PairField {
   }
 
   say(text: string) {
+    sayWhenShown(this.said, text, 'bad')
     this.box.open = true
-    this.said.textContent = text
-    this.said.hidden = !text
   }
 
   value(bench: boolean): { agent: string; model: string; message: string } | null | 'invalid' {
     if (!this.on.checked) return null
-    this.said.textContent = ''
-    this.said.hidden = true
+    say(this.said, '', 'bad')
     if (!this.agent.value) {
       this.say('No second agent is available.')
       return 'invalid'

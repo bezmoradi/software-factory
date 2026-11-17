@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, field, say, statusLine, whileBusy } from '../lib/dom.ts'
+import { button, el, field, focusedKey, refocus, say, statusLine, whileBusy } from '../lib/dom.ts'
 
 const MAX = 300
 
@@ -19,8 +19,14 @@ class SfProjectCommands extends HTMLElement {
   #project = ''
   #check = el('input', 'textbox')
   #setup = el('input', 'textbox')
-  #save = button('Save commands', 'small', () => void this.#store())
+  #save = button('Save commands', 'small', () => void this.#store(), 'button', 'commands-save')
   #said = statusLine()
+  #again = button('Read again', 'link small', () => {
+    if (this.#reading) return
+    say(this.#said, '')
+    void whileBusy(this.#again, () => this.#load())
+  }, 'button', 'commands-again')
+  #reading = 0
   #loaded = ''
   #built = false
 
@@ -59,16 +65,31 @@ class SfProjectCommands extends HTMLElement {
   async #load() {
     const project = this.#project
     if (!project) return
-    const res = await api('/api/project-commands', { op: 'read', name: project }).catch(() => null)
-    if (project !== this.#project) return
-    if (!res || !res.ok) {
-      say(this.#said, await problemOf(res), 'warn')
-      return
+    this.#reading++
+    this.#again.setAttribute('aria-disabled', 'true')
+    try {
+      const res = await api('/api/project-commands', { op: 'read', name: project }).catch(() => null)
+      if (project !== this.#project) return
+      if (!res || !res.ok) {
+        say(this.#said, await problemOf(res), 'warn')
+        return this.#retry(true)
+      }
+      const body = await res.json().catch(() => null) as { check?: unknown; setup?: unknown } | null
+      this.#check.value = typeof body?.check === 'string' ? body.check : ''
+      this.#setup.value = typeof body?.setup === 'string' ? body.setup : ''
+      this.#loaded = project
+      this.#retry(false)
+    } finally {
+      if (!--this.#reading) this.#again.removeAttribute('aria-disabled')
     }
-    const body = await res.json().catch(() => null) as { check?: unknown; setup?: unknown } | null
-    this.#check.value = typeof body?.check === 'string' ? body.check : ''
-    this.#setup.value = typeof body?.setup === 'string' ? body.setup : ''
-    this.#loaded = project
+  }
+
+  #retry(on: boolean) {
+    if (on === (this.#again.parentNode === this)) return
+    if (on) return this.#said.after(this.#again)
+    const focused = focusedKey(this)
+    this.#again.remove()
+    refocus(this, focused, () => ['commands-save'])
   }
 
   async #store() {
