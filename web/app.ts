@@ -1,8 +1,8 @@
 import { api, exchange, trade, upload } from './api.ts'
-import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
+import { claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { busy, button, byId, copyText, el, emit, fileLink, pressed, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
+import { button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
@@ -12,7 +12,7 @@ import { placeMenu } from './lib/menu.ts'
 import { isRecord } from './lib/json.ts'
 import { sessionState } from './components/session-list.ts'
 import { warnings } from './components/overview.ts'
-import type { CardHost, Changes, Check, Consent, Expect, GateEvent, Needs, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
+import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView, WorkflowDoc } from './types.ts'
 import './components/changes.ts'
 import './components/docs.ts'
 import './components/file.ts'
@@ -38,7 +38,7 @@ import './components/setup.ts'
 import './components/tabs.ts'
 import './components/toasts.ts'
 import type { Toast } from './components/toasts.ts'
-import { approveTrustFiles, askTrust, consentFor, money } from './components/consent.ts'
+import { money } from './components/consent.ts'
 import { openAway, setHalt, setHaltSession } from './components/halt.ts'
 import { isMac, openPalette, openShortcuts, paletteKey, typing, type PaletteItem } from './components/palette.ts'
 import './components/rules.ts'
@@ -59,6 +59,7 @@ import { armed, changesSession, controllable, current, inTurn, pickingSize, revi
 import { barStatus, paintSide, queueBarFit, setSide, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
+import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, holdBusy, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 
 setPainter(paint)
 
@@ -103,15 +104,6 @@ byId('menu-wake').after(modelMenu)
 let reviewer: ReviewerView | null = null
 let starterNames = new Map<string, string>()
 let projectsAt = 0
-const removals = new Map<string, { message: string; offer: { flag: string; value: string } | null }>()
-const busyManage = new Map<string, { action: string; at: number; force: boolean }>()
-const controlBusy = new Set<string>()
-const reviewAsking = new Set<string>()
-const pushAsking = new Set<string>()
-const pushWatched = new Map<string, number>()
-const pushSaid = new Map<string, { text: string; tone: string }>()
-const PUSH_SAID: Record<string, { text: string; tone: string }> = { held: { text: 'Held', tone: 'warn' }, denied: { text: 'Denied', tone: 'bad' }, refused: { text: 'Not pushed', tone: 'bad' } }
-const answerAsking = new Set<string>()
 
 const checks = new Map<string, { check: Check; node: HTMLElementTagNameMap['sf-check']; li: HTMLLIElement }>()
 
@@ -149,9 +141,6 @@ function stageOff(s: Session): string {
   return inTurn(s) ? `Step buttons are available when ${agentWord(s.info.agent)} finishes.` : ''
 }
 
-const ASKED_MS = 30000
-
-const stepping = new Map<string, number>()
 const ran = new Map<string, Set<Step>>()
 
 function began(s: Session) {
@@ -166,22 +155,6 @@ function turnOf(s: Session): Turn {
   const busy = state.connected && inTurn(s)
   const awaiting: Step = gate?.size === 'feature' && gate.requirements?.hash && !gate.requirements.approved ? 'define' : gate?.effective === 'feature' && gate.planDoc && !gate.planDoc.approved ? 'plan' : ''
   return { ran: ran.get(s.sid) ?? new Set<Step>(), running: busy ? s.step || awaiting : '', busy }
-}
-
-function holdBusy(b: HTMLButtonElement, on: boolean) {
-  if (on !== (b.getAttribute('aria-busy') === 'true')) busy(b, on)
-}
-
-function once(s: Session | null | undefined, what: string, run: () => Promise<boolean>) {
-  if (!s) return
-  const key = `${s.sid}:${what}`
-  const at = stepping.get(key) ?? 0
-  if (at && Date.now() - at < ASKED_MS) return
-  const now = Date.now()
-  stepping.set(key, now)
-  void run().then(ok => {
-    if (!ok && stepping.get(key) === now) stepping.delete(key)
-  })
 }
 
 function onEvent(ev: StreamEvent) {
@@ -549,17 +522,6 @@ function paintManage(s: Session) {
   if (offer && !pending?.force) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
 }
 
-function confirmed(key: string, prompt = ''): boolean {
-  if (armed.delete(key)) {
-    if (prompt) say('')
-    return true
-  }
-  armed.add(key)
-  if (prompt) say(prompt)
-  schedulePaint()
-  return false
-}
-
 function paintCheckpoint(s: Session) {
   const c = s.workflow?.knackpack === true ? s.context : null
   const shown = !!c && checkpointed.get(s.sid) !== c.level
@@ -600,25 +562,6 @@ function forgetSession(sid: string) {
   markCheckpoint(sid, '')
   s.view.remove()
   closeTab(`s/${sid}`)
-}
-
-async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
-  busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
-  schedulePaint()
-  setTimeout(schedulePaint, 30500)
-  const { ok, body: out } = await reply(await api(path, { sid: s.sid, ...body }).catch(() => null))
-  if (!ok || path !== '/api/stop-session') busyManage.delete(s.sid)
-  if (ok) {
-    removals.delete(s.sid)
-    if (path === '/api/remove-session') forgetSession(s.sid)
-    schedulePaint()
-    return ''
-  }
-  const offer = out.offer && typeof out.offer === 'object' ? (out.offer as { flag: string; value: string }) : null
-  const message = typeof out.message === 'string' ? out.message : "That didn't work."
-  removals.set(s.sid, { message, offer })
-  schedulePaint()
-  return offer ? `${message} Open the session to choose what to do with it.` : message
 }
 
 function reviewsOf(s: Session): ReviewsView | null {
@@ -673,146 +616,6 @@ function forgePanelOf(s: Session): ForgePanelView | null {
   const i = s.info
   if (!i.verified || !Array.isArray(i.forge) || !i.forge.length) return null
   return { forge: i.forge, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
-}
-
-const forgeAsking = new Set<string>()
-
-async function answerForge(s: Session | null, answer: { card: string; approve: boolean; draft?: boolean; confirmed?: boolean }) {
-  if (!s || forgeAsking.has(s.sid)) return
-  forgeAsking.add(s.sid)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/forge-answer', { sid: s.sid, ...answer }).catch(() => null))
-  forgeAsking.delete(s.sid)
-  schedulePaint()
-  const comment = s.info.forge?.find(f => f.card === answer.card)?.kind === 'comment'
-  if (!ok) toast({ id: `forge-answer:${s.sid}`, title: !answer.approve ? "It wasn't denied." : comment ? "It wasn't posted." : "It wasn't opened.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-function whilePressed<T>(work: () => Promise<T>): Promise<T> {
-  const b = pressed()
-  return b ? whileBusy(b, work) : work()
-}
-
-async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) {
-  if (!s) return
-  const { ok, body: said } = await whilePressed(async () => reply(await api(route, { sid: s.sid, ...body }).catch(() => null)))
-  if (!ok) return void toast({ id: `${route}:${s.sid}`, title, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad' })
-  toast({ title: done, tone: 'ok' })
-  s.auditSeen++
-  void loadGate(s, true)
-  schedulePaint()
-}
-
-function pushedHead(s: Session): boolean {
-  const p = s.info.push
-  const head = s.gate?.head ?? ''
-  return !!p && !p.running && !pushAsking.has(s.sid) && (p.result === 'pushed' || p.result === 'up-to-date') && !!head && p.commit === head
-}
-
-function pushOutcome(s: Session) {
-  const since = pushWatched.get(s.sid)
-  const p = s.info.push
-  if (since === undefined || !p || p.running || pushAsking.has(s.sid) || p.at === since) return
-  pushWatched.delete(s.sid)
-  const said = PUSH_SAID[p.result]
-  if (said) {
-    pushSaid.set(s.sid, said)
-    setTimeout(() => {
-      if (pushSaid.get(s.sid) !== said) return
-      pushSaid.delete(s.sid)
-      schedulePaint()
-    }, 6000)
-  }
-  requestAnimationFrame(() => {
-    if (current() !== s) return
-    const panel = byId('push-panel')
-    const target = panel.querySelector<HTMLElement>('.push-card') ?? panel.querySelector<HTMLElement>('#push-result')
-    if (!target) return
-    target.scrollIntoView({ block: 'nearest' })
-    const lost = !document.activeElement || document.activeElement === document.body
-    if (lost) panel.querySelector<HTMLElement>('#push-result')?.focus({ preventScroll: true })
-  })
-}
-
-async function startPush(s: Session | null) {
-  if (!s || pushAsking.has(s.sid) || s.info.push?.running || pushedHead(s)) return
-  pushAsking.add(s.sid)
-  pushSaid.delete(s.sid)
-  pushWatched.set(s.sid, s.info.push?.at ?? 0)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/push', { sid: s.sid }).catch(() => null))
-  pushAsking.delete(s.sid)
-  if (!ok) pushWatched.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `push:${s.sid}`, title: "The push didn't start.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-async function answerPush(s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }) {
-  if (!s || answerAsking.has(s.sid)) return
-  answerAsking.add(s.sid)
-  schedulePaint()
-  const { ok, body } = await reply(await api('/api/push-answer', { sid: s.sid, ...answer }).catch(() => null))
-  answerAsking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `push-answer:${s.sid}`, title: answer.allow ? "The push wasn't allowed." : "The push wasn't denied.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
-
-async function startReview(s: Session | null, all: boolean) {
-  if (!s || reviewAsking.has(s.sid) || s.info.review?.running) return
-  reviewAsking.add(s.sid)
-  schedulePaint()
-  const asked = all ? { sid: s.sid, all: true } : { sid: s.sid }
-  let consent: Consent = {}
-  let answer = await reply(await api('/api/review', asked).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the review')
-    if (!more?.costOk) break
-    consent = { costOk: true }
-    answer = await reply(await api('/api/review', { ...asked, ...consent }).catch(() => null))
-  }
-  const { ok, body } = answer
-  reviewAsking.delete(s.sid)
-  schedulePaint()
-  const message = typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.'
-  if (!ok && body.error === 'reviewed') toast({ id: `review:${s.sid}`, title: 'Every review is done.', description: message, tone: 'info' })
-  else if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined })
-}
-
-const testAsking = new Set<string>()
-
-async function startTestList(s: Session | null) {
-  if (!s || testAsking.has(s.sid) || s.info.review?.testList?.state === 'running') return
-  testAsking.add(s.sid)
-  schedulePaint()
-  let answer = await reply(await api('/api/test-list', { sid: s.sid }).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the manual test list')
-    if (!more?.costOk) break
-    answer = await reply(await api('/api/test-list', { sid: s.sid, costOk: true }).catch(() => null))
-  }
-  const { ok, body } = answer
-  testAsking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `test-list:${s.sid}`, title: "The test list wasn't started.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad', timeout: body.needs ? 0 : undefined })
-}
-
-const explainAsking = new Set<string>()
-const planAsking = new Set<string>()
-
-async function startAside(s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) {
-  if (!s || asking.has(s.sid) || running) return
-  asking.add(s.sid)
-  schedulePaint()
-  let answer = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
-  for (let round = 0; !answer.ok && round < 2; round++) {
-    const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", what)
-    if (!more?.costOk) break
-    answer = await reply(await api(route, { sid: s.sid, ...body, costOk: true }).catch(() => null))
-  }
-  const { ok, body: said } = answer
-  asking.delete(s.sid)
-  schedulePaint()
-  if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad', timeout: said.needs ? 0 : undefined })
 }
 
 function paintAgents(s: Session) {
@@ -1171,56 +974,6 @@ async function markViewed(s: Session | null, d: { path: string; blob: string; vi
   toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
-async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = []) {
-  if (!s) return false
-  const asleep = sleeping(s)
-  if (asleep && !s.info.controlled) {
-    say('Wake the session first: it was read-only on this page when it stopped.')
-    return false
-  }
-  if (asleep && (images.length || files.length)) {
-    say('Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu.')
-    return false
-  }
-  if (!asleep && !controllable(s)) {
-    say('This session is read-only on this page.')
-    return false
-  }
-  if (text.startsWith('!')) {
-    const line = text.slice(1).trim()
-    toast({ id: 'shell-line', title: "The page doesn't run shell lines.", description: `It sends messages to ${agentWord(s.info.agent)}. Ask it to run the command, or run it yourself in the agent container.`, tone: 'warn', ...(line ? { action: { label: 'Copy the command', run: () => void copy(line) } } : {}) })
-    return false
-  }
-  if (/^\/[^\s/]+(?:\s|$)/.test(text) && (images.length || files.length)) {
-    say("A command can't carry images or files. Send them in a message of their own.")
-    return false
-  }
-  const bypass = s.info.mode === 'bypassPermissions'
-  if (bypass && !pressed && !confirmed(`${s.sid}:bypass`, 'This session runs with bypassPermissions: Claude runs every tool without asking. Press Enter again to send anyway.')) return false
-  say('')
-  const body: { sid: string; text: string; images?: string[]; files?: string[]; confirm?: boolean } = { sid: s.sid, text }
-  if (images.length) body.images = images
-  if (files.length) body.files = files
-  if (bypass) body.confirm = true
-  const name = starterNames.get(s.info.agent ?? '') ?? 'The agent'
-  const answer = asleep ? await withConsent(name, 'the session', consent => api('/api/message', { ...body, ...consent })) : await reply(await api('/api/message', body).catch(() => null))
-  if (!answer.ok) {
-    const why = answer.body.message
-    say(typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.')
-    const action = identityAction(answer.body)
-    if (action) toast({ id: 'identity-needed', title: 'The session didn’t wake.', description: 'Set the name and email agents commit with first.', tone: 'bad', timeout: 0, action })
-    return false
-  }
-  if (asleep) {
-    say(s.info.live ? '' : `Waking the session. The message goes to ${agentWord(s.info.agent)} once it reconnects, if that happens within 2 minutes.`)
-  }
-  if (s.context && /^\/knackpack:checkpoint(?:\s|$)/.test(text)) {
-    markCheckpoint(s.sid, s.context.level)
-    schedulePaint()
-  }
-  return true
-}
-
 async function markSignIn() {
   const state = await signInState(api)
   if (!state) return
@@ -1268,12 +1021,6 @@ byId('approval').addEventListener('sf-plan-review', e => {
   void startAside(s, '/api/plan-review', planAsking, s?.info.review?.planReview?.state === 'running', 'the plan review', { hash: e.detail.hash })
 })
 byId('reviews').addEventListener('sf-walkthrough-check', e => void checkStep(current(), e.detail))
-async function checkStep(s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) {
-  if (!s) return d.settle(false)
-  const { ok, body } = await reply(await api('/api/walkthrough-check', { sid: s.sid, commit: d.commit, step: d.step, done: d.done }).catch(() => null))
-  d.settle(ok)
-  if (!ok) toast({ id: `walkthrough:${s.sid}`, title: "The step wasn't checked off.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
-}
 async function setExpect(agent: string, expect: Expect) {
   const { ok, body } = await reply(await api('/api/sign-in-expect', { agent, expect }).catch(() => null))
   if (!ok) toast({ id: `expect:${agent}`, title: "What you expect wasn't saved.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
@@ -1356,31 +1103,6 @@ byId('size').addEventListener('change', async () => {
 byId('team-open').addEventListener('click', () => void openTeam())
 byId('team-approve').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-approve'), () => teamOp('approve')))
 byId('team-forget').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-forget'), () => teamOp('forget')))
-const ASK_WAIT_MS = 15000
-
-function waiting(asked: { hash: string; at: number } | undefined, hash: string): boolean {
-  return asked?.hash === hash && Date.now() - asked.at < ASK_WAIT_MS
-}
-
-async function notThrough(res: Response | null, title: string) {
-  if (res?.ok) return
-  const why = res ? await res.json().then((b: { message?: unknown }) => (typeof b.message === 'string' ? b.message : ''), () => '') : ''
-  toast({ title, description: why ? visible(why) : res ? 'Try again.' : 'Check that the engine is running.', tone: 'bad' })
-}
-async function approve(kind: 'requirements' | 'plan', hash: string) {
-  const s = current()
-  if (!s) return
-  s.asked[kind] = { hash, at: Date.now() }
-  delete s.refused[kind]
-  schedulePaint()
-  setTimeout(schedulePaint, ASK_WAIT_MS)
-  const doc = kind === 'plan' ? s.gate?.planDoc : s.gate?.requirements
-  const res = doc?.hash === hash ? await api(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text }).catch(() => null) : null
-  delete s.asked[kind]
-  void loadGate(s, true)
-  schedulePaint()
-  if (!res?.ok) await notThrough(res, 'The approval did not go through.')
-}
 byId('req-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('requirements', e.detail.hash)))
 byId('req-approval').addEventListener('sf-revise', e => {
   const s = current()
@@ -1465,66 +1187,6 @@ byId('menu-readonly').addEventListener('click', async () => {
   const res = await api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null)
   if (!res || !res.ok) toast({ title: 'The page could not make this session read-only.', tone: 'bad' })
 })
-async function wakeSession(s: Session) {
-  const name = starterNames.get(s.info.agent ?? '') ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/wake', { sid: s.sid, ...consent }))
-  toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs || identityAction(body) ? 0 : undefined, action: identityAction(body) })
-}
-
-async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
-  const rounds = 3
-  let approve: string | undefined
-  for (let round = 1; round <= rounds; round++) {
-    toast({ id: 'trust', title: 'Answering Claude Code’s trust question…', description: 'This takes a few seconds.', tone: 'info', timeout: 60000 })
-    const trusted = await reply(await api('/api/claude-trust', approve ? { path, approve } : { path }).catch(() => null))
-    const files = (trusted.body.needs as Needs | undefined)?.approval
-    if (trusted.ok || !files) return trusted
-    if (round === rounds) {
-      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.', tone: 'warn', timeout: 0 })
-      return null
-    }
-    const said = typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined
-    toast(approve ? { id: 'trust', title: 'The files changed since you approved them.', description: said, tone: 'warn', timeout: 0 } : { id: 'trust', title: 'Claude Code’s trust question waits for your approval.', tone: 'info', timeout: 5000 })
-    if (!(await approveTrustFiles(files, starterNames.get('claude') ?? 'Claude Code'))) {
-      toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The folder stays untrusted.', tone: 'warn', timeout: 5000 })
-      return null
-    }
-    approve = files.hash
-  }
-  return null
-}
-
-async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  let consent: Consent = {}
-  let answer = await reply(await send(consent).catch(() => null))
-  for (let round = 0; !answer.ok && round < 5; round++) {
-    const needs = answer.body.needs as Needs | undefined
-    if (resumable && needs?.box) consent = { ...consent, box: needs.box }
-    if (needs?.signIn && needs.box && !needs.cost) {
-      if (!(await boxSignIn(api, needs, name, title => toast({ title, tone: 'ok' })))) break
-      answer = await reply(await send(consent).catch(() => null))
-      continue
-    }
-    if (needs?.trust) {
-      if (!(await askTrust(needs.trust))) break
-      const trusted = await answerTrust(needs.trust)
-      if (!trusted) break
-      if (!trusted.ok) {
-        byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close('trust')
-        return trusted
-      }
-      toast({ id: 'trust', title: 'Claude Code now trusts this project.', tone: 'info', timeout: 5000 })
-      answer = await reply(await send(consent).catch(() => null))
-      continue
-    }
-    const more = await consentFor(needs, name, what)
-    if (!more) break
-    consent = { ...consent, ...more }
-    answer = await reply(await send(consent).catch(() => null))
-  }
-  return answer
-}
-
 function usageText(s: Session): string {
   const parts: string[] = []
   if (s.total) parts.push(`${s.total.toLocaleString()} tokens`)
@@ -1558,26 +1220,6 @@ function paintBranchMenu(s: Session) {
   }
   byId('menu-bring-main').hidden = !(owned && s.info.running && s.info.live && s.info.controlled)
   byId('menu-fork').hidden = !forkable(s)
-}
-
-function forkable(s: Session): boolean {
-  return !!(state.connected && s.info.verified && s.info.kind === 'background' && s.info.project)
-}
-
-async function handOver(s: Session, agent: string) {
-  const name = agentName(agent)
-  if (!confirmed(`${s.sid}:handover:${agent}`, `Choose Continue with ${name} again to stop this session and go on with ${name} on the same branch, with the approvals you gave.`)) return
-  toast({ id: `handover:${s.sid}`, title: `Handing ${visible(label(s.info))} over to ${name}…`, description: 'The engine starts the other agent on the same branch in a container of its own, then stops this session and its container.', tone: 'info', timeout: 150000 })
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/handover', { sid: s.sid, agent, ...consent }))
-  toast(ok ? { id: `handover:${s.sid}`, title: `${name} continues the branch.`, description: "It shows in the project's list when it connects; open it there to write its first message. The engine tells it where the branch stands.", tone: 'ok', timeout: 8000 } : { id: `handover:${s.sid}`, title: 'The branch wasn’t handed over.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0, action: identityAction(body) })
-  if (ok) void loadProjects(true)
-}
-
-async function bringMain(s: Session) {
-  toast({ id: `main:${s.sid}`, title: 'Fetching the latest main…', tone: 'info', timeout: 60000 })
-  const { ok, body } = await reply(await api('/api/bring-main', { sid: s.sid }).catch(() => null))
-  const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit.slice(0, 7) : ''
-  toast(ok ? { id: `main:${s.sid}`, title: `Main is now at ${commit} as origin/main in the clone.`, description: 'The engine asked the agent to merge it into its branch and resolve any conflicts.', tone: 'ok' } : { id: `main:${s.sid}`, title: 'The latest main wasn’t brought in.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0 })
 }
 
 byId('session-menu').addEventListener('click', e => {
@@ -1681,16 +1323,6 @@ byId('control-cancel').addEventListener('click', () => {
   paint()
   byId('control-button').focus()
 })
-async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): Promise<T> {
-  controlBusy.add(s.sid)
-  paint()
-  try {
-    return await work()
-  } finally {
-    controlBusy.delete(s.sid)
-    paint()
-  }
-}
 byId('control-button').addEventListener('click', async () => {
   const s = current()
   if (!s || controlBusy.has(s.sid)) return
@@ -1946,6 +1578,8 @@ byId('overview').addEventListener('sf-counts', e => {
 })
 
 startLayout({ jumpLatest: () => composer.jump('latest') })
+
+const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain } = startSessionActions({ reply, loadGate, loadProjects, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
 
 const composer = startComposer({ current, sessions, state, scroller, send, say, toast, api, upload })
 const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
