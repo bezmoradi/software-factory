@@ -37,7 +37,7 @@ type SavedPromptState struct {
 
 type SavedPromptStore interface {
 	Load() (SavedPromptState, error)
-	Save(SavedPromptState) error
+	Save(SavedPromptState) (int, error)
 }
 
 type SavedPromptsPage interface {
@@ -99,18 +99,12 @@ func ValidPromptText(text string) bool {
 	return true
 }
 
-func promptBytes(st SavedPromptState) int {
+func promptBytes(all map[string][]SavedPrompt) int {
 	n := 0
-	count := func(list []SavedPrompt) {
+	for _, list := range all {
 		for _, p := range list {
 			n += len(p.Name) + len(p.Text)
 		}
-	}
-	for _, list := range st.Projects {
-		count(list)
-	}
-	for _, r := range st.Removed {
-		count(r.Data)
 	}
 	return n
 }
@@ -136,23 +130,40 @@ func (s *SavedPrompts) load() (SavedPromptState, error) {
 	return st, nil
 }
 
-func (s *SavedPrompts) projectData(event string, fn func(st *SavedPromptState) bool) {
+func (s *SavedPrompts) projectData(event, name string, fn func(st *SavedPromptState) bool) {
 	if s.cfg.Store == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.load()
-	if err != nil || !fn(&st) {
+	st, err := s.cfg.Store.Load()
+	if err != nil {
+		projectDataNotSaved(s.cfg.Logger, "saved prompts", name, err)
 		return
 	}
-	if s.save(st) == nil {
-		s.cfg.Logger.Info("saved prompts", "event", event)
+	if st.Projects == nil {
+		st.Projects = map[string][]SavedPrompt{}
+	}
+	if !fn(&st) {
+		return
+	}
+	trimmed, err := s.cfg.Store.Save(st)
+	if err != nil {
+		projectDataNotSaved(s.cfg.Logger, "saved prompts", name, err)
+		return
+	}
+	s.trimmed(trimmed)
+	s.cfg.Logger.Info("saved prompts", "event", event)
+}
+
+func (s *SavedPrompts) trimmed(n int) {
+	if n > 0 {
+		s.cfg.Logger.Warn("saved prompts", "event", "removed-trimmed-to-fit", "prompts", n)
 	}
 }
 
 func (s *SavedPrompts) ParkProject(id ProjectID) {
-	s.projectData("parked", func(st *SavedPromptState) bool {
+	s.projectData("parked", id.Name, func(st *SavedPromptState) bool {
 		var parked bool
 		st.Removed, _, parked = parkProject(st.Projects, st.Removed, id)
 		return parked
@@ -160,15 +171,20 @@ func (s *SavedPrompts) ParkProject(id ProjectID) {
 }
 
 func (s *SavedPrompts) RestoreProject(id ProjectID) {
-	s.projectData("restored", func(st *SavedPromptState) bool {
+	s.projectData("restored", id.Name, func(st *SavedPromptState) bool {
 		var changed bool
 		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
+		if list, ok := st.Projects[id.Name]; ok && promptBytes(st.Projects) > MaxSavedPromptBytes {
+			delete(st.Projects, id.Name)
+			st.Removed = append(st.Removed, RemovedProject[[]SavedPrompt]{ID: id, Data: list})
+			s.cfg.Logger.Warn("saved prompts", "event", "not-restored", "name", id.Name, "reason", "size")
+		}
 		return changed
 	})
 }
 
 func (s *SavedPrompts) KeepProjects(names []string) {
-	s.projectData("unlisted-set-aside", func(st *SavedPromptState) bool {
+	s.projectData("unlisted-set-aside", "", func(st *SavedPromptState) bool {
 		var n int
 		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
 		return n > 0
@@ -196,10 +212,12 @@ func (s *SavedPrompts) Prompts(repo string) ([]SavedPrompt, error) {
 }
 
 func (s *SavedPrompts) save(st SavedPromptState) error {
-	if err := s.cfg.Store.Save(st); err != nil {
-		s.cfg.Logger.Warn("saved prompts", "event", "not-saved")
+	trimmed, err := s.cfg.Store.Save(st)
+	if err != nil {
+		s.cfg.Logger.Warn("saved prompts", "event", "not-saved", "err", err.Error())
 		return explained(conflict("not saved"), "The engine couldn't save the prompts, so nothing changed.")
 	}
+	s.trimmed(trimmed)
 	return nil
 }
 
@@ -242,7 +260,7 @@ func (s *SavedPrompts) SavePrompt(repo, id, name, text string) ([]SavedPrompt, e
 	}
 	before := all[repo]
 	all[repo] = list
-	if promptBytes(st) > MaxSavedPromptBytes {
+	if promptBytes(all) > MaxSavedPromptBytes {
 		all[repo] = before
 		return nil, explained(limited("size"), "The saved prompts together would be over 1 MiB, more than the engine keeps. Delete or shorten some first.")
 	}

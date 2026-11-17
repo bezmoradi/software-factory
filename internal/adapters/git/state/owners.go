@@ -16,7 +16,7 @@ var ownedRecords = map[string][]ownedPart{
 	approvalsFile:       {{path: []string{"approvals", "[]"}}},
 	signInFile:          {{}},
 	reviewerAgentsFile:  {{path: []string{"files", "[]"}}, {path: []string{"roles", "[]"}}},
-	workFile:            {{path: []string{"teams", "{}"}}, {path: []string{"projects", "{}"}}, {path: []string{"removed", "[]"}}, {path: []string{"sessions", "{}"}}},
+	workFile:            {{path: []string{"teams", "{}"}}, {path: []string{"projects", "{}"}}, {path: []string{"removed", "[]"}}, {path: []string{"removedTeams", "[]"}}, {path: []string{"sessions", "{}"}}},
 	identityFile:        {{}},
 	updateFile:          {{}},
 	reviewsFile:         {{path: []string{"reviews", "[]"}, only: "override"}},

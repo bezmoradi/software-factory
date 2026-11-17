@@ -78,10 +78,11 @@ type SavedWork struct {
 }
 
 type WorkState struct {
-	Teams    map[string]TeamApproval
-	Projects map[string]ProjectSettings
-	Removed  []RemovedProject[ProjectSettings]
-	Sessions map[string]SavedWork
+	Teams        map[string]TeamApproval
+	Projects     map[string]ProjectSettings
+	Removed      []RemovedProject[ProjectSettings]
+	RemovedTeams []RemovedProject[TeamApproval]
+	Sessions     map[string]SavedWork
 }
 
 type WorkStore interface {
@@ -270,42 +271,49 @@ var (
 	_ ProjectData = (*Work)(nil)
 )
 
-func (w *Work) projectData(event string, fn func(st *WorkState) bool) {
-	err := w.change(func(st *WorkState) error {
-		if !fn(st) {
-			return errUnchanged
-		}
-		return nil
-	})
-	switch {
-	case err == nil:
-		w.cfg.Logger.Info("work", "event", event)
-	case !errors.Is(err, errUnchanged):
-		w.cfg.Logger.Warn("work", "event", "project-data-not-saved")
+func (w *Work) projectData(event, name string, fn func(st *WorkState) bool) {
+	w.store.Lock()
+	defer w.store.Unlock()
+	st, err := w.cfg.Store.Load()
+	if err != nil {
+		projectDataNotSaved(w.cfg.Logger, "work", name, err)
+		return
 	}
+	filled(&st)
+	if !fn(&st) {
+		return
+	}
+	if err := w.cfg.Store.Save(st); err != nil {
+		projectDataNotSaved(w.cfg.Logger, "work", name, err)
+		return
+	}
+	w.cfg.Logger.Info("work", "event", event)
 }
 
 func (w *Work) ParkProject(id ProjectID) {
-	w.projectData("settings-parked", func(st *WorkState) bool {
-		var parked bool
-		st.Removed, _, parked = parkProject(st.Projects, st.Removed, id)
-		return parked
+	w.projectData("settings-parked", id.Name, func(st *WorkState) bool {
+		var settings, team bool
+		st.Removed, _, settings = parkProject(st.Projects, st.Removed, id)
+		st.RemovedTeams, _, team = parkProject(st.Teams, st.RemovedTeams, id)
+		return settings || team
 	})
 }
 
 func (w *Work) RestoreProject(id ProjectID) {
-	w.projectData("settings-restored", func(st *WorkState) bool {
-		var changed bool
-		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
-		return changed
+	w.projectData("settings-restored", id.Name, func(st *WorkState) bool {
+		var settings, team bool
+		st.Removed, settings = restoreProject(st.Projects, st.Removed, id)
+		st.RemovedTeams, team = restoreProject(st.Teams, st.RemovedTeams, id)
+		return settings || team
 	})
 }
 
 func (w *Work) KeepProjects(names []string) {
-	w.projectData("unlisted-settings-set-aside", func(st *WorkState) bool {
-		var n int
-		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
-		return n > 0
+	w.projectData("unlisted-settings-set-aside", "", func(st *WorkState) bool {
+		var settings, team int
+		st.Removed, settings = keepProjects(st.Projects, st.Removed, names)
+		st.RemovedTeams, team = keepProjects(st.Teams, st.RemovedTeams, names)
+		return settings+team > 0
 	})
 }
 
@@ -349,6 +357,11 @@ func (w *Work) read() (WorkState, error) {
 	if err != nil {
 		w.cfg.Logger.Warn("work", "event", "state-unreadable")
 	}
+	filled(&st)
+	return st, err
+}
+
+func filled(st *WorkState) {
 	if st.Teams == nil {
 		st.Teams = map[string]TeamApproval{}
 	}
@@ -358,7 +371,6 @@ func (w *Work) read() (WorkState, error) {
 	if st.Sessions == nil {
 		st.Sessions = map[string]SavedWork{}
 	}
-	return st, err
 }
 
 func (w *Work) change(fn func(*WorkState) error) error {
@@ -368,15 +380,7 @@ func (w *Work) change(fn func(*WorkState) error) error {
 	if err != nil {
 		return explained(conflict("state"), "The engine couldn't read its project settings.")
 	}
-	if st.Teams == nil {
-		st.Teams = map[string]TeamApproval{}
-	}
-	if st.Projects == nil {
-		st.Projects = map[string]ProjectSettings{}
-	}
-	if st.Sessions == nil {
-		st.Sessions = map[string]SavedWork{}
-	}
+	filled(&st)
 	if err := fn(&st); err != nil {
 		return err
 	}

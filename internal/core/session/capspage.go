@@ -160,10 +160,15 @@ func (l *Limits) Frame() Fields {
 
 var _ ProjectData = (*Limits)(nil)
 
-func (l *Limits) projectData(event string, fn func() bool) {
+func (l *Limits) projectData(event, name string, fn func() bool) {
 	l.mu.Lock()
 	logger := l.cfg.Logger
-	if l.cfg.Store == nil || !l.loaded || !fn() {
+	if l.cfg.Store != nil && !l.loaded {
+		l.mu.Unlock()
+		projectDataNotSaved(logger, "limits", name, errors.New("caps.json wasn't read"))
+		return
+	}
+	if l.cfg.Store == nil || !fn() {
 		l.mu.Unlock()
 		return
 	}
@@ -175,7 +180,7 @@ func (l *Limits) projectData(event string, fn func() bool) {
 }
 
 func (l *Limits) ParkProject(id ProjectID) {
-	l.projectData("caps-parked", func() bool {
+	l.projectData("caps-parked", id.Name, func() bool {
 		var parked bool
 		l.removed, _, parked = parkProject(l.projects, l.removed, id)
 		return parked
@@ -183,7 +188,7 @@ func (l *Limits) ParkProject(id ProjectID) {
 }
 
 func (l *Limits) RestoreProject(id ProjectID) {
-	l.projectData("caps-restored", func() bool {
+	l.projectData("caps-restored", id.Name, func() bool {
 		var changed bool
 		l.removed, changed = restoreProject(l.projects, l.removed, id)
 		return changed
@@ -191,7 +196,7 @@ func (l *Limits) RestoreProject(id ProjectID) {
 }
 
 func (l *Limits) KeepProjects(names []string) {
-	l.projectData("caps-unlisted-set-aside", func() bool {
+	l.projectData("caps-unlisted-set-aside", "", func() bool {
 		var n int
 		l.removed, n = keepProjects(l.projects, l.removed, names)
 		return n > 0

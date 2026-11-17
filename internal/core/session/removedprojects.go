@@ -1,6 +1,10 @@
 package session
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
+)
 
 const MaxRemovedProjects = 50
 
@@ -20,7 +24,7 @@ func (c *Repos) UseProjectData(data ProjectData) {
 	c.OnAdded(data.RestoreProject)
 	list, err := c.List()
 	if err != nil {
-		c.cfg.Logger.Warn("repository", "event", "project-data-not-checked")
+		c.cfg.Logger.Warn("repository", "event", "project-data-not-checked", "err", err.Error())
 		return
 	}
 	names := make([]string, 0, len(list))
@@ -28,6 +32,14 @@ func (c *Repos) UseProjectData(data ProjectData) {
 		names = append(names, r.Name)
 	}
 	data.KeepProjects(names)
+}
+
+func projectDataNotSaved(logger shared.Logger, area, name string, err error) {
+	args := []any{"event", "project-data-not-saved"}
+	if name != "" {
+		args = append(args, "name", name)
+	}
+	logger.Warn(area, append(args, "err", err.Error())...)
 }
 
 func RoomForRemoved[T any](removed []RemovedProject[T], id ProjectID) bool {
@@ -43,8 +55,19 @@ func RoomForRemoved[T any](removed []RemovedProject[T], id ProjectID) bool {
 	return n < MaxRemovedProjects
 }
 
+func sameURL(a, b ProjectID) bool {
+	return a.URL != "" && b.URL != "" && sameRepository(a.URL, b.URL)
+}
+
 func sameProject(a, b ProjectID) bool {
-	return a.Name == b.Name && a.URL != "" && b.URL != "" && sameRepository(a.URL, b.URL)
+	return a.Name == b.Name && sameURL(a, b)
+}
+
+func NextToTrim[T any](removed []RemovedProject[T]) int {
+	if i := slices.IndexFunc(removed, func(r RemovedProject[T]) bool { return r.ID.URL != "" }); i >= 0 {
+		return i
+	}
+	return 0
 }
 
 func parkProject[T any](active map[string]T, removed []RemovedProject[T], id ProjectID) ([]RemovedProject[T], []RemovedProject[T], bool) {
@@ -87,10 +110,22 @@ func restoreProject[T any](active map[string]T, removed []RemovedProject[T], id 
 	out := setAside(active, removed, id.Name)
 	i := slices.IndexFunc(out, func(r RemovedProject[T]) bool { return sameProject(r.ID, id) })
 	if i < 0 {
+		i = lastIndex(out, func(r RemovedProject[T]) bool { return sameURL(r.ID, id) })
+	}
+	if i < 0 {
 		return out, had
 	}
 	active[id.Name] = out[i].Data
 	return slices.Delete(out, i, i+1), true
+}
+
+func lastIndex[T any](list []T, match func(T) bool) int {
+	for i, x := range slices.Backward(list) {
+		if match(x) {
+			return i
+		}
+	}
+	return -1
 }
 
 func keepProjects[T any](active map[string]T, removed []RemovedProject[T], names []string) ([]RemovedProject[T], int) {

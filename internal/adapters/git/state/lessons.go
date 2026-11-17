@@ -167,7 +167,7 @@ func (l Lessons) Load() (session.LessonState, error) {
 	return out, nil
 }
 
-func (l Lessons) Save(st session.LessonState) error {
+func (l Lessons) Save(st session.LessonState) (int, error) {
 	defer l.lock()()
 	f := lessonsJSON{Version: 1, Projects: map[string]lessonProjectJSON{}}
 	for name, p := range st.Projects {
@@ -175,39 +175,39 @@ func (l Lessons) Save(st session.LessonState) error {
 			f.Projects[name] = lessonProjectJSONOf(p)
 		}
 	}
+	var removed []session.RemovedProject[session.LessonProject]
 	for _, r := range st.Removed {
 		if repoName.MatchString(r.ID.Name) && removedID(r.ID) {
-			f.Removed = append(f.Removed, removedLessonJSON{Project: r.ID.Name, URL: r.ID.URL, lessonProjectJSON: lessonProjectJSONOf(r.Data)})
+			removed = append(removed, r)
 		}
 	}
+	data, removedDropped, err := fitted(removed, func(r session.RemovedProject[session.LessonProject]) removedLessonJSON {
+		return removedLessonJSON{Project: r.ID.Name, URL: r.ID.URL, lessonProjectJSON: lessonProjectJSONOf(r.Data)}
+	}, func(list []removedLessonJSON) ([]byte, error) {
+		f.Removed = list
+		return encode(f)
+	}, func(p session.LessonProject) int { return len(p.Findings) + len(p.Lines) })
 	dropped := 0
-	for {
-		data, err := encode(f)
-		if err != nil {
-			return err
-		}
+	for err == nil && len(data) > maxFile {
 		trimmed := false
-		if len(data) > maxFile {
-			for name, p := range f.Projects {
-				if v, n := halved(p); n > 0 {
-					f.Projects[name], dropped, trimmed = v, dropped+n, true
-				}
-			}
-			for i, r := range f.Removed {
-				if v, n := halved(r.lessonProjectJSON); n > 0 {
-					f.Removed[i].lessonProjectJSON, dropped, trimmed = v, dropped+n, true
-				}
+		for name, p := range f.Projects {
+			if v, n := halved(p); n > 0 {
+				f.Projects[name], dropped, trimmed = v, dropped+n, true
 			}
 		}
-		if trimmed {
-			continue
+		if !trimmed {
+			break
 		}
-		if err := writeBytes(l.Dir, lessonsFile, data); err != nil {
-			return err
-		}
-		noteDropped(l.Dir, lessonsFile, dropped)
-		return nil
+		data, err = encode(f)
 	}
+	if err != nil {
+		return 0, err
+	}
+	if err := writeBytes(l.Dir, lessonsFile, data); err != nil {
+		return 0, err
+	}
+	noteDropped(l.Dir, lessonsFile, dropped+removedDropped)
+	return removedDropped, nil
 }
 
 func (l Lessons) Dropped(n int) { noteDropped(l.Dir, lessonsFile, n) }

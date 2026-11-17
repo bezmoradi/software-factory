@@ -49,11 +49,11 @@ func promptOK(p savedPromptJSON) bool {
 	return session.ValidPromptID(p.ID) && session.ValidPromptName(p.Name) && session.ValidPromptText(p.Text)
 }
 
-func promptsOf(p promptProjectJSON, total *int) []session.SavedPrompt {
+func promptsOf(p promptProjectJSON, total *int, budget int) []session.SavedPrompt {
 	var list []session.SavedPrompt
 	seen := map[string]bool{}
 	for _, x := range p.Prompts {
-		if len(list) >= session.MaxSavedPrompts || seen[x.ID] || !promptOK(x) || *total+len(x.Name)+len(x.Text) > session.MaxSavedPromptBytes {
+		if len(list) >= session.MaxSavedPrompts || seen[x.ID] || !promptOK(x) || *total+len(x.Name)+len(x.Text) > budget {
 			continue
 		}
 		seen[x.ID] = true
@@ -89,7 +89,7 @@ func (s SavedPrompts) Load() (session.SavedPromptState, error) {
 	if err := json.Unmarshal(data, &f); err != nil || !readsVersion(savedPromptsFile, f.Version) {
 		return session.SavedPromptState{}, errors.New("savedprompts.json isn't a record of saved prompts this engine reads")
 	}
-	total := 0
+	total, removedTotal := 0, 0
 	for _, p := range f.Projects {
 		if !repoName.MatchString(p.Repo) || len(out.Projects) >= session.MaxPromptProjects {
 			continue
@@ -97,7 +97,7 @@ func (s SavedPrompts) Load() (session.SavedPromptState, error) {
 		if _, dup := out.Projects[p.Repo]; dup {
 			continue
 		}
-		if list := promptsOf(p, &total); len(list) > 0 {
+		if list := promptsOf(p, &total, session.MaxSavedPromptBytes); len(list) > 0 {
 			out.Projects[p.Repo] = list
 		}
 	}
@@ -106,14 +106,14 @@ func (s SavedPrompts) Load() (session.SavedPromptState, error) {
 		if !repoName.MatchString(r.Repo) || !removedID(id) || !session.RoomForRemoved(out.Removed, id) {
 			continue
 		}
-		if list := promptsOf(r.promptProjectJSON, &total); len(list) > 0 {
+		if list := promptsOf(r.promptProjectJSON, &removedTotal, maxFile); len(list) > 0 {
 			out.Removed = append(out.Removed, session.RemovedProject[[]session.SavedPrompt]{ID: id, Data: list})
 		}
 	}
 	return out, nil
 }
 
-func (s SavedPrompts) Save(st session.SavedPromptState) error {
+func (s SavedPrompts) Save(st session.SavedPromptState) (int, error) {
 	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,14 +123,28 @@ func (s SavedPrompts) Save(st session.SavedPromptState) error {
 			f.Projects = append(f.Projects, promptsJSONOf(repo, list, owner))
 		}
 	}
-	for _, r := range st.Removed {
-		if repoName.MatchString(r.ID.Name) && removedID(r.ID) && len(r.Data) > 0 {
-			f.Removed = append(f.Removed, removedPromptsJSON{URL: r.ID.URL, promptProjectJSON: promptsJSONOf(r.ID.Name, r.Data, owner)})
-		}
-	}
 	if len(f.Projects) > session.MaxPromptProjects {
-		return errors.New("too many projects with saved prompts")
+		return 0, errors.New("too many projects with saved prompts")
 	}
 	sort.Slice(f.Projects, func(i, j int) bool { return f.Projects[i].Repo < f.Projects[j].Repo })
-	return write(s.Dir, savedPromptsFile, f)
+	var removed []session.RemovedProject[[]session.SavedPrompt]
+	for _, r := range st.Removed {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) && len(r.Data) > 0 {
+			removed = append(removed, r)
+		}
+	}
+	data, dropped, err := fitted(removed, func(r session.RemovedProject[[]session.SavedPrompt]) removedPromptsJSON {
+		return removedPromptsJSON{URL: r.ID.URL, promptProjectJSON: promptsJSONOf(r.ID.Name, r.Data, owner)}
+	}, func(list []removedPromptsJSON) ([]byte, error) {
+		f.Removed = list
+		return encode(f)
+	}, func(l []session.SavedPrompt) int { return len(l) })
+	if err != nil {
+		return 0, err
+	}
+	if err := writeBytes(s.Dir, savedPromptsFile, data); err != nil {
+		return 0, err
+	}
+	noteDropped(s.Dir, savedPromptsFile, dropped)
+	return dropped, nil
 }

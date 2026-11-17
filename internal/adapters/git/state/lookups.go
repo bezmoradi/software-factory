@@ -23,10 +23,16 @@ func NewPackageLookups(dir string) PackageLookups { return PackageLookups{Dir: d
 
 var _ session.LookupStore = PackageLookups{}
 
+type removedLookupJSON struct {
+	Project string `json:"project"`
+	URL     string `json:"url"`
+}
+
 type lookupsJSON struct {
-	Version  int      `json:"version"`
-	Projects []string `json:"projects"`
-	Owner    string   `json:"owner,omitempty"`
+	Version  int                 `json:"version"`
+	Projects []string            `json:"projects"`
+	Removed  []removedLookupJSON `json:"removed,omitempty"`
+	Owner    string              `json:"owner,omitempty"`
 }
 
 var errLookups = errors.New("package-lookups.json isn't a list of projects this engine reads")
@@ -39,38 +45,53 @@ func (s PackageLookups) lock() func() {
 	return s.mu.Unlock
 }
 
-func (s PackageLookups) Load() ([]string, error) {
+func (s PackageLookups) Load() (session.LookupState, error) {
 	defer s.lock()()
+	out := session.LookupState{Projects: map[string]bool{}}
 	data, err := read(s.Dir, lookupsFile)
 	if err != nil {
-		return nil, err
+		return session.LookupState{}, err
 	}
 	if data == nil {
-		return []string{}, nil
+		return out, nil
 	}
 	var f lookupsJSON
 	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Projects) > session.MaxLookupProjects {
-		return nil, errLookups
+		return session.LookupState{}, errLookups
 	}
 	for _, p := range f.Projects {
 		if !lookupProject.MatchString(p) {
-			return nil, errLookups
+			return session.LookupState{}, errLookups
+		}
+		out.Projects[p] = true
+	}
+	for _, r := range f.Removed {
+		id := session.ProjectID{Name: r.Project, URL: r.URL}
+		if lookupProject.MatchString(r.Project) && removedID(id) && session.RoomForRemoved(out.Removed, id) {
+			out.Removed = append(out.Removed, session.RemovedProject[bool]{ID: id, Data: true})
 		}
 	}
-	return slices.Clone(f.Projects), nil
+	return out, nil
 }
 
-func (s PackageLookups) Save(list []string) error {
+func (s PackageLookups) Save(st session.LookupState) error {
 	owner := ownerIn(s.Dir)
 	defer s.lock()()
-	if len(list) > session.MaxLookupProjects {
-		return errLookups
-	}
-	out := make([]string, 0, len(list))
-	for _, p := range list {
-		if lookupProject.MatchString(p) {
+	out := []string{}
+	for p, on := range st.Projects {
+		if on && lookupProject.MatchString(p) {
 			out = append(out, p)
 		}
 	}
-	return write(s.Dir, lookupsFile, lookupsJSON{Owner: owner, Version: 1, Projects: out})
+	if len(out) > session.MaxLookupProjects {
+		return errLookups
+	}
+	slices.Sort(out)
+	f := lookupsJSON{Owner: owner, Version: 1, Projects: out}
+	for _, r := range st.Removed {
+		if r.Data && lookupProject.MatchString(r.ID.Name) && removedID(r.ID) {
+			f.Removed = append(f.Removed, removedLookupJSON{Project: r.ID.Name, URL: r.ID.URL})
+		}
+	}
+	return write(s.Dir, lookupsFile, f)
 }

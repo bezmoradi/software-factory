@@ -172,7 +172,7 @@ func (l *Limits) Use(cfg LimitsConfig) {
 	l.lastSave = l.lastTick
 	l.mu.Unlock()
 	if err != nil {
-		cfg.Logger.Warn("limits", "event", "state-not-read")
+		cfg.Logger.Warn("limits", "event", "state-not-read", "err", err.Error())
 	}
 	if start {
 		go l.run()
@@ -262,7 +262,7 @@ func (l *Limits) save() error {
 	l.lastSave = l.now()
 	l.mu.Unlock()
 	if err := cfg.Store.Save(st); err != nil {
-		cfg.Logger.Warn("limits", "event", "state-not-saved")
+		cfg.Logger.Warn("limits", "event", "state-not-saved", "err", err.Error())
 		l.mu.Lock()
 		l.unsaved = true
 		l.mu.Unlock()

@@ -41,10 +41,48 @@ type removedDecisionsJSON struct {
 	decisionProjectJSON
 }
 
+type spanJSON struct {
+	Name string    `json:"name"`
+	From time.Time `json:"from,omitzero"`
+	To   time.Time `json:"to,omitzero"`
+}
+
+type projectSpansJSON struct {
+	Repo  string     `json:"repo"`
+	Spans []spanJSON `json:"spans"`
+}
+
+type removedSpansJSON struct {
+	URL string `json:"url"`
+	projectSpansJSON
+}
+
 type decisionLogJSON struct {
-	Version  int                    `json:"version"`
-	Projects []decisionProjectJSON  `json:"projects"`
-	Removed  []removedDecisionsJSON `json:"removed,omitempty"`
+	Version      int                    `json:"version"`
+	Projects     []decisionProjectJSON  `json:"projects"`
+	Removed      []removedDecisionsJSON `json:"removed,omitempty"`
+	Spans        []projectSpansJSON     `json:"spans,omitempty"`
+	RemovedSpans []removedSpansJSON     `json:"removedSpans,omitempty"`
+}
+
+func spanListOf(list []spanJSON, open bool) []session.ProjectSpan {
+	var out []session.ProjectSpan
+	for i, j := range list {
+		last := i == len(list)-1
+		if !repoName.MatchString(j.Name) || len(out) >= session.MaxProjectSpans || (j.To.IsZero() && (!open || !last)) || (!j.To.IsZero() && j.To.Before(j.From)) {
+			continue
+		}
+		out = append(out, session.ProjectSpan{Name: j.Name, From: j.From, To: j.To})
+	}
+	return out
+}
+
+func spansJSONOf(repo string, list []session.ProjectSpan) projectSpansJSON {
+	p := projectSpansJSON{Repo: repo, Spans: []spanJSON{}}
+	for _, x := range list {
+		p.Spans = append(p.Spans, spanJSON{Name: x.Name, From: x.From.UTC(), To: x.To.UTC()})
+	}
+	return p
 }
 
 func editOf(j decisionEditJSON) session.DecisionEdit {
@@ -89,7 +127,7 @@ func (s DecisionLog) Load() (session.DecisionState, error) {
 	if err != nil {
 		return session.DecisionState{}, err
 	}
-	out := session.DecisionState{Projects: map[string][]session.DecisionEdit{}}
+	out := session.DecisionState{Projects: map[string][]session.DecisionEdit{}, Spans: map[string][]session.ProjectSpan{}}
 	if data == nil {
 		return out, nil
 	}
@@ -117,10 +155,27 @@ func (s DecisionLog) Load() (session.DecisionState, error) {
 			out.Removed = append(out.Removed, session.RemovedProject[[]session.DecisionEdit]{ID: id, Data: list})
 		}
 	}
+	for _, p := range f.Spans {
+		if _, dup := out.Spans[p.Repo]; dup || !repoName.MatchString(p.Repo) || len(out.Spans) >= session.MaxDecisionProjects {
+			continue
+		}
+		if list := spanListOf(p.Spans, true); len(list) > 0 {
+			out.Spans[p.Repo] = list
+		}
+	}
+	for _, r := range f.RemovedSpans {
+		id := session.ProjectID{Name: r.Repo, URL: r.URL}
+		if !repoName.MatchString(r.Repo) || !removedID(id) || !session.RoomForRemoved(out.RemovedSpans, id) {
+			continue
+		}
+		if list := spanListOf(r.Spans, false); len(list) > 0 {
+			out.RemovedSpans = append(out.RemovedSpans, session.RemovedProject[[]session.ProjectSpan]{ID: id, Data: list})
+		}
+	}
 	return out, nil
 }
 
-func (s DecisionLog) Save(st session.DecisionState) error {
+func (s DecisionLog) Save(st session.DecisionState) (int, error) {
 	owner := ownerIn(s.Dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,23 +189,43 @@ func (s DecisionLog) Save(st session.DecisionState) error {
 		skipped += n
 		f.Projects = append(f.Projects, p)
 	}
-	for _, r := range st.Removed {
-		if !repoName.MatchString(r.ID.Name) || !removedID(r.ID) || len(r.Data) == 0 {
-			continue
-		}
-		p, n := editsJSONOf(r.ID.Name, r.Data, owner)
-		skipped += n
-		f.Removed = append(f.Removed, removedDecisionsJSON{URL: r.ID.URL, decisionProjectJSON: p})
-	}
 	if len(f.Projects) > session.MaxDecisionProjects {
-		return errors.New("too many projects with decision log edits")
+		return 0, errors.New("too many projects with decision log edits")
 	}
 	sort.Slice(f.Projects, func(i, j int) bool { return f.Projects[i].Repo < f.Projects[j].Repo })
-	if err := write(s.Dir, decisionLogFile, f); err != nil {
-		return err
+	for repo, list := range st.Spans {
+		if repoName.MatchString(repo) && len(list) > 0 {
+			f.Spans = append(f.Spans, spansJSONOf(repo, list))
+		}
 	}
-	noteDropped(s.Dir, decisionLogFile, skipped)
-	return nil
+	sort.Slice(f.Spans, func(i, j int) bool { return f.Spans[i].Repo < f.Spans[j].Repo })
+	for _, r := range st.RemovedSpans {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) && len(r.Data) > 0 {
+			f.RemovedSpans = append(f.RemovedSpans, removedSpansJSON{URL: r.ID.URL, projectSpansJSON: spansJSONOf(r.ID.Name, r.Data)})
+		}
+	}
+	var removed []session.RemovedProject[[]session.DecisionEdit]
+	for _, r := range st.Removed {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) && len(r.Data) > 0 {
+			removed = append(removed, r)
+		}
+	}
+	data, trimmed, err := fitted(removed, func(r session.RemovedProject[[]session.DecisionEdit]) removedDecisionsJSON {
+		p, n := editsJSONOf(r.ID.Name, r.Data, owner)
+		skipped += n
+		return removedDecisionsJSON{URL: r.ID.URL, decisionProjectJSON: p}
+	}, func(list []removedDecisionsJSON) ([]byte, error) {
+		f.Removed = list
+		return encode(f)
+	}, func(e []session.DecisionEdit) int { return len(e) })
+	if err != nil {
+		return 0, err
+	}
+	if err := writeBytes(s.Dir, decisionLogFile, data); err != nil {
+		return 0, err
+	}
+	noteDropped(s.Dir, decisionLogFile, skipped+trimmed)
+	return trimmed, nil
 }
 
 func (s DecisionLog) Dropped(n int) { noteDropped(s.Dir, decisionLogFile, n) }
