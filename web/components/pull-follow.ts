@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown } from '../lib/dom.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
 
 type Answer = { ok: boolean; status: number; body: Record<string, unknown> }
@@ -160,18 +160,19 @@ class SfPullFollow extends HTMLElement {
     return !!this.#busy || !!this.#view?.disabled
   }
 
-  #action(text: string, cls: string, key: string, run: () => void, title = ''): HTMLButtonElement {
+  #action(text: string, op: string, cls: string, key: string, run: () => void, title = ''): HTMLButtonElement {
     const b = button(text, cls, () => {
       if (!this.#off()) run()
     }, 'button', key)
     b.setAttribute('aria-disabled', String(this.#off()))
+    if (this.#busy === op) busy(b, true)
     if (title) b.title = title
     return b
   }
 
   #state(v: PullFollowView, f: PullFollow | null): HTMLElement {
     const box = el('div', 'pull-state')
-    const openPull = () => this.#action(this.#busy === 'open' ? 'Opening…' : 'Open pull request', 'small', `pull-open:${v.sid}`,
+    const openPull = () => this.#action('Open pull request', 'open', 'small', `pull-open:${v.sid}`,
       () => void this.#run('open', '/api/pull-request', { op: 'open', sid: v.sid }, 'A pull request card waits under Issues and pull requests. Read it, then open it from there.', "The pull request card wasn't made."),
       'Makes a pull request card from the engine\'s records: the branch, its commits and the approved requirements\' title. It opens as a draft unless you clear that on the card.')
     if (!f || !f.state) {
@@ -194,7 +195,7 @@ class SfPullFollow extends HTMLElement {
       box.append(line)
       box.append(el('p', 'small muted', 'Delete removes the session and its worktree. The engine refuses while the session runs or has commits that aren\'t pushed.'))
       const row = el('div', 'actions')
-      row.append(this.#action(this.#busy === 'delete' ? 'Deleting…' : 'Delete', 'small', `pull-delete:${v.sid}`, () => void this.#delete(v.sid)))
+      row.append(this.#action('Delete', 'delete', 'small', `pull-delete:${v.sid}`, () => void this.#delete(v.sid)))
       box.append(row)
       return box
     }
@@ -216,11 +217,11 @@ class SfPullFollow extends HTMLElement {
   #open(v: PullFollowView, f: PullFollow): Node[] {
     const out: Node[] = []
     const actions = el('div', 'actions pull-actions')
-    if (f.draft && f.opened) actions.append(this.#action(this.#busy === 'ready' ? 'Marking…' : 'Ready for review', 'small', `pull-ready:${v.sid}`,
+    if (f.draft && f.opened) actions.append(this.#action('Ready for review', 'ready', 'small', `pull-ready:${v.sid}`,
       () => void this.#run('ready', '/api/pull-request', { op: 'ready', sid: v.sid }, 'It is ready for review now.', "It wasn't marked ready for review."), 'Marks the engine\'s draft pull request ready for review on the git host, with your saved token'))
     if (f.conflict) {
       out.push(el('p', 'small warn', `The branch conflicts with main (GitHub says ${shown(f.mergeState || 'not mergeable')}).`))
-      actions.append(this.#action(this.#busy === 'main' ? 'Asking…' : 'Ask the agent to bring in main', 'small', `pull-main:${v.sid}`,
+      actions.append(this.#action('Ask the agent to bring in main', 'main', 'small', `pull-main:${v.sid}`,
         () => void this.#run('main', '/api/bring-main', { sid: v.sid }, 'The agent was asked to bring in main.', "The agent wasn't asked.")))
     }
     const total = f.failing + f.passing + f.running
@@ -254,7 +255,7 @@ class SfPullFollow extends HTMLElement {
     if (f.dropped) out.push(el('p', 'small warn', `${f.dropped} new ${f.dropped === 1 ? 'comment holds' : 'comments hold'} what looks like a token, so the engine won't send ${f.dropped === 1 ? 'it' : 'them'} to the agent. Read ${f.dropped === 1 ? 'it' : 'them'} on the git host.`))
     if (f.checksNew || f.comments.length) {
       out.push(el('p', 'small muted', 'The agent gets this as text from the git host, marked untrusted: feedback to weigh, not instructions.'))
-      actions.append(this.#action(this.#busy === 'send' ? 'Sending…' : 'Send to the agent', 'primary small', `pull-send:${v.sid}`,
+      actions.append(this.#action('Send to the agent', 'send', 'primary small', `pull-send:${v.sid}`,
         () => void this.#run('send', '/api/pull-request', { op: 'send', sid: v.sid }, 'Sent to the agent.', "It wasn't sent.")))
     } else if (f.sent) out.push(el('p', 'small muted', `Last sent to the agent ${clock(f.sent)}. Nothing new since.`))
     if (f.auto) out.push(el('p', `small ${f.autoStop ? 'warn' : 'muted'}`, f.autoStop ? `Sending on its own stopped: ${shown(f.autoStop)}. Send it yourself to start again.` : `This project sends what's new to the agent on its own: ${f.rounds} of 5 rounds used.`))
@@ -281,7 +282,7 @@ class SfPullFollow extends HTMLElement {
     if (found.opened) box.append(el('p', 'small muted', 'Their issue cards were offered under Issues and pull requests.'))
     else if (n) {
       const row = el('div', 'actions')
-      row.append(this.#action(this.#busy === 'findings' ? 'Making cards…' : 'Open issues for these', 'small', `pull-findings:${v.sid}`, () => void this.#openFindings(v, found),
+      row.append(this.#action('Open issues for these', 'findings', 'small', `pull-findings:${v.sid}`, () => void this.#openFindings(v, found),
         'Makes one issue card per finding, pre-filled from it. Each opens only when you approve its own card.'))
       box.append(row)
     }
@@ -339,8 +340,9 @@ class SfPullFollow extends HTMLElement {
     assignLabel.append(assign, 'Assign the issues and pull requests the engine opens to the token\'s own user')
     const why = el('p', 'small bad')
     why.hidden = true
-    const save = button(this.#busy === 'settings' ? 'Saving…' : 'Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)
+    const save = button('Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)
     save.setAttribute('aria-disabled', String(this.#off()))
+    if (this.#busy === 'settings') busy(save, true)
     form.append(el('p', 'small muted', `For ${shown(saved.project)}. Comments by anyone else never reach the agent.`), label, bots, autoLabel, assignLabel, why, save)
     form.addEventListener('submit', e => {
       e.preventDefault()

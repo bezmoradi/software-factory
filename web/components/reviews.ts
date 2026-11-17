@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, fileLink, repoPath, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, fileLink, repoPath, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
@@ -95,6 +95,7 @@ class SfReviews extends HTMLElement {
   #opened = new Set<string>()
   #wholes = new Map<string, Promise<WholeReport | string>>()
   #timer = 0
+  #all = false
 
   connectedCallback() {
     if (!this.#button) this.hidden = true
@@ -140,28 +141,34 @@ class SfReviews extends HTMLElement {
     const r = value.review
     const running = !!r?.running || value.asking
     const off = running || !!value.disabled
-    const b = button(running ? 'Reviewing…' : 'Review', 'primary small', () => {
+    const decided = (state: string) => state === 'pass' || state === 'block' || state === 'overridden'
+    const verdicts = !r?.running && ((value.gate ?? []).some(x => decided(x.state)) || (!!r && (!value.head || value.head === r.commit) && r.roles.some(x => decided(x.state))))
+    const againBusy = verdicts && value.asking && this.#all
+    const b = button('Review', 'primary small', () => {
       if (b.getAttribute('aria-disabled') === 'true') return
+      this.#all = false
       emit(this, 'sf-review', { all: false })
     })
     b.setAttribute('aria-disabled', String(off))
+    if (running && !againBusy) busy(b, true)
     b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in a reviewer container each, compared with what the remote\'s main branch lacks'
-    const decided = (state: string) => state === 'pass' || state === 'block' || state === 'overridden'
-    const verdicts = !r?.running && ((value.gate ?? []).some(x => decided(x.state)) || (!!r && (!value.head || value.head === r.commit) && r.roles.some(x => decided(x.state))))
     const again = verdicts ? button('Run all again', 'small', () => {
       if (again?.getAttribute('aria-disabled') === 'true') return
+      this.#all = true
       emit(this, 'sf-review', { all: true })
     }) : null
     if (again) {
       again.setAttribute('aria-disabled', String(off))
+      if (againBusy) busy(again, true)
       again.title = 'Runs every required reviewer on the latest commit again, those that already passed or blocked it included, for fresh verdicts: each one is a run in a reviewer container of its own'
     }
     const pushOff = value.pushing || !!value.disabled
-    const p = button(value.pushing ? 'Pushing…' : 'Push', 'small', () => {
+    const p = button('Push', 'small', () => {
       if (p.getAttribute('aria-disabled') === 'true') return
       emit(this, 'sf-push-request')
     })
     p.setAttribute('aria-disabled', String(pushOff))
+    if (value.pushing) busy(p, true)
     p.title = 'Asks the engine to push this session\'s branch at its latest commit: the gate checks the reviews and the remote\'s main branch first'
     const head = el('div', 'row reviews-head')
     head.append(el('h2', 'label', 'Reviews'), el('span', 'spacer'), b)
@@ -198,7 +205,7 @@ class SfReviews extends HTMLElement {
     }
     const failed = r && !value.asking ? failure(r, note) : null
     if (failed) {
-      const p = el('p', 'small bad', r?.req ? `${failed.said} Request id ${text(r.req)}.` : failed.said)
+      const p = el('p', 'small bad', failed.said)
       p.id = 'reviews-failed'
       described.push(p.id)
       parts.push(p)
@@ -301,12 +308,13 @@ class SfReviews extends HTMLElement {
     const t: TestList | null = value.testList ?? null
     const running = t?.state === 'running' || !!value.testAsking
     const off = running || !!value.disabled
-    const b = button(running ? 'Writing the test list…' : 'Write a manual test list', 'small', () => {
+    const b = button('Write a manual test list', 'small', () => {
       if (b.getAttribute('aria-disabled') === 'true') return
       emit(this, 'sf-test-list')
     })
     b.id = 'test-list-button'
     b.setAttribute('aria-disabled', String(off))
+    if (running) busy(b, true)
     b.title = 'Asks Claude Code in a reviewer container of its own, with read-only tools, for steps to try by hand on this session branch\'s latest commit. It isn\'t a review: the push gate and the agent never see it'
     const head = el('div', 'row test-list-head')
     head.append(el('span', 'small', 'Manual test list'), el('span', 'spacer'), b)
@@ -478,9 +486,9 @@ class SfReviews extends HTMLElement {
     input.addEventListener('input', () => this.#reasons.set(`${commit}:${role.agent}`, input.value))
     const label = el('label', 'small', 'Your reason for overriding it (the audit file keeps it)')
     label.htmlFor = input.id
-    const busy = value.overriding === role.agent || !!value.disabled
+    const held = value.overriding === role.agent || !!value.disabled
     const b = button('Override', 'small', () => {
-      if (busy) return
+      if (held) return
       const reason = input.value.trim()
       if (!reason) {
         input.setAttribute('aria-invalid', 'true')
@@ -490,7 +498,8 @@ class SfReviews extends HTMLElement {
       input.removeAttribute('aria-invalid')
       emit(this, 'sf-override', { agent: role.agent, commit, reason })
     })
-    b.setAttribute('aria-disabled', String(busy))
+    b.setAttribute('aria-disabled', String(held))
+    if (value.overriding === role.agent) busy(b, true)
     b.title = role.runs && role.runs > 1 ? 'Counts every blocking run of this role as passed for this commit only. A new commit needs a new review.' : 'Counts this role as passed for this commit only. A new commit needs a new review.'
     box.append(label, input, b)
     return box

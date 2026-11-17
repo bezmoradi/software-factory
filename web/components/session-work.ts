@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
 
 export interface AgentModel {
   id: string
@@ -144,6 +144,7 @@ class SfSessionWork extends HTMLElement {
   #target: SessionWorkTarget | null = null
   #view: WorkView | null = null
   #busy = false
+  #busyKey = ''
   #status = el('p', 'small')
   #model = el('select', 'textbox')
   #effort = el('select', 'textbox')
@@ -235,10 +236,17 @@ class SfSessionWork extends HTMLElement {
     return v.queue.items.length > 0 || !!v.queue.stopped || v.setup?.state === 'running' || v.check?.state === 'failed' || v.check?.state === 'timed-out'
   }
 
-  async #call(body: Record<string, unknown>, ok: string): Promise<boolean> {
+  #held(b: HTMLButtonElement): boolean {
+    if (!this.#busy || this.#busyKey !== b.dataset.key) return false
+    busy(b, true)
+    return true
+  }
+
+  async #call(body: Record<string, unknown>, ok: string, key: string): Promise<boolean> {
     const sid = this.#target?.sid
     if (!sid) return false
     this.#busy = true
+    this.#busyKey = key
     this.#paint()
     const res = await api('/api/session-work', { ...body, sid }).catch(() => null)
     this.#busy = false
@@ -284,8 +292,8 @@ class SfSessionWork extends HTMLElement {
     label.htmlFor = this.#model.id
     this.#model.disabled = off
     this.#effort.disabled = off
-    const go = button('Switch model', 'small', () => void this.#call({ op: 'model', model: this.#model.value, effort: this.#effort.value }, 'Switched. The new model applies from the next turn.'), 'button', 'work-switch')
-    go.disabled = off
+    const go = button('Switch model', 'small', () => void this.#call({ op: 'model', model: this.#model.value, effort: this.#effort.value }, 'Switched. The new model applies from the next turn.', 'work-switch'), 'button', 'work-switch')
+    go.disabled = !this.#held(go) && off
     const row = el('div', 'row field-row')
     row.append(label, this.#model, this.#effort, go)
     parts.push(row)
@@ -298,8 +306,8 @@ class SfSessionWork extends HTMLElement {
     if (q.waiting) parts.push(el('p', 'small', q.waiting))
     if (q.stopped) {
       const row = el('div', 'row')
-      const resume = button('Resume', 'small', () => void this.#call({ op: 'queue-resume' }, 'The queue sends the next message when the session is free.'), 'button', 'work-resume')
-      resume.disabled = off
+      const resume = button('Resume', 'small', () => void this.#call({ op: 'queue-resume' }, 'The queue sends the next message when the session is free.', 'work-resume'), 'button', 'work-resume')
+      resume.disabled = !this.#held(resume) && off
       row.append(el('p', 'small warn', `Stopped: ${q.stopped}`), resume)
       parts.push(row)
     }
@@ -309,7 +317,7 @@ class SfSessionWork extends HTMLElement {
         const li = el('li')
         const row = el('div', 'row')
         if (this.#editing === m.id) {
-          const save = button('Save', 'small', () => void this.#call({ op: 'queue-edit', id: m.id, text: this.#edit.value }, 'Saved.').then(ok => {
+          const save = button('Save', 'small', () => void this.#call({ op: 'queue-edit', id: m.id, text: this.#edit.value }, 'Saved.', `work-save:${m.id}`).then(ok => {
             if (ok) {
               this.#editing = ''
               this.#paint()
@@ -319,22 +327,23 @@ class SfSessionWork extends HTMLElement {
             this.#editing = ''
             this.#paint()
           }, 'button', `work-cancel:${m.id}`)
-          save.disabled = off
-          row.append(this.#edit, save, cancel)
+          save.disabled = !this.#held(save) && off
+          row.append(this.#edit, cancel, save)
         } else {
           const text = el('p', 'small queued-text', visible(m.text.length > 400 ? `${m.text.slice(0, 400)}…` : m.text))
-          const up = button('Up', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i - 1 }, 'Moved.'), 'button', `work-up:${m.id}`)
-          const down = button('Down', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i + 1 }, 'Moved.'), 'button', `work-down:${m.id}`)
+          const up = button('Up', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i - 1 }, 'Moved.', `work-up:${m.id}`), 'button', `work-up:${m.id}`)
+          const down = button('Down', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i + 1 }, 'Moved.', `work-down:${m.id}`), 'button', `work-down:${m.id}`)
           const edit = button('Edit', 'ghost small', () => {
             this.#editing = m.id
             this.#edit.value = m.text
             this.#paint()
             this.#edit.focus()
           }, 'button', `work-edit:${m.id}`)
-          const remove = button('Remove', 'ghost small', () => void this.#call({ op: 'queue-remove', id: m.id }, 'Removed.'), 'button', `work-remove:${m.id}`)
-          up.disabled = off || i === 0 || (q.sending && i <= 1)
-          down.disabled = off || i === q.items.length - 1 || (q.sending && i === 0)
-          edit.disabled = remove.disabled = off || (q.sending && i === 0)
+          const remove = button('Remove', 'ghost small', () => void this.#call({ op: 'queue-remove', id: m.id }, 'Removed.', `work-remove:${m.id}`), 'button', `work-remove:${m.id}`)
+          up.disabled = !this.#held(up) && (off || i === 0 || (q.sending && i <= 1))
+          down.disabled = !this.#held(down) && (off || i === q.items.length - 1 || (q.sending && i === 0))
+          edit.disabled = off || (q.sending && i === 0)
+          remove.disabled = !this.#held(remove) && edit.disabled
           for (const [b, what] of [[up, 'Move up'], [down, 'Move down'], [edit, 'Edit'], [remove, 'Remove']] as const) b.setAttribute('aria-label', `${what} queued message ${i + 1}`)
           row.append(text, up, down, edit, remove)
         }
@@ -349,11 +358,11 @@ class SfSessionWork extends HTMLElement {
     const add = button('Add to queue', 'small', () => {
       const text = this.#add.value.trim()
       if (!text) return
-      void this.#call({ op: 'queue-add', text }, 'Queued.').then(ok => {
+      void this.#call({ op: 'queue-add', text }, 'Queued.', 'work-add').then(ok => {
         if (ok) this.#add.value = ''
       })
     }, 'button', 'work-add')
-    add.disabled = this.#add.disabled
+    add.disabled = !this.#held(add) && this.#add.disabled
     const box = el('div', 'field')
     box.append(label, this.#add, add)
     parts.push(box)

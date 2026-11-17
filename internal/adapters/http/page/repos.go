@@ -80,7 +80,11 @@ func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) 
 			return
 		}
 		s.reg.Limits().TokenSaved(info.Host)
-		send(w, http.StatusOK, map[string]any{"ok": true, "host": hostJSON{Host: info.Host, SavedAt: millis(info.SavedAt)}})
+		answer := map[string]any{"ok": true, "host": hostJSON{Host: info.Host, SavedAt: millis(info.SavedAt)}}
+		if info.Warning != "" {
+			answer["warning"] = info.Warning
+		}
+		send(w, http.StatusOK, answer)
 	case "/api/remove-token":
 		f, ok := textFields(w, body, 4096, "host")
 		if !ok {

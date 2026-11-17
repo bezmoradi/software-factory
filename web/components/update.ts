@@ -1,4 +1,4 @@
-import { button, el } from '../lib/dom.ts'
+import { actionButton, button, el } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 import { commandBlock } from './login.ts'
 
@@ -83,6 +83,10 @@ async function call(body: Record<string, unknown>): Promise<{ ok: boolean; messa
   }
   const message = parsed !== null && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string' ? (parsed as { message: string }).message : ''
   return { ok: false, message: message || 'The engine didn’t take that. Try again once the page is connected.' }
+}
+
+export function developmentBuild(): boolean {
+  return view?.development === true
 }
 
 export function initUpdates(p: Post): void {
@@ -191,13 +195,10 @@ export function openUpdate(): void {
   head.append(heading, cross)
   const said = el('p', 'small warn')
   said.setAttribute('role', 'status')
-  const later = button('Remind me later', 'ghost small', () => {
-    later.disabled = true
-    void call({ later: r.version }).then(a => {
-      later.disabled = false
-      if (a.ok) return close()
-      said.textContent = a.message
-    })
+  const later = actionButton('Remind me later', 'ghost small', async () => {
+    const a = await call({ later: r.version })
+    if (a.ok) return close()
+    said.textContent = a.message
   })
   later.title = `Hides this until a release newer than ${r.version} is out`
   const actions = el('div', 'row consent-actions')

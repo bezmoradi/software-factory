@@ -1,4 +1,4 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, button, el, opener, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -166,7 +166,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
   }
 
   const actions = el('div', 'row consent-actions')
-  actions.append(button('Refresh', 'ghost small', () => void reload()), el('span', 'spacer'), button('Close', 'ghost small', close))
+  actions.append(actionButton('Refresh', 'ghost small', reload), el('span', 'spacer'), button('Close', 'ghost small', close))
   d.append(
     el('h2', 'label', 'Register of exceptions'),
     el('p', 'small', 'Every exception to the usual rules in one place, read only: pushes you allowed with a reason, verdicts you overrode, flagged files and commits you allowed, hosts you added to the network allowlist and the allow rules Claude Code saved. Decisions come from the engine’s audit file, newest first.'),

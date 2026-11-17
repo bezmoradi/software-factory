@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
 
 const MAX_NAME = 120
 const MAX_TEXT = 500
@@ -69,6 +69,7 @@ class SfDecisionLog extends HTMLElement {
   #project = ''
   #view: LogView | null = null
   #busy = false
+  #doing = ''
   #editing = ''
   #status = el('p', 'small')
   #adding = el('textarea', 'textbox')
@@ -102,12 +103,18 @@ class SfDecisionLog extends HTMLElement {
     this.#editing = ''
     this.#status.textContent = ''
     this.#paint()
-    if (value) void this.#call({ op: 'read', repo: value })
+    if (value) void this.#call({ op: 'read', repo: value }, 'decision-again')
   }
 
-  async #call(body: Record<string, unknown>): Promise<boolean> {
+  #hold(b: HTMLButtonElement): void {
+    if (this.#busy && this.#doing === b.dataset.key) busy(b, true)
+    else b.disabled = this.#busy
+  }
+
+  async #call(body: Record<string, unknown>, key: string): Promise<boolean> {
     const project = this.#project
     this.#busy = true
+    this.#doing = key
     this.#paint()
     const res = await api('/api/decision-log', body).catch(() => null)
     if (project !== this.#project) return false
@@ -128,7 +135,7 @@ class SfDecisionLog extends HTMLElement {
   async #add() {
     const text = this.#adding.value.trim()
     if (!text || this.#busy) return
-    if (await this.#call({ op: 'add', repo: this.#project, text })) {
+    if (await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add')) {
       this.#adding.value = ''
       this.#status.className = 'small muted'
       this.#status.textContent = 'Added. New sessions get it with their first message.'
@@ -148,7 +155,7 @@ class SfDecisionLog extends HTMLElement {
   async #save(e: Entry) {
     const name = this.#name.value.trim()
     const text = this.#text.value.trim()
-    if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked })) {
+    if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)) {
       this.#editing = ''
       this.#status.className = 'small muted'
       this.#status.textContent = 'Saved. It stays through every rebuild of the log.'
@@ -174,8 +181,9 @@ class SfDecisionLog extends HTMLElement {
       this.#editing = ''
       this.#paint()
     }, 'button', `decision-cancel:${e.id}`)
-    save.disabled = cancel.disabled = this.#busy
-    box.append(row, save, cancel)
+    this.#hold(save)
+    cancel.disabled = this.#busy
+    box.append(row, cancel, save)
     return box
   }
 
@@ -196,8 +204,8 @@ class SfDecisionLog extends HTMLElement {
     edit.disabled = this.#busy
     acts.append(edit)
     if (e.added || e.edited) {
-      const remove = button(e.added ? 'Remove' : 'Undo my changes', 'link small', () => void this.#call({ op: 'remove', repo: this.#project, id: e.id }), 'button', `decision-remove:${e.id}`)
-      remove.disabled = this.#busy
+      const remove = button(e.added ? 'Remove' : 'Undo my changes', 'link small', () => void this.#call({ op: 'remove', repo: this.#project, id: e.id }, `decision-remove:${e.id}`), 'button', `decision-remove:${e.id}`)
+      this.#hold(remove)
       acts.append(remove)
     }
     li.append(acts)
@@ -217,7 +225,7 @@ class SfDecisionLog extends HTMLElement {
       const addLabel = el('label', 'small', 'Add an entry')
       addLabel.htmlFor = this.#adding.id
       const add = button('Add', 'small', () => void this.#add(), 'button', 'decision-add')
-      add.disabled = this.#busy
+      this.#hold(add)
       const addBox = el('div', 'field')
       addBox.append(addLabel, this.#adding, add)
       parts.push(addBox)
@@ -234,8 +242,8 @@ class SfDecisionLog extends HTMLElement {
       if (v.note) preview.append(el('pre', 'small', shown(v.note)))
       parts.push(preview)
     }
-    const again = button(this.#busy ? 'Reading…' : 'Read again', 'link small', () => void this.#call({ op: 'read', repo: this.#project }), 'button', 'decision-again')
-    again.disabled = this.#busy
+    const again = button('Read again', 'link small', () => void this.#call({ op: 'read', repo: this.#project }, 'decision-again'), 'button', 'decision-again')
+    this.#hold(again)
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
     refocus(this, focused)

@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { button, el, shown, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
 
 type Issue = { number: number; title: string; body?: string; url: string; author: string; labels: string[]; created: number; open: boolean }
 
@@ -29,8 +29,15 @@ class SfIssuePicker extends HTMLElement {
   #page = 1
   #more = false
   #busy = false
+  #loaded = false
   #issues: Issue[] = []
   #chosen: Picked | null = null
+  #listButton = button('List open issues', 'small', () => this.#run(this.#listButton, () => this.#load(1)))
+
+  #run(b: HTMLButtonElement, work: () => Promise<void>): void {
+    if (this.#busy || !this.path) return
+    void whileBusy(b, work)
+  }
 
   connectedCallback() {
     if (this.#details.isConnected) return
@@ -46,15 +53,16 @@ class SfIssuePicker extends HTMLElement {
     this.#label.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return
       e.preventDefault()
-      void this.#load(1)
+      this.#run(this.#listButton, () => this.#load(1))
     })
-    row.append(name, this.#label, button('List open issues', 'small', () => void this.#load(1)))
+    row.append(name, this.#label, this.#listButton)
     this.#status.setAttribute('role', 'status')
     this.#details.append(summary, intro, row, this.#status, this.#list, this.#picked)
     this.#details.addEventListener('toggle', () => {
-      if (this.#details.open && !this.#issues.length && !this.#busy) void this.#load(1)
+      if (this.#details.open && !this.#loaded && !this.#busy) void this.#load(1)
     })
     this.append(this.#details)
+    void this.#load(1)
   }
 
   chosen(): { issue: number; issueHash: string } | null | 'refused' {
@@ -84,6 +92,7 @@ class SfIssuePicker extends HTMLElement {
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
     this.#more = a.body.more === true
     this.#issues = Array.isArray(a.body.issues) ? (a.body.issues as Issue[]) : []
+    this.#loaded = true
     this.#status.textContent = this.#issues.length ? `Page ${this.#page} of the open issues${label ? ` labeled ${shown(label)}` : ''} in ${shown(String(a.body.repo ?? ''))}.` : `No open issues${label ? ` labeled ${shown(label)}` : ''} on this page.`
     this.#paintList()
   }
@@ -92,14 +101,20 @@ class SfIssuePicker extends HTMLElement {
     const ul = el('ul', 'list issue-items')
     for (const i of this.#issues) {
       const li = el('li', '')
-      const pick = button(`#${i.number} ${shown(i.title)}`, 'link', () => void this.#pick(i.number))
+      const pick = button(`#${i.number} ${shown(i.title)}`, 'link', () => this.#run(pick, () => this.#pick(i.number)))
       pick.setAttribute('aria-pressed', String(this.#chosen?.issue.number === i.number))
       li.append(pick, el('span', 'small muted', ` by ${shown(i.author)}${i.labels.length ? `, ${i.labels.map(shown).join(', ')}` : ''}`))
       ul.append(li)
     }
     const nav = el('div', 'actions')
-    if (this.#page > 1) nav.append(button('Newer', 'small ghost', () => void this.#load(this.#page - 1)))
-    if (this.#more) nav.append(button('Older', 'small ghost', () => void this.#load(this.#page + 1)))
+    if (this.#page > 1) {
+      const newer = button('Newer', 'small ghost', () => this.#run(newer, () => this.#load(this.#page - 1)))
+      nav.append(newer)
+    }
+    if (this.#more) {
+      const older = button('Older', 'small ghost', () => this.#run(older, () => this.#load(this.#page + 1)))
+      nav.append(older)
+    }
     this.#list.replaceChildren(ul, nav)
   }
 

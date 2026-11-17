@@ -1,4 +1,4 @@
-import { button, el, emit, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
@@ -86,6 +86,7 @@ class SfPushPanel extends HTMLElement {
   #card = ''
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
+  #answered = ''
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -292,6 +293,7 @@ class SfPushPanel extends HTMLElement {
         return
       }
       input.removeAttribute('aria-invalid')
+      this.#answered = allow ? 'allow' : 'deny'
       emit(this, 'sf-push-answer', { card: p.card, commit: p.commit, allow, reason })
     }
     const allow = button('Allow', 'primary small', answer(true), 'button', 'allow')
@@ -315,6 +317,8 @@ class SfPushPanel extends HTMLElement {
     }
     for (const b of actions.querySelectorAll('button')) b.setAttribute('aria-disabled', String(off))
     if (findings && sent) findings.setAttribute('aria-disabled', 'true')
+    if (value.answering && this.#answered === 'allow') busy(allow, true)
+    if (value.answering && this.#answered === 'deny') busy(deny, true)
     box.append(row, actions)
     if (findings && sent) box.append(el('p', 'small muted', `Findings sent to the session at ${when(sent)}; the push stays held.`))
     if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))

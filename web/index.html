@@ -111,7 +111,7 @@
 <div class="layout" id="live-view" hidden>
   <button type="button" id="side-toggle" class="side-toggle label" aria-expanded="false" aria-controls="side"><sf-icon class="icon" name="chevron"></sf-icon>Session details</button>
   <main>
-    <div class="crumbs-row"><nav id="crumbs" class="crumbs" aria-label="Breadcrumb"><ol id="crumbs-list"></ol></nav><button type="button" class="link small docs-link" id="session-docs" data-doc="working-in-a-session"><sf-icon class="icon" name="link"></sf-icon>View in docs</button></div>
+    <div class="page-head"><nav id="crumbs" class="crumbs" aria-label="Breadcrumb"><ol id="crumbs-list"></ol></nav><button type="button" class="link small docs-link" id="session-docs" data-doc="working-in-a-session"><sf-icon class="icon" name="link"></sf-icon>View in docs</button></div>
     <div id="warnings" class="notice warn small" hidden></div>
     <sf-recap id="recap" class="notice small recap" hidden></sf-recap>
     <sf-session-facts id="session-facts" hidden></sf-session-facts>
@@ -189,7 +189,7 @@
     </div>
     <div class="session-foot small" id="session-foot" hidden>
       <span class="session-foot-text" id="foot-text"></span>
-      <span class="session-foot-acts" id="manage" hidden><button type="button" class="ghost small stack" id="manage-button"><span></span><span class="off"></span><span class="off"></span></button> <button type="button" class="ghost small" id="force-button" hidden></button> <button type="button" class="ghost small" id="manage-cancel" hidden>Cancel</button></span>
+      <span class="session-foot-acts" id="manage" hidden><button type="button" class="ghost small stack" id="manage-button"><span></span><span class="off"></span></button> <button type="button" class="ghost small" id="force-button" hidden></button> <button type="button" class="ghost small" id="manage-cancel" hidden>Cancel</button></span>
       <button type="button" class="ghost icon-button" id="session-more" aria-label="More actions for this session" aria-haspopup="menu" popovertarget="session-menu"><sf-icon class="icon" name="more"></sf-icon></button>
     </div>
     <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" id="menu-bring-main" hidden>Bring in the latest main</button><button type="button" role="menuitem" id="menu-fork" hidden>Fork here</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>

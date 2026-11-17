@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
 
@@ -192,18 +192,19 @@ class SfKeep extends HTMLElement {
       parts.push(el('p', 'small', `Restore branch moves ${visible(v.branch)} to ${shortSha(v.commit)} and has agent-host remove the session’s worktree and add it again at that commit. A running session is stopped first, and a worktree with changes that aren’t committed is left as it is.`))
       const row = el('div', 'row')
       row.append(
-        button('Restore branch now', 'primary small', () => void this.#restore(), 'button', 'keep-confirm'),
         button('Cancel', 'ghost small', () => {
           this.#confirm = false
           this.#paint()
         }, 'button', 'keep-cancel'),
+        button('Restore branch now', 'primary small', () => void this.#restore(), 'button', 'keep-confirm'),
       )
       parts.push(row)
     } else {
-      const go = button(this.#busy ? 'Restoring…' : 'Restore branch', 'small', () => {
-        if (!off) void this.#ask()
+      const go = button('Restore branch', 'small', () => {
+        if (!off) void whileBusy(go, () => this.#ask())
       }, 'button', 'keep-restore')
       go.setAttribute('aria-disabled', String(off))
+      if (this.#busy) busy(go, true)
       const why = t.disabled || (!v.commit ? v.refusal : '')
       if (why) {
         go.title = visible(why)

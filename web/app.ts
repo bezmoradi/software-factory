@@ -2,7 +2,7 @@ import { api, events, exchange, forget, signedIn, trade, upload } from './api.ts
 import { boxSignIn, claudeLogin, signInState, type SignInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
-import { button, el, emit, fileLink, repoPath, settleFocus, shown, visible, visibleCommand } from './lib/dom.ts'
+import { busy, button, el, emit, fileLink, pressed, repoPath, settleFocus, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { agentWord, attachCommand, baseName, composeCommand, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
@@ -150,6 +150,15 @@ const topBar = document.querySelector<HTMLElement>('body > .bar')
 const BAR_STEPS = ['fit-brand', 'fit-compact', 'fit-tight']
 let barFitQueued = false
 
+function barStatus(detail: string) {
+  const stateEl = byId('state')
+  const title = byId('title')
+  stateEl.textContent = state.connected ? '' : 'Disconnected'
+  stateEl.hidden = state.connected
+  title.textContent = detail
+  title.hidden = !detail
+}
+
 function barFits(bar: HTMLElement): boolean {
   const style = getComputedStyle(bar)
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
@@ -208,7 +217,8 @@ let lost = 0
 const sending = new Set<string>()
 const armed = new Set<string>()
 const removals = new Map<string, { message: string; offer: { flag: string; value: string } | null }>()
-const busyManage = new Map<string, { action: string; at: number }>()
+const busyManage = new Map<string, { action: string; at: number; force: boolean }>()
+const controlBusy = new Set<string>()
 const reviewAsking = new Set<string>()
 const pushAsking = new Set<string>()
 const pushWatched = new Map<string, number>()
@@ -296,6 +306,10 @@ function turnOf(s: Session): Turn {
   const busy = state.connected && inTurn(s)
   const awaiting: Step = gate?.size === 'feature' && gate.requirements?.hash && !gate.requirements.approved ? 'define' : gate?.effective === 'feature' && gate.planDoc && !gate.planDoc.approved ? 'plan' : ''
   return { ran: ran.get(s.sid) ?? new Set<Step>(), running: busy ? s.step || awaiting : '', busy }
+}
+
+function holdBusy(b: HTMLButtonElement, on: boolean) {
+  if (on !== (b.getAttribute('aria-busy') === 'true')) busy(b, on)
 }
 
 function once(s: Session | null | undefined, what: string, run: () => Promise<boolean>) {
@@ -731,8 +745,7 @@ function paint() {
   }
   if (s) {
     const st = sessionState({ ...s.info, busy: working(s), needs: waitingOf(s).length })
-    byId('state').textContent = state.connected ? visible(label(s.info)) : 'Disconnected'
-    byId('title').textContent = state.connected ? [st.word, s.info.mode ? `${modeLabel(s.info.mode)} mode` : 'mode unknown', s.sid.slice(0, 8)].join(' · ') : state.note
+    barStatus(state.connected ? [st.word, s.info.mode ? `${modeLabel(s.info.mode)} mode` : 'mode unknown', s.sid.slice(0, 8)].join(' · ') : state.note)
     byId('title').title = s.info.cwd || ''
     paintCrumbs(s)
     byId('usage').textContent = usageText(s)
@@ -755,7 +768,7 @@ function paint() {
       const stage = b.closest<HTMLElement>('li[data-stage]')?.dataset.stage
       const step = b.id === 'tasks-start' ? 'tasks' : stage === 'define' || stage === 'plan' ? stage : ''
       const hold = step && s.gate?.holds ? (s.gate.holds[step] ?? '') : ''
-      b.setAttribute('aria-disabled', String(!!off || !!hold))
+      b.setAttribute('aria-disabled', String(!!off || !!hold || b.getAttribute('aria-busy') === 'true'))
       if (off) b.setAttribute('aria-describedby', 'path-busy')
       else if (hold) b.setAttribute('aria-describedby', `${step === 'tasks' ? 'plan' : step}-detail`)
       else b.removeAttribute('aria-describedby')
@@ -797,8 +810,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
     byId<HTMLElementTagNameMap['sf-split']>('split').view = null
     byId<HTMLElementTagNameMap['sf-compare']>('compare').view = null
-    byId('state').textContent = state.connected ? (current.key === 'docs' ? 'Docs' : current.key === 'projects' ? 'Projects' : current.key.startsWith('f:') ? 'File, read-only' : current.key.startsWith('c:') ? 'Changes' : 'Welcome') : 'Disconnected'
-    byId('title').textContent = state.connected ? '' : state.note
+    barStatus(state.connected ? '' : state.note)
     byId('usage').textContent = ''
     byId('stop').hidden = true
     byId('working').hidden = true
@@ -835,7 +847,7 @@ function paintChangesTab() {
 
 function paintControl(s: Session) {
   const i = s.info
-  const button = byId('control-button')
+  const button = byId<HTMLButtonElement>('control-button')
   let text = ''
   let action = ''
   const claims = i.disputed ? (i.claims || []).filter(c => typeof c === 'string').map(visible) : []
@@ -880,6 +892,7 @@ function paintControl(s: Session) {
   byId('foot-text').classList.toggle('bad', !notice && i.mode === 'bypassPermissions')
   byId('control-text').textContent = text
   button.dataset.action = action === 'Wake it' ? 'wake' : action === 'End both connections' ? 'release' : 'control'
+  holdBusy(button, controlBusy.has(s.sid))
   const labels = [action, button.dataset.action === 'control' && !i.controlled ? 'Confirm control' : '']
   const shown = labels[1] && armed.has(`${s.sid}:control`) ? 1 : 0
   ;[...button.children].forEach((span, n) => {
@@ -897,8 +910,8 @@ function paintManage(s: Session) {
   box.hidden = !managed
   if (!managed) return
   const removal = removals.get(s.sid)
-  const button = byId('manage-button')
-  const force = byId('force-button')
+  const button = byId<HTMLButtonElement>('manage-button')
+  const force = byId<HTMLButtonElement>('force-button')
   const stop = !!i.running
   let pending = busyManage.get(s.sid)
   if (pending && (Date.now() - pending.at > 30000 || (pending.action === 'stop' && !stop))) {
@@ -906,16 +919,18 @@ function paintManage(s: Session) {
     pending = undefined
   }
   button.dataset.action = stop ? 'stop' : 'remove'
-  const labels = stop ? ['Stop session', 'Confirm stop', 'Stopping…'] : ['Delete session', 'Confirm delete', 'Deleting…']
-  const shown = pending ? 2 : armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
+  const labels = stop ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
+  const shown = armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
+  holdBusy(button, !!pending && !pending.force)
+  holdBusy(force, !!pending?.force)
   ;[...button.children].forEach((span, i) => {
     span.textContent = labels[i] ?? ''
     span.classList.toggle('off', i !== shown)
   })
   button.classList.toggle('danger', shown === 1)
   force.classList.toggle('danger', armed.has(`${s.sid}:force`))
-  ;(button as HTMLButtonElement).disabled = !!pending
-  ;(force as HTMLButtonElement).disabled = !!pending
+  button.disabled = !!pending?.force
+  force.disabled = !!pending && !pending.force
   const note = shown === 1 ? (stop ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.') : armed.has(`${s.sid}:force`) && removal?.offer ? `Press the button again to ${removal.offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${removal.offer.value}.` : removal?.message || ''
   if (note) {
     byId('foot-text').textContent = note
@@ -925,7 +940,7 @@ function paintManage(s: Session) {
   const offer = !stop && removal?.offer
   force.hidden = !offer
   byId('manage-cancel').hidden = !!pending || (shown !== 1 && !(offer && armed.has(`${s.sid}:force`)))
-  if (offer) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
+  if (offer && !pending?.force) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
 }
 
 function confirmed(key: string, prompt = ''): boolean {
@@ -982,7 +997,7 @@ function forgetSession(sid: string) {
 }
 
 async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
-  busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now() })
+  busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
   schedulePaint()
   setTimeout(schedulePaint, 30500)
   const { ok, body: out } = await reply(await api(path, { sid: s.sid, ...body }).catch(() => null))
@@ -1067,9 +1082,14 @@ async function answerForge(s: Session | null, answer: { card: string; approve: b
   if (!ok) toast({ id: `forge-answer:${s.sid}`, title: !answer.approve ? "It wasn't denied." : comment ? "It wasn't posted." : "It wasn't opened.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
 }
 
+function whilePressed<T>(work: () => Promise<T>): Promise<T> {
+  const b = pressed()
+  return b ? whileBusy(b, work) : work()
+}
+
 async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) {
   if (!s) return
-  const { ok, body: said } = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
+  const { ok, body: said } = await whilePressed(async () => reply(await api(route, { sid: s.sid, ...body }).catch(() => null)))
   if (!ok) return void toast({ id: `${route}:${s.sid}`, title, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad' })
   toast({ title: done, tone: 'ok' })
   s.auditSeen++
@@ -1361,7 +1381,7 @@ async function openTeam() {
     if (s) paintTeam(s, s.gate ?? null)
     return
   }
-  await teamOp('read')
+  await whileBusy(byId<HTMLButtonElement>('team-open'), () => teamOp('read'))
 }
 
 function paintExceptions(s: Session) {
@@ -1420,7 +1440,9 @@ function labelOfSid(sid: string): string {
   return x ? label(x.info) : ''
 }
 
-function projectOf(cwd: string): Project | null {
+function projectOf(info: SessionInfo): Project | null {
+  if (info.project) return projectList.find(p => p.name === info.project) ?? null
+  const cwd = info.cwd || ''
   return projectList.filter(p => cwd === p.path || cwd.startsWith(`${p.path}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null
 }
 
@@ -1987,7 +2009,7 @@ async function setExpect(agent: string, expect: Expect) {
 }
 byId('reviews').addEventListener('sf-push-request', () => void startPush(current()))
 byId('push-panel').addEventListener('sf-push-answer', e => void answerPush(current(), e.detail))
-byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => send(COMMIT_ASK)))
+byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => whilePressed(() => send(COMMIT_ASK))))
 byId('forge-panel').addEventListener('sf-forge-answer', e => void answerForge(current(), e.detail))
 byId('pull-follow').addEventListener('sf-session-deleted', e => forgetSession(e.detail.sid))
 byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(current(), '/api/send-findings', e.detail, "The findings weren't sent.", 'The blocking findings were sent to the session. The push stays held.'))
@@ -2013,8 +2035,9 @@ byId('path').addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
   if (!b || b.getAttribute('aria-disabled') === 'true') return
   const command = b.dataset.command || ''
-  if (command === 'commit') return once(current(), command, () => send(COMMIT_ASK))
-  return once(current(), command, () => send(command))
+  const sent = (text: string) => whileBusy(b, () => send(text)).finally(schedulePaint)
+  if (command === 'commit') return once(current(), command, () => sent(COMMIT_ASK))
+  return once(current(), command, () => sent(command))
 })
 let teamPicks = ''
 
@@ -2038,9 +2061,9 @@ function paintTeamPicks(s: Session) {
 byId('size-pick').addEventListener('click', async e => {
   const b = (e.target as Element).closest<HTMLButtonElement>('button[data-size]')
   const s = current()
-  if (!b || !s) return
+  if (!b || !s || byId('size-pick').querySelector('button[aria-busy="true"]')) return
   const picked = b.dataset.size ?? ''
-  const res = await api('/api/size', { sid: s.sid, size: picked }).catch(() => null)
+  const res = await whileBusy(b, () => api('/api/size', { sid: s.sid, size: picked }).catch(() => null))
   if (!res || !res.ok) return say('The work type did not change. Check that the session is still running.')
   if (s.gate) s.gate = { ...s.gate, workType: picked, chosen: true }
   void loadGate(s, true)
@@ -2059,8 +2082,8 @@ byId('size').addEventListener('change', async () => {
   if (s) void loadGate(s, true)
 })
 byId('team-open').addEventListener('click', () => void openTeam())
-byId('team-approve').addEventListener('click', () => void teamOp('approve'))
-byId('team-forget').addEventListener('click', () => void teamOp('forget'))
+byId('team-approve').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-approve'), () => teamOp('approve')))
+byId('team-forget').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-forget'), () => teamOp('forget')))
 const ASK_WAIT_MS = 15000
 
 function waiting(asked: { hash: string; at: number } | undefined, hash: string): boolean {
@@ -2086,26 +2109,26 @@ async function approve(kind: 'requirements' | 'plan', hash: string) {
   schedulePaint()
   if (!res?.ok) await notThrough(res, 'The approval did not go through.')
 }
-byId('req-approval').addEventListener('sf-approve', e => void approve('requirements', e.detail.hash))
+byId('req-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('requirements', e.detail.hash)))
 byId('req-approval').addEventListener('sf-revise', e => {
   const s = current()
   if (!s) return
   const note = e.detail.note
-  once(s, `revise-req:${note}`, () => send(`Before going on, change the agreed requirements in this session's intent record: ${note}`, [], s).then(ok => {
+  once(s, `revise-req:${note}`, () => whilePressed(() => send(`Before going on, change the agreed requirements in this session's intent record: ${note}`, [], s).then(ok => {
     if (ok) byId<HTMLElementTagNameMap['sf-approval']>('req-approval').sent(note)
     return ok
-  }))
+  })))
 })
-byId('approval').addEventListener('sf-approve', e => void approve('plan', e.detail.hash))
+byId('approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
 byId('approval').addEventListener('sf-revise', e => {
   const s = current()
   const path = s?.gate?.planDoc?.path
   if (!s || !path) return void toast({ title: "This page doesn't know the plan's file.", description: 'Ask for the change in the conversation instead.', tone: 'warn' })
   const note = e.detail.note
-  once(s, `revise:${note}`, () => send(`Before going on, change the plan in ${path}: ${note}`, [], s).then(ok => {
+  once(s, `revise:${note}`, () => whilePressed(() => send(`Before going on, change the plan in ${path}: ${note}`, [], s).then(ok => {
     if (ok) byId<HTMLElementTagNameMap['sf-approval']>('approval').sent(note)
     return ok
-  }))
+  })))
 })
 byId('project-agents').addEventListener('sf-project-setting', async e => {
   const res = await api('/api/project', e.detail).catch(() => null)
@@ -2117,10 +2140,10 @@ byId('project-agents').addEventListener('sf-project-setting', async e => {
   await loadProjects(true)
   paint()
 })
-byId('checkpoint-button').addEventListener('click', () => once(current(), 'checkpoint', () => send('/knackpack:checkpoint')))
+byId('checkpoint-button').addEventListener('click', () => once(current(), 'checkpoint', () => whileBusy(byId<HTMLButtonElement>('checkpoint-button'), () => send('/knackpack:checkpoint'))))
 byId('stall-stop').addEventListener('click', () => {
   const s = current()
-  if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
+  if (s) void whileBusy(byId<HTMLButtonElement>('stall-stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
 })
 byId('stall-copy').addEventListener('click', () => {
   const command = byId('stall-copy').dataset.command
@@ -2206,7 +2229,7 @@ async function withConsent(name: string, what: string, send: (c: Consent) => Pro
     const needs = answer.body.needs as Needs | undefined
     if (resumable && needs?.box) consent = { ...consent, box: needs.box }
     if (needs?.signIn && needs.box && !needs.cost) {
-      if (!(await boxSignIn(api, needs, name))) break
+      if (!(await boxSignIn(api, needs, name, title => toast({ title, tone: 'ok' })))) break
       answer = await reply(await send(consent).catch(() => null))
       continue
     }
@@ -2214,8 +2237,11 @@ async function withConsent(name: string, what: string, send: (c: Consent) => Pro
       if (!(await askTrust(needs.trust))) break
       const trusted = await answerTrust(needs.trust)
       if (!trusted) break
-      toast({ id: 'trust', title: trusted.ok ? 'Claude Code now trusts this project.' : 'Claude Code’s trust question wasn’t answered.', description: !trusted.ok && typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined, tone: trusted.ok ? 'info' : 'bad', timeout: trusted.ok ? 5000 : 0 })
-      if (!trusted.ok) return trusted
+      if (!trusted.ok) {
+        byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close('trust')
+        return trusted
+      }
+      toast({ id: 'trust', title: 'Claude Code now trusts this project.', tone: 'info', timeout: 5000 })
       answer = await reply(await send(consent).catch(() => null))
       continue
     }
@@ -2313,7 +2339,7 @@ byId('changes').addEventListener('sf-fork-commit', e => {
 })
 byId('lineage').addEventListener('sf-handover', e => {
   const s = sessions.get(e.detail.sid)
-  if (s) void handOver(s, e.detail.agent)
+  if (s) void whilePressed(() => handOver(s, e.detail.agent))
 })
 byId('lineage').addEventListener('sf-open-session', e => {
   if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
@@ -2332,7 +2358,7 @@ byId<HTMLElementTagNameMap['sf-compare']>('compare').next = startSecond
 byId('compare').addEventListener('sf-delete-session', async e => {
   const s = sessions.get(e.detail.sid)
   if (!s) return
-  const problem = await manage(s, '/api/remove-session', {})
+  const problem = await whilePressed(() => manage(s, '/api/remove-session', {}))
   if (problem) toast({ id: `delete:${s.sid}`, title: `${label(s.info)} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 })
 })
 byId('menu-wake').addEventListener('click', () => {
@@ -2383,23 +2409,32 @@ byId('control-cancel').addEventListener('click', () => {
   paint()
   byId('control-button').focus()
 })
+async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): Promise<T> {
+  controlBusy.add(s.sid)
+  paint()
+  try {
+    return await work()
+  } finally {
+    controlBusy.delete(s.sid)
+    paint()
+  }
+}
 byId('control-button').addEventListener('click', async () => {
   const s = current()
-  if (!s) return
+  if (!s || controlBusy.has(s.sid)) return
   if (byId('control-button').dataset.action === 'release') {
-    const res = await api('/api/release', { sid: s.sid }).catch(() => null)
+    const res = await controlBusyWhile(s, () => api('/api/release', { sid: s.sid }).catch(() => null))
     toast(res && res.ok ? { title: 'Ended both connections.', description: 'The real session reconnects by itself within a few seconds. If the other one comes back too, stop the program that runs it.', tone: 'info', timeout: 10000 } : { title: 'The connections could not be ended.', description: 'Try again, or restart the session.', tone: 'bad' })
     return
   }
-  if (byId('control-button').dataset.action === 'wake') return void wakeSession(s)
+  if (byId('control-button').dataset.action === 'wake') return void controlBusyWhile(s, () => wakeSession(s))
   if (s.info.controlled) {
-    await api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null)
+    await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null))
     return
   }
   if (!confirmed(`${s.sid}:control`)) return
-  const res = await api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null)
+  const res = await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null))
   if (!res || !res.ok) toast({ title: 'The page could not take control of this session.', tone: 'bad' })
-  paint()
 })
 byId('signin').addEventListener('click', async () => {
   showGone('Signing in…', '', false, true)
@@ -2495,7 +2530,7 @@ byId('session-docs').addEventListener('click', () => {
   const s = current()
   openDocs(byId('session-docs').dataset.doc!, s ? { view: current.key, label: 'session' } : null)
 })
-byId('projects').addEventListener('click', e => {
+for (const id of ['projects', 'projects-side']) byId(id).addEventListener('click', e => {
   const link = (e.target as Element).closest<HTMLElement>('button[data-doc]')
   if (link) openDocs(link.dataset.doc!, { view: 'projects', label: 'Projects' })
 })
@@ -2505,7 +2540,7 @@ byId('welcome').addEventListener('click', e => {
   if (walk) return openDocs(walk.dataset.doc!, { view: 'overview', label: 'Welcome' })
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
-  if (start === 'login') void claudeLogin(api, () => void markSignIn(), reviewer?.signIn ?? null)
+  if (start === 'login') void claudeLogin(api, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
   if (start === 'identity') openIdentity()
   if (start === 'egress') openEgress(api)
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
@@ -2516,18 +2551,37 @@ byId('welcome').addEventListener('click', e => {
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
 async function changeRepo(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
+  try {
+    await changeRepoNow(detail)
+  } finally {
+    projects.settle('repo')
+  }
+}
+async function changeRepoNow(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
   const { ok, body } = detail.op === 'add' ? await reply(await api('/api/add-repo', { url: detail.url }).catch(() => null)) : await reply(await api('/api/remove-repo', { name: detail.name }).catch(() => null))
-  if (!ok) return projects.say('', typeof body.message === 'string' ? body.message : "That didn't work. Try again.", true)
-  if (detail.op === 'add') {
-    projects.added()
-    projects.say('', `Cloning ${typeof body.url === 'string' ? body.url : detail.url}…`)
-  } else projects.say('', '')
+  if (!ok) {
+    const problem = typeof body.message === 'string' ? body.message : "That didn't work. Try again."
+    return detail.op === 'add' ? projects.addFailed(problem) : projects.say('', problem, true)
+  }
+  if (detail.op === 'add') projects.added()
+  projects.say('', '')
   await loadProjects(true)
 }
 async function changeToken(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
+  try {
+    await changeTokenNow(detail)
+  } finally {
+    projects.settle('token')
+  }
+}
+async function changeTokenNow(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
   const { ok, body } = detail.op === 'save' ? await reply(await api('/api/save-token', { host: detail.host, token: detail.token }).catch(() => null)) : await reply(await api('/api/remove-token', { host: detail.host }).catch(() => null))
-  if (!ok) return projects.tokenSaid(typeof body.message === 'string' ? body.message : "That didn't work. Try again.", true)
+  if (!ok) {
+    const where = visible(detail.host.replace(/^https:\/\//, ''))
+    return void toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? `The token for ${where} wasn't saved` : `The token for ${where} wasn't removed`, description: typeof body.message === 'string' ? visible(body.message) : "That didn't work. Try again.", tone: 'bad', timeout: 0 })
+  }
   const saved = isRecord(body.host) && typeof body.host.host === 'string' ? body.host.host : detail.host
+  if (typeof body.warning === 'string' && body.warning) toast({ id: `token:${saved}`, title: `Token saved for ${visible(saved)}, with a warning`, description: visible(body.warning), tone: 'warn', timeout: 0 })
   projects.tokenSaid(detail.op === 'save' ? `Token saved for ${saved}.` : `Token removed for ${detail.host}.`)
   await loadProjects(true)
 }
@@ -2536,8 +2590,11 @@ projects.addEventListener('sf-expect', e => void setExpect(e.detail.agent, e.det
 projects.addEventListener('sf-token', e => void changeToken(e.detail))
 projects.addEventListener('sf-session-action', async e => {
   const s = sessions.get(e.detail.sid)
-  const project = s && projectOf(s.info.cwd || '')
-  if (!s || !project) return
+  const project = s && projectOf(s.info)
+  if (!s || !project) {
+    toast({ id: `manage:${e.detail.sid}`, title: e.detail.action === 'stop' ? "The session wasn't stopped" : "The session wasn't deleted", description: 'This page lost track of it. Reload the page and try again.', tone: 'bad', timeout: 0 })
+    return
+  }
   const name = label(s.info)
   projects.say(project.path, e.detail.action === 'stop' ? `Stopping ${name}…` : `Deleting ${name}…`)
   const problem = await manage(s, e.detail.action === 'stop' ? '/api/stop-session' : '/api/remove-session', {})
@@ -2880,7 +2937,7 @@ byId('composer').addEventListener('submit', async e => {
 })
 byId('stop').addEventListener('click', () => {
   const s = current()
-  if (s) void api('/api/interrupt', { sid: s.sid }).catch(() => null)
+  if (s) void whileBusy(byId<HTMLButtonElement>('stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
 })
 byId('rules').addEventListener('sf-rules-open', e => {
   const s = current()
@@ -2929,7 +2986,7 @@ function sessionActions(s: Session): PaletteItem[] {
   const manageBox = byId('manage')
   const manageButton = byId<HTMLButtonElement>('manage-button')
   const stopping = manageButton.dataset.action !== 'remove'
-  out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || (manageBox.hidden ? 'only a Claude Code background session this engine started is stopped or deleted here' : manageButton.disabled ? 'it is already being stopped or deleted' : ''), run: () => {
+  out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || (manageBox.hidden ? 'only a Claude Code background session this engine started is stopped or deleted here' : manageButton.disabled || manageButton.getAttribute('aria-busy') === 'true' ? 'it is already being stopped or deleted' : ''), run: () => {
     for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
     manageButton.click()
     manageButton.focus()
@@ -3018,8 +3075,8 @@ onNotifyOpen(sid => {
   if (sessions.has(sid)) go(`s/${sid}`)
 })
 byId('disconnect').addEventListener('click', async () => {
+  await whileBusy(byId<HTMLButtonElement>('disconnect'), () => api('/api/disconnect', {}).catch(() => null))
   if (byId('account').matches(':popover-open')) byId('account').hidePopover()
-  await api('/api/disconnect', {}).catch(() => null)
   signOut('Disconnected', SIGN_IN_HINT)
 })
 paint()

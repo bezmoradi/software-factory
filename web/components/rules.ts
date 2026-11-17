@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, shown, visible } from '../lib/dom.ts'
+import { button, el, emit, shown, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
@@ -59,7 +59,7 @@ class SfRules extends HTMLElement {
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
     this.#status.setAttribute('role', 'status')
-    const refresh = button('Refresh', 'ghost small', () => void this.#load(true), 'button', 'rules:refresh')
+    const refresh = button('Refresh', 'ghost small', () => void whileBusy(refresh, () => this.#load(true)), 'button', 'rules:refresh')
     const head = el('div', 'row rules-head')
     head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'), refresh)
     this.#details.append(summary, head, this.#status, this.#body)

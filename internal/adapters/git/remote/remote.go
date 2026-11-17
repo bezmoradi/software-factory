@@ -534,6 +534,18 @@ func (r Remote) baseGit(name string) (*os.Root, func(), error) {
 	}, nil
 }
 
+func (r Remote) Delete(name string) error {
+	if !repoName.MatchString(name) || strings.Contains(name, "..") {
+		return errors.New("the repository's folder name isn't one the engine uses")
+	}
+	ws, err := r.base()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ws.Close() }()
+	return ws.RemoveAll(name)
+}
+
 func place(ws *os.Root, tmpName, base string, taken func(string) bool) (string, error) {
 	for i := 1; i <= maxNames; i++ {
 		name := base

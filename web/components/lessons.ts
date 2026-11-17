@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 
@@ -58,6 +58,7 @@ class SfLessons extends HTMLElement {
   #body = el('div', 'lessons-body')
   #timer = 0
   #busy = ''
+  #doing = ''
   #chosen = new Map<string, string>()
   #built = false
 
@@ -143,13 +144,13 @@ class SfLessons extends HTMLElement {
     const run = v.run
     const running = run?.state === 'running' || this.#busy === 'suggest'
     if (v.offered > 0 || running) {
-      const b = button(running ? 'Suggesting…' : 'Suggest lines', 'small', () => {
+      const b = button('Suggest lines', 'small', () => {
         if (b.getAttribute('aria-disabled') === 'true') return
         this.#busy = 'suggest'
         this.#paint()
         void this.#call({ op: 'suggest', name: this.#project })
       })
-      b.setAttribute('aria-disabled', String(running))
+      if (running) busy(b, true)
       b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)
     }
@@ -200,9 +201,9 @@ class SfLessons extends HTMLElement {
     }
     pick.value = this.#chosen.get(x.id) ?? ''
     pick.addEventListener('change', () => this.#chosen.set(x.id, pick.value))
-    const busy = this.#busy === x.id
+    const held = this.#busy === x.id
     const approve = button('Approve', 'small', () => {
-      if (busy) return
+      if (held) return
       if (!pick.value) {
         pick.setAttribute('aria-invalid', 'true')
         pick.focus()
@@ -210,23 +211,27 @@ class SfLessons extends HTMLElement {
       }
       pick.removeAttribute('aria-invalid')
       this.#busy = x.id
-      void this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value }).then(ok => {
+      this.#doing = 'approve'
+      void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
         if (!ok) return
         this.#said.className = 'small muted'
         this.#said.textContent = 'Sent to the session as a note with its next message.'
       })
     })
     const decline = button('Decline', 'small ghost', () => {
-      if (busy) return
+      if (held) return
       this.#busy = x.id
-      void this.#call({ op: 'decline', name: this.#project, id: x.id }).then(ok => {
+      this.#doing = 'decline'
+      void whileBusy(decline, () => this.#call({ op: 'decline', name: this.#project, id: x.id })).then(ok => {
         if (!ok) return
         this.#said.className = 'small muted'
         this.#said.textContent = 'Declined. Nothing was sent or changed.'
       })
     })
-    approve.setAttribute('aria-disabled', String(busy))
-    decline.setAttribute('aria-disabled', String(busy))
+    if (held && this.#doing === 'approve') busy(approve, true)
+    else approve.setAttribute('aria-disabled', String(held))
+    if (held && this.#doing === 'decline') busy(decline, true)
+    else decline.setAttribute('aria-disabled', String(held))
     row.append(label, pick, approve, decline)
     li.append(row)
     return li

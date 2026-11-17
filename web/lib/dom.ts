@@ -61,6 +61,63 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   return b
 }
 
+const resting = new WeakMap<HTMLButtonElement, string | null>()
+let lastPressed: HTMLButtonElement | null = null
+
+export function pressed(): HTMLButtonElement | null {
+  return lastPressed
+}
+
+function refuseBusy(e: Event): void {
+  const t = e.target
+  if (!(t instanceof Element)) return
+  if (e.type === 'click') {
+    lastPressed = t.closest('button')
+    setTimeout(() => {
+      lastPressed = null
+    })
+  }
+  const held = e.type === 'submit' ? t.querySelector('button[type="submit"][aria-busy="true"]') : t.closest('button[aria-busy="true"]')
+  if (!held) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', refuseBusy, true)
+  document.addEventListener('submit', refuseBusy, true)
+}
+
+export function busy(b: HTMLButtonElement, on: boolean): void {
+  if (on) {
+    if (!resting.has(b)) resting.set(b, b.getAttribute('aria-disabled'))
+    b.setAttribute('aria-busy', 'true')
+    b.setAttribute('aria-disabled', 'true')
+    return
+  }
+  if (!resting.has(b)) return
+  const before = resting.get(b) ?? null
+  resting.delete(b)
+  b.removeAttribute('aria-busy')
+  if (before === null) b.removeAttribute('aria-disabled')
+  else b.setAttribute('aria-disabled', before)
+}
+
+export async function whileBusy<T>(b: HTMLButtonElement, work: () => Promise<T>): Promise<T> {
+  busy(b, true)
+  try {
+    return await work()
+  } finally {
+    busy(b, false)
+  }
+}
+
+export function actionButton(text: string, cls: string, run: () => Promise<unknown>, type: 'button' | 'submit' = 'button', key = ''): HTMLButtonElement {
+  const b = button(text, cls, undefined, type, key)
+  b.addEventListener('click', () => void whileBusy(b, run))
+  return b
+}
+
 type SfEvents = { [K in keyof HTMLElementEventMap as K extends `sf-${string}` ? K : never]: HTMLElementEventMap[K] }
 type Detail<E> = E extends CustomEvent<infer D> ? [detail: D] : []
 

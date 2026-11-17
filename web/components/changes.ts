@@ -1,4 +1,4 @@
-import { button, el, emit, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, fileLink, focusedKey, refocus, remembered, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes } from '../types.ts'
@@ -366,8 +366,10 @@ class SfChanges extends HTMLElement {
       li.append(words, el('span', 'spacer'), drop)
       return li
     }))
-    this.#send.disabled = this.#sending || !mine.length
-    this.#send.textContent = this.#sending ? 'Sending…' : mine.length ? `Send ${mine.length} ${plural(mine.length, 'comment')}` : 'Send comments'
+    busy(this.#send, false)
+    this.#send.disabled = !mine.length
+    this.#send.textContent = mine.length ? `Send ${mine.length} ${plural(mine.length, 'comment')}` : 'Send comments'
+    if (this.#sending) busy(this.#send, true)
   }
 
   #sendComments() {

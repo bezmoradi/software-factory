@@ -1,4 +1,4 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { button, el, opener, visible, whileBusy } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -62,9 +62,7 @@ export function editIdentity(post: Post, current: CommitIdentity | null, saved: 
   form.addEventListener('submit', e => {
     e.preventDefault()
     if (!form.reportValidity()) return
-    save.disabled = true
-    void call(post, { op: 'set', name: name.value, email: email.value }).then(a => {
-      save.disabled = false
+    void whileBusy(save, () => call(post, { op: 'set', name: name.value, email: email.value })).then(a => {
       const id = identityOf(a.body.identity)
       if (!a.ok || !id) {
         why.textContent = typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.'

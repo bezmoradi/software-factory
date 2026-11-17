@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, emit, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, shown, visible } from '../lib/dom.ts'
 
 const MAX_NAME = 60
 const MAX_TEXT = 20000
@@ -33,6 +33,7 @@ class SfSavedPrompts extends HTMLElement {
   #editing: SavedPrompt | null = null
   #deleting = ''
   #busy = false
+  #busyOp = ''
   #toggle = button('Saved prompts', 'ghost small', undefined, 'button', 'saved-prompts-toggle')
   #panel = el('div', 'saved-prompts surface')
   #status = el('p', 'small')
@@ -101,6 +102,7 @@ class SfSavedPrompts extends HTMLElement {
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
     this.#busy = true
+    this.#busyOp = typeof body.op === 'string' ? body.op : ''
     this.#paint()
     const res = await api('/api/saved-prompts', body).catch(() => null)
     this.#busy = false
@@ -154,14 +156,15 @@ class SfSavedPrompts extends HTMLElement {
     if (this.#editing) {
       const e = this.#editing
       const save = button(e.id ? 'Save changes' : 'Save prompt', 'primary small', () => void this.#save(), 'button', 'save')
-      save.disabled = this.#busy
+      if (this.#busy && this.#busyOp === 'save') busy(save, true)
+      else save.disabled = this.#busy
       const cancel = button('Cancel', 'ghost small', () => {
         this.#editing = null
         this.#paint()
         this.#toggleFocus()
       }, 'button', 'cancel')
       const row = el('div', 'row')
-      row.append(save, cancel)
+      row.append(cancel, save)
       parts.push(el('p', 'small muted', e.id ? 'Edit the prompt. It is your own text: the engine keeps it for this project and sends it only when you send the message.' : 'Name it and write the text. It is your own text: the engine keeps it for this project and sends it only when you send the message.'), this.#name, this.#text, row)
     } else {
       const list = this.#list
@@ -200,7 +203,8 @@ class SfSavedPrompts extends HTMLElement {
         this.#paint()
         this.#panel.querySelector<HTMLElement>(`[data-key="delete:${p.id}"]`)?.focus()
       }, 'button', `no:${p.id}`)
-      yes.disabled = this.#busy
+      if (this.#busy && this.#busyOp === 'remove') busy(yes, true)
+      else yes.disabled = this.#busy
       head.append(el('span', 'small warn', 'Delete this prompt?'), yes, no)
       li.append(head)
       queueMicrotask(() => no.focus())

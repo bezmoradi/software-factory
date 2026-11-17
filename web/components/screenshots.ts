@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { button, el, visible, whileBusy } from '../lib/dom.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -65,7 +65,8 @@ class SfScreenshots extends HTMLElement {
     this.#figure.append(this.#img, this.#caption)
     this.#figure.hidden = true
     const refresh = button('Refresh', 'ghost small', () => {
-      if (this.#target) void this.refresh(this.#target.sid)
+      const sid = this.#target?.sid
+      if (sid) void whileBusy(refresh, () => this.refresh(sid))
     })
     this.#details.append(this.#summary, el('p', 'small muted', 'Images the agent saved in its screenshots folder, newest first. The engine reads each one, checks it is a PNG, JPEG or GIF of at most 10 MiB and 8,192 pixels a side, and shows it again as a PNG.'), this.#list, refresh, this.#status, this.#figure)
   }
@@ -116,7 +117,7 @@ class SfScreenshots extends HTMLElement {
     this.#summary.textContent = `Screenshots (${this.#shots.length})`
     this.#list.replaceChildren(...this.#shots.map(s => {
       const li = el('li')
-      const open = button(visible(s.name), 'link', () => void this.#open(s.name))
+      const open = button(visible(s.name), 'link', () => void whileBusy(open, () => this.#open(s.name)))
       open.setAttribute('aria-pressed', String(s.name === this.#shown))
       li.append(open, el('span', 'muted', ` ${size(s.size)} · ${new Date(s.at).toLocaleString()}`))
       return li

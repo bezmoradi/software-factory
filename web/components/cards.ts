@@ -1,4 +1,4 @@
-import { button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { busy, button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
 import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
@@ -51,6 +51,7 @@ export function hiddenMark(text: string, what: string): HTMLElement {
 }
 
 const pending = new WeakSet<HTMLElement>()
+const sending = new WeakMap<HTMLElement, { button: HTMLButtonElement }>()
 
 export const answering = (host: HTMLElement) => pending.has(host)
 
@@ -64,8 +65,19 @@ function rerender(host: HTMLElement, render: () => void) {
   else if (key) host.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus()
 }
 
+function sentFrom(control: HTMLButtonElement | HTMLInputElement, from: HTMLButtonElement): boolean {
+  return control === from || (!!from.dataset.key && control instanceof HTMLButtonElement && control.dataset.key === from.dataset.key)
+}
+
 function lock(host: HTMLElement, locked: boolean) {
-  for (const control of host.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) if (!control.closest('sf-markdown')) control.disabled = locked
+  const from = sending.get(host)
+  for (const control of host.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
+    if (control.closest('sf-markdown')) continue
+    if (from && control instanceof HTMLButtonElement && sentFrom(control, from.button)) {
+      control.disabled = false
+      busy(control, locked)
+    } else control.disabled = locked
+  }
 }
 
 const watching = new WeakMap<HTMLElement, ResizeObserver>()
@@ -96,8 +108,9 @@ function showCommand(host: HTMLElement, text: string, name: string) {
   host.append(box, more)
 }
 
-function reply(host: HTMLElement, id: string, answer: Answer) {
+function reply(host: HTMLElement, id: string, answer: Answer, from: HTMLButtonElement) {
   if (host.contains(document.activeElement)) host.dataset.answered = ''
+  sending.set(host, { button: from })
   pending.add(host)
   lock(host, true)
   emit(host, 'sf-answer', { id, answer })
@@ -107,6 +120,7 @@ function fail(host: HTMLElement, message: string) {
   pending.delete(host)
   delete host.dataset.answered
   lock(host, false)
+  sending.delete(host)
   let note = host.querySelector('.card-error')
   if (!note) note = host.appendChild(el('p', 'small bad card-error'))
   note.textContent = message
@@ -217,7 +231,7 @@ class SfAsk extends HTMLElement {
         const b = button(visible(o.label), '', undefined, 'button', `opt:${qi}:${oi}`)
         if (o.description) b.append(el('small', '', visible(o.description)))
         b.addEventListener('click', () => {
-          if (single) return reply(this, id, { [q.question]: o.label })
+          if (single) return reply(this, id, { [q.question]: o.label }, b)
           const now = picks.get(q.question) || []
           picks.set(q.question, q.multiSelect ? (now.includes(o.label) ? now.filter(l => l !== o.label) : [...now, o.label]) : [o.label])
           mark()
@@ -241,7 +255,7 @@ class SfAsk extends HTMLElement {
         this.#notes.set(q.question, note)
       }
       note.onSend = text => {
-        if (single) return reply(this, id, { [q.question]: text })
+        if (single) return reply(this, id, { [q.question]: text }, note.send)
         picks.set(q.question, [text])
         mark()
         refresh()
@@ -254,7 +268,7 @@ class SfAsk extends HTMLElement {
     const actions = el('div', 'actions')
     submit.addEventListener('click', () => {
       const answered = questions.filter(q => picks.get(q.question)?.length)
-      if (answered.length) reply(this, id, Object.fromEntries(answered.map(q => [q.question, (picks.get(q.question) ?? []).join(', ')])))
+      if (answered.length) reply(this, id, Object.fromEntries(answered.map(q => [q.question, (picks.get(q.question) ?? []).join(', ')])), submit)
     })
     actions.append(submit, el('span', 'small muted', `A question you leave unanswered is sent without an answer.${alsoThere(attach)}`))
     this.append(actions)
@@ -292,22 +306,22 @@ class SfPermission extends HTMLElement {
       choices.append(el('p', 'small muted', attach ? `Too long to show in full here, so allow it in Claude Code itself: ${attach}` : "The page can't show the whole call, so it can only deny it."))
     } else {
       const yes = button('Yes', 'primary', undefined, 'button', 'yes')
-      yes.addEventListener('click', () => reply(this, id, { choice: 'yes' }))
+      yes.addEventListener('click', () => reply(this, id, { choice: 'yes' }, yes))
       choices.append(yes)
       if (always && !irreversible) {
         const again = button(visible(always), '', undefined, 'button', 'always')
-        again.addEventListener('click', () => reply(this, id, { choice: 'always' }))
+        again.addEventListener('click', () => reply(this, id, { choice: 'always' }, again))
         choices.append(again)
       }
       if (auto && !irreversible) {
         const switching = button('Yes, and switch to auto mode', '', undefined, 'button', 'auto')
-        switching.addEventListener('click', () => reply(this, id, { choice: 'auto' }))
+        switching.addEventListener('click', () => reply(this, id, { choice: 'auto' }, switching))
         choices.append(switching)
       }
     }
     const name = who === 'Claude' || who === 'Codex' ? who : 'the agent'
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: `What should ${name} do instead? Optional`, label: `What ${name} should do instead`, send: 'Deny', maxLength: 2000, toggle: `No, and tell ${name} what to do differently` })).ready()
-    note.onSend = text => reply(this, id, text ? { choice: 'no', note: text } : { choice: 'no' })
+    note.onSend = text => reply(this, id, text ? { choice: 'no', note: text } : { choice: 'no' }, note.send)
     choices.append(note.toggle!)
     const footer = attach ? `No without a note also stops Claude’s current turn.${alsoThere(attach)}` : ''
     this.append(choices, note.form, ...(footer ? [el('p', 'small muted', footer)] : []))
@@ -345,9 +359,9 @@ class SfPlan extends HTMLElement {
     const where = attach ? `run ${attach} and answer there` : 'answer in Claude Code itself'
     if (readOnly) return this.append(el('p', 'small muted', `To approve it or ask for changes, ${where}.`))
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: 'What should Claude change?', label: 'What Claude should change in the plan', send: 'Tell Claude what to change', maxLength: 2000, required: true })).ready()
-    note.onSend = text => reply(this, id, { choice: 'revise', note: text })
+    note.onSend = text => reply(this, id, { choice: 'revise', note: text }, note.send)
     const approve = button('Approve in Claude Code', '', undefined, 'button', 'approve')
-    approve.addEventListener('click', () => reply(this, id, { choice: 'terminal' }))
+    approve.addEventListener('click', () => reply(this, id, { choice: 'terminal' }, approve))
     const choices = el('div', 'choices')
     choices.append(approve)
     this.append(note.form, choices, el('p', 'small muted', `Claude Code lets only its own prompt approve a plan. Approve in Claude Code shows the usual prompt there; then ${where}.`))

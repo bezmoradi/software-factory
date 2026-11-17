@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, unspoofed, visible } from '../lib/dom.ts'
 import type { WorkflowRun } from '../types.ts'
 
 interface Protection {
@@ -77,6 +77,7 @@ class SfProjectFacts extends HTMLElement {
   #repo = ''
   #view: FactsView | null = null
   #busy = false
+  #op = ''
   #status = el('p', 'small')
 
   constructor() {
@@ -95,6 +96,7 @@ class SfProjectFacts extends HTMLElement {
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
     this.#busy = true
+    this.#op = typeof body.op === 'string' ? body.op : ''
     this.#paint()
     const res = await api('/api/project-facts', body).catch(() => null)
     this.#busy = false
@@ -204,11 +206,12 @@ class SfProjectFacts extends HTMLElement {
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Reading the workflows and the main branch\'s protection…' : 'Nothing read yet.'))
     else parts.push(this.#readiness(v), this.#workflows(v), this.#protection(v.protection, v.branch), this.#lookups(v))
-    const again = button(this.#busy ? 'Reading…' : 'Read again', 'link small', () => {
+    const again = button('Read again', 'link small', () => {
       this.#status.textContent = ''
       void this.#call({ op: 'read', repo: this.#repo })
     }, 'button', 'facts-again')
-    again.disabled = this.#busy
+    if (this.#busy && this.#op === 'read') busy(again, true)
+    else again.disabled = this.#busy
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
     refocus(this, focused)

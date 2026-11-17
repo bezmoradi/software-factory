@@ -1,4 +1,3 @@
-import { lastFailedRequest } from '../api.ts'
 import { button, el } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
@@ -55,9 +54,7 @@ class SfToasts extends HTMLElement {
     else item.removeAttribute('role')
     const body = el('div', 'toast-body')
     body.append(el('p', 'toast-title', title))
-    const failedID = tone === 'bad' ? lastFailedRequest() : ''
-    const told = failedID && !`${title} ${description}`.includes(failedID) ? `${description}${description ? ' ' : ''}Request id ${failedID}.` : description
-    if (told) body.append(el('p', 'toast-text', told))
+    if (description) body.append(el('p', 'toast-text', description))
     const shown = item
     if (action) body.append(button(action.label, 'link toast-action', () => { this.#close(shown); action.run() }))
     const close = button('', 'ghost icon-button toast-close', () => this.#close(shown))

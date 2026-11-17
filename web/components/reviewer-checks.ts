@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, remembered, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, remembered, shown, visible } from '../lib/dom.ts'
 
 interface CheckRun {
   state: string
@@ -201,10 +201,10 @@ class SfReviewerChecks extends HTMLElement {
       what.append(...this.#replies(r, c))
     }
     const actions = el('div', 'row')
-    const word = this.#busy === r.agent ? 'Starting…' : 'Check now'
-    const now = button(word, 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
-    now.disabled = off || r.running || c?.result === 'running'
-    now.setAttribute('aria-label', `${word}: the ${visible(r.roleName)}`)
+    const now = button('Check now', 'ghost small', () => void this.#check(r.agent, false), 'button', `check:${r.agent}`)
+    now.setAttribute('aria-label', `Check now: the ${visible(r.roleName)}`)
+    if (this.#busy === r.agent) busy(now, true)
+    else now.disabled = off || r.running || c?.result === 'running'
     actions.append(now)
     if (this.#cost === r.agent) {
       const pay = button('Check now, it costs money', 'small', () => void this.#check(r.agent, true), 'button', `pay:${r.agent}`)

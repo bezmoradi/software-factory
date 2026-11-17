@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { actionButton, busy, button, el, visible, whileBusy } from '../lib/dom.ts'
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
@@ -140,6 +140,7 @@ class SfProjectCaps extends HTMLElement {
   #project = ''
   #said = el('p', 'small')
   #save = button('Save caps', 'small', () => void this.#store())
+  #saving = false
   #stop = () => {}
 
   connectedCallback() {
@@ -161,7 +162,7 @@ class SfProjectCaps extends HTMLElement {
   }
 
   paint() {
-    if (!this.#save.disabled && !this.contains(document.activeElement)) this.#inputs.set(limitsNow().projects.get(this.#project) ?? null)
+    if (!this.#saving && !this.contains(document.activeElement)) this.#inputs.set(limitsNow().projects.get(this.#project) ?? null)
   }
 
   async #store() {
@@ -171,9 +172,9 @@ class SfProjectCaps extends HTMLElement {
       this.#said.textContent = 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.'
       return
     }
-    this.#save.disabled = true
-    const problem = await limitsCall({ op: 'project', name: this.#project, ...v })
-    this.#save.disabled = false
+    this.#saving = true
+    const problem = await whileBusy(this.#save, () => limitsCall({ op: 'project', name: this.#project, ...v }))
+    this.#saving = false
     this.#said.className = problem ? 'small warn' : 'small muted'
     this.#said.textContent = problem || 'Saved.'
   }
@@ -186,12 +187,14 @@ class SfSessionLimits extends HTMLElement {
   #edit = new CapsInputs('Caps for this session')
   #editing = false
   #busy = false
+  #busyKey = ''
+  #editSave = button('Save caps', 'small', () => void this.#saveEdit(), 'button', 'caps-save')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Caps and limits for this session')
     this.#said.setAttribute('role', 'status')
-    if (!this.#edit.box.querySelector('button')) this.#edit.box.append(button('Save caps', 'small', () => void this.#saveEdit()))
+    if (!this.#edit.box.querySelector('button')) this.#edit.box.append(this.#editSave)
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -216,7 +219,7 @@ class SfSessionLimits extends HTMLElement {
       const w = meterFor(p.side, sid)?.windows.find(x => x.kind === p.kind)
       if (!w) continue
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind))))
+      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind), 'continue'), 'button', 'continue'))
       parts.push(box)
       pausedShown = true
       break
@@ -225,23 +228,27 @@ class SfSessionLimits extends HTMLElement {
     const near = pausedShown ? undefined : own?.windows.find(w => w.near)
     if (own && near) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind))))
+      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind), 'continue'), 'button', 'continue'))
       parts.push(box)
     }
     if (s?.wakeAt) {
       const box = el('div', 'notice small')
-      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false })))
+      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false }, 'wake-cancel'), 'button', 'wake-cancel'))
       parts.push(box)
     } else if (s?.wakeOffer) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true })))
+      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true }, 'wake'), 'button', 'wake'))
       parts.push(box)
     }
     if (sid && !s?.reached) parts.push(this.#editor(s))
     if (this.#said.textContent) parts.push(this.#said)
     this.hidden = !sid
     this.replaceChildren(...parts)
-    for (const b of this.querySelectorAll('button')) b.disabled = this.#busy
+    for (const b of this.querySelectorAll('button')) {
+      const held = this.#busy && !!b.dataset.key && b.dataset.key === this.#busyKey
+      b.disabled = this.#busy && !held
+      if (held) busy(b, true)
+    }
   }
 
   #reached(s: SessionLimits): HTMLElement {
@@ -261,7 +268,7 @@ class SfSessionLimits extends HTMLElement {
     }
     input.min = String(usedOf(s.reached, s))
     const row = el('div', 'field-row')
-    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind: s.reached, value: Number(input!.value) })), button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid })))
+    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind: s.reached, value: Number(input!.value) }, 'raise'), 'button', 'raise'), button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid }, 'stop'), 'button', 'stop'))
     box.append(row)
     return box
   }
@@ -272,7 +279,7 @@ class SfSessionLimits extends HTMLElement {
     const what = st.failing ? `the same failing command ran ${st.count} times` : `${visible(st.tool)} repeated ${st.count} times`
     box.append(el('p', '', `Looks stuck: ${what} in its last few calls.`))
     if (st.detail) box.append(el('code', 'caps-detail', visible(st.detail)))
-    box.append(button('Interrupt', 'small', () => void api('/api/interrupt', { sid }).catch(() => null)))
+    box.append(actionButton('Interrupt', 'small', () => api('/api/interrupt', { sid }).catch(() => null)))
     return box
   }
 
@@ -312,15 +319,17 @@ class SfSessionLimits extends HTMLElement {
       return this.paint()
     }
     this.#editing = false
-    await this.#call({ op: 'session', sid, ...v })
+    await this.#call({ op: 'session', sid, ...v }, 'caps-save')
   }
 
-  async #call(body: Record<string, unknown>) {
+  async #call(body: Record<string, unknown>, key: string) {
     this.#busy = true
+    this.#busyKey = key
     this.#said.textContent = ''
     this.paint()
     this.#said.textContent = await limitsCall(body)
     this.#busy = false
+    busy(this.#editSave, false)
     this.paint()
   }
 }

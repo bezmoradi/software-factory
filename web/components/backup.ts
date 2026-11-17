@@ -1,4 +1,4 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, button, el, opener, visible, whileBusy } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Send = (file: Blob) => Promise<Response>
@@ -171,17 +171,16 @@ export function openBackup(post: Post, send: Send): void {
       const ul = el('ul', 'list')
       for (const name of v.needClone) {
         const li = el('li', 'row')
-        const b = button('Clone again', 'ghost small', () => {
-          b.disabled = true
-          void post(CLONE, { name }).then(async res => {
-            const parsed: unknown = await res.json().catch(() => ({}))
-            const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-            say.textContent = res.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : text(r.message) ? visible(text(r.message)) : 'The clone didn’t start.'
-            if (!res.ok) b.disabled = false
-          }).catch(() => {
+        const b = actionButton('Clone again', 'ghost small', async () => {
+          const res = await post(CLONE, { name }).catch(() => null)
+          if (!res) {
             say.textContent = 'The engine didn’t answer.'
-            b.disabled = false
-          })
+            return
+          }
+          const parsed: unknown = await res.json().catch(() => ({}))
+          const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+          say.textContent = res.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : text(r.message) ? visible(text(r.message)) : 'The clone didn’t start.'
+          if (res.ok) b.disabled = true
         })
         li.append(el('code', '', visible(name)), el('span', 'spacer'), b)
         ul.append(li)
@@ -205,10 +204,9 @@ export function openBackup(post: Post, send: Send): void {
     if (view) paint(view)
   }
 
-  exportButton.addEventListener('click', () => {
-    exportButton.disabled = true
+  exportButton.addEventListener('click', () => void whileBusy(exportButton, () => {
     say.textContent = 'Exporting…'
-    void post(EXPORT, {}).then(async res => {
+    return post(EXPORT, {}).then(async res => {
       if (!res.ok) {
         const parsed: unknown = await res.json().catch(() => ({}))
         const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
@@ -220,10 +218,8 @@ export function openBackup(post: Post, send: Send): void {
       say.textContent = `Saved ${fileName(res)} (${Math.ceil(blob.size / 1024).toLocaleString()} KiB).`
     }).catch(() => {
       say.textContent = 'The export was cut off. Try again.'
-    }).finally(() => {
-      exportButton.disabled = false
     })
-  })
+  }))
 
   picker.addEventListener('change', () => {
     const file = picker.files?.[0]
@@ -233,27 +229,25 @@ export function openBackup(post: Post, send: Send): void {
       say.textContent = 'That file is larger than 256 MiB, more than an import takes.'
       return
     }
-    importButton.disabled = true
     say.textContent = `Importing ${visible(file.name)}…`
-    void send(file).then(async res => {
+    void whileBusy(importButton, () => send(file).then(async res => {
       const parsed: unknown = await res.json().catch(() => ({}))
       const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
       if (!res.ok) {
         say.textContent = text(r.message) ? visible(text(r.message)) : res.status === 413 ? 'That file is larger than an import takes.' : 'The import didn’t finish.'
-        importButton.disabled = false
         return
       }
       const report = reportOf(r.report)
       say.textContent = 'Imported. The engine restarts to finish; the page reconnects once it’s back.'
+      importButton.disabled = true
       if (report) body.replaceChildren(...reportNodes(report))
     }).catch(() => {
       say.textContent = 'The import was cut off. Try again.'
-      importButton.disabled = false
-    })
+    }))
   })
 
   const actions = el('div', 'row consent-actions')
-  actions.append(button('Refresh', 'ghost small', () => void reload()), el('span', 'spacer'), button('Close', 'ghost small', close))
+  actions.append(actionButton('Refresh', 'ghost small', reload), el('span', 'spacer'), button('Close', 'ghost small', close))
   const transfer = el('div', 'row')
   transfer.append(exportButton, importButton, picker)
   d.append(

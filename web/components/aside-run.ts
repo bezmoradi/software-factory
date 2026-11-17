@@ -1,4 +1,4 @@
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './markdown.ts'
@@ -40,6 +40,7 @@ export function asideBox(o: AsideBox): HTMLElement {
   b.id = o.id
   b.dataset.key = o.id
   b.setAttribute('aria-disabled', String(off))
+  if (running) busy(b, true)
   b.title = o.hint
   const head = el('div', 'row aside-run-head')
   head.append(el('span', 'small', o.title), el('span', 'spacer'), b)

@@ -1,4 +1,4 @@
-import { button, el, opener } from '../lib/dom.ts'
+import { actionButton, button, el, opener } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -58,7 +58,7 @@ export function openDiagnostics(post: Post): void {
     saveButton.disabled = false
   }
   const actions = el('div', 'row consent-actions')
-  actions.append(saveButton, button('Build again', 'ghost small', () => void load()), el('span', 'spacer'), button('Close', 'ghost small', close))
+  actions.append(saveButton, actionButton('Build again', 'ghost small', load), el('span', 'spacer'), button('Close', 'ghost small', close))
   d.append(
     el('h2', 'label', 'Diagnostics'),
     el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),

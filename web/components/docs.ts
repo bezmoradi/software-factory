@@ -196,7 +196,9 @@ class SfDocs extends HTMLElement {
     nav.setAttribute('aria-label', 'Docs sections')
     const toc = el('ul', 'docs-toc')
     const body = el('div', 'docs-body')
-    body.append(pageCrumb('Docs'))
+    const head = el('div', 'page-head')
+    head.append(pageCrumb('Docs'))
+    body.append(head)
     for (const s of list) {
       const part = el('section', 'docs-section')
       part.dataset.doc = s.id

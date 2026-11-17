@@ -1,4 +1,4 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, busy, button, el, opener, visible, whileBusy } from '../lib/dom.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -89,7 +89,7 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
   say.setAttribute('role', 'status')
   const space = el('div', 'workspace-space')
   const list = el('ul', 'list workspace-list')
-  const busy = new Set<string>()
+  const deleting = new Set<string>()
 
   const paint = (v: View) => {
     space.replaceChildren()
@@ -113,9 +113,10 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       head.append(el('span', 'small', size))
       li.append(head)
       const acts = el('div', 'row')
-      const del = button(busy.has(r.sid) ? 'Deleting…' : 'Delete session', 'ghost small', () => void remove(r))
+      const del = button('Delete session', 'ghost small', () => void whileBusy(del, () => remove(r)))
       del.setAttribute('aria-label', `Delete the session ${visible(name)} and its worktree`)
-      if (!r.deletable || busy.has(r.sid)) del.disabled = true
+      if (!r.deletable) del.disabled = true
+      else if (deleting.has(r.sid)) busy(del, true)
       acts.append(del)
       if (!r.deletable && r.why) acts.append(el('span', 'small muted', visible(r.why)))
       li.append(acts)
@@ -135,11 +136,11 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
   }
 
   const remove = async (r: Row, offer: { flag: string; value: string } | null = null) => {
-    if (busy.has(r.sid)) return
-    busy.add(r.sid)
+    if (deleting.has(r.sid)) return
+    deleting.add(r.sid)
     say.textContent = 'Deleting…'
     const a = await call(post, offer ? { op: 'delete', sid: r.sid, flag: offer.flag, value: offer.value } : { op: 'delete', sid: r.sid })
-    busy.delete(r.sid)
+    deleting.delete(r.sid)
     if (a.ok) {
       say.textContent = 'Deleted, with its worktree.'
       deleted(r.sid)
@@ -149,13 +150,13 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     const o = a.body.offer
     if (o && typeof o === 'object' && typeof (o as Record<string, unknown>).flag === 'string' && typeof (o as Record<string, unknown>).value === 'string') {
       const next = { flag: (o as Record<string, string>).flag!, value: (o as Record<string, string>).value! }
-      say.replaceChildren(el('span', '', `${message} `), button('Delete anyway', 'ghost small', () => void remove(r, next)))
+      say.replaceChildren(el('span', '', `${message} `), actionButton('Delete anyway', 'ghost small', () => remove(r, next)))
     } else say.textContent = message
     void reload()
   }
 
   const actions = el('div', 'row consent-actions')
-  actions.append(button('Refresh', 'ghost small', () => void reload()), el('span', 'spacer'), button('Close', 'ghost small', close))
+  actions.append(actionButton('Refresh', 'ghost small', reload), el('span', 'spacer'), button('Close', 'ghost small', close))
   d.append(
     el('h2', 'label', 'Workspace'),
     el('p', 'small', 'Clones and session worktrees share the workspace volume. Sizes count the files in each worktree without following links, and stop counting at 200,000 entries.'),

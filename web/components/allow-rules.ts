@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, shown, visible, whileBusy } from '../lib/dom.ts'
 import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
@@ -118,8 +118,9 @@ class SfAllowRules extends HTMLElement {
     what.append(el('code', '', shown(r.rule)))
     for (const why of r.wide) what.append(' ', el('span', 'tag warn', `Wide: ${visible(why)}`))
     const key = `${fileKey(r.box, r.place, r.worktree)}:${r.rule}`
-    const remove = button(this.#busy === key ? 'Removing…' : 'Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
-    remove.disabled = this.#busy !== ''
+    const remove = button('Remove', 'ghost small', () => void this.#remove(r), 'button', `remove:${key}`)
+    if (this.#busy === key) busy(remove, true)
+    else remove.disabled = this.#busy !== ''
     remove.setAttribute('aria-label', `Remove the rule ${visible(r.rule)} from ${visible(r.path)}`)
     row.append(what, remove)
     li.append(row)
@@ -154,7 +155,7 @@ class SfAllowRules extends HTMLElement {
     }
     const again = button('Read again', 'link small', () => {
       this.#status.textContent = ''
-      void this.#call({ op: 'list', repo: this.#repo })
+      void whileBusy(again, () => this.#call({ op: 'list', repo: this.#repo }))
     }, 'button', 'rules-again')
     again.disabled = this.#busy !== ''
     parts.push(again, this.#status)

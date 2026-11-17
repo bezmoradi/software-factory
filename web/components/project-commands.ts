@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el } from '../lib/dom.ts'
+import { button, el, whileBusy } from '../lib/dom.ts'
 
 const MAX = 300
 
@@ -91,9 +91,7 @@ class SfProjectCommands extends HTMLElement {
       this.#said.textContent = `Each command is one line of at most ${MAX} bytes.`
       return
     }
-    this.#save.disabled = true
-    const res = await api('/api/project-commands', { op: 'set', name: this.#project, check, setup }).catch(() => null)
-    this.#save.disabled = false
+    const res = await whileBusy(this.#save, () => api('/api/project-commands', { op: 'set', name: this.#project, check, setup }).catch(() => null))
     if (!res || !res.ok) {
       this.#said.className = 'small warn'
       this.#said.textContent = await problemOf(res)

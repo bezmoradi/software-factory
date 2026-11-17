@@ -1,4 +1,5 @@
-import { button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, button, el, opener, visible, whileBusy } from '../lib/dom.ts'
+import { secret } from './secret.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -192,14 +193,14 @@ export function openEgress(post: Post): void {
       label.append(box, el('span', '', `${visible(a.name)}: ${a.hosts.map(visible).join(', ')}`))
       agentsBox.append(label)
     }
-    agentsBox.append(button('Save agents', 'ghost small', () => void saveAgents()))
+    agentsBox.append(actionButton('Save agents', 'ghost small', saveAgents))
     addedList.replaceChildren()
     if (!v.added.length) addedList.append(el('li', 'muted', 'No hosts added.'))
     for (const h of v.added) {
       const li = el('li', 'row')
       li.append(el('code', '', visible(h.host)), el('span', 'small muted', until(h.expires, v.now)), el('span', 'small', typeof h.reason === 'string' && h.reason ? `“${visible(h.reason)}”` : 'no reason given'))
       if (h.uploads) li.append(el('span', 'tag warn', 'accepts uploads'))
-      li.append(el('span', 'spacer'), button('Remove', 'ghost small', () => void remove(h.host)))
+      li.append(el('span', 'spacer'), actionButton('Remove', 'ghost small', () => remove(h.host)))
       addedList.append(li)
     }
     gatewayURL.value = v.gateway?.url ?? ''
@@ -243,7 +244,7 @@ export function openEgress(post: Post): void {
     const reason = reasonInput.value.trim()
     const a = await call(post, { op: 'add', host, expires: expiry.value, ...(uploadsOk ? { uploadsOk: true } : {}), ...(reason ? { reason } : {}) })
     if (!a.ok && a.body.error === 'uploads') {
-      uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Add anyway', 'ghost small', () => void add(true)), button('Cancel', 'ghost small', () => { uploadWarn.hidden = true }))
+      uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Cancel', 'ghost small', () => { uploadWarn.hidden = true }), actionButton('Add anyway', 'ghost small', () => add(true)))
       uploadWarn.hidden = false
       return
     }
@@ -314,6 +315,7 @@ export function openEgress(post: Post): void {
   const saveGateway = async (clear: boolean) => {
     const key = clear ? '' : gwKey.value.trim()
     gwKey.value = ''
+    gwKey.type = 'password'
     gwTell([], false)
     const a = await call(post, { op: 'gateway', url: clear ? '' : gatewayURL.value.trim(), agents: gwAgents.checked, reviewers: gwReviewers.checked })
     if (!answer(a, 'The gateway wasn’t saved.') || !key || !gwSides().length) return
@@ -337,10 +339,11 @@ export function openEgress(post: Post): void {
   expiryLabel.append(expiry)
   const reasonLabel = el('label', 'small', 'Reason')
   reasonLabel.append(reasonInput)
-  addForm.append(hostLabel, expiryLabel, reasonLabel, button('Add', 'primary small', undefined, 'submit'))
+  const addButton = button('Add', 'primary small', undefined, 'submit')
+  addForm.append(hostLabel, expiryLabel, reasonLabel, addButton)
   addForm.addEventListener('submit', e => {
     e.preventDefault()
-    void add(false)
+    void whileBusy(addButton, () => add(false))
   })
   const gwForm = el('form', 'egress-gateway')
   const urlLabel = el('label', 'small', 'Base URL')
@@ -349,17 +352,21 @@ export function openEgress(post: Post): void {
   aLabel.append(gwAgents, el('span', '', 'Claude Code sessions'))
   const rLabel = el('label', 'small row')
   rLabel.append(gwReviewers, el('span', '', 'Reviewers'))
+  const keyField = el('div', 'egress-key')
+  const keyBox = secret(gwKey, 'key')
   const keyLabel = el('label', 'small', 'Key or token (leave empty to keep the saved one)')
-  keyLabel.append(gwKey)
+  keyLabel.htmlFor = gwKey.id
+  keyField.append(keyLabel, keyBox)
   const gwActions = el('div', 'row')
-  gwActions.append(button('Save gateway', 'ghost small', undefined, 'submit'), button('Remove key', 'ghost small', () => void removeKey()), button('Remove gateway', 'ghost small', () => void saveGateway(true)))
-  gwForm.append(urlLabel, aLabel, rLabel, keyLabel, gwActions, gwSay)
+  const saveGatewayButton = button('Save gateway', 'ghost small', undefined, 'submit')
+  gwActions.append(saveGatewayButton, actionButton('Remove key', 'ghost small', removeKey), actionButton('Remove gateway', 'ghost small', () => saveGateway(true)))
+  gwForm.append(urlLabel, aLabel, rLabel, keyField, gwActions, gwSay)
   gwForm.addEventListener('submit', e => {
     e.preventDefault()
-    void saveGateway(false)
+    void whileBusy(saveGatewayButton, () => saveGateway(false))
   })
   const refreshRow = el('div', 'row')
-  refreshRow.append(el('h3', 'label', 'Refused requests'), el('span', 'spacer'), button('Refresh', 'ghost small', () => void loadRefusals()))
+  refreshRow.append(el('h3', 'label', 'Refused requests'), el('span', 'spacer'), actionButton('Refresh', 'ghost small', loadRefusals))
   const actions = el('div', 'row consent-actions')
   actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
   d.append(

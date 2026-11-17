@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, shown } from '../lib/dom.ts'
 
 interface RoleNumbers {
   role: string
@@ -205,8 +205,8 @@ class SfProjectMetrics extends HTMLElement {
       parts.push(...this.#numbers(v), this.#roles(v), this.#pulls(v), this.#cost(v))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
     }
-    const again = button(this.#busy ? 'Counting…' : 'Count again', 'link small', () => void this.#read(), 'button', 'metrics-again')
-    again.disabled = this.#busy
+    const again = button('Count again', 'link small', () => void this.#read(), 'button', 'metrics-again')
+    if (this.#busy) busy(again, true)
     parts.push(again, this.#status)
     this.replaceChildren(...parts)
     refocus(this, focused)

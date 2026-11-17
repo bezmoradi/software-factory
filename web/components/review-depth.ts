@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 
 interface DepthView {
   advisory: string[]
@@ -193,9 +193,7 @@ class SfReviewDepth extends HTMLElement {
       if (s.dataset.agent && n > 1) runs[s.dataset.agent] = n
     }
     const extraRuns = Number(this.#extraRuns.value) > 1 ? Number(this.#extraRuns.value) : 0
-    this.#save.disabled = true
-    const res = await api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null)
-    this.#save.disabled = false
+    const res = await whileBusy(this.#save, () => api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null))
     if (!res || !res.ok) {
       this.#said.className = 'small warn'
       this.#said.textContent = await problemOf(res)

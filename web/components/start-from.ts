@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { button, el, shown, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -140,8 +140,14 @@ export class BenchmarkField {
   #page = 1
   #more = false
   #busy = false
+  #loaded = false
   #pulls: MergedPull[] = []
   #chosen: { pull: MergedPull; refused: string; clipped: boolean; hash: string } | null = null
+
+  #run(b: HTMLButtonElement, work: () => Promise<void>): void {
+    if (this.#busy) return
+    void whileBusy(b, work)
+  }
 
   constructor(path: string) {
     this.#path = path
@@ -150,8 +156,9 @@ export class BenchmarkField {
     this.#status.setAttribute('role', 'status')
     this.box.append(summary, intro, this.#status, this.#list, this.#picked)
     this.box.addEventListener('toggle', () => {
-      if (this.box.open && !this.#pulls.length && !this.#busy) void this.#load(1)
+      if (this.box.open && !this.#loaded && !this.#busy) void this.#load(1)
     })
+    void this.#load(1)
   }
 
   chosen(): { number: number; hash: string; base: string } | null | 'refused' {
@@ -181,6 +188,7 @@ export class BenchmarkField {
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
     this.#more = a.body.more === true
     this.#pulls = Array.isArray(a.body.pulls) ? (a.body.pulls as MergedPull[]).filter(p => Number.isInteger(p.number) && SHA.test(p.base)) : []
+    this.#loaded = true
     this.#status.textContent = this.#pulls.length ? `Page ${this.#page} of the closed pull requests in ${shown(String(a.body.repo ?? ''))}, merged ones only.` : 'No merged pull requests on this page.'
     this.#paintList()
   }
@@ -189,14 +197,20 @@ export class BenchmarkField {
     const ul = el('ul', 'list issue-items')
     for (const p of this.#pulls) {
       const li = el('li', '')
-      const pick = button(`#${p.number} ${shown(p.title)}`, 'link', () => void this.#pick(p.number))
+      const pick = button(`#${p.number} ${shown(p.title)}`, 'link', () => this.#run(pick, () => this.#pick(p.number)))
       pick.setAttribute('aria-pressed', String(this.#chosen?.pull.number === p.number))
       li.append(pick, el('span', 'small muted', ` by ${shown(p.author)}, base ${shortSha(p.base)}`))
       ul.append(li)
     }
     const nav = el('div', 'actions')
-    if (this.#page > 1) nav.append(button('Newer', 'small ghost', () => void this.#load(this.#page - 1)))
-    if (this.#more) nav.append(button('Older', 'small ghost', () => void this.#load(this.#page + 1)))
+    if (this.#page > 1) {
+      const newer = button('Newer', 'small ghost', () => this.#run(newer, () => this.#load(this.#page - 1)))
+      nav.append(newer)
+    }
+    if (this.#more) {
+      const older = button('Older', 'small ghost', () => this.#run(older, () => this.#load(this.#page + 1)))
+      nav.append(older)
+    }
     this.#list.replaceChildren(ul, nav)
   }
 

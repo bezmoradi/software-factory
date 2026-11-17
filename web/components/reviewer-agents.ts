@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, visible } from '../lib/dom.ts'
 
 interface AgentFileView {
   name: string
@@ -46,6 +46,7 @@ class SfReviewerAgents extends HTMLElement {
   #target: ReviewerAgentsTarget | null = null
   #view: AgentFilesView | null = null
   #busy = false
+  #removing = ''
   #file = el('input')
   #status = el('p', 'small')
   #loaded = ''
@@ -134,7 +135,10 @@ class SfReviewerAgents extends HTMLElement {
   }
 
   async #remove(name: string) {
-    if (await this.#call({ op: 'remove', name })) {
+    this.#removing = name
+    const done = await this.#call({ op: 'remove', name })
+    this.#removing = ''
+    if (done) {
       this.#status.className = 'small ok'
       this.#status.textContent = `Removed ${visible(name)}. Its roles fall back to knackpack's agents.`
       this.#paint()
@@ -180,7 +184,8 @@ class SfReviewerAgents extends HTMLElement {
         const detail = [f.model ? `model ${visible(f.model)}` : 'model: the default', f.tools.length ? `tools ${f.tools.map(visible).join(', ')}` : 'tools: every review tool', `${Math.max(1, Math.round(f.bytes / 1024))} KiB`].join(' · ')
         what.append(el('p', 'small muted', detail), el('p', 'small', visible(f.description.length > 300 ? `${f.description.slice(0, 300)}…` : f.description)))
         const remove = button('Remove', 'ghost small', () => void this.#remove(f.name), 'button', `remove:${f.name}`)
-        remove.disabled = off
+        if (this.#busy && this.#removing === f.name) busy(remove, true)
+        else remove.disabled = off
         remove.setAttribute('aria-label', `Remove the agent file ${visible(f.name)}`)
         row.append(what, remove)
         li.append(row)

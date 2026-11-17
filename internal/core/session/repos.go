@@ -19,6 +19,7 @@ import (
 const (
 	CloneFor       = 10 * time.Minute
 	FetchFor       = 30 * time.Second
+	TokenCheckFor  = 10 * time.Second
 	MaxClones      = 3
 	MaxRecords     = 200
 	MaxTokenLength = 4096
@@ -53,6 +54,17 @@ type Records interface {
 type TokenInfo struct {
 	Host    string
 	SavedAt time.Time
+	Warning string
+}
+
+type TokenCheck struct {
+	Rejected bool
+	Problem  string
+	Warning  string
+}
+
+type TokenChecker interface {
+	CheckToken(ctx context.Context, host, token string) TokenCheck
 }
 
 type Tokens interface {
@@ -93,6 +105,7 @@ type Fetched struct {
 type Remote interface {
 	Clone(ctx context.Context, q CloneRequest) (Cloned, error)
 	Fetch(ctx context.Context, q FetchRequest) (Fetched, error)
+	Delete(name string) error
 }
 
 type Commits interface {
@@ -125,6 +138,7 @@ type ReposConfig struct {
 	Tokens    Tokens
 	Remote    Remote
 	Commits   Commits
+	Checker   TokenChecker
 	Notify    func(Fields)
 	Now       func() time.Time
 	Base      context.Context
@@ -317,7 +331,7 @@ func validHostName(h string) bool {
 
 func sameRepository(a, b string) bool {
 	key := func(s string) string {
-		return strings.TrimSuffix(strings.TrimRight(s, "/"), ".git")
+		return strings.TrimSuffix(strings.TrimRight(strings.ToLower(s), "/"), ".git")
 	}
 	return key(a) == key(b)
 }
@@ -549,6 +563,9 @@ func (c *Repos) Remove(name string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.cfg.Remote.Delete(name); err != nil {
+		c.cfg.Logger.Warn("repository", "event", "folder-not-removed")
+	}
 	for _, forget := range hooks {
 		forget(id)
 	}
@@ -589,13 +606,24 @@ func (c *Repos) SaveToken(host, token string) (TokenInfo, error) {
 	if !validToken(token) {
 		return TokenInfo{}, explained(invalid("token"), "A token is 1 to 4096 printable characters with no spaces.")
 	}
+	warning := ""
+	if c.cfg.Checker != nil {
+		ctx, cancel := context.WithTimeout(c.cfg.Base, TokenCheckFor)
+		v := c.cfg.Checker.CheckToken(ctx, h, token)
+		cancel()
+		if v.Rejected {
+			c.cfg.Logger.Info("token refused for " + h)
+			return TokenInfo{}, explained(invalid("token"), v.Problem)
+		}
+		warning = v.Warning
+	}
 	at := c.cfg.Now().UTC().Truncate(time.Second)
 	if err := c.cfg.Tokens.Save(h, token, at); err != nil {
 		return TokenInfo{}, explained(conflict("tokens"), "The engine couldn't save the token.")
 	}
 	c.cfg.Logger.Info("token saved for " + h)
 	c.hostsChanged()
-	return TokenInfo{Host: h, SavedAt: at}, nil
+	return TokenInfo{Host: h, SavedAt: at, Warning: warning}, nil
 }
 
 func (c *Repos) RemoveToken(host string) error {

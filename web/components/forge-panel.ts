@@ -1,4 +1,4 @@
-import { button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
 import { scrolledText } from './cards.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
 
@@ -53,6 +53,7 @@ class SfForgePanel extends HTMLElement {
   #key = ''
   #drafts = new Map<string, boolean>()
   #confirmed = new Set<string>()
+  #answered = ''
   #observers: ResizeObserver[] = []
 
   connectedCallback() {
@@ -166,11 +167,14 @@ class SfForgePanel extends HTMLElement {
         if (why) why.hidden = false
         return void check.focus()
       }
+      this.#answered = approve.dataset.key ?? ''
       emit(this, 'sf-forge-answer', answer())
     }, 'button', `approve:${f.card}`)
     if (title) approve.title = title
     const deny = button('Deny', 'small', () => {
-      if (!off) emit(this, 'sf-forge-answer', { card: f.card, approve: false })
+      if (off) return
+      this.#answered = deny.dataset.key ?? ''
+      emit(this, 'sf-forge-answer', { card: f.card, approve: false })
     }, 'button', `deny:${f.card}`)
     deny.setAttribute('aria-disabled', String(off))
     const sync = () => {
@@ -212,6 +216,8 @@ class SfForgePanel extends HTMLElement {
     parts.push(actions)
     if (why) parts.push(why)
     sync()
+    if (value.answering && this.#answered === approve.dataset.key) busy(approve, true)
+    if (value.answering && this.#answered === deny.dataset.key) busy(deny, true)
     if (value.disabled) parts.push(el('p', 'small muted', shown(value.disabled)))
     return parts
   }

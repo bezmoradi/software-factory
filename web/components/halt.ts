@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, visible } from '../lib/dom.ts'
+import { busy, button, el, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 export interface HaltView {
@@ -22,7 +22,7 @@ let view: HaltView = OFF
 let session: HaltSession | null = null
 let said = ''
 let armed = false
-let sending = false
+let sending = ''
 const shown = new Set<{ paint(): void }>()
 
 export function haltOf(raw: unknown): HaltView | null {
@@ -69,9 +69,9 @@ function clock(ms: number): string {
   return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 }
 
-async function send(body: Record<string, unknown>) {
+async function send(body: Record<string, unknown>, key: string) {
   if (sending) return
-  sending = true
+  sending = key
   said = ''
   paintAll()
   try {
@@ -82,12 +82,18 @@ async function send(body: Record<string, unknown>) {
   } catch {
     said = "The engine didn't answer. Try again once the page is connected."
   } finally {
-    sending = false
+    sending = ''
     paintAll()
   }
 }
 
 const awayHere = () => !!session && view.away.includes(session.sid)
+
+function held(b: HTMLButtonElement, key: string): HTMLButtonElement {
+  if (key && sending === key) busy(b, true)
+  else b.disabled = !!sending
+  return b
+}
 
 function control(name: string, shape: string, cls: string, tip: string, onClick?: () => void, shown = ''): HTMLButtonElement {
   const b = button('', cls, onClick)
@@ -120,36 +126,38 @@ class SfHalt extends HTMLElement {
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'Away mode')
     menu.addEventListener('beforetoggle', () => menu.style.setProperty('--halt-top', `${Math.round((this.closest('.bar') ?? this).getBoundingClientRect().bottom + 4)}px`))
-    const all = button(`${view.awayAll ? '✓ ' : ''}Away for every session`, '', () => void send({ op: 'away', on: !view.awayAll }))
+    const all = button(`${view.awayAll ? '✓ ' : ''}Away for every session`, '', () => void send({ op: 'away', on: !view.awayAll }, 'away-all'))
+    if (sending === 'away-all') busy(all, true)
     all.setAttribute('role', 'menuitemcheckbox')
     all.setAttribute('aria-checked', String(view.awayAll))
     menu.append(all)
     if (session) {
       const here = awayHere()
-      const one = button(`${here ? '✓ ' : ''}Away for ${visible(session.name)}`, '', () => void send({ op: 'away', on: !here, sid: session!.sid }))
+      const one = button(`${here ? '✓ ' : ''}Away for ${visible(session.name)}`, '', () => void send({ op: 'away', on: !here, sid: session!.sid }, 'away-one'))
+      if (sending === 'away-one') busy(one, true)
       one.setAttribute('role', 'menuitemcheckbox')
       one.setAttribute('aria-checked', String(here))
       menu.append(one)
     }
     menu.append(el('p', 'small muted', `Each new permission card is denied with the note “${AWAY_NOTE}”. Issue, pull request and push cards still wait for you.`))
+    away.disabled = !!sending
     parts.push(away, menu)
     if (!view.mode) {
-      const pause = control('Pause all', 'pause', 'ghost small', 'Holds new turns and automatic reviews and pushes; running sessions keep running.', () => void send({ op: 'pause' }))
+      const pause = control('Pause all', 'pause', 'ghost small', 'Holds new turns and automatic reviews and pushes; running sessions keep running.', () => void send({ op: 'pause' }, 'pause'))
       const stop = control(armed ? 'Confirm stop everything' : 'Stop everything', 'stop', 'small danger', 'Interrupts every running turn, stops every session, holds every push and refuses new starts until Release.', () => {
         if (!armed) {
           armed = true
           return this.paint()
         }
         armed = false
-        void send({ op: 'stop' })
+        void send({ op: 'stop' }, 'stop')
       }, armed ? 'Confirm' : '')
-      parts.push(pause, stop)
-      if (armed) parts.push(control('Cancel', 'close', 'ghost small', 'Keeps everything running.', () => {
+      parts.push(held(pause, 'pause'), held(stop, 'stop'))
+      if (armed) parts.push(held(control('Cancel', 'close', 'ghost small', 'Keeps everything running.', () => {
         armed = false
         this.paint()
-      }))
+      }), ''))
     }
-    for (const b of parts) if (b instanceof HTMLButtonElement && b.getAttribute('role') !== 'menuitemcheckbox') b.disabled = sending
     this.replaceChildren(...parts)
   }
 }
@@ -171,17 +179,17 @@ class SfHaltBanner extends HTMLElement {
     const at = clock(view.since)
     if (view.mode === 'stopped') {
       const row = el('div', 'halt-row bad')
-      row.append(el('p', '', `Stop everything is on${at ? ` since ${at}` : ''}. Every running turn was interrupted and every session stopped; every push is held, and no session starts or wakes until you press Release.`), button('Release', 'small', () => void send({ op: 'release' })))
+      row.append(el('p', '', `Stop everything is on${at ? ` since ${at}` : ''}. Every running turn was interrupted and every session stopped; every push is held, and no session starts or wakes until you press Release.`), held(button('Release', 'small', () => void send({ op: 'release' }, 'release')), 'release'))
       parts.push(row)
     } else if (view.mode === 'paused') {
       const row = el('div', 'halt-row warn')
-      row.append(el('p', '', `Pause all is on${at ? ` since ${at}` : ''}. Running sessions keep running, but no new turn starts and no automatic review or push runs until you press Release.`), button('Release', 'small', () => void send({ op: 'release' })))
+      row.append(el('p', '', `Pause all is on${at ? ` since ${at}` : ''}. Running sessions keep running, but no new turn starts and no automatic review or push runs until you press Release.`), held(button('Release', 'small', () => void send({ op: 'release' }, 'release')), 'release'))
       parts.push(row)
     }
     if (view.awayAll || awayHere()) {
       const row = el('div', 'halt-row warn')
       const which = view.awayAll ? 'every session' : visible(session!.name)
-      row.append(el('p', '', `Away mode is on for ${which}: each new permission card is denied with the note “${AWAY_NOTE}”. Issue, pull request and push cards still wait for you.`), button('Turn away mode off', 'small', () => void send(view.awayAll ? { op: 'away', on: false } : { op: 'away', on: false, sid: session!.sid })))
+      row.append(el('p', '', `Away mode is on for ${which}: each new permission card is denied with the note “${AWAY_NOTE}”. Issue, pull request and push cards still wait for you.`), held(button('Turn away mode off', 'small', () => void send(view.awayAll ? { op: 'away', on: false } : { op: 'away', on: false, sid: session!.sid }, 'away-off')), 'away-off'))
       parts.push(row)
     }
     if (said) {
@@ -191,7 +199,6 @@ class SfHaltBanner extends HTMLElement {
     }
     this.hidden = !parts.length
     this.replaceChildren(...parts)
-    for (const b of this.querySelectorAll('button')) b.disabled = sending
   }
 }
 
