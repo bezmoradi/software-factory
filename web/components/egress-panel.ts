@@ -1,4 +1,5 @@
-import { actionButton, button, el, opener, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, button, el, focusedKey, refocus, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import { secret } from './secret.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -54,6 +55,7 @@ interface Refusal {
 }
 
 type Answer = { ok: boolean; body: Record<string, unknown> }
+type Refill = 'agents' | 'gateway' | null
 
 async function call(post: Post, body: unknown, route = ROUTE): Promise<Answer> {
   const res = await post(route, body).catch(() => null)
@@ -116,14 +118,6 @@ const REASONS: Record<string, string> = {
 }
 
 export function openEgress(post: Post): void {
-  const back = opener()
-  const d = el('dialog', 'consent egress surface')
-  d.setAttribute('aria-label', 'Network access')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
   const say = el('p', 'small warn')
   say.setAttribute('role', 'status')
   const intro = el('p', 'small', 'Agents and reviewers reach the internet only through egress, which allows HTTPS to the hosts below and refuses every git host: the engine pushes for them. A change here takes effect at once, without a restart.')
@@ -137,6 +131,7 @@ export function openEgress(post: Post): void {
   hostInput.spellcheck = false
   hostInput.autocomplete = 'off'
   hostInput.placeholder = 'registry.npmjs.org'
+  hostInput.dataset.key = 'host'
   const reasonInput = el('input', 'textbox')
   reasonInput.name = 'reason'
   reasonInput.maxLength = 200
@@ -174,43 +169,65 @@ export function openEgress(post: Post): void {
   gwSay.setAttribute('role', 'status')
   const listsNote = el('p', 'small muted')
   let view: EgressView | null = null
+  let gwFilled: { url: string; agents: boolean; reviewers: boolean } | null = null
+  const agentsFilled = new Map<string, boolean>()
+  const gwEdited = () => !!gwFilled && (gatewayURL.value !== gwFilled.url || gwAgents.checked !== gwFilled.agents || gwReviewers.checked !== gwFilled.reviewers)
 
   const failed = (a: Answer, fallback: string) => {
     say.textContent = text(a.body.message) ? visible(text(a.body.message)) : fallback
   }
 
-  const paint = (v: EgressView) => {
+  const paint = (v: EgressView, refill: Refill = null) => {
+    const key = focusedKey(m.dialog)
+    const before = view?.added.map(h => h.host) ?? []
     view = v
     startNote.textContent = v.saved ? '' : 'Until you save a change here, the lists are the starting values from SF_ALLOW and SF_EXTRA_ALLOW.'
     pending.textContent = v.pending ? 'egress hasn’t taken the latest list yet, so the sandbox check fails and sessions are Held until it does.' : ''
+    const edited = new Map<string, boolean>()
+    if (refill !== 'agents') {
+      for (const b of agentsBox.querySelectorAll<HTMLInputElement>('input[type=checkbox]')) {
+        if (agentsFilled.get(b.value) !== b.checked) edited.set(b.value, b.checked)
+      }
+    }
+    agentsFilled.clear()
     agentsBox.replaceChildren(el('legend', 'label', 'Agents you use'))
     for (const a of v.agents) {
       const label = el('label', 'small row')
       const box = el('input')
       box.type = 'checkbox'
       box.value = a.id
-      box.checked = a.inUse
+      box.dataset.key = `agent:${a.id}`
+      box.checked = edited.get(a.id) ?? a.inUse
+      agentsFilled.set(a.id, a.inUse)
       label.append(box, el('span', '', `${visible(a.name)}: ${a.hosts.map(visible).join(', ')}`))
       agentsBox.append(label)
     }
-    agentsBox.append(actionButton('Save agents', 'ghost small', saveAgents))
+    agentsBox.append(actionButton('Save agents', 'ghost small', saveAgents, 'button', 'save-agents'))
     addedList.replaceChildren()
     if (!v.added.length) addedList.append(el('li', 'muted', 'No hosts added.'))
     for (const h of v.added) {
       const li = el('li', 'row')
       li.append(el('code', '', visible(h.host)), el('span', 'small muted', until(h.expires, v.now)), el('span', 'small', typeof h.reason === 'string' && h.reason ? `“${visible(h.reason)}”` : 'no reason given'))
       if (h.uploads) li.append(el('span', 'tag warn', 'accepts uploads'))
-      li.append(el('span', 'spacer'), actionButton('Remove', 'ghost small', () => remove(h.host)))
+      li.append(el('span', 'spacer'), actionButton('Remove', 'ghost small', () => remove(h.host), 'button', `remove:${h.host}`))
       addedList.append(li)
     }
-    gatewayURL.value = v.gateway?.url ?? ''
-    gwAgents.checked = v.gateway ? v.gateway.agents : true
-    gwReviewers.checked = v.gateway ? v.gateway.reviewers : true
+    if (refill === 'gateway' || !gwEdited()) {
+      gatewayURL.value = v.gateway?.url ?? ''
+      gwAgents.checked = v.gateway ? v.gateway.agents : true
+      gwReviewers.checked = v.gateway ? v.gateway.reviewers : true
+      gwFilled = { url: gatewayURL.value, agents: gwAgents.checked, reviewers: gwReviewers.checked }
+    }
     gwNote.textContent = v.gatewayKeyNote
     listsNote.textContent = `Agents reach: ${v.lists.agents.map(visible).join(', ') || 'nothing'}. Reviewers reach: ${v.lists.reviewers.map(visible).join(', ') || 'nothing'}.`
+    refocus(m.dialog, key, k => {
+      if (!k.startsWith('remove:')) return []
+      const at = before.indexOf(k.slice('remove:'.length))
+      return [...before.slice(at + 1), ...before.slice(0, Math.max(at, 0)).reverse()].map(h => `remove:${h}`).concat('host')
+    })
   }
 
-  const answer = (a: Answer, fallback: string): boolean => {
+  const answer = (a: Answer, fallback: string, refill: Refill = null): boolean => {
     const v = viewOf(a.body)
     if (!a.ok || !v) {
       failed(a, fallback)
@@ -218,7 +235,7 @@ export function openEgress(post: Post): void {
       return false
     }
     say.textContent = ''
-    paint(v)
+    paint(v, refill)
     return true
   }
 
@@ -231,7 +248,7 @@ export function openEgress(post: Post): void {
 
   const saveAgents = async () => {
     const ids = [...agentsBox.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].filter(b => b.checked).map(b => b.value)
-    answer(await call(post, { op: 'agents', agents: ids }), 'The agents weren’t saved.')
+    answer(await call(post, { op: 'agents', agents: ids }), 'The agents weren’t saved.', 'agents')
   }
 
   const remove = async (host: string) => {
@@ -244,17 +261,26 @@ export function openEgress(post: Post): void {
     const reason = reasonInput.value.trim()
     const a = await call(post, { op: 'add', host, expires: expiry.value, ...(uploadsOk ? { uploadsOk: true } : {}), ...(reason ? { reason } : {}) })
     if (!a.ok && a.body.error === 'uploads') {
-      uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Cancel', 'ghost small', () => { uploadWarn.hidden = true }), actionButton('Add anyway', 'ghost small', () => add(true)))
+      uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Cancel', 'ghost small', () => {
+        uploadWarn.hidden = true
+        hostInput.focus()
+      }), actionButton('Add anyway', 'ghost small', () => add(true)))
       uploadWarn.hidden = false
       return
     }
+    const fromWarn = uploadWarn.contains(document.activeElement)
     uploadWarn.hidden = true
-    if (answer(a, 'The host wasn’t added.')) {
+    const added = answer(a, 'The host wasn’t added.')
+    if (added) {
       hostInput.value = ''
       reasonInput.value = ''
       hint.textContent = ''
       void loadRefusals()
     }
+    if (!fromWarn) return
+    const shown = added ? view?.added.find(h => h.host.toLowerCase() === host.toLowerCase())?.host : undefined
+    const remover = shown ? m.dialog.querySelector<HTMLButtonElement>(`[data-key="${CSS.escape(`remove:${shown}`)}"]`) : null
+    ;(remover ?? hostInput).focus()
   }
 
   const prefill = (r: Refusal) => {
@@ -318,7 +344,7 @@ export function openEgress(post: Post): void {
     gwKey.type = 'password'
     gwTell([], false)
     const a = await call(post, { op: 'gateway', url: clear ? '' : gatewayURL.value.trim(), agents: gwAgents.checked, reviewers: gwReviewers.checked })
-    if (!answer(a, 'The gateway wasn’t saved.') || !key || !gwSides().length) return
+    if (!answer(a, 'The gateway wasn’t saved.', 'gateway') || !key || !gwSides().length) return
     gwTell(['Saving the key…'], false)
     await keySteps(target => ({ step: 'key', target, key }), 'Key saved', 'The key wasn’t saved. Try again.')
   }
@@ -367,31 +393,26 @@ export function openEgress(post: Post): void {
   })
   const refreshRow = el('div', 'row')
   refreshRow.append(el('h3', 'label', 'Refused requests'), el('span', 'spacer'), actionButton('Refresh', 'ghost small', loadRefusals))
-  const actions = el('div', 'row consent-actions')
-  actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
-  d.append(
-    el('h2', 'label', 'Network access'),
-    intro, startNote, pending, say,
-    agentsBox,
-    el('h3', 'label', 'Hosts you added'),
-    el('p', 'small muted', 'For agents only; reviewers reach only Claude Code’s hosts and the gateway. A host you add gives every session a way out, so add only what a task needs, and give it an expiry when you can.'),
-    addedList, addForm, hint, uploadWarn,
-    refreshRow,
-    el('p', 'small muted', 'What egress refused since it started: host, count and last time, never the path. It keeps one count per host and reason across all sessions, so it doesn’t say which session asked.'),
-    refusedBox,
-    el('h3', 'label', 'Company LLM gateway'),
-    el('p', 'small', 'Sets Claude Code’s base URL (ANTHROPIC_BASE_URL) for the sessions and reviewers you choose, and adds the gateway’s host to their allowlist. While the gateway is on for a side, that side’s list leaves out Anthropic’s own hosts and Claude Code’s telemetry hosts (anthropic.com, claude.ai, claude.com, Statsig, Sentry, Datadog), unless the gateway is one of them, so a key pasted for the gateway can’t reach them; removing the gateway brings them back.'),
-    el('p', 'small warn', `${GATEWAY_WARNING}.`),
-    gwNote, gwForm,
-    listsNote,
-    actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'egress',
+    title: 'Network access',
+    body: [
+      intro, startNote, pending, say,
+      agentsBox,
+      el('h3', 'label', 'Hosts you added'),
+      el('p', 'small muted', 'For agents only; reviewers reach only Claude Code’s hosts and the gateway. A host you add gives every session a way out, so add only what a task needs, and give it an expiry when you can.'),
+      addedList, addForm, hint, uploadWarn,
+      refreshRow,
+      el('p', 'small muted', 'What egress refused since it started: host, count and last time, never the path. It keeps one count per host and reason across all sessions, so it doesn’t say which session asked.'),
+      refusedBox,
+      el('h3', 'label', 'Company LLM gateway'),
+      el('p', 'small', 'Sets Claude Code’s base URL (ANTHROPIC_BASE_URL) for the sessions and reviewers you choose, and adds the gateway’s host to their allowlist. While the gateway is on for a side, that side’s list leaves out Anthropic’s own hosts and Claude Code’s telemetry hosts (anthropic.com, claude.ai, claude.com, Statsig, Sentry, Datadog), unless the gateway is one of them, so a key pasted for the gateway can’t reach them; removing the gateway brings them back.'),
+      el('p', 'small warn', `${GATEWAY_WARNING}.`),
+      gwNote, gwForm,
+      listsNote,
+    ],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
   void reload()
   void loadRefusals()
 }

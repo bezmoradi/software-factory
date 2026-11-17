@@ -1,4 +1,5 @@
-import { actionButton, button, el, opener, visible, whileBusy } from '../lib/dom.ts'
+import { actionButton, button, el, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Send = (file: Blob) => Promise<Response>
@@ -143,14 +144,7 @@ function fileName(res: Response): string {
 }
 
 export function openBackup(post: Post, send: Send): void {
-  const back = opener()
-  const d = el('dialog', 'consent backup surface')
-  d.setAttribute('aria-label', 'Export and import')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
+  let generation = 0
   const say = el('p', 'small')
   say.setAttribute('role', 'status')
   const body = el('div', 'backup-body')
@@ -198,8 +192,10 @@ export function openBackup(post: Post, send: Send): void {
   }
 
   const reload = async () => {
+    const mine = ++generation
     say.textContent = 'Loading…'
     const { view, message } = await load(post)
+    if (mine !== generation) return
     say.textContent = message
     if (view) paint(view)
   }
@@ -238,6 +234,7 @@ export function openBackup(post: Post, send: Send): void {
         return
       }
       const report = reportOf(r.report)
+      generation++
       say.textContent = 'Imported. The engine restarts to finish; the page reconnects once it’s back.'
       importButton.disabled = true
       if (report) body.replaceChildren(...reportNodes(report))
@@ -246,21 +243,21 @@ export function openBackup(post: Post, send: Send): void {
     }))
   })
 
-  const actions = el('div', 'row consent-actions')
-  actions.append(actionButton('Refresh', 'ghost small', reload), el('span', 'spacer'), button('Close', 'ghost small', close))
   const transfer = el('div', 'row')
   transfer.append(exportButton, importButton, picker)
-  d.append(
-    el('h2', 'label', 'Export and import'),
-    el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
-    el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),
-    transfer, importWhy, say, body, actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'backup',
+    title: 'Export and import',
+    body: [
+      el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
+      el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),
+      transfer, importWhy, say, body,
+    ],
+    lead: [actionButton('Refresh', 'ghost small', reload)],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
+  m.onClose(() => {
+    generation++
+  })
   void reload()
 }

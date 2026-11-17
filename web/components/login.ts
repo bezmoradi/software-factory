@@ -1,4 +1,5 @@
 import { busy, button, el, visible, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
 import { icon } from './icon.ts'
@@ -272,41 +273,28 @@ export async function signInState(post: Post): Promise<SignInState | null> {
 }
 
 export async function claudeLogin(post: Post, tell: (title: string) => void, closed?: () => void, known?: SignIn | null): Promise<void> {
-  const d = el('dialog', 'consent login surface')
-  d.setAttribute('aria-label', 'Sign Claude Code in for the reviewers')
   const reviewers = new Row(post, 'reviewers', how => {
-    close()
+    m.close()
     tell(`Claude Code for the reviewers is signed in with ${how}.`)
   })
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   let open = true
   let again = 0
-  const close = () => {
+  const m = modal({
+    kind: 'login',
+    title: 'Sign Claude Code in for the reviewers',
+    body: [
+      el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
+      reviewers.node,
+    ],
+    actions: [button('Close', 'ghost small', () => m.close())],
+    focus: 'heading',
+  })
+  m.onClose(() => {
     open = false
     clearTimeout(again)
     reviewers.cancel()
-    d.close()
-    d.remove()
     closed?.()
-    if (opener?.isConnected) opener.focus()
-  }
-  const actions = el('div', 'row consent-actions')
-  actions.append(el('span', 'spacer'), button('Close', 'ghost small', close))
-  const heading = el('h2', 'label', 'Sign Claude Code in for the reviewers')
-  heading.tabIndex = -1
-  d.append(
-    heading,
-    el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
-    reviewers.node,
-    actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
   })
-  document.body.append(d)
-  d.showModal()
-  heading.focus()
   if (known) reviewers.show(known)
   const refresh = async (): Promise<void> => {
     const a = await call(post, { step: 'status' })
@@ -347,18 +335,15 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
   if (!BOX.test(box)) return Promise.resolve(false)
   const target = `box:${box}`
   return new Promise(resolve => {
-    const d = el('dialog', 'consent login surface')
-    d.setAttribute('aria-label', `Sign ${visible(name)} in for this session`)
     const status = el('p', 'small', describe(needs.signIn ?? null))
     status.setAttribute('role', 'status')
     let finished = false
-    const done = (answer: boolean) => {
+    let answer = false
+    const done = (yes: boolean) => {
       if (finished) return
       finished = true
-      row?.cancel()
-      d.close()
-      d.remove()
-      resolve(answer)
+      answer = yes
+      m.close()
     }
     const row = needs.code ? new Row(post, target, how => {
       done(true)
@@ -384,7 +369,6 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       if (await check() !== false) done(true)
     }
     const parts: Node[] = [
-      el('h2', 'label', `Sign ${visible(name)} in for this session`),
       el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
     ]
     if (row) {
@@ -395,16 +379,17 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       parts.push(status)
       if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
     }
-    const actions = el('div', 'row consent-actions')
     const go = button('Continue', 'primary small', () => void whileBusy(go, proceed))
-    actions.append(el('span', 'spacer'), button('Cancel', 'ghost small', () => done(false)), go)
-    parts.push(actions)
-    d.append(...parts)
-    d.addEventListener('cancel', e => {
-      e.preventDefault()
-      done(false)
+    const m = modal({
+      kind: 'login',
+      title: `Sign ${visible(name)} in for this session`,
+      body: parts,
+      actions: [button('Cancel', 'ghost small', () => done(false)), go],
     })
-    document.body.append(d)
-    d.showModal()
+    m.onClose(() => {
+      finished = true
+      row?.cancel()
+      resolve(answer)
+    })
   })
 }

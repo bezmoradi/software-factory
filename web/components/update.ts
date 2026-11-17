@@ -1,4 +1,5 @@
 import { actionButton, button, el } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
 import { commandBlock } from './login.ts'
 
@@ -175,52 +176,37 @@ export function openUpdate(): void {
   if (!view || !r) return
   const running = view.running
   const development = view.development
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const d = el('dialog', 'consent update surface')
   const title = `Update to Software Factory ${r.version}`
-  d.setAttribute('aria-label', title)
-  const close = () => {
-    d.close()
-    d.remove()
-    const back = opener?.isConnected ? opener : document.getElementById('palette-open')
-    back?.focus()
-  }
-  const heading = el('h2', 'update-title', title)
-  heading.tabIndex = -1
-  const cross = button('', 'ghost icon-button update-x', close)
+  const cross = button('', 'ghost icon-button update-x', () => m.close())
   cross.setAttribute('aria-label', 'Close')
   cross.title = 'Close'
   cross.append(icon('close'))
-  const head = el('div', 'update-head')
-  head.append(heading, cross)
   const said = el('p', 'small warn')
   said.setAttribute('role', 'status')
   const later = actionButton('Remind me later', 'ghost small', async () => {
     const a = await call({ later: r.version })
-    if (a.ok) return close()
+    if (a.ok) return m.close()
     said.textContent = a.message
   })
   later.title = `Hides this until a release newer than ${r.version} is out`
-  const actions = el('div', 'row consent-actions')
-  actions.append(later, el('span', 'spacer'), button('Close', 'primary small', close))
   const tag = `v${r.version}`
   const steps = development ? [sourceSteps(true), releaseSteps()] : [releaseSteps(), sourceSteps(false)]
-  d.append(
-    head,
-    para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
-    para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
-    ...steps,
-    keepsAndStops(),
-    said,
-    actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'update',
+    title,
+    headingClass: 'update-title',
+    header: { cls: 'update-head', after: [cross] },
+    body: [
+      para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
+      para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
+      ...steps,
+      keepsAndStops(),
+      said,
+    ],
+    lead: [later],
+    actions: [button('Close', 'primary small', () => m.close())],
+    focus: 'heading',
   })
-  document.body.append(d)
-  d.showModal()
-  heading.focus()
 }
 
 class SfUpdate extends HTMLElement {

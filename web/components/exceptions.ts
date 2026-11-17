@@ -1,4 +1,5 @@
-import { actionButton, button, el, opener, visible } from '../lib/dom.ts'
+import { actionButton, button, el, visible } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
 import { shortSha } from '../lib/format.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -68,14 +69,7 @@ function until(expires: number, now: number): string {
 }
 
 export function openExceptions(post: Post, labelOf: (sid: string) => string): void {
-  const back = opener()
-  const d = el('dialog', 'consent exceptions surface')
-  d.setAttribute('aria-label', 'Register of exceptions')
-  const close = () => {
-    d.close()
-    back()
-    d.remove()
-  }
+  let generation = 0
   const say = el('p', 'small')
   say.setAttribute('role', 'status')
   const body = el('div', 'exceptions-body')
@@ -153,9 +147,11 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
   }
 
   const reload = async () => {
+    const mine = ++generation
     say.textContent = 'Loading…'
     const res = await post(ROUTE, {}).catch(() => null)
     const parsed: unknown = res ? await res.json().catch(() => ({})) : {}
+    if (mine !== generation) return
     const v = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
     if (!res || !res.ok) {
       say.textContent = text(v.message) ? visible(text(v.message)) : 'The register didn’t load.'
@@ -165,18 +161,18 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     paint(v)
   }
 
-  const actions = el('div', 'row consent-actions')
-  actions.append(actionButton('Refresh', 'ghost small', reload), el('span', 'spacer'), button('Close', 'ghost small', close))
-  d.append(
-    el('h2', 'label', 'Register of exceptions'),
-    el('p', 'small', 'Every exception to the usual rules in one place, read only: pushes you allowed with a reason, verdicts you overrode, flagged files and commits you allowed, hosts you added to the network allowlist and the allow rules Claude Code saved. Decisions come from the engine’s audit file, newest first.'),
-    say, body, actions,
-  )
-  d.addEventListener('cancel', e => {
-    e.preventDefault()
-    close()
+  const m = modal({
+    kind: 'exceptions',
+    title: 'Register of exceptions',
+    body: [
+      el('p', 'small', 'Every exception to the usual rules in one place, read only: pushes you allowed with a reason, verdicts you overrode, flagged files and commits you allowed, hosts you added to the network allowlist and the allow rules Claude Code saved. Decisions come from the engine’s audit file, newest first.'),
+      say, body,
+    ],
+    lead: [actionButton('Refresh', 'ghost small', reload)],
+    actions: [button('Close', 'ghost small', () => m.close())],
   })
-  document.body.append(d)
-  d.showModal()
+  m.onClose(() => {
+    generation++
+  })
   void reload()
 }

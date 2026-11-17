@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, opener, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { confirmDialog } from '../lib/dialog.ts'
 import { label, shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import { agentName } from './lineage.ts'
@@ -68,28 +69,9 @@ function elapsed(from: number | undefined): string {
 }
 
 export function confirmBoth(): Promise<boolean> {
-  return new Promise(resolve => {
-    const back = opener()
-    const d = el('dialog', 'consent surface')
-    d.setAttribute('aria-label', 'Start both sessions')
-    const done = (answer: boolean) => {
-      d.close()
-      back()
-      d.remove()
-      resolve(answer)
-    }
-    const actions = el('div', 'row consent-actions')
-    actions.append(el('span', 'spacer'), button('Cancel', 'ghost small', () => done(false)), button('Start both', 'primary small', () => done(true)))
-    d.append(el('h2', 'label', 'Start both sessions?'),
-      el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
-      actions)
-    d.addEventListener('cancel', e => {
-      e.preventDefault()
-      done(false)
-    })
-    document.body.append(d)
-    d.showModal()
-  })
+  return confirmDialog('Start both sessions?', [
+    el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
+  ], 'Start both', 'primary')
 }
 
 function diffBox(c: Changes, what: string): HTMLElement {
