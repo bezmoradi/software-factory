@@ -278,7 +278,7 @@ func repositories(base context.Context, cfg PageConfig, reg *session.Registry, l
 	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {
 		checker = tokencheck.Checker{Client: client}
 	} else {
-		logger.Warn("repository", "event", "token-check-off")
+		logger.Warn("repository", "event", "token-check-off", "err", err.Error())
 	}
 	return session.NewRepos(session.ReposConfig{
 		Workspace: cfg.Workspace,

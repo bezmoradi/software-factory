@@ -61,5 +61,8 @@ func useReviewExtras(srv *page.Server, reg *session.Registry, parts engineParts,
 		logger.Warn("lessons", "event", "not-started")
 		return
 	}
+	if parts.repos != nil {
+		parts.repos.UseProjectData(lessons)
+	}
 	srv.UseLessons(lessons)
 }

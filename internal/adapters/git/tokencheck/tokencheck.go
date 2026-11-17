@@ -140,11 +140,12 @@ func (c Checker) gitlab(ctx context.Context, name, token string) session.TokenCh
 	if self.Revoked || self.Active != nil && !*self.Active {
 		return session.TokenCheck{Rejected: true, Problem: "GitLab says this token is revoked or expired. Create a new one."}
 	}
-	if !slices.Contains(self.Scopes, "write_repository") {
-		return session.TokenCheck{Warning: "This token has no write_repository scope, so pushes to GitLab will fail. Create one with it to push."}
+	var warnings []string
+	if !slices.Contains(self.Scopes, "write_repository") && !slices.Contains(self.Scopes, "api") {
+		warnings = append(warnings, "This token has neither the write_repository nor the api scope, so pushes to GitLab will fail. Create one with write_repository to push.")
 	}
 	if when, err := time.Parse("2006-01-02", self.ExpiresAt); err == nil && when.Sub(c.now()) < soonExpires {
-		return session.TokenCheck{Warning: "This token expires on " + when.Format("Jan 2, 2006") + ". Create a new one before then."}
+		warnings = append(warnings, "This token expires on "+when.Format("Jan 2, 2006")+". Create a new one before then.")
 	}
-	return session.TokenCheck{}
+	return session.TokenCheck{Warning: strings.Join(warnings, " ")}
 }

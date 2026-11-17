@@ -427,6 +427,10 @@ func workOff(in, out string, report *session.ImportReport) error {
 		p.Findings, p.PRComment, p.Depth = false, false, workflow.Depth{}
 		st.Projects[name] = p
 	}
+	for i := range st.Removed {
+		p := &st.Removed[i].Data
+		p.Findings, p.PRComment, p.Depth = false, false, workflow.Depth{}
+	}
 	approvals := 0
 	for sid, w := range st.Sessions {
 		if w.Requirements != nil || w.Plan != nil || len(w.Allowed) > 0 {
@@ -456,21 +460,27 @@ func pairsHistory(in, out string, report *session.ImportReport) error {
 }
 
 func lessonsShown(in, out string, report *session.ImportReport) error {
-	all, err := NewLessons(in).Load()
+	st, err := NewLessons(in).Load()
 	if err != nil {
 		return err
 	}
 	dropped := 0
-	for name, p := range all {
+	settled := func(p session.LessonProject) session.LessonProject {
 		n := len(p.Lines)
 		p.Lines = slices.DeleteFunc(p.Lines, func(l session.LessonLine) bool { return l.State == session.LessonOffered })
 		dropped += n - len(p.Lines)
-		all[name] = p
+		return p
+	}
+	for name, p := range st.Projects {
+		st.Projects[name] = settled(p)
+	}
+	for i, r := range st.Removed {
+		st.Removed[i].Data = settled(r.Data)
 	}
 	if dropped > 0 {
 		report.Off = append(report.Off, plural(dropped, "suggested instruction line")+" not yet approved dropped; ask for suggestions again")
 	}
-	return NewLessons(out).Save(all)
+	return NewLessons(out).Save(st)
 }
 
 func egressAgents(in, out string) error {

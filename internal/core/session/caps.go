@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ type CapsSession struct {
 
 type CapsState struct {
 	Projects map[string]Caps
+	Removed  []RemovedProject[Caps]
 	Sessions []CapsSession
 	Tokens   map[string]time.Time
 }
@@ -121,6 +123,7 @@ type Limits struct {
 	started        bool
 	loaded         bool
 	projects       map[string]Caps
+	removed        []RemovedProject[Caps]
 	sessions       map[string]*capSession
 	known          map[string]limitsSession
 	reviewerSignIn *SignIn
@@ -182,6 +185,12 @@ func (l *Limits) loadLocked(st CapsState) {
 			l.projects[name] = clean
 		}
 	}
+	l.removed = nil
+	for _, r := range st.Removed {
+		if clean, ok := CheckCaps(r.Data); ok && clean.Any() && r.ID.Name != "" && RoomForRemoved(l.removed, r.ID) {
+			l.removed = append(l.removed, RemovedProject[Caps]{ID: r.ID, Data: clean})
+		}
+	}
 	for _, s := range st.Sessions {
 		if !sidPattern.MatchString(s.SID) || len(l.sessions) >= MaxCapSessions {
 			continue
@@ -217,6 +226,7 @@ func cleanUsed(u CapsUsed) CapsUsed {
 func (l *Limits) stateLocked() CapsState {
 	st := CapsState{Projects: map[string]Caps{}, Tokens: map[string]time.Time{}}
 	maps.Copy(st.Projects, l.projects)
+	st.Removed = slices.Clone(l.removed)
 	for sid, s := range l.sessions {
 		cs := CapsSession{SID: sid, Project: s.project, Used: s.used, Reached: s.reached, ReachedAt: s.reachedAt}
 		if s.own != nil {

@@ -80,6 +80,7 @@ type SavedWork struct {
 type WorkState struct {
 	Teams    map[string]TeamApproval
 	Projects map[string]ProjectSettings
+	Removed  []RemovedProject[ProjectSettings]
 	Sessions map[string]SavedWork
 }
 
@@ -264,7 +265,49 @@ type WorkPage interface {
 	ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error)
 }
 
-var _ WorkPage = (*Work)(nil)
+var (
+	_ WorkPage    = (*Work)(nil)
+	_ ProjectData = (*Work)(nil)
+)
+
+func (w *Work) projectData(event string, fn func(st *WorkState) bool) {
+	err := w.change(func(st *WorkState) error {
+		if !fn(st) {
+			return errUnchanged
+		}
+		return nil
+	})
+	switch {
+	case err == nil:
+		w.cfg.Logger.Info("work", "event", event)
+	case !errors.Is(err, errUnchanged):
+		w.cfg.Logger.Warn("work", "event", "project-data-not-saved")
+	}
+}
+
+func (w *Work) ParkProject(id ProjectID) {
+	w.projectData("settings-parked", func(st *WorkState) bool {
+		var parked bool
+		st.Removed, _, parked = parkProject(st.Projects, st.Removed, id)
+		return parked
+	})
+}
+
+func (w *Work) RestoreProject(id ProjectID) {
+	w.projectData("settings-restored", func(st *WorkState) bool {
+		var changed bool
+		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
+		return changed
+	})
+}
+
+func (w *Work) KeepProjects(names []string) {
+	w.projectData("unlisted-settings-set-aside", func(st *WorkState) bool {
+		var n int
+		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
+		return n > 0
+	})
+}
 
 func NewWork(cfg WorkConfig) (*Work, error) {
 	if cfg.Targets == nil || cfg.Heads == nil || cfg.History == nil || cfg.Files == nil || cfg.Repos == nil || cfg.Store == nil || cfg.Level == nil {

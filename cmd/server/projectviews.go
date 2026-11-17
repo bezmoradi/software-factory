@@ -38,6 +38,7 @@ func useProjectViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *s
 		Imported: state.ImportedReviews(cfg.StateDir), Runs: state.NewSessions(cfg.StateDir).Load, Caps: state.NewCaps(cfg.StateDir).Load, Follows: follows.Load}))
 	decisions := session.NewDecisionLog(session.DecisionLogConfig{Store: state.NewDecisionLog(cfg.StateDir), Audit: audit, Writer: audit, Follows: follows.Load,
 		Repos: parts.repos, Note: reg.NoteFor(session.DecisionNoteSource), Logger: logger})
+	parts.repos.UseProjectData(decisions)
 	srv.UseDecisionLog(decisions)
 	if parts.dispatcher != nil {
 		parts.dispatcher.UseDecisionLog(decisions)

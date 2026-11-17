@@ -128,7 +128,7 @@ type RepoAdmin interface {
 	View() (RepoView, error)
 	Add(raw string) (Cloning, error)
 	Remove(name string) error
-	SaveToken(host, token string) (TokenInfo, error)
+	SaveToken(ctx context.Context, host, token string) (TokenInfo, error)
 	RemoveToken(host string) error
 }
 
@@ -155,6 +155,7 @@ type Repos struct {
 	sessions func(name string) int
 	hosts    func()
 	removed  []func(ProjectID)
+	added    []func(ProjectID)
 	fetched  func(ctx context.Context, name, branch, commit string)
 
 	delivers  map[string]*sync.Mutex
@@ -188,6 +189,12 @@ func (c *Repos) OnHosts(changed func()) {
 func (c *Repos) OnRemoved(forget func(ProjectID)) {
 	c.mu.Lock()
 	c.removed = append(c.removed, forget)
+	c.mu.Unlock()
+}
+
+func (c *Repos) OnAdded(restore func(ProjectID)) {
+	c.mu.Lock()
+	c.added = append(c.added, restore)
 	c.mu.Unlock()
 }
 
@@ -550,6 +557,12 @@ func (c *Repos) clone(k Cloning) {
 		c.frame("failed", k.URL, done.Name, "The clone finished, but the engine couldn't record it, so it isn't in the list.")
 		return
 	}
+	c.mu.Lock()
+	hooks := slices.Clone(c.added)
+	c.mu.Unlock()
+	for _, restore := range hooks {
+		restore(ProjectID{Name: done.Name, URL: k.URL})
+	}
 	c.cfg.Logger.Info("repository", "event", "added")
 	c.frame("added", k.URL, done.Name, "")
 	c.hostsChanged()
@@ -564,7 +577,7 @@ func (c *Repos) Remove(name string) error {
 		return err
 	}
 	if err := c.cfg.Remote.Delete(name); err != nil {
-		c.cfg.Logger.Warn("repository", "event", "folder-not-removed")
+		c.cfg.Logger.Warn("repository", "event", "folder-not-removed", "name", name, "err", err.Error())
 	}
 	for _, forget := range hooks {
 		forget(id)
@@ -582,6 +595,11 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	if len(kept) == len(recs) {
 		return ProjectID{}, explained(notFound("repository"), "That repository is no longer in the list.")
 	}
+	for _, k := range c.cloning {
+		if k.Name == name || sameRepository(k.URL, recs[at].URL) {
+			return ProjectID{}, explained(conflict("cloning"), "This repository is being cloned again. Wait for the clone to finish, then remove it.")
+		}
+	}
 	if c.sessions != nil {
 		if n := c.sessions(name); n > 0 {
 			what := "its session"
@@ -598,7 +616,7 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	return ProjectID{Name: name, URL: recs[at].URL}, nil
 }
 
-func (c *Repos) SaveToken(host, token string) (TokenInfo, error) {
+func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, error) {
 	h, err := HostOf(host)
 	if err != nil {
 		return TokenInfo{}, explained(invalid("host"), err.Error())
@@ -608,9 +626,13 @@ func (c *Repos) SaveToken(host, token string) (TokenInfo, error) {
 	}
 	warning := ""
 	if c.cfg.Checker != nil {
-		ctx, cancel := context.WithTimeout(c.cfg.Base, TokenCheckFor)
-		v := c.cfg.Checker.CheckToken(ctx, h, token)
+		cctx, cancel := context.WithTimeout(ctx, TokenCheckFor)
+		v := c.cfg.Checker.CheckToken(cctx, h, token)
 		cancel()
+		if ctx.Err() != nil {
+			c.cfg.Logger.Info("token not saved for " + h + ": the request ended during the check")
+			return TokenInfo{}, explained(conflict("abandoned"), "The save ended before the engine finished checking the token, so it saved nothing.")
+		}
 		if v.Rejected {
 			c.cfg.Logger.Info("token refused for " + h)
 			return TokenInfo{}, explained(invalid("token"), v.Problem)
@@ -643,7 +665,9 @@ func (c *Repos) RemoveToken(host string) error {
 }
 
 func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
+	c.mu.Lock()
 	recs, err := c.cfg.Records.Load()
+	c.mu.Unlock()
 	if err != nil {
 		return "", explained(conflict("records"), "The engine couldn't read its list of repositories.")
 	}
@@ -871,10 +895,13 @@ func (c *Repos) recloned(k Cloning) {
 	}
 	c.mu.Lock()
 	recs, err := c.cfg.Records.Load()
+	updated, named := false, true
 	if err == nil {
+		named = slices.ContainsFunc(recs, func(r Record) bool { return r.Name == k.Name })
 		if j := slices.IndexFunc(recs, func(r Record) bool { return r.Name == k.Name && r.URL == k.URL }); j >= 0 {
 			recs[j].Branch, recs[j].Commit = done.Branch, done.Commit
 			err = c.cfg.Records.Save(recs)
+			updated = err == nil
 		}
 	}
 	delete(c.cloning, k.URL)
@@ -882,6 +909,16 @@ func (c *Repos) recloned(k Cloning) {
 	if err != nil {
 		c.cfg.Logger.Warn("repository", "event", "record-failed")
 		c.frame("failed", k.URL, done.Name, "The clone finished, but the engine couldn't record it.")
+		return
+	}
+	if !updated {
+		if !named {
+			if derr := c.cfg.Remote.Delete(k.Name); derr != nil {
+				c.cfg.Logger.Warn("repository", "event", "folder-not-removed", "name", k.Name, "err", derr.Error())
+			}
+		}
+		c.cfg.Logger.Warn("repository", "event", "record-failed")
+		c.frame("failed", k.URL, done.Name, "The clone finished, but the project is no longer in the list.")
 		return
 	}
 	c.cfg.Logger.Info("repository", "event", "recloned")

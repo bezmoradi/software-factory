@@ -72,6 +72,10 @@ func validProject(id session.ProjectID) bool {
 	return id.Name != "" && cleanText(id.Name, maxFollowProject) && id.URL != "" && cleanText(id.URL, maxProjectURL)
 }
 
+func removedID(id session.ProjectID) bool {
+	return id.Name != "" && cleanText(id.Name, maxFollowProject) && cleanText(id.URL, maxProjectURL)
+}
+
 func followURL(u string) bool {
 	return u == "" || len(u) <= maxFollowURL && strings.HasPrefix(u, "https://") && cleanText(u, maxFollowURL)
 }

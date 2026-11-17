@@ -173,6 +173,7 @@ type Dispatcher struct {
 	started    time.Time
 	woken      time.Time
 	starting   bool
+	startRepo  string
 	approvalMu sync.Mutex
 	saveMu     sync.Mutex
 	home       *HomeSettings
@@ -307,7 +308,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if !id.Set() {
 		return Started{}, noIdentity()
 	}
-	if err := d.claimStart(); err != nil {
+	if err := d.claimStart(repo.Name); err != nil {
 		return Started{}, err
 	}
 	defer d.endStart()
@@ -448,7 +449,7 @@ func utf8Valid(s string) bool {
 	return strings.ToValidUTF8(s, "�") == s
 }
 
-func (d *Dispatcher) claimStart() error {
+func (d *Dispatcher) claimStart(repo string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := d.reg.now()
@@ -456,6 +457,7 @@ func (d *Dispatcher) claimStart() error {
 		return explained(limited("wait"), "Wait a few seconds between starts.")
 	}
 	d.starting = true
+	d.startRepo = repo
 	d.started = now
 	return nil
 }
@@ -463,6 +465,7 @@ func (d *Dispatcher) claimStart() error {
 func (d *Dispatcher) endStart() {
 	d.mu.Lock()
 	d.starting = false
+	d.startRepo = ""
 	d.mu.Unlock()
 }
 
@@ -1258,6 +1261,9 @@ func (d *Dispatcher) SessionsOf(repo string) int {
 		if r.repo == repo {
 			n++
 		}
+	}
+	if n == 0 && d.starting && d.startRepo == repo {
+		n = 1
 	}
 	return n
 }

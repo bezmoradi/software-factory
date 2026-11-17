@@ -55,9 +55,16 @@ type lessonProjectJSON struct {
 	Lines    []lessonLineJSON    `json:"lines,omitempty"`
 }
 
+type removedLessonJSON struct {
+	Project string `json:"project"`
+	URL     string `json:"url"`
+	lessonProjectJSON
+}
+
 type lessonsJSON struct {
 	Version  int                          `json:"version"`
 	Projects map[string]lessonProjectJSON `json:"projects"`
+	Removed  []removedLessonJSON          `json:"removed,omitempty"`
 }
 
 func (l Lessons) lock() func() {
@@ -98,52 +105,80 @@ func lessonLineOf(x lessonLineJSON) (session.LessonLine, bool) {
 	return out, len(out.From) > 0
 }
 
-func (l Lessons) Load() (map[string]session.LessonProject, error) {
+func lessonProjectOf(p lessonProjectJSON) session.LessonProject {
+	var v session.LessonProject
+	for _, x := range p.Findings {
+		if fd, ok := lessonFindingOf(x); ok && len(v.Findings) < session.MaxLessonFindings && !slices.ContainsFunc(v.Findings, func(y session.LessonFinding) bool { return y.ID == fd.ID }) {
+			v.Findings = append(v.Findings, fd)
+		}
+	}
+	for _, x := range p.Lines {
+		if ln, ok := lessonLineOf(x); ok && len(v.Lines) < session.MaxLessonLines && !slices.ContainsFunc(v.Lines, func(y session.LessonLine) bool { return y.ID == ln.ID }) {
+			v.Lines = append(v.Lines, ln)
+		}
+	}
+	return v
+}
+
+func lessonProjectJSONOf(p session.LessonProject) lessonProjectJSON {
+	var v lessonProjectJSON
+	for _, x := range p.Findings {
+		v.Findings = append(v.Findings, lessonFindingJSON{ID: x.ID, Agent: x.Agent, Path: x.Path, Title: x.Title, Excerpt: x.Excerpt, Commits: x.Commits, Last: x.Last.UTC()})
+	}
+	for _, x := range p.Lines {
+		v.Lines = append(v.Lines, lessonLineJSON{ID: x.ID, Text: x.Text, From: x.From, State: x.State, Session: x.Session, At: x.At.UTC()})
+	}
+	return v
+}
+
+func halved(p lessonProjectJSON) (lessonProjectJSON, int) {
+	if len(p.Findings) <= 1 {
+		return p, 0
+	}
+	n := len(p.Findings) - len(p.Findings)/2
+	p.Findings = p.Findings[:len(p.Findings)/2]
+	return p, n
+}
+
+func (l Lessons) Load() (session.LessonState, error) {
 	defer l.lock()()
-	out := map[string]session.LessonProject{}
+	out := session.LessonState{Projects: map[string]session.LessonProject{}}
 	data, err := read(l.Dir, lessonsFile)
 	if err != nil || data == nil {
 		return out, err
 	}
 	var f lessonsJSON
 	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 {
-		return nil, errors.New("lessons.json isn't a record of lessons from reviews this engine reads")
+		return session.LessonState{}, errors.New("lessons.json isn't a record of lessons from reviews this engine reads")
 	}
 	for name, p := range f.Projects {
-		if !repoName.MatchString(name) || len(out) >= session.MaxLessonProjects {
+		if !repoName.MatchString(name) || len(out.Projects) >= session.MaxLessonProjects {
 			continue
 		}
-		var v session.LessonProject
-		for _, x := range p.Findings {
-			if fd, ok := lessonFindingOf(x); ok && len(v.Findings) < session.MaxLessonFindings && !slices.ContainsFunc(v.Findings, func(y session.LessonFinding) bool { return y.ID == fd.ID }) {
-				v.Findings = append(v.Findings, fd)
-			}
+		out.Projects[name] = lessonProjectOf(p)
+	}
+	for _, r := range f.Removed {
+		id := session.ProjectID{Name: r.Project, URL: r.URL}
+		if !repoName.MatchString(r.Project) || !removedID(id) || !session.RoomForRemoved(out.Removed, id) {
+			continue
 		}
-		for _, x := range p.Lines {
-			if ln, ok := lessonLineOf(x); ok && len(v.Lines) < session.MaxLessonLines && !slices.ContainsFunc(v.Lines, func(y session.LessonLine) bool { return y.ID == ln.ID }) {
-				v.Lines = append(v.Lines, ln)
-			}
-		}
-		out[name] = v
+		out.Removed = append(out.Removed, session.RemovedProject[session.LessonProject]{ID: id, Data: lessonProjectOf(r.lessonProjectJSON)})
 	}
 	return out, nil
 }
 
-func (l Lessons) Save(all map[string]session.LessonProject) error {
+func (l Lessons) Save(st session.LessonState) error {
 	defer l.lock()()
 	f := lessonsJSON{Version: 1, Projects: map[string]lessonProjectJSON{}}
-	for name, p := range all {
-		if !repoName.MatchString(name) {
-			continue
+	for name, p := range st.Projects {
+		if repoName.MatchString(name) {
+			f.Projects[name] = lessonProjectJSONOf(p)
 		}
-		var v lessonProjectJSON
-		for _, x := range p.Findings {
-			v.Findings = append(v.Findings, lessonFindingJSON{ID: x.ID, Agent: x.Agent, Path: x.Path, Title: x.Title, Excerpt: x.Excerpt, Commits: x.Commits, Last: x.Last.UTC()})
+	}
+	for _, r := range st.Removed {
+		if repoName.MatchString(r.ID.Name) && removedID(r.ID) {
+			f.Removed = append(f.Removed, removedLessonJSON{Project: r.ID.Name, URL: r.ID.URL, lessonProjectJSON: lessonProjectJSONOf(r.Data)})
 		}
-		for _, x := range p.Lines {
-			v.Lines = append(v.Lines, lessonLineJSON{ID: x.ID, Text: x.Text, From: x.From, State: x.State, Session: x.Session, At: x.At.UTC()})
-		}
-		f.Projects[name] = v
 	}
 	dropped := 0
 	for {
@@ -154,11 +189,13 @@ func (l Lessons) Save(all map[string]session.LessonProject) error {
 		trimmed := false
 		if len(data) > maxFile {
 			for name, p := range f.Projects {
-				if len(p.Findings) > 1 {
-					dropped += len(p.Findings) - len(p.Findings)/2
-					p.Findings = p.Findings[:len(p.Findings)/2]
-					f.Projects[name] = p
-					trimmed = true
+				if v, n := halved(p); n > 0 {
+					f.Projects[name], dropped, trimmed = v, dropped+n, true
+				}
+			}
+			for i, r := range f.Removed {
+				if v, n := halved(r.lessonProjectJSON); n > 0 {
+					f.Removed[i].lessonProjectJSON, dropped, trimmed = v, dropped+n, true
 				}
 			}
 		}

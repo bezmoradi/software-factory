@@ -55,9 +55,14 @@ type DecisionEdit struct {
 	At     time.Time
 }
 
+type DecisionState struct {
+	Projects map[string][]DecisionEdit
+	Removed  []RemovedProject[[]DecisionEdit]
+}
+
 type DecisionStore interface {
-	Load() (map[string][]DecisionEdit, error)
-	Save(map[string][]DecisionEdit) error
+	Load() (DecisionState, error)
+	Save(DecisionState) error
 	Dropped(n int)
 }
 
@@ -111,7 +116,10 @@ type DecisionLog struct {
 	dropped int
 }
 
-var _ DecisionLogPage = (*DecisionLog)(nil)
+var (
+	_ DecisionLogPage = (*DecisionLog)(nil)
+	_ ProjectData     = (*DecisionLog)(nil)
+)
 
 func NewDecisionLog(cfg DecisionLogConfig) *DecisionLog {
 	if cfg.Now == nil {
@@ -238,18 +246,76 @@ func (l *DecisionLog) known(repo string) error {
 }
 
 func (l *DecisionLog) edits() (map[string][]DecisionEdit, error) {
+	st, err := l.state()
+	return st.Projects, err
+}
+
+func (l *DecisionLog) state() (DecisionState, error) {
 	if l.cfg.Store == nil {
-		return nil, explained(conflict("no store"), "This engine keeps no decision log edits.")
+		return DecisionState{}, explained(conflict("no store"), "This engine keeps no decision log edits.")
 	}
-	all, err := l.cfg.Store.Load()
+	st, err := l.cfg.Store.Load()
 	if err != nil {
 		l.cfg.Logger.Warn("decision log", "event", "edits-not-read")
-		return nil, explained(conflict("unreadable"), "The engine couldn't read the decision log's edits, so it changes none.")
+		return DecisionState{}, explained(conflict("unreadable"), "The engine couldn't read the decision log's edits, so it changes none.")
 	}
-	if all == nil {
-		all = map[string][]DecisionEdit{}
+	if st.Projects == nil {
+		st.Projects = map[string][]DecisionEdit{}
 	}
-	return all, nil
+	return st, nil
+}
+
+func (l *DecisionLog) projectData(event string, fn func(st *DecisionState) (int, bool)) {
+	if l == nil || l.cfg.Store == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	st, err := l.state()
+	if err != nil {
+		return
+	}
+	dropped, changed := fn(&st)
+	if !changed {
+		return
+	}
+	if err := l.cfg.Store.Save(st); err != nil {
+		l.cfg.Logger.Warn("decision log", "event", "edits-not-saved")
+		return
+	}
+	if dropped > 0 {
+		l.cfg.Store.Dropped(dropped)
+	}
+	l.cfg.Logger.Info("decision log", "event", event)
+}
+
+func (l *DecisionLog) ParkProject(id ProjectID) {
+	l.projectData("parked", func(st *DecisionState) (int, bool) {
+		var parked bool
+		var dropped []RemovedProject[[]DecisionEdit]
+		st.Removed, dropped, parked = parkProject(st.Projects, st.Removed, id)
+		n := 0
+		for _, r := range dropped {
+			n += len(r.Data)
+		}
+		return n, parked
+	})
+}
+
+func (l *DecisionLog) RestoreProject(id ProjectID) {
+	l.projectData("restored", func(st *DecisionState) (int, bool) {
+		var changed bool
+		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
+		return 0, changed
+	})
+}
+
+func (l *DecisionLog) KeepProjects(names []string) {
+	l.projectData("unlisted-set-aside", func(st *DecisionState) (int, bool) {
+		var n int
+		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
+		return 0, n > 0
+	})
 }
 
 func (l *DecisionLog) built(repo string, edits []DecisionEdit) DecisionLogView {
@@ -414,10 +480,11 @@ func (l *DecisionLog) change(repo, result string, f func(list []DecisionEdit, cu
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	all, err := l.edits()
+	st, err := l.state()
 	if err != nil {
 		return DecisionLogView{}, err
 	}
+	all := st.Projects
 	current := l.built(repo, all[repo])
 	l.dropped = 0
 	next, err := f(slices.Clone(all[repo]), current)
@@ -432,7 +499,7 @@ func (l *DecisionLog) change(repo, result string, f func(list []DecisionEdit, cu
 	} else {
 		all[repo] = next
 	}
-	if err := l.cfg.Store.Save(all); err != nil {
+	if err := l.cfg.Store.Save(st); err != nil {
 		l.cfg.Logger.Warn("decision log", "event", "edits-not-saved")
 		return DecisionLogView{}, explained(conflict("not saved"), "The engine couldn't save the change, so nothing changed.")
 	}

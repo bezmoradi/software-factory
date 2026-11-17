@@ -402,7 +402,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if repoRoutes[r.URL.Path] {
-		s.repos(w, r.URL.Path, body)
+		s.repos(w, r, body)
 		return
 	}
 	if fileRoutes[r.URL.Path] {

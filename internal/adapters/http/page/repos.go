@@ -44,12 +44,12 @@ func textFields(w http.ResponseWriter, body map[string]any, limit int, keys ...s
 	return out, true
 }
 
-func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) {
+func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Repos == nil {
 		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no workspace, so it can't add repositories."})
 		return
 	}
-	switch path {
+	switch r.URL.Path {
 	case "/api/add-repo":
 		f, ok := textFields(w, body, 4096, "url")
 		if !ok {
@@ -73,7 +73,7 @@ func (s *Server) repos(w http.ResponseWriter, path string, body map[string]any) 
 		if !ok {
 			return
 		}
-		info, err := s.cfg.Repos.SaveToken(f["host"], f["token"])
+		info, err := s.cfg.Repos.SaveToken(r.Context(), f["host"], f["token"])
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)

@@ -22,4 +22,7 @@ func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, logger sha
 		lc.Continued = p.pushes.Continued
 	}
 	limits.Use(lc)
+	if p.repos != nil {
+		p.repos.UseProjectData(limits)
+	}
 }

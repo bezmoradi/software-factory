@@ -24,5 +24,7 @@ func useSavedPrompts(srv *page.Server, parts engineParts, cfg PageConfig, logger
 		}
 		return false
 	}
-	srv.UseSavedPrompts(session.NewSavedPrompts(session.SavedPromptsConfig{Store: state.NewSavedPrompts(cfg.StateDir), Known: known, Logger: logger}))
+	prompts := session.NewSavedPrompts(session.SavedPromptsConfig{Store: state.NewSavedPrompts(cfg.StateDir), Known: known, Logger: logger})
+	repos.UseProjectData(prompts)
+	srv.UseSavedPrompts(prompts)
 }
