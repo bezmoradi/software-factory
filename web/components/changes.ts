@@ -390,8 +390,10 @@ class SfChanges extends HTMLElement {
         this.#sending = false
         this.#holdBox(false)
         if (ok) {
-          this.#comments.delete(branch)
-          this.#said.textContent = 'Sent to the agent as one message.'
+          const kept = (this.#comments.get(branch) ?? []).filter(c => !mine.includes(c))
+          if (kept.length) this.#comments.set(branch, kept)
+          else this.#comments.delete(branch)
+          this.#said.textContent = kept.length ? `Sent to the agent as one message. ${kept.length} ${plural(kept.length, 'comment')} added since ${kept.length === 1 ? 'is' : 'are'} kept here.` : 'Sent to the agent as one message.'
         } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
         this.#paintList()
       },
