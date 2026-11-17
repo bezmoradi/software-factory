@@ -14,7 +14,8 @@ import './metrics.ts'
 import './decision-log.ts'
 import './review-depth.ts'
 import './lessons.ts'
-import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './overview.ts'
+import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './session-list.ts'
+import { placeMenu } from '../lib/menu.ts'
 import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
 import { developmentBuild } from './update.ts'
 import type { PairAgent } from './start-from.ts'
@@ -389,6 +390,15 @@ class SfProjects extends HTMLElement {
     this.#replaceValue.addEventListener('input', () => this.#hint())
   }
 
+  connectedCallback() {
+    if (this.#starting?.id && !this.#starting.late && this.#startTimer === undefined) this.#startTimer = setTimeout(() => this.#late(), 30000)
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this.#startTimer)
+    this.#startTimer = undefined
+  }
+
   #hint() {
     for (const [input, hint, host] of [[this.#tokenValue, this.#tokenHint, this.#tokenHost.value], [this.#replaceValue, this.#replaceHint, this.#replacing]] as const) {
       const text = tokenShape(host, input.value)
@@ -406,10 +416,8 @@ class SfProjects extends HTMLElement {
     if (key === this.#viewKey) return
     this.#viewKey = key
     this.#view = value
-    for (const path of this.#forms.keys()) if (!value.projects.some(p => p.path === path)) this.#forms.delete(path)
-    for (const m of [this.#caps, this.#expiry]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
-    for (const path of this.#commands.keys()) if (!value.projects.some(p => p.path === path)) this.#commands.delete(path)
-    for (const m of [this.#depth, this.#lessons]) for (const path of m.keys()) if (!value.projects.some(p => p.path === path)) m.delete(path)
+    const kept = new Set(value.projects.map(p => p.path))
+    for (const m of [this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
     this.#render()
   }
 
@@ -730,7 +738,7 @@ class SfProjects extends HTMLElement {
         return
       }
       this.#menuOpen = p.path
-      this.#place(more, menu)
+      placeMenu(more, menu)
       menu.querySelector<HTMLElement>('button')?.focus()
     })
     menu.addEventListener('keydown', e => {
@@ -738,15 +746,6 @@ class SfProjects extends HTMLElement {
       rovingKeys(e, items, items.indexOf(document.activeElement as HTMLElement), 'vertical')
     })
     return [more, menu]
-  }
-
-  #place(anchor: HTMLElement, menu: HTMLElement) {
-    const r = anchor.getBoundingClientRect()
-    const w = menu.offsetWidth
-    const h = menu.offsetHeight
-    const top = r.bottom + 4 + h > innerHeight - 8 ? Math.max(8, r.top - 4 - h) : r.bottom + 4
-    menu.style.top = `${Math.round(top)}px`
-    menu.style.left = `${Math.round(Math.max(8, Math.min(r.right - w, innerWidth - w - 8)))}px`
   }
 
   #row(p: Project) {
