@@ -30,7 +30,7 @@ func (w *Work) saved(sid string) *SavedWork {
 	if s == nil {
 		return nil
 	}
-	v := SavedWork{Repo: s.repo, Claude: s.claude, Type: s.typeID, Chosen: s.chosen, Requirements: savedApproval(s.req), Plan: savedApproval(s.plan)}
+	v := SavedWork{Repo: s.repo, Claude: s.claude, Type: s.typeID, Chosen: s.chosen, Requirements: savedApproval(s.req), Plan: savedApproval(s.plan), Lock: s.lock}
 	if len(s.allowed) > 0 {
 		v.Allowed = map[string][]string{}
 		for p, set := range s.allowed {
@@ -66,7 +66,7 @@ func (w *Work) Restore(sids []string) {
 		if !keep[sid] || w.sessions[sid] != nil {
 			continue
 		}
-		s := &workSession{repo: v.Repo, claude: v.Claude, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements), plan: workApprovalOf(v.Plan)}
+		s := &workSession{repo: v.Repo, claude: v.Claude, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements), plan: workApprovalOf(v.Plan), lock: testLockOf(v.Lock)}
 		if len(v.Allowed) > 0 {
 			s.allowed = map[string]map[string]bool{}
 			for p, blobs := range v.Allowed {
@@ -87,4 +87,11 @@ func (w *Work) Restore(sids []string) {
 	if err != nil {
 		w.cfg.Logger.Warn("work", "event", "sessions-not-pruned")
 	}
+}
+
+func testLockOf(l *TestLock) *TestLock {
+	if l == nil || l.Commit == "" || len(l.Files) == 0 || len(l.Files) > MaxLockedTests || l.BranchLeft < 0 || l.BranchLeft > 0 && !l.Cut {
+		return nil
+	}
+	return &TestLock{Commit: l.Commit, At: l.At, Files: maps.Clone(l.Files), Cut: l.Cut, BranchLeft: l.BranchLeft}
 }

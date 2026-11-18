@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"regexp"
 	"slices"
 	"strconv"
@@ -25,12 +26,20 @@ var (
 func modelsOf(v any) []string {
 	m, _ := v.(map[string]any)
 	var out []string
-	for name := range m {
+	spent := map[string]float64{}
+	for name, u := range m {
 		if reviewModelName.MatchString(name) {
 			out = append(out, name)
+			fields, _ := u.(map[string]any)
+			spent[name], _ = fields["costUSD"].(float64)
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b string) int {
+		if spent[a] != spent[b] {
+			return cmp.Compare(spent[b], spent[a])
+		}
+		return strings.Compare(a, b)
+	})
 	return out[:min(len(out), maxReviewModels)]
 }
 

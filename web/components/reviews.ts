@@ -23,9 +23,14 @@ function provenance(role: ReviewRole): string {
   const parts = [
     role.pluginCommit ? `knackpack ${shortSha(role.pluginCommit)}` : '',
     role.claudeCode ? (role.claudeCode === 'sf-fake-claude' ? 'the development fake reviewer' : `Claude Code ${text(role.claudeCode)}`) : '',
-    ...(role.models ?? []).map(text),
+    ...(role.models ?? []).slice(0, 1).map(text),
   ]
   return parts.filter(Boolean).join(' · ')
+}
+
+function alsoUsed(role: ReviewRole): string {
+  const others = (role.models ?? []).slice(1)
+  return others.length ? `Also used: ${others.map(text).join(', ')}` : ''
 }
 
 function duration(ms: number): string {
@@ -360,6 +365,8 @@ class SfReviews extends HTMLElement {
     if (role.advisory) li.append(el('div', 'small muted', 'Advisory for this project: its findings are warnings, and it never counts for the push, the push hold or automatic findings sends.'))
     const made = provenance(role)
     if (made) li.append(el('div', 'small muted', made))
+    const also = alsoUsed(role)
+    if (also) li.append(el('div', 'small muted', also))
     const progress = this.#progress(role)
     if (progress) li.append(progress)
     li.append(el('div', 'small muted', role.incremental && role.since ? `Reviewed only what changed since ${shortSha(role.since)}, which its previous round reviewed${role.previous ? ', and was asked to check that round\'s findings' : ''}` : 'Reviewed the whole branch from where it leaves the remote\'s main branch'))

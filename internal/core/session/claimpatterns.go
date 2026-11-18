@@ -3,6 +3,7 @@ package session
 import (
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -166,16 +167,77 @@ var (
 )
 
 func commandRuns(command string) (tests, build bool) {
-	flat := strings.NewReplacer("'", " ", "\"", " ").Replace(command)
-	for _, segment := range commandSplit.Split(flat, -1) {
-		t, b := segmentRuns(strings.Fields(segment))
+	segments, _ := splitCommand(command)
+	for _, words := range segments {
+		t, b := segmentRuns(words)
 		tests = tests || t
 		build = build || b || t
 	}
 	return tests, build
 }
 
-func segmentRuns(words []string) (tests, build bool) {
+func splitCommand(command string) (segments [][]string, ops []string) {
+	flat := strings.NewReplacer("'", " ", "\"", " ").Replace(command)
+	seps := commandSplit.FindAllStringIndex(flat, -1)
+	segments = make([][]string, 0, len(seps)+1)
+	ops = make([]string, 0, len(seps))
+	from := 0
+	for _, s := range seps {
+		segments = append(segments, strings.Fields(strings.TrimPrefix(strings.TrimSpace(flat[from:s[0]]), "&")))
+		ops = append(ops, flat[s[0]:s[1]])
+		from = s[1]
+	}
+	segments = append(segments, strings.Fields(strings.TrimPrefix(strings.TrimSpace(flat[from:]), "&")))
+	return segments, ops
+}
+
+func endsPipeline(op string) bool {
+	return op != "|" && op != "(" && op != ")"
+}
+
+func keepsFailure(words []string) bool {
+	words = commandPrefixless(words)
+	switch {
+	case len(words) == 1:
+		return path.Base(words[0]) == "false"
+	case len(words) == 2 && (words[0] == "exit" || words[0] == "return"):
+		n, err := strconv.Atoi(words[1])
+		return err == nil && n%256 != 0
+	}
+	return false
+}
+
+func testDecides(command string) bool {
+	segments, ops := splitCommand(command)
+	end := len(segments)
+	for {
+		last := -1
+		for i := end - 1; i >= 0; i-- {
+			if len(segments[i]) > 0 {
+				last = i
+				break
+			}
+		}
+		if last < 0 {
+			return false
+		}
+		if last > 0 && ops[last-1] == "||" && keepsFailure(segments[last]) {
+			end = last
+			continue
+		}
+		for i := last; i >= 0; i-- {
+			if isTestSegment(segments[i]) {
+				return true
+			}
+			if i > 0 && endsPipeline(ops[i-1]) {
+				return false
+			}
+		}
+		return false
+	}
+}
+
+func commandPrefixless(words []string) []string {
 	for len(words) > 0 {
 		w := words[0]
 		switch {
@@ -194,6 +256,70 @@ func segmentRuns(words []string) (tests, build bool) {
 		}
 		break
 	}
+	return words
+}
+
+type HiddenStatus string
+
+const (
+	HiddenByPipe HiddenStatus = "pipe"
+	HiddenByOr   HiddenStatus = "or"
+)
+
+var (
+	statusFilters = map[string]bool{"grep": true, "egrep": true, "fgrep": true, "rg": true, "tail": true, "head": true, "tee": true, "less": true, "more": true, "sort": true, "uniq": true, "wc": true, "awk": true, "sed": true, "cut": true}
+	pipefailSet   = regexp.MustCompile(`(?:^|\s)-[A-Za-z]*o\s+pipefail\b|(?i:\bsetopt\s+[^;&|\n]*\bpipe_?fail\b)|\bPIPESTATUS\b|\bpipestatus\b`)
+)
+
+func statusHiddenBy(command string, isCheck func(words []string) bool) HiddenStatus {
+	segments, ops := splitCommand(command)
+	pipefail := pipefailSet.MatchString(command)
+	checkBefore, checkNow, piped, seenCheck, last := false, false, false, false, -1
+	checkEarlier, lastCheck := false, false
+	hidden := func() bool {
+		return !pipefail && piped && checkBefore && last >= 0 && statusFilters[programOf(segments[last])]
+	}
+	for i, words := range segments {
+		if i > 0 {
+			switch ops[i-1] {
+			case "|":
+				piped = true
+			case ";", "\n", "&&", "||", "$(", "`":
+				if hidden() {
+					return HiddenByPipe
+				}
+				checkBefore, checkNow, piped = false, false, false
+			}
+		}
+		if len(words) == 0 {
+			continue
+		}
+		checkBefore = checkBefore || checkNow
+		checkEarlier = seenCheck
+		checkNow = isCheck(words)
+		lastCheck = checkNow
+		seenCheck = seenCheck || checkNow
+		last = i
+	}
+	if hidden() {
+		return HiddenByPipe
+	}
+	if checkEarlier && !lastCheck && last > 0 && ops[last-1] == "||" && !keepsFailure(segments[last]) {
+		return HiddenByOr
+	}
+	return ""
+}
+
+func programOf(words []string) string {
+	words = commandPrefixless(words)
+	if len(words) == 0 {
+		return ""
+	}
+	return path.Base(words[0])
+}
+
+func segmentRuns(words []string) (tests, build bool) {
+	words = commandPrefixless(words)
 	if len(words) == 0 {
 		return false, false
 	}

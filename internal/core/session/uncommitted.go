@@ -53,12 +53,13 @@ type worktreeBook struct {
 	busy        map[string]bool
 	again       map[string]bool
 	tools       map[string]map[string]pendingCheck
+	edits       map[string]map[string]bool
 	checks      map[string]map[CheckKind]AgentCheck
 }
 
 func newWorktreeBook() *worktreeBook {
 	return &worktreeBook{uncommitted: map[string]Uncommitted{}, changed: map[string]changedSet{}, busy: map[string]bool{}, again: map[string]bool{},
-		tools: map[string]map[string]pendingCheck{}, checks: map[string]map[CheckKind]AgentCheck{}}
+		tools: map[string]map[string]pendingCheck{}, edits: map[string]map[string]bool{}, checks: map[string]map[CheckKind]AgentCheck{}}
 }
 
 func (r *Registry) WatchWorktrees(w WorktreeWatch) {
@@ -184,6 +185,7 @@ func (b *worktreeBook) forget(sid string) {
 	delete(b.uncommitted, sid)
 	delete(b.changed, sid)
 	delete(b.tools, sid)
+	delete(b.edits, sid)
 	delete(b.checks, sid)
 }
 
@@ -203,4 +205,16 @@ func (r *Registry) factsInto(sid string, info *Info) {
 	}
 	info.Overlaps = r.overlapsLocked(b, sid)
 	info.Checks = b.checksOf(sid)
+}
+
+func (r *Registry) AgentChecks(sid string) []AgentCheck {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.worktrees
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.checksOf(sid)
 }

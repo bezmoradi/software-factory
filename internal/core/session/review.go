@@ -255,6 +255,7 @@ type Reviews struct {
 	rateHandlers []func(side string, w []RateWindow)
 	testStore    sync.Mutex
 	changeFacts  ChangeBlobs
+	changeLocks  TestLocks
 
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice
@@ -592,7 +593,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		givens[i] = given
 		givens[i].run, givens[i].runs = p.run, p.runs
 		if _, ok := extra[p.base]; !ok {
-			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.Repo, p.base, head)
+			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.SID, t.Repo, p.base, head)
 		}
 		givens[i].facts = facts[p.base]
 		var f SnapshotFile

@@ -209,7 +209,7 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 	if !ok1 || !ok2 {
 		return session.SavedWork{}, false
 	}
-	v := session.SavedWork{Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan}
+	v := session.SavedWork{Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock)}
 	for p, blobs := range w.Allowed {
 		if !relPath(p) || len(blobs) == 0 || len(blobs) > maxVersions || slices.ContainsFunc(blobs, func(b string) bool { return !commitID.MatchString(b) }) {
 			continue
@@ -220,4 +220,25 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 		v.Allowed[p] = append([]string(nil), blobs...)
 	}
 	return v, true
+}
+
+func testLockOf(l *testLockJSON) *session.TestLock {
+	if l == nil || !commitID.MatchString(l.Commit) || len(l.Files) == 0 || len(l.Files) > session.MaxLockedTests || l.BranchLeft < 0 || l.BranchLeft > 0 && !l.Cut {
+		return nil
+	}
+	files := make(map[string]string, len(l.Files))
+	for p, blob := range l.Files {
+		if !relPath(p) || !commitID.MatchString(blob) {
+			return nil
+		}
+		files[p] = blob
+	}
+	return &session.TestLock{Commit: l.Commit, At: l.At, Files: files, Cut: l.Cut, BranchLeft: l.BranchLeft}
+}
+
+func testLockJSONOf(l *session.TestLock) *testLockJSON {
+	if l == nil {
+		return nil
+	}
+	return &testLockJSON{Commit: l.Commit, At: l.At.UTC(), Files: l.Files, Cut: l.Cut, BranchLeft: l.BranchLeft}
 }

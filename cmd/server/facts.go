@@ -19,8 +19,12 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 	}
 	reg.WatchWorktrees(session.WorktreeWatch{Targets: parts.dispatcher.PushTarget, Heads: files.Reviews{}, Reader: files.Worktrees{Workspace: cfg.Workspace},
 		Commits: files.Reader{}, History: files.Reader{}, Main: parts.repos.Main})
+	var locks session.TestLocks
+	if parts.work != nil {
+		locks = parts.work
+	}
 	if parts.reviews != nil {
-		parts.reviews.UseChangeFacts(files.Reader{})
+		parts.reviews.UseChangeFacts(files.Reader{}, locks)
 	}
 	var reader session.ProtectionReader
 	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {
@@ -34,6 +38,9 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 	srv.UseProjectFacts(facts)
 	if parts.pushes != nil {
 		parts.pushes.UseExtras(session.PushExtras{Files: files.Reader{}, Workflows: files.Reader{}, Registry: &registry.Registry{Client: registry.NewClient()},
-			LookupsOn: facts.LookupsOn, Base: base})
+			LookupsOn: facts.LookupsOn, Locks: locks, Base: base})
+		if parts.work != nil {
+			parts.work.OnLockMoved(parts.pushes.LockMoved)
+		}
 	}
 }

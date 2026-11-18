@@ -3,6 +3,9 @@
   "crossSessionInbound": "refuse",
   "disableClaudeAiConnectors": true,
   "disableRemoteControl": true,
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "0"
+  },
   "isolatePeerMachines": true,
   "permissions": {
     "deny": ["SendMessage", "ListAgents"]

@@ -117,11 +117,13 @@ type PushView struct {
 	Findings     bool
 	FindingsSent time.Time
 	Extra        *PushExtra
+	Checks       []AgentCheck
 }
 
 func (v PushView) clone() PushView {
 	v.Missing = slices.Clone(v.Missing)
 	v.Unmet = slices.Clone(v.Unmet)
+	v.Checks = slices.Clone(v.Checks)
 	if v.Audit != nil {
 		a := *v.Audit
 		a.Missing = slices.Clone(a.Missing)
@@ -178,6 +180,7 @@ type PushesConfig struct {
 	AutoFindings   func(project string) bool
 	TurnBase       func(sid string) string
 	Branch         BranchWalker
+	Checks         func(sid string) []AgentCheck
 }
 
 type PushWork interface {
@@ -844,6 +847,19 @@ func clipAtWord(s string, n int) string {
 	return strings.TrimRight(cut, " ;,:") + "…"
 }
 
+func (p *Pushes) checksAt(sid string, at time.Time) []AgentCheck {
+	if p.cfg.Checks == nil {
+		return nil
+	}
+	var out []AgentCheck
+	for _, c := range p.cfg.Checks(sid) {
+		if !c.At.After(at) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (x *pushing) refreshCard(result gate.Result, reason string, missing []string) push.Reply {
 	p := x.p
 	kept := func(why string) push.Reply {
@@ -867,6 +883,7 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
 		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
 	p.mu.Unlock()
+	v.Checks = p.checksAt(x.sid, e.Time)
 	p.show(x.sid, v)
 	shared.Tagged(p.cfg.Logger, x.entry.Req).Info("push", "event", "card-refreshed", "missing", len(missing))
 	return push.Reply{Decision: push.DecisionHeld, Reason: e.Reason}
@@ -882,7 +899,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
 	e = e.masked()
 	reason = e.Reason
-	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden}
+	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time)}
 	if result == gate.Held {
 		v.Unmet = slices.Clone(x.unmet)
 	}

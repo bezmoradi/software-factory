@@ -167,6 +167,8 @@ export interface AgentCheck {
   command: string
   ok: boolean
   at: number
+  editedAt?: number
+  hidden?: string
 }
 
 export interface ChangeNote {
@@ -217,6 +219,26 @@ export interface PushExtra {
   workflows: WorkflowRun[]
   workflowsProblem?: string
   lookup: string
+  locked?: LockedTests | null
+}
+
+export interface LockedTests {
+  commit: string
+  count: number
+  paths: string[]
+  problem?: string
+}
+
+export interface TestLockView {
+  offered: boolean
+  why?: string
+  commit?: string
+  at?: number
+  files: number
+  paths: string[]
+  cut: boolean
+  branchLeft: number
+  changed: LockedTests | null
 }
 
 export interface SessionFactsView {
@@ -341,6 +363,7 @@ export interface SessionPush {
   findings?: boolean
   findingsSent?: number
   extra?: PushExtra
+  checks?: AgentCheck[]
 }
 
 export interface SessionForge {
@@ -868,6 +891,7 @@ export interface GateEvent {
   handoff?: boolean
   catalog?: string
   catalogWhy?: string
+  testLock?: TestLockView
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }

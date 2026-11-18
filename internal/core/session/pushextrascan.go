@@ -60,6 +60,8 @@ var (
 	}
 	loggingCall = regexp.MustCompile(`\b(?:log|logger|logging|slog|klog|zap|zerolog|console|metrics|statsd|tracer|span|sentry|Sentry|otel|telemetry|audit)\s*\.\s*[A-Za-z_]+\s*\(|\blog(?:ger)?\.(?:Info|Warn|Error|Debug|Print)`)
 	runLater    = regexp.MustCompile(`(?i)(^|/)(makefile|gnumakefile|[^/]+\.mk|justfile|taskfile\.ya?ml|\.pre-commit-config\.ya?ml)$|^\.github/workflows/|^\.husky/|^\.githooks/`)
+	runnerSetup = regexp.MustCompile(`(?i)(^|/)(pytest\.ini|(jest|vitest|playwright|cypress)\.config\.[^/]+|vitest\.workspace\.[^/]+|karma\.conf\.[^/]+|\.mocharc(\.[^/]+)?|phpunit\.xml(\.dist)?|\.rspec)$`)
+	goTestMain  = regexp.MustCompile(`(?m)^func\s+TestMain\s*\(`)
 )
 
 func isTestPath(p string) bool { return testPath.MatchString(p) }
@@ -279,6 +281,16 @@ func testNotes(c push.Change, before, after string) []ChangeNote {
 	}
 	if runLater.MatchString(c.Path) {
 		note("a file a person or CI runs later was " + string(c.Status))
+	}
+	if c.Status != push.Deleted {
+		switch {
+		case strings.HasSuffix(c.Path, "_test.go") && countMatches(goTestMain, after) > countMatches(goTestMain, before):
+			note("a new TestMain, which decides whether this package's tests run")
+		case path.Base(c.Path) == "conftest.py":
+			note("pytest's conftest.py, which runs before the tests, was " + string(c.Status))
+		case runnerSetup.MatchString(c.Path):
+			note("test runner configuration, which decides which tests run and how, was " + string(c.Status))
+		}
 	}
 	if path.Base(c.Path) == "package.json" {
 		if what := scriptChanges(before, after); what != "" {

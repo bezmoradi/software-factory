@@ -93,7 +93,8 @@ func (w *Work) Guarded(sid, top string, paths []string) string {
 	if top == "" || len(paths) == 0 {
 		return ""
 	}
-	if _, ok := w.session(sid); !ok {
+	ws, ok := w.session(sid)
+	if !ok {
 		return ""
 	}
 	t, ok := w.cfg.Targets(sid)
@@ -106,7 +107,7 @@ func (w *Work) Guarded(sid, top string, paths []string) string {
 			return why
 		}
 	}
-	return ""
+	return w.lockedWrite(ws, top, paths)
 }
 
 func teamRulesAsk(t TeamRules) string {

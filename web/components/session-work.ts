@@ -1,6 +1,8 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { shortSha } from '../lib/format.ts'
 import { isRecord } from '../lib/json.ts'
+import type { LockedTests, TestLockView } from '../types.ts'
 
 export interface AgentModel {
   id: string
@@ -125,6 +127,30 @@ function readView(v: unknown): WorkView | null {
   }
 }
 
+interface LockRead {
+  head: string
+  lock: TestLockView
+}
+
+function lockedOf(v: unknown): LockedTests | null {
+  if (!isRecord(v) || typeof v.commit !== 'string') return null
+  return { commit: v.commit, count: Number(v.count) || 0, paths: strings(v.paths), problem: typeof v.problem === 'string' ? v.problem : '' }
+}
+
+function readLock(v: unknown): LockRead | null {
+  if (!isRecord(v) || !isRecord(v.gate) || !isRecord(v.gate.testLock)) return null
+  const l = v.gate.testLock
+  const text = (x: unknown) => (typeof x === 'string' ? x : '')
+  return {
+    head: text(v.gate.head),
+    lock: { offered: l.offered === true, why: text(l.why), commit: text(l.commit), at: Number(l.at) || 0, files: Number(l.files) || 0, paths: strings(l.paths), cut: l.cut === true, branchLeft: Number(l.branchLeft) || 0, changed: lockedOf(l.changed) },
+  }
+}
+
+function shown(value: string): string {
+  return visible(unspoofed(value))
+}
+
 async function problemOf(res: Response | null): Promise<string> {
   if (!res) return 'The engine didn\'t answer. Try again.'
   const body = await res.json().catch(() => null) as { message?: unknown } | null
@@ -154,6 +180,8 @@ class SfSessionWork extends HTMLElement {
   #summary = el('summary', 'small')
   #opened: boolean | null = null
   #shown = false
+  #lock: LockRead | null = null
+  #lockLoading = 0
 
   constructor() {
     super()
@@ -175,6 +203,7 @@ class SfSessionWork extends HTMLElement {
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open !== this.#shown) this.#opened = this.#details.open
       this.#shown = this.#details.open
+      if (this.#details.open && this.#target?.sid) void this.#readLock(this.#target.sid)
     })
   }
 
@@ -192,6 +221,7 @@ class SfSessionWork extends HTMLElement {
     }
     if (changed) {
       this.#view = null
+      this.#lock = null
       this.#editing = ''
       this.#opened = null
       this.#status.textContent = ''
@@ -202,12 +232,97 @@ class SfSessionWork extends HTMLElement {
   async refresh(sid: string) {
     if (sid !== this.#target?.sid) return
     const n = ++this.#loading
+    void this.#readLock(sid)
     const res = await api('/api/session-work', { op: 'read', sid }).catch(() => null)
     if (n !== this.#loading || sid !== this.#target?.sid || !res || !res.ok) return
     const v = readView(await res.json().catch(() => null))
     if (!v) return
     this.#view = v
     this.#paint()
+  }
+
+  async #readLock(sid: string) {
+    const n = ++this.#lockLoading
+    const res = await api('/api/gate', { sid }).catch(() => null)
+    if (n !== this.#lockLoading || sid !== this.#target?.sid || !res || !res.ok) return
+    const v = readLock(await res.json().catch(() => null))
+    if (!v) return
+    this.#lock = v
+    this.#paint()
+  }
+
+  async #lockCall(op: 'lock' | 'unlock', key: string) {
+    const sid = this.#target?.sid
+    const head = this.#lock?.head ?? ''
+    if (!sid) return
+    this.#busy = true
+    this.#busyKey = key
+    this.#opened ??= this.#details.open
+    this.#paint()
+    const res = await api('/api/lock-tests', op === 'lock' ? { sid, op, head } : { sid, op }).catch(() => null)
+    this.#busy = false
+    if (sid !== this.#target?.sid) return
+    if (!res || !res.ok) {
+      say(this.#status, await problemOf(res), 'warn')
+      this.#paint()
+      void this.#readLock(sid)
+      return
+    }
+    say(this.#status, op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', 'muted')
+    await this.#readLock(sid)
+    this.#paint()
+  }
+
+  #lockPart(off: boolean): HTMLElement[] {
+    const r = this.#lock
+    if (!r) return []
+    const l = r.lock
+    const parts: HTMLElement[] = [el('h3', 'label', 'Locked tests')]
+    if (!l.commit) {
+      parts.push(el('p', 'small muted', 'Lock the tests once the ones you want kept are written and committed. Claude Code\'s file tools (Edit, Write and the like) then ask you before each write to one of them; a shell command or another agent doesn\'t ask. The push card shows any locked file that changed since, however it was changed. Neither holds a push. Approving the requirements or the plan again unlocks them.'))
+      if (!l.offered) {
+        if (l.why) parts.push(el('p', 'small muted', shown(l.why)))
+        return parts
+      }
+      const lock = button('Lock tests', 'small', () => void this.#lockCall('lock', 'work-lock'), 'button', 'work-lock')
+      lock.disabled = !this.#held(lock) && off
+      lock.setAttribute('aria-label', `Lock the test files of commit ${shortSha(r.head)}`)
+      const row = el('div', 'row')
+      row.append(lock)
+      parts.push(row)
+      return parts
+    }
+    const files = `${l.files} test ${l.files === 1 ? 'file' : 'files'}`
+    parts.push(el('p', 'small', `${files} locked at commit ${shortSha(l.commit)}${l.at ? ` at ${when(l.at)}` : ''}. Claude Code's file tools (Edit, Write and the like) ask you before each write to one of them; a shell command or another agent doesn't ask. The push card shows any locked file that changed, however it was changed. Neither holds a push.`))
+    if (l.cut) {
+      parts.push(el('p', 'small warn', `Only these ${files} are locked: the engine locks at most 2,000 test files and 256 KiB of their paths, and this commit has more.`))
+      if (l.branchLeft) parts.push(el('p', 'small warn', `${l.branchLeft} test ${l.branchLeft === 1 ? 'file' : 'files'} this branch adds or changes ${l.branchLeft === 1 ? "isn't" : "aren't"} among them.`))
+      else parts.push(el('p', 'small muted', 'Every test file this branch adds or changes is among them.'))
+    }
+    const c = l.changed
+    if (c?.problem) parts.push(el('p', 'small warn', `${shown(c.problem.charAt(0).toUpperCase() + c.problem.slice(1))}.`))
+    else if (c && c.count) {
+      parts.push(el('p', 'small warn', `Locked tests changed since ${shortSha(l.commit)}: ${c.count}`))
+      const list = el('ul', 'small list')
+      list.append(...c.paths.map(p => el('li', '', shown(p))))
+      if (c.count > c.paths.length) list.append(el('li', 'muted', `and ${c.count - c.paths.length} more`))
+      parts.push(list)
+    } else if (c) parts.push(el('p', 'small muted', `None of the locked files changed since commit ${shortSha(l.commit)}. A new test file or test configuration can still stop them running, and isn't counted here.`))
+    if (l.paths.length) {
+      const box = el('details', 'small')
+      box.append(el('summary', 'small', `The locked files (${l.files})`))
+      const list = el('ul', 'small list')
+      list.append(...l.paths.map(p => el('li', '', shown(p))))
+      if (l.files > l.paths.length) list.append(el('li', 'muted', `and ${l.files - l.paths.length} more`))
+      box.append(list)
+      parts.push(box)
+    }
+    const unlock = button('Unlock tests', 'ghost small', () => void this.#lockCall('unlock', 'work-unlock'), 'button', 'work-unlock')
+    unlock.disabled = !this.#held(unlock) && off
+    const row = el('div', 'row')
+    row.append(unlock)
+    parts.push(row)
+    return parts
   }
 
   focusModel() {
@@ -225,6 +340,7 @@ class SfSessionWork extends HTMLElement {
     if (v.setup) parts.push(`Setup ${STATE_WORDS[v.setup.state] ?? visible(v.setup.state)}`)
     if (v.check) parts.push(`Check ${STATE_WORDS[v.check.state] ?? visible(v.check.state)}`)
     if (v.ports) parts.push(`Ports ${v.ports.first}–${v.ports.last}`)
+    if (this.#lock?.lock.commit) parts.push(this.#lock.lock.changed?.count ? `Locked tests changed: ${this.#lock.lock.changed.count}` : 'Tests locked')
     return parts.join(' · ')
   }
 
@@ -390,13 +506,14 @@ class SfSessionWork extends HTMLElement {
     const off = t.disabled || this.#busy
     const parts: HTMLElement[] = [...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
     if (v.ports) parts.push(el('h3', 'label', 'Ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
+    parts.push(...this.#lockPart(off))
     parts.push(this.#status)
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? this.#notable(v)
     this.#details.open = this.#shown
     replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
-    refocus(this, focused, () => ['work-add', 'work-queue-add', 'work-model'])
+    refocus(this, focused, key => [...(key === 'work-lock' ? ['work-unlock'] : key === 'work-unlock' ? ['work-lock'] : []), 'work-add', 'work-queue-add', 'work-model'])
   }
 }
 

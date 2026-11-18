@@ -7,7 +7,7 @@ var (
 	ReviewAllowed = []string{"Agent", "ToolSearch"}
 )
 
-const reviewSettings = `{"disableAllHooks":true,"permissions":{"blockReadsOutsideWorkingDirectories":true,"deny":["Read(~/**)"]}}`
+const reviewSettings = `{"disableAllHooks":true,"env":{"CLAUDE_CODE_SUBAGENT_MODEL":"inherit","CLAUDE_CODE_SUBAGENT_MODEL_FORCE":"1"},"permissions":{"blockReadsOutsideWorkingDirectories":true,"deny":["Read(~/**)","Agent(Explore)"]}}`
 
 func ReviewArgv(command, plugin, agent, prompt string) []string {
 	return ReviewArgvWith(command, plugin, agent, prompt, ModelChoice{})

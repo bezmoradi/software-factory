@@ -1,5 +1,6 @@
 import { el, unspoofed, visible } from '../lib/dom.ts'
-import type { AgentCheck, DependencyChange, PushExtra, SessionPush, WorkflowRun } from '../types.ts'
+import { shortSha } from '../lib/format.ts'
+import type { AgentCheck, DependencyChange, LockedTests, PushExtra, SessionPush, WorkflowRun } from '../types.ts'
 
 const KINDS: Record<string, string> = { test: 'Tests', lint: 'Lint', 'type-check': 'Type check', build: 'Build' }
 const ECOSYSTEMS: Record<string, string> = { go: 'Go', npm: 'npm', pypi: 'PyPI', crates: 'crates.io' }
@@ -75,14 +76,42 @@ function workflow(w: WorkflowRun): HTMLElement {
   return li
 }
 
-function checks(p: SessionPush, all: AgentCheck[]): HTMLElement | null {
-  const before = all.filter(c => !p.at || c.at <= p.at)
-  if (!before.length) return null
-  return section('Checks the agent ran before this, reported by the agent:', list(before.map(c => item(c.ok ? '' : 'warn', `${KINDS[c.kind] ?? text(c.kind)}: `, code(c.command), ` ${c.ok ? 'finished without an error' : 'failed or was refused'}`))))
+const HIDDEN: Record<string, string> = {
+  pipe: 'result unknown: its exit status is that of the command its output was piped into, and it doesn\'t set pipefail',
+  or: 'result unknown: it ends in || and a command that isn\'t a check, such as || true or || echo failed, so its exit status is that command\'s',
+}
+
+function result(c: AgentCheck): string {
+  if (c.hidden) return HIDDEN[c.hidden] ?? 'result unknown: its exit status isn\'t the check\'s own'
+  return c.ok ? 'finished without an error' : 'failed or was refused'
+}
+
+function ranCheck(p: SessionPush, c: AgentCheck): HTMLElement {
+  const stale = !!c.editedAt && (!p.at || c.editedAt <= p.at)
+  const li = item(c.ok && !c.hidden && !stale ? '' : 'warn', `${KINDS[c.kind] ?? text(c.kind)}: `, code(c.command), ` ${result(c)}`)
+  if (stale) li.append(' ', tag('the agent edited files after it ran', 'warn'))
+  return li
+}
+
+function checks(p: SessionPush, all: AgentCheck[]): HTMLElement {
+  const before = p.checks ?? all.filter(c => !p.at || c.at <= p.at)
+  const rows = before.map(c => ranCheck(p, c))
+  const missing = Object.keys(KINDS).filter(k => !before.some(c => c.kind === k))
+  if (missing.length) rows.push(item('muted', `Not reported: ${missing.map(k => KINDS[k]).join(', ')}`))
+  return section('Checks the agent ran before this, reported by the agent:', list(rows))
+}
+
+function lockedTests(l: LockedTests): HTMLElement[] {
+  if (l.problem) return [el('p', 'small warn', `${text(l.problem.charAt(0).toUpperCase() + l.problem.slice(1))}.`)]
+  if (!l.count) return []
+  const rows = l.paths.map(p => item('warn', code(p)))
+  if (l.count > l.paths.length) rows.push(item('muted', `and ${l.count - l.paths.length} more`))
+  return [section(`Locked tests changed since ${shortSha(l.commit)}: ${l.count}`, el('p', 'small muted', 'Changed, deleted or moved away from their path since you locked them, however the change was made. A new test file doesn\'t count.'), list(rows))]
 }
 
 function extraParts(x: PushExtra): HTMLElement[] {
   const parts: HTMLElement[] = []
+  if (x.locked) parts.push(...lockedTests(x.locked))
   if (x.tests.length) parts.push(section('Tests, suppressions and files run later:', list(x.tests.map(n => item('warn', code(n.path), `: ${text(n.what)}`)))))
   if (x.dependencies.length) {
     const rows = x.dependencies.map(d => dependency(d, x.lookup))
@@ -110,8 +139,7 @@ export function changeFacts(p: SessionPush, all: AgentCheck[]): HTMLElement | nu
   const parts: HTMLElement[] = []
   if (x) parts.push(...extraParts(x))
   else parts.push(el('p', 'small muted', 'Reading the change for tests, dependencies, file kinds and workflows…'))
-  const ran = checks(p, all)
-  if (ran) parts.push(ran)
+  parts.push(checks(p, all))
   const box = el('div', 'push-facts')
   box.append(el('p', 'small', 'About this change'), el('p', 'small muted', 'Facts the engine read from the commit, for you to check. None of them holds or allows the push.'), ...parts)
   return box

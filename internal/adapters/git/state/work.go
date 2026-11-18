@@ -58,7 +58,16 @@ type sessionWorkJSON struct {
 	Requirements *workApprovalJSON   `json:"requirements,omitempty"`
 	Plan         *workApprovalJSON   `json:"plan,omitempty"`
 	Allowed      map[string][]string `json:"allowed,omitempty"`
+	Lock         *testLockJSON       `json:"testLock,omitempty"`
 	Owner        string              `json:"owner,omitempty"`
+}
+
+type testLockJSON struct {
+	Commit     string            `json:"commit"`
+	At         time.Time         `json:"at"`
+	Files      map[string]string `json:"files"`
+	Cut        bool              `json:"cut,omitempty"`
+	BranchLeft int               `json:"branchLeft,omitempty"`
 }
 
 type removedSettingsJSON struct {
@@ -172,7 +181,7 @@ func (s Work) Save(st session.WorkState) error {
 		f.Sessions = map[string]sessionWorkJSON{}
 		for sid, w := range st.Sessions {
 			f.Sessions[sid] = sessionWorkJSON{Owner: owner, Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen,
-				Requirements: approvalJSONOf(w.Requirements), Plan: approvalJSONOf(w.Plan), Allowed: w.Allowed}
+				Requirements: approvalJSONOf(w.Requirements), Plan: approvalJSONOf(w.Plan), Allowed: w.Allowed, Lock: testLockJSONOf(w.Lock)}
 		}
 	}
 	return write(s.Dir, workFile, f)

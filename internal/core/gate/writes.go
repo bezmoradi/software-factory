@@ -36,19 +36,25 @@ func ProtectedWrite(top, file string) string {
 	return ""
 }
 
-func GuardedWrite(top, file string, protect []string) string {
-	if len(protect) == 0 || !path.IsAbs(file) || !path.IsAbs(top) {
-		return ""
+func worktreePath(top, file string) (string, bool) {
+	if !path.IsAbs(file) || !path.IsAbs(top) {
+		return "", false
 	}
 	root := strings.ToLower(path.Clean(top))
 	p := strings.ToLower(path.Clean(file))
-	rel := strings.TrimPrefix(p, "/")
-	if root != "/" {
-		rest, ok := strings.CutPrefix(p, root+"/")
-		if !ok {
-			return ""
-		}
-		rel = rest
+	if root == "/" {
+		return strings.TrimPrefix(p, "/"), true
+	}
+	return strings.CutPrefix(p, root+"/")
+}
+
+func GuardedWrite(top, file string, protect []string) string {
+	if len(protect) == 0 {
+		return ""
+	}
+	rel, ok := worktreePath(top, file)
+	if !ok {
+		return ""
 	}
 	for _, pattern := range protect {
 		if workflow.PathMatches(pattern, rel, true) {
@@ -56,4 +62,12 @@ func GuardedWrite(top, file string, protect []string) string {
 		}
 	}
 	return ""
+}
+
+func LockedWrite(top, file string, locked map[string]bool) bool {
+	if len(locked) == 0 {
+		return false
+	}
+	rel, ok := worktreePath(top, file)
+	return ok && locked[rel]
 }

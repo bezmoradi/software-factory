@@ -50,6 +50,7 @@ type PushExtra struct {
 	Workflows        []WorkflowRun
 	WorkflowsProblem string
 	Lookup           string
+	Locked           *LockedChange
 }
 
 type PushExtras struct {
@@ -57,6 +58,7 @@ type PushExtras struct {
 	Workflows WorkflowReader
 	Registry  PackageRegistry
 	LookupsOn func(project string) bool
+	Locks     TestLocks
 	Base      context.Context
 	Now       func() time.Time
 }
@@ -82,14 +84,27 @@ func (p *Pushes) UseExtras(x PushExtras) {
 	p.extras.Store(&pushExtras{cfg: x, cached: map[string]*PushExtra{}, running: map[string]bool{}})
 }
 
-func extraKey(sid, commit string) string { return sid + " " + commit }
+func extraKey(sid, commit, lock string) string { return sid + " " + commit + " " + lock }
+
+func (p *Pushes) LockMoved(sid string) {
+	p.mu.Lock()
+	v, ok := p.views[sid]
+	p.mu.Unlock()
+	if ok && v.Commit != "" && !v.Running {
+		p.show(sid, v.clone())
+	}
+}
 
 func (p *Pushes) extraFor(sid string, v PushView) *PushExtra {
 	b := p.extras.Load()
 	if b == nil || v.Commit == "" || v.Running {
 		return v.Extra
 	}
-	key := extraKey(sid, v.Commit)
+	lock := ""
+	if b.cfg.Locks != nil {
+		lock = b.cfg.Locks.LockKey(sid)
+	}
+	key := extraKey(sid, v.Commit, lock)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if x := b.cached[key]; x != nil {
@@ -169,6 +184,11 @@ func (p *Pushes) computeExtra(b *pushExtras, sid, head string) *PushExtra {
 	if b.cfg.Registry != nil && b.cfg.LookupsOn != nil && b.cfg.LookupsOn(t.Name) {
 		ctx, cancel := context.WithTimeout(b.cfg.Base, extraFor)
 		out.Lookup = lookupPackages(ctx, b.cfg.Registry, out.Dependencies, b.cfg.Now())
+		cancel()
+	}
+	if b.cfg.Locks != nil {
+		ctx, cancel := context.WithTimeout(b.cfg.Base, extraFor)
+		out.Locked = b.cfg.Locks.LockedTests(ctx, sid, head)
 		cancel()
 	}
 	out.Problems = slices.Compact(out.Problems)

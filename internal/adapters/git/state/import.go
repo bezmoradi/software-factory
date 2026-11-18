@@ -434,14 +434,14 @@ func workOff(in, out string, report *session.ImportReport) error {
 	}
 	approvals := 0
 	for sid, w := range st.Sessions {
-		if w.Requirements != nil || w.Plan != nil || len(w.Allowed) > 0 {
+		if w.Requirements != nil || w.Plan != nil || len(w.Allowed) > 0 || w.Lock != nil {
 			approvals++
 		}
-		w.Requirements, w.Plan, w.Allowed = nil, nil, nil
+		w.Requirements, w.Plan, w.Allowed, w.Lock = nil, nil, nil, nil
 		st.Sessions[sid] = w
 	}
 	if approvals > 0 {
-		report.Off = append(report.Off, plural(approvals, "session")+" had requirement, plan or flagged-file approvals, kept for display only")
+		report.Off = append(report.Off, plural(approvals, "session")+" had requirement, plan or flagged-file approvals or locked tests, kept for display only")
 	}
 	return NewWork(out).Save(st)
 }

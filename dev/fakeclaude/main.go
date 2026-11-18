@@ -47,10 +47,12 @@ var (
 )
 
 const (
-	slowFor   = 45 * time.Second
-	slowMost  = 3600
-	fakeModel = "sf-fake-model"
-	fakeCost  = 0.0125
+	slowFor        = 45 * time.Second
+	slowMost       = 3600
+	fakeModel      = "sf-fake-model"
+	fakeSmallModel = "sf-fake-small-model"
+	fakeCost       = 0.0125
+	fakeSmallCost  = 0.0025
 )
 
 func main() {
@@ -61,6 +63,10 @@ func main() {
 	r, err := review(os.Args[1:], st)
 	out := result{Type: "result", Subtype: "success", NumTurns: r.turns, Result: r.text, SessionID: "fake-reviewer", Cost: fakeCost,
 		Denials: r.denials, ModelUsage: map[string]usage{modelOf(os.Args[1:]): {CostUSD: fakeCost}}}
+	if err == nil && has("TWO-MODELS") {
+		out.ModelUsage[fakeSmallModel] = usage{CostUSD: fakeSmallCost}
+		out.Cost += fakeSmallCost
+	}
 	if out.Denials == nil {
 		out.Denials = []denial{}
 	}

@@ -30,10 +30,12 @@ type overlapJSON struct {
 }
 
 type agentCheckJSON struct {
-	Kind    string `json:"kind"`
-	Command string `json:"command"`
-	OK      bool   `json:"ok"`
-	At      int64  `json:"at"`
+	Kind     string `json:"kind"`
+	Command  string `json:"command"`
+	OK       bool   `json:"ok"`
+	At       int64  `json:"at"`
+	EditedAt int64  `json:"editedAt,omitempty"`
+	Hidden   string `json:"hidden,omitempty"`
 }
 
 type changeNoteJSON struct {
@@ -84,6 +86,7 @@ type pushExtraJSON struct {
 	Workflows        []workflowRunJSON `json:"workflows"`
 	WorkflowsProblem string            `json:"workflowsProblem,omitempty"`
 	Lookup           string            `json:"lookup"`
+	Locked           *lockedJSON       `json:"locked,omitempty"`
 }
 
 type protectionJSON struct {
@@ -130,7 +133,7 @@ func checksOf(list []session.AgentCheck) []agentCheckJSON {
 	}
 	out := make([]agentCheckJSON, 0, len(list))
 	for _, c := range list {
-		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At)})
+		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At), EditedAt: millis(c.EditedAt), Hidden: string(c.Hidden)})
 	}
 	return out
 }
@@ -148,7 +151,7 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 		return nil
 	}
 	out := &pushExtraJSON{Commit: x.Commit, Problems: nonNil(x.Problems), Tests: make([]changeNoteJSON, 0, len(x.Tests)), Dependencies: make([]dependencyJSON, 0, len(x.Dependencies)),
-		MoreDependencies: x.MoreDependencies, Kinds: make([]fileKindJSON, 0, len(x.Kinds)), Workflows: workflowRunsOf(x.Workflows), WorkflowsProblem: x.WorkflowsProblem, Lookup: x.Lookup}
+		MoreDependencies: x.MoreDependencies, Kinds: make([]fileKindJSON, 0, len(x.Kinds)), Workflows: workflowRunsOf(x.Workflows), WorkflowsProblem: x.WorkflowsProblem, Lookup: x.Lookup, Locked: lockedOf(x.Locked)}
 	for _, n := range x.Tests {
 		out.Tests = append(out.Tests, changeNoteJSON{Path: n.Path, What: n.What})
 	}

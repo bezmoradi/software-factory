@@ -75,6 +75,7 @@ type SavedWork struct {
 	Requirements *SavedApproval
 	Plan         *SavedApproval
 	Allowed      map[string][]string
+	Lock         *TestLock
 }
 
 type WorkState struct {
@@ -131,6 +132,7 @@ type workSession struct {
 	req     *workApproval
 	plan    *workApproval
 	allowed map[string]map[string]bool
+	lock    *TestLock
 }
 
 type Work struct {
@@ -143,6 +145,7 @@ type Work struct {
 	scanKeys []string
 	sizeMu   sync.Mutex
 	sizes    map[string]changeSize
+	lockShow func(sid string)
 }
 
 type WorkDoc struct {
@@ -208,6 +211,7 @@ type GateView struct {
 	Handoff       bool
 	Catalog       workflow.CatalogState
 	CatalogWhy    string
+	Lock          LockView
 }
 
 type TeamView struct {
@@ -263,6 +267,8 @@ type WorkPage interface {
 	AskRewrite(ctx context.Context, sid, commit string, field CommitField) error
 	EditHold(ctx context.Context, sid, top string, paths []string) string
 	Guarded(sid, top string, paths []string) string
+	LockTests(ctx context.Context, sid, head string) error
+	UnlockTests(sid string) error
 	ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error)
 }
 
@@ -1018,6 +1024,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	if !plan {
 		a.Text = text
 	}
+	var unlocked *TestLock
 	w.mu.Lock()
 	if s := w.sessions[sid]; s != nil {
 		if plan {
@@ -1026,10 +1033,14 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 			s.req = a
 			s.plan = nil
 		}
+		unlocked, s.lock = s.lock, nil
 	}
 	w.mu.Unlock()
 	w.persist(sid)
 	w.approved(sid, g.t, g.head, plan, hash)
+	if unlocked != nil {
+		w.unlocked(sid, g.t, unlocked, "the developer approved the "+what+" again, which clears the tests locked at commit "+shortSHA(unlocked.Commit))
+	}
 	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("approved", "what", what)
 	if next := nextStep(g, plan); next != "" && w.cfg.Tell != nil {
@@ -1223,6 +1234,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	reviewers, missing := w.reviewerStates(g)
 	v.Reviewers = reviewers
 	v.Catalog, v.CatalogWhy = g.setup.setup.Catalog.State, g.setup.setup.Catalog.Reason
+	v.Lock = w.lockView(ctx, g)
 	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
 	for _, p := range g.scan.lfs {
 		v.LFS = append(v.LFS, maskLines(p, true))
