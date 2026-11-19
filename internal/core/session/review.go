@@ -204,7 +204,6 @@ type ReviewsConfig struct {
 	Snapshots  Snapshots
 	Records    ReviewRecords
 	Replies    ReviewReplies
-	Checks     ReviewerChecks
 	Minimum    review.Minimum
 	Plugins    PluginSource
 	Mains      Mains
@@ -239,8 +238,6 @@ type Reviews struct {
 	approvals  map[string]viewApproval
 	approvalAt uint64
 	store      sync.Mutex
-	checkStore sync.Mutex
-	checking   map[string]chan struct{}
 	claude     string
 	wg         sync.WaitGroup
 	reviewing  int
@@ -317,11 +314,8 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
-		return nil, err
-	}
-	if err := r.settleChecks(); err != nil {
 		return nil, err
 	}
 	r.loadTests()
@@ -722,11 +716,6 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		r.running[t.SID] = 0
 	}
 	r.mu.Unlock()
-	if due := r.checksDue(entries); len(due) > 0 {
-		view.Note = strings.TrimSpace(held + " Checking the reviewer after an update: it reviews a change with a planted defect and a clean one, the same way as this review.")
-		r.show(t.SID, view.clone())
-		view.Note = strings.TrimSpace(held + " " + r.checkAfter(ctx, due, plugin))
-	}
 	view.Running = false
 	mu.Lock()
 	shown := view.clone()

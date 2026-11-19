@@ -71,7 +71,6 @@ dimensions:
     - "/api/review-models"
     - "/api/review-reply"
     - "/api/reviewer-agents"
-    - "/api/reviewer-checks"
     - "/api/save-token"
     - "/api/saved-prompts"
     - "/api/screenshot"

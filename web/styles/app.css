@@ -299,7 +299,7 @@ pre {
 .tool.sub { padding-left: 1rem; }
 .sub-list { list-style: none; margin: .4rem 0 0; padding: 0; }
 .subagent > details > summary { min-height: 24px; color: var(--soft); }
-:is(sf-reviewer-checks, sf-changes) details > summary { min-height: 24px; }
+sf-changes details > summary { min-height: 24px; }
 
 .card {
   background: var(--card);
@@ -333,8 +333,6 @@ sf-reviewer-agents { display: block; margin-top: .8rem; }
 sf-reviewer-agents .field-row { flex-wrap: wrap; margin-top: .4rem; }
 sf-reviewer-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-reviewer-agents .field-row > input[type="file"] { min-width: 0; max-width: 100%; }
-sf-reviewer-checks .list > li > .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
-sf-reviewer-checks .list > li > .row > .row { flex-wrap: wrap; justify-content: flex-end; }
 sf-reviewer-agents .list .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 sf-project-agents .check-row { align-items: center; gap: .4rem; margin-top: .4rem; }
 sf-project-agents .check-row input { flex: none; margin: 0; accent-color: var(--accent); }
@@ -381,7 +379,7 @@ sf-reviews .reviews-head { flex-wrap: wrap; align-items: center; margin-bottom: 
 sf-reviews .reviews-head .label { margin-bottom: 0; }
 sf-reviews .review-findings { margin: .35rem 0 0; padding-left: 1.1rem; }
 sf-reviews .review-findings li + li { margin-top: .2rem; }
-sf-reviews .review-message, sf-reviewer-checks .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
+sf-reviews .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
 .path { list-style: none; margin: 0; padding: 0; }
 .path > li { position: relative; display: grid; grid-template-columns: 1rem minmax(0, 1fr); column-gap: .65rem; padding-bottom: .85rem; }
 .path > li:not(:last-child)::before { content: ''; position: absolute; left: calc(.5rem - 1px); top: 1.35rem; bottom: .15rem; width: 2px; background: var(--line); }

@@ -256,14 +256,6 @@ func verdict(agent, prompt string, st *stream) reply {
 		r.text = report + "\n**Changes required:** head/BLOCK-REVIEW asks the fake reviewer to block.\nknackpack-verdict/1: block"
 		return r
 	}
-	if plantedDefect() && agent == slopReviewer {
-		r.text = report + "\n**Verdict: SIMPLER CHANGE AVAILABLE**\n### [Medium] change.diff adds a line that is only `" + plantedLine + "`\n" + plantedFindings + "\nknackpack-verdict/1: pass"
-		return r
-	}
-	if plantedDefect() {
-		r.text = report + "\n**Changes required:** change.diff adds a line that is only `" + plantedLine + "`.\nknackpack-verdict/1: block"
-		return r
-	}
 	if has("SEVERE-PASS") {
 		r.text = report + "\n### [High] head/SEVERE-PASS asks the fake reviewer to pass with a severe finding\n\n## Findings table\n\n| ID | Severity | Blocks | Title |\n|---|---|---|---|\n| F1 | High | yes | head/SEVERE-PASS |\n" + findingsLine() + "\nknackpack-verdict/1: pass"
 		return r

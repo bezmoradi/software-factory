@@ -111,7 +111,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	var capped []string
 	var missing []string
 	var finished []RoleReview
-	var checking []string
 	for _, q := range required {
 		if q.Missing {
 			missing = append(missing, q.Agent)
@@ -124,9 +123,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 				f := finishedRole(q, r.withReply(t.SID, e), rd.Count, limit)
 				f.Run, f.Runs, f.Advisory = key.Number(), q.RunCount(), q.Advisory
 				finished = append(finished, f)
-				if e.Record.Channel == review.Checking {
-					checking = append(checking, ReviewerName(q))
-				}
 				continue
 			}
 			open = append(open, key)
@@ -175,7 +171,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if len(plans) == 0 && len(capped) == 0 {
 		release()
-		return explained(conflict("reviewed"), reviewedMessage(head, checking))
+		return explained(conflict("reviewed"), reviewedMessage(head))
 	}
 	if len(plans) == 0 && len(finished) > 0 {
 		release()
@@ -237,12 +233,8 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	return nil
 }
 
-func reviewedMessage(head string, checking []string) string {
-	out := "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."
-	if len(checking) > 0 {
-		out = "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again; the engine is checking the " + strings.Join(checking, " and ") + " after an update, and " + plural(len(checking), "its pass counts", "their passes count") + " once the check ends. Press Run all again for fresh verdicts."
-	}
-	return out
+func reviewedMessage(head string) string {
+	return "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."
 }
 
 type plannedRole struct {

@@ -50,7 +50,6 @@ type Config struct {
 	Logins         session.LoginPage
 	Forge          session.ForgeService
 	ReviewerAgents session.ReviewerAgentsPage
-	ReviewerChecks session.ReviewerChecksPage
 	Identity       session.IdentityPage
 	Egress         session.EgressPage
 	Recaps         session.RecapPage
@@ -177,7 +176,7 @@ var pageRoutes = map[string]bool{
 	"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true,
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
-	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
 	haltRoute:       true,
 	limitsRoute:     true,
 	egressRoute:     true,
@@ -347,10 +346,6 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == reviewerAgentsRoute {
 		s.reviewerAgents(w, body)
-		return
-	}
-	if r.URL.Path == reviewerChecksRoute {
-		s.reviewerChecks(w, r, body)
 		return
 	}
 	if r.URL.Path == expectRoute {

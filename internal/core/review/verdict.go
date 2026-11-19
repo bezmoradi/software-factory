@@ -7,6 +7,8 @@ import (
 	"unicode"
 )
 
+const slopReviewer = "knackpack:slop-reviewer"
+
 type State string
 
 const (

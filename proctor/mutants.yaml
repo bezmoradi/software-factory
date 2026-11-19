@@ -478,12 +478,6 @@
     - file: "internal/adapters/http/page/revieweragents.go"
       find: "\t\tout.Roles[string(role)] = v.Roles[role]"
       replace: "\t\tout.Roles[string(role)] = v.Defaults[role]"
-- id: PAGE-067
-  title: "Reviewer checks answer 202 on list and 200 on check"
-  edits:
-    - file: "internal/adapters/http/page/reviewerchecks.go"
-      find: "\tif op == \"check\" {\n\t\tcode = http.StatusAccepted"
-      replace: "\tif op == \"list\" {\n\t\tcode = http.StatusAccepted"
 - id: PAGE-068
   title: "The bar preference takes any text, which goes into the page's HTML"
   edits:
@@ -1018,12 +1012,6 @@
     - file: "internal/core/review/shaped.go"
       find: "\tif m := machineLine.FindStringSubmatch(p); m != nil {\n\t\treturn stateOf(m[1]) == Pass\n\t}\n"
       replace: ""
-- id: CORE-010
-  title: "A reviewer check where the reviewer passed the planted defect no longer fails"
-  edits:
-    - file: "internal/core/review/check.go"
-      find: "case defect == Pass:\n\t\treturn CheckFailure"
-      replace: "case defect == Pass:\n\t\treturn CheckUnsettled"
 - id: CORE-011
   title: "A session whose sandbox check failed earlier counts as sandboxed once it passes"
   edits:

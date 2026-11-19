@@ -63,7 +63,6 @@ var stores = map[string]storeRow{
 	sessionsFile:        {class: classKept, version: 1, label: "sessions, which come back stopped and as history only"},
 	workFile:            {class: classKept, version: 1, label: "project settings and work types; approvals come back for display only and automatic sends off"},
 	reviewsFile:         {class: classDisplay, version: reviewsVersion, label: "review records and overrides"},
-	checksFile:          {class: classDisplay, version: 1, label: "reviewer checks after an update"},
 	approvalsFile:       {class: classDisplay, version: 1, label: "start-up approvals"},
 	egressFile:          {class: classOff, version: 1, place: placeKeepOwn, label: "added hosts and the gateway"},
 	keyRoutesFile:       {class: classOff, version: 1, label: "whether a pasted key may be saved"},
@@ -164,8 +163,6 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewWork(d).Load)
 	case reviewsFile:
 		err = loaded(Reviews{Dir: d}.Load)
-	case checksFile:
-		err = loaded(Checks{Dir: d}.Load)
 	case approvalsFile:
 		err = loaded(NewApprovals(d).Load)
 	case egressFile:

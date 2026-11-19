@@ -27,7 +27,6 @@ paths:
   - "internal/adapters/http/page/middleware.go"
   - "internal/adapters/http/page/start.go"
   - "internal/adapters/http/page/workflow.go"
-  - "internal/adapters/http/page/reviewerchecks.go"
   - "internal/adapters/http/page/repos.go"
   - "internal/adapters/http/page/identity.go"
   - "internal/adapters/git/push/*.go"
@@ -55,7 +54,7 @@ paths:
 
 Each check below tries one rule of the trust boundary or the gate (ARCHITECTURE.md "Trust boundary" and "Review, then push") and gives the refusal or result the code produces. Run them on your own Docker with your Software Factory stopped, as [Hand checks with Compose](compose-hand-checks.md) says, on the development overlay with its fakes, in the order below: the last ones restart the engine, which stops every session. Record what each gave in the description of the change that ran them; no test keeps a fixed bypass from coming back. The page's own refusals are in ARCHITECTURE.md "Page security checks", and the containers' isolation in [Hand checks with Compose](compose-hand-checks.md).
 
-**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with knackpack's documents read from commits, the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity, and runs both reviewer checks, so no first pass waits on one. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session (work type `fix` unless named), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
+**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with knackpack's documents read from commits, the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session (work type `fix` unless named), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
 
 ```bash
 export SF_DEV_KNACKPACK_DOCS=repo SF_DEV_UPDATE_API=https://gitserver.test:8443/release-api SF_DEV_REVIEW_MINUTES=2
@@ -83,11 +82,9 @@ key
 sf /api/commit-identity '{"op":"set","name":"Dev Person","email":"12345+dev@users.noreply.github.com"}'
 sf /api/save-token '{"host":"gitserver.test:8443","token":"sf-dev-gitserver-token"}'
 sf /api/add-repo '{"url":"https://gitserver.test:8443/dev/demo.git"}'
-sf /api/reviewer-checks '{"op":"check","agent":"knackpack:adversarial-reviewer","costOk":true}'
-sf /api/reviewer-checks '{"op":"check","agent":"knackpack:slop-reviewer","costOk":true}'
 ```
 
-Go on once `sf /api/projects '{}'` lists `/workspace/base/demo` and `logs engine 'msg="review check" event=finished'` shows `result=passed` for both roles (Check now answers 409 `no plugin` until the engine has installed knackpack; send it again). A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (ARCHITECTURE.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
+Go on once `sf /api/projects '{}'` lists `/workspace/base/demo`. A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (ARCHITECTURE.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
 
 **The agent listener names the sender and refuses what isn't its own.** Each request goes from one session's container to `engine-agents:8081`; the engine takes the container from the connection's address, never from the request.
 

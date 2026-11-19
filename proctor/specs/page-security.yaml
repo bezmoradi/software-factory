@@ -85,7 +85,6 @@ tables:
       - ["t01_review_depth", "/api/review-depth"]
       - ["t01_review_models", "/api/review-models"]
       - ["t01_reviewer_agents", "/api/reviewer-agents"]
-      - ["t01_reviewer_checks", "/api/reviewer-checks"]
       - ["t01_save_token", "/api/save-token"]
       - ["t01_saved_prompts", "/api/saved-prompts"]
       - ["t01_send_findings", "/api/send-findings"]
@@ -227,7 +226,6 @@ tables:
       - ["t02_review_depth", "/api/review-depth"]
       - ["t02_review_models", "/api/review-models"]
       - ["t02_reviewer_agents", "/api/reviewer-agents"]
-      - ["t02_reviewer_checks", "/api/reviewer-checks"]
       - ["t02_save_token", "/api/save-token"]
       - ["t02_saved_prompts", "/api/saved-prompts"]
       - ["t02_send_findings", "/api/send-findings"]
@@ -370,7 +368,6 @@ tables:
       - ["t03_review_depth", "/api/review-depth"]
       - ["t03_review_models", "/api/review-models"]
       - ["t03_reviewer_agents", "/api/reviewer-agents"]
-      - ["t03_reviewer_checks", "/api/reviewer-checks"]
       - ["t03_save_token", "/api/save-token"]
       - ["t03_saved_prompts", "/api/saved-prompts"]
       - ["t03_send_findings", "/api/send-findings"]
@@ -513,7 +510,6 @@ tables:
       - ["t04_review_depth", "/api/review-depth"]
       - ["t04_review_models", "/api/review-models"]
       - ["t04_reviewer_agents", "/api/reviewer-agents"]
-      - ["t04_reviewer_checks", "/api/reviewer-checks"]
       - ["t04_save_token", "/api/save-token"]
       - ["t04_saved_prompts", "/api/saved-prompts"]
       - ["t04_send_findings", "/api/send-findings"]
@@ -655,7 +651,6 @@ tables:
       - ["t05_review_depth", "/api/review-depth"]
       - ["t05_review_models", "/api/review-models"]
       - ["t05_reviewer_agents", "/api/reviewer-agents"]
-      - ["t05_reviewer_checks", "/api/reviewer-checks"]
       - ["t05_save_token", "/api/save-token"]
       - ["t05_saved_prompts", "/api/saved-prompts"]
       - ["t05_send_findings", "/api/send-findings"]
@@ -797,7 +792,6 @@ tables:
       - ["t06_review_depth", "/api/review-depth"]
       - ["t06_review_models", "/api/review-models"]
       - ["t06_reviewer_agents", "/api/reviewer-agents"]
-      - ["t06_reviewer_checks", "/api/reviewer-checks"]
       - ["t06_save_token", "/api/save-token"]
       - ["t06_saved_prompts", "/api/saved-prompts"]
       - ["t06_send_findings", "/api/send-findings"]
@@ -936,7 +930,6 @@ tables:
       - ["t07_review", "/api/review"]
       - ["t07_review_depth", "/api/review-depth"]
       - ["t07_review_models", "/api/review-models"]
-      - ["t07_reviewer_checks", "/api/reviewer-checks"]
       - ["t07_save_token", "/api/save-token"]
       - ["t07_saved_prompts", "/api/saved-prompts"]
       - ["t07_send_findings", "/api/send-findings"]
@@ -1108,7 +1101,6 @@ tables:
       - ["t09_review_depth", "/api/review-depth"]
       - ["t09_review_models", "/api/review-models"]
       - ["t09_reviewer_agents", "/api/reviewer-agents"]
-      - ["t09_reviewer_checks", "/api/reviewer-checks"]
       - ["t09_save_token", "/api/save-token"]
       - ["t09_saved_prompts", "/api/saved-prompts"]
       - ["t09_send_findings", "/api/send-findings"]
@@ -1261,7 +1253,6 @@ tables:
       - ["t10_review_models", "/api/review-models"]
       - ["t10_review_reply", "/api/review-reply"]
       - ["t10_reviewer_agents", "/api/reviewer-agents"]
-      - ["t10_reviewer_checks", "/api/reviewer-checks"]
       - ["t10_save_token", "/api/save-token"]
       - ["t10_saved_prompts", "/api/saved-prompts"]
       - ["t10_screenshot", "/api/screenshot"]
@@ -1380,7 +1371,6 @@ tables:
           - t11_put_review_models
           - t11_put_review_reply
           - t11_put_reviewer_agents
-          - t11_put_reviewer_checks
           - t11_put_save_token
           - t11_put_saved_prompts
           - t11_put_screenshot
@@ -1471,7 +1461,6 @@ tables:
           - t11_delete_review_models
           - t11_delete_review_reply
           - t11_delete_reviewer_agents
-          - t11_delete_reviewer_checks
           - t11_delete_save_token
           - t11_delete_saved_prompts
           - t11_delete_screenshot
@@ -1562,7 +1551,6 @@ tables:
           - t11_patch_review_models
           - t11_patch_review_reply
           - t11_patch_reviewer_agents
-          - t11_patch_reviewer_checks
           - t11_patch_save_token
           - t11_patch_saved_prompts
           - t11_patch_screenshot
@@ -1656,7 +1644,6 @@ tables:
       - ["t11_put_review_models", "/api/review-models", "PUT"]
       - ["t11_put_review_reply", "/api/review-reply", "PUT"]
       - ["t11_put_reviewer_agents", "/api/reviewer-agents", "PUT"]
-      - ["t11_put_reviewer_checks", "/api/reviewer-checks", "PUT"]
       - ["t11_put_save_token", "/api/save-token", "PUT"]
       - ["t11_put_saved_prompts", "/api/saved-prompts", "PUT"]
       - ["t11_put_screenshot", "/api/screenshot", "PUT"]
@@ -1747,7 +1734,6 @@ tables:
       - ["t11_delete_review_models", "/api/review-models", "DELETE"]
       - ["t11_delete_review_reply", "/api/review-reply", "DELETE"]
       - ["t11_delete_reviewer_agents", "/api/reviewer-agents", "DELETE"]
-      - ["t11_delete_reviewer_checks", "/api/reviewer-checks", "DELETE"]
       - ["t11_delete_save_token", "/api/save-token", "DELETE"]
       - ["t11_delete_saved_prompts", "/api/saved-prompts", "DELETE"]
       - ["t11_delete_screenshot", "/api/screenshot", "DELETE"]
@@ -1838,7 +1824,6 @@ tables:
       - ["t11_patch_review_models", "/api/review-models", "PATCH"]
       - ["t11_patch_review_reply", "/api/review-reply", "PATCH"]
       - ["t11_patch_reviewer_agents", "/api/reviewer-agents", "PATCH"]
-      - ["t11_patch_reviewer_checks", "/api/reviewer-checks", "PATCH"]
       - ["t11_patch_save_token", "/api/save-token", "PATCH"]
       - ["t11_patch_saved_prompts", "/api/saved-prompts", "PATCH"]
       - ["t11_patch_screenshot", "/api/screenshot", "PATCH"]
@@ -1955,7 +1940,6 @@ tables:
           - t12_put_review_models
           - t12_put_review_reply
           - t12_put_reviewer_agents
-          - t12_put_reviewer_checks
           - t12_put_save_token
           - t12_put_saved_prompts
           - t12_put_screenshot
@@ -2046,7 +2030,6 @@ tables:
           - t12_delete_review_models
           - t12_delete_review_reply
           - t12_delete_reviewer_agents
-          - t12_delete_reviewer_checks
           - t12_delete_save_token
           - t12_delete_saved_prompts
           - t12_delete_screenshot
@@ -2137,7 +2120,6 @@ tables:
           - t12_patch_review_models
           - t12_patch_review_reply
           - t12_patch_reviewer_agents
-          - t12_patch_reviewer_checks
           - t12_patch_save_token
           - t12_patch_saved_prompts
           - t12_patch_screenshot
@@ -2231,7 +2213,6 @@ tables:
       - ["t12_put_review_models", "/api/review-models", "PUT"]
       - ["t12_put_review_reply", "/api/review-reply", "PUT"]
       - ["t12_put_reviewer_agents", "/api/reviewer-agents", "PUT"]
-      - ["t12_put_reviewer_checks", "/api/reviewer-checks", "PUT"]
       - ["t12_put_save_token", "/api/save-token", "PUT"]
       - ["t12_put_saved_prompts", "/api/saved-prompts", "PUT"]
       - ["t12_put_screenshot", "/api/screenshot", "PUT"]
@@ -2322,7 +2303,6 @@ tables:
       - ["t12_delete_review_models", "/api/review-models", "DELETE"]
       - ["t12_delete_review_reply", "/api/review-reply", "DELETE"]
       - ["t12_delete_reviewer_agents", "/api/reviewer-agents", "DELETE"]
-      - ["t12_delete_reviewer_checks", "/api/reviewer-checks", "DELETE"]
       - ["t12_delete_save_token", "/api/save-token", "DELETE"]
       - ["t12_delete_saved_prompts", "/api/saved-prompts", "DELETE"]
       - ["t12_delete_screenshot", "/api/screenshot", "DELETE"]
@@ -2413,7 +2393,6 @@ tables:
       - ["t12_patch_review_models", "/api/review-models", "PATCH"]
       - ["t12_patch_review_reply", "/api/review-reply", "PATCH"]
       - ["t12_patch_reviewer_agents", "/api/reviewer-agents", "PATCH"]
-      - ["t12_patch_reviewer_checks", "/api/reviewer-checks", "PATCH"]
       - ["t12_patch_save_token", "/api/save-token", "PATCH"]
       - ["t12_patch_saved_prompts", "/api/saved-prompts", "PATCH"]
       - ["t12_patch_screenshot", "/api/screenshot", "PATCH"]
@@ -2519,7 +2498,6 @@ tables:
       - ["t13_review_depth", "/api/review-depth"]
       - ["t13_review_models", "/api/review-models"]
       - ["t13_reviewer_agents", "/api/reviewer-agents"]
-      - ["t13_reviewer_checks", "/api/reviewer-checks"]
       - ["t13_save_token", "/api/save-token"]
       - ["t13_saved_prompts", "/api/saved-prompts"]
       - ["t13_send_findings", "/api/send-findings"]

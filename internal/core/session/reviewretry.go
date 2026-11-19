@@ -76,8 +76,6 @@ func settled(e ReviewEntry) bool {
 	switch e.Record.State {
 	case review.Pass, review.Block:
 		return true
-	case review.Unknown:
-		return e.Record.Channel == review.Checking
 	}
 	return false
 }

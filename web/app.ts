@@ -24,7 +24,6 @@ import './components/projects.ts'
 import './components/reviews.ts'
 import './components/saved-prompts.ts'
 import './components/reviewer-agents.ts'
-import './components/reviewer-checks.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import { typeChangeOf } from './components/push-facts.ts'
@@ -678,7 +677,6 @@ function paintChecks(s: Session) {
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 3, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
   byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
   reviewModels.view = gate && project?.path ? { project: project.path, disabled } : null
-  byId<HTMLElementTagNameMap['sf-reviewer-checks']>('reviewer-checks').view = gate ? { disabled, review: `${s.info.review?.commit ?? ''}:${s.info.review?.running ? 'running' : 'done'}` } : null
 }
 
 function projectFor(s: Session): Project | null {

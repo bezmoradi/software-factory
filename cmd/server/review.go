@@ -104,13 +104,6 @@ func reviewerAgents(cfg PageConfig, repos *session.Repos, logger shared.Logger) 
 	return session.NewReviewerAgents(session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger})
 }
 
-func (p engineParts) reviewerChecksPage() session.ReviewerChecksPage {
-	if p.reviews == nil {
-		return nil
-	}
-	return p.reviews
-}
-
 func (p engineParts) reviewerAgentsPage() session.ReviewerAgentsPage {
 	if p.agentFiles == nil {
 		return nil
@@ -147,7 +140,7 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 		logger.Warn("development reviewer switched on; reviews run a fake, not Claude Code", "variable", "SF_DEV_REVIEWER")
 	}
 	rc := session.ReviewsConfig{
-		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Replies: state.Replies{Dir: cfg.StateDir}, Checks: state.Checks{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
+		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Replies: state.Replies{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
 		Dir: cfg.Review.SeenAs, Command: command, Base: base, Show: reg.SetReview, Logger: logger,
 		Expected: expected, ShowSignIn: func(si session.SignIn) { reg.Notify(page.ReviewerFrame(si)) }, Audit: state.NewAudit(cfg.StateDir),
 	}
