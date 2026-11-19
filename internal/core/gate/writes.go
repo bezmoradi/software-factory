@@ -2,6 +2,7 @@ package gate
 
 import (
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
@@ -15,6 +16,9 @@ func ProtectedWrite(top, file string) string {
 	}
 	root := strings.ToLower(path.Clean(top))
 	p := strings.ToLower(path.Clean(file))
+	if slices.Contains(strings.Split(p, "/"), ".git") {
+		return "it is git's own metadata, which the engine reads to find the session's commits"
+	}
 	if root != "/" {
 		rest, ok := strings.CutPrefix(p, root+"/")
 		if !ok {
@@ -30,10 +34,14 @@ func ProtectedWrite(top, file string) string {
 			return "it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here"
 		}
 	}
-	if segments[len(segments)-1] == ".env" {
+	if environmentFile(segments[len(segments)-1]) {
 		return "it is an environment file that agents load at start, which can change where their traffic goes"
 	}
 	return ""
+}
+
+func environmentFile(name string) bool {
+	return name == ".env" || name == ".envrc" || strings.HasPrefix(name, ".env.")
 }
 
 func worktreePath(top, file string) (string, bool) {
