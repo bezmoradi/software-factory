@@ -348,6 +348,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent, cfg.DevDocs))
 		logger.Warn("development ACP agent switched on", "variable", "SF_DEV_ACP_AGENT")
 	}
+	devChecks := devCheckKeys(cfg.DevACPAgent, developmentImage(boxes.DevMarker), logger)
 	docs := docsInRepo(cfg, logger)
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
@@ -386,6 +387,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Identity:     identity,
 		DocsInRepo:   docs,
 		KeyRoutes:    state.NewKeyRoutes(cfg.StateDir),
+		DevChecks:    devChecks,
 		Logger:       logger,
 	})
 	if allow != nil {

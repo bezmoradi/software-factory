@@ -250,3 +250,18 @@ docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserve
 - The waiting push: the stopping engine waits up to about 5 seconds for the running reviews and logs `review event=finished role=bug-hunter state=failed why=engine-stopped` (and `simplicity`). A stop that lands while a reviewer container is starting or in its sandbox probe logs `reviewer container event=stopped` at INFO, not `not-started` or `sandbox-failed`. The new engine logs `push resume event=queued count=1 dropped=0`, then `push resume event=review-started`, and after the 45-second reviews `push event=pushed by="agent, after reviews"`. The git host then has `$(branch w)` at `w`'s commit.
 - The Reviews panel: each session's latest review is back, and every passing role carries `Not rechecked since the engine restarted against the current approved texts and team rules, which can set this pass aside; the next approval recheck does.` `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
 - The update check: `update check event=newer`, from the engine before the restart or from the new one at start. If the restart logs `event=reused`, the stopping engine's line is the `newer` one, and the new engine logs another a minute after the stored check. Every `release-seen` line, for `/release-api/repos/bezmoradi/software-factory/tags` and `/release-api/repos/bezmoradi/software-factory/releases/tags/v9.9.9`, has `authorization=absent cookie=absent user-agent="software-factory-update-check"`, although the engine holds a token for this host (`gitserver.test:8443`, saved in Setup).
+
+**The check-only key goes only to the bundled fake.** The engine mints it only when `SF_DEV_ACP_AGENT` is exactly `/usr/local/bin/sf-fake-acp` (ARCHITECTURE.md "Trust boundary"). `/proc/self/root/usr/local/bin/sf-fake-acp` is a symbolic link to that same file under another path, so the fake runs and shows what it was given; `/usr/local/bin/sf-fake-claude` is another binary, and a value with arguments is one file name the agent-host can't find. Recreating the engine stops every session, so run this last.
+
+```bash
+other() { printf 'services:\n  engine:\n    environment:\n      SF_DEV_ACP_AGENT: "%s"\n' "$1" > /tmp/sf-other-agent.yaml; docker compose -f compose.yaml -f compose.dev.yaml -f /tmp/sf-other-agent.yaml up -d --wait engine && key; }
+probe() { start "$1"; sf /api/message "{\"sid\":\"$(sid $1)\",\"text\":\"say: key probe\\ntry: k_probe probe.txt\"}"; for i in $(seq 30); do docker exec -w "$(wt $1)" "$(ctr $1)" cat gate-answers/k_probe.txt 2>/dev/null && break; sleep 1; done; }
+other /proc/self/root/usr/local/bin/sf-fake-acp; logs engine 'event=check-key-ignored'; probe k1
+other /usr/local/bin/sf-fake-claude; logs engine 'event=check-key-ignored'
+other '/usr/local/bin/sf-fake-acp --x'; logs engine 'event=check-key-ignored'
+docker compose -f compose.yaml -f compose.dev.yaml up -d --wait engine && key; logs engine 'development switch: each development ACP|check-key-ignored'; probe k2
+```
+
+- Each of the three: one `development ACP agent event=check-key-ignored why="the engine gives a check-only key only to the bundled fake agent, /usr/local/bin/sf-fake-acp, …"` line, and no `development switch: each development ACP session gets a check-only key` line.
+- `k1`: `fallback without asking: no key: allowed, wrote`, so the fake's `session/new` held no `SF_DEV_CHECK_KEY`.
+- With the overlay's own value: the `development switch` line, no `check-key-ignored`, and `k2` gives `engine 200: allowed, wrote`. A value that cleans to the bundled path, such as `/usr/local/bin/../bin/sf-fake-acp`, gets the key too, since the engine passes the cleaned path, which the agent-host then runs.

@@ -114,6 +114,7 @@ type DispatcherConfig struct {
 	Identity     *Identities
 	DocsInRepo   bool
 	KeyRoutes    KeyRoutes
+	DevChecks    bool
 	Logger       shared.Logger
 }
 
@@ -634,11 +635,16 @@ func (d *Dispatcher) findClaude(ctx context.Context, host Host, cwd, id, sid str
 	return "", ""
 }
 
-func (d *Dispatcher) mcpFor(b *bridge, box string) *MCPServer {
+func (d *Dispatcher) mcpFor(b *bridge, spec AgentSpec, box string) *MCPServer {
 	if d.cfg.MCPCommand == "" {
 		return nil
 	}
 	env := map[string]string{"SF_PUSH_TOKEN": b.pushToken()}
+	if d.cfg.DevChecks && spec.ID == DevAgentID {
+		if key := d.reg.CheckOnly(b.sid, box); key != "" {
+			env[DevCheckVariable] = key
+		}
+	}
 	if d.cfg.PluginSocket != "" {
 		env["SF_PLUGIN_SOCKET"] = d.cfg.PluginSocket
 	}
@@ -680,7 +686,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor)
 	choice := d.launchChoice(r)
-	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b, r.box), Version: d.cfg.Version, Thread: d.threadOf(r), Model: choice.Model, Effort: choice.Effort})
+	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b, r.spec, r.box), Version: d.cfg.Version, Thread: d.threadOf(r), Model: choice.Model, Effort: choice.Effort})
 	cancel()
 	if err != nil {
 		_ = p.Close()

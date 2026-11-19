@@ -54,7 +54,7 @@ func (s *Server) pushRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) check(w http.ResponseWriter, r *http.Request) {
-	sid, err := s.reg.Checking(connSecret(r))
+	sid, err := s.reg.ToolChecking(connSecret(r))
 	if err != nil {
 		s.agentError(w, r, err)
 		return

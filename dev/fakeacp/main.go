@@ -104,7 +104,9 @@ func callTool(tool string, args map[string]any) string {
 		cmd := exec.Command(s.Command, s.Args...)
 		cmd.Env = os.Environ()
 		for _, e := range s.Env {
-			cmd.Env = append(cmd.Env, e.Name+"="+e.Value)
+			if e.Name != checkKeyVariable {
+				cmd.Env = append(cmd.Env, e.Name+"="+e.Value)
+			}
 		}
 		in, _ := cmd.StdinPipe()
 		outPipe, _ := cmd.StdoutPipe()
@@ -390,6 +392,10 @@ func scripted(id json.RawMessage, text string) bool {
 			chunk(value + "\n")
 		case "done":
 			done = true
+		default:
+			if !tryLine(callID, key, value) {
+				placeLine(callID, key, value)
+			}
 		}
 	}
 	reply(id, map[string]any{"stopReason": "end_turn"})
