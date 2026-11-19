@@ -108,6 +108,17 @@ func openCheckout(open func(string) (*os.Root, error), workspace, dir string) (*
 }
 
 func (c *checkout) relative(given string) (string, error) {
+	rel, err := c.local(given)
+	if err != nil {
+		return "", err
+	}
+	if hiddenPath(strings.Split(rel, "/")) {
+		return "", errSecret
+	}
+	return rel, nil
+}
+
+func (c *checkout) local(given string) (string, error) {
 	if given == "" || len(given) > maxFilePath || strings.ContainsAny(given, "\x00\r\n") || !utf8.ValidString(given) {
 		return "", errMissing
 	}
@@ -121,9 +132,6 @@ func (c *checkout) relative(given string) (string, error) {
 	rel := path.Clean(given)
 	if !filepath.IsLocal(rel) || rel == "." {
 		return "", errOutside
-	}
-	if hiddenPath(strings.Split(rel, "/")) {
-		return "", errSecret
 	}
 	return rel, nil
 }
@@ -196,13 +204,16 @@ func (c *checkout) text(given string) (string, string, error) {
 	return rel, strings.ToValidUTF8(string(data), "�"), nil
 }
 
-func (c *checkout) exists(given string) bool {
-	rel, err := c.relative(given)
+func (c *checkout) presence(given string) error {
+	rel, err := c.local(given)
 	if err != nil {
-		return false
+		return err
 	}
 	_, err = c.lstat(rel)
-	return err == nil
+	if hiddenPath(strings.Split(rel, "/")) && (err == nil || errors.Is(err, errLink)) {
+		return errSecret
+	}
+	return err
 }
 
 type listing struct {
@@ -388,6 +399,60 @@ func fileError(err error) string {
 	return errMissing.Error()
 }
 
+func notRead(err error) bool {
+	for _, e := range []error{errSecret, errLarge, errBinary, errLink} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
+func checkedAnswer(paths []string, errs []error) map[string]any {
+	found := []string{}
+	unread := map[string]string{}
+	for i, p := range paths {
+		switch {
+		case errs[i] == nil:
+			found = append(found, p)
+		case notRead(errs[i]):
+			unread[p] = fileError(errs[i])
+		}
+	}
+	answer := map[string]any{"found": found}
+	if len(unread) > 0 {
+		answer["unread"] = unread
+	}
+	return answer
+}
+
+func secretsNotLookedUp(errs []error) []error {
+	out := make([]error, len(errs))
+	for i, err := range errs {
+		out[i] = err
+		if errors.Is(err, errSecret) {
+			out[i] = errMissing
+		}
+	}
+	return out
+}
+
+func checkedPaths(body map[string]any) ([]string, bool) {
+	list, ok := body["paths"].([]any)
+	if !ok || len(list) == 0 || len(list) > maxChecked {
+		return nil, false
+	}
+	paths := make([]string, 0, len(list))
+	for _, v := range list {
+		p, ok := v.(string)
+		if !ok || p == "" || len(p) > maxFilePath {
+			return nil, false
+		}
+		paths = append(paths, p)
+	}
+	return paths, true
+}
+
 func (s *Server) files(w http.ResponseWriter, route string, body map[string]any) {
 	sid := str(body["sid"], 80)
 	allowed := map[string][]string{
@@ -429,23 +494,16 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 		}
 		send(w, http.StatusOK, map[string]string{"path": rel, "text": text})
 	case "/api/file-check":
-		list, ok := body["paths"].([]any)
-		if !ok || len(list) == 0 || len(list) > maxChecked {
+		paths, ok := checkedPaths(body)
+		if !ok {
 			refuse(w, http.StatusBadRequest, "paths")
 			return
 		}
-		found := []string{}
-		for _, v := range list {
-			p, ok := v.(string)
-			if !ok || p == "" || len(p) > maxFilePath {
-				refuse(w, http.StatusBadRequest, "paths")
-				return
-			}
-			if c.exists(p) {
-				found = append(found, p)
-			}
+		errs := make([]error, len(paths))
+		for i, p := range paths {
+			errs[i] = c.presence(p)
 		}
-		send(w, http.StatusOK, map[string]any{"found": found})
+		send(w, http.StatusOK, checkedAnswer(paths, errs))
 	case "/api/files":
 		q, ok := body["q"].(string)
 		if !ok || len(q) > maxQuery {
@@ -560,28 +618,13 @@ func (s *Server) commitFiles(w http.ResponseWriter, route, sid string, body map[
 		}
 		send(w, http.StatusOK, map[string]string{"path": rels[0], "text": texts[0], "commit": commit})
 	case "/api/file-check":
-		list, ok := body["paths"].([]any)
-		if !ok || len(list) == 0 || len(list) > maxChecked {
+		paths, ok := checkedPaths(body)
+		if !ok {
 			refuse(w, http.StatusBadRequest, "paths")
 			return
 		}
-		paths := make([]string, 0, len(list))
-		for _, v := range list {
-			p, ok := v.(string)
-			if !ok || p == "" || len(p) > maxFilePath {
-				refuse(w, http.StatusBadRequest, "paths")
-				return
-			}
-			paths = append(paths, p)
-		}
 		_, _, errs := s.commitTexts(sid, commit, paths)
-		found := []string{}
-		for i, p := range paths {
-			if errs[i] == nil {
-				found = append(found, p)
-			}
-		}
-		send(w, http.StatusOK, map[string]any{"found": found})
+		send(w, http.StatusOK, checkedAnswer(paths, secretsNotLookedUp(errs)))
 	default:
 		refuse(w, http.StatusBadRequest, "fields")
 	}

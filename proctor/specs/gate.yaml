@@ -765,7 +765,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-002
-    name: "Pinned answers of the write check. Refused and counted: a dangling link to .env, a link to a folder not there yet with .env inside it, and a two-link chain ending at .env (each link is followed to where the write lands), .env.local, .env.example, .env.production, sub/.env.local, .envrc and .ENVRC (an environment file by its own name), the worktree's .git file, .git/hooks, .git/config and sub/.git/config, and the session clone's .git/config by its absolute path and through a link out of the worktree (git's own metadata, wherever it is). A .. after a missing folder or after a link to a folder outside the worktree doesn't hide a link to .env or .git: missing/../env-link, missing/a/../../env-link, missing/../git-link and out-link/../env-link are refused, as is src/../env-link (the plugin walks the path as given and as folded, each through its links). A path starting ~/ is placed under the home folder, as Claude Code places it: ~/../../workspace/s/<box>/worktrees/sf-<id>/.env is refused and counted, and ~/notes.txt is allowed and not written, since it is outside the worktree. A path with white space around it is placed both as written and trimmed, as Claude Code trims it: \" .env\", \".env \" and a tab before .agents/x are refused and counted. Refused without asking and not counted: a link loop, since where the write lands can't be told. Allowed and not counted: a folder named .env (the rule is about the file's own name), .claude/settings.json and CLAUDE.md (left to the start-up approval), proctor/, PROCTOR/, the root Makefile and GNUmakefile (guarded only once main or the branch holds proctor/proctor.yaml, which this project doesn't), %2eagents, a Cyrillic .аgents, agents and .agents.bak, a Write with no path, the lowercase tool name write, Read, and a Bash redirect into .agents (shell writes aren't checked)"
+    name: "Pinned answers of the write check. Refused and counted: a dangling link to .env, a link to a folder not there yet with .env inside it, and a two-link chain ending at .env (each link is followed to where the write lands), .env.local, .env.example, .env.production, sub/.env.local, .envrc and .ENVRC (an environment file by its own name), the worktree's .git file, .git/hooks, .git/config and sub/.git/config, and the session clone's .git/config by its absolute path and through a link out of the worktree (git's own metadata, wherever it is). A .. after a missing folder or after a link to a folder outside the worktree doesn't hide a link to .env or .git: missing/../env-link, missing/a/../../env-link, missing/../git-link and out-link/../env-link are refused, as is src/../env-link (the plugin walks the path as given and as folded, each through its links). A path starting ~/ is placed under the home folder, as Claude Code places it: ~/../../workspace/s/<box>/worktrees/sf-<id>/.env is refused and counted, and ~/notes.txt is allowed and not written, since it is outside the worktree. A path with white space around it is placed both as written and trimmed, as Claude Code trims it: \" .env\", \".env \" and a tab before .agents/x are refused and counted. Refused without asking and not counted: a link loop, since where the write lands can't be told. Allowed and not counted: a folder named .env (the rule is about the file's own name), .claude/settings.json and CLAUDE.md (left to the start-up approval), proctor/, PROCTOR/, the root Makefile and GNUmakefile (guarded only once main or the branch holds proctor/proctor.yaml, which this project doesn't), %2eagents, a Cyrillic .аgents, agents and .agents.bak, a Write with no path, the lowercase tool name write, Read, and a Bash redirect into .agents (shell writes aren't checked). /api/file-check then names what is there but isn't read in unread: the links env-link, chain-a, loop-a, out-link and clone-config as link, none followed, web/.env/x and .claude/settings.json, which landed, as secret, and newdir-link/.env, a secret name through a link, as secret, the reason /api/file gives first; the missing .env and missing-<run>.txt are in neither found nor unread"
     steps:
       - id: start
         do: http.request
@@ -1868,6 +1868,18 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { found: ["CLAUDE.md", "proctor/specs/gw.yaml", "PROCTOR/gw.yaml", "Makefile", "GNUmakefile", "%2eagents/x", "agents/x.md"] }
+      - id: pinned-unread
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/w_link_loop.txt", "env-link", "chain-a", "loop-a", "out-link", "clone-config", "web/.env/x", ".claude/settings.json", "newdir-link/.env", ".env", "missing-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/w_link_loop.txt"], unread: { "env-link": link, "chain-a": link, "loop-a": link, "out-link": link, "clone-config": link, "web/.env/x": secret, ".claude/settings.json": secret, "newdir-link/.env": secret } }
       - id: remove-dirty
         do: http.request
         identity: page

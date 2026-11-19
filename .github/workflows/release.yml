@@ -165,7 +165,7 @@ jobs:
           sh scripts/release-compose.sh "$IMAGE" "$IMAGE_DIGEST" "$files/compose.release.yaml"
           (cd "$files" && docker compose -f compose.yaml -f compose.release.yaml config --format json) > "$RUNNER_TEMP/release.json"
           if ! sh scripts/release-check.sh "$IMAGE@$IMAGE_DIGEST" "$RUNNER_TEMP/release.json"; then
-            echo "::error::The release's compose.yaml and compose.release.yaml aren't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE and the helper on helpernet alone; scripts/release-check.sh names what differs."
+            echo "::error::The release's compose.yaml and compose.release.yaml aren't exactly egress, engine and helper on $IMAGE@$IMAGE_DIGEST with pull_policy missing, each with only the Compose keys, user, cap_drop [ALL], security_opt [no-new-privileges:true] and read_only the release allows, only volume and tmpfs mounts, ports on 127.0.0.1 only, default bridge networks and local volumes with no external one and no host folder, no SF_BOX_LIVE, no SF_DEV_ setting and the helper on helpernet alone; scripts/release-check.sh names what differs."
             exit 1
           fi
           sh scripts/release-install.sh "$VERSION" "$files/compose.yaml" "$files/compose.release.yaml" "$files/install.sh"
