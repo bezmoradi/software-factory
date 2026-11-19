@@ -1,0 +1,70 @@
+version: 2
+project: software-factory
+manifest: manifest.yaml
+dimensions: dimensions.yaml
+drivers:
+  http:
+    official: http
+    policy:
+      reads:
+        - { method: POST, path: /api/agent-models }
+        - { method: POST, path: /api/agent-report }
+        - { method: POST, path: /api/audit, shows: [/api/dispatch, /api/remove-session, /api/stop-session] }
+        - { method: POST, path: /api/backup, shows: [/api/import] }
+        - { method: POST, path: /api/changes, shows: [/api/dispatch, /api/message, /api/viewed] }
+        - { method: POST, path: /api/docs }
+        - { method: POST, path: /api/file, shows: [/api/message] }
+        - { method: POST, path: /api/file-check, shows: [/api/message] }
+        - { method: POST, path: /api/gate, shows: [/api/dispatch, /api/lock-tests, /api/remove-session] }
+        - { method: POST, path: /api/metrics }
+        - { method: POST, path: /api/projects, shows: [/api/add-repo, /api/remove-repo, /api/save-token, /api/session] }
+        - { method: POST, path: /api/review-reply }
+        - { method: POST, path: /api/screenshot }
+        - { method: POST, path: /api/screenshots, shows: [/api/dispatch] }
+      destructive:
+        - { method: POST, path: /api/remove-repo }
+        - { method: POST, path: /api/remove-session }
+      max_body_bytes: 268435457
+  http_misdirected:
+    official: http
+    policy_from: http
+  docker:
+    official: docker
+    policy:
+      scope:
+        - { label: com.docker.compose.project, value: sf-proctor }
+        - { label: dev.software-factory.stack, value: sf-proctor }
+identities:
+  page:
+    type: bearer
+    variants: [unknown, basic_scheme, token_scheme, no_scheme]
+    accepted_variants: [lowercase_scheme]
+  anonymous: { type: none }
+secrets: [git_token]
+redaction:
+  json_paths: ["$.body.token"]
+app_logs:
+  format: logfmt
+  levels: [ERROR, FATAL, PANIC]
+  level_field: level
+  message_field: msg
+  approved:
+    fields: [side, method, route, status, event, why, req]
+    order: written
+    max_bytes: 524288
+    scrub:
+      - { name: req, field: req }
+      - { name: time, pattern: '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})' }
+time_limits: { max_call: 110s }
+transcripts:
+  max_bytes: 524288
+  scrub:
+    - { name: request_id, path: "$.headers.x-sf-request" }
+    - { name: request_id_list, path: "$.header_lists.x-sf-request" }
+    - { name: date, path: "$.headers.date", numbered: false }
+    - { name: date_list, path: "$.header_lists.date", numbered: false }
+    - { name: saved_at, path: "$.body.host.savedAt" }
+    - { name: hosts_saved_at, path: "$.body.hosts[0].savedAt" }
+    - { name: added_at, path: "$.body.projects[0].addedAt" }
+    - { name: second_added_at, path: "$.body.projects[1].addedAt" }
+    - { name: time, pattern: '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})' }

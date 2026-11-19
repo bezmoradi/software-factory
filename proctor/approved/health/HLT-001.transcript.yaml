@@ -1,0 +1,55 @@
+format: "proctor-transcript/1"
+scenario: "HLT-001"
+specification: "health"
+steps:
+  - do: "http.request"
+    fact:
+      body:
+        status: "ok"
+      header_lists:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "16"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date_list>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+      headers:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "16"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+      status: 200
+    id: "liveness"
+    identity: "anonymous"
+    phase: "verification"
+    with:
+      method: "GET"
+      path: "/healthz"

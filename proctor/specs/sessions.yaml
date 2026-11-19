@@ -1,0 +1,507 @@
+version: 2
+suite: sessions
+scenarios:
+  - id: SES-001
+    name: "A development session starts from main, has nothing to lock, keep or review, writes the file a message asks for, leaves an audit trail when it stops, and is deleted only through the offer for its uncommitted file"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; the gate step that expects it reads the session saved from this dispatch, so no earlier run's session can match" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": {}
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+          any:
+            "$.body.entries": { kind: session-start, by: page, result: started, session: "${sid}", branch: "sf/${id}", from: main }
+        save: { box: "$.body.entries[0].box" }
+      - id: helper-image
+        do: docker.container
+        with: { name: sf-proctor-helper-1 }
+        expect:
+          equal: { "$.found": true }
+        save: { helper_image: "$.container.image" }
+      - id: box-running
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image": "${helper_image}"
+            "$.container.image_ref": "${helper_image}"
+            "$.container.state.running": true
+            "$.container.state.health": healthy
+            "$.container.user": "10002:10000"
+            "$.container.init": true
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.oom_score_adj": 500
+            "$.container.pids_limit": 2048
+            "$.container.memory": 2147483648
+            "$.container.memory_swap": 2147483648
+            "$.container.nano_cpus": 2000000000
+            "$.container.restart_policy": { name: on-failure, maximum_retry_count: 3 }
+            "$.container.log_driver": json-file
+            "$.container.network_mode": "sf-proctor-box-${box}"
+            "$.container.networks": [{ name: "sf-proctor-box-${box}", ipv4_address: "10.213.15.244", in_scope: true }]
+            "$.container.extra_hosts": ["egress-agents:10.213.15.243", "egress:10.213.15.243", "engine-agents:10.213.15.242"]
+            "$.container.ipc_mode": private
+            "$.container.pid_mode": ""
+            "$.container.cgroupns_mode": private
+            "$.container.shm_size": 67108864
+            "$.container.ports": []
+            "$.container.publish_all_ports": false
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.sysctls": []
+            "$.container.dns": []
+            "$.container.group_add": []
+            "$.container.docker_socket": false
+            "$.container.tmpfs": ["/run/sf", "/tmp"]
+            "$.container.mounts":
+              - { type: volume, destination: /home/agent, read_only: false, volume: "sf-proctor-home-${box}", subpath: null, source: null }
+              - { type: volume, destination: /opt/software-factory/agents, read_only: true, volume: sf-proctor_agents, subpath: null, source: null }
+              - { type: volume, destination: "/uploads/${box}", read_only: true, volume: sf-proctor_uploads, subpath: "${box}", source: null }
+              - { type: volume, destination: "/workspace/s/${box}", read_only: false, volume: sf-proctor_workspace, subpath: "s/${box}", source: null }
+          length: { "$.container.labels": 6 }
+          any:
+            "$.container.labels": [{ key: dev.software-factory.stack, value: sf-proctor }, { key: dev.software-factory.box, value: "${box}" }, { key: com.docker.compose.project, value: "" }, { key: com.docker.compose.service, value: "" }, { key: com.docker.compose.version, value: "" }]
+          count:
+            "$.container.labels": { where: { key: dev.software-factory.recipe }, is: 1 }
+      - id: box-network
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.network.driver": bridge
+            "$.network.internal": true
+            "$.network.enable_ipv6": false
+            "$.network.ipam[0].subnet": "10.213.15.240/28"
+            "$.network.members":
+              - { name: "sf-proctor-box-${box}", ipv4_address: "10.213.15.244", in_scope: true }
+              - { name: sf-proctor-egress-1, ipv4_address: "10.213.15.243", in_scope: true }
+              - { name: sf-proctor-engine-1, ipv4_address: "10.213.15.242", in_scope: true }
+          length: { "$.network.ipam": 1 }
+          any:
+            "$.network.options": { key: com.docker.network.bridge.gateway_mode_ipv4, value: isolated }
+            "$.network.labels": [{ key: dev.software-factory.stack, value: sf-proctor }, { key: dev.software-factory.box, value: "${box}" }]
+          none:
+            "$.network.labels": { key: dev.software-factory.recipe }
+      - id: box-home
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.labels": [{ key: dev.software-factory.box, value: "${box}" }, { key: dev.software-factory.stack, value: sf-proctor }]
+            "$.volume.type_option": ""
+            "$.volume.option_keys": []
+      - id: gate
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+            "$.body.gate.workType": fix
+            "$.body.gate.allowed": false
+            "$.body.gate.testLock": { offered: false, why: "The session's branch has no commit the main branch lacks yet. Lock the tests once the agent has committed the ones you want kept.", files: 0, paths: [], cut: false, branchLeft: 0, changed: null }
+          present: ["$.body.gate.head"]
+        save: { head: "$.body.gate.head" }
+      - id: changes
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.changes.branch": "sf/${id}"
+            "$.body.changes.head": "${head}"
+            "$.body.changes.base": "${head}"
+            "$.body.changes.from": fork
+            "$.body.changes.files": []
+            "$.body.changes.commits": []
+            "$.body.changes.note": "Only committed work is shown."
+      - id: no-screenshots
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/screenshots"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { screenshots: [], max: 50 }
+      - id: nothing-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/keep"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.branch": "sf/${id}"
+            "$.body.head": "${head}"
+            "$.body.commit": ""
+            "$.body.restorable": false
+            "$.body.heads": []
+            "$.body.refusal": "Nothing is copied yet: the engine copies the branch's commits that main lacks when a turn ends."
+      - id: nothing-to-lock
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/lock-tests"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", op: lock, head: "${head}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "nothing to lock", message: "The session's branch has no commit the main branch lacks yet. Lock the tests once the agent has committed the ones you want kept." }
+      - id: not-locked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/lock-tests"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", op: unlock }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not locked", message: "This session has no locked tests." }
+      - id: still-unlocked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.head": "${head}"
+            "$.body.gate.testLock.offered": false
+          absent: ["$.body.gate.testLock.commit", "$.body.gate.testLock.at"]
+      - id: not-on-branch
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/viewed"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: README.md, blob: "${head}", viewed: true }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not on branch", message: "That version of the file isn't one this session's branch changes, so the engine doesn't mark it viewed. Reload the Changes view and mark the file again." }
+      - id: nothing-viewed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.changes.head": "${head}"
+            "$.body.changes.files": []
+      - id: no-review-yet
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", from: reviewed }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "no reviewed commit", message: "No commit on this session's branch has a reviewer's pass or block yet, within the newest 5000 commits, so there is no last reviewed commit to compare with." }
+      - id: no-whole-report
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review-reply"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", agent: "knackpack:adversarial-reviewer", commit: "${head}", run: 1 }
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: reply, message: "The engine keeps no whole report for that review." }
+      - id: remove-while-running
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: running, message: "Stop the session before deleting it.", offer: null }
+      - id: box-still-running
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: still-running
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: ask-for-a-file
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor ${run.id}\nwrite: proctor-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.txt", "proctor-${run.id}-missing.txt"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["proctor-${run.id}.txt"] }
+      - id: file-text
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "proctor-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "proctor-${run.id}.txt", text: "ok\n" }
+      - id: still-uncommitted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.changes.head": "${head}"
+            "$.body.changes.files": []
+            "$.body.changes.commits": []
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: home-kept
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        expect:
+          equal: { "$.found": true }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+          present: ["$.body.message"]
+      - id: woken-then-stopped
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: home-kept-dirty
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        expect:
+          equal: { "$.found": true }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove-stale-offer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-proctor" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: offer, message: "That choice is no longer the one offered. Try Delete again.", offer: null }
+      - id: home-kept-stale
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        expect:
+          equal: { "$.found": true }
+      - id: still-not-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: box-not-woken
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: network-removed
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }

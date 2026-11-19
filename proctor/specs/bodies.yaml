@@ -1,0 +1,432 @@
+version: 2
+suite: bodies
+tables:
+  - id: UPL-T01
+    name: "An upload whose Content-Type isn't one image type or application/octet-stream, with no parameters, is refused with 415 before its body is read"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/upload"
+      headers: { Origin: "${page.origin}", Content-Type: "${row.type}", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+      body_base64: iVBORw0KGgpwcm9jdG9y
+    expect:
+      equal:
+        "$.status": 415
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: type }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]"]
+    no_state_check: "refused with 415 by uploadKind before the body is read or the engine saves anything; no page read lists uploads, and a table row can't name a read of its own"
+    columns: ["case", "type"]
+    rows:
+      - ["upl_t01_text", "text/plain"]
+      - ["upl_t01_json", "application/json"]
+      - ["upl_t01_svg", "image/svg+xml"]
+      - ["upl_t01_bmp", "image/bmp"]
+      - ["upl_t01_gzip", "application/gzip"]
+      - ["upl_t01_png_charset", "image/png; charset=binary"]
+      - ["upl_t01_octet_param", "application/octet-stream; name=a.txt"]
+      - ["upl_t01_bad_parameter", "image/png; x"]
+      - ["upl_t01_two_types", "image/png, image/gif"]
+
+  - id: UPL-T02
+    name: "An image whose bytes don't start as its declared type's do is refused with 400 before the engine saves anything"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/upload"
+      headers: { Origin: "${page.origin}", Content-Type: "${row.type}", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+      body_base64: iVBORw0KGgpwcm9jdG9y
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: upload, message: "That isn't the kind of image it says it is." }
+    no_state_check: "refused with 400 by Registry.Upload's type check, before it looks up the session or saves anything; no page read lists uploads, and a table row can't name a read of its own"
+    columns: ["case", "type"]
+    rows:
+      - ["upl_t02_jpeg", "image/jpeg"]
+      - ["upl_t02_gif", "image/gif"]
+      - ["upl_t02_webp", "image/webp"]
+
+scenarios:
+  - id: UPL-001
+    name: "Each image type whose bytes start as that type's do passes every check of the upload but the session, and is refused with 404 for a session the engine didn't start"
+    steps:
+      - id: png
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: jpeg
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/jpeg, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: /9j/4HByb2N0b3I=
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: gif
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/gif, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: R0lGODlhcHJvY3Rvcg==
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: webp
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/webp, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: UklGRg8AAABXRUJQcHJvY3Rvcg==
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: file
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "notes%20${run.id}.txt", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: cHJvY3RvciBub3Rlcwo=
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+
+  - id: UPL-002
+    name: "A file upload without a usable X-SF-Name, or an image upload with one, is refused with 400"
+    steps:
+      - id: file-no-name
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: cHJvY3RvciBub3Rlcwo=
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: name }
+        no_state_check: "refused with 400 by the upload handler's name check, before the body is read or anything is saved; no page read lists uploads"
+      - id: file-name-with-slash
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "a%2F${run.id}.txt", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: cHJvY3RvciBub3Rlcwo=
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: name }
+        no_state_check: "refused with 400, since the name decodes to one holding a slash, which session.UploadName refuses, before the body is read or anything is saved; no page read lists uploads"
+      - id: file-name-bad-escape
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "${run.id}%zz.txt", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: cHJvY3RvciBub3Rlcwo=
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: name }
+        no_state_check: "refused with 400, since url.PathUnescape refuses the name's %zz, before the body is read or anything is saved; no page read lists uploads"
+      - id: image-with-name
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Name: "${run.id}.png", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: name }
+        no_state_check: "refused with 400, since an image takes its name from its type and a name sent with one is refused, before the body is read or anything is saved; no page read lists uploads"
+
+  - id: UPL-003
+    name: "An upload without X-SF-Session, or with one longer than 80 characters, is refused with 400, and one of 80 reaches the session lookup"
+    steps:
+      - id: session-of-80
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-00000000000000000000-0000-4000-8000-000000000000-0000000" }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "a session header of 80 characters passes the handler's length check and is refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: no-session
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: session }
+        no_state_check: "refused with 400 by the upload handler's session check, before the body is read or anything is saved; no page read lists uploads"
+      - id: long-session
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-00000000000000000000-0000-4000-8000-000000000000-00000000" }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: session }
+        no_state_check: "refused with 400, since the session header is 81 characters and the handler takes at most 80, before the body is read or anything is saved; no page read lists uploads"
+
+  - id: UPL-004
+    name: "An image of 2.5 MiB passes the size check, and one byte more is refused with 413 before its body is read"
+    steps:
+      - id: at-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_fill: { bytes: 2621440, pattern_base64: iVBORw0KGgo= }
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "an image of exactly session.MaxImage bytes that starts as a PNG does passes the size and type checks and is refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: over-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_fill: { bytes: 2621441, pattern_base64: iVBORw0KGgo= }
+        expect:
+          equal:
+            "$.status": 413
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: body }
+        no_state_check: "refused with 413 because its Content-Length is over session.MaxImage, before the body is read or anything is saved; no page read lists uploads"
+
+  - id: UPL-005
+    name: "A file of 10 MiB passes the size check, and one byte more is refused with 413 before its body is read"
+    steps:
+      - id: at-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "${run.id}.bin", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_fill: { bytes: 10485760, pattern: x }
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "Only a session this engine started takes images and files." }
+        no_state_check: "a file of exactly session.MaxDrop bytes passes the size check and is refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+      - id: over-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "${run.id}.bin", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_fill: { bytes: 10485761, pattern: x }
+        expect:
+          equal:
+            "$.status": 413
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: body }
+        no_state_check: "refused with 413 because its Content-Length is over session.MaxDrop, before the body is read or anything is saved; no page read lists uploads"
+
+  - id: IMP-001
+    name: "An import is refused for its Content-Type, its upload headers or a body over 256 MiB, and, since the engine holds a project, any archive is refused with 409 and nothing is staged"
+    steps:
+      - id: before
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/backup"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.canImport": false
+            "$.body.why": "This engine has projects already. An import goes only into an engine with no projects and no sessions."
+      - id: json
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}" }
+          body: { proctor: "${run.id}" }
+        expect:
+          equal:
+            "$.status": 415
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: type }
+      - id: x-gzip
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/x-gzip }
+          body_base64: H4sIAAAAAAAAAwMAAAAAAAAAAAA=
+        expect:
+          equal:
+            "$.status": 415
+            "$.body": { error: type }
+      - id: gzip-with-parameter
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: "application/gzip; charset=binary" }
+          body_base64: H4sIAAAAAAAAAwMAAAAAAAAAAAA=
+        expect:
+          equal:
+            "$.status": 415
+            "$.body": { error: type }
+      - id: with-name
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/gzip, X-SF-Name: "${run.id}.tar.gz" }
+          body_base64: H4sIAAAAAAAAAwMAAAAAAAAAAAA=
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: fields }
+      - id: with-session
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/gzip, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_base64: H4sIAAAAAAAAAwMAAAAAAAAAAAA=
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: fields }
+      - id: over-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/gzip }
+          body_fill: { bytes: 268435457, pattern: x }
+        expect:
+          equal:
+            "$.status": 413
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: body }
+      - id: at-limit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/gzip }
+          body_fill: { bytes: 268435456, pattern: x }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not empty", message: "This engine has projects already. An import goes only into an engine with no projects and no sessions." }
+      - id: empty-gzip
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/import"
+          headers: { Origin: "${page.origin}", Content-Type: application/gzip }
+          body_base64: H4sIAAAAAAAAAwMAAAAAAAAAAAA=
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not empty", message: "This engine has projects already. An import goes only into an engine with no projects and no sessions." }
+      - id: nothing-staged
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/backup"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.canImport": false
+            "$.body.why": "This engine has projects already. An import goes only into an engine with no projects and no sessions."
+
+  - id: UPL-006
+    name: "An empty file is refused with 400 before the engine looks up its session"
+    steps:
+      - id: empty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: application/octet-stream, X-SF-Name: "${run.id}.txt", X-SF-Session: "00000000-0000-4000-8000-000000000000" }
+          body_text: ""
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: upload, message: "The file is empty." }
+        no_state_check: "refused with 400 by Registry.Upload, since the body is empty, before it looks up the session or saves anything; no page read lists uploads"

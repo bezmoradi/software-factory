@@ -1,0 +1,3674 @@
+version: 2
+suite: gate
+scenarios:
+  - id: GATE-001
+    name: "The fake agent's Write, Edit, MultiEdit and NotebookEdit calls ask /check from a Fix session's container as Claude Code's plugin does; every path the write check protects (.agents and .codex as any segment, in any case, after .. and repeated slashes, as an absolute path, and through the real path of a linked folder; .env as the last segment in any case) is refused, counted once each and not written, and writes that leave .agents, sit in a sibling folder that only starts with the worktree's name, or are outside the worktree aren't protected"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-protected
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate protected ${run.id}\nmkdir: .agents/skills\nlink: agents-link -> .agents\ntry: w_agents_skill .agents/skills/gw/SKILL.md\ntry: w_agents_plugins .agents/plugins/marketplace.json\ntry: w_agents_nested src/.agents/x.md\ntry: w_agents_itself .agents\ntry: w_codex_config .codex/config.toml\ntry: w_codex_nested sub/.codex/config.toml\ntry: w_env .env\ntry: w_env_nested web/.env\ntry: w_case_agents .AGENTS/x\ntry: w_case_codex .Codex/config.toml\ntry: w_case_env .ENV\ntry: w_dotdot_in src/../.agents/x\ntry: w_dot_slashes ./.codex//config.toml\ntry: w_absolute /workspace/s/${box}/worktrees/sf-${id}/.codex/abs.toml\ntry: w_link_dir agents-link/x.md\ntry-tool: e_codex Edit {\"file_path\":\".codex/a\",\"old_string\":\"\",\"new_string\":\"\\n\"}\ntry-tool: e_multi MultiEdit {\"file_path\":\".agents/a\",\"edits\":[]}\ntry-tool: e_notebook NotebookEdit {\"notebook_path\":\".codex/n.ipynb\",\"new_source\":\"x\"}\ntry: w_dotdot_out .agents/../src/gw-${run.id}.txt\ntry: w_sibling ../sf-${id}x/.agents/a\ntry: w_escape ../sf-other/.agents/x\ntry: w_home /home/agent/.codex/config.toml\ntry: w_allowed gw-${run.id}.txt\ntry-tool: e_allowed Edit {\"file_path\":\"gw-${run.id}.txt\",\"old_string\":\"\",\"new_string\":\"\\n\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: protected-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/e_allowed.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/e_allowed.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: w-agents-skill-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_skill.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_skill.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-skill-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_skill.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_skill.txt", text: "engine 200: refused\n" }
+      - id: w-agents-plugins-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_plugins.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_plugins.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-plugins-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_plugins.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_plugins.txt", text: "engine 200: refused\n" }
+      - id: w-agents-nested-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_nested.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-nested-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_nested.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_nested.txt", text: "engine 200: refused\n" }
+      - id: w-agents-itself-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_itself.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_itself.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-itself-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_itself.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_itself.txt", text: "engine 200: refused\n" }
+      - id: w-codex-config-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_codex_config.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_codex_config.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-codex-config-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_codex_config.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_codex_config.txt", text: "engine 200: refused\n" }
+      - id: w-codex-nested-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_codex_nested.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_codex_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-codex-nested-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_codex_nested.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_codex_nested.txt", text: "engine 200: refused\n" }
+      - id: w-env-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env.txt", text: "engine 200: refused\n" }
+      - id: w-env-nested-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_nested.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-nested-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_nested.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_nested.txt", text: "engine 200: refused\n" }
+      - id: w-case-agents-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_agents.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-case-agents-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_agents.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_agents.txt", text: "engine 200: refused\n" }
+      - id: w-case-codex-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_codex.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-case-codex-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_codex.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_codex.txt", text: "engine 200: refused\n" }
+      - id: w-case-env-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_env.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_env.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-case-env-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_env.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_env.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-in-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_in.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_in.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-in-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_in.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_in.txt", text: "engine 200: refused\n" }
+      - id: w-dot-slashes-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dot_slashes.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dot_slashes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dot-slashes-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dot_slashes.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dot_slashes.txt", text: "engine 200: refused\n" }
+      - id: w-absolute-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_absolute.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_absolute.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-absolute-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_absolute.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_absolute.txt", text: "engine 200: refused\n" }
+      - id: w-link-dir-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_dir.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_dir.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-link-dir-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_dir.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_dir.txt", text: "engine 200: refused\n" }
+      - id: e-codex-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_codex.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: e-codex-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_codex.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_codex.txt", text: "engine 200: refused\n" }
+      - id: e-multi-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_multi.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_multi.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: e-multi-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_multi.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_multi.txt", text: "engine 200: refused\n" }
+      - id: e-notebook-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_notebook.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_notebook.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: e-notebook-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_notebook.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_notebook.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-out-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_out.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_out.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-out-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_out.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_out.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-sibling-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_sibling.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_sibling.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-sibling-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_sibling.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_sibling.txt", text: "engine 200: allowed, not written: outside the worktree\n" }
+      - id: w-escape-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_escape.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_escape.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-escape-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_escape.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_escape.txt", text: "engine 200: allowed, not written: outside the worktree\n" }
+      - id: w-home-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-home-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home.txt", text: "engine 200: allowed, not written: outside the worktree\n" }
+      - id: w-allowed-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_allowed.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_allowed.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-allowed-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_allowed.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_allowed.txt", text: "engine 200: allowed, wrote\n" }
+      - id: e-allowed-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_allowed.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_allowed.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: e-allowed-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/e_allowed.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/e_allowed.txt", text: "engine 200: allowed, wrote\n" }
+      - id: protected-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { protected-write: 18 }
+      - id: allowed-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["src/gw-${run.id}.txt", "gw-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["src/gw-${run.id}.txt", "gw-${run.id}.txt"] }
+      - id: allowed-text
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gw-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gw-${run.id}.txt", text: "ok\n\n" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-002
+    name: "Pinned answers of the write check. Refused and counted: a dangling link to .env, a link to a folder not there yet with .env inside it, and a two-link chain ending at .env (each link is followed to where the write lands), .env.local, .env.example, .env.production, sub/.env.local, .envrc and .ENVRC (an environment file by its own name), the worktree's .git file, .git/hooks, .git/config and sub/.git/config, and the session clone's .git/config by its absolute path and through a link out of the worktree (git's own metadata, wherever it is). A .. after a missing folder or after a link to a folder outside the worktree doesn't hide a link to .env or .git: missing/../env-link, missing/a/../../env-link, missing/../git-link and out-link/../env-link are refused, as is src/../env-link (the plugin walks the path as given and as folded, each through its links). A path starting ~/ is placed under the home folder, as Claude Code places it: ~/../../workspace/s/<box>/worktrees/sf-<id>/.env is refused and counted, and ~/notes.txt is allowed and not written, since it is outside the worktree. A path with white space around it is placed both as written and trimmed, as Claude Code trims it: \" .env\", \".env \" and a tab before .agents/x are refused and counted. Refused without asking and not counted: a link loop, since where the write lands can't be told. Allowed and not counted: a folder named .env (the rule is about the file's own name), .claude/settings.json and CLAUDE.md (left to the start-up approval), proctor/, PROCTOR/, the root Makefile and GNUmakefile (guarded only once main or the branch holds proctor/proctor.yaml, which this project doesn't), %2eagents, a Cyrillic .аgents, agents and .agents.bak, a Write with no path, the lowercase tool name write, Read, and a Bash redirect into .agents (shell writes aren't checked)"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-pinned
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate pinned ${run.id}\nlink: env-link -> .env\ntry: w_dangling_env env-link\ntry: w_env_local .env.local\ntry: w_envrc .envrc\ntry: w_env_folder web/.env/x\ntry: w_git_hook .git/hooks/pre-commit\ntry: w_git_config .git/config\ntry: w_git_file .git\ntry: w_git_nested sub/.git/config\ntry: w_env_example .env.example\ntry: w_env_production .env.production\ntry: w_env_local_nested sub/.env.local\ntry: w_case_envrc .ENVRC\nlink: newdir-link -> newdir\ntry: w_link_newdir newdir-link/.env\nlink: chain-a -> chain-b\nlink: chain-b -> .env\ntry: w_link_chain chain-a\nlink: loop-a -> loop-b\nlink: loop-b -> loop-a\ntry: w_link_loop loop-a\nmkdir: src\nlink: git-link -> .git\nlink: out-link -> /tmp\ntry: w_dotdot_missing missing/../env-link\ntry: w_dotdot_missing_deep missing/a/../../env-link\ntry: w_dotdot_missing_git missing/../git-link\ntry: w_dotdot_out_link out-link/../env-link\ntry: w_dotdot_src src/../env-link\nlink: clone-config -> ../../repos/demo/.git/config\ntry: w_clone_git /workspace/s/${box}/repos/demo/.git/config\ntry: w_clone_git_link clone-config\ntry: w_home_env ~/../../workspace/s/${box}/worktrees/sf-${id}/.env\ntry: w_home_notes ~/notes.txt\ntry-tool: w_space_env Write {\"file_path\":\" .env\",\"content\":\"x\"}\ntry-tool: w_env_space Write {\"file_path\":\".env \",\"content\":\"x\"}\ntry-tool: w_tab_agents Write {\"file_path\":\"\\t.agents/x\",\"content\":\"x\"}\ntry: w_claude_settings .claude/settings.json\ntry: w_claude_md CLAUDE.md\ntry: w_spec proctor/specs/gw.yaml\ntry: w_spec_case PROCTOR/gw.yaml\ntry: w_makefile Makefile\ntry: w_gnumakefile GNUmakefile\ntry: w_encoded %2eagents/x\ntry: w_lookalike .аgents/x\ntry: w_agents_word agents/x.md\ntry: w_agents_suffix .agents.bak/x\ntry-tool: w_no_paths Write {\"content\":\"x\"}\ntry-tool: w_tool_case write {\"file_path\":\".agents/x\",\"content\":\"x\"}\ntry-tool: w_read Read {\"file_path\":\".agents/x\"}\ntry-run: w_bash_redirect echo x > .agents/x" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: pinned-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/w_bash_redirect.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/w_bash_redirect.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: w-dangling-env-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dangling_env.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dangling_env.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dangling-env-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dangling_env.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dangling_env.txt", text: "engine 200: refused\n" }
+      - id: w-env-local-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_local.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_local.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-local-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_local.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_local.txt", text: "engine 200: refused\n" }
+      - id: w-envrc-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_envrc.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_envrc.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-envrc-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_envrc.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_envrc.txt", text: "engine 200: refused\n" }
+      - id: w-env-folder-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_folder.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_folder.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-folder-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_folder.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_folder.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-git-hook-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_hook.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_hook.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-git-hook-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_hook.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_hook.txt", text: "engine 200: refused\n" }
+      - id: w-git-config-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_config.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_config.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-git-config-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_config.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_config.txt", text: "engine 200: refused\n" }
+      - id: w-git-file-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_file.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_file.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-git-file-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_file.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_file.txt", text: "engine 200: refused\n" }
+      - id: w-git-nested-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_nested.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-git-nested-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_git_nested.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_git_nested.txt", text: "engine 200: refused\n" }
+      - id: w-env-example-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_example.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_example.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-example-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_example.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_example.txt", text: "engine 200: refused\n" }
+      - id: w-env-production-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_production.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_production.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-production-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_production.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_production.txt", text: "engine 200: refused\n" }
+      - id: w-env-local-nested-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_local_nested.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_local_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-local-nested-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_local_nested.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_local_nested.txt", text: "engine 200: refused\n" }
+      - id: w-case-envrc-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_envrc.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_envrc.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-case-envrc-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_case_envrc.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_case_envrc.txt", text: "engine 200: refused\n" }
+      - id: w-link-newdir-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_newdir.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_newdir.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-link-newdir-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_newdir.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_newdir.txt", text: "engine 200: refused\n" }
+      - id: w-link-chain-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_chain.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_chain.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-link-chain-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_chain.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_chain.txt", text: "engine 200: refused\n" }
+      - id: w-link-loop-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_loop.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_loop.json", text: "" }
+      - id: w-link-loop-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_link_loop.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_link_loop.txt", text: "fallback without asking: where the links lead can't be told: refused\n" }
+      - id: w-dotdot-missing-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-missing-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-missing-deep-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing_deep.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing_deep.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-missing-deep-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing_deep.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing_deep.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-missing-git-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing_git.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing_git.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-missing-git-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_missing_git.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_missing_git.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-out-link-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_out_link.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_out_link.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-out-link-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_out_link.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_out_link.txt", text: "engine 200: refused\n" }
+      - id: w-dotdot-src-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_src.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-dotdot-src-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_dotdot_src.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_dotdot_src.txt", text: "engine 200: refused\n" }
+      - id: w-clone-git-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_clone_git.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_clone_git.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-clone-git-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_clone_git.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_clone_git.txt", text: "engine 200: refused\n" }
+      - id: w-clone-git-link-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_clone_git_link.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_clone_git_link.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is git's own metadata, which the engine reads to find the session's commits\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-clone-git-link-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_clone_git_link.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_clone_git_link.txt", text: "engine 200: refused\n" }
+      - id: w-home-env-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home_env.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home_env.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-home-env-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home_env.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home_env.txt", text: "engine 200: refused\n" }
+      - id: w-home-notes-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home_notes.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home_notes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-home-notes-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_home_notes.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_home_notes.txt", text: "engine 200: allowed, not written: outside the worktree\n" }
+      - id: w-space-env-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_space_env.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_space_env.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-space-env-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_space_env.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_space_env.txt", text: "engine 200: refused\n" }
+      - id: w-env-space-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_space.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_space.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is an environment file that agents load at start, which can change where their traffic goes\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-env-space-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_env_space.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_env_space.txt", text: "engine 200: refused\n" }
+      - id: w-tab-agents-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_tab_agents.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_tab_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-tab-agents-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_tab_agents.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_tab_agents.txt", text: "engine 200: refused\n" }
+      - id: w-claude-settings-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_claude_settings.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_claude_settings.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-claude-settings-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_claude_settings.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_claude_settings.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-claude-md-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_claude_md.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_claude_md.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-claude-md-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_claude_md.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_claude_md.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-spec-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_spec.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_spec.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-spec-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_spec.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_spec.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-spec-case-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_spec_case.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_spec_case.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-spec-case-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_spec_case.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_spec_case.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-makefile-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_makefile.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_makefile.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-makefile-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_makefile.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_makefile.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-gnumakefile-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_gnumakefile.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_gnumakefile.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-gnumakefile-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_gnumakefile.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_gnumakefile.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-encoded-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_encoded.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_encoded.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-encoded-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_encoded.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_encoded.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-lookalike-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_lookalike.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_lookalike.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-lookalike-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_lookalike.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_lookalike.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-agents-word-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_word.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_word.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-word-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_word.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_word.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-agents-suffix-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_suffix.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_suffix.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-agents-suffix-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_agents_suffix.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_agents_suffix.txt", text: "engine 200: allowed, wrote\n" }
+      - id: w-no-paths-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_no_paths.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_no_paths.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-no-paths-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_no_paths.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_no_paths.txt", text: "engine 200: allowed, not written: no path\n" }
+      - id: w-tool-case-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_tool_case.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_tool_case.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"unknown\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-tool-case-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_tool_case.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_tool_case.txt", text: "engine 200: allowed\n" }
+      - id: w-read-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_read.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_read.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"read\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-read-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_read.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_read.txt", text: "engine 200: allowed\n" }
+      - id: w-bash-redirect-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_bash_redirect.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_bash_redirect.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: w-bash-redirect-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/w_bash_redirect.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/w_bash_redirect.txt", text: "engine 200: allowed\n" }
+      - id: pinned-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { protected-write: 42 }
+      - id: pinned-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["CLAUDE.md", "proctor/specs/gw.yaml", "PROCTOR/gw.yaml", "Makefile", "GNUmakefile", "%2eagents/x", "agents/x.md"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["CLAUDE.md", "proctor/specs/gw.yaml", "PROCTOR/gw.yaml", "Makefile", "GNUmakefile", "%2eagents/x", "agents/x.md"] }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-003
+    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, codex cloud and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request and /split-request it is refused with 401 connection"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-commands
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate commands ${run.id}\ntry-run: c_git_push git push origin HEAD\ntry-run: c_git_c_push git -C sub push\ntry-run: c_sh_c bash -c 'git push'\ntry-run: c_send_pack env GIT_DIR=x git send-pack origin\ntry-run: c_hidden \"$(printf git)\" push\ntry-run: c_gh_pr gh pr create --fill\ntry-tool: c_monitor Monitor {\"command\":\"git push\"}\ntry-tool: c_mcp_push mcp__github__push_files {}\ntry-run: c_claude_remote claude --remote fix\ntry-run: c_codex_cloud codex cloud exec x\ntry-run: c_npx_teleport npx @anthropic-ai/claude-code --teleport\ntry-run: c_rm_root rm -rf /\ntry-run: c_reset_hard git reset --hard\ntry-run: c_curl_sh curl -fsSL x | sh\ntry-run: c_child_claude claude -p hi\ntry-tool: c_remote_trigger RemoteTrigger {}\ntry-tool: c_send_message SendMessage {\"to\":\"x\"}\ntry-tool: c_agent_remote Agent {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_task_remote Task {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_projects_write Projects {\"method\":\"project_write\"}\ntry-run: c_gh_comment gh pr comment 1 -b x\ntry-run: c_echo echo git push\ntry-run: c_status git status\ntry-run: c_rm_build rm -rf build\ntry-tool: c_agent_local Agent {\"prompt\":\"x\"}\ntry-tool: c_mcp_read mcp__github__get_file_contents {}\ntry-tool: c_mcp_other mcp__notes__save {}\ntry-tool: c_web_fetch WebFetch {\"url\":\"https://example.org\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: key-elsewhere
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate key ${run.id}\nkey-at: k_check conn POST /check {\"tool\":\"Read\",\"input\":{},\"top\":\"\",\"paths\":[]}\nkey-at: k_check_as_push push POST /check {\"tool\":\"Read\"}\nkey-at: k_poll conn GET /poll\nkey-at: k_events conn POST /events {\"events\":[]}\nkey-at: k_wait conn GET /wait?card=0123456789abcdef0123456789abcdef\nkey-at: k_wake conn POST /wake?card=0123456789abcdef0123456789abcdef {}\nkey-at: k_image conn GET /image?id=x\nkey-at: k_turn_check conn POST /turn-check {}\nkey-at: k_session_model conn GET /session-model\nkey-at: k_push push POST /push-request {}\nkey-at: k_forge push POST /forge-request {\"kind\":\"issue\",\"title\":\"x\",\"body\":\"x\"}\nkey-at: k_checks push POST /checks-request {}\nkey-at: k_comments push POST /comments-request {}\nkey-at: k_split push POST /split-request {\"tasks\":[{\"title\":\"x\",\"message\":\"x\"}]}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: key-sent
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/k_split.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/k_split.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: c-git-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_git_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_git_push.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-git-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_git_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_git_push.txt", text: "engine 200: refused\n" }
+      - id: c-git-c-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_git_c_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_git_c_push.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-git-c-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_git_c_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_git_c_push.txt", text: "engine 200: refused\n" }
+      - id: c-sh-c-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_sh_c.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_sh_c.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-sh-c-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_sh_c.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_sh_c.txt", text: "engine 200: refused\n" }
+      - id: c-send-pack-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_send_pack.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_send_pack.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-send-pack-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_send_pack.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_send_pack.txt", text: "engine 200: refused\n" }
+      - id: c-hidden-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_hidden.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_hidden.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-hidden-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_hidden.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_hidden.txt", text: "engine 200: refused\n" }
+      - id: c-gh-pr-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_gh_pr.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_gh_pr.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-gh-pr-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_gh_pr.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_gh_pr.txt", text: "engine 200: refused\n" }
+      - id: c-monitor-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_monitor.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_monitor.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-monitor-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_monitor.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_monitor.txt", text: "engine 200: refused\n" }
+      - id: c-mcp-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_push.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"mcp\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: c-mcp-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_push.txt", text: "engine 200: refused\n" }
+      - id: c-claude-remote-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_claude_remote.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_claude_remote.json", text: "{\"cloud\":\"this runs on the vendor's servers, outside Software Factory\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-claude-remote-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_claude_remote.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_claude_remote.txt", text: "engine 200: refused\n" }
+      - id: c-codex-cloud-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_codex_cloud.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_codex_cloud.json", text: "{\"cloud\":\"this runs on the vendor's servers, outside Software Factory\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-codex-cloud-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_codex_cloud.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_codex_cloud.txt", text: "engine 200: refused\n" }
+      - id: c-npx-teleport-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_npx_teleport.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_npx_teleport.json", text: "{\"cloud\":\"this runs on the vendor's servers, outside Software Factory\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-npx-teleport-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_npx_teleport.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_npx_teleport.txt", text: "engine 200: refused\n" }
+      - id: c-rm-root-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_rm_root.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_rm_root.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":true,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-rm-root-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_rm_root.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_rm_root.txt", text: "engine 200: asked\n" }
+      - id: c-reset-hard-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_reset_hard.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_reset_hard.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":true,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-reset-hard-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_reset_hard.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_reset_hard.txt", text: "engine 200: asked\n" }
+      - id: c-curl-sh-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_curl_sh.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_curl_sh.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":true,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-curl-sh-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_curl_sh.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_curl_sh.txt", text: "engine 200: asked\n" }
+      - id: c-child-claude-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_child_claude.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_child_claude.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":true,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-child-claude-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_child_claude.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_child_claude.txt", text: "engine 200: asked\n" }
+      - id: c-remote-trigger-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_remote_trigger.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_remote_trigger.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"remote\",\"protected\":\"\",\"pushes\":false,\"waits\":true}\n" }
+      - id: c-remote-trigger-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_remote_trigger.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_remote_trigger.txt", text: "engine 200: asked\n" }
+      - id: c-send-message-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_send_message.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_send_message.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"remote\",\"protected\":\"\",\"pushes\":false,\"waits\":true}\n" }
+      - id: c-send-message-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_send_message.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_send_message.txt", text: "engine 200: asked\n" }
+      - id: c-agent-remote-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_agent_remote.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_agent_remote.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"remote\",\"protected\":\"\",\"pushes\":false,\"waits\":true}\n" }
+      - id: c-agent-remote-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_agent_remote.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_agent_remote.txt", text: "engine 200: asked\n" }
+      - id: c-task-remote-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_task_remote.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_task_remote.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"remote\",\"protected\":\"\",\"pushes\":false,\"waits\":true}\n" }
+      - id: c-task-remote-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_task_remote.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_task_remote.txt", text: "engine 200: asked\n" }
+      - id: c-projects-write-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_projects_write.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_projects_write.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"remote\",\"protected\":\"\",\"pushes\":false,\"waits\":true}\n" }
+      - id: c-projects-write-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_projects_write.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_projects_write.txt", text: "engine 200: asked\n" }
+      - id: c-gh-comment-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_gh_comment.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_gh_comment.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-gh-comment-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_gh_comment.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_gh_comment.txt", text: "engine 200: allowed\n" }
+      - id: c-echo-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_echo.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_echo.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-echo-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_echo.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_echo.txt", text: "engine 200: allowed\n" }
+      - id: c-status-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_status.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_status.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-status-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_status.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_status.txt", text: "engine 200: allowed\n" }
+      - id: c-rm-build-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_rm_build.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_rm_build.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-rm-build-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_rm_build.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_rm_build.txt", text: "engine 200: allowed\n" }
+      - id: c-agent-local-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_agent_local.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_agent_local.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"session\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-agent-local-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_agent_local.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_agent_local.txt", text: "engine 200: allowed\n" }
+      - id: c-mcp-read-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_read.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_read.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"mcp\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-mcp-read-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_read.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_read.txt", text: "engine 200: allowed\n" }
+      - id: c-mcp-other-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_other.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_other.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"mcp\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-mcp-other-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_mcp_other.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_mcp_other.txt", text: "engine 200: allowed\n" }
+      - id: c-web-fetch-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_web_fetch.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_web_fetch.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"web\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-web-fetch-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/c_web_fetch.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/c_web_fetch.txt", text: "engine 200: allowed\n" }
+      - id: k-check-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_check.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_check.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"read\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: k-check-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_check.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_check.txt", text: "status 200: sent the check-only key as x-sf-conn\n" }
+      - id: k-check-as-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_check_as_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_check_as_push.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-check-as-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_check_as_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_check_as_push.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-poll-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_poll.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_poll.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-poll-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_poll.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_poll.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-events-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_events.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_events.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-events-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_events.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_events.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-wait-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_wait.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_wait.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-wait-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_wait.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_wait.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-wake-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_wake.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_wake.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-wake-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_wake.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_wake.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-image-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_image.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_image.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-image-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_image.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_image.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-turn-check-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_turn_check.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_turn_check.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-turn-check-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_turn_check.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_turn_check.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-session-model-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_session_model.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_session_model.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-session-model-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_session_model.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_session_model.txt", text: "status 401: sent the check-only key as x-sf-conn\n" }
+      - id: k-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_push.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_push.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-forge-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_forge.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_forge.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-forge-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_forge.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_forge.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-checks-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_checks.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_checks.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-checks-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_checks.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_checks.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-comments-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_comments.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_comments.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-comments-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_comments.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_comments.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-split-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_split.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_split.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-split-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_split.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_split.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: commands-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { cloud-refused: 3, protected-write: 42, push-refused: 8, remote-held: 5 }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-004
+    name: "A Feature session before any approval: /check holds every write, documentation included, with the Feature hold's whole reason, the fake writes neither file and the hold isn't counted, while a protected path and a push in the same turn are still refused and counted, the lowercase tool name write isn't held, and a shell write lands"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-feature
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate feature ${run.id}\ntry: f_src src/feature-${run.id}.txt\ntry: f_docs docs/feature-${run.id}.md\ntry: f_protected .codex/config.toml\ntry-run: f_push git push\ntry-tool: f_tool_case write {\"file_path\":\"src/lower-${run.id}.txt\",\"content\":\"x\"}\nwrite: feature-control-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: feature-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/f_tool_case.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/f_tool_case.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: f-src-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_src.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/feature-${run.id}.txt can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change, once Spec Kit has named the feature's folder. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: f-src-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_src.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_src.txt", text: "engine 200: refused\n" }
+      - id: f-docs-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_docs.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_docs.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"docs/feature-${run.id}.md can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change, once Spec Kit has named the feature's folder. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: f-docs-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_docs.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_docs.txt", text: "engine 200: refused\n" }
+      - id: f-protected-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_protected.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_protected.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+      - id: f-protected-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_protected.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_protected.txt", text: "engine 200: refused\n" }
+      - id: f-push-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_push.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_push.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":true,\"waits\":false}\n" }
+      - id: f-push-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_push.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_push.txt", text: "engine 200: refused\n" }
+      - id: f-tool-case-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_tool_case.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_tool_case.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"unknown\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: f-tool-case-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/f_tool_case.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/f_tool_case.txt", text: "engine 200: allowed\n" }
+      - id: feature-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["src/feature-${run.id}.txt", "docs/feature-${run.id}.md", "src/lower-${run.id}.txt", "feature-control-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["feature-control-${run.id}.txt"] }
+      - id: feature-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { cloud-refused: 3, protected-write: 43, push-refused: 9, remote-held: 5 }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-005
+    name: "A Docs only session: /check allows documentation, holds a source file and CLAUDE.md with the Docs only reason, the fake writes only what was allowed, and the hold isn't counted"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: docs }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-docs
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate docs ${run.id}\ntry: d_doc docs/gw-${run.id}.md\ntry: d_notes notes-${run.id}.md\ntry: d_src src/gw-${run.id}.go\ntry: d_claude_md CLAUDE.md\nwrite: docs-control-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: docs-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/d_claude_md.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/d_claude_md.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: d-doc-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_doc.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_doc.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: d-doc-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_doc.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_doc.txt", text: "engine 200: allowed, wrote\n" }
+      - id: d-notes-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_notes.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_notes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: d-notes-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_notes.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_notes.txt", text: "engine 200: allowed, wrote\n" }
+      - id: d-src-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_src.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"This session's work type is Docs only, which changes documentation only, and src/gw-${run.id}.go isn't documentation. Pick Fix or Feature on the software factory page to change it. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: d-src-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_src.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_src.txt", text: "engine 200: refused\n" }
+      - id: d-claude-md-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_claude_md.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_claude_md.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"This session's work type is Docs only, which changes documentation only, and CLAUDE.md isn't documentation. Pick Fix or Feature on the software factory page to change it. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: d-claude-md-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/d_claude_md.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/d_claude_md.txt", text: "engine 200: refused\n" }
+      - id: docs-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["docs/gw-${run.id}.md", "notes-${run.id}.md", "src/gw-${run.id}.go", "CLAUDE.md", "docs-control-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["docs/gw-${run.id}.md", "notes-${run.id}.md", "docs-control-${run.id}.txt"] }
+      - id: docs-not-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { cloud-refused: 3, protected-write: 43, push-refused: 9, remote-held: 5 }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }

@@ -1,0 +1,2967 @@
+- id: HAND-001
+  title: "The API routes' 415 for a wrong content type becomes 400"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\")\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
+      replace: "\t\trefuse(w, http.StatusBadRequest, \"type\")\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
+- id: HAND-002
+  title: "The Origin check accepts any origin that starts with the page's"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "len(origin) != 1 || origin[0] != s.origin)"
+      replace: "len(origin) != 1 || !strings.HasPrefix(origin[0], s.origin))"
+- id: HAND-003
+  title: "Sec-Fetch-Site same-site is accepted"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "return site[0] == \"same-origin\" || visit && site[0] == \"none\""
+      replace: "return site[0] == \"same-origin\" || site[0] == \"same-site\" || visit && site[0] == \"none\""
+- id: HAND-004
+  title: "The Authorization scheme isn't checked, so the real key works under any scheme"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "return ok && strings.EqualFold(scheme, \"Bearer\") && s.keys.check("
+      replace: "return ok && scheme != \"\" && s.keys.check("
+- id: HAND-005
+  title: "The Referrer-Policy header is dropped"
+  edits:
+    - file: "internal/adapters/http/page/security.go"
+      find: "\t\th.Set(\"Referrer-Policy\", \"no-referrer\")\n"
+      replace: ""
+- id: HAND-006
+  title: "The page body limit is raised from 64 KiB to 128 KiB"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "MaxPageBody     = 64 << 10"
+      replace: "MaxPageBody     = 128 << 10"
+- id: HAND-007
+  title: "The gate stops protecting .agents/"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "var agentConfigDirs = set(\".codex\", \".agents\")"
+      replace: "var agentConfigDirs = set(\".codex\")"
+- id: HAND-008
+  title: "A session's box gets a writable root file system"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "ReadonlyRootfs: true,"
+      replace: "ReadonlyRootfs: false,"
+- id: HAND-009
+  title: "A session's box gets unlimited swap"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "MemorySwap:     r.cfg.Memory,"
+      replace: "MemorySwap:     -1,"
+- id: HAND-010
+  title: "PUT is accepted on every POST route, skipping the POST-only Origin rule"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "if r.Method != want {"
+      replace: "if r.Method != want && !(r.Method == http.MethodPut && want == http.MethodPost) {"
+- id: HAND-011
+  title: "A repository URL with user:password@ is accepted"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "if u.User != nil || strings.Contains(u.Host, \"@\") {"
+      replace: "if strings.Contains(u.Host, \"@\") {"
+- id: HAND-012
+  title: "Adding a repository already listed answers 400 instead of 409"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "explained(conflict(\"exists\"),"
+      replace: "explained(invalid(\"exists\"),"
+- id: HAND-013
+  title: "Removing a session leaves its home volume"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/ops.go"
+      find: "if err != nil || !found {"
+      replace: "if err != nil || found {"
+- id: HAND-014
+  title: "Sec-Fetch-Site same-site is accepted on API calls, not on navigations"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "return site[0] == \"same-origin\" || visit && site[0] == \"none\""
+      replace: "return site[0] == \"same-origin\" || !visit && site[0] == \"same-site\" || visit && site[0] == \"none\""
+- id: PAGE-001
+  title: "The Host check also accepts localhost:<port>, not only 127.0.0.1:<port>"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tif r.Host != s.host {\n"
+      replace: "\tif r.Host != s.host && r.Host != \"localhost:\"+strconv.Itoa(s.cfg.PublicPort) {\n"
+- id: PAGE-002
+  title: "A POST without an Origin header is no longer refused"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tif r.Method == http.MethodPost && !hasOrigin {\n\t\ts.reject(w, r, http.StatusForbidden, \"origin\")\n\t\treturn\n\t}\n"
+      replace: ""
+- id: PAGE-003
+  title: "A top-level visit no longer needs Sec-Fetch-Dest: document, so Sec-Fetch-Site: none is accepted for frames"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "r.Header.Get(\"Sec-Fetch-Mode\") == \"navigate\" && r.Header.Get(\"Sec-Fetch-Dest\") == \"document\""
+      replace: "r.Header.Get(\"Sec-Fetch-Mode\") == \"navigate\""
+- id: PAGE-004
+  title: "The sign-in route no longer requires a JSON content type"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tif r.URL.Path == signinRoute {\n\t\tif !isJSON(r) {\n\t\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\")\n\t\t\treturn\n\t\t}\n\t\ts.signin(w, r)"
+      replace: "\tif r.URL.Path == signinRoute {\n\t\ts.signin(w, r)"
+- id: PAGE-005
+  title: "An event stream that ends is never detached from the registry"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tdefer s.reg.Detach(id)\n\tif !s.authorized(r) {"
+      replace: "\t_ = id\n\tif !s.authorized(r) {"
+- id: PAGE-006
+  title: "Conflict errors map to 400 instead of 409"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "session.Conflict:     http.StatusConflict,"
+      replace: "session.Conflict:     http.StatusBadRequest,"
+- id: PAGE-007
+  title: "A successful reply always answers 200, ignoring the route's 202"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tsend(w, okStatus, map[string]bool{\"ok\": true})"
+      replace: "\tsend(w, http.StatusOK, map[string]bool{\"ok\": true})"
+- id: PAGE-008
+  title: "Disconnect no longer revokes the page key"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\t\tif s.keys.revoke() {"
+      replace: "\t\tif s.keys.active != \"\" {"
+- id: PAGE-009
+  title: "Sign-in accepts a non-empty body"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tif len(body) != 0 {\n\t\ts.reject(w, r, http.StatusBadRequest, \"body\")\n\t\treturn\n\t}\n\tkey := s.keys.issue()"
+      replace: "\t_ = body\n\tkey := s.keys.issue()"
+- id: PAGE-010
+  title: "The page key is never filled with random bytes"
+  edits:
+    - file: "internal/adapters/http/page/signin.go"
+      find: "\t_, _ = rand.Read(b)\n"
+      replace: "\t_ = rand.Reader\n"
+- id: PAGE-011
+  title: "Issuing a key doesn't record when it was made"
+  edits:
+    - file: "internal/adapters/http/page/signin.go"
+      find: "\tk.created = now\n"
+      replace: ""
+- id: PAGE-012
+  title: "The page's CSP drops frame-ancestors 'none'"
+  edits:
+    - file: "internal/adapters/http/page/security.go"
+      find: "form-action 'none'; frame-ancestors 'none'; object-src 'none'\""
+      replace: "form-action 'none'; object-src 'none'\""
+- id: PAGE-013
+  title: "X-Frame-Options: DENY is dropped from every page response"
+  edits:
+    - file: "internal/adapters/http/page/security.go"
+      find: "\t\th.Set(\"X-Frame-Options\", \"DENY\")\n"
+      replace: ""
+- id: PAGE-014
+  title: "text/plain counts as JSON"
+  edits:
+    - file: "internal/adapters/http/page/security.go"
+      find: "return err == nil && kind == \"application/json\""
+      replace: "return err == nil && (kind == \"application/json\" || kind == \"text/plain\")"
+- id: PAGE-015
+  title: "The strict JSON decoder accepts trailing values after the object"
+  edits:
+    - file: "internal/adapters/http/page/security.go"
+      find: "\tif dec.More() {\n\t\treturn errBody\n\t}\n\tif _, err := dec.Token(); !errors.Is(err, io.EOF) {\n\t\treturn errBody\n\t}\n\treturn nil"
+      replace: "\treturn nil"
+- id: PAGE-016
+  title: "The request id header goes on agent responses instead of page responses"
+  edits:
+    - file: "internal/adapters/http/page/middleware.go"
+      find: "\t\t\tif side == \"page\" {"
+      replace: "\t\t\tif side == \"agent\" {"
+- id: PAGE-017
+  title: "A request id the client sends is reused"
+  edits:
+    - file: "internal/adapters/http/page/middleware.go"
+      find: "\t\t\tid := shared.NewRequest()\n"
+      replace: "\t\t\tid := r.Header.Get(shared.RequestHeader)\n\t\t\tif id == \"\" {\n\t\t\t\tid = shared.NewRequest()\n\t\t\t}\n"
+- id: PAGE-018
+  title: "Closing a page connection never frees its slot"
+  edits:
+    - file: "internal/adapters/http/page/listener.go"
+      find: "\tc.once.Do(c.release)\n"
+      replace: ""
+- id: PAGE-019
+  title: "The agent listener no longer checks the connecting address is the box's paired agent"
+  edits:
+    - file: "internal/adapters/http/page/listener.go"
+      find: "if okL && okR && known && p.agent == remote && len(l.conns[p.box]) < BoxConns {"
+      replace: "if okL && okR && known && remote.IsValid() && len(l.conns[p.box]) < BoxConns {"
+- id: PAGE-020
+  title: "The agent listener refuses browser-like headers only on POST"
+  edits:
+    - file: "internal/adapters/http/page/agent.go"
+      find: "\tif browserHeaders(r) {\n"
+      replace: "\tif browserHeaders(r) && r.Method == http.MethodPost {\n"
+- id: PAGE-021
+  title: "An events batch's decode slot is never given back"
+  edits:
+    - file: "internal/adapters/http/page/agent.go"
+      find: "return func() { <-s.decodes }, true"
+      replace: "return func() {}, true"
+- id: PAGE-022
+  title: ".env files are no longer hidden"
+  edits:
+    - file: "internal/adapters/http/page/files.go"
+      find: "`(?i)^(\\.env(\\..*)?|\\.envrc|"
+      replace: "`(?i)^(\\.envrc|"
+- id: PAGE-023
+  title: "Folders starting with .git (the .git folder itself) are shown like .github"
+  edits:
+    - file: "internal/adapters/http/page/files.go"
+      find: "if !strings.HasPrefix(p, \".\") || p == \".github\" {"
+      replace: "if !strings.HasPrefix(p, \".\") || strings.HasPrefix(p, \".git\") {"
+- id: PAGE-024
+  title: "Reading a worktree file follows symbolic links"
+  edits:
+    - file: "internal/adapters/http/page/files.go"
+      find: "got, err := c.root.Lstat(at)"
+      replace: "got, err := c.root.Stat(at)"
+- id: PAGE-025
+  title: "A file read at a commit isn't checked against the hidden-path rules"
+  edits:
+    - file: "internal/adapters/http/page/files.go"
+      find: "\tif hiddenPath(strings.Split(rel, \"/\")) {\n\t\treturn \"\", errSecret\n\t}\n\treturn rel, nil\n}\n\nfunc shownAt"
+      replace: "\treturn rel, nil\n}\n\nfunc shownAt"
+- id: PAGE-026
+  title: "A failed read at a commit is reported as success"
+  edits:
+    - file: "internal/adapters/http/page/files.go"
+      find: "\t\tcase err != nil:\n\t\t\terrs[i] = errCommit"
+      replace: "\t\tcase err != nil:\n\t\t\terrs[i] = nil"
+- id: PAGE-027
+  title: "The attachment count cap is removed"
+  edits:
+    - file: "internal/adapters/http/page/upload.go"
+      find: "if !ok || len(list) > session.MaxAttached {"
+      replace: "if !ok {"
+- id: PAGE-028
+  title: "Uploaded files are saved world-readable"
+  edits:
+    - file: "internal/adapters/http/page/upload.go"
+      find: "if err := f.Chmod(0o640); err != nil {"
+      replace: "if err := f.Chmod(0o644); err != nil {"
+- id: PAGE-029
+  title: "Dispatch accepts the agent's auto mode"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "[]string{\"\", \"default\", \"manual\"}, mode)"
+      replace: "[]string{\"\", \"default\", \"manual\", \"auto\"}, mode)"
+- id: PAGE-030
+  title: "Dispatch waits 105 ms instead of 105 s"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "dispatchFor = 105 * time.Second"
+      replace: "dispatchFor = 105 * time.Millisecond"
+- id: PAGE-031
+  title: "An approval hash isn't checked for its form"
+  edits:
+    - file: "internal/adapters/http/page/startup.go"
+      find: "if !isText || s == \"\" || !session.ValidApproval(s) {"
+      replace: "if !isText || s == \"\" {"
+- id: PAGE-032
+  title: "costOk is read as 'was a boolean' rather than its value"
+  edits:
+    - file: "internal/adapters/http/page/startup.go"
+      find: "\t\tc.CostOK = b\n"
+      replace: "\t\tc.CostOK = b || isBool\n"
+- id: PAGE-033
+  title: "Approving requirements approves the plan and the other way round"
+  edits:
+    - file: "internal/adapters/http/page/workflow.go"
+      find: "s.cfg.Work.Approve(r.Context(), sid, path == \"/api/approve-plan\", hash, text)"
+      replace: "s.cfg.Work.Approve(r.Context(), sid, path != \"/api/approve-plan\", hash, text)"
+- id: PAGE-034
+  title: "Approving the team file doesn't check the sha's form"
+  edits:
+    - file: "internal/adapters/http/page/workflow.go"
+      find: "if !ok || !hash256.MatchString(sha) {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\")"
+      replace: "if !ok {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\")"
+- id: PAGE-035
+  title: "Review role models come back with model and effort swapped"
+  edits:
+    - file: "internal/adapters/http/page/sessionwork.go"
+      find: "Model: c.Model, Effort: c.Effort}"
+      replace: "Model: c.Effort, Effort: c.Model}"
+- id: PAGE-036
+  title: "A failed session-work change is swallowed and the view sent with 200"
+  edits:
+    - file: "internal/adapters/http/page/sessionwork.go"
+      find: "\tif err != nil {\n\t\tcode, p := status(err)\n\t\tsend(w, code, p)\n\t\treturn\n\t}\n\tv, err := s.work.View(ctx, sid)"
+      replace: "\tv, err := s.work.View(ctx, sid)"
+- id: PAGE-037
+  title: "NotebookEdit is no longer treated as a write tool"
+  edits:
+    - file: "internal/adapters/http/page/push.go"
+      find: "\"MultiEdit\": true, \"NotebookEdit\": true}"
+      replace: "\"MultiEdit\": true}"
+- id: PAGE-038
+  title: "A push answer without an allow field counts as allow"
+  edits:
+    - file: "internal/adapters/http/page/pushes.go"
+      find: "allow, okAllow := body[\"allow\"].(bool)"
+      replace: "allow, okAllow := body[\"allow\"] != false, true"
+- id: PAGE-039
+  title: "A file marked viewed stays viewed after its content changes"
+  edits:
+    - file: "internal/adapters/http/page/pushes.go"
+      find: "Viewed: marked && blob != \"\" && mark == blob"
+      replace: "Viewed: marked"
+- id: PAGE-040
+  title: "Whole-number fields accept fractions"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "if !ok || f != math.Trunc(f) || f < float64(low)"
+      replace: "if !ok || math.IsNaN(f) || f < float64(low)"
+- id: PAGE-041
+  title: "Restore branch takes a commit of any form"
+  edits:
+    - file: "internal/adapters/http/page/keep.go"
+      find: "okCommit = okCommit && op == \"restore\" && flagCommit.MatchString(commit)"
+      replace: "okCommit = okCommit && op == \"restore\""
+- id: PAGE-042
+  title: "The cap on agents in a pair is removed"
+  edits:
+    - file: "internal/adapters/http/page/pair.go"
+      find: "if !ok || len(list) == 0 || len(list) > session.MaxPairAgents {"
+      replace: "if !ok || len(list) == 0 {"
+- id: PAGE-043
+  title: "Dismissed task cards stay in the session's view"
+  edits:
+    - file: "internal/adapters/http/page/split.go"
+      find: "\t\tif v.State == session.SplitDismissed {\n\t\t\tcontinue\n\t\t}\n"
+      replace: ""
+- id: PAGE-044
+  title: "Dropping a session's screenshots does nothing"
+  edits:
+    - file: "internal/adapters/http/page/screenshots.go"
+      find: "\treturn top.RemoveAll(sid)\n"
+      replace: "\treturn nil\n"
+- id: PAGE-045
+  title: "Import accepts application/gzip with one parameter"
+  edits:
+    - file: "internal/adapters/http/page/export.go"
+      find: "return err == nil && len(params) == 0 && kind == importType"
+      replace: "return err == nil && len(params) <= 1 && kind == importType"
+- id: PAGE-046
+  title: "Text fields lose their length cap"
+  edits:
+    - file: "internal/adapters/http/page/repos.go"
+      find: "\t\tif !ok || len(v) > limit {"
+      replace: "\t\tif !ok {"
+- id: PAGE-047
+  title: "Stop all pauses instead of stopping"
+  edits:
+    - file: "internal/adapters/http/page/halt.go"
+      find: "\t\tcase \"stop\":\n\t\t\terr = h.StopAll()"
+      replace: "\t\tcase \"stop\":\n\t\t\terr = h.PauseAll()"
+- id: PAGE-048
+  title: "The commit pattern for flags is no longer anchored at the end"
+  edits:
+    - file: "internal/adapters/http/page/flag.go"
+      find: "`^[0-9a-f]{40}([0-9a-f]{24})?$`"
+      replace: "`^[0-9a-f]{40}([0-9a-f]{24})?`"
+- id: PAGE-049
+  title: "The engine's lock socket is world-writable"
+  edits:
+    - file: "internal/adapters/http/page/lock.go"
+      find: "if err := os.Chmod(p, 0o600); err != nil {"
+      replace: "if err := os.Chmod(p, 0o666); err != nil {"
+- id: PAGE-050
+  title: "The commit identity comes back with name and email swapped"
+  edits:
+    - file: "internal/adapters/http/page/identity.go"
+      find: "map[string]string{\"name\": id.Name, \"email\": id.Email}"
+      replace: "map[string]string{\"name\": id.Email, \"email\": id.Name}"
+- id: PAGE-051
+  title: "Unmarking a file as viewed marks it instead"
+  edits:
+    - file: "internal/adapters/http/page/viewed.go"
+      find: "reply(w, v.Mark(r.Context(), sid, path, blob, on), http.StatusOK)"
+      replace: "reply(w, v.Mark(r.Context(), sid, path, blob, on || okOn), http.StatusOK)"
+- id: PAGE-052
+  title: "The audit view swaps the engine's reason and the person's reason"
+  edits:
+    - file: "internal/adapters/http/page/audit.go"
+      find: "Reason: e.Reason, PersonReason: e.PersonReason,"
+      replace: "Reason: e.PersonReason, PersonReason: e.Reason,"
+- id: PAGE-053
+  title: "Explain a change always counts as consented to cost"
+  edits:
+    - file: "internal/adapters/http/page/asides.go"
+      find: "err = starter.Explain(ctx, sid, consent.CostOK)"
+      replace: "err = starter.Explain(ctx, sid, true)"
+- id: PAGE-054
+  title: "Diagnostics accepts fields in its body"
+  edits:
+    - file: "internal/adapters/http/page/diagnostics.go"
+      find: "\tif len(body) != 0 {\n\t\trefuse(w, http.StatusBadRequest, \"fields\")\n\t\treturn\n\t}\n\tif s.cfg.Diagnostics == nil {"
+      replace: "\tif s.cfg.Diagnostics == nil {"
+- id: PAGE-055
+  title: "Files the engine writes atomically in its state folder are world-readable"
+  edits:
+    - file: "internal/adapters/http/page/state.go"
+      find: "if err := f.Chmod(0o600); err != nil {"
+      replace: "if err := f.Chmod(0o644); err != nil {"
+- id: PAGE-056
+  title: "Repository names may hold dots first and slashes"
+  edits:
+    - file: "internal/adapters/http/page/rules.go"
+      find: "`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`"
+      replace: "`^[A-Za-z0-9.][A-Za-z0-9._/-]{0,99}$`"
+- id: PAGE-057
+  title: "Adding a host always counts as allowing uploads to it"
+  edits:
+    - file: "internal/adapters/http/page/egress.go"
+      find: "\t\t\tuploadsOk = b\n"
+      replace: "\t\t\tuploadsOk = b || ok\n"
+- id: PAGE-058
+  title: "Session ids for views may hold dots and slashes"
+  edits:
+    - file: "internal/adapters/http/page/views.go"
+      find: "`^[A-Za-z0-9][A-Za-z0-9-]{0,79}$`"
+      replace: "`^[A-Za-z0-9][A-Za-z0-9./-]{0,79}$`"
+- id: PAGE-059
+  title: "The sign-in target isn't checked against the known targets"
+  edits:
+    - file: "internal/adapters/http/page/login.go"
+      find: "if okTarget && (len(target) > maxTarget || !session.ValidLoginTarget(target)) {"
+      replace: "if okTarget && len(target) > maxTarget {"
+- id: PAGE-060
+  title: "Project caps can be set for a project the engine doesn't have"
+  edits:
+    - file: "internal/adapters/http/page/limits.go"
+      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\terr = l.SetProject(name, c)"
+      replace: "\t\terr = l.SetProject(name, c)"
+- id: PAGE-061
+  title: "A forge answer without confirmed counts as confirmed"
+  edits:
+    - file: "internal/adapters/http/page/forge.go"
+      find: "confirmed, okConfirmed := body[\"confirmed\"].(bool)"
+      replace: "confirmed, okConfirmed := body[\"confirmed\"] != false, true"
+- id: PAGE-062
+  title: "The update route takes check and later together"
+  edits:
+    - file: "internal/adapters/http/page/update.go"
+      find: "if len(body) > 1 || !keysWithin(body, \"check\", \"later\") {"
+      replace: "if !keysWithin(body, \"check\", \"later\") {"
+- id: PAGE-063
+  title: "Switching the package lookup on switches it off and the other way round"
+  edits:
+    - file: "internal/adapters/http/page/facts.go"
+      find: "err := facts.SetLookups(repo, on)"
+      replace: "err := facts.SetLookups(repo, !on)"
+- id: PAGE-064
+  title: "Suggesting lessons doesn't check the project exists"
+  edits:
+    - file: "internal/adapters/http/page/lessons.go"
+      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\t_ = http.NewResponseController"
+      replace: "\t\t_ = http.NewResponseController"
+- id: PAGE-065
+  title: "Removing a saved prompt doesn't check the id's form"
+  edits:
+    - file: "internal/adapters/http/page/savedprompts.go"
+      find: "!okID || !session.ValidPromptID(id) {"
+      replace: "!okID {"
+- id: PAGE-066
+  title: "Reviewer agent roles come back as the defaults"
+  edits:
+    - file: "internal/adapters/http/page/revieweragents.go"
+      find: "\t\tout.Roles[string(role)] = v.Roles[role]"
+      replace: "\t\tout.Roles[string(role)] = v.Defaults[role]"
+- id: PAGE-067
+  title: "Reviewer checks answer 202 on list and 200 on check"
+  edits:
+    - file: "internal/adapters/http/page/reviewerchecks.go"
+      find: "\tif op == \"check\" {\n\t\tcode = http.StatusAccepted"
+      replace: "\tif op == \"list\" {\n\t\tcode = http.StatusAccepted"
+- id: PAGE-068
+  title: "The bar preference takes any text, which goes into the page's HTML"
+  edits:
+    - file: "internal/adapters/http/page/assets.go"
+      find: "if !ok || (s != \"left\" && s != \"right\") {"
+      replace: "if !ok {"
+- id: CMD-001
+  title: "The 0.0.0.0 page listener no longer refuses connections to the engine's other addresses"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\treturn page.AllowLocal(pageLn, allowed, nil), nil"
+      replace: "\t_ = allowed\n\treturn pageLn, nil"
+- id: CMD-002
+  title: "The page server accepts request headers up to 1 MiB"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\t\tMaxHeaderBytes:    16 << 10,\n\t\tBaseContext:"
+      replace: "\t\tMaxHeaderBytes:    1 << 20,\n\t\tBaseContext:"
+- id: CMD-003
+  title: "The page server waits 10 minutes for request headers"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\t\tReadHeaderTimeout: 10 * time.Second,\n\t\tIdleTimeout:       time.Minute,\n\t\tMaxHeaderBytes:    16 << 10,"
+      replace: "\t\tReadHeaderTimeout: 10 * time.Minute,\n\t\tIdleTimeout:       time.Minute,\n\t\tMaxHeaderBytes:    16 << 10,"
+- id: CMD-004
+  title: "The page listener allows the agent listener's 256 connections"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "page.LimitListener(pageListener, page.PageConns, nil)"
+      replace: "page.LimitListener(pageListener, page.AgentConns, nil)"
+- id: CMD-005
+  title: "Agent connections aren't tagged with their box"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\t\tagentServer.ConnContext = page.BoxContext\n"
+      replace: ""
+- id: CMD-006
+  title: "The page server's ticker never runs"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\tgo srv.Run(ctx)\n"
+      replace: ""
+- id: CMD-007
+  title: "Saved prompts are never wired to the page"
+  edits:
+    - file: "cmd/server/server.go"
+      find: "\tuseSavedPrompts(srv, parts, cfg, logger)\n"
+      replace: ""
+- id: CMD-008
+  title: "A box taken down keeps its sessions registered"
+  edits:
+    - file: "cmd/server/boxes.go"
+      find: "\tdropped := b.reg.DropBox(box)\n"
+      replace: "\tdropped := 0\n"
+- id: CMD-009
+  title: "Removing a box leaves its uploads folder"
+  edits:
+    - file: "cmd/server/boxes.go"
+      find: "\tif f.uploads != nil {\n\t\tif uerr := f.uploads.DropBox(box); err == nil {\n\t\t\terr = uerr\n\t\t}\n\t}\n"
+      replace: ""
+- id: CMD-010
+  title: "The helper is reported down while it answers"
+  edits:
+    - file: "cmd/server/boxes.go"
+      find: "\tdown := err != nil\n"
+      replace: "\tdown := err == nil\n"
+- id: CMD-011
+  title: "The agents' proxy answers every network, not only the session containers' subnets"
+  edits:
+    - file: "cmd/server/egress.go"
+      find: "proxy.Serve(ctx, egress.AllowSubnets(proxyListener, subnets, dropCounter(logger, \"agents\", \"a session container's\")))"
+      replace: "proxy.Serve(ctx, proxyListener)"
+- id: CMD-012
+  title: "Egress's status and control endpoint is served without TLS"
+  edits:
+    - file: "cmd/server/egress.go"
+      find: "\t\tstatusListener = tls.NewListener(statusListener, tc)\n"
+      replace: "\t\t_, _ = tc, tls.NewListener\n"
+- id: CMD-013
+  title: "Egress reads its allow and deny lists the wrong way round"
+  edits:
+    - file: "cmd/server/egress.go"
+      find: "\t\tAllow:        list(*allow),\n\t\tDeny:         list(*deny),"
+      replace: "\t\tAllow:        list(*deny),\n\t\tDeny:         list(*allow),"
+- id: CMD-014
+  title: "Egress closes an idle tunnel after 5 seconds by default"
+  edits:
+    - file: "cmd/server/egress.go"
+      find: "env(\"EGRESS_IDLE_TIMEOUT\", \"5m\")"
+      replace: "env(\"EGRESS_IDLE_TIMEOUT\", \"5s\")"
+- id: CMD-015
+  title: "The box helper serves its API without TLS"
+  edits:
+    - file: "cmd/server/helper.go"
+      find: "go func() { errs <- srv.Serve(tls.NewListener(netutil.LimitListener(ln, helperConns), tc)) }()"
+      replace: "go func() { _, _ = tc, tls.NewListener; errs <- srv.Serve(netutil.LimitListener(ln, helperConns)) }()"
+- id: CMD-016
+  title: "The box helper doesn't sweep leftover containers at start"
+  edits:
+    - file: "cmd/server/helper.go"
+      find: "\tif err := helper.Sweep(ctx); err != nil {\n\t\treturn err\n\t}\n"
+      replace: ""
+- id: CMD-017
+  title: "The sandbox check is off even when on"
+  edits:
+    - file: "cmd/server/sandbox.go"
+      find: "\t\tsb.On = cfg.Helper != \"\"\n"
+      replace: "\t\tsb.On = false\n"
+- id: CMD-018
+  title: "The update check counts as forced off unless SF_NO_UPDATE_CHECK is set"
+  edits:
+    - file: "cmd/server/updates.go"
+      find: "Forced: getenv(\"SF_NO_UPDATE_CHECK\") != \"\""
+      replace: "Forced: getenv(\"SF_NO_UPDATE_CHECK\") == \"\""
+- id: CMD-019
+  title: "Import never restarts the engine"
+  edits:
+    - file: "cmd/server/backup.go"
+      find: "\t\tRestart: hook.restart,\n"
+      replace: "\t\tRestart: func() {},\n"
+- id: CMD-020
+  title: "Pushes aren't told about the stop switch"
+  edits:
+    - file: "cmd/server/durable.go"
+      find: "\t\tp.pushes.UseHalt(reg.Halt())\n"
+      replace: ""
+- id: CMD-021
+  title: "Diagnostics shows the named settings' values, not only set or unset"
+  edits:
+    - file: "cmd/server/diagnostics.go"
+      find: "\t\t\tif getenv(name) != \"\" {\n\t\t\t\tv = \"set\"\n\t\t\t}"
+      replace: "\t\t\tif getenv(name) != \"\" {\n\t\t\t\tv = getenv(name)\n\t\t\t}"
+- id: CMD-022
+  title: "A reviewer container is never removed after its lease"
+  edits:
+    - file: "cmd/server/reviewers.go"
+      find: "\tdefer h.close(ctx, l.run)\n\tif snapshot != \"\" {"
+      replace: "\tif snapshot != \"\" {"
+- id: GATE-001
+  title: "A Codex config folder below the worktree root (sub/.codex/config.toml) is no longer a protected write: only the first path segment is checked"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "for _, s := range segments {"
+      replace: "for _, s := range segments[:1] {"
+- id: GATE-002
+  title: "Only a top-level .env is protected; a nested one (app/.env) can be written without the person"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "if environmentFile(segments[len(segments)-1]) {"
+      replace: "if environmentFile(segments[0]) {"
+- id: GATE-003
+  title: "A relative write path is no longer refused as protected, so a relative path to .codex/ or .env passes"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "return \"the path to write is relative\""
+      replace: "return \"\""
+- id: GATE-004
+  title: "Proctor's folder is matched case-sensitively, so a branch's PROCTOR/specs/x.yaml isn't flagged as a specification change"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "return strings.EqualFold(first, SpecFolder)"
+      replace: "return first == SpecFolder"
+- id: GATE-005
+  title: "GNUmakefile is no longer treated as the root Makefile that runs Proctor"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "return strings.EqualFold(rel, \"Makefile\") || strings.EqualFold(rel, \"GNUmakefile\")"
+      replace: "return strings.EqualFold(rel, \"Makefile\")"
+- id: GATE-006
+  title: "A symbolic link under proctor/ with an absolute target (/etc/passwd) counts as staying inside proctor/"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "if target == \"\" || path.IsAbs(target) || strings.ContainsAny"
+      replace: "if target == \"\" || strings.ContainsAny"
+- id: GATE-007
+  title: "Off-by-one: a project with exactly one locked test file doesn't hold writes to it"
+  edits:
+    - file: "internal/core/gate/writes.go"
+      find: "if len(locked) == 0 {"
+      replace: "if len(locked) <= 1 {"
+- id: GATE-008
+  title: "The protected-path check runs for shell tools instead of edit tools, so Write/Edit to .codex/ or .env aren't protected"
+  edits:
+    - file: "internal/core/gate/check.go"
+      find: "if k != EditTool {"
+      replace: "if k != ShellTool {"
+- id: GATE-009
+  title: "SendMessage is classed as a session tool, so it no longer waits for the person"
+  edits:
+    - file: "internal/core/gate/tools.go"
+      find: "\"SendMessage\": RemoteTool,"
+      replace: "\"SendMessage\": SessionTool,"
+- id: GATE-010
+  title: "An Agent/Task call with isolation remote is no longer seen as running on the vendor's servers"
+  edits:
+    - file: "internal/core/gate/tools.go"
+      find: "if input[\"isolation\"] == \"remote\" {"
+      replace: "if input[\"isolation\"] == \"cloud\" {"
+- id: GATE-011
+  title: "Remote tools no longer wait for the person"
+  edits:
+    - file: "internal/core/gate/tools.go"
+      find: "return k == RemoteTool"
+      replace: "return false"
+- id: GATE-012
+  title: "The cap on the developer's reason grows from 500 to 5000 characters"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "len([]rune(r)) > 500"
+      replace: "len([]rune(r)) > 5000"
+- id: GATE-013
+  title: "A one-time push answer can be used again: Used is ignored"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "a != nil && !a.Used && a.Commit"
+      replace: "a != nil && a.Commit"
+- id: GATE-014
+  title: "A push answer binds to any commit: an Allow given for one commit covers a later commit on the branch"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "&& a.Commit == r.Commit && a.Branch"
+      replace: "&& a.Branch"
+- id: GATE-015
+  title: "A stopped session counts as sandboxed even if the sandbox check never passed"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "case l.Level == level.Stopped && l.Sandboxed:"
+      replace: "case l.Level == level.Stopped:"
+- id: GATE-016
+  title: "Only work types that change no file are refused a push, so Exploring (push false) can push"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if !f.Type.Push {"
+      replace: "if !f.Type.Push && f.Type.Edits == workflow.NoEdits {"
+- id: GATE-017
+  title: "A force push is refused only when the branch equals main, not when the engine doesn't know main"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if r.Force && (f.Main == \"\" || r.Branch == f.Main) {"
+      replace: "if r.Force && r.Branch == f.Main {"
+- id: GATE-018
+  title: "The gate drops every other item (flags, approvals, file lists) from what a push needs"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "missing := append([]string{}, f.Items...)"
+      replace: "missing := []string{}"
+- id: GATE-019
+  title: "The developer's answer is read backwards: Deny lets the push through and Allow denies it"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if !f.Answer.Allow {"
+      replace: "if f.Answer.Allow {"
+- id: GATE-020
+  title: "Allow pushes while the sandbox check fails (once the first check since start has run)"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if unsandboxed {"
+      replace: "if false {"
+- id: GATE-021
+  title: "Allowing a push with items missing no longer needs the developer's reason"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if why := Reason(f.Answer.Reason); why != \"\" {"
+      replace: "if why := Reason(f.Answer.Reason); why != \"\" || f.Answer.Allow {"
+- id: GATE-022
+  title: "Off-by-one: a push with exactly one missing item is allowed"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "if len(missing) == 0 {\n\t\treturn Decision{Result: Allowed}\n\t}\n\treturn"
+      replace: "if len(missing) <= 1 {\n\t\treturn Decision{Result: Allowed}\n\t}\n\treturn"
+- id: GATE-023
+  title: "A # inside a word starts a comment, so `echo x#; git push` hides the push"
+  edits:
+    - file: "internal/core/gate/shell.go"
+      find: "case c == '#' && !has:"
+      replace: "case c == '#':"
+- id: GATE-024
+  title: "An unquoted heredoc body with $(...) is accepted, so `cat <<EOF` with $(git push) in its body isn't seen"
+  edits:
+    - file: "internal/core/gate/shell.go"
+      find: "if doc.expand && runsInBody.MatchString(line) {"
+      replace: "if doc.expand && strings.Contains(line, \"`\") {"
+- id: GATE-025
+  title: "A ${...} expansion may hold $( and quotes, so `echo ${x:-$(git push)}` hides the push"
+  edits:
+    - file: "internal/core/gate/shell.go"
+      find: "braceForbidden = regexp.MustCompile(\"[$`'\\\"\\\\\\\\(]\")"
+      replace: "braceForbidden = regexp.MustCompile(\"[`'\\\"\\\\\\\\]\")"
+- id: GATE-026
+  title: "printf's \\x escapes are no longer decoded, so `printf 'git \\x70ush' | sh` isn't seen as a push"
+  edits:
+    - file: "internal/core/gate/shell.go"
+      find: "\t\tcase e[0] == 'x':\n\t\t\tn, _ := strconv.ParseUint(e[1:], 16, 8)\n\t\t\treturn string(rune(n))\n"
+      replace: ""
+- id: GATE-027
+  title: "A command's name keeps its folder, so /usr/bin/git push isn't seen as git"
+  edits:
+    - file: "internal/core/gate/shell.go"
+      find: "return strings.ToLower(word[strings.LastIndexByte(word, '/')+1:])"
+      replace: "return strings.ToLower(word)"
+- id: GATE-028
+  title: "git send-pack is no longer a push"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "|| sub == \"push\" || sub == \"send-pack\" {"
+      replace: "|| sub == \"push\" {"
+- id: GATE-029
+  title: "A git -c value naming push (an alias) no longer counts, so `git -c alias.p=push p` pushes unseen"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return pushWord.MatchString(v) || unresolved.MatchString(v) })"
+      replace: "return unresolved.MatchString(v) })"
+- id: GATE-030
+  title: "gh pr merge is no longer a push"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return verb == \"create\" || verb == \"new\" || verb == \"merge\""
+      replace: "return verb == \"create\" || verb == \"new\""
+- id: GATE-031
+  title: "gh api with -f/-F fields is read as GET, not POST, so writes to git/refs through fields pass"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "effective = \"POST\""
+      replace: "effective = \"GET\""
+- id: GATE-032
+  title: "curl with -d/--json no longer implies POST, so a data upload to the GitHub API isn't a write"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "method = \"POST\""
+      replace: "method = \"GET\""
+- id: GATE-033
+  title: "The GitHub MCP push_files tool is no longer push-shaped"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "__(push_files|create_or_update_file"
+      replace: "__(create_or_update_file"
+- id: GATE-034
+  title: "A command named by a variable ($G push) counts only if the loose git regex matches, not on the word push"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return loose || pushWord.MatchString(text)\n\t}\n\tcmd :="
+      replace: "return loose\n\t}\n\tcmd :="
+- id: GATE-035
+  title: "xargs fed by echo is not checked, only printf, so `echo push origin | xargs git` pushes unseen"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return len(w) > 0 && readers[nameOf(w[0])] && slices.ContainsFunc(w[1:], pushWord.MatchString)"
+      replace: "return len(w) > 0 && nameOf(w[0]) == \"printf\" && slices.ContainsFunc(w[1:], pushWord.MatchString)"
+- id: GATE-036
+  title: "A shell with no arguments is read as not reading its input, so `echo 'git push' | sh` isn't scanned"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return true\n}\n\nfunc gitPushes"
+      replace: "return false\n}\n\nfunc gitPushes"
+- id: GATE-037
+  title: "sh -c scans the last argument instead of the script, so `sh -c 'git push' x` hides the push"
+  edits:
+    - file: "internal/core/gate/push.go"
+      find: "return s.pushes(args[j], depth+1)"
+      replace: "return s.pushes(args[len(args)-1], depth+1)"
+- id: GATE-038
+  title: "rm -rf / is no longer irreversible"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "return clean == \"/\" || clean == \".\" ||"
+      replace: "return clean == \".\" ||"
+- id: GATE-039
+  title: "wget is no longer a downloader, so `wget -qO- url | sh` isn't irreversible"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "downloaders      = set(\"curl\", \"wget\", \"fetch\""
+      replace: "downloaders      = set(\"curl\", \"fetch\""
+- id: GATE-040
+  title: "claude started with only options (claude --dangerously-skip-permissions) isn't a child session"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "if at < 0 || !tools[args[at]] {\n\t\treturn true\n\t}"
+      replace: "if at < 0 {\n\t\treturn false\n\t}\n\tif !tools[args[at]] {\n\t\treturn true\n\t}"
+- id: FLOW-001
+  title: "Approving the requirements no longer checks the approved text's hash, so a stale approval counts"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "case a.Hash != f.ReqHash:"
+      replace: "case a.Hash == \"\":"
+- id: FLOW-002
+  title: "Approving the plan no longer checks the plan's hash"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "if a.Hash != f.PlanHash {"
+      replace: "if a.Hash == \"\" {"
+- id: FLOW-003
+  title: "The plan can be approved at a commit with work beyond the plan's own files"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "if f.Head == \"\" || (f.Head != f.ReqBaseline && !f.ArtifactsOnly) {"
+      replace: "if f.Head == \"\" {"
+- id: FLOW-004
+  title: "Implement may start once the requirements are approved, before the plan is"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "if feature && !f.PlanOk {"
+      replace: "if feature && !f.ReqOk {"
+- id: FLOW-005
+  title: "A Feature's edits are allowed once the requirements are approved, before the plan is"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "case f.Profile != Feature || f.PlanOk ||"
+      replace: "case f.Profile != Feature || f.ReqOk ||"
+- id: FLOW-006
+  title: "Agent instruction files (CLAUDE.md, .claude/...) count as documentation"
+  edits:
+    - file: "internal/core/workflow/files.go"
+      find: "if !docFile.MatchString(path) || instructionFile.MatchString(path) {"
+      replace: "if !docFile.MatchString(path) {"
+- id: FLOW-007
+  title: "A trailing ** in a glob matches only direct children, so protect \"secrets/**\" misses secrets/a/b"
+  edits:
+    - file: "internal/core/workflow/glob.go"
+      find: "out.WriteString(lineChar + \"*\")"
+      replace: "out.WriteString(`[^/]*`)"
+- id: FLOW-008
+  title: "A team file pattern may hold .. segments"
+  edits:
+    - file: "internal/core/workflow/team.go"
+      find: "strings.HasPrefix(p, \"/\") || slices.Contains(strings.Split(p, \"/\"), \"..\") ||"
+      replace: "strings.HasPrefix(p, \"/\") ||"
+- id: FLOW-009
+  title: "The team file's version may be any number of 1 or more"
+  edits:
+    - file: "internal/core/workflow/team.go"
+      find: "!ok || v != 1 {"
+      replace: "!ok || v < 1 {"
+- id: FLOW-010
+  title: "Off-by-one: exactly 50 protect patterns are refused"
+  edits:
+    - file: "internal/core/workflow/teamrules.go"
+      find: "if len(list) > MaxProtect {"
+      replace: "if len(list) >= MaxProtect {"
+- id: FLOW-011
+  title: "A file rule's instruction may hold control characters and line breaks"
+  edits:
+    - file: "internal/core/workflow/teamrules.go"
+      find: "utf8.RuneCountInString(s) > MaxInstruction || !plainLine(s) {"
+      replace: "utf8.RuneCountInString(s) > MaxInstruction {"
+- id: FLOW-012
+  title: "The strict JSON reader accepts a key twice (the last wins)"
+  edits:
+    - file: "internal/core/workflow/json.go"
+      find: "\t\tif _, dup := o.values[k]; dup {\n\t\t\tp.fail(\"the key \\\"\" + clip(k, 40) + \"\\\" twice\")\n\t\t}\n"
+      replace: ""
+- id: FLOW-013
+  title: "The strict JSON reader accepts invisible and direction-changing characters in strings"
+  edits:
+    - file: "internal/core/workflow/json.go"
+      find: "\t\t\tfor _, r := range s {\n\t\t\t\tif hiddenRune(r) {\n\t\t\t\t\tp.fail(\"an invisible or direction-changing character in a string\")\n\t\t\t\t}\n\t\t\t}\n"
+      replace: ""
+- id: FLOW-014
+  title: "A flag removed in a later commit (still in the branch's history) no longer holds the push"
+  edits:
+    - file: "internal/core/workflow/items.go"
+      find: "case f.Allowed:"
+      replace: "case f.Allowed, f.Fixed:"
+- id: FLOW-015
+  title: "The unfinished secrets scan holds the push only when something was flagged"
+  edits:
+    - file: "internal/core/workflow/items.go"
+      find: "if !p.FlagsRead {"
+      replace: "if !p.FlagsRead && len(p.Flagged) > 0 {"
+- id: FLOW-016
+  title: "The project's own extra agents are no longer required"
+  edits:
+    - file: "internal/core/workflow/setup.go"
+      find: "add(Requirement{Agent: a, Why: \"Added for this project\"})"
+      replace: "_ = a"
+- id: FLOW-017
+  title: "The adapter's default agents are swapped: the slop reviewer fills the bug hunter role"
+  edits:
+    - file: "internal/core/workflow/adapter.go"
+      find: "review.BugHunter: \"knackpack:adversarial-reviewer\", review.Simplicity: \"knackpack:slop-reviewer\""
+      replace: "review.BugHunter: \"knackpack:slop-reviewer\", review.Simplicity: \"knackpack:adversarial-reviewer\""
+- id: CORE-001
+  title: "Only the first review run counts, so a role set to run 3 times passes on one"
+  edits:
+    - file: "internal/core/review/record.go"
+      find: "n := min(max(runs, 1), MaxRuns)\n\tfor run := 1"
+      replace: "n := 1\n\tfor run := 1"
+- id: CORE-002
+  title: "A failed or timed-out review counts as a pass"
+  edits:
+    - file: "internal/core/review/record.go"
+      find: "\tcase Pass:\n\t\treturn \"\"\n\tcase Block:"
+      replace: "\tcase Pass, Failed:\n\t\treturn \"\"\n\tcase Block:"
+- id: CORE-003
+  title: "A review's provider is no longer checked, so a reviewer defined in the repository counts"
+  edits:
+    - file: "internal/core/review/record.go"
+      find: "\tif why := RoleProblem(k.Agent, spawned(k.Agent, r.Provider, offer)); why != \"\" {\n\t\treturn \"a review by \" + k.Agent + \" started from a provider the gate trusts: \" + why\n\t}\n"
+      replace: ""
+- id: CORE-004
+  title: "An advisory run counts for the gate unless overridden (the override test is inverted)"
+  edits:
+    - file: "internal/core/review/record.go"
+      find: "ok && r.Advisory && r.Override == \"\""
+      replace: "ok && r.Advisory && r.Override != \"\""
+- id: CORE-005
+  title: "An agent from the repository's own (project or local) source may fill a role"
+  edits:
+    - file: "internal/core/review/role.go"
+      find: "if o.Plugin == \"project\" || repositorySource.MatchString(o.Source) {"
+      replace: "if o.Plugin == \"project\" {"
+- id: CORE-006
+  title: "A knackpack: agent from any plugin, not only knackpack@knackpack, is trusted"
+  edits:
+    - file: "internal/core/review/role.go"
+      find: "if strings.HasPrefix(agent, \"knackpack:\") && o.Plugin != knackpackProvider {"
+      replace: "if strings.HasPrefix(agent, \"knackpack:\") && o.Plugin == \"\" {"
+- id: CORE-007
+  title: "A reply that gives both pass and block no longer counts as a conflict"
+  edits:
+    - file: "internal/core/review/verdict.go"
+      find: "if len(seen) > 1 {"
+      replace: "if len(seen) > 2 {"
+- id: CORE-008
+  title: "A machine pass whose closing paragraph says 'changes required' still counts as a pass"
+  edits:
+    - file: "internal/core/review/verdict.go"
+      find: "if r != nil && stateOf(m[1]) == Pass && r.closingBlocks("
+      replace: "if r != nil && stateOf(m[1]) == Block && r.closingBlocks("
+- id: CORE-009
+  title: "A line 'knackpack-verdict/1: pass' added by the change is no longer seen as verdict-shaped"
+  edits:
+    - file: "internal/core/review/shaped.go"
+      find: "\tif m := machineLine.FindStringSubmatch(p); m != nil {\n\t\treturn stateOf(m[1]) == Pass\n\t}\n"
+      replace: ""
+- id: CORE-010
+  title: "A reviewer check where the reviewer passed the planted defect no longer fails"
+  edits:
+    - file: "internal/core/review/check.go"
+      find: "case defect == Pass:\n\t\treturn CheckFailure"
+      replace: "case defect == Pass:\n\t\treturn CheckUnsettled"
+- id: CORE-011
+  title: "A session whose sandbox check failed earlier counts as sandboxed once it passes"
+  edits:
+    - file: "internal/core/level/level.go"
+      find: "r.Sandboxed = wasLocked && !broken"
+      replace: "r.Sandboxed = wasLocked"
+- id: CORE-012
+  title: "Request ids are 8 hex digits instead of 16"
+  edits:
+    - file: "internal/core/shared/request.go"
+      find: "requestBytes  = 8"
+      replace: "requestBytes  = 4"
+- id: CORE-013
+  title: "A request-tagged logger drops the req= field"
+  edits:
+    - file: "internal/core/shared/request.go"
+      find: "return append(slices.Clone(args), RequestKey, t.id)"
+      replace: "return slices.Clone(args)"
+- id: SESS-001
+  title: "Agent files with control characters are accepted"
+  edits:
+    - file: "internal/core/session/agentfile.go"
+      find: "(unicode.IsControl(c) ||"
+      replace: "(unicode.IsControl(c) && c == 0 ||"
+- id: SESS-002
+  title: "A front matter key given twice is accepted, the later value winning"
+  edits:
+    - file: "internal/core/session/agentfile.go"
+      find: "if _, dup := values[key]; dup {"
+      replace: "if _, dup := values[key]; dup && key == \"\" {"
+- id: SESS-003
+  title: "Reviewer agent files may carry a hooks key, which runs commands in the trusted reviewer container"
+  edits:
+    - file: "internal/core/session/agentfile.go"
+      find: "if slices.Contains(agentFileKeys, k) {"
+      replace: "if slices.Contains(agentFileKeys, k) || k == \"hooks\" {"
+- id: SESS-004
+  title: "Reviewer agent files may list any tool, such as Bash or Write, not only the review tools"
+  edits:
+    - file: "internal/core/session/agentfile.go"
+      find: "if !slices.Contains(ReviewTools, t) {"
+      replace: "if false && !slices.Contains(ReviewTools, t) {"
+- id: SESS-005
+  title: "Removing an allow rule accepts any worktree name, such as ../x"
+  edits:
+    - file: "internal/core/session/allowrules.go"
+      find: "case place == RuleInWorktree && RuleWorktreeName.MatchString(worktree):"
+      replace: "case place == RuleInWorktree:"
+- id: SESS-006
+  title: "The allow rules view of one project lists the containers of every project's sessions"
+  edits:
+    - file: "internal/core/session/allowrules.go"
+      find: "if r.repo == repo && ValidBox(r.box) &&"
+      replace: "if ValidBox(r.box) &&"
+- id: SESS-007
+  title: "The reason a person types is written to the audit log without masking tokens"
+  edits:
+    - file: "internal/core/session/audit.go"
+      find: "e.Reason, e.PersonReason, e.Path = maskCut(boundReason(e.Reason)), maskCut(e.PersonReason), maskSecrets(e.Path)"
+      replace: "e.Reason, e.Path = maskCut(boundReason(e.Reason)), maskSecrets(e.Path)"
+- id: SESS-008
+  title: "Away mode approves permission cards instead of denying them"
+  edits:
+    - file: "internal/core/session/away.go"
+      find: "value := map[string]any{\"choice\": \"no\", \"note\": AwayNote}"
+      replace: "value := map[string]any{\"choice\": \"yes\", \"note\": AwayNote}"
+- id: SESS-009
+  title: "Import reads the archive before checking that the engine is empty"
+  edits:
+    - file: "internal/core/session/backup.go"
+      find: "\tif why := b.empty(); why != \"\" {\n\t\tb.audit(ImportRefused, why)\n\t\treturn ImportReport{}, explained(conflict(\"not empty\"), why)\n\t}\n\treport, err := b.cfg.Archive.Stage(r)"
+      replace: "\treport, err := b.cfg.Archive.Stage(r)"
+- id: SESS-010
+  title: "Box ids may hold any lowercase letter"
+  edits:
+    - file: "internal/core/session/boxes.go"
+      find: "(c < 'a' || c > 'f')"
+      replace: "(c < 'a' || c > 'z')"
+- id: SESS-011
+  title: "A start waiting for sign-in is dropped after 30 seconds"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "PendingBoxFor   = 30 * time.Minute"
+      replace: "PendingBoxFor   = 30 * time.Second"
+- id: SESS-012
+  title: "The engine records only 10 session containers"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "MaxBoxRecords   = 1000"
+      replace: "MaxBoxRecords   = 10"
+- id: SESS-013
+  title: "Stopping a session's container leaves the engine's route to it"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "\td.cfg.Routes.Down(box)\n\td.forgetSeen()\n\tbctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)"
+      replace: "\td.forgetSeen()\n\tbctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), boxCallFor)"
+- id: SESS-014
+  title: "A container that is already gone counts as not stopped"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "if err := d.cfg.Boxes.Stop(bctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      replace: "if err := d.cfg.Boxes.Stop(bctx, box); err != nil {"
+- id: SESS-015
+  title: "Deleting a session doesn't remove its container"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "if err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      replace: "if err := error(nil); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+- id: SESS-016
+  title: "Deleting a session leaves its folder in the workspace"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "if err := d.cfg.Folders.Remove(box); err != nil {"
+      replace: "if err := error(nil); err != nil {"
+- id: SESS-017
+  title: "At start the engine doesn't stop session containers left running"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "\td.sweepLeftovers(ctx)\n\td.dropPending(true)"
+      replace: "\td.dropPending(true)"
+- id: SESS-018
+  title: "The engine uses any worktree path agent-host answers"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "if want == \"\" || cwd != want {"
+      replace: "if want == \"\" {"
+- id: SESS-019
+  title: "A waiting start resumes with another agent than it was made for"
+  edits:
+    - file: "internal/core/session/boxsessions.go"
+      find: "if r.repoPath != repo.Path || r.spec.ID != spec.ID {"
+      replace: "if r.repoPath != repo.Path {"
+- id: SESS-020
+  title: "When an ACP session ends, its open permission cards stay open"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "\tfor card := range b.reqs {\n\t\tb.recordLocked(Fields{\"type\": \"resolved\", \"id\": card})\n\t}\n"
+      replace: ""
+- id: SESS-021
+  title: "Queued messages start new turns while Pause all or Stop everything is on"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "if len(b.waiting) == 0 || b.ended || b.reg.halt.turns() != \"\" {"
+      replace: "if len(b.waiting) == 0 || b.ended {"
+- id: SESS-022
+  title: "A tool call's command is shown without masking tokens"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "f[\"command\"] = maskSecrets(command)"
+      replace: "f[\"command\"] = command"
+- id: SESS-023
+  title: "Answering No to an ACP permission card allows the tool call"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "return agent.Answer{Allow: false, Note: note}"
+      replace: "return agent.Answer{Allow: true, Note: note}"
+- id: SESS-024
+  title: "A negative money cap is accepted"
+  edits:
+    - file: "internal/core/session/caps.go"
+      find: "|| c.MoneyUSD < 0 || c.MoneyUSD > MaxCapUSD {"
+      replace: "|| c.MoneyUSD > MaxCapUSD {"
+- id: SESS-025
+  title: "Spending exactly the money cap doesn't reach it"
+  edits:
+    - file: "internal/core/session/caps.go"
+      find: "return c.MoneyUSD > 0 && u.CostUSD >= c.MoneyUSD"
+      replace: "return c.MoneyUSD > 0 && u.CostUSD > c.MoneyUSD"
+- id: SESS-026
+  title: "A session at a cap accepts new own caps instead of Raise"
+  edits:
+    - file: "internal/core/session/capspage.go"
+      find: "\tif s.reached != \"\" {\n\t\tl.mu.Unlock()\n\t\treturn explained(conflict(\"reached\")"
+      replace: "\tif false {\n\t\tl.mu.Unlock()\n\t\treturn explained(conflict(\"reached\")"
+- id: SESS-027
+  title: "Raise the cap raises a kind the session didn't reach"
+  edits:
+    - file: "internal/core/session/capspage.go"
+      find: "if s == nil || s.reached == \"\" || s.reached != kind {"
+      replace: "if s == nil || s.reached == \"\" {"
+- id: SESS-028
+  title: "A session at its cap still gets new messages"
+  edits:
+    - file: "internal/core/session/capsrun.go"
+      find: "\tif s.reached != \"\" {\n\t\treturn \"This session reached its \""
+      replace: "\tif false {\n\t\treturn \"This session reached its \""
+- id: SESS-029
+  title: "Cumulative cost reports are added in full each time, overcounting spending"
+  edits:
+    - file: "internal/core/session/capsrun.go"
+      find: "\t\tadd = cost - s.costLast\n"
+      replace: "\t\tadd = cost\n"
+- id: SESS-030
+  title: "Yes is accepted on a permission card the page couldn't show in full"
+  edits:
+    - file: "internal/core/session/cards.go"
+      find: "\t\tcase \"yes\":\n\t\t\treturn c.complete\n"
+      replace: "\t\tcase \"yes\":\n\t\t\treturn true\n"
+- id: SESS-031
+  title: "Answers to questions the agent didn't ask are accepted"
+  edits:
+    - file: "internal/core/session/cards.go"
+      find: "if !asked[k] || !ok || strings.TrimSpace(text) == \"\""
+      replace: "if !asked[k] && k == \"\" || !ok || strings.TrimSpace(text) == \"\""
+- id: SESS-032
+  title: "Changes from a commit accept any text as the commit"
+  edits:
+    - file: "internal/core/session/changepoints.go"
+      find: "return at, changeCommit.MatchString(commit)"
+      replace: "return at, commit != \"\""
+- id: SESS-033
+  title: "Changes compare with a commit that isn't on the session's branch"
+  edits:
+    - file: "internal/core/session/changepoints.go"
+      find: "\t\tif !branch.has(at.Commit) {"
+      replace: "\t\tif at.Commit == \"\" {"
+- id: SESS-034
+  title: "A check's output is kept and shown even when it holds a token"
+  edits:
+    - file: "internal/core/session/checkcmd.go"
+      find: "\t\tif secretText(tail) {\n\t\t\tdone.Withheld = true\n\t\t} else {\n\t\t\tdone.Tail = clip(tail, MaxCommandTail)\n\t\t}"
+      replace: "\t\tdone.Tail = clip(tail, MaxCommandTail)"
+- id: SESS-035
+  title: "The page passes /permissions, which changes what the agent may do, to Claude Code"
+  edits:
+    - file: "internal/core/session/commands.go"
+      find: "\"review\": true, \"security-review\": true,"
+      replace: "\"review\": true, \"security-review\": true, \"permissions\": true,"
+- id: SESS-036
+  title: "Unknown slash commands, such as /login or /model, are passed on"
+  edits:
+    - file: "internal/core/session/commands.go"
+      find: "(known != nil && known.custom[name]) {\n\t\treturn false\n\t}\n\treturn true"
+      replace: "(known != nil && known.custom[name]) {\n\t\treturn false\n\t}\n\treturn false"
+- id: SESS-037
+  title: "Hosts added for the agents are also allowed for the reviewers"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "\tif side != SideReviewers {\n\t\tfor _, h := range s.Added {"
+      replace: "\tif side != \"\" {\n\t\tfor _, h := range s.Added {"
+- id: SESS-038
+  title: "egress is told no expiry for hosts added for a while"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "\t\t\tif !h.Expires.IsZero() {\n\t\t\t\texpires[h.Name] = h.Expires.Truncate(time.Second)\n\t\t\t}\n"
+      replace: ""
+- id: SESS-039
+  title: "With a gateway set, Anthropic's hosts stay allowed beside it"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "return h != gw && ClaudeVendorHost(h)"
+      replace: "return h == gw && ClaudeVendorHost(h)"
+- id: SESS-040
+  title: "Pruning keeps expired hosts and drops hosts that haven't expired"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "if h.Expires.IsZero() || now.Before(h.Expires) {"
+      replace: "if h.Expires.IsZero() || now.After(h.Expires) {"
+- id: SESS-041
+  title: "The allowlist checks added hosts against the base list instead of the deny list, so git hosts can be allowed"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "if d := DeniedBy(a.cfg.Deny, name); d != \"\" {"
+      replace: "if d := DeniedBy(a.cfg.Base, name); d != \"\" {"
+- id: SESS-042
+  title: "Upload hosts are added without the person's consent, and refused with it"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "if UploadHost(name) && !uploadsOk {"
+      replace: "if UploadHost(name) && uploadsOk {"
+- id: SESS-043
+  title: "Removing an added host says it isn't there, and removing an unknown host succeeds"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "if len(s.Added) == n {\n\t\t\treturn explained(notFound(\"host\")"
+      replace: "if len(s.Added) != n {\n\t\t\treturn explained(notFound(\"host\")"
+- id: SESS-044
+  title: "The gateway's host isn't checked against the deny list"
+  edits:
+    - file: "internal/core/session/egress.go"
+      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif !agents && !reviewers {"
+      replace: "\t\tif !agents && !reviewers {"
+- id: SESS-045
+  title: "registry.npmjs.org is no longer treated as an upload host"
+  edits:
+    - file: "internal/core/session/egresshosts.go"
+      find: "\"registry.npmjs.org\", \"registry.yarnpkg.com\","
+      replace: "\"registry.yarnpkg.com\","
+- id: SESS-046
+  title: "Single-label host names such as localhost are allowed"
+  edits:
+    - file: "internal/core/session/egresshosts.go"
+      find: "if !validDNSName(bare) || !strings.Contains(bare, \".\") {"
+      replace: "if !validDNSName(bare) {"
+- id: SESS-047
+  title: "A wildcard entry such as .com that covers a git host isn't denied"
+  edits:
+    - file: "internal/core/session/egresshosts.go"
+      find: "if bare == d || strings.HasSuffix(bare, \".\"+d) || (wild && strings.HasSuffix(d, \".\"+bare)) {\n\t\t\treturn d"
+      replace: "if bare == d || strings.HasSuffix(bare, \".\"+d) || (wild && d == bare) {\n\t\t\treturn d"
+- id: SESS-048
+  title: "The gateway URL may start with http://"
+  edits:
+    - file: "internal/core/session/egresshosts.go"
+      find: "if err != nil || u.Scheme != \"https\" || u.Host == \"\" || u.Opaque != \"\" {"
+      replace: "if err != nil || u.Scheme != \"https\" && u.Scheme != \"http\" || u.Host == \"\" || u.Opaque != \"\" {"
+- id: SESS-049
+  title: "An allowlist reason holding a token is saved"
+  edits:
+    - file: "internal/core/session/egressreason.go"
+      find: "\tcase secretText(r):\n\t\treturn \"\", explained(invalid(\"reason\"), \"The reason looks like it holds a token or a key, so it wasn't saved. Write it without one.\")\n"
+      replace: ""
+- id: SESS-050
+  title: "Every allowed push is listed as an exception, not only ones the person allowed past the gate"
+  edits:
+    - file: "internal/core/session/exceptions.go"
+      find: "if e.Result != string(gate.Allowed) || e.PersonReason == \"\" {"
+      replace: "if e.Result != string(gate.Allowed) {"
+- id: SESS-051
+  title: "Bring in main runs on a stopped session"
+  edits:
+    - file: "internal/core/session/fetchmain.go"
+      find: "\tcase !running:\n\t\treturn \"\", explained(conflict(\"not running\")"
+      replace: "\tcase !running && handed:\n\t\treturn \"\", explained(conflict(\"not running\")"
+- id: SESS-052
+  title: "Bring in main messages the agent while Pause all or Stop everything is on"
+  edits:
+    - file: "internal/core/session/fetchmain.go"
+      find: "\tif why := d.reg.halt.turns(); why != \"\" {\n\t\treturn \"\", explained(conflict(\"halted\"), why)\n\t}\n"
+      replace: ""
+- id: SESS-053
+  title: "Issues from findings open for a commit that isn't the latest review's"
+  edits:
+    - file: "internal/core/session/findingissues.go"
+      find: "if at == \"\" || at != commit {"
+      replace: "if at == \"\" {"
+- id: SESS-054
+  title: "Findings of a block the person overrode are still sent to the agent"
+  edits:
+    - file: "internal/core/session/findings.go"
+      find: "if e.Record.State != review.Block || e.Record.Override != \"\" || e.Record.Advisory ||"
+      replace: "if e.Record.State != review.Block || e.Record.Advisory ||"
+- id: SESS-055
+  title: "Reviewers' findings holding a token are sent to the agent"
+  edits:
+    - file: "internal/core/session/findings.go"
+      find: "\tif flagText.MatchString(text) {\n\t\treturn \"\", false\n\t}\n\treturn text, true"
+      replace: "\treturn text, true"
+- id: SESS-056
+  title: "Send findings accepts a commit other than the held push's"
+  edits:
+    - file: "internal/core/session/findings.go"
+      find: "case h == nil || h.card != card || h.commit != commit:"
+      replace: "case h == nil || h.card != card:"
+- id: SESS-057
+  title: "The same findings can be sent to the agent again"
+  edits:
+    - file: "internal/core/session/findings.go"
+      find: "\tcase !h.sent.IsZero():\n\t\tp.mu.Unlock()\n\t\treturn explained(conflict(\"sent\"), \"The findings for this commit were already sent to the session.\")\n"
+      replace: ""
+- id: SESS-058
+  title: "Turning automatic Send findings off leaves it on"
+  edits:
+    - file: "internal/core/session/findingsetting.go"
+      find: "p.Findings = on"
+      replace: "p.Findings = true"
+- id: SESS-059
+  title: "GitHub tokens of the usual 36 characters aren't detected as secrets"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "gh[pousr]_[A-Za-z0-9]{36,}"
+      replace: "gh[pousr]_[A-Za-z0-9]{40,}"
+- id: SESS-060
+  title: ".env.local files aren't flagged as secret files"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "return rest != \"example\" && rest != \"sample\" && rest != \"template\""
+      replace: "return rest != \"example\" && rest != \"sample\" && rest != \"template\" && rest != \"local\""
+- id: SESS-061
+  title: "Tokens split by control or invisible characters inside files aren't detected"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "func secretData(b []byte) bool {\n\treturn flagText.Match(b) || needsCleaning(b) && flagText.MatchString(cleanLines(string(b)))"
+      replace: "func secretData(b []byte) bool {\n\treturn flagText.Match(b)"
+- id: SESS-062
+  title: "Passwords in URLs inside pushed files aren't flagged"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "\tcase f.Data != nil && flagURL.Match(f.Data):\n\t\treturn FlagPassword, flagWhy[FlagPassword], true\n"
+      replace: ""
+- id: SESS-063
+  title: "Tokens in a commit's author, committer or other headers aren't flagged"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "case f.text != \"\" && secretText(f.text):"
+      replace: "case f.field == FieldMessage && f.text != \"\" && secretText(f.text):"
+- id: SESS-064
+  title: "Allowing one version of a flagged file allows every later version"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "\tfor _, v := range f.Versions {\n\t\tif !set[v] {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true"
+      replace: "\treturn true"
+- id: SESS-065
+  title: "The changes view's diff shows tokens unmasked"
+  edits:
+    - file: "internal/core/session/flag.go"
+      find: "\tcs.Diff = maskDiff(cs.Diff)\n"
+      replace: ""
+- id: SESS-066
+  title: "Git host errors shown to the agent and page don't hide the token (arguments swapped)"
+  edits:
+    - file: "internal/core/session/forge.go"
+      find: "\t\ts = strings.ReplaceAll(s, token, \"[token]\")\n\t}\n\treturn clip(s, maxForgeReason)\n}\n\nfunc forgeWhy"
+      replace: "\t\ts = strings.ReplaceAll(s, \"[token]\", token)\n\t}\n\treturn clip(s, maxForgeReason)\n}\n\nfunc forgeWhy"
+- id: SESS-067
+  title: "Approving an issue that looks like it holds a secret needs no confirmation"
+  edits:
+    - file: "internal/core/session/forge.go"
+      find: "approve && where != \"\" && !confirmed {"
+      replace: "approve && where != \"\" && confirmed {"
+- id: SESS-068
+  title: "A start may name both a branch and a pull request"
+  edits:
+    - file: "internal/core/session/fork.go"
+      find: "case n > 1 || n == 1 && q.Continues != nil:"
+      replace: "case n > 2 || n == 1 && q.Continues != nil:"
+- id: SESS-069
+  title: "A start with only a commit is accepted and starts from main"
+  edits:
+    - file: "internal/core/session/fork.go"
+      find: "\tcase q.From.Commit != \"\" && q.From.Branch == \"\" && q.From.Pull == 0 && q.From.SID == \"\":\n\t\treturn explained(invalid(\"from\"), \"A commit goes only with a branch, a pull request or a session.\")\n"
+      replace: ""
+- id: SESS-070
+  title: "Forking from a commit missing from the session's clone is accepted"
+  edits:
+    - file: "internal/core/session/fork.go"
+      find: "\t\tin, err = false, nil"
+      replace: "\t\tin, err = true, nil"
+- id: SESS-071
+  title: "Stop everything doesn't stop the running sessions"
+  edits:
+    - file: "internal/core/session/halt.go"
+      find: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n\th.stopEvery(cfg)\n"
+      replace: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n"
+- id: SESS-072
+  title: "Stop everything lets sessions start and wake, and Pause all blocks them"
+  edits:
+    - file: "internal/core/session/halt.go"
+      find: "\tif h.modeNow() == HaltStopped {\n\t\treturn \"Stop everything is on, so no session starts"
+      replace: "\tif h.modeNow() == HaltPaused {\n\t\treturn \"Stop everything is on, so no session starts"
+- id: SESS-073
+  title: "Pause all doesn't stop new turns"
+  edits:
+    - file: "internal/core/session/halt.go"
+      find: "\tcase HaltPaused:\n\t\treturn \"Pause all is on, so no new turn starts until you press Release at the top of the page.\"\n"
+      replace: ""
+- id: SESS-074
+  title: "Away mode for every session has no effect"
+  edits:
+    - file: "internal/core/session/halt.go"
+      find: "return h.awayAll || h.away[sid]"
+      replace: "return h.away[sid]"
+- id: SESS-075
+  title: "Pause all refuses the person's own Push from the page"
+  edits:
+    - file: "internal/core/session/haltpush.go"
+      find: "if p.halted(ByPage) == \"\" {"
+      replace: "if p.halted(ByAgent) == \"\" {"
+- id: SESS-076
+  title: "A session can be handed over to the agent it already runs"
+  edits:
+    - file: "internal/core/session/handover.go"
+      find: "\tcase spec.ID == r.spec.ID:\n\t\treturn Started{}, explained(invalid(\"agent\"), \"Choose another agent than the one this session runs.\")\n"
+      replace: ""
+- id: SESS-077
+  title: "The commit name may hold < or >, which breaks the author line"
+  edits:
+    - file: "internal/core/session/identity.go"
+      find: " || r == '<' || r == '>' {"
+      replace: " {"
+- id: SESS-078
+  title: "The branch copy's cap per session is 256 KiB"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "KeepSessionCap     = 256 << 20"
+      replace: "KeepSessionCap     = 256 << 10"
+- id: SESS-079
+  title: "The branch copy stops after 5 packs"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "MaxKeptPacks       = 500"
+      replace: "MaxKeptPacks       = 5"
+- id: SESS-080
+  title: "The branch copy stores files holding tokens"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "\t\t\tif secretData(o.Data) {\n\t\t\t\treturn FlagSecret, true\n\t\t\t}\n\t\t\tif flagURL.Match(o.Data) {"
+      replace: "\t\t\tif flagURL.Match(o.Data) {"
+- id: SESS-081
+  title: "Restore branch accepts any commit, not only kept ones"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "\t\tif !rec.kept(commit) {"
+      replace: "\t\tif !sha1Hex.MatchString(commit) {"
+- id: SESS-082
+  title: "Restore rewrites a branch that holds the copy and refuses to repair a broken worktree"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "\tif holds && linked {\n"
+      replace: "\tif holds && !linked {\n"
+- id: SESS-083
+  title: "Restore branch leaves the session's container running"
+  edits:
+    - file: "internal/core/session/keep.go"
+      find: "\tdefer d.stopBox(ctx, r.box)\n\tif repair {"
+      replace: "\tif repair {"
+- id: SESS-084
+  title: "A kept commit counts as passed when a required review is missing"
+  edits:
+    - file: "internal/core/session/keepheads.go"
+      find: "if verdict != KeptPass && verdict != KeptOverridden {"
+      replace: "if verdict == KeptBlock {"
+- id: SESS-085
+  title: "A saved key isn't removed when the gateway's host changed"
+  edits:
+    - file: "internal/core/session/keyroutes.go"
+      find: "\t}\n\treturn k.Gateway != host\n}"
+      replace: "\t}\n\treturn false\n}"
+- id: SESS-086
+  title: "Session-fork audit entries lack the commit and the source session"
+  edits:
+    - file: "internal/core/session/lifecycle.go"
+      find: "if kind == AuditSessionStart || kind == AuditSessionFork {"
+      replace: "if kind == AuditSessionStart {"
+- id: SESS-087
+  title: "Forks get no session-fork audit entry, and starts from a branch do"
+  edits:
+    - file: "internal/core/session/lifecycle.go"
+      find: "if r.from.kind == StartFromFork {"
+      replace: "if r.from.kind == StartFromBranch {"
+- id: SESS-088
+  title: "Every rate limit allows one call more than set"
+  edits:
+    - file: "internal/core/session/limiter.go"
+      find: "if len(kept) >= l.count {"
+      replace: "if len(kept) > l.count {"
+- id: SESS-089
+  title: "API keys of 2 characters are accepted"
+  edits:
+    - file: "internal/core/session/login.go"
+      find: "minAPIKey      = 20"
+      replace: "minAPIKey      = 2"
+- id: SESS-090
+  title: "A pasted API key may hold a single quote"
+  edits:
+    - file: "internal/core/session/login.go"
+      find: "if r <= ' ' || r > '~' || r == '\\'' {"
+      replace: "if r <= ' ' || r > '~' {"
+- id: SESS-500
+  title: "The agent's factory_push rate limit is never applied"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if !p.calls.allow(sid, now) {"
+      replace: "if false && !p.calls.allow(sid, now) {"
+- id: SESS-501
+  title: "A held push card stays valid for 15 hours instead of 15 minutes"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "AllowFor        = 15 * time.Minute"
+      replace: "AllowFor        = 15 * time.Hour"
+- id: SESS-502
+  title: "Pressing Push on the page ignores an engine-wide halt"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "\tif err := p.pageHalted(); err != nil {\n\t\treturn err\n\t}\n\tif err := p.claim(sid); err != nil {"
+      replace: "\tif err := p.claim(sid); err != nil {"
+- id: SESS-503
+  title: "Answering a held card checks the halt for Deny instead of Allow"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if err := p.pageHalted(); allow && err != nil {"
+      replace: "if err := p.pageHalted(); !allow && err != nil {"
+- id: SESS-504
+  title: "Allowing a push with exactly one missing item needs no reason"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if allow && len(h.missing) > 0 && clean == \"\" {"
+      replace: "if allow && len(h.missing) > 1 && clean == \"\" {"
+- id: SESS-505
+  title: "A push answer's reason with control characters or over 500 characters is silently dropped instead of refused"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if given != \"\" && clean == \"\" {"
+      replace: "if false && given != \"\" && clean == \"\" {"
+- id: SESS-506
+  title: "A push card answer is accepted for a different commit than the card's"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if h == nil || h.card != card || h.commit != commit {"
+      replace: "if h == nil || h.card != card {"
+- id: SESS-507
+  title: "Denying a push on the page doesn't record the denial of that commit"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "\tif !allow {\n\t\tp.refuseLocked(sid, h.commit)\n"
+      replace: "\tif !allow {\n"
+- id: SESS-508
+  title: "Hand off is accepted on a card that wasn't held by a capped reviewer"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "\tcase !h.handoff:\n"
+      replace: "\tcase false:\n"
+- id: SESS-509
+  title: "Pressing Push no longer clears an earlier denial of the same commit"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "\t\t\tp.unrefuseLocked(sid, head)\n"
+      replace: "\t\t\t_ = head\n"
+- id: SESS-510
+  title: "A push from the page may go to the remote's main branch"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if !remote.Empty && remote.Main == t.Branch {"
+      replace: "if !remote.Empty && remote.Main == t.Branch && by != ByPage {"
+- id: SESS-511
+  title: "A push goes ahead with no token saved for the host"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "\tif token == \"\" {\n\t\thost, _ := HostOf(url)"
+      replace: "\tif token == \"\" && false {\n\t\thost, _ := HostOf(url)"
+- id: SESS-512
+  title: "The host token is no longer masked in push reasons"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if x.token != \"\" {\n\t\ts = strings.ReplaceAll(s, x.token, \"[token]\")"
+      replace: "if x.token != \"\" && false {\n\t\ts = strings.ReplaceAll(s, x.token, \"[token]\")"
+- id: SESS-513
+  title: "The project's push hold also holds the person's own Push from the page"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if by != ByPage && worked {"
+      replace: "if worked {"
+- id: SESS-514
+  title: "The gate is never told the requirements or plan still need approval"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "f.Type, f.Required, f.Items, f.NeedsApproval = wf.Type, wf.Required, slices.Clone(wf.Items), wf.NeedsApproval"
+      replace: "f.Type, f.Required, f.Items, f.NeedsApproval = wf.Type, wf.Required, slices.Clone(wf.Items), false"
+- id: SESS-515
+  title: "Passed and overridden reviews are counted the wrong way round"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "case passed:\n\t\t\t\tx.passed++\n\t\t\tcase overridden:\n\t\t\t\tx.overridden++"
+      replace: "case passed:\n\t\t\t\tx.overridden++\n\t\t\tcase overridden:\n\t\t\t\tx.passed++"
+- id: SESS-516
+  title: "Negative push-hold limits are accepted"
+  edits:
+    - file: "internal/core/session/pushhold.go"
+      find: "return h.MaxFiles >= 0 && h.MaxFiles <= MaxHoldFiles"
+      replace: "return h.MaxFiles >= -1 && h.MaxFiles <= MaxHoldFiles"
+- id: SESS-517
+  title: "The file-count hold triggers at the limit instead of above it"
+  edits:
+    - file: "internal/core/session/pushhold.go"
+      find: "(h.MaxFiles > 0 && files > h.MaxFiles)"
+      replace: "(h.MaxFiles > 0 && files >= h.MaxFiles)"
+- id: SESS-518
+  title: "The after-block hold needs two blocked rounds instead of one"
+  edits:
+    - file: "internal/core/session/pushhold.go"
+      find: "RoundOf(entries, t.Branch, q.Agent, false).Blocked > 0 {"
+      replace: "RoundOf(entries, t.Branch, q.Agent, false).Blocked > 1 {"
+- id: SESS-519
+  title: "The line-count hold counts only added lines, not removed ones"
+  edits:
+    - file: "internal/core/session/pushhold.go"
+      find: "inHunk && (strings.HasPrefix(line, \"+\") || strings.HasPrefix(line, \"-\"))"
+      replace: "inHunk && strings.HasPrefix(line, \"+\")"
+- id: SESS-520
+  title: "Go test files are no longer recognized as tests"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "`(?i)(_test\\.go$|\\.(test|spec)"
+      replace: "`(?i)(\\.(test|spec)"
+- id: SESS-521
+  title: "New t.Skip calls aren't counted as skip markers"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "`\\bt\\.Skip(?:Now|f)?\\(|\\b(?:it|test|describe)\\.skip\\b"
+      replace: "`\\b(?:it|test|describe)\\.skip\\b"
+- id: SESS-522
+  title: "Removing a single assertion line isn't reported"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "if d := oldAsserts - newAsserts; d > 0 {"
+      replace: "if d := oldAsserts - newAsserts; d > 1 {"
+- id: SESS-523
+  title: "Changes to GitHub workflows aren't flagged as files run later"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "|^\\.github/workflows/|^\\.husky/"
+      replace: "|^\\.husky/"
+- id: SESS-524
+  title: "A modified file made executable isn't listed"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "case c.NewMode == push.ModeExecutable && c.OldMode != push.ModeExecutable:"
+      replace: "case c.NewMode == push.ModeExecutable && c.Status == push.Added:"
+- id: SESS-525
+  title: "A file whose first byte is NUL isn't seen as binary"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "return strings.IndexByte(s, 0) >= 0"
+      replace: "return strings.IndexByte(s, 0) > 0"
+- id: SESS-526
+  title: "A deleted test file isn't reported"
+  edits:
+    - file: "internal/core/session/pushextrascan.go"
+      find: "if test && c.Status == push.Deleted {"
+      replace: "if test && c.Status == push.TypeChanged {"
+- id: SESS-527
+  title: "A failed test, lint or build run is shown as passed"
+  edits:
+    - file: "internal/core/session/pushextrachecks.go"
+      find: "OK: done, Done: true"
+      replace: "OK: true, Done: true"
+- id: SESS-528
+  title: "go vet isn't recognized as a lint check"
+  edits:
+    - file: "internal/core/session/pushextrachecks.go"
+      find: "arg == \"test\" || arg == \"vet\" || arg == \"build\""
+      replace: "arg == \"test\" || arg == \"build\""
+- id: SESS-529
+  title: "New devDependencies in package.json aren't listed"
+  edits:
+    - file: "internal/core/session/pushextradeps.go"
+      find: "[]string{\"dependencies\", \"devDependencies\", \"optionalDependencies\", \"peerDependencies\"}"
+      replace: "[]string{\"dependencies\", \"optionalDependencies\", \"peerDependencies\"}"
+- id: SESS-530
+  title: "Proctor protection is switched off when proctor.yaml can't be read within 1 KiB"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "return !errors.Is(err, push.ErrNotFound)"
+      replace: "return !errors.Is(err, push.ErrNotFound) && err == nil"
+- id: SESS-531
+  title: "A branch that deletes proctor/proctor.yaml escapes the spec hold"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "return t.Project != \"\" && w.proctorAt(t.Project, main) || w.proctorAt(t.Repo, main) || w.proctorAt(t.Repo, head)"
+      replace: "return w.proctorAt(t.Repo, head)"
+- id: SESS-532
+  title: "A root Makefile that is a symlink inside the repo isn't refused"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "func() bool { return gate.SpecMakefile(p) || w.linkLeaves(t.Repo, head, p) }"
+      replace: "func() bool { return w.linkLeaves(t.Repo, head, p) }"
+- id: SESS-533
+  title: "Deleting a Proctor specification isn't flagged"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "case c.Status == push.Deleted:\n\t\t\tadd(p, specWhy(p)+deletedWhy, absentBlob, nil)"
+      replace: "case c.Status == push.Deleted && c.NewSHA != \"\":\n\t\t\tadd(p, specWhy(p)+deletedWhy, absentBlob, nil)"
+- id: SESS-534
+  title: "Adding a single waiver to a Proctor spec isn't reported"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "if d := now.waivers - was.waivers; d > 0 {"
+      replace: "if d := now.waivers - was.waivers; d > 1 {"
+- id: SESS-535
+  title: "The agent's writes under proctor/ are refused only when the project doesn't use Proctor"
+  edits:
+    - file: "internal/core/session/specs.go"
+      find: "\tif !w.specsProtected(t, main, head) {\n\t\treturn \"\"\n\t}\n\treturn why"
+      replace: "\tif w.specsProtected(t, main, head) {\n\t\treturn \"\"\n\t}\n\treturn why"
+- id: SESS-536
+  title: "A plan approval counts against requirements that changed after their approval"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "(!feature || g.reqOk)"
+      replace: "(!feature || ws.req != nil)"
+- id: SESS-537
+  title: "An approval keeps counting after its document changes"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\t\treturn d.Hash == a.Hash\n"
+      replace: "\t\treturn d.Hash != \"\"\n"
+- id: SESS-538
+  title: "Symlink refusals under proctor/ are checked only when there is an LFS refusal"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if refusal == \"\" {\n\t\trefusal = linkRefusal(g)"
+      replace: "if refusal != \"\" {\n\t\trefusal = linkRefusal(g)"
+- id: SESS-539
+  title: "A push with a single Git LFS file isn't refused"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if len(paths) == 0 {\n\t\treturn \"\"\n\t}\n\tshown := make([]string, 0, 5)"
+      replace: "if len(paths) <= 1 {\n\t\treturn \"\"\n\t}\n\tshown := make([]string, 0, 5)"
+- id: SESS-540
+  title: "A project's review rounds may be set to 0"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if rounds < 1 || rounds > maxRounds {"
+      replace: "if rounds < 0 || rounds > maxRounds {"
+- id: SESS-541
+  title: "Approving checks the hash format but not that the text matches it"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if !sha256Hex.MatchString(hash) || textHash(text) != hash {"
+      replace: "if !sha256Hex.MatchString(hash) {"
+- id: SESS-542
+  title: "Approving new requirements keeps the earlier plan approval"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\t\t\ts.req = a\n\t\t\ts.plan = nil\n"
+      replace: "\t\t\ts.req = a\n"
+- id: SESS-543
+  title: "A flagged file may be allowed without a reason"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tif clean == \"\" {\n\t\treturn explained(invalid(\"reason\"), \"Allowing a flagged file needs"
+      replace: "\tif false {\n\t\treturn explained(invalid(\"reason\"), \"Allowing a flagged file needs"
+- id: SESS-544
+  title: "A symlink the spec hold can't follow may be allowed"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tif f.Link {\n\t\treturn explained(conflict(\"link\")"
+      replace: "\tif false && f.Link {\n\t\treturn explained(conflict(\"link\")"
+- id: SESS-545
+  title: "Allowing a flagged file without a digest skips the staleness check"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if !hmac.Equal([]byte(w.flagDigest(f)), []byte(digest)) {"
+      replace: "if digest != \"\" && !hmac.Equal([]byte(w.flagDigest(f)), []byte(digest)) {"
+- id: SESS-546
+  title: "Tests are locked even when the branch moved since the page read it"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "\tif g.head != head {\n\t\treturn explained(conflict(\"changed\")"
+      replace: "\tif g.head != head && head == \"\" {\n\t\treturn explained(conflict(\"changed\")"
+- id: SESS-547
+  title: "A lock with no test files is accepted"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "if len(files) == 0 {\n\t\treturn explained(conflict(\"no tests\")"
+      replace: "if files == nil {\n\t\treturn explained(conflict(\"no tests\")"
+- id: SESS-548
+  title: "A locked test that was modified isn't reported as changed"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "ok && (c.Status == push.Deleted || c.NewSHA != blob)"
+      replace: "ok && blob != \"\" && c.Status == push.Deleted"
+- id: SESS-549
+  title: "Unlocking reports success but keeps the lock"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "\t\twas, s.lock = s.lock, nil\n"
+      replace: "\t\twas = s.lock\n"
+- id: SESS-550
+  title: "Only the first path of a multi-path agent write is checked against the locked tests"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "for _, p := range paths {\n\t\tif gate.LockedWrite(top, p, locked) {"
+      replace: "for _, p := range paths[:min(len(paths), 1)] {\n\t\tif gate.LockedWrite(top, p, locked) {"
+- id: SESS-551
+  title: "Tests can be locked on a branch with no commits of its own"
+  edits:
+    - file: "internal/core/session/testlock.go"
+      find: "\tcase g.base == g.head:\n"
+      replace: "\tcase g.base == g.head && g.base == \"\":\n"
+- id: SESS-552
+  title: "Images up to 5 MB are accepted instead of 2.5 MB"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "MaxImage       = 5 << 19"
+      replace: "MaxImage       = 5 << 20"
+- id: SESS-553
+  title: "An upload's bytes aren't checked against its image type"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "if !imageMatches(kind, data) {"
+      replace: "if false && !imageMatches(kind, data) {"
+- id: SESS-554
+  title: "A dropped file's name may hold a backslash"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "c == '/' || c == '\\\\' ||"
+      replace: "c == '/' ||"
+- id: SESS-555
+  title: "A dropped file may be named .."
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "name == \".\" || name == \"..\" ||"
+      replace: "name == \".\" ||"
+- id: SESS-556
+  title: "An image keeps the name the page sent instead of image.<ext>"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "\t\tname = \"image.\" + ext\n"
+      replace: "\t\t_ = ext\n"
+- id: SESS-557
+  title: "Uploads are accepted for a stopped session"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "\tcase !a.running:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
+      replace: "\tcase false:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
+- id: SESS-558
+  title: "A message may attach another session's upload"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "if seen[id] || u == nil || u.SID != sid || u.Sent"
+      replace: "if seen[id] || u == nil || u.Sent"
+- id: SESS-559
+  title: "A branch counts as merged when main is in it, not when it is in main"
+  edits:
+    - file: "internal/core/session/workspace.go"
+      find: "w.cfg.History.IsAncestor(context.Background(), s.Path, head, main)"
+      replace: "w.cfg.History.IsAncestor(context.Background(), s.Path, main, head)"
+- id: SESS-560
+  title: "A running session may be deleted from the workspace view"
+  edits:
+    - file: "internal/core/session/workspace.go"
+      find: "\tcase s.Running:\n\t\trow.Why = \"Stop the session before deleting it.\""
+      replace: "\tcase false:\n\t\trow.Why = \"Stop the session before deleting it.\""
+- id: SESS-561
+  title: "A held push counts as pushed for deleting a session"
+  edits:
+    - file: "internal/core/session/workspace.go"
+      find: "e.Result != string(gate.Pushed) && e.Result != string(ResultUpToDate)"
+      replace: "e.Result != string(gate.Pushed) && e.Result != string(ResultUpToDate) && e.Result != string(gate.Held)"
+- id: SESS-562
+  title: "Low disk space is reported only below 2 MiB instead of 2 GiB"
+  edits:
+    - file: "internal/core/session/workspace.go"
+      find: "LowSpaceBytes   = 2 << 30"
+      replace: "LowSpaceBytes   = 2 << 20"
+- id: SESS-563
+  title: "The record of sessions doesn't save each session's container"
+  edits:
+    - file: "internal/core/session/restore.go"
+      find: "\t\tout[len(out)-1].Box = r.box\n"
+      replace: ""
+- id: SESS-564
+  title: "The engine overwrites sessions.json even after failing to read it"
+  edits:
+    - file: "internal/core/session/restore.go"
+      find: "\tif d.runsUnread {\n\t\td.mu.Unlock()\n\t\td.cfg.Logger.Warn(\"sessions\", \"event\", \"not-saved\", \"why\", \"unread\")"
+      replace: "\tif false {\n\t\td.mu.Unlock()\n\t\td.cfg.Logger.Warn(\"sessions\", \"event\", \"not-saved\", \"why\", \"unread\")"
+- id: SESS-565
+  title: "A failed sandbox check doesn't stop the running sessions"
+  edits:
+    - file: "internal/core/session/sandbox.go"
+      find: "\tif o.Event == level.CheckFailed {\n\t\td.sandboxFailed()\n\t}\n"
+      replace: ""
+- id: SESS-566
+  title: "A session starts when the sandbox check couldn't run"
+  edits:
+    - file: "internal/core/session/sandbox.go"
+      find: "if d.cfg.Sandbox == nil || o.Event == level.CheckPassed {"
+      replace: "if d.cfg.Sandbox == nil || o.Event != level.CheckFailed {"
+- id: SESS-567
+  title: "Sessions start during an engine-wide halt"
+  edits:
+    - file: "internal/core/session/sandbox.go"
+      find: "\tif why := d.reg.halt.starts(); why != \"\" {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
+      replace: "\tif why := d.reg.halt.starts(); why != \"\" && false {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
+- id: SESS-568
+  title: "The sandbox check gets 90 ms instead of 90 seconds"
+  edits:
+    - file: "internal/core/session/sandbox.go"
+      find: "checkFor   = 90 * time.Second"
+      replace: "checkFor   = 90 * time.Millisecond"
+- id: SESS-569
+  title: "A privileged session container passes the box check"
+  edits:
+    - file: "internal/core/session/sandboxbox.go"
+      find: "\t{\"privileged\", \"false\", \"the session's container is privileged\"},\n"
+      replace: ""
+- id: SESS-570
+  title: "A box fact the helper didn't report counts as passing"
+  edits:
+    - file: "internal/core/session/sandboxbox.go"
+      find: "if ok && got == f.want {"
+      replace: "if !ok || got == f.want {"
+- id: SESS-571
+  title: "A session whose box check fails isn't stopped"
+  edits:
+    - file: "internal/core/session/sandboxbox.go"
+      find: "\t\t\t\td.boxFailed(t.sid)\n"
+      replace: ""
+- id: SESS-572
+  title: "A repository address with a ? query is accepted"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "if strings.Contains(raw, \"#\") || strings.Contains(raw, \"?\") {"
+      replace: "if strings.Contains(raw, \"#\") {"
+- id: SESS-573
+  title: "A repository path with .. parts is accepted"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "if part == \".\" || part == \"..\" {"
+      replace: "if part == \".\" {"
+- id: SESS-574
+  title: "A token with spaces is accepted"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "if t[i] < 0x21 || t[i] > 0x7e {"
+      replace: "if t[i] < 0x20 || t[i] > 0x7e {"
+- id: SESS-575
+  title: "The same repository is added twice when its address differs in case"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "strings.TrimSuffix(strings.TrimRight(strings.ToLower(s), \"/\"), \".git\")"
+      replace: "strings.TrimSuffix(strings.TrimRight(s, \"/\"), \".git\")"
+- id: SESS-576
+  title: "A repository with one session may be removed"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "if n := c.sessions(name); n > 0 {"
+      replace: "if n := c.sessions(name); n > 1 {"
+- id: SESS-577
+  title: "A project whose clone is present may be recloned"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "\tif !c.cloneMissing(rec) {\n"
+      replace: "\tif false && !c.cloneMissing(rec) {\n"
+- id: SESS-578
+  title: "A verdict may be overridden without a reason"
+  edits:
+    - file: "internal/core/session/review.go"
+      find: "\tif clean == \"\" {\n\t\treturn explained(invalid(\"reason\"), \"An override needs"
+      replace: "\tif false {\n\t\treturn explained(invalid(\"reason\"), \"An override needs"
+- id: SESS-579
+  title: "A verdict may be overridden after the branch moved"
+  edits:
+    - file: "internal/core/session/review.go"
+      find: "\tif head != commit {\n\t\treturn explained(conflict(\"moved\")"
+      replace: "\tif head != commit && commit == \"\" {\n\t\treturn explained(conflict(\"moved\")"
+- id: SESS-580
+  title: "Failed and passed reviews may be overridden, not only blocking ones"
+  edits:
+    - file: "internal/core/session/review.go"
+      find: "case e.Record.State == review.Block && e.Record.Override == \"\":"
+      replace: "case e.Record.State != review.Running && e.Record.Override == \"\":"
+- id: SESS-581
+  title: "Review snapshots are never removed"
+  edits:
+    - file: "internal/core/session/review.go"
+      find: "if err := r.cfg.Snapshots.Remove(snap.ID); err != nil {"
+      replace: "if err := error(nil); err != nil {"
+- id: SESS-582
+  title: "Reviews run when the reviewers' sandbox check couldn't run"
+  edits:
+    - file: "internal/core/session/review.go"
+      find: "\tif o.Event == level.CheckPassed {\n\t\treturn \"\"\n\t}\n\twhy := \"the reviewers' sandbox"
+      replace: "\tif o.Event != level.CheckFailed {\n\t\treturn \"\"\n\t}\n\twhy := \"the reviewers' sandbox"
+- id: SESS-583
+  title: "A review starts on a branch with nothing new"
+  edits:
+    - file: "internal/core/session/reviewstart.go"
+      find: "\tif base == head {\n\t\trelease()\n\t\treturn explained(conflict(\"no change\")"
+      replace: "\tif base == head && head == \"\" {\n\t\trelease()\n\t\treturn explained(conflict(\"no change\")"
+- id: SESS-584
+  title: "A second review of a session starts while one is running"
+  edits:
+    - file: "internal/core/session/reviewstart.go"
+      find: "\tif _, busy := r.running[t.SID]; busy {\n"
+      replace: "\tif _, busy := r.running[t.SID]; busy && false {\n"
+- id: SESS-585
+  title: "Reviewers run one round past the project's round limit"
+  edits:
+    - file: "internal/core/session/reviewstart.go"
+      find: "if !q.Advisory && rd.Capped(limit) {"
+      replace: "if !q.Advisory && rd.Capped(limit+1) {"
+- id: SESS-586
+  title: "Verdict-shaped lines in commit messages aren't detected"
+  edits:
+    - file: "internal/core/session/reviewshaped.go"
+      find: "{{Name: \"change\", Text: s.Added, Diff: true}, {Name: CommitsFile, Text: messageLines(s.Commits)}}"
+      replace: "{{Name: \"change\", Text: s.Added, Diff: true}}"
+- id: SESS-587
+  title: "Token-shaped text is kept in the message queue"
+  edits:
+    - file: "internal/core/session/queue.go"
+      find: "\tif secretText(text) {\n\t\treturn \"\", explained(invalid(\"text\"), \"The queue doesn't keep"
+      replace: "\tif false {\n\t\treturn \"\", explained(invalid(\"text\"), \"The queue doesn't keep"
+- id: SESS-588
+  title: "A queued message may start with ! (a shell command)"
+  edits:
+    - file: "internal/core/session/queue.go"
+      find: "strings.HasPrefix(text, \"!\") || "
+      replace: ""
+- id: SESS-589
+  title: "The queue holds 11 messages instead of 10"
+  edits:
+    - file: "internal/core/session/queue.go"
+      find: "if len(q.items) >= MaxQueue {"
+      replace: "if len(q.items) > MaxQueue {"
+- id: BOX-001
+  title: "The helper's request size limit is 8 KiB instead of 1 KiB, so a 2 KiB request header is read instead of refused with 431"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "MaxRequest     = 1 << 10"
+      replace: "MaxRequest     = 1 << 13"
+- id: BOX-002
+  title: "A request over the helper's size limit is refused with 400 instead of 431"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "refuse(http.StatusRequestHeaderFieldsTooLarge, ReasonTooLarge,"
+      replace: "refuse(http.StatusBadRequest, ReasonTooLarge,"
+- id: BOX-003
+  title: "The helper no longer refuses a path with percent-encoded characters (RawPath set), so /v1/boxes/%61... is routed instead of 404"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "if !ok || r.URL.RawPath != \"\" {"
+      replace: "if !ok {"
+- id: BOX-004
+  title: "A wrong method on a helper route is refused with 404 instead of 405"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "refuse(http.StatusMethodNotAllowed, ReasonMethod,"
+      replace: "refuse(http.StatusNotFound, ReasonMethod,"
+- id: BOX-005
+  title: "The helper accepts a query string; only an empty '?' is refused, so /healthz?x=1 answers 200"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "if r.URL.RawQuery != \"\" || r.URL.ForceQuery {"
+      replace: "if r.URL.ForceQuery {"
+- id: BOX-006
+  title: "The helper's health route takes a body: GET /healthz with a body answers 200 instead of 400"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "if hasBody(w, r) {"
+      replace: "if name != routeHealth && hasBody(w, r) {"
+- id: BOX-008
+  title: "The helper's box route also accepts GET, so GET /v1/boxes/<id> reaches the key check (401/503) instead of 405"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/server.go"
+      find: "return []string{http.MethodPut, http.MethodDelete}"
+      replace: "return []string{http.MethodGet, http.MethodPut, http.MethodDelete}"
+- id: BOX-011
+  title: "A session's container drops only NET_RAW instead of every capability (CapDrop [NET_RAW], not [ALL])"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "CapDrop:        []string{\"ALL\"},"
+      replace: "CapDrop:        []string{\"NET_RAW\"},"
+- id: BOX-012
+  title: "A session's container runs without no-new-privileges (SecurityOpt empty)"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "SecurityOpt:    []string{\"no-new-privileges:true\"},"
+      replace: "SecurityOpt:    nil,"
+- id: BOX-013
+  title: "A session's container's pids limit is 131072 instead of 2048"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "PidsLimit:      boxPids,"
+      replace: "PidsLimit:      boxPids * 64,"
+- id: BOX-014
+  title: "A session's container runs as root (User 0:0) instead of 10002:10000"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "User:        boxUser,"
+      replace: "User:        \"0:0\","
+- id: BOX-015
+  title: "A session's container runs without an init process (Init false)"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Init:           true,"
+      replace: "Init:           false,"
+- id: BOX-016
+  title: "A session's container mounts the whole s/ folder of the workspace volume, so it sees every session's clone, instead of only s/<box>"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Subpath: \"s/\" + box}}"
+      replace: "Subpath: \"s\"}}"
+- id: BOX-017
+  title: "A session's container mounts the agents volume read-write instead of read-only"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Target: agentsTarget, ReadOnly: true,"
+      replace: "Target: agentsTarget, ReadOnly: false,"
+- id: BOX-018
+  title: "A session's /run/sf tmpfs (the plugin socket folder) is mode 0777 instead of 0700"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "\"size=1m,mode=0700,uid=10002,gid=10000\""
+      replace: "\"size=1m,mode=0777,uid=10002,gid=10000\""
+- id: BOX-021
+  title: "The default memory limit of a session's and a reviewer container is 8 GiB instead of 2 GiB"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/config.go"
+      find: "DefaultMemory   = 2 << 30"
+      replace: "DefaultMemory   = 8 << 30"
+- id: BOX-022
+  title: "The default CPU limit of a session's and a reviewer container is 16 CPUs instead of 2"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/config.go"
+      find: "DefaultNanoCPUs = 2_000_000_000"
+      replace: "DefaultNanoCPUs = 16_000_000_000"
+- id: BOX-023
+  title: "A reviewer container mounts its snapshot read-write, so the reviewer can change what it reviews (touch /reviews/<id>/x succeeds)"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/reviewers.go"
+      find: "Target: ReviewsAt + \"/\" + snapshot, ReadOnly: true,"
+      replace: "Target: ReviewsAt + \"/\" + snapshot, ReadOnly: false,"
+- id: BOX-024
+  title: "A reviewer container mounts the whole reviews volume at its snapshot path instead of only its snapshot's subpath, so it sees every other run's snapshot"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/reviewers.go"
+      find: "VolumeOptions: &volumeOptionsJSON{NoCopy: true, Subpath: snapshot}}"
+      replace: "VolumeOptions: &volumeOptionsJSON{NoCopy: true}}"
+- id: BOX-025
+  title: "The helper's cap on reviewer containers is off by one: it starts a 33rd while 32 run"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/reviewers.go"
+      find: "if n >= maxReviewers {"
+      replace: "if n > maxReviewers {"
+- id: BOX-026
+  title: "Removing a reviewer container leaves its network behind"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/reviewers.go"
+      find: "\treturn h.dropNetwork(ctx, n)\n}"
+      replace: "\treturn nil\n}"
+- id: BOX-027
+  title: "Stopping a session's container leaves its network behind"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/objects.go"
+      find: "\tif n != nil {\n\t\treturn recipe, h.dropNetwork(ctx, n)\n\t}"
+      replace: "\tif n != nil {\n\t\treturn recipe, nil\n\t}"
+- id: BOX-028
+  title: "Dropping a container only stops it: it isn't removed, so a stopped session's container is left behind (docker ps -a) and the next start finds the name taken"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/objects.go"
+      find: "if err := h.docker.delete(ctx, \"/containers/\"+pathPart(id), url.Values{\"force\": {\"true\"}}); err != nil && !IsNotFound(err) {"
+      replace: "if err := error(nil); err != nil {"
+- id: BOX-029
+  title: "Removing a box leaves its home volume behind"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/ops.go"
+      find: "if err := h.docker.delete(ctx, \"/volumes/\"+pathPart(name), nil); err != nil && !IsNotFound(err) {"
+      replace: "if err := error(nil); err != nil {"
+- id: BOX-030
+  title: "After a failed start the helper removes the container it made but not the network, which is left behind"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/ops.go"
+      find: "\tif err := h.dropNetwork(ctx, n); err != nil {\n\t\tproblems = append(problems, \"the network: \""
+      replace: "\tif err := error(nil); err != nil {\n\t\tproblems = append(problems, \"the network: \""
+- id: BOX-031
+  title: "The sandbox check ignores hosts egress allows beyond the engine's list: only a missing host fails it, so egress started with EGRESS_ALLOW plus example.org passes"
+  edits:
+    - file: "internal/adapters/sandbox/docker/checker.go"
+      find: "if extra, missing := diff(wantAllow, allow); len(extra)+len(missing) > 0 {"
+      replace: "if extra, missing := diff(wantAllow, allow); len(missing) > 0 {"
+- id: BOX-032
+  title: "The sandbox probe no longer tries the Docker API port 2375 at the session network's gateway, so a listener there doesn't fail the check"
+  edits:
+    - file: "internal/adapters/sandbox/docker/probe.go"
+      find: "GatewayPorts  = []string{\"22\", \"80\", \"443\", \"2375\", \"3000\", \"8080\"}"
+      replace: "GatewayPorts  = []string{\"22\", \"80\", \"443\", \"3000\", \"8080\"}"
+- id: BOX-033
+  title: "The helper reports own-network-only=true for a session's container attached to a second network too, as long as its own is among them"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/ops.go"
+      find: "\"own-network-only=\" + strconv.FormatBool(len(names) == 1 && names[0] == own),"
+      replace: "\"own-network-only=\" + strconv.FormatBool(slices.Contains(names, own)),"
+- id: BOX-034
+  title: "The helper no longer counts another container on a session's network as a problem, so members-only stays true after docker network connect of a stranger"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/ops.go"
+      find: "\t\tif _, ok := want[id]; !ok {\n\t\t\tout = append(out, \"another container \""
+      replace: "\t\tif _, ok := want[id]; !ok && id == \"\" {\n\t\t\tout = append(out, \"another container \""
+- id: BOX-035
+  title: "SF_MAX_BOXES is off by one: with SF_MAX_BOXES=1 a second session's container starts"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/objects.go"
+      find: "if len(live) >= h.cfg.MaxBoxes {"
+      replace: "if len(live) > h.cfg.MaxBoxes {"
+- id: EGR-001
+  title: "gitlab.com is no longer a refused git host: a CONNECT to gitlab.com:443 is refused not_allowlisted instead of git_host, and an allowlist naming gitlab.com is accepted"
+  edits:
+    - file: "internal/adapters/egress/policy.go"
+      find: "var gitHosts = []string{\"github.com\", \"githubusercontent.com\", \"gitlab.com\", \"bitbucket.org\"}"
+      replace: "var gitHosts = []string{\"github.com\", \"githubusercontent.com\", \"bitbucket.org\"}"
+- id: EGR-002
+  title: "Egress accepts a CONNECT to port 22 as well as 443 (and tunnels it to the host's 443), so CONNECT api.anthropic.com:22 answers 200 instead of 403 port"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "if port != \"443\" {"
+      replace: "if port != \"443\" && port != \"22\" {"
+- id: EGR-003
+  title: "A CONNECT the policy refuses (git host, IP literal, not allowlisted) is answered 502 instead of 403"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "p.refuse(conn, http.StatusForbidden, reason, logged(requested), tag...)"
+      replace: "p.refuse(conn, http.StatusBadGateway, reason, logged(requested), tag...)"
+- id: EGR-004
+  title: "A non-CONNECT request to egress (plain GET http://...) is answered 405 instead of 403"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "p.refuse(conn, http.StatusForbidden, ReasonMethod, \"\", tag...)"
+      replace: "p.refuse(conn, http.StatusMethodNotAllowed, ReasonMethod, \"\", tag...)"
+- id: EGR-005
+  title: "Egress checks only the first address a name resolves to, so a name resolving to a public and a private address is dialed"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "\tfor _, addr := range addrs {\n\t\tif !publicAddress(addr) {"
+      replace: "\tfor _, addr := range addrs[:1] {\n\t\tif !publicAddress(addr) {"
+- id: EGR-006
+  title: "Egress treats RFC 1918 private addresses as public, so an allowlisted name resolving to 10.x, 172.16.x or 192.168.x is dialed instead of refused private_address"
+  edits:
+    - file: "internal/adapters/egress/address.go"
+      find: "a.IsUnspecified() || a.IsLoopback() || a.IsPrivate() ||"
+      replace: "a.IsUnspecified() || a.IsLoopback() ||"
+- id: EGR-007
+  title: "Egress no longer checks that the TLS ClientHello's SNI matches the CONNECT host, so a tunnel to an allowed host can carry a handshake for github.com"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "if normalize(name) != host {"
+      replace: "if name == \"\" && normalize(name) != host {"
+- id: EGR-008
+  title: "A wildcard allowlist entry .example.com also matches names that merely end in example.com, such as evilexample.com"
+  edits:
+    - file: "internal/adapters/egress/policy.go"
+      find: "\t\t\tif strings.HasSuffix(name, a) {\n\t\t\t\treturn true"
+      replace: "\t\t\tif strings.HasSuffix(name, a[1:]) {\n\t\t\t\treturn true"
+- id: EGR-009
+  title: "Subdomains of git hosts (api.github.com, raw.githubusercontent.com) are no longer denied as git hosts; only the exact names are"
+  edits:
+    - file: "internal/adapters/egress/policy.go"
+      find: "\t\tif name == d || strings.HasSuffix(name, \".\"+d) {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n\nfunc (p Policy) allowed"
+      replace: "\t\tif name == d {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n\nfunc (p Policy) allowed"
+- id: EGR-010
+  title: "An allowlist entry with an expiry keeps working for a day after it expires"
+  edits:
+    - file: "internal/adapters/egress/policy.go"
+      find: "if t, ok := p.expires[a]; ok && !now.Before(t) {"
+      replace: "if t, ok := p.expires[a]; ok && !now.Before(t.Add(24*time.Hour)) {"
+- id: HOST-001
+  title: "agent-host no longer refuses a request carrying an Origin header (only the Sec-Fetch and Referer headers count as a browser's), so curl -H 'Origin: http://example.org' /healthz answers 200 instead of 403"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "for _, h := range []string{\"Origin\", \"Sec-Fetch-Site\","
+      replace: "for _, h := range []string{\"Sec-Fetch-Site\","
+- id: HOST-002
+  title: "A session's agent-host accepts an api-key step that names no box (the reviewers' key step), so {\"step\":\"clear\"} answers 200 instead of 409 box"
+  edits:
+    - file: "internal/adapters/agenthost/clear.go"
+      find: "\tif box != s.ownBox() {\n\t\ts.log.Warn(\"agent-host\", \"event\", \"other-box-refused\")"
+      replace: "\tif box != s.ownBox() && box != \"\" {\n\t\ts.log.Warn(\"agent-host\", \"event\", \"other-box-refused\")"
+- id: HOST-003
+  title: "agent-host saves the Anthropic API key file (and Claude Code's settings) world-readable, mode 0644 instead of 0600"
+  edits:
+    - file: "internal/adapters/agenthost/apikey.go"
+      find: "if err := tmp.Chmod(0o600); err != nil {"
+      replace: "if err := tmp.Chmod(0o644); err != nil {"
+- id: HOST-004
+  title: "agent-host accepts a query string on its routes; only a bare '?' is refused, so /healthz?x=1 answers 200 instead of 400 query"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "\tif r.URL.RawQuery != \"\" || r.URL.ForceQuery {\n\t\trefuse(w, fail(http.StatusBadRequest, \"query\", \"\"))"
+      replace: "\tif r.URL.ForceQuery {\n\t\trefuse(w, fail(http.StatusBadRequest, \"query\", \"\"))"
+- id: HOST-005
+  title: "agent-host accepts JSON bodies with fields its routes don't take (unknown fields ignored instead of 400 body)"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "\tdec.DisallowUnknownFields()\n"
+      replace: ""
+- id: HOST-006
+  title: "agent-host accepts a body with more JSON after the first value (trailing data ignored instead of 400 body)"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "if err := dec.Decode(v); err != nil || dec.More() {"
+      replace: "if err := dec.Decode(v); err != nil {"
+- id: HOST-007
+  title: "A body over agent-host's size limit is refused with 400 instead of 413"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "return fail(http.StatusRequestEntityTooLarge, \"body\","
+      replace: "return fail(http.StatusBadRequest, \"body\","
+- id: HOST-008
+  title: "agent-host takes any Content-Type, such as text/plain, instead of only application/json (no 415)"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "return err == nil && kind == \"application/json\""
+      replace: "return err == nil && kind != \"\""
+- id: HOST-009
+  title: "A command's working folder may be the workspace's parent folder: cwd /workspace/s passes the inside check instead of 400 cwd"
+  edits:
+    - file: "internal/adapters/agenthost/process.go"
+      find: "return err == nil && rel != \"..\" && !strings.HasPrefix(rel, \"../\") && !filepath.IsAbs(rel)"
+      replace: "return err == nil && !strings.HasPrefix(rel, \"../\") && !filepath.IsAbs(rel)"
+- id: HOST-010
+  title: "A reviewer container's agent-host lets a second POST /v1/key replace its key instead of answering 409 key-taken"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "\ttaken := s.key != nil\n"
+      replace: "\ttaken := false\n"
+- id: HOST-011
+  title: "agent-host runs a project command that fails session.CheckProjectCommand (several lines, or over 300 bytes) instead of refusing it 400 command"
+  edits:
+    - file: "internal/adapters/agenthost/projectcmd.go"
+      find: "if _, ok := session.CheckProjectCommand(q.Command); !ok || q.Command == \"\" {"
+      replace: "if q.Command == \"\" {"
+- id: HOST-012
+  title: "A reviewer container's agent-host serves every route of a session's agent-host (worktrees, trust, processes...) instead of only the review routes, so POST /v1/worktrees reaches the key check (401) instead of 404"
+  edits:
+    - file: "internal/adapters/agenthost/server.go"
+      find: "if ok && s.cfg.Review && !reviewRoutes[r.URL.Path] {"
+      replace: "if ok && s.cfg.Review && r.URL.Path == \"\" {"
+- id: HOST-013
+  title: "agent-host's cap on concurrent /v1/run commands is off by one: a ninth runs while eight run"
+  edits:
+    - file: "internal/adapters/agenthost/process.go"
+      find: "if s.runs >= MaxRuns {"
+      replace: "if s.runs > MaxRuns {"
+- id: EGR-011
+  title: "Egress no longer cuts an open tunnel when its host leaves the allowlist (Network access remove, or an expiry), so the tunnel lives until idle or the hour limit"
+  edits:
+    - file: "internal/adapters/egress/proxy.go"
+      find: "if policy.Check(tn.host) != \"\" {"
+      replace: "if policy.Check(tn.host) == ReasonIPLiteral {"
+- id: EGR-012
+  title: "When the engine drops a session's subnet (its container stopped), egress keeps that subnet's open connections instead of closing them"
+  edits:
+    - file: "internal/adapters/egress/boxes.go"
+      find: "\tfor _, c := range closing {\n\t\t_ = c.Conn.Close()\n\t}"
+      replace: "\tfor range closing {\n\t}"
+- id: STACK-001
+  title: "The default allowlist also names example.org, so every session's agent can reach it through egress (the engine reads the same list, so the sandbox check still passes)"
+  edits:
+    - file: "compose.yaml"
+      find: "chatgpt.com},${SF_EXTRA_ALLOW:-}"
+      replace: "chatgpt.com,example.org},${SF_EXTRA_ALLOW:-}"
+- id: STACK-002
+  title: "The control network between the engine and egress isn't internal, so it has a route out"
+  edits:
+    - file: "compose.yaml"
+      find: "  controlnet:\n    internal: true"
+      replace: "  controlnet:\n    internal: false"
+- id: STACK-003
+  title: "Egress's memory limit is 2g instead of 256m"
+  edits:
+    - file: "compose.yaml"
+      find: "    mem_limit: 256m\n    pids_limit: 256"
+      replace: "    mem_limit: 2g\n    pids_limit: 256"
+- id: STACK-004
+  title: "The box helper's pids limit is 4096 instead of 64"
+  edits:
+    - file: "compose.yaml"
+      find: "    pids_limit: 64\n"
+      replace: "    pids_limit: 4096\n"
+- id: STACK-005
+  title: "The image makes the engine's state folder /var/lib/software-factory mode 0755 instead of 0700, so other users in the engine's container (and a fresh engine-state volume copied from it) can list it"
+  edits:
+    - file: "Dockerfile"
+      find: "install -d -o engine -g sf -m 0700 /var/lib/software-factory"
+      replace: "install -d -o engine -g sf -m 0755 /var/lib/software-factory"
+- id: LOG-001
+  title: "The recent-events list keeps an error's raw text (paths, hosts, messages) instead of reducing it to a short word"
+  edits:
+    - file: "internal/adapters/loggers/slog/logger.go"
+      find: "kindWord = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,47}$`)"
+      replace: "kindWord = regexp.MustCompile(`^.{1,300}$`)"
+- id: LOG-002
+  title: "A request answered 400 is dropped from the recent-events list like a success"
+  edits:
+    - file: "internal/adapters/loggers/slog/logger.go"
+      find: "if status > 0 && status < 400 && rec.Level < slog.LevelWarn {"
+      replace: "if status > 0 && status <= 400 && rec.Level < slog.LevelWarn {"
+- id: LOG-003
+  title: "Only warnings and errors reach the recent-events list; info-level events, failed requests included, are dropped"
+  edits:
+    - file: "internal/adapters/loggers/slog/logger.go"
+      find: "\tif e, ok := eventOf(rec); ok {"
+      replace: "\tif e, ok := eventOf(rec); ok && rec.Level >= slog.LevelWarn {"
+- id: LOG-004
+  title: "A request answered 400 shows in recent events without its status as the error"
+  edits:
+    - file: "internal/adapters/loggers/slog/logger.go"
+      find: "if e.Error == \"\" && status >= 400 {"
+      replace: "if e.Error == \"\" && status > 400 {"
+- id: GIT-001
+  title: "A push failure's reason no longer replaces the raw host token with [token]"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "\t\ts = strings.ReplaceAll(s, t.Token, \"[token]\")\n"
+      replace: ""
+- id: GIT-002
+  title: "A push no longer refuses when the remote branch moved since the gate checked it (only forced pushes check)"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "\tif current != req.Expected {\n"
+      replace: "\tif current != req.Expected && req.Force {\n"
+- id: GIT-003
+  title: "The fast-forward check only refuses when reading history fails, so a push that doesn't build on the remote branch goes ahead"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "\t\tif err != nil || !ok {\n\t\t\treturn rejected(\"the commit doesn't build"
+      replace: "\t\tif err != nil && !ok {\n\t\t\treturn rejected(\"the commit doesn't build"
+- id: GIT-004
+  title: "The fast-forward check runs only for forced pushes, the opposite of what it should"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "if current != \"\" && !req.Force {"
+      replace: "if current != \"\" && req.Force {"
+- id: GIT-005
+  title: "A branch the remote refused (status other than ok) is reported as pushed"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "\t\tif s.Status != \"ok\" {"
+      replace: "\t\tif s.Status == \"\" {"
+- id: GIT-006
+  title: "A remote that says nothing about the pushed branch is taken as a successful push"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "\treturn failed(\"the remote didn't report on the branch\", current)"
+      replace: "\treturn push.Result{Outcome: push.Pushed, Previous: current}"
+- id: GIT-007
+  title: "A remote that couldn't unpack the push isn't treated as a failure"
+  edits:
+    - file: "internal/adapters/git/push/push.go"
+      find: "if report.UnpackStatus != \"ok\" {"
+      replace: "if report.UnpackStatus == \"\" {"
+- id: GIT-008
+  title: "Clone and fetch error messages no longer replace the raw host token with [token]"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\t\ts = strings.ReplaceAll(s, token, \"[token]\")\n"
+      replace: ""
+- id: GIT-009
+  title: "The git client waits only a millisecond for the host's answer headers"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\t\tResponseHeaderTimeout: time.Minute,"
+      replace: "\t\tResponseHeaderTimeout: time.Millisecond,"
+- id: GIT-010
+  title: "A fetch downloads new commits only when the caller passes no presence check, which the engine always passes, so it never downloads"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\tif !slices.Contains(q.Have, head) && (q.Present == nil || !q.Present(head)) {"
+      replace: "\tif !slices.Contains(q.Have, head) && q.Present == nil {"
+- id: GIT-011
+  title: "A pack from the remote is stored even when it doesn't hold the commit that was asked for"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\tif ok, err := idx.Contains(plumbing.NewHash(want)); err != nil || !ok {"
+      replace: "\tif _, err := idx.Contains(plumbing.NewHash(want)); err != nil {"
+- id: GIT-012
+  title: "The engine's own copy of a cloned repository is left writable (0644) instead of read-only"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\t\t\treturn root.Chmod(p, 0o444)"
+      replace: "\t\t\treturn root.Chmod(p, 0o644)"
+- id: GIT-013
+  title: "Removing a project leaves the engine's clone of it in the workspace"
+  edits:
+    - file: "internal/adapters/git/remote/remote.go"
+      find: "\treturn ws.RemoveAll(name)\n"
+      replace: "\treturn nil\n"
+- id: GIT-014
+  title: "A session clone's refs and config are world-writable (0666) instead of 0664"
+  edits:
+    - file: "internal/adapters/git/remote/session.go"
+      find: "\tcloneFileMode = 0o664"
+      replace: "\tcloneFileMode = 0o666"
+- id: GIT-015
+  title: "A session clone's folders lose the setgid bit, so files the agent creates no longer take the shared group"
+  edits:
+    - file: "internal/adapters/git/remote/session.go"
+      find: "\tcloneDirMode  = 0o775 | os.ModeSetgid"
+      replace: "\tcloneDirMode  = os.FileMode(0o775)"
+- id: GIT-016
+  title: "Sharing a session clone also chmods the hard-linked packs, making the engine's own packs group-writable"
+  edits:
+    - file: "internal/adapters/git/remote/session.go"
+      find: "\t\tcase d.Type().IsRegular() && strings.HasPrefix(p, \".git/objects/\"):\n\t\t\treturn nil\n"
+      replace: ""
+- id: GIT-017
+  title: "Syncing a session clone updates only refs/remotes/origin/<main>, not the local main branch"
+  edits:
+    - file: "internal/adapters/git/remote/session.go"
+      find: "\tif err := writeRefs(git, baseRefs(mainBranch), main); err != nil {"
+      replace: "\tif err := writeRefs(git, baseRefs(mainBranch)[1:], main); err != nil {"
+- id: GIT-018
+  title: "Listing the remote's branches no longer drops names the engine doesn't accept as branches"
+  edits:
+    - file: "internal/adapters/git/remote/refs.go"
+      find: "\t\tif !ok || !push.ValidBranch(branch) {"
+      replace: "\t\tif !ok {"
+- id: GIT-019
+  title: "Restoring a kept head looks for the commit only in the last kept pack"
+  edits:
+    - file: "internal/adapters/git/keep/keep.go"
+      find: "\t\tfound = found || has"
+      replace: "\t\tfound = has"
+- id: GIT-020
+  title: "Restoring objects reports success even when no kept pack holds the commit"
+  edits:
+    - file: "internal/adapters/git/keep/keep.go"
+      find: "\tif !found {\n\t\treturn errors.New(\"the copy doesn't hold that commit\")"
+      replace: "\tif !found && len(rec.Packs) == 0 {\n\t\treturn errors.New(\"the copy doesn't hold that commit\")"
+- id: GIT-021
+  title: "The kept copy's files are written 0644, readable by others"
+  edits:
+    - file: "internal/adapters/git/keep/keep.go"
+      find: "\tif err := f.Chmod(0o600); err != nil {"
+      replace: "\tif err := f.Chmod(0o644); err != nil {"
+- id: GIT-022
+  title: "A kept pack may be twice the remaining room before the copy counts as full"
+  edits:
+    - file: "internal/adapters/git/keep/keep.go"
+      find: "\tif int64(len(pack)) > limit {"
+      replace: "\tif int64(len(pack)) > limit*2 {"
+- id: GIT-023
+  title: "Removing a session's kept copy does nothing"
+  edits:
+    - file: "internal/adapters/git/keep/keep.go"
+      find: "\treturn os.RemoveAll(filepath.Join(s.Dir, sid))"
+      replace: "\treturn nil"
+- id: GIT-024
+  title: "IsAncestor answers true when the walk ends without meeting the ancestor"
+  edits:
+    - file: "internal/adapters/git/files/reader.go"
+      find: "\t\treturn false, nil\n\t})\n}\n\nfunc (Reader) ChangedFiles"
+      replace: "\t\treturn true, nil\n\t})\n}\n\nfunc (Reader) ChangedFiles"
+- id: GIT-025
+  title: "The changed-files diff ignores a file whose only change is its mode"
+  edits:
+    - file: "internal/adapters/git/files/reader.go"
+      find: "if inL && inR && l.sha == rt.sha && l.mode == rt.mode {"
+      replace: "if inL && inR && l.sha == rt.sha {"
+- id: GIT-026
+  title: "A file replaced by a symbolic link is reported as modified, not as a type change"
+  edits:
+    - file: "internal/adapters/git/files/reader.go"
+      find: "\t\t\tif family(l.mode) != family(rt.mode) {"
+      replace: "\t\t\tif family(l.mode) != family(rt.mode) && rt.mode != push.ModeSymlink {"
+- id: GIT-027
+  title: "A repository with .git/info/grafts isn't refused (the check looks for 'graft')"
+  edits:
+    - file: "internal/adapters/git/files/repo.go"
+      find: "if present(r.root, filepath.Join(\"info\", \"grafts\")) {"
+      replace: "if present(r.root, filepath.Join(\"info\", \"graft\")) {"
+- id: GIT-028
+  title: "A loose object whose content doesn't hash to its name is read as that object"
+  edits:
+    - file: "internal/adapters/git/files/store.go"
+      find: "\tif digest(k, data) != sha {"
+      replace: "\tif digest(k, data) == \"\" {"
+- id: GIT-029
+  title: "Reading .git files follows symbolic links (Stat instead of Lstat, no O_NOFOLLOW)"
+  edits:
+    - file: "internal/adapters/git/files/repo.go"
+      find: "\tinfo, err := root.Lstat(rel)\n\tif err != nil {\n\t\treturn nil, 0, err\n\t}\n\tif !info.Mode().IsRegular() {"
+      replace: "\tinfo, err := root.Stat(rel)\n\tif err != nil {\n\t\treturn nil, 0, err\n\t}\n\tif !info.Mode().IsRegular() {"
+    - file: "internal/adapters/git/files/repo.go"
+      find: "f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)"
+      replace: "f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)"
+- id: GIT-030
+  title: "A review snapshot accepts a symbolic link with an absolute target"
+  edits:
+    - file: "internal/adapters/git/files/snapshot.go"
+      find: "\tif strings.HasPrefix(target, \"/\") {\n\t\treturn nil, errors.New(\"absolute\")"
+      replace: "\tif strings.HasPrefix(target, \"//\") {\n\t\treturn nil, errors.New(\"absolute\")"
+- id: GIT-031
+  title: "A review snapshot accepts a symbolic link whose ../ steps climb out of the tree"
+  edits:
+    - file: "internal/adapters/git/files/snapshot.go"
+      find: "\t\t\t\treturn nil, errors.New(\"escapes\")\n"
+      replace: "\t\t\t\tcontinue\n"
+- id: GIT-032
+  title: "Executable files lose their exec bit in a review snapshot"
+  edits:
+    - file: "internal/adapters/git/files/snapshot.go"
+      find: "\t\t\t\tperm = 0o755\n"
+      replace: "\t\t\t\tperm = 0o644\n"
+- id: GIT-033
+  title: "A token saved for a host is also used for any host whose name ends with it"
+  edits:
+    - file: "internal/adapters/git/state/tokens.go"
+      find: "\t\tif t.Host == host {\n\t\t\treturn t.Token, true, nil"
+      replace: "\t\tif strings.HasSuffix(host, t.Host) {\n\t\t\treturn t.Token, true, nil"
+- id: GIT-034
+  title: "Saving a token for a host keeps the old one too, and the old one stays in use"
+  edits:
+    - file: "internal/adapters/git/state/tokens.go"
+      find: "\tlist = slices.DeleteFunc(list, func(t tokenJSON) bool { return t.Host == host })\n"
+      replace: ""
+- id: GIT-035
+  title: "Removing a token reports success but writes back the unchanged list"
+  edits:
+    - file: "internal/adapters/git/state/tokens.go"
+      find: "\treturn true, write(s.Dir, tokensFile, tokensJSON{Version: 1, Tokens: kept})"
+      replace: "\treturn true, write(s.Dir, tokensFile, tokensJSON{Version: 1, Tokens: list})"
+- id: GIT-036
+  title: "Removing a saved token says it wasn't there, and removing a missing one rewrites the file and says it was"
+  edits:
+    - file: "internal/adapters/git/state/tokens.go"
+      find: "\tif len(kept) == len(list) {"
+      replace: "\tif len(kept) != len(list) {"
+- id: GIT-037
+  title: "The export file includes tokens.json, the git host tokens"
+  edits:
+    - file: "internal/adapters/git/state/export.go"
+      find: "tokensFile:          {class: classOut, label: \"git host tokens are never exported\"},"
+      replace: "tokensFile:          {class: classKept, label: \"git host tokens are never exported\"},"
+- id: GIT-038
+  title: "An import no longer leaves out stores that never travel (tokens, boxes, keep, the stamp)"
+  edits:
+    - file: "internal/adapters/git/state/import.go"
+      find: "\t\tcase row.class == classOut:\n\t\t\treport.LeftOut = append(report.LeftOut, text(h.Name)+\": \"+row.label)\n\t\t\tcontinue\n"
+      replace: ""
+- id: GIT-039
+  title: "Automatic pushes waiting on reviews come back on import instead of being dropped"
+  edits:
+    - file: "internal/adapters/git/state/export.go"
+      find: "waitingFile:         {class: classDropped,"
+      replace: "waitingFile:         {class: classKept,"
+- id: GIT-040
+  title: "State files are written 0640 instead of 0600"
+  edits:
+    - file: "internal/adapters/git/state/state.go"
+      find: "\tif err := f.Chmod(0o600); err != nil {"
+      replace: "\tif err := f.Chmod(0o640); err != nil {"
+- id: GIT-041
+  title: "An import accepts an export of a newer format than the engine reads"
+  edits:
+    - file: "internal/adapters/git/state/import.go"
+      find: "\tif m.Format < 1 || m.Format > ArchiveFormat {"
+      replace: "\tif m.Format < 1 {"
+- id: GIT-042
+  title: "GitHub's 401 for a token is no longer taken as a rejection (403 is checked instead)"
+  edits:
+    - file: "internal/adapters/git/tokencheck/tokencheck.go"
+      find: "\tcase status == http.StatusUnauthorized:\n\t\treturn session.TokenCheck{Rejected: true, Problem: \"GitHub"
+      replace: "\tcase status == http.StatusForbidden:\n\t\treturn session.TokenCheck{Rejected: true, Problem: \"GitHub"
+- id: INST-001
+  title: "An agent tarball isn't compared with its pinned sha512"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "; got != p.Integrity {"
+      replace: "; got == \"\" {"
+- id: INST-002
+  title: "The registry's dist.integrity isn't compared with the pin"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "\tif meta.Dist.Integrity != p.Integrity {"
+      replace: "\tif meta.Dist.Integrity == \"\" {"
+- id: INST-003
+  title: "An agent tarball may be downloaded from a host other than the registry"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "if err != nil || tar.Scheme != reg.Scheme || tar.Host != reg.Host {"
+      replace: "if err != nil || tar.Scheme != reg.Scheme {"
+- id: INST-004
+  title: "Registry redirects to another host are followed"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "if first := via[0].URL; req.URL.Scheme != first.Scheme || req.URL.Host != first.Host {"
+      replace: "if first := via[0].URL; req.URL.Scheme != first.Scheme {"
+- id: INST-005
+  title: "The package.json inside an agent tarball isn't checked for the pinned version"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "if json.Unmarshal(data, &m) != nil || m.Name != p.Name || m.Version != p.Version {"
+      replace: "if json.Unmarshal(data, &m) != nil || m.Name != p.Name {"
+- id: INST-006
+  title: "An agent counts as installed when its bin link points at any version with the same file name"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "\tif err != nil || link != linkTarget(a, b) {"
+      replace: "\tif err != nil || path.Base(link) != path.Base(linkTarget(a, b)) {"
+- id: INST-007
+  title: "Installing a new agent version leaves the old version folders behind"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "\t\tif e.Name() != a.Version {"
+      replace: "\t\tif e.Name() != a.Version && !e.IsDir() {"
+- id: INST-008
+  title: "The agent installer waits only 30 ms for the registry's answer headers"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "\t\t\tResponseHeaderTimeout: 30 * time.Second,"
+      replace: "\t\t\tResponseHeaderTimeout: 30 * time.Millisecond,"
+- id: INST-009
+  title: "Executable files unpacked from an agent tarball are world-writable (0777)"
+  edits:
+    - file: "internal/adapters/install/npm/installer.go"
+      find: "\t\tmode = 0o755\n"
+      replace: "\t\tmode = 0o777\n"
+- id: INST-010
+  title: "A plugin counts as installed whatever commit its current link names"
+  edits:
+    - file: "internal/adapters/install/npm/plugins.go"
+      find: "\tif err != nil || link != pl.Commit {"
+      replace: "\tif err != nil || link == \"\" {"
+- id: INST-011
+  title: "A plugin commit's manifest isn't checked for the pinned version"
+  edits:
+    - file: "internal/adapters/install/npm/plugins.go"
+      find: "if json.Unmarshal(f.Data, &m) != nil || m.Name != pl.Name || m.Version != pl.Version {"
+      replace: "if json.Unmarshal(f.Data, &m) != nil || m.Name != pl.Name {"
+- id: INST-012
+  title: "A plugin's agents are listed without the plugin's prefix"
+  edits:
+    - file: "internal/adapters/install/npm/plugins.go"
+      find: "\t\t\tout = append(out, pl.ID+\":\"+name)"
+      replace: "\t\t\tout = append(out, name)"
+- id: INST-013
+  title: "A version with no provenance passes though its pin names a source to check it against"
+  edits:
+    - file: "internal/adapters/install/npm/provenance.go"
+      find: "\tcase !published:\n\t\tr.State = ProvenanceFailed"
+      replace: "\tcase !published:\n\t\tr.State = ProvenanceNone"
+- id: INST-014
+  title: "The signed provenance isn't checked for the pinned tarball's sha512"
+  edits:
+    - file: "internal/adapters/install/npm/sigstore.go"
+      find: "st.Subject[0].Name != subject || st.Subject[0].Digest[\"sha512\"] != digest {"
+      replace: "st.Subject[0].Name != subject {"
+- id: INST-015
+  title: "The provenance certificate is checked at the current time instead of when the log recorded it"
+  edits:
+    - file: "internal/adapters/install/npm/sigstore.go"
+      find: "CurrentTime: logged,"
+      replace: "CurrentTime: time.Now(),"
+- id: INST-016
+  title: "The update check accepts an answer that isn't JSON by its content type"
+  edits:
+    - file: "internal/adapters/install/releases/releases.go"
+      find: "if kind, _, err := mime.ParseMediaType(resp.Header.Get(\"Content-Type\")); err != nil || kind != \"application/json\" {"
+      replace: "if _, _, err := mime.ParseMediaType(resp.Header.Get(\"Content-Type\")); err != nil {"
+- id: INST-017
+  title: "OSV lookups report only withdrawn advisories and drop live ones"
+  edits:
+    - file: "internal/adapters/install/osv/osv.go"
+      find: "\t\t\tif d.Withdrawn != \"\" {"
+      replace: "\t\t\tif d.Withdrawn == \"\" {"
+- id: INST-018
+  title: "OSV answers with fewer results than questions are accepted"
+  edits:
+    - file: "internal/adapters/install/osv/osv.go"
+      find: "\tif len(out.Results) != len(queries) {"
+      replace: "\tif len(out.Results) > len(queries) {"
+- id: ENG-001
+  title: "An ACP permission request for another session id is accepted"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "\tif c.sessionID == \"\" || p.SessionID != c.sessionID {"
+      replace: "\tif c.sessionID == \"\" {"
+- id: ENG-002
+  title: "An ACP permission card shows the agent's allow_always option"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "if o.Kind == kindAllowAlways || (o.Kind == kindAllowOnce && !tool.Whole) {"
+      replace: "if o.Kind == kindAllowOnce && !tool.Whole {"
+- id: ENG-003
+  title: "An answer naming the allow_always option is no longer refused"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "\t\tcase o.Kind == kindAllowAlways:\n\t\t\treturn \"\", false, ErrAllowAlways\n"
+      replace: ""
+- id: ENG-004
+  title: "An allow naming an option is accepted for a tool call the engine can't see whole"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "\t\tcase a.Allow && !p.whole:\n\t\t\treturn \"\", false, ErrNotWhole\n"
+      replace: ""
+- id: ENG-005
+  title: "An allow is accepted after the tool call's input changed since the card was shown"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "a.Allow && !rejected && (st == nil || st.version != p.version)"
+      replace: "a.Allow && !rejected && st == nil"
+- id: ENG-006
+  title: "When an ACP request has no allow_once option an allow picks allow_always"
+  edits:
+    - file: "internal/adapters/engines/acp/permission.go"
+      find: "\treturn firstOfKind(p.options, kindRejectOnce), true, nil"
+      replace: "\treturn firstOfKind(p.options, kindAllowAlways), false, nil"
+- id: ENG-007
+  title: "Every ACP tool call counts as whole, even with no input"
+  edits:
+    - file: "internal/adapters/engines/acp/updates.go"
+      find: "\t\tWhole:  st.input != nil,"
+      replace: "\t\tWhole:  true,"
+- id: ENG-008
+  title: "A changed tool input no longer bumps the tool's version"
+  edits:
+    - file: "internal/adapters/engines/acp/updates.go"
+      find: "\t\t\tst.version = c.inputSeq\n"
+      replace: ""
+- id: ENG-009
+  title: "ACP session updates for another session id are accepted"
+  edits:
+    - file: "internal/adapters/engines/acp/updates.go"
+      find: "\tif c.sessionID == \"\" || n.SessionID != c.sessionID {"
+      replace: "\tif c.sessionID == \"\" {"
+- id: ENG-010
+  title: "The ACP protocol version the agent answers isn't checked"
+  edits:
+    - file: "internal/adapters/engines/acp/client.go"
+      find: "if *r.ProtocolVersion != ProtocolVersion {"
+      replace: "if *r.ProtocolVersion < 0 {"
+- id: ENG-011
+  title: "Cancelling an ACP turn leaves its permission cards pending"
+  edits:
+    - file: "internal/adapters/engines/acp/client.go"
+      find: "\tc.cancelPermissionsLocked()\n\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
+      replace: "\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
+- id: ENG-012
+  title: "A Codex command approval asking for network access counts as whole"
+  edits:
+    - file: "internal/adapters/engines/codex/approve.go"
+      find: "\t\tisNull(p.NetworkApprovalContext) &&\n"
+      replace: ""
+- id: ENG-013
+  title: "A Codex file approval that grants a root folder counts as whole"
+  edits:
+    - file: "internal/adapters/engines/codex/approve.go"
+      find: "req.whole = len(it.changes) > 0 && !it.tooBig && !grant"
+      replace: "req.whole = len(it.changes) > 0 && !it.tooBig"
+- id: ENG-014
+  title: "Codex requests from another thread are shown instead of declined"
+  edits:
+    - file: "internal/adapters/engines/codex/approve.go"
+      find: "\tif req.foreign {\n\t\tc.reply("
+      replace: "\tif false && req.foreign {\n\t\tc.reply("
+- id: ENG-015
+  title: "Codex's approvals reviewer isn't checked, only the policy"
+  edits:
+    - file: "internal/adapters/engines/codex/notify.go"
+      find: "\tif mode == policyOnRequest && who == reviewerUser {"
+      replace: "\tif mode == policyOnRequest {"
+- id: ENG-016
+  title: "A Codex allow is accepted after the thread reported a changed approval policy"
+  edits:
+    - file: "internal/adapters/engines/codex/client.go"
+      find: "\t\tcase c.violated:\n\t\t\terr = ErrPolicy\n"
+      replace: ""

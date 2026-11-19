@@ -1,0 +1,264 @@
+version: 2
+suite: repositories
+scenarios:
+  - id: REP-001
+    name: "Saving the git host's token again keeps one entry for the host, named by its URL"
+    transcript: true
+    approved_log: true
+    steps:
+      - id: save-token-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/save-token"
+          headers: { Origin: "${page.origin}" }
+          body: { host: "gitserver.test:8443", token: "${secret.git_token}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.ok": true
+            "$.body.host.host": "https://gitserver.test:8443"
+          present: ["$.body.host.savedAt"]
+          absent: ["$.body.warning", "$.body.token"]
+      - id: one-entry
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.hosts": { where: { host: "https://gitserver.test:8443" }, is: 1 }
+          any:
+            "$.body.projects": { path: /workspace/base/demo, name: demo }
+
+  - id: REP-002
+    name: "Adding a repository that is in the list already is refused, and the list keeps it once"
+    transcript: true
+    steps:
+      - id: add-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/dev/demo.git" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: exists, message: "That repository is in the list already, as demo." }
+        waive: { FIX-05: "the dev git host serves only fixed repositories, so the URL can't carry ${run.id}; this request is refused, and the step after it counts the list's entries for the URL" }
+      - id: listed-once
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cloning": []
+          count:
+            "$.body.projects": { where: { url: "https://gitserver.test:8443/dev/demo.git" }, is: 1 }
+
+  - id: REP-003
+    name: "A second repository whose name is taken is cloned under a new name, listed when the clone finishes, and removed again"
+    transcript: true
+    steps:
+      - id: add
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/demo.git" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { ok: true, url: "https://gitserver.test:8443/demo.git", name: demo }
+        waive: { FIX-05: "the dev git host serves only fixed repositories, so the URL can't carry ${run.id}; each run starts from an engine with no state, and this scenario removes the repository it adds" }
+      - id: cloned
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git", branch: main }
+          none:
+            "$.body.cloning": { url: "https://gitserver.test:8443/demo.git" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { name: demo-2 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          none:
+            "$.body.projects": { url: "https://gitserver.test:8443/demo.git" }
+          any:
+            "$.body.projects": { name: demo }
+
+  - id: REP-004
+    name: "A repository the git host doesn't have fails to clone and is never listed"
+    transcript: true
+    steps:
+      - id: add-missing
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/dev/proctor-${run.id}.git" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true, url: "https://gitserver.test:8443/dev/proctor-${run.id}.git", name: "proctor-${run.id}" }
+      - id: clone-ended-unlisted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          none:
+            "$.body.cloning": { url: "https://gitserver.test:8443/dev/proctor-${run.id}.git" }
+            "$.body.projects": { url: "https://gitserver.test:8443/dev/proctor-${run.id}.git" }
+
+  - id: REP-005
+    name: "An address with a user name and password, another scheme, a query, a fragment or a .. part is refused, and nothing is added"
+    steps:
+      - id: add-with-user
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://u:p@gitserver.test:8443/dev/refused-${run.id}.git" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "Leave the user name and password out of the address; save a token for the host instead." }
+      - id: add-http
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "http://gitserver.test:8443/dev/refused-${run.id}.git" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
+      - id: add-ssh
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "ssh://git@gitserver.test:8443/dev/refused-${run.id}.git" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
+      - id: add-with-query
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/dev/refused-${run.id}.git?x" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "Leave out the ? query or # fragment: give the repository's plain https address." }
+      - id: add-with-fragment
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/dev/refused-${run.id}.git#x" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "Leave out the ? query or # fragment: give the repository's plain https address." }
+      - id: add-with-dot-dot
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/dev/../refused-${run.id}.git" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: url, message: "The path can't have . or .. parts." }
+      - id: nothing-added
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cloning": []
+          none:
+            "$.body.projects": { name: "refused-${run.id}" }
+          any:
+            "$.body.projects": { name: demo }

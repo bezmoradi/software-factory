@@ -1,0 +1,270 @@
+version: 2
+suite: stack
+scenarios:
+  - id: STK-001
+    name: "The stack's Compose containers run with compose.yaml's hardening, and only the box helper holds Docker's socket"
+    steps:
+      - id: engine
+        do: docker.container
+        with: { name: sf-proctor-engine-1 }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image_ref": "software-factory-proctor:dev"
+            "$.container.state.running": true
+            "$.container.state.health": healthy
+            "$.container.user": engine
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.init": true
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.memory": 1073741824
+            "$.container.pids_limit": 512
+            "$.container.restart_policy": { name: unless-stopped, maximum_retry_count: 0 }
+            "$.container.log_driver": json-file
+            "$.container.docker_socket": false
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.publish_all_ports": false
+            "$.container.ports": [{ container_port: "8080/tcp", host_ip: "127.0.0.1", host_port: "${page.port}" }]
+            "$.container.tmpfs": ["/tmp"]
+            "$.container.mounts":
+              - { type: volume, destination: /opt/sf-dev/git-ca, read_only: true, volume: sf-proctor_gitserver-ca, subpath: null, source: null }
+              - { type: volume, destination: /opt/software-factory/agents, read_only: false, volume: sf-proctor_agents, subpath: null, source: null }
+              - { type: volume, destination: /reviews, read_only: false, volume: sf-proctor_reviews, subpath: null, source: null }
+              - { type: volume, destination: /run/sf-egress, read_only: false, volume: sf-proctor_egress-key, subpath: null, source: null }
+              - { type: volume, destination: /run/sf-helper, read_only: false, volume: sf-proctor_helper-key, subpath: null, source: null }
+              - { type: volume, destination: /uploads, read_only: false, volume: sf-proctor_uploads, subpath: null, source: null }
+              - { type: volume, destination: /var/lib/software-factory, read_only: false, volume: sf-proctor_engine-state, subpath: null, source: null }
+              - { type: volume, destination: /workspace, read_only: false, volume: sf-proctor_workspace, subpath: null, source: null }
+          length: { "$.container.networks": 4 }
+          any:
+            "$.container.networks": [{ name: sf-proctor_controlnet, in_scope: true }, { name: sf-proctor_gitnet, in_scope: true }, { name: sf-proctor_helpernet, in_scope: true }, { name: sf-proctor_outside, in_scope: true }]
+      - id: helper
+        do: docker.container
+        with: { name: sf-proctor-helper-1 }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image_ref": "software-factory-proctor:dev"
+            "$.container.state.running": true
+            "$.container.state.health": healthy
+            "$.container.user": "10005:10005"
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.init": true
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.memory": 67108864
+            "$.container.pids_limit": 64
+            "$.container.restart_policy": { name: unless-stopped, maximum_retry_count: 0 }
+            "$.container.log_driver": json-file
+            "$.container.docker_socket": true
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.ports": []
+            "$.container.tmpfs": []
+            "$.container.networks[0].name": sf-proctor_helpernet
+            "$.container.mounts":
+              - { type: volume, destination: /run/sf-helper, read_only: true, volume: sf-proctor_helper-key, subpath: null, source: null }
+              - { type: bind, destination: /var/run/docker.sock, read_only: false, volume: null, subpath: null, source: docker_socket }
+          length: { "$.container.networks": 1, "$.container.group_add": 1 }
+      - id: egress
+        do: docker.container
+        with: { name: sf-proctor-egress-1 }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image_ref": "software-factory-proctor:local"
+            "$.container.state.running": true
+            "$.container.state.health": healthy
+            "$.container.user": egress
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.init": true
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.memory": 268435456
+            "$.container.pids_limit": 256
+            "$.container.restart_policy": { name: unless-stopped, maximum_retry_count: 0 }
+            "$.container.log_driver": json-file
+            "$.container.docker_socket": false
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.ports": []
+            "$.container.tmpfs": []
+            "$.container.mounts":
+              - { type: volume, destination: /run/sf-egress, read_only: true, volume: sf-proctor_egress-key, subpath: null, source: null }
+          length: { "$.container.networks": 2 }
+          any:
+            "$.container.networks": [{ name: sf-proctor_controlnet, in_scope: true }, { name: sf-proctor_outside, in_scope: true }]
+      - id: gitserver
+        do: docker.container
+        with: { name: sf-proctor-gitserver-1 }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image_ref": "software-factory-proctor:gitserver"
+            "$.container.state.running": true
+            "$.container.state.health": healthy
+            "$.container.user": gitsrv
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.init": true
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.memory": 268435456
+            "$.container.pids_limit": 256
+            "$.container.restart_policy": { name: unless-stopped, maximum_retry_count: 0 }
+            "$.container.docker_socket": false
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.ports": []
+            "$.container.tmpfs": ["/tmp"]
+            "$.container.networks[0].name": sf-proctor_gitnet
+            "$.container.mounts":
+              - { type: volume, destination: /srv/ca, read_only: false, volume: sf-proctor_gitserver-ca, subpath: null, source: null }
+              - { type: volume, destination: /srv/git, read_only: false, volume: sf-proctor_gitserver-data, subpath: null, source: null }
+          length: { "$.container.networks": 1 }
+      - id: stack-containers
+        do: docker.containers
+        with: { labels: { com.docker.compose.project: sf-proctor } }
+        expect:
+          equal: { "$.count": 4 }
+          count:
+            "$.containers": { where: { docker_socket: true }, is: 1 }
+          any:
+            "$.containers": { name: sf-proctor-helper-1, docker_socket: true }
+          none:
+            "$.containers": [{ privileged: true }, { readonly_rootfs: false }, { init: false }, { publish_all_ports: true }]
+
+  - id: STK-002
+    name: "The stack's networks: helpernet, controlnet and gitnet are internal, outside isn't, and each holds only its services"
+    steps:
+      - id: helpernet
+        do: docker.network
+        with: { name: sf-proctor_helpernet }
+        expect:
+          equal:
+            "$.found": true
+            "$.network.driver": bridge
+            "$.network.internal": true
+          length: { "$.network.members": 2 }
+          any:
+            "$.network.members": [{ name: sf-proctor-engine-1, in_scope: true }, { name: sf-proctor-helper-1, in_scope: true }]
+          none:
+            "$.network.members": { in_scope: false }
+      - id: controlnet
+        do: docker.network
+        with: { name: sf-proctor_controlnet }
+        expect:
+          equal:
+            "$.found": true
+            "$.network.driver": bridge
+            "$.network.internal": true
+          length: { "$.network.members": 2 }
+          any:
+            "$.network.members": [{ name: sf-proctor-egress-1, in_scope: true }, { name: sf-proctor-engine-1, in_scope: true }]
+          none:
+            "$.network.members": { in_scope: false }
+      - id: outside
+        do: docker.network
+        with: { name: sf-proctor_outside }
+        expect:
+          equal:
+            "$.found": true
+            "$.network.driver": bridge
+            "$.network.internal": false
+          length: { "$.network.members": 2 }
+          any:
+            "$.network.members": [{ name: sf-proctor-egress-1, in_scope: true }, { name: sf-proctor-engine-1, in_scope: true }]
+          none:
+            "$.network.members": { in_scope: false }
+      - id: gitnet
+        do: docker.network
+        with: { name: sf-proctor_gitnet }
+        expect:
+          equal:
+            "$.found": true
+            "$.network.driver": bridge
+            "$.network.internal": true
+          length: { "$.network.members": 2 }
+          any:
+            "$.network.members": [{ name: sf-proctor-engine-1, in_scope: true }, { name: sf-proctor-gitserver-1, in_scope: true }]
+          none:
+            "$.network.members": { in_scope: false }
+
+  - id: STK-003
+    name: "The stack's key and upload volumes are tmpfs, so their contents never reach disk, and the workspace and engine state are plain local volumes"
+    steps:
+      - id: uploads
+        do: docker.volume
+        with: { name: sf-proctor_uploads }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": tmpfs
+            "$.volume.option_keys": [device, o, type]
+          any:
+            "$.volume.labels": { key: com.docker.compose.volume, value: uploads }
+      - id: egress-key
+        do: docker.volume
+        with: { name: sf-proctor_egress-key }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": tmpfs
+            "$.volume.option_keys": [device, o, type]
+          any:
+            "$.volume.labels": { key: com.docker.compose.volume, value: egress-key }
+      - id: helper-key
+        do: docker.volume
+        with: { name: sf-proctor_helper-key }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": tmpfs
+            "$.volume.option_keys": [device, o, type]
+          any:
+            "$.volume.labels": { key: com.docker.compose.volume, value: helper-key }
+      - id: workspace
+        do: docker.volume
+        with: { name: sf-proctor_workspace }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": ""
+            "$.volume.option_keys": []
+      - id: engine-state
+        do: docker.volume
+        with: { name: sf-proctor_engine-state }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": ""
+            "$.volume.option_keys": []
+
+  - id: STK-004
+    name: "No session or reviewer container is left over"
+    steps:
+      - id: no-boxes
+        do: docker.containers
+        with: { labels: { dev.software-factory.stack: sf-proctor }, has_labels: [dev.software-factory.box] }
+        expect:
+          equal: { "$.count": 0 }
+      - id: no-reviewers
+        do: docker.containers
+        with: { labels: { dev.software-factory.stack: sf-proctor }, has_labels: [dev.software-factory.reviewer] }
+        eventually: { within: 60s, every: 1s }
+        expect:
+          equal: { "$.count": 0 }

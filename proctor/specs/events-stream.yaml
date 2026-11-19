@@ -1,0 +1,494 @@
+version: 2
+suite: events-stream
+tables:
+  - id: EVS-T01
+    name: "The event stream opens for no other form of the page key, or the page's key under another scheme than Bearer"
+    do: http.request
+    identity: page
+    variant: "${row.variant}"
+    with:
+      method: GET
+      path: "/api/events"
+      headers: { Origin: "${page.origin}" }
+    expect:
+      equal:
+        "$.status": 401
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: token }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]"]
+    columns: ["case", "variant"]
+    rows:
+      - ["evs_t01_basic_scheme", "basic_scheme"]
+      - ["evs_t01_token_scheme", "token_scheme"]
+      - ["evs_t01_no_scheme", "no_scheme"]
+
+scenarios:
+  - id: EVS-001
+    name: "The event stream opens for no request without the page key"
+    steps:
+      - id: no-key
+        do: http.request
+        identity: anonymous
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 401
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: token }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+
+  - id: EVS-002
+    name: "The event stream opens for no key the page never issued"
+    steps:
+      - id: unknown-key
+        do: http.request
+        identity: page
+        variant: unknown
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 401
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: token }
+
+  - id: EVS-003
+    name: "The event stream refuses another site's Origin, even with the page key"
+    steps:
+      - id: other-origin
+        do: http.request
+        identity: page
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "https://proctor.invalid" }
+        expect:
+          equal:
+            "$.status": 403
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: origin }
+
+  - id: EVS-004
+    name: "The event stream refuses a cross-site fetch, even with the page key"
+    steps:
+      - id: cross-site
+        do: http.request
+        identity: page
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "${page.origin}", Sec-Fetch-Site: cross-site }
+        expect:
+          equal:
+            "$.status": 403
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: site }
+
+  - id: EVS-005
+    name: "The event stream refuses a query string, so the key never travels in a URL"
+    steps:
+      - id: query
+        do: http.request
+        identity: page
+        with:
+          method: GET
+          path: "/api/events"
+          query: { token: proctor }
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: query }
+
+  - id: EVS-006
+    name: "The event stream refuses another Host, even with the page key"
+    steps:
+      - id: other-host
+        do: http_misdirected.request
+        identity: page
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 421
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: host }
+
+  - id: EVS-007
+    name: "A POST to the event stream's route is refused, since the stream is GET only"
+    steps:
+      - id: post
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 405
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: method }
+        no_state_check: "refused with 405 before the stream or any handler runs, so nothing changed; no read shows the stream's subscribers, and an http.frames step, which needs an open stream, isn't counted as an http request's state check"
+
+  - id: EVS-008
+    name: "The page key opens the event stream as NDJSON, whose first frames are the hello with no session and the halt state, and nothing else comes while nothing happens"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.open": true
+            "$.format": ndjson
+            "$.headers.content-type": ["application/x-ndjson; charset=utf-8"]
+            "$.headers.cache-control": ["no-store"]
+            "$.headers.x-content-type-options": ["nosniff"]
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+            "$.frames[0].json.supervisor": ""
+            "$.frames[0].json.compose": "docker compose -p sf-proctor"
+            "$.frames[1].json": { type: halt, mode: "", since: 0, awayAll: false, away: [] }
+          matches: { "$.frames[0].json.stream": "[0-9a-f]{24}" }
+          keys: { "$.frames[0].json": [compose, sessions, stream, supervisor, type] }
+      - id: quiet
+        do: http.frames
+        on: events
+        consistently: { for: 2s, every: 200ms }
+        expect:
+          equal:
+            "$.count": 2
+            "$.closed": false
+            "$.overflow": false
+          none:
+            "$.frames": { json.type: sessions }
+
+  - id: EVS-009
+    name: "The page key with a lowercase bearer scheme, and no Origin, as a same-origin GET sends, opens the event stream"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        variant: lowercase_scheme
+        as: events
+        with:
+          path: "/api/events"
+        expect:
+          equal:
+            "$.status": 200
+            "$.open": true
+            "$.format": ndjson
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.closed": false
+
+  - id: EVS-010
+    name: "The page holds at most two event streams at once, and a third is refused with 429 while both are open"
+    steps:
+      - id: first
+        do: http.open
+        identity: page
+        as: first
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true }
+      - id: second
+        do: http.open
+        identity: page
+        as: second
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true }
+      - id: both-said-hello
+        do: http.frames
+        on: second
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal: { "$.frames[0].json.type": hello }
+      - id: third
+        do: http.open
+        identity: page
+        as: third
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 429
+            "$.open": false
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: streams }
+      - id: first-still-open
+        do: http.frames
+        on: first
+        expect:
+          equal: { "$.frames[0].json.type": hello, "$.closed": false }
+
+  - id: EVS-011
+    name: "A session's frames reach the open stream: its listing, its turns, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor stream ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: listed-live
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].id": "${id}", "json.sessions[0].name": "proctor stream ${run.id}", "json.sessions[0].project": demo, "json.sessions[0].agent": dev-acp, "json.sessions[0].box": "${box}", "json.sessions[0].branch": "sf/${id}", "json.sessions[0].running": true, "json.sessions[0].live": true, "json.sessions[0].controlled": true }
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor ${run.id}\nwrite: proctor-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.txt"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["proctor-${run.id}.txt"] }
+      - id: file-text
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "proctor-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "proctor-${run.id}.txt", text: "ok\n" }
+      - id: upload
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/upload"
+          headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "${sid}" }
+          body_base64: iVBORw0KGgpwcm9jdG9y
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+          matches: { "$.body.id": "[0-9a-f]{24}" }
+          keys: { "$.body": [id] }
+        save: { image: "$.body.id" }
+        no_state_check: "no page read lists uploads; the look step sends this id, which Registry.Message takes only while the upload waits, and the received step below asserts the agent got these 15 bytes by their sha256, but it is an http.frames step, which Proctor doesn't count as an http request's state check"
+      - id: look
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "proctor look ${run.id}", images: ["${image}"] }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+        no_state_check: "this message's only effect is the agent's turn, which writes no file and only the event stream shows; the received step below asserts it, but it is an http.frames step, which Proctor doesn't count as an http request's state check"
+      - id: turns-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 2 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: received
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.images: 1, json.text: "proctor look ${run.id}" }
+              - { json.type: text, json.sid: "${sid}", json.text: "The fake agent received 2 content blocks:\n- text: \"I pasted an image on the Software Factory page; it is in this message, and also saved at /uploads/${box}/${sid}/${image}/image.png.\\n\\nproctor look ${run.id}\"\n- image: image/png, 15 bytes, sha256 27c0ab99197e1139, uri file:///uploads/${box}/${sid}/${image}/image.png, decoded: true" }
+      - id: nothing-withheld
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: omitted, json.sid: "${sid}" }
+              - { json.type: permission, json.sid: "${sid}" }
+              - { json.type: dropped, json.sid: "${sid}" }
+      - id: unlisted
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, json.sessions: [] }

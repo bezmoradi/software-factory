@@ -1,0 +1,6 @@
+format: "proctor-log/1"
+INFO "token saved for https://gitserver.test:8443"
+INFO request side=page method=POST route=/api/save-token status=200 req=<req-1>
+INFO request side=page method=POST route=/api/projects status=200 req=<req-2>
+INFO "sandbox check" event=check-passed
+unparsed lines: 0
