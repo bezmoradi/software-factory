@@ -1,8 +1,6 @@
 package server
 
 import (
-	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -83,20 +81,6 @@ func (p engineParts) workPage() session.WorkPage {
 
 const docsFrom = "0.26.0"
 
-func parseDocs(cfg *PageConfig, getenv func(string) string) error {
-	switch v := getenv("SF_DEV_KNACKPACK_DOCS"); v {
-	case "":
-	case "repo":
-		if cfg.DevACPAgent == "" {
-			return errors.New("SF_DEV_KNACKPACK_DOCS is only for the development overlay, which also sets SF_DEV_ACP_AGENT, so this engine doesn't start: remove SF_DEV_KNACKPACK_DOCS from the engine's environment")
-		}
-		cfg.DevDocs = true
-	default:
-		return fmt.Errorf("SF_DEV_KNACKPACK_DOCS must be repo or unset, got %q", v)
-	}
-	return nil
-}
-
 func versionParts(v string) ([3]int, bool) {
 	var out [3]int
 	parts := strings.Split(v, ".")
@@ -136,11 +120,7 @@ func pinnedKnackpack() string {
 	return ""
 }
 
-func docsInRepo(cfg PageConfig, logger shared.Logger) bool {
-	if cfg.DevDocs {
-		logger.Warn("development switch: knackpack's requirements and plan count only as committed, and the development ACP agent takes knackpack's workflow", "variable", "SF_DEV_KNACKPACK_DOCS")
-		return true
-	}
+func docsInRepo() bool {
 	return atLeast(pinnedKnackpack(), docsFrom)
 }
 

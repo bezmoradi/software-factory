@@ -185,7 +185,6 @@ type PushesConfig struct {
 
 type PushWork interface {
 	PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool)
-	HandoffText(sid string) string
 }
 
 type heldPush struct {
@@ -751,7 +750,7 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	if p.cfg.Tell == nil || p.cfg.Work == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message, so it can't hand off.")
 	}
-	if err := p.cfg.Tell(sid, p.cfg.Work.HandoffText(sid)); err != nil {
+	if err := p.cfg.Tell(sid, HandoffCommand); err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}

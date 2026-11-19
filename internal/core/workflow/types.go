@@ -12,13 +12,12 @@ type Step string
 const (
 	Define    Step = "define"
 	Plan      Step = "plan"
-	Tasks     Step = "tasks"
 	Implement Step = "implement"
 	Review    Step = "review"
 	Deliver   Step = "deliver"
 )
 
-var StepOrder = []Step{Define, Plan, Tasks, Implement, Review, Deliver}
+var StepOrder = []Step{Define, Plan, Implement, Review, Deliver}
 
 type Edits string
 
@@ -85,7 +84,7 @@ func (t WorkType) Profile() Profile {
 	return Fix
 }
 
-func TypeProblems(t WorkType, adapter AdapterID) []string {
+func TypeProblems(t WorkType) []string {
 	var out []string
 	say := func(s string) { out = append(out, t.ID+": "+s) }
 	seen := map[Step]bool{}
@@ -106,22 +105,13 @@ func TypeProblems(t WorkType, adapter AdapterID) []string {
 	if len(t.Steps) == 0 {
 		say("a work type needs at least one step")
 	}
-	if seen[Tasks] && !seen[Plan] {
-		say("tasks needs a plan step before it")
-	}
 	if seen[Define] && !seen[Plan] {
 		say("define needs a plan step after it")
 	}
 	if seen[Plan] && !seen[Define] {
 		say("plan needs a define step before it, since a plan is approved against agreed requirements")
 	}
-	if adapter == "" {
-		adapter = Knackpack
-	}
-	if seen[Tasks] && Adapters[adapter].Commands[Tasks] == "" {
-		say("tasks needs an adapter with a tasks step, such as \"spec-kit\"")
-	}
-	if (seen[Plan] || seen[Tasks]) && !seen[Implement] {
+	if seen[Plan] && !seen[Implement] {
 		say("a plan needs an implement step after it")
 	}
 	if t.Push {
@@ -149,7 +139,7 @@ func TypeProblems(t WorkType, adapter AdapterID) []string {
 		if t.Edits == DocsEdits {
 			say("a documentation-only work type must push, as Docs only does; one that doesn't push changes any file, as Exploring does")
 		}
-		if t.Edits == AnyEdits && (seen[Define] || seen[Plan] || seen[Tasks] || seen[Review]) {
+		if t.Edits == AnyEdits && (seen[Define] || seen[Plan] || seen[Review]) {
 			say("a work type that changes files and doesn't push has only an implement step, as Exploring does")
 		}
 	}

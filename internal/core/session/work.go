@@ -71,7 +71,6 @@ type SavedApproval struct {
 
 type SavedWork struct {
 	Repo         string
-	Claude       bool
 	Type         string
 	Chosen       bool
 	Requirements *SavedApproval
@@ -129,7 +128,6 @@ type workApproval struct {
 
 type workSession struct {
 	repo    string
-	claude  bool
 	typeID  string
 	chosen  bool
 	req     *workApproval
@@ -202,8 +200,6 @@ type GateView struct {
 	Requirements  *WorkDoc
 	Plan          *WorkDoc
 	Research      string
-	TasksNeeded   bool
-	TasksWritten  bool
 	Define        bool
 	Reviewers     []WorkReviewer
 	Missing       []string
@@ -506,7 +502,7 @@ type setupOf struct {
 	project  string
 }
 
-func (w *Work) setupFor(name string, claude bool) setupOf {
+func (w *Work) setupFor(name string) setupOf {
 	st := w.load()
 	personal := workflow.Personal{Rounds: DefaultRounds}
 	if p, ok := st.Projects[name]; ok {
@@ -520,16 +516,7 @@ func (w *Work) setupFor(name string, claude bool) setupOf {
 	if r, ok := w.repoByName(name); ok {
 		team, out.approved, out.note = w.teamFor(r, st)
 	}
-	adapter := workflow.SpecKit
-	if claude {
-		adapter = workflow.Knackpack
-	}
-	if team != nil && !claude {
-		t := *team
-		t.Adapter = workflow.SpecKit
-		team = &t
-	}
-	out.setup, out.problems = workflow.SetupOf(team, personal, adapter)
+	out.setup, out.problems = workflow.SetupOf(team, personal, workflow.Knackpack)
 	out.setup.Catalog = w.cfg.Catalog()
 	if w.cfg.RoleAgents != nil {
 		maps.Copy(out.setup.Roles, w.cfg.RoleAgents.RolesFor(name))
@@ -556,24 +543,24 @@ func (w *Work) defaultType(s workflow.Setup) string {
 	return DefaultWorkType
 }
 
-func (w *Work) Check(repo string, claude bool, typeID string) error {
+func (w *Work) Check(repo, typeID string) error {
 	if typeID == "" {
 		return nil
 	}
-	if _, ok := typeIn(w.setupFor(repo, claude).setup.Types, typeID); !ok {
+	if _, ok := typeIn(w.setupFor(repo).setup.Types, typeID); !ok {
 		return explained(invalid("type"), "That work type isn't one this project offers.")
 	}
 	return nil
 }
 
-func (w *Work) Begin(sid, repo string, claude bool, typeID string) {
-	s := w.setupFor(repo, claude)
+func (w *Work) Begin(sid, repo, typeID string) {
+	s := w.setupFor(repo)
 	chosen := typeID != ""
 	if _, ok := typeIn(s.setup.Types, typeID); !ok {
 		typeID, chosen = w.defaultType(s.setup), s.project != ""
 	}
 	w.mu.Lock()
-	w.sessions[sid] = &workSession{repo: repo, claude: claude, typeID: typeID, chosen: chosen}
+	w.sessions[sid] = &workSession{repo: repo, typeID: typeID, chosen: chosen}
 	w.mu.Unlock()
 	w.persist(sid)
 }
@@ -612,7 +599,7 @@ func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
 	}
-	if _, ok := typeIn(w.setupFor(ws.repo, ws.claude).setup.Types, id); !ok {
+	if _, ok := typeIn(w.setupFor(ws.repo).setup.Types, id); !ok {
 		return explained(invalid("type"), "That work type isn't one this project offers.")
 	}
 	w.mu.Lock()
@@ -630,7 +617,6 @@ type workDocs struct {
 	req       *WorkDoc
 	plan      *WorkDoc
 	research  string
-	tasks     bool
 	dir       string
 	held      bool
 	reported  bool
@@ -702,48 +688,17 @@ func (w *Work) committedKnackpack(sid, repo, head string) workDocs {
 	return out
 }
 
-func (w *Work) docs(sid string, adapter workflow.AdapterID, repo, head string, files []string, tasks bool) workDocs {
-	if adapter == workflow.Knackpack && w.cfg.DocsInRepo {
+func (w *Work) docs(sid, repo, head string) workDocs {
+	if w.cfg.DocsInRepo {
 		return w.committedKnackpack(sid, repo, head)
 	}
-	if adapter == workflow.Knackpack {
-		rep, ok := w.cfg.Reported(sid)
-		if !ok {
-			return workDocs{}
-		}
-		out := workDocs{req: docFrom(rep.Requirements), plan: docFrom(rep.Plan), reported: true}
-		if rep.Research != nil {
-			out.research = rep.Research.Path
-		}
-		return out
+	rep, ok := w.cfg.Reported(sid)
+	if !ok {
+		return workDocs{}
 	}
-	out := workDocs{held: true}
-	if head == "" {
-		return out
-	}
-	names := workflow.Adapters[adapter].Documents
-	feature, _ := w.readDoc(repo, head, names.Feature)
-	out.dir = workflow.SpecFeatureDir([]byte(feature), files)
-	if out.dir == "" {
-		return out
-	}
-	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Requirements); ok {
-		out.req = shownDoc(out.dir+"/"+names.Requirements, t)
-		out.req.Commit = head
-	}
-	if _, ok := w.readDoc(repo, head, out.dir+"/"+names.Research); ok {
-		out.research = out.dir + "/" + names.Research
-	}
-	plan, hasPlan := w.readDoc(repo, head, out.dir+"/"+names.Plan)
-	taskText, hasTasks := w.readDoc(repo, head, out.dir+"/"+names.Tasks)
-	out.tasks = hasTasks
-	if hasPlan {
-		text := plan
-		if tasks && hasTasks {
-			text = plan + "\n\n---\n\n# " + out.dir + "/" + names.Tasks + "\n\n" + taskText
-		}
-		out.plan = shownDoc(out.dir+"/"+names.Plan, text)
-		out.plan.Commit = head
+	out := workDocs{req: docFrom(rep.Requirements), plan: docFrom(rep.Plan), reported: true}
+	if rep.Research != nil {
+		out.research = rep.Research.Path
 	}
 	return out
 }
@@ -782,7 +737,7 @@ type gathered struct {
 
 func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
 	g := gathered{ws: ws, t: t, head: head, main: main}
-	g.setup = w.setupFor(ws.repo, ws.claude)
+	g.setup = w.setupFor(ws.repo)
 	g.adapter = g.setup.setup.Adapter
 	kind, ok := typeIn(g.setup.setup.Types, ws.typeID)
 	if !ok {
@@ -821,8 +776,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	if note != "" {
 		g.effNote = strings.TrimSpace(g.effNote + " " + note)
 	}
-	tasks := slices.Contains(kind.Steps, workflow.Tasks)
-	g.docs = w.docs(sid, g.adapter, t.Repo, head, g.files, tasks)
+	g.docs = w.docs(sid, t.Repo, head)
 	if g.docs.held {
 		g.docs.onBranch(g.files, g.listed)
 	}
@@ -873,7 +827,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	g.items, g.toApprove = workflow.Items(workflow.Progress{
 		Chosen: g.chosen.Profile(), Effective: g.eff, Adapter: g.adapter,
 		FilesListed: g.listed || head == "", FilesNote: g.note, FlagsRead: flagsRead, Flagged: flagged,
-		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile, TasksWritten: g.docs.tasks,
+		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
 	})
 	if item := specOverItem(g); item != "" {
@@ -933,9 +887,9 @@ func lfsRefusal(paths []string) string {
 func (w *Work) Reviewers(ctx context.Context, sid string, t PushTarget, base, head string) []workflow.Requirement {
 	ws, ok := w.session(sid)
 	if !ok {
-		ws = workSession{repo: t.Name, claude: true, typeID: DefaultWorkType}
+		ws = workSession{repo: t.Name, typeID: DefaultWorkType}
 	}
-	setup := w.setupFor(ws.repo, ws.claude)
+	setup := w.setupFor(ws.repo)
 	kind, ok := typeIn(setup.setup.Types, ws.typeID)
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
@@ -979,7 +933,7 @@ func (w *Work) current(ctx context.Context, sid string) (gathered, error) {
 
 func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	f := workflow.Facts{Profile: g.chosen.Profile(), Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
-		UsesArtifacts: g.docs.held, PlanCommand: workflow.Adapters[g.adapter].Commands[workflow.Plan]}
+		UsesArtifacts: g.docs.held}
 	if g.docs.req != nil {
 		f.ReqHash = g.docs.req.Hash
 	}
@@ -990,13 +944,9 @@ func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 		f.ReqBaseline = g.ws.req.Commit
 	}
 	if f.UsesArtifacts {
-		f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Plan, workflow.Tasks}, g.docs.dir)
+		f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Plan}, g.docs.dir)
 		if !g.reqOk {
-			dir := g.docs.dir
-			if g.adapter == workflow.Knackpack {
-				dir = ""
-			}
-			f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Define}, dir)
+			f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Define}, "")
 		}
 		if f.ReqBaseline != "" && g.head != "" {
 			if f.ReqBaseline == g.head {
@@ -1032,7 +982,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	switch {
 	case doc == nil && onBase != nil:
 		return explained(conflict("on base"), "The "+what+" text is from an earlier task, already on the base branch, so it can't be approved here. The session's own commits must add or change it.")
-	case doc == nil && g.docs.held && g.adapter == workflow.Knackpack:
+	case doc == nil && g.docs.held:
 		return explained(conflict("not committed"), "The engine counts only the "+what+" text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve.")
 	case doc == nil:
 		return explained(conflict("nothing"), "There's no "+what+" to approve yet.")
@@ -1223,8 +1173,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	}
 	v := GateView{Head: g.head, Branch: g.t.Branch, Adapter: g.adapter, Type: g.chosen.ID, Chosen: g.ws.chosen, Effective: g.eff.Profile(), Note: g.effNote,
 		Types: g.setup.setup.Types, Commands: workflow.Adapters[g.adapter].Commands, TeamApproved: g.setup.approved, TeamNote: g.setup.note,
-		Research: g.docs.research, TasksNeeded: slices.Contains(g.chosen.Steps, workflow.Tasks), TasksWritten: g.docs.tasks,
-		Rounds: g.setup.rounds, FilesListed: g.listed, ChangedFiles: len(g.files), PlanApprovals: g.docs.held}
+		Research: g.docs.research, Rounds: g.setup.rounds, FilesListed: g.listed, ChangedFiles: len(g.files), PlanApprovals: g.docs.held}
 	if d := g.docs.req; d != nil {
 		c := *d
 		c.Approved, c.Changed = g.reqOk, g.reqWas
@@ -1300,7 +1249,6 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	v.Holds = map[string]string{
 		"define": workflow.Decide(f, workflow.Action{Kind: workflow.StartDefine}),
 		"plan":   workflow.Decide(f, workflow.Action{Kind: workflow.StartPlan}),
-		"tasks":  workflow.Decide(f, workflow.Action{Kind: workflow.StartTasks}),
 	}
 	if feature && v.Requirements != nil && !g.reqOk {
 		v.Holds["approveRequirements"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApproveRequirements, Hash: v.Requirements.Hash})
@@ -1466,7 +1414,7 @@ func (w *Work) SetProject(ctx context.Context, path, op string, rounds int, kind
 		}
 	case "type":
 		if kind != "" {
-			if _, ok := typeIn(w.setupFor(r.Name, true).setup.Types, kind); !ok {
+			if _, ok := typeIn(w.setupFor(r.Name).setup.Types, kind); !ok {
 				return explained(invalid("type"), "That work type isn't one this project offers.")
 			}
 		}
@@ -1721,16 +1669,7 @@ func (w *Work) AskRewrite(ctx context.Context, sid, commit string, field CommitF
 func (w *Work) Rounds(sid, repo string) int {
 	ws, ok := w.session(sid)
 	if !ok {
-		ws = workSession{repo: repo, claude: true}
+		ws = workSession{repo: repo}
 	}
-	return w.setupFor(ws.repo, ws.claude).rounds
-}
-
-func (w *Work) HandoffText(sid string) string {
-	ws, ok := w.session(sid)
-	if ok && ws.claude {
-		return HandoffCommand
-	}
-	return "The software factory's push gate holds this branch's push: a reviewer reached this project's round limit and still blocks, and the developer chose Hand off. " +
-		"Don't push, and don't fix the findings or ask for another review. Write the developer a handoff summary: what the change does, each blocking finding that is still open, what you tried, and what you'd do next."
+	return w.setupFor(ws.repo).rounds
 }

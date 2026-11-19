@@ -20,7 +20,6 @@ import (
 
 const (
 	PluginManifest = ".claude-plugin/plugin.json"
-	PyProject      = "pyproject.toml"
 	PluginsFolder  = "plugins"
 	currentLink    = "current"
 	pluginFor      = 10 * time.Minute
@@ -112,7 +111,7 @@ func (p *Plugins) Installed(id string) bool {
 	if err != nil || link != pl.Commit {
 		return false
 	}
-	info, err := os.Lstat(filepath.Join(p.folder(pl), pl.Commit, filepath.FromSlash(manifestOf(pl))))
+	info, err := os.Lstat(filepath.Join(p.folder(pl), pl.Commit, filepath.FromSlash(PluginManifest)))
 	return err == nil && info.Mode().IsRegular()
 }
 
@@ -228,50 +227,19 @@ func (p *Plugins) install(ctx context.Context, pl Plugin, report func(string)) e
 	return p.activate(pl, tree)
 }
 
-func manifestOf(pl Plugin) string {
-	if pl.Manifest != "" {
-		return pl.Manifest
-	}
-	return PluginManifest
-}
-
 func (p *Plugins) checkManifest(repo string, pl Plugin) error {
-	name := manifestOf(pl)
-	f, err := p.cfg.Trees.ReadFile(repo, pl.Commit, name)
+	f, err := p.cfg.Trees.ReadFile(repo, pl.Commit, PluginManifest)
 	if err != nil || f.Mode != push.ModeFile {
-		return fmt.Errorf("the commit has no %s", name)
-	}
-	if name == PyProject {
-		if !pyProjectNames(string(f.Data), pl.Name, pl.Version) {
-			return fmt.Errorf("the commit's %s doesn't name %s %s", name, pl.Name, pl.Version)
-		}
-		return nil
+		return fmt.Errorf("the commit has no %s", PluginManifest)
 	}
 	var m struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
 	if json.Unmarshal(f.Data, &m) != nil || m.Name != pl.Name || m.Version != pl.Version {
-		return fmt.Errorf("the commit's %s doesn't name %s %s", name, pl.Name, pl.Version)
+		return fmt.Errorf("the commit's %s doesn't name %s %s", PluginManifest, pl.Name, pl.Version)
 	}
 	return nil
-}
-
-func pyProjectNames(text, name, version string) bool {
-	inProject, gotName, gotVersion := false, false, false
-	for line := range strings.SplitSeq(text, "\n") {
-		l := strings.TrimSpace(line)
-		if strings.HasPrefix(l, "[") {
-			inProject = l == "[project]"
-			continue
-		}
-		if !inProject {
-			continue
-		}
-		gotName = gotName || l == `name = "`+name+`"`
-		gotVersion = gotVersion || l == `version = "`+version+`"`
-	}
-	return gotName && gotVersion
 }
 
 func (p *Plugins) Agents(id string) []string {

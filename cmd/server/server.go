@@ -50,7 +50,6 @@ type PageConfig struct {
 	AgentBinary  string
 	DevACPAgent  string
 	DevGitCA     string
-	DevDocs      bool
 	Sandbox      SandboxConfig
 	Install      InstallConfig
 	Review       ReviewConfig
@@ -99,9 +98,6 @@ func ParsePageConfig(getenv func(string) string) (PageConfig, error) {
 	}
 	cfg.StateDir = dir
 	if err := parseStarts(&cfg, getenv); err != nil {
-		return cfg, err
-	}
-	if err := parseDocs(&cfg, getenv); err != nil {
 		return cfg, err
 	}
 	if cfg.Install, err = parseInstall(getenv); err != nil {
@@ -344,11 +340,11 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	agents := session.Agents()
 	if cfg.DevACPAgent != "" {
-		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent, cfg.DevDocs))
+		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent))
 		logger.Warn("development ACP agent switched on", "variable", "SF_DEV_ACP_AGENT")
 	}
 	devChecks := devCheckKeys(cfg.DevACPAgent, developmentImage(boxes.DevMarker), logger)
-	docs := docsInRepo(cfg, logger)
+	docs := docsInRepo()
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)

@@ -23,7 +23,6 @@ type AgentSpec struct {
 	AskingModes []string
 	Pass        []string
 	Enabled     bool
-	Knackpack   bool
 	Off         string
 	Startup     string
 	Status      *SignInStatus
@@ -39,13 +38,13 @@ type AgentView struct {
 
 func Agents() []AgentSpec {
 	return []AgentSpec{
-		{ID: "claude", Name: "Claude Code", Method: MethodPlugin, Command: []string{"claude", "--bg"}, Pass: []string{"CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER"}, Enabled: true, Knackpack: true,
+		{ID: "claude", Name: "Claude Code", Method: MethodPlugin, Command: []string{"claude", "--bg"}, Pass: []string{"CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER"}, Enabled: true,
 			Startup: "claude", Status: &SignInStatus{Args: []string{"auth", "status"}, Kind: "claude", Step: signInLater}},
 	}
 }
 
-func DevelopmentAgent(command string, knackpack bool) AgentSpec {
-	return AgentSpec{ID: DevAgentID, Name: "Development ACP agent", Method: MethodACP, Command: []string{command}, Enabled: true, Knackpack: knackpack,
+func DevelopmentAgent(command string) AgentSpec {
+	return AgentSpec{ID: DevAgentID, Name: "Development ACP agent", Method: MethodACP, Command: []string{command}, Enabled: true,
 		Startup: "claude", Status: &SignInStatus{Args: []string{"auth", "status"}, Kind: "claude", Step: signInLater}}
 }
 

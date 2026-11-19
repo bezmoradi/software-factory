@@ -202,7 +202,7 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 	if !ok1 || !ok2 {
 		return session.SavedWork{}, false
 	}
-	v := session.SavedWork{Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock)}
+	v := session.SavedWork{Repo: w.Repo, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock)}
 	for p, blobs := range w.Allowed {
 		if !relPath(p) || len(blobs) == 0 || len(blobs) > maxVersions || slices.ContainsFunc(blobs, func(b string) bool { return !commitID.MatchString(b) }) {
 			continue

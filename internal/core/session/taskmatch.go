@@ -67,7 +67,7 @@ func (w *Work) TypeChange(ctx context.Context, sid, base, head string) (TypeChan
 	if !ok {
 		return TypeChange{}, false
 	}
-	setup := w.setupFor(ws.repo, ws.claude)
+	setup := w.setupFor(ws.repo)
 	kind, ok := typeIn(setup.setup.Types, ws.typeID)
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)

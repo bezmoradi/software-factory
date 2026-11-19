@@ -3225,7 +3225,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/f_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/feature-${run.id}.txt can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change, once Spec Kit has named the feature's folder. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/f_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/feature-${run.id}.txt can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
       - id: f-src-obeyed
         do: http.request
         identity: page
@@ -3249,7 +3249,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/f_docs.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"docs/feature-${run.id}.md can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change, once Spec Kit has named the feature's folder. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/f_docs.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"docs/feature-${run.id}.md can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
       - id: f-docs-obeyed
         do: http.request
         identity: page

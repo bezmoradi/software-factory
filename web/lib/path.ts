@@ -7,8 +7,8 @@ const SKIPPED = 'skipped'
 const OUTDATED = 'outdated'
 type Mark = boolean | typeof SKIPPED | typeof OUTDATED
 export type Started = boolean | null | 'nobase'
-export type Step = '' | 'define' | 'plan' | 'tasks'
-type Active = '' | 'work' | 'verify' | 'define' | 'plan' | 'tasks'
+export type Step = '' | 'define' | 'plan'
+type Active = '' | 'work' | 'verify' | 'define' | 'plan'
 export interface Turn {
   ran: ReadonlySet<Step>
   running: Step
@@ -66,7 +66,7 @@ function stages(gate: GateEvent | null, started: Started, active: Active, off: b
   const running = reviewers.some(r => r.state === 'running')
   return {
     define,
-    plan: [!feature ? SKIPPED : planned, !feature ? `Not needed for ${sized}` : !gate.plan ? (active === 'plan' || turn.running === 'plan' ? 'The agent is making the plan' : strict && gate.holds?.plan ? 'Starts once you approve the requirements' : `Needs a plan${press(off, turn.ran.has('plan'))}`) : gate.approved === false ? (turn.running === 'tasks' ? `${name(gate.plan)} · the agent is writing the tasks` : turn.busy ? 'The agent is still working on the plan' : `${name(gate.plan)} · waiting for your approval`) : `${name(gate.plan)} · approved · research ${gate.research ? 'done' : 'skipped'}`],
+    plan: [!feature ? SKIPPED : planned, !feature ? `Not needed for ${sized}` : !gate.plan ? (active === 'plan' || turn.running === 'plan' ? 'The agent is making the plan' : strict && gate.holds?.plan ? 'Starts once you approve the requirements' : `Needs a plan${press(off, turn.ran.has('plan'))}`) : gate.approved === false ? (turn.busy ? 'The agent is still working on the plan' : `${name(gate.plan)} · waiting for your approval`) : `${name(gate.plan)} · approved · research ${gate.research ? 'done' : 'skipped'}`],
     implement: [!wait, `${at}${dirty ? local : wait && gate.head ? ` · ${wait}` : started === 'nobase' ? " · no base branch, so the page can't tell this branch's commits" : ''}`],
     verify: [verified ? (dirty ? OUTDATED : !wait) : false, !verified ? `${count(reviewers.filter(r => OK.includes(r.state)).length, reviewers.length, 'passes', 'pass')}${!wait ? '' : running ? `. Reviews are running before Implement is done: ${wait}${dirty ? ", so they won't count" : ''}` : `. Reviews start once Implement is done: ${wait}`}` : dirty ? `${passed}, but ${pending?.complete ? "uncommitted files aren't reviewed" : "the gate couldn't check for uncommitted files"}` : wait ? `${passed}, but Implement isn't done: ${wait}` : passed],
     deliver: pushed ? [true, `Pushed ${shortSha(gate.head)}${gate.branch ? ` to ${gate.branch}` : ''}`] : [!!gate.allowed, gate.allowed ? 'The gate has what it needs for this commit: Push sends it, once the sandbox check holds' : 'Push held until it has:'],
@@ -88,7 +88,7 @@ export function paintPath(root: HTMLElement, gate: GateEvent | null, started: St
   const all = stages(gate, started, active, off, turn, pushed)
   const typed = gate?.types?.find(t => t.id === gate.workType)
   if (typed && !typed.builtin) {
-    const kinds: Record<string, string[]> = { define: ['define'], plan: ['plan', 'tasks'], implement: ['implement'], verify: ['review'], deliver: ['deliver'] }
+    const kinds: Record<string, string[]> = { define: ['define'], plan: ['plan'], implement: ['implement'], verify: ['review'], deliver: ['deliver'] }
     for (const [stage, wants] of Object.entries(kinds)) {
       const got = all[stage]
       if (!wants.some(k => typed.steps.includes(k)) || got?.[0] === SKIPPED) all[stage] = [SKIPPED, `Not part of ${visible(typed.name)}`]
@@ -110,14 +110,14 @@ export function paintPath(root: HTMLElement, gate: GateEvent | null, started: St
     li.className = done === SKIPPED ? 'skipped' : done === OUTDATED ? 'outdated' : done ? 'done' : now ? 'current' : ''
     const unchecked = stage === 'implement' && !!gate?.uncommitted && !gate.uncommitted.complete
     li.classList.toggle('unchecked', unchecked)
-    const ring = active === 'verify' ? stage === 'verify' : active === 'define' || active === 'plan' || active === 'tasks' ? stage === (active === 'tasks' ? 'plan' : active) && !done : active === 'work' && now && stage !== 'define' && stage !== 'plan'
+    const ring = active === 'verify' ? stage === 'verify' : active === 'define' || active === 'plan' ? stage === active && !done : active === 'work' && now && stage !== 'define' && stage !== 'plan'
     li.classList.toggle('active', !unchecked && ring)
     li.querySelector('.stage-detail')!.textContent = detail
     const complete = !!done && done !== OUTDATED
-    const running = turn.running === stage || (stage === 'plan' && turn.running === 'tasks')
+    const running = turn.running === stage
     if (stage === 'define' || stage === 'plan') {
       const word = turn.ran.has(stage) ? 'Continue' : 'Start'
-      for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage:not(#tasks-start)')) {
+      for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) {
         b.hidden = complete || running || produced(stage, gate)
         if (b.textContent !== word) b.textContent = word
       }

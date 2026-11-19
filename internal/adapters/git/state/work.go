@@ -52,7 +52,6 @@ type workApprovalJSON struct {
 
 type sessionWorkJSON struct {
 	Repo         string              `json:"repo"`
-	Claude       bool                `json:"claude"`
 	Type         string              `json:"type"`
 	Chosen       bool                `json:"chosen"`
 	Requirements *workApprovalJSON   `json:"requirements,omitempty"`
@@ -180,7 +179,7 @@ func (s Work) Save(st session.WorkState) error {
 	if len(st.Sessions) > 0 {
 		f.Sessions = map[string]sessionWorkJSON{}
 		for sid, w := range st.Sessions {
-			f.Sessions[sid] = sessionWorkJSON{Owner: owner, Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen,
+			f.Sessions[sid] = sessionWorkJSON{Owner: owner, Repo: w.Repo, Type: w.Type, Chosen: w.Chosen,
 				Requirements: approvalJSONOf(w.Requirements), Plan: approvalJSONOf(w.Plan), Allowed: w.Allowed, Lock: testLockJSONOf(w.Lock)}
 		}
 	}

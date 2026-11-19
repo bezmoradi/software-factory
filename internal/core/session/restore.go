@@ -167,7 +167,7 @@ func (d *Dispatcher) Restore() int {
 			d.mu.Lock()
 			r := d.runs[sid]
 			d.mu.Unlock()
-			d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
+			d.cfg.Work.Begin(sid, r.repo, r.typ)
 		}
 	}
 	if d.cfg.Reviews != nil {

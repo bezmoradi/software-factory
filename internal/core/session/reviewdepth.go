@@ -122,7 +122,7 @@ func (w *Work) ReviewDepth(path string) (DepthView, error) {
 		return DepthView{}, err
 	}
 	d := w.depthOf(r.Name)
-	setup := w.setupFor(r.Name, true)
+	setup := w.setupFor(r.Name)
 	kind, ok := typeIn(setup.setup.Types, w.defaultType(setup.setup))
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)

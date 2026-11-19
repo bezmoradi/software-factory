@@ -297,7 +297,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	}
 	repo := repos[i]
 	if d.cfg.Work != nil {
-		if err := d.cfg.Work.Check(repo.Name, spec.Knackpack, q.Type); err != nil {
+		if err := d.cfg.Work.Check(repo.Name, q.Type); err != nil {
 			return Started{}, err
 		}
 	}
@@ -402,7 +402,7 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 		*kept = d.holdForAnswer(r, q, err)
 	}
 	if d.cfg.Work != nil && r.sid != "" && d.hasRun(r.sid) {
-		d.cfg.Work.Begin(r.sid, r.repo, r.spec.Knackpack, r.typ)
+		d.cfg.Work.Begin(r.sid, r.repo, r.typ)
 	}
 	d.startedWork(r, err)
 	d.offerDecisions(r, err)
@@ -912,7 +912,7 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 	}
 	d.homeStarted(r)
 	if d.cfg.Work != nil && !d.cfg.Work.Has(sid) {
-		d.cfg.Work.Begin(sid, r.repo, r.spec.Knackpack, r.typ)
+		d.cfg.Work.Begin(sid, r.repo, r.typ)
 	}
 	if r.spec.Method == MethodPlugin {
 		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})

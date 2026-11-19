@@ -82,10 +82,10 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	team := &Team{Roles: map[review.Role]string{}}
 	if v, ok := root.values["adapter"]; ok {
-		if s, _ := asString(v); s == string(Knackpack) || s == string(SpecKit) {
-			team.Adapter = AdapterID(s)
+		if s, _ := asString(v); s == string(Knackpack) {
+			team.Adapter = Knackpack
 		} else {
-			say("\"adapter\" must be \"knackpack\" or \"spec-kit\"")
+			say("\"adapter\" must be \"knackpack\", the only workflow the software factory has")
 		}
 	}
 	parseWorkTypes(root, team, &out)
@@ -208,7 +208,7 @@ func parseWorkTypes(root *object, team *Team, out *[]string) {
 			}
 		}
 		w := WorkType{ID: id, Name: name, Steps: steps, Edits: Edits(edits), Push: push, Roles: roles}
-		*out = append(*out, TypeProblems(w, team.Adapter)...)
+		*out = append(*out, TypeProblems(w)...)
 		team.WorkTypes = append(team.WorkTypes, w)
 	}
 }

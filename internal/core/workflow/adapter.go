@@ -4,10 +4,7 @@ import "github.com/bezmoradi/software-factory/internal/core/review"
 
 type AdapterID string
 
-const (
-	Knackpack AdapterID = "knackpack"
-	SpecKit   AdapterID = "spec-kit"
-)
+const Knackpack AdapterID = "knackpack"
 
 type Adapter struct {
 	Commands      map[Step]string
@@ -21,9 +18,7 @@ type Adapter struct {
 type Documents struct {
 	Feature      string
 	Requirements string
-	Research     string
 	Plan         string
-	Tasks        string
 }
 
 var defaultAgents = map[review.Role]string{review.BugHunter: "knackpack:adversarial-reviewer", review.Simplicity: "knackpack:slop-reviewer"}
@@ -39,16 +34,5 @@ var Adapters = map[AdapterID]Adapter{
 		RootArtifacts: map[Step][]string{Define: {KnackpackFeature}, Plan: {KnackpackFeature}},
 		AnyFolder:     ".knackpack/*",
 		Documents:     Documents{Feature: KnackpackFeature, Requirements: "REQUIREMENTS.md", Plan: "PLAN.md"},
-	},
-	SpecKit: {
-		Commands: map[Step]string{Define: "/speckit-specify", Plan: "/speckit-plan", Tasks: "/speckit-tasks", Implement: "/speckit-implement"},
-		Agents:   defaultAgents,
-		Artifacts: map[Step][]string{
-			Define: {"spec.md", "checklists/**"},
-			Plan:   {"plan.md", "research.md", "data-model.md", "quickstart.md", "contracts/**"},
-			Tasks:  {"tasks.md"},
-		},
-		RootArtifacts: map[Step][]string{Define: {".specify/feature.json"}},
-		Documents:     Documents{Feature: ".specify/feature.json", Requirements: "spec.md", Research: "research.md", Plan: "plan.md", Tasks: "tasks.md"},
 	},
 }

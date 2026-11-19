@@ -888,7 +888,7 @@ export interface GateEvent {
   requirements?: WorkflowDoc | null
   implemented?: boolean
   waiting?: string
-  holds?: { define: string; plan: string; tasks?: string; reviewer?: string; approveRequirements?: string; approvePlan?: string; ignore?: string }
+  holds?: { define: string; plan: string; reviewer?: string; approveRequirements?: string; approvePlan?: string; ignore?: string }
   flagged?: FlaggedFile[]
   flagsRead?: boolean
   lfs?: string[]
@@ -900,9 +900,7 @@ export interface GateEvent {
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }
-  commands?: { define?: string; plan?: string; tasks?: string; implement?: string }
-  tasks?: boolean
-  tasksWritten?: boolean
+  commands?: { define?: string; plan?: string }
   rounds?: number
   committed?: boolean
 }

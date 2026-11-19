@@ -31,7 +31,6 @@ var (
 		{"SF_SANDBOX_CHECK", oneOf("on", "off")},
 		{"SF_UMASK", octalUmask},
 		{"SF_DEV_SKIP_SIGNIN", oneOf("1")},
-		{"SF_DEV_KNACKPACK_DOCS", oneOf("repo")},
 		{"SF_DEV_STATE_VERSION", oneOf("2")},
 		{"SF_DEV_AUDIT_ROTATE", numberWithin(1024, 32<<20)},
 		{devReviewMinutes, numberWithin(1, 19)},

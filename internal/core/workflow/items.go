@@ -1,9 +1,5 @@
 package workflow
 
-import (
-	"slices"
-)
-
 type Flag struct {
 	Path    string
 	Why     string
@@ -22,7 +18,6 @@ type Progress struct {
 	ReqOk           bool
 	ReqWasApproved  bool
 	PlanFile        string
-	TasksWritten    bool
 	PlanOk          bool
 	PlanWasApproved bool
 	PlanBase        string
@@ -78,12 +73,6 @@ func Items(p Progress) ([]string, bool) {
 			from = "the Plan step"
 		}
 		say("a plan from " + from + ", which only the developer can start")
-	case feature && slices.Contains(p.Effective.Steps, Tasks) && !p.TasksWritten:
-		from := commands[Tasks]
-		if from == "" {
-			from = "the Tasks step"
-		}
-		say("tasks from " + from + ", written beside the plan")
 	case feature && !p.PlanOk:
 		switch {
 		case p.PlanWasApproved:

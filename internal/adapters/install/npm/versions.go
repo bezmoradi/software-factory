@@ -48,15 +48,13 @@ const (
 )
 
 type Plugin struct {
-	ID       string
-	Name     string
-	Version  string
-	URL      string
-	Commit   string
-	Manifest string
+	ID      string
+	Name    string
+	Version string
+	URL     string
+	Commit  string
 }
 
 var PinnedPlugins = []Plugin{
 	{ID: "knackpack", Name: "knackpack", Version: "0.26.0", URL: "https://github.com/bezmoradi/knackpack.git", Commit: "7a501d3f1296f632b4cbd7ab825174c1e48daf93"},
-	{ID: "spec-kit", Name: "specify-cli", Version: "1.4.0", URL: "https://github.com/github/spec-kit.git", Commit: "0019fa14d12f45edabc2cc3176c9168a68bd0f97", Manifest: PyProject},
 }

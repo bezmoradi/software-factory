@@ -82,7 +82,7 @@ EXCEPTION.assign = 'Assigned to the token\'s user'
 EXCEPTION.away = 'Away mode'
 const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
 const HIDDEN_RESULTS = ['sending', 'posting']
-const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
+const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
 
 
 const COMMIT_ASK = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore. Each commit message says what changed and why."
@@ -345,11 +345,11 @@ function paint() {
     if (inTurn(s)) for (const k of [...stepping.keys()]) if (k.startsWith(`${s.sid}:`)) stepping.delete(k)
     for (const b of byId('path').querySelectorAll<HTMLButtonElement>('button.stage')) {
       const stage = b.closest<HTMLElement>('li[data-stage]')?.dataset.stage
-      const step = b.id === 'tasks-start' ? 'tasks' : stage === 'define' || stage === 'plan' ? stage : ''
+      const step = stage === 'define' || stage === 'plan' ? stage : ''
       const hold = step && s.gate?.holds ? (s.gate.holds[step] ?? '') : ''
       b.setAttribute('aria-disabled', String(!!off || !!hold || b.getAttribute('aria-busy') === 'true'))
       if (off) b.setAttribute('aria-describedby', 'path-busy')
-      else if (hold) b.setAttribute('aria-describedby', `${step === 'tasks' ? 'plan' : step}-detail`)
+      else if (hold) b.setAttribute('aria-describedby', `${step}-detail`)
       else b.removeAttribute('aria-describedby')
     }
     if (byId('path-busy').textContent !== off) byId('path-busy').textContent = off
@@ -658,7 +658,7 @@ function paintChecks(s: Session) {
   }
   const typeNow = gate?.workType ?? gate?.size
   if (typeNow && !focused && [...size.options].some(o => o.value === typeNow)) size.value = typeNow
-  paintAdapter(gate, turn)
+  paintAdapter(gate)
   paintTeam(s, gate)
   size.disabled = disabled || !gate
   byId('size-note').textContent = gate?.sizeNote ?? ''
@@ -702,22 +702,13 @@ async function loadGate(s: Session, force = false) {
 let teamShown: TeamView | null = null
 let teamFor = ''
 
-function paintAdapter(gate: GateEvent | null, turn: Turn) {
+function paintAdapter(gate: GateEvent | null) {
   const c = gate?.commands
   for (const [stage, command] of [['define', c?.define], ['plan', c?.plan]] as const) {
     const b = document.querySelector<HTMLButtonElement>(`#path li[data-stage="${stage}"] > div > button.stage`)
     if (!b || !command) continue
     b.dataset.command = command
     b.title = `Sends ${command} to this session`
-  }
-  const tasks = byId<HTMLButtonElement>('tasks-start')
-  const steps = gate?.types?.find(t => t.id === gate.workType)?.steps ?? []
-  tasks.hidden = !c?.tasks || !steps.includes('tasks') || gate?.effective !== 'feature' || !gate.plan || gate.approved === true || !!gate.tasksWritten || turn.running === 'tasks'
-  const word = turn.ran.has('tasks') ? 'Continue tasks' : 'Tasks'
-  if (tasks.textContent !== word) tasks.textContent = word
-  if (c?.tasks) {
-    tasks.dataset.command = c.tasks
-    tasks.title = `Sends ${c.tasks} to this session`
   }
 }
 
@@ -726,7 +717,7 @@ function setupLines(v: TeamView): HTMLElement[] {
   if (!setup) return []
   const own = setup.types.filter(t => !t.builtin)
   const items = [
-    `Workflow: ${setup.adapter === 'spec-kit' ? 'GitHub Spec Kit' : setup.adapter === 'knackpack' ? 'knackpack' : 'the built-in steps'}`,
+    `Workflow: ${setup.adapter === 'knackpack' ? 'knackpack' : 'the built-in steps'}`,
     `Bug hunter: ${visible(setup.roles['bug-hunter'] ?? '')}; simplicity checker: ${visible(setup.roles.simplicity ?? '')}`,
     ...own.map(t => `Work type ${visible(t.name)}: ${t.steps.join(', ')}; ${t.push ? 'pushes' : "doesn't push"}; edits ${t.edits}${t.roles.length ? `; needs ${t.roles.join(' and ')}` : ''}`),
     ...(setup.defaultType ? [`Default work type: ${visible(setup.defaultType)}`] : []),

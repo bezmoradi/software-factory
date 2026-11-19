@@ -79,13 +79,9 @@ func agentVersions(agent string) (string, string) {
 			version = a.Version
 		}
 	}
-	workflow := "spec-kit"
-	if agent == "claude" {
-		workflow = "knackpack"
-	}
 	commit := ""
 	for _, pl := range npm.PinnedPlugins {
-		if pl.ID == workflow {
+		if pl.ID == "knackpack" {
 			commit = pl.Commit
 		}
 	}

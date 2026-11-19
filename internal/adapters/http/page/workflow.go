@@ -82,8 +82,6 @@ type gateJSON struct {
 	PlanHash     string             `json:"planHash"`
 	Approved     bool               `json:"approved"`
 	Research     string             `json:"research"`
-	Tasks        bool               `json:"tasks"`
-	TasksWritten bool               `json:"tasksWritten"`
 	Define       bool               `json:"define"`
 	Reviewers    []gateReviewerJSON `json:"reviewers"`
 	Missing      []string           `json:"missing"`
@@ -196,7 +194,7 @@ func gateOf(v session.GateView) gateJSON {
 	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(profileSize(v)), WorkType: v.Type, Chosen: v.Chosen,
 		Effective: string(v.Effective), SizeNote: v.Note, Types: typesJSON(v.Types), Commands: map[string]string{},
 		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
-		Research: v.Research, Tasks: v.TasksNeeded, TasksWritten: v.TasksWritten, Define: v.Define, Reviewers: []gateReviewerJSON{},
+		Research: v.Research, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
 		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
 		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change)}

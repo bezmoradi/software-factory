@@ -140,11 +140,7 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 	}
 	if g.planOk {
 		if g.docs.held && g.docs.plan != nil && !g.docs.plan.Clipped {
-			from := "as the engine read it from commit " + g.docs.plan.Commit
-			if slices.Contains(g.chosen.Steps, workflow.Tasks) && g.docs.tasks {
-				from += ", with the tasks after it, as the page showed it for approval"
-			}
-			add("plan", approvedName(names.Plan, "plan.md"), from, g.docs.plan.Text)
+			add("plan", approvedName(names.Plan, "plan.md"), "as the engine read it from commit "+g.docs.plan.Commit, g.docs.plan.Text)
 		} else {
 			unkept("plan", ws.plan)
 		}

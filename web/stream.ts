@@ -93,8 +93,8 @@ async function restarted(): Promise<boolean> {
 }
 
 function stepOf(text: string): Step {
-  const skill = /^\s*(?:<command-name>\s*)?\/?(?:knackpack:(challenge-requirements|plan-implementation)|speckit-(specify|plan|tasks))\b/.exec(text)
-  return skill?.[1] === 'challenge-requirements' || skill?.[2] === 'specify' ? 'define' : skill?.[1] === 'plan-implementation' || skill?.[2] === 'plan' ? 'plan' : skill?.[2] === 'tasks' ? 'tasks' : ''
+  const skill = /^\s*(?:<command-name>\s*)?\/?knackpack:(challenge-requirements|plan-implementation)\b/.exec(text)
+  return skill?.[1] === 'challenge-requirements' ? 'define' : skill?.[1] === 'plan-implementation' ? 'plan' : ''
 }
 
 export function ensure(sid: string): Session {

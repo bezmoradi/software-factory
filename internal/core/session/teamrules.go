@@ -36,9 +36,9 @@ func instructionProblems(team *workflow.Team) []string {
 func (w *Work) sessionSetup(sid, name string) workflow.Setup {
 	ws, ok := w.session(sid)
 	if !ok {
-		ws = workSession{repo: name, claude: true}
+		ws = workSession{repo: name}
 	}
-	return w.setupFor(ws.repo, ws.claude).setup
+	return w.setupFor(ws.repo).setup
 }
 
 func (w *Work) TeamRulesFor(ctx context.Context, sid string, t PushTarget, base, head string) (TeamRules, error) {

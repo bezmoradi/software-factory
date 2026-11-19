@@ -5,46 +5,11 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 const KnackpackFeature = ".knackpack/feature.json"
 
-var (
-	knackpackDir = regexp.MustCompile(`^\.knackpack/[a-z0-9][a-z0-9-]{0,63}$`)
-	specDir      = regexp.MustCompile(`^specs/[\w.-]{1,100}$`)
-	specInDiff   = regexp.MustCompile(`^(specs/[\w.-]{1,100})/spec\.md$`)
-	featureKeys  = []string{"feature_directory", "featureDirectory", "feature_dir", "directory", "path"}
-)
-
-func SpecFeatureDir(featureJSON []byte, changed []string) string {
-	if len(featureJSON) > 0 && len(featureJSON) <= 65536 {
-		var v map[string]any
-		if json.Unmarshal(featureJSON, &v) == nil {
-			for _, k := range featureKeys {
-				s, ok := v[k].(string)
-				if !ok {
-					continue
-				}
-				s = strings.TrimSuffix(strings.TrimPrefix(s, "./"), "/")
-				if specDir.MatchString(s) {
-					return s
-				}
-				break
-			}
-		}
-	}
-	var found []string
-	for _, p := range changed {
-		if m := specInDiff.FindStringSubmatch(p); m != nil && !slices.Contains(found, m[1]) {
-			found = append(found, m[1])
-		}
-	}
-	if len(found) == 1 {
-		return found[0]
-	}
-	return ""
-}
+var knackpackDir = regexp.MustCompile(`^\.knackpack/[a-z0-9][a-z0-9-]{0,63}$`)
 
 func KnackpackFeatureDir(featureJSON []byte) string {
 	if len(featureJSON) == 0 || len(featureJSON) > 65536 {
