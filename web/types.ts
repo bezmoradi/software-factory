@@ -59,21 +59,10 @@ export interface SplitCard {
   secretAt?: string
 }
 
-export interface Stint {
-  agent: string
-  sid: string
-  name?: string
-  from: string
-  to: string
-}
-
 export interface Lineage {
   branch: string
   origin?: string
   from: string
-  earlier: Stint[]
-  handedTo?: string
-  last?: string
   group?: string
   groupKind?: 'pair' | 'goal'
 }
@@ -777,12 +766,6 @@ export interface ToolEvent extends Stamped {
   agentName?: string
 }
 
-export interface NoticeEvent extends Stamped {
-  type: 'notice'
-  text: string
-  reported?: boolean
-}
-
 export interface ToolDoneEvent extends Stamped {
   type: 'tool_done'
   id: string
@@ -1118,7 +1101,6 @@ export type SessionEvent =
   | UsageEvent
   | CompactEvent
   | AuditEvent
-  | NoticeEvent
 
 export interface RepoEvent {
   type: 'repo'
@@ -1215,7 +1197,6 @@ declare global {
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-pair': CustomEvent<PairDispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
-    'sf-handover': CustomEvent<{ sid: string; agent: string }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event

@@ -321,7 +321,7 @@ class SfPermission extends HTMLElement {
         choices.append(switching)
       }
     }
-    const name = who === 'Claude' || who === 'Codex' ? who : 'the agent'
+    const name = who === 'Claude' ? who : 'the agent'
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: `What should ${name} do instead? Optional`, label: `What ${name} should do instead`, send: 'Deny', maxLength: 2000, toggle: `No, and tell ${name} what to do differently` })).ready()
     note.onSend = text => reply(this, id, text ? { choice: 'no', note: text } : { choice: 'no' }, note.send)
     choices.append(note.toggle!)

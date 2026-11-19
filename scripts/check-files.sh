@@ -23,7 +23,7 @@ grep -nE '<script>|<script [^>]*>[^<]|<style|[[:space:]]style=|[[:space:]]on[a-z
 grep -E '\.(go|ts)$' "$tmp/list" | grep -v '^dev/' >"$tmp/code"
 while IFS= read -r f; do
 	grep -nE 'credentials\.json|find-generic-password|[Kk]eychain|setup-token|oauth/token' "$f" | sed "s|^|$f:|; s|$|: code that names a credential store, which no code reads|"
-	grep -nE 'Getenv\("(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|OPENAI_API_KEY|CODEX_API_KEY)"' "$f" | sed "s|^|$f:|; s|$|: code that reads a model key variable|"
+	grep -nE '(Getenv|LookupEnv)\("[A-Z0-9_]*(API_?KEY|AUTH_TOKEN|OAUTH_TOKEN)"' "$f" | sed "s|^|$f:|; s|$|: code that reads a model key variable|"
 	grep -nE 'exec\.Command(Context)?\((ctx, )?"git"' "$f" | sed "s|^|$f:|; s|$|: code that runs git, which runs the repository's own configuration|"
 	case "$f" in
 	web/*.ts | plugin/*.ts) grep -nE 'innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function\(' "$f" | sed "s|^|$f:|; s|$|: HTML or code built from strings|" ;;

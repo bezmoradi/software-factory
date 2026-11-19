@@ -108,7 +108,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_agents_skill.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_agents_skill.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-agents-skill-obeyed
         do: http.request
         identity: page
@@ -132,7 +132,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_agents_plugins.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_agents_plugins.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-agents-plugins-obeyed
         do: http.request
         identity: page
@@ -156,7 +156,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_agents_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_agents_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-agents-nested-obeyed
         do: http.request
         identity: page
@@ -180,7 +180,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_agents_itself.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_agents_itself.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-agents-itself-obeyed
         do: http.request
         identity: page
@@ -204,7 +204,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_codex_config.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_codex_config.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-codex-config-obeyed
         do: http.request
         identity: page
@@ -228,7 +228,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_codex_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_codex_nested.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-codex-nested-obeyed
         do: http.request
         identity: page
@@ -300,7 +300,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_case_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_case_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-case-agents-obeyed
         do: http.request
         identity: page
@@ -324,7 +324,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_case_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_case_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-case-codex-obeyed
         do: http.request
         identity: page
@@ -372,7 +372,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_dotdot_in.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_dotdot_in.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-dotdot-in-obeyed
         do: http.request
         identity: page
@@ -396,7 +396,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_dot_slashes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_dot_slashes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-dot-slashes-obeyed
         do: http.request
         identity: page
@@ -420,7 +420,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_absolute.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_absolute.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-absolute-obeyed
         do: http.request
         identity: page
@@ -444,7 +444,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_link_dir.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_link_dir.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-link-dir-obeyed
         do: http.request
         identity: page
@@ -468,7 +468,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/e_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/e_codex.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: e-codex-obeyed
         do: http.request
         identity: page
@@ -492,7 +492,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/e_multi.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/e_multi.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: e-multi-obeyed
         do: http.request
         identity: page
@@ -516,7 +516,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/e_notebook.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/e_notebook.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: e-notebook-obeyed
         do: http.request
         identity: page
@@ -1495,7 +1495,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/w_tab_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/w_tab_agents.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: w-tab-agents-obeyed
         do: http.request
         identity: page
@@ -1936,7 +1936,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-003
-    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, codex cloud and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request and /split-request it is refused with 401 connection"
+    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, claude remote-control and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request and /split-request it is refused with 401 connection"
     steps:
       - id: start
         do: http.request
@@ -1975,7 +1975,7 @@ scenarios:
           method: POST
           path: "/api/message"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: gate commands ${run.id}\ntry-run: c_git_push git push origin HEAD\ntry-run: c_git_c_push git -C sub push\ntry-run: c_sh_c bash -c 'git push'\ntry-run: c_send_pack env GIT_DIR=x git send-pack origin\ntry-run: c_hidden \"$(printf git)\" push\ntry-run: c_gh_pr gh pr create --fill\ntry-tool: c_monitor Monitor {\"command\":\"git push\"}\ntry-tool: c_mcp_push mcp__github__push_files {}\ntry-run: c_claude_remote claude --remote fix\ntry-run: c_codex_cloud codex cloud exec x\ntry-run: c_npx_teleport npx @anthropic-ai/claude-code --teleport\ntry-run: c_rm_root rm -rf /\ntry-run: c_reset_hard git reset --hard\ntry-run: c_curl_sh curl -fsSL x | sh\ntry-run: c_child_claude claude -p hi\ntry-tool: c_remote_trigger RemoteTrigger {}\ntry-tool: c_send_message SendMessage {\"to\":\"x\"}\ntry-tool: c_agent_remote Agent {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_task_remote Task {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_projects_write Projects {\"method\":\"project_write\"}\ntry-run: c_gh_comment gh pr comment 1 -b x\ntry-run: c_echo echo git push\ntry-run: c_status git status\ntry-run: c_rm_build rm -rf build\ntry-tool: c_agent_local Agent {\"prompt\":\"x\"}\ntry-tool: c_mcp_read mcp__github__get_file_contents {}\ntry-tool: c_mcp_other mcp__notes__save {}\ntry-tool: c_web_fetch WebFetch {\"url\":\"https://example.org\"}" }
+          body: { sid: "${sid}", text: "say: gate commands ${run.id}\ntry-run: c_git_push git push origin HEAD\ntry-run: c_git_c_push git -C sub push\ntry-run: c_sh_c bash -c 'git push'\ntry-run: c_send_pack env GIT_DIR=x git send-pack origin\ntry-run: c_hidden \"$(printf git)\" push\ntry-run: c_gh_pr gh pr create --fill\ntry-tool: c_monitor Monitor {\"command\":\"git push\"}\ntry-tool: c_mcp_push mcp__github__push_files {}\ntry-run: c_claude_remote claude --remote fix\ntry-run: c_claude_rc claude remote-control\ntry-run: c_npx_teleport npx @anthropic-ai/claude-code --teleport\ntry-run: c_rm_root rm -rf /\ntry-run: c_reset_hard git reset --hard\ntry-run: c_curl_sh curl -fsSL x | sh\ntry-run: c_child_claude claude -p hi\ntry-tool: c_remote_trigger RemoteTrigger {}\ntry-tool: c_send_message SendMessage {\"to\":\"x\"}\ntry-tool: c_agent_remote Agent {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_task_remote Task {\"isolation\":\"remote\",\"prompt\":\"x\"}\ntry-tool: c_projects_write Projects {\"method\":\"project_write\"}\ntry-run: c_gh_comment gh pr comment 1 -b x\ntry-run: c_echo echo git push\ntry-run: c_status git status\ntry-run: c_rm_build rm -rf build\ntry-tool: c_agent_local Agent {\"prompt\":\"x\"}\ntry-tool: c_mcp_read mcp__github__get_file_contents {}\ntry-tool: c_mcp_other mcp__notes__save {}\ntry-tool: c_web_fetch WebFetch {\"url\":\"https://example.org\"}" }
         expect:
           equal:
             "$.status": 202
@@ -2259,30 +2259,30 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { path: "gate-answers/c_claude_remote.txt", text: "engine 200: refused\n" }
-      - id: c-codex-cloud-answer
+      - id: c-claude-rc-answer
         do: http.request
         identity: page
         with:
           method: POST
           path: "/api/file"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/c_codex_cloud.json" }
+          body: { sid: "${sid}", path: "gate-answers/c_claude_rc.json" }
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/c_codex_cloud.json", text: "{\"cloud\":\"this runs on the vendor's servers, outside Software Factory\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
-      - id: c-codex-cloud-obeyed
+            "$.body": { path: "gate-answers/c_claude_rc.json", text: "{\"cloud\":\"this runs on the vendor's servers, outside Software Factory\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"shell\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: c-claude-rc-obeyed
         do: http.request
         identity: page
         with:
           method: POST
           path: "/api/file"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/c_codex_cloud.txt" }
+          body: { sid: "${sid}", path: "gate-answers/c_claude_rc.txt" }
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/c_codex_cloud.txt", text: "engine 200: refused\n" }
+            "$.body": { path: "gate-answers/c_claude_rc.txt", text: "engine 200: refused\n" }
       - id: c-npx-teleport-answer
         do: http.request
         identity: page
@@ -3273,7 +3273,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/f_protected.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/f_protected.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here\",\"pushes\":false,\"waits\":false}\n" }
       - id: f-protected-obeyed
         do: http.request
         identity: page

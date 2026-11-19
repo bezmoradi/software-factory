@@ -47,7 +47,7 @@ class SfProjectCommands extends HTMLElement {
     this.replaceChildren(
       el('h3', 'label', 'Check and setup commands'),
       el('p', 'small muted', 'Both run in the agent container, in the session\'s own worktree, as the agents\' user, with the model keys cleared. They are what you type here, never anything read from the repository. Empty is off.'),
-      field('Check command', this.#check, 'Runs when the agent ends a turn, for at most 5 minutes. When it fails, Claude Code gets the end of its output and one more try in the same turn; Codex gets it as a note with your next message. The result shows on the session and never counts for a review or a push.'),
+      field('Check command', this.#check, 'Runs when the agent ends a turn, for at most 5 minutes. When it fails, Claude Code gets the end of its output and one more try in the same turn; the development ACP agent gets it as a note with your next message. The result shows on the session and never counts for a review or a push.'),
       field('Setup command', this.#setup, 'Runs once in each new session\'s worktree, for at most 15 minutes, after you approve the start-up card, never before it and never when it is refused. Messages you send while it runs wait in the session\'s queue. Its output shows on the session.'),
       this.#save,
       this.#said,

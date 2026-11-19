@@ -2,7 +2,6 @@ version: 1
 dimensions:
   post_routes:
     - "/api/add-repo"
-    - "/api/agent-models"
     - "/api/agent-report"
     - "/api/allow-commit"
     - "/api/allow-file"
@@ -38,7 +37,6 @@ dimensions:
     - "/api/gate"
     - "/api/halt"
     - "/api/handoff"
-    - "/api/handover"
     - "/api/import"
     - "/api/interrupt"
     - "/api/issues"

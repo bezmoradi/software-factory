@@ -300,10 +300,14 @@ func (d *Dispatcher) historyOnly(sid string) error {
 	d.mu.Lock()
 	r := d.runs[sid]
 	history := r != nil && r.history
+	doubled := r != nil && r.doubled
 	old := r != nil && !r.history && r.box == ""
 	d.mu.Unlock()
 	if history {
 		return explained(conflict("history only"), historyMessage)
+	}
+	if doubled {
+		return explained(conflict("branch held"), doubledMessage)
 	}
 	if old {
 		return oldLayout()

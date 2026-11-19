@@ -262,9 +262,11 @@ func (d *Dispatcher) waitStartGap(ctx context.Context) error {
 func checkAgents(list []PairAgent, bench bool, double bool) error {
 	switch {
 	case len(list) < 1 || len(list) > MaxPairAgents:
-		return explained(invalid("agents"), "Start one agent on a merged pull request, or two agents on one task.")
+		return explained(invalid("agents"), "Start one session on a merged pull request, or two sessions on one task.")
 	case len(list) == 1 && !bench:
-		return explained(invalid("agents"), "Start with both needs two agents, or two models of one agent.")
+		return explained(invalid("agents"), "Start with both needs two sessions of one agent.")
+	case len(list) == 2 && list[0].Agent != list[1].Agent:
+		return explained(invalid("agents"), "Start with both runs two sessions of one agent; only their models can differ.")
 	case len(list) == 2 && !double:
 		return explained(conflict("double"), DoubleUsage+" Confirm it to start them.")
 	}

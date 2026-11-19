@@ -4,7 +4,6 @@ import { byId, pressed, visible, whileBusy } from './lib/dom.ts'
 import { agentWord, label } from './lib/format.ts'
 import { boxSignIn } from './components/login.ts'
 import { approveTrustFiles, askTrust, consentFor } from './components/consent.ts'
-import { agentName } from './components/lineage.ts'
 import type { Toast } from './components/toasts.ts'
 import type { Consent, Needs } from './types.ts'
 
@@ -13,7 +12,6 @@ type Reply = { ok: boolean; body: Record<string, unknown> }
 interface SessionActionsDeps {
   reply: (res: Response | null) => Promise<Reply>
   loadGate: (s: Session, force?: boolean) => Promise<void>
-  loadProjects: (force?: boolean) => Promise<void>
   starterNames: () => ReadonlyMap<string, string>
   identityAction: (body: Record<string, unknown>) => Toast['action']
   markCheckpoint: (sid: string, level: string) => void
@@ -35,7 +33,6 @@ export interface SessionActions {
   approve: (kind: 'requirements' | 'plan', hash: string) => Promise<void>
   wakeSession: (s: Session) => Promise<void>
   withConsent: (name: string, what: string, send: (c: Consent) => Promise<Response>, resumable?: boolean) => Promise<Reply>
-  handOver: (s: Session, agent: string) => Promise<void>
   bringMain: (s: Session) => Promise<void>
 }
 
@@ -146,7 +143,7 @@ export async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): P
   }
 }
 
-export function startSessionActions({ reply, loadGate, loadProjects, starterNames, identityAction, markCheckpoint, copy, forgetSession }: SessionActionsDeps): SessionActions {
+export function startSessionActions({ reply, loadGate, starterNames, identityAction, markCheckpoint, copy, forgetSession }: SessionActionsDeps): SessionActions {
   async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
     busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
     schedulePaint()
@@ -395,15 +392,6 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     return answer
   }
 
-  async function handOver(s: Session, agent: string) {
-    const name = agentName(agent)
-    if (!confirmed(`${s.sid}:handover:${agent}`, `Choose Continue with ${name} again to stop this session and go on with ${name} on the same branch, with the approvals you gave.`)) return
-    toast({ id: `handover:${s.sid}`, title: `Handing ${visible(label(s.info))} over to ${name}…`, description: 'The engine starts the other agent on the same branch in a container of its own, then stops this session and its container.', tone: 'info', timeout: 150000 })
-    const { ok, body } = await withConsent(name, 'the session', consent => api('/api/handover', { sid: s.sid, agent, ...consent }))
-    toast(ok ? { id: `handover:${s.sid}`, title: `${name} continues the branch.`, description: "It shows in the project's list when it connects; open it there to write its first message. The engine tells it where the branch stands.", tone: 'ok', timeout: 8000 } : { id: `handover:${s.sid}`, title: 'The branch wasn’t handed over.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0, action: identityAction(body) })
-    if (ok) void loadProjects(true)
-  }
-
   async function bringMain(s: Session) {
     toast({ id: `main:${s.sid}`, title: 'Fetching the latest main…', tone: 'info', timeout: 60000 })
     const { ok, body } = await reply(await api('/api/bring-main', { sid: s.sid }).catch(() => null))
@@ -411,5 +399,5 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     toast(ok ? { id: `main:${s.sid}`, title: `Main is now at ${commit} as origin/main in the clone.`, description: 'The engine asked the agent to merge it into its branch and resolve any conflicts.', tone: 'ok' } : { id: `main:${s.sid}`, title: 'The latest main wasn’t brought in.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0 })
   }
 
-  return { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain }
+  return { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain }
 }

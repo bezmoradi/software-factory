@@ -37,7 +37,6 @@ type gatewayJSON struct {
 
 type egressJSON struct {
 	Version int             `json:"version"`
-	Agents  []string        `json:"agents"`
 	Added   []addedHostJSON `json:"added"`
 	Gateway *gatewayJSON    `json:"gateway,omitempty"`
 }
@@ -62,20 +61,10 @@ func (s Egress) Load() (session.EgressSettings, bool, error) {
 		return session.EgressSettings{}, false, nil
 	}
 	var f egressJSON
-	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Agents) > 8 || len(f.Added) > session.MaxAddedHosts {
+	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 || len(f.Added) > session.MaxAddedHosts {
 		return session.EgressSettings{}, false, errEgressFile
 	}
 	var out session.EgressSettings
-	known := map[string]bool{}
-	for _, a := range session.AgentHostTable() {
-		known[a.ID] = true
-	}
-	for _, id := range f.Agents {
-		if !known[id] {
-			return session.EgressSettings{}, false, errEgressFile
-		}
-		out.Agents = append(out.Agents, id)
-	}
 	for _, h := range f.Added {
 		if session.HostName(h.Name) != h.Name || !session.ValidAllowEntry(h.Name) || h.Expires < 0 || h.AddedAt < 0 {
 			return session.EgressSettings{}, false, errEgressFile
@@ -106,10 +95,7 @@ func (s Egress) Load() (session.EgressSettings, bool, error) {
 func (s Egress) Save(e session.EgressSettings) error {
 	owner := ownerIn(s.Dir)
 	defer s.lock()()
-	f := egressJSON{Version: 1, Agents: e.Agents, Added: make([]addedHostJSON, 0, len(e.Added))}
-	if f.Agents == nil {
-		f.Agents = []string{}
-	}
+	f := egressJSON{Version: 1, Added: make([]addedHostJSON, 0, len(e.Added))}
 	for _, h := range e.Added {
 		j := addedHostJSON{Owner: owner, Name: h.Name, Reason: h.Reason}
 		if !h.AddedAt.IsZero() {

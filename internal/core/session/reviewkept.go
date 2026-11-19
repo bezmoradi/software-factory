@@ -3,9 +3,7 @@ package session
 import (
 	"cmp"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
@@ -29,8 +27,6 @@ type KeptBranch struct {
 	Branch  string
 	Rounds  int
 	Recheck bool
-	Since   time.Time
-	Earlier []string
 }
 
 func keptGivenOf(why string, g *RunGiven) KeptGiven {
@@ -64,16 +60,11 @@ func (r *Reviews) keepGiven(sid string, e ReviewEntry, g KeptGiven) {
 	}
 }
 
-func (r *Reviews) givenFor(sids []string, e ReviewEntry) (KeptGiven, bool) {
+func (r *Reviews) givenFor(sid string, e ReviewEntry) (KeptGiven, bool) {
 	if r.cfg.Replies == nil {
 		return KeptGiven{}, false
 	}
-	for _, sid := range sids {
-		if g, ok := r.cfg.Replies.GetGiven(sid, e.Key, e.StartedAt); ok {
-			return g, true
-		}
-	}
-	return KeptGiven{}, false
+	return r.cfg.Replies.GetGiven(sid, e.Key, e.StartedAt)
 }
 
 func (r *Reviews) uncheckedLocked(sid string, v ReviewView) ReviewView {
@@ -150,17 +141,11 @@ func (r *Reviews) savedView(sid string, b KeptBranch, entries map[review.Key]Rev
 		runs[k] = max(runs[k], e.Key.Number())
 	}
 	limit := roundLimit(b.Rounds)
-	before := map[review.Key]bool{}
 	for _, e := range mine {
 		q := workflow.Requirement{Agent: e.Key.Agent, Role: e.Role, Advisory: e.Record.Advisory}
 		role := finishedRole(q, r.withReply(sid, e), RoundOf(entries, b.Branch, e.Key.Agent, e.Record.Advisory).Count, limit)
 		role.Run, role.Runs, role.Advisory = e.Key.Number(), runs[runsOfRole{e.Key.Agent, e.Record.Advisory}], e.Record.Advisory
-		owners := []string{sid}
-		if !b.Since.IsZero() && e.StartedAt.Before(b.Since) {
-			before[e.Key] = true
-			owners = append(owners, b.Earlier...)
-		}
-		if g, ok := r.givenFor(owners, e); ok {
+		if g, ok := r.givenFor(sid, e); ok {
 			role.Why, role.Given = g.Why, g.Given
 		}
 		view.Roles = append(view.Roles, role)
@@ -171,34 +156,12 @@ func (r *Reviews) savedView(sid string, b KeptBranch, entries map[review.Key]Rev
 	slices.SortStableFunc(view.Roles, func(a, c RoleReview) int {
 		return cmp.Or(cmp.Compare(roleRank(a.Role), roleRank(c.Role)), cmp.Compare(rankOf(a.Advisory), rankOf(c.Advisory)), cmp.Compare(a.Agent, c.Agent), cmp.Compare(a.Run, c.Run))
 	})
-	view.Note = takenOverNote(view.Roles, b.Branch, view.Commit, before)
 	for _, e := range entries {
 		if e.Key.Branch == b.Branch {
 			view.SessionCostUSD += e.CostUSD
 		}
 	}
 	return view, true
-}
-
-func takenOverNote(roles []RoleReview, branch, commit string, before map[review.Key]bool) string {
-	if len(before) == 0 {
-		return ""
-	}
-	if len(before) == len(roles) {
-		return "Every review shown here ran before this session took the branch over from an earlier session."
-	}
-	var names []string
-	for _, role := range roles {
-		if !before[review.Key{Commit: commit, Branch: branch, Agent: role.Agent}.AtRun(role.Run)] {
-			continue
-		}
-		name := role.Name
-		if role.Runs > 1 {
-			name += ", run " + strconv.Itoa(role.Run) + " of " + strconv.Itoa(role.Runs)
-		}
-		names = append(names, name)
-	}
-	return "These reviews ran before this session took the branch over from an earlier session: " + strings.Join(names, "; ") + ". The others ran in this session."
 }
 
 func roleRank(role review.Role) int {

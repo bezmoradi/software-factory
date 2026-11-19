@@ -28,7 +28,6 @@ type AgentHosts struct {
 func AgentHostTable() []AgentHosts {
 	return []AgentHosts{
 		{ID: "claude", Name: "Claude Code", Hosts: []string{"api.anthropic.com", "claude.ai", "claude.com", "platform.claude.com"}},
-		{ID: "codex", Name: "Codex CLI", Hosts: []string{"api.openai.com", "auth.openai.com", "chatgpt.com"}},
 	}
 }
 

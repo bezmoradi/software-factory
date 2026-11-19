@@ -52,7 +52,7 @@ func reviewerMinimum(plugin string) review.Minimum {
 	return review.Minimum{ClaudeCode: npm.MinimumReviewerClaudeCode, Plugin: npm.MinimumReviewerKnackpack, Pinned: plugin}
 }
 
-var advisoryPackages = map[string]string{"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex"}
+var advisoryPackages = map[string]string{"claude": "@anthropic-ai/claude-code"}
 
 func advisoryQueries(getenv func(string) string, logger shared.Logger) []osv.Query {
 	var qs []osv.Query

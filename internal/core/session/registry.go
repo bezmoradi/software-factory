@@ -265,7 +265,7 @@ var forwarded = map[string]bool{
 	"prompt": true, "command": true, "text": true, "tool": true, "tool_done": true, "busy": true, "idle": true,
 	"ask": true, "permission": true, "plan": true, "resolved": true, "ended": true, "agents": true, "catalog": true,
 	"control": true, "mode": true, "login": true, "usage": true, "compact": true, "context": true,
-	"workflow": true, "notice": true,
+	"workflow": true,
 }
 
 func New(version string, now func() time.Time) *Registry {

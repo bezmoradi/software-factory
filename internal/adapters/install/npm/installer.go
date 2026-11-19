@@ -401,11 +401,7 @@ func (i *Installer) fetch(ctx context.Context, p Package, tmp string) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	folder := p.Folder
-	if folder == "" {
-		folder = p.Name
-	}
-	dest := filepath.Join(tmp, "node_modules", filepath.FromSlash(folder))
+	dest := filepath.Join(tmp, "node_modules", filepath.FromSlash(p.Name))
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}

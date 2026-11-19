@@ -37,7 +37,7 @@ export class StartFromField {
     if (own.length) {
       const group = el('optgroup')
       group.label = 'A session’s latest commit'
-      for (const s of own) group.append(option(`sid:${s.sid}`, `Session ${visible(label(s))}${s.lineage?.handedTo ? ' (handed over)' : ''}`))
+      for (const s of own) group.append(option(`sid:${s.sid}`, `Session ${visible(label(s))}`))
       this.select.append(group)
     }
     const at = own.find(s => s.sid === fork)
@@ -136,7 +136,7 @@ export class BenchmarkField {
   constructor(path: string) {
     this.#path = path
     const summary = el('summary', 'small', 'Benchmark: start from a merged pull request')
-    const intro = el('p', 'small muted', "Lists the repository's merged pull requests with your saved token. Pick one to read its description; Start then begins at its base commit with the description as the first message, framed as its author's task description, not as instructions, and the comparison shows the result next to the merged diff. With Start with both, both agents get it.")
+    const intro = el('p', 'small muted', "Lists the repository's merged pull requests with your saved token. Pick one to read its description; Start then begins at its base commit with the description as the first message, framed as its author's task description, not as instructions, and the comparison shows the result next to the merged diff. With Start with both, both sessions get it.")
     this.box.append(summary, intro, this.#status, this.#list, this.#picked)
     this.box.addEventListener('toggle', () => {
       if (this.box.open && !this.#loaded && !this.#busy) void this.#load(1)
@@ -241,7 +241,6 @@ export class BenchmarkField {
 export class PairField {
   box = el('details', 'pair-field')
   on = el('input')
-  agent = el('select', 'textbox')
   model = el('select', 'textbox')
   message = el('textarea', 'textbox')
   said = statusLine('small bad status-slot')
@@ -249,16 +248,10 @@ export class PairField {
 
   constructor(starters: Starter[], models: [string, string][]) {
     this.#starters = starters.filter(a => a.enabled)
-    const summary = el('summary', 'small', 'Start with both: two agents on one task')
+    const summary = el('summary', 'small', 'Start with both: two sessions on one task')
     const check = el('label', 'check small')
     this.on.type = 'checkbox'
-    check.append(this.on, ' Start a second session beside the first, to compare them')
-    this.agent.setAttribute('aria-label', 'Second agent')
-    for (const a of this.#starters) {
-      const o = el('option', '', a.name)
-      o.value = a.id
-      this.agent.append(o)
-    }
+    check.append(this.on, ' Start a second session of the same agent beside the first, to compare them')
     this.model.setAttribute('aria-label', 'Second model')
     for (const [value, text] of models) {
       const o = el('option', '', text)
@@ -266,7 +259,7 @@ export class PairField {
       this.model.append(o)
     }
     const row = el('div', 'opts field-row')
-    row.append(this.agent, this.model)
+    row.append(this.model)
     const id = `pair-message-${++serial}`
     const name = el('label', 'small', 'First message, sent to both')
     name.htmlFor = id
@@ -274,15 +267,14 @@ export class PairField {
     this.message.rows = 4
     this.message.maxLength = 20000
     this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
-    const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and the agents' cost estimates; keep one and delete the other.")
+    const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and both sessions' cost estimates; keep one and delete the other.")
     this.box.append(summary, check, row, name, this.message, note, this.said)
-    const sync = () => {
-      const plugin = this.#starters.find(a => a.id === this.agent.value)?.method === 'plugin'
-      this.model.hidden = !plugin
-      if (!plugin) this.model.value = ''
-    }
-    this.agent.addEventListener('change', sync)
-    sync()
+  }
+
+  follow(agent: string) {
+    const plugin = this.#starters.find(a => a.id === agent)?.method === 'plugin'
+    this.model.hidden = !plugin
+    if (!plugin) this.model.value = ''
   }
 
   say(text: string) {
@@ -290,19 +282,15 @@ export class PairField {
     this.box.open = true
   }
 
-  value(bench: boolean): { agent: string; model: string; message: string } | null | 'invalid' {
+  value(bench: boolean): { model: string; message: string } | null | 'invalid' {
     if (!this.on.checked) return null
     say(this.said, '', 'bad')
-    if (!this.agent.value) {
-      this.say('No second agent is available.')
-      return 'invalid'
-    }
     const message = this.message.value.trim()
     if (!bench && !message) {
       this.say('Write the first message both sessions get, or pick a merged pull request as a benchmark.')
       this.message.focus()
       return 'invalid'
     }
-    return { agent: this.agent.value, model: this.model.value, message: bench ? '' : message }
+    return { model: this.model.value, message: bench ? '' : message }
   }
 }

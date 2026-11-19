@@ -581,8 +581,11 @@ func (k *Keep) holdsCommit(ctx context.Context, repo, last, head string) bool {
 
 func (k *Keep) View(ctx context.Context, sid string) (KeepView, error) {
 	t, ok := k.d.PushTarget(sid)
+	if !ok && k.d.doubledRun(sid) {
+		return KeepView{}, explained(conflict("branch held"), doubledMessage)
+	}
 	if !ok {
-		return KeepView{}, explained(notFound("session"), "This engine holds no branch for that session: it was handed over, deleted or not started here.")
+		return KeepView{}, explained(notFound("session"), "This engine holds no branch for that session: it was deleted or not started here.")
 	}
 	rec, err := k.cfg.Store.Load(sid)
 	if err != nil {
@@ -644,11 +647,8 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	}
 	defer d.release(r)
 	d.mu.Lock()
-	handed, running := r.handedTo != "" || r.handing, r.running
+	running := r.running
 	d.mu.Unlock()
-	if handed {
-		return KeepView{}, false, explained(conflict("handed over"), handedMessage)
-	}
 	if !d.reg.TurnSince(sid).IsZero() {
 		return KeepView{}, false, explained(conflict("in turn"), "The session is in its turn. Wait for it to end, or stop the turn, then restore the branch.")
 	}

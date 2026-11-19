@@ -21,7 +21,6 @@ type SessionWorkConfig struct {
 	Queues   QueueStore
 	Ports    PortStore
 	Models   ModelStore
-	Lister   ModelLister
 	Audit    Audit
 	Note     func(sid, text string)
 	PortNote func(sid, text string)
@@ -53,7 +52,6 @@ type SessionWork struct {
 	pending  map[string]int
 	models   map[string]SessionModel
 	roles    map[string]ModelChoice
-	codex    codexModels
 }
 
 type workFacts struct {
@@ -349,7 +347,6 @@ type SessionWorkView struct {
 	Agent    string
 	Model    SessionModel
 	Offered  []AgentModel
-	Known    bool
 	Queue    QueueView
 	Check    *CommandRun
 	Setup    *CommandRun
@@ -367,17 +364,14 @@ func ClaudeOffered() []AgentModel {
 	return out
 }
 
-func (w *SessionWork) AgentModels(ctx context.Context, agent string) ([]AgentModel, bool) {
-	switch agent {
-	case "claude":
-		return ClaudeOffered(), true
-	case "codex":
-		return w.CodexModels(ctx, "")
+func agentModels(agent string) []AgentModel {
+	if agent == "claude" {
+		return ClaudeOffered()
 	}
-	return []AgentModel{}, true
+	return []AgentModel{}
 }
 
-func (w *SessionWork) View(ctx context.Context, sid string) (SessionWorkView, error) {
+func (w *SessionWork) View(sid string) (SessionWorkView, error) {
 	info, ok := w.reg.workInfo(sid)
 	if !ok {
 		return SessionWorkView{}, explained(notFound("session"), "The engine has no session of that id.")
@@ -386,7 +380,7 @@ func (w *SessionWork) View(ctx context.Context, sid string) (SessionWorkView, er
 	v.Model, _ = w.SessionModel(sid)
 	v.Model.Agent = info.Agent
 	v.Check, v.Setup = w.Runs(sid)
-	v.Offered, v.Known = w.AgentModels(ctx, info.Agent)
+	v.Offered = agentModels(info.Agent)
 	v.PortsEnv = info.Agent == "claude" && len(claudePortEnv(v.Ports)) > 0
 	return v, nil
 }

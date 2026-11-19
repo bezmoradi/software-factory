@@ -67,12 +67,7 @@ type runJSON struct {
 	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
 	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
 
-	CodexThread string `json:"codexThread,omitempty"`
-
-	Origin     string      `json:"origin,omitempty"`
-	Earlier    []stintJSON `json:"earlier,omitempty"`
-	HandedTo   string      `json:"handedTo,omitempty"`
-	HandedHead string      `json:"handedHead,omitempty"`
+	Origin string `json:"origin,omitempty"`
 
 	Group       string `json:"group,omitempty"`
 	GroupKind   string `json:"groupKind,omitempty"`
@@ -130,7 +125,6 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 	seen := map[string]bool{}
 	for _, r := range f.Sessions {
 		v, ok := runOf(r)
-		v.CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		if !ok || seen[v.SID] || len(out) >= maxSessions {
 			continue
 		}
@@ -160,7 +154,6 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
 			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
 		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
-		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
 		f.Sessions[len(f.Sessions)-1].RmDone = r.RmDone

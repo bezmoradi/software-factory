@@ -99,7 +99,6 @@ tables:
       - ["fld_backup", "/api/backup", { proctorUnknownField: true }, "fields"]
       - ["fld_metrics_no_repo", "/api/metrics", { op: read }, "fields"]
       - ["fld_agent_report", "/api/agent-report", { op: list }, "fields"]
-      - ["fld_agent_models", "/api/agent-models", { op: read, agent: proctor }, "fields"]
       - ["fld_screenshots", "/api/screenshots", {}, "fields"]
       - ["fld_screenshot_name", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000" }, "name"]
       - ["fld_review_reply", "/api/review-reply", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
@@ -295,5 +294,5 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: session, message: "This engine holds no branch for that session: it was handed over, deleted or not started here." }
+            "$.body": { error: session, message: "This engine holds no branch for that session: it was deleted or not started here." }
         no_state_check: "op read changes nothing, and it's refused with 404 since no session has this id; /api/keep isn't declared a read, since op restore on the same path rewrites a branch and HTTP-11 matches the path only, and no other read shows the engine's copy"

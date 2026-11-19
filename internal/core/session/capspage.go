@@ -95,7 +95,7 @@ func (l *Limits) Frame() Fields {
 	}
 	addMeter(SideReviewers, "", "")
 	for _, sid := range sids {
-		if side, box := meterOf(l.known[sid]); side == SideAgents || side == SideCodex {
+		if side, box := meterOf(l.known[sid]); side == SideAgents {
 			addMeter(side, box, sid)
 		}
 	}

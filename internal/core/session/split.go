@@ -327,7 +327,7 @@ func (s *Splits) Dismiss(sid, card string) error {
 func (d *Dispatcher) goalOf(sid string) (path, agent, typ string, running int, ok bool) {
 	d.mu.Lock()
 	r := d.runs[sid]
-	if r == nil || r.handedTo != "" {
+	if r == nil || r.doubled {
 		d.mu.Unlock()
 		return "", "", "", 0, false
 	}

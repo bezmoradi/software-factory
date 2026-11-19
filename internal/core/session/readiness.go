@@ -58,7 +58,7 @@ var (
 )
 
 var readySuggestion = map[string]string{
-	ReadyInstructions: "Add a CLAUDE.md or AGENTS.md at the repository's root that says how to build, test and lint the project and what its rules are. Claude Code and Codex read it at the start of every session.",
+	ReadyInstructions: "Add a CLAUDE.md or AGENTS.md at the repository's root that says how to build, test and lint the project and what its rules are. Claude Code reads it at the start of every session.",
 	ReadyTests:        "Add a test command the agents can run: a test script in package.json, a test target in the Makefile, or the language's own runner (go test, pytest, cargo test) with its project file.",
 	ReadyCI:           "Add a workflow in .github/workflows/ that runs the tests and linters on pull requests, so every change is checked before it merges.",
 	ReadyLint:         "Add a linter's configuration at the root (.golangci.yml, eslint.config.js, ruff.toml or [tool.ruff] in pyproject.toml, .rubocop.yml, biome.json), so the agents and CI check the code the same way.",

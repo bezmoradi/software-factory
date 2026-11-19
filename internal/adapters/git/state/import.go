@@ -369,7 +369,7 @@ func (a Archive) transform(in, out string, report *session.ImportReport) error {
 			report.Off = append(report.Off, offLines(name, in)...)
 			err = copyRaw(in, shown, name, row.limit)
 			if err == nil && name == egressFile {
-				err = egressAgents(in, out)
+				err = egressBare(in, out)
 			}
 		default:
 			if name == reposFile {
@@ -397,7 +397,6 @@ func historyOnly(in, out string, report *session.ImportReport) error {
 	}
 	for i := range runs {
 		runs[i].Sandboxed = false
-		runs[i].CodexThread = ""
 		runs[i].InterruptedAt = time.Time{}
 		runs[i].InTurnSince = time.Time{}
 		runs[i].HistoryOnly = true
@@ -485,12 +484,12 @@ func lessonsShown(in, out string, report *session.ImportReport) error {
 	return err
 }
 
-func egressAgents(in, out string) error {
-	e, ok, err := NewEgress(in).Load()
+func egressBare(in, out string) error {
+	_, ok, err := NewEgress(in).Load()
 	if err != nil || !ok {
 		return err
 	}
-	return NewEgress(out).Save(session.EgressSettings{Agents: e.Agents})
+	return NewEgress(out).Save(session.EgressSettings{})
 }
 
 func plural(n int, what string) string {

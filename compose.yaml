@@ -17,7 +17,7 @@ x-hardening: &hardening
       max-file: "3"
 
 x-egress-lists: &egress-lists
-  EGRESS_ALLOW: ${SF_ALLOW:-api.anthropic.com,claude.ai,claude.com,platform.claude.com,api.openai.com,auth.openai.com,chatgpt.com},${SF_EXTRA_ALLOW:-}
+  EGRESS_ALLOW: ${SF_ALLOW:-api.anthropic.com,claude.ai,claude.com,platform.claude.com},${SF_EXTRA_ALLOW:-}
   EGRESS_DENY: ${SF_EXTRA_DENY:-}
 
 services:

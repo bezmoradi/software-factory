@@ -9,14 +9,6 @@ export interface AgentModel {
   id: string
   name: string
   efforts: string[]
-  defaultEffort: string
-  default: boolean
-}
-
-export interface AgentModels {
-  models: AgentModel[]
-  known: boolean
-  efforts: string[]
 }
 
 interface CommandRun {
@@ -40,7 +32,7 @@ interface Queued {
 
 interface WorkView {
   agent: string
-  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[]; known: boolean }
+  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[] }
   queue: { items: Queued[]; stopped: string; waiting: string; sending: boolean; max: number }
   check: CommandRun | null
   setup: CommandRun | null
@@ -55,22 +47,13 @@ export interface SessionWorkTarget {
 }
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-const FALLBACK_EFFORTS = ['low', 'medium', 'high']
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
 function modelsOf(v: unknown): AgentModel[] {
-  return Array.isArray(v) ? v.filter(isRecord).filter(m => typeof m.id === 'string' && typeof m.name === 'string').map(m => ({ id: m.id as string, name: m.name as string, efforts: strings(m.efforts), defaultEffort: typeof m.defaultEffort === 'string' ? m.defaultEffort : '', default: m.default === true })) : []
-}
-
-export async function agentModels(agent: string): Promise<AgentModels | null> {
-  const res = await api('/api/agent-models', { op: 'read', agent }).catch(() => null)
-  if (!res || !res.ok) return null
-  const body = await res.json().catch(() => null) as unknown
-  if (!isRecord(body)) return null
-  return { models: modelsOf(body.models), known: body.known === true, efforts: strings(body.efforts) }
+  return Array.isArray(v) ? v.filter(isRecord).filter(m => typeof m.id === 'string' && typeof m.name === 'string').map(m => ({ id: m.id as string, name: m.name as string, efforts: strings(m.efforts) })) : []
 }
 
 export function modelOptions(select: HTMLSelectElement, models: AgentModel[], first: string) {
@@ -85,19 +68,10 @@ export function modelOptions(select: HTMLSelectElement, models: AgentModel[], fi
   if (models.some(m => m.id === keep)) select.value = keep
 }
 
-export function effortsOf(offered: AgentModels | AgentModel[] | null, model: string): string[] {
-  if (!offered) return CLAUDE_EFFORTS
-  const list = Array.isArray(offered) ? offered : offered.models
-  const known = Array.isArray(offered) ? list.length > 0 : offered.known
-  if (!known) return FALLBACK_EFFORTS
-  const m = list.find(x => (model ? x.id === model : x.default))
-  return m?.efforts.length ? m.efforts : FALLBACK_EFFORTS
-}
-
-export function effortOptions(select: HTMLSelectElement, offered: AgentModels | AgentModel[] | null, model: string, first: string) {
+export function effortOptions(select: HTMLSelectElement, first: string) {
   const blank = el('option', '', first)
   blank.value = ''
-  select.replaceChildren(blank, ...effortsOf(offered, model).map(e => {
+  select.replaceChildren(blank, ...CLAUDE_EFFORTS.map(e => {
     const o = el('option', '', `Effort: ${visible(e)}`)
     o.value = e
     return o
@@ -118,7 +92,7 @@ function readView(v: unknown): WorkView | null {
   const ports = isRecord(v.ports) && typeof v.ports.first === 'number' && typeof v.ports.last === 'number' ? { first: v.ports.first, last: v.ports.last, env: v.ports.env === true } : null
   return {
     agent: text(v.agent),
-    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered), known: m.known === true },
+    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered) },
     queue: { items, stopped: text(q.stopped), waiting: text(q.waiting), sending: q.sending === true, max: Number(q.max) || 10 },
     check: readRun(v.check),
     setup: readRun(v.setup),
@@ -338,7 +312,7 @@ class SfSessionWork extends HTMLElement {
 
   #summaryText(v: WorkView): string {
     const parts: string[] = []
-    if (v.agent === 'claude' || v.agent === 'codex') parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
+    if (v.agent === 'claude') parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
     parts.push(v.queue.items.length ? `Queue: ${v.queue.items.length}${v.queue.stopped ? ', stopped' : ''}` : 'Queue: empty')
     if (v.setup) parts.push(`Setup ${STATE_WORDS[v.setup.state] ?? visible(v.setup.state)}`)
     if (v.check) parts.push(`Check ${STATE_WORDS[v.check.state] ?? visible(v.check.state)}`)
@@ -383,21 +357,20 @@ class SfSessionWork extends HTMLElement {
     const v = this.#view
     if (!v) return
     const keep = this.#effort.value
-    effortOptions(this.#effort, v.agent === 'codex' ? v.model.offered : null, this.#model.value || v.model.start, 'Effort: as it is')
+    effortOptions(this.#effort, 'Effort: as it is')
     if ([...this.#effort.options].some(o => o.value === keep)) this.#effort.value = keep
   }
 
   #modelPart(v: WorkView, off: boolean): HTMLElement[] {
-    if (v.agent !== 'claude' && v.agent !== 'codex') return []
+    if (v.agent !== 'claude') return []
     const name = (id: string) => v.model.offered.find(m => m.id === id)?.name ?? id
     const now = v.model.now ? visible(name(v.model.now)) : 'the agent\'s default'
     const effort = v.model.nowEffort ? `, effort ${visible(v.model.nowEffort)}` : ''
     const said = v.model.model || v.model.effort ? `Model: ${now}${effort}, set from this page; it applies from ${v.model.from || 'the next turn'}.` : `Model: ${now}${effort}, as the session started.`
     const parts: HTMLElement[] = [el('h3', 'label', 'Model'), el('p', 'small', said)]
     if (v.agent === 'claude') parts.push(el('p', 'small muted', 'Claude Code\'s own status line keeps naming the model the session started with; the switch rewrites only this session\'s main-loop requests, and never Claude Code\'s saved defaults.'))
-    if (v.agent === 'codex' && !v.model.known) parts.push(el('p', 'small muted', 'Codex\'s model list couldn\'t be read, so no other model is offered.'))
     if (!this.contains(document.activeElement) || document.activeElement === document.body) {
-      modelOptions(this.#model, v.model.offered, v.agent === 'claude' ? `The start model (${v.model.start || 'default'})` : v.model.start ? `The start model (${visible(v.model.start)})` : 'Pick a model')
+      modelOptions(this.#model, v.model.offered, `The start model (${v.model.start || 'default'})`)
       this.#model.value = v.model.offered.some(m => m.id === v.model.model) ? v.model.model : ''
       this.#fillEfforts()
       this.#effort.value = [...this.#effort.options].some(o => o.value === v.model.effort) ? v.model.effort : ''

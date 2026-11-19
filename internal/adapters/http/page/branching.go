@@ -13,14 +13,12 @@ import (
 
 const (
 	bringMainRoute   = "/api/bring-main"
-	handoverRoute    = "/api/handover"
 	startPointsRoute = "/api/start-points"
-	handoverFor      = dispatchFor + manageFor
 	maxFromBranch    = 255
 )
 
 var (
-	branchingRoutes = map[string]bool{bringMainRoute: true, handoverRoute: true, startPointsRoute: true}
+	branchingRoutes = map[string]bool{bringMainRoute: true, startPointsRoute: true}
 	agentID         = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 )
 
@@ -36,21 +34,10 @@ type pullHeadJSON struct {
 	Commit string `json:"commit"`
 }
 
-type stintJSON struct {
-	Agent string `json:"agent"`
-	SID   string `json:"sid"`
-	Name  string `json:"name,omitempty"`
-	From  string `json:"from"`
-	To    string `json:"to"`
-}
-
 type lineageJSON struct {
-	Branch   string      `json:"branch"`
-	Origin   string      `json:"origin,omitempty"`
-	From     string      `json:"from"`
-	Earlier  []stintJSON `json:"earlier"`
-	HandedTo string      `json:"handedTo,omitempty"`
-	Last     string      `json:"last,omitempty"`
+	Branch string `json:"branch"`
+	Origin string `json:"origin,omitempty"`
+	From   string `json:"from"`
 
 	Group     string `json:"group,omitempty"`
 	GroupKind string `json:"groupKind,omitempty"`
@@ -60,12 +47,7 @@ func lineageOf(l *session.Lineage) *lineageJSON {
 	if l == nil {
 		return nil
 	}
-	out := &lineageJSON{Branch: l.Branch, Origin: l.Origin, From: l.From, Earlier: make([]stintJSON, 0, len(l.Earlier)), HandedTo: l.HandedTo, Last: l.Last,
-		Group: l.Group, GroupKind: l.GroupKind}
-	for _, t := range l.Earlier {
-		out.Earlier = append(out.Earlier, stintJSON{Agent: t.Agent, SID: t.SID, Name: t.Name, From: t.From, To: t.To})
-	}
-	return out
+	return &lineageJSON{Branch: l.Branch, Origin: l.Origin, From: l.From, Group: l.Group, GroupKind: l.GroupKind}
 }
 
 func (s *Server) UseBranching(b session.BranchPage) {
@@ -114,12 +96,8 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 	}
 	sid, okSid := body["sid"].(string)
 	okSid = okSid && sid != "" && len(sid) <= 80
-	limit := manageFor
-	if r.URL.Path == handoverRoute {
-		limit = handoverFor
-	}
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(limit + writeFor))
-	ctx, cancel := context.WithTimeout(r.Context(), limit)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
+	ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 	defer cancel()
 	switch r.URL.Path {
 	case bringMainRoute:
@@ -135,21 +113,6 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 			return
 		}
 		send(w, http.StatusOK, map[string]string{"commit": commit})
-	case handoverRoute:
-		agent, okAgent := body["agent"].(string)
-		consent, consented := consentOf(body)
-		if !keysWithin(body, "sid", "agent", "approve", "costOk") || !okSid || !okAgent || !agentID.MatchString(agent) || !consented {
-			refuse(w, http.StatusBadRequest, "fields")
-			return
-		}
-		started, err := b.Handover(ctx, sid, agent, consent)
-		shared.For(r.Context(), s.logger).Info("handover", "agent", agent, "ok", err == nil)
-		if err != nil {
-			code, p := status(err)
-			send(w, code, p)
-			return
-		}
-		send(w, http.StatusAccepted, map[string]any{"ok": true, "id": started.ID, "sid": started.SID})
 	case startPointsRoute:
 		path, okPath := body["path"].(string)
 		if !keysWithin(body, "path") || !okPath || path == "" || len(path) > session.MaxCwd {

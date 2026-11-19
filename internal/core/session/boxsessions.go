@@ -68,7 +68,6 @@ type CloneSpec struct {
 	Repo       string
 	MainBranch string
 	Main       string
-	Branch     string
 	Head       string
 	Objects    []push.Object
 }
@@ -767,7 +766,7 @@ func (d *Dispatcher) dropStillPending(box string) {
 	d.dropBox(box, false)
 }
 
-func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *run, continues bool) error {
+func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *run) error {
 	if d.cfg.Clones == nil {
 		return explained(conflict("no clone"), "This engine can't make the session's own clone.")
 	}
@@ -780,9 +779,6 @@ func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *r
 		}
 	}
 	q := CloneSpec{Box: r.box, Repo: r.repo, MainBranch: mainBranch, Main: main, Head: r.base}
-	if continues {
-		q.Branch = r.branch
-	}
 	if from != nil {
 		objects, err := d.carried(from, r.base, main)
 		if err != nil {
@@ -806,7 +802,7 @@ func (d *Dispatcher) carried(from *run, head, main string) ([]push.Object, error
 	d.mu.Lock()
 	clone, box := from.clone, from.box
 	base := ""
-	if (from.origin == "" || from.origin == OriginMain) && len(from.earlier) == 0 {
+	if from.origin == "" || from.origin == OriginMain {
 		base = from.base
 	}
 	d.mu.Unlock()
@@ -949,14 +945,10 @@ func (d *Dispatcher) stopWaiting(r *run) {
 
 func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {
 	sid := ""
-	switch {
-	case q.Continues != nil:
-		sid = q.Continues.SID
-	case q.From.SID != "":
-		sid = q.From.SID
-	default:
+	if q.From.SID == "" {
 		return nil, nil
 	}
+	sid = q.From.SID
 	d.mu.Lock()
 	r := d.runs[sid]
 	d.mu.Unlock()
@@ -1128,11 +1120,6 @@ func (d *Dispatcher) askedBox(q Dispatch) string {
 	var stale []string
 	for b, r := range d.waiting {
 		if r.asked != q.asked {
-			continue
-		}
-		if q.Continues != nil && r.base != q.Continues.Head {
-			stale = append(stale, b)
-			delete(d.waiting, b)
 			continue
 		}
 		box = b

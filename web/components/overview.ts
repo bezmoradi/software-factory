@@ -11,7 +11,7 @@ export function warnings(s: SessionInfo, all: SessionInfo[]): string[] {
   const out: string[] = []
   if (s.verified && s.level === 'locked' && s.sandboxed === false) out.push(`Locked, not sandboxed: every check since this run started passed, but a check failed or couldn't run in an earlier run, so the session's work isn't counted as sandboxed and its pushes are held on the sandbox item.`)
   if (s.verified && s.level === 'held') out.push(`Held: every push from this session is held and no new session starts, because ${s.levelReason || 'the sandbox check hasn\'t passed'}.${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
-  if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the session's container (${signInStep(s.agent, s.box)}); this page never signs in for you.`)
+  if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the session's container (${signInStep(s.box)}); this page never signs in for you.`)
   if (s.signInWait) out.push(`Waiting for sign-in: ${agentWord(s.agent)} in this session's container isn't signed in. Press Wake to open the session's sign-in panel, sign in there, then continue.`)
   const others = sharing(s, all)
   if (others.length) out.push(`${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} also in ${s.checkout}, with no worktree between them, and at least one of these sessions is working, so their edits can collide.`)

@@ -3,7 +3,6 @@ package npm
 type Package struct {
 	Name      string
 	Version   string
-	Folder    string
 	Integrity string
 }
 
@@ -38,26 +37,6 @@ var Pinned = []Agent{
 					{Name: "@anthropic-ai/claude-code-linux-arm64", Version: "2.1.322", Integrity: "sha512-YYNp1op87WWcBEE6jC1neOjMDPdn4Iy+kUHyFcI1GsLl4IwH7EjZlwVKcpsZqVbE0IXEFaOldmyOHC1y3j18Ag=="},
 				},
 				Bin: "node_modules/@anthropic-ai/claude-code-linux-arm64/claude",
-			},
-		},
-	},
-	{
-		ID: "codex", Name: "Codex CLI", Version: "0.167.1", Command: "codex",
-		Source: Source{Repository: "https://github.com/openai/codex", Workflow: ".github/workflows/rust-release.yml", Ref: "refs/tags/rust-v0.167.1"},
-		Builds: map[string]Build{
-			"amd64": {
-				Packages: []Package{
-					{Name: "@openai/codex", Version: "0.167.1", Integrity: "sha512-39uApTRT9bkhE8tMXTIfZxaZ27oi7hPqWoF2Coyp+iQFAD3NVHgH838IYVUfJaX85leMSP2s4JOmVw0mMSCN5Q=="},
-					{Name: "@openai/codex", Version: "0.167.1-linux-x64", Folder: "@openai/codex-linux-x64", Integrity: "sha512-qZteglyvMCj1QVymMyPyKdtw38HaXCv5gvw8WN+N0+JJstu3k/d8xiYj9ciL7OwFLhcujgP8bCGJgaREeqrHkw=="},
-				},
-				Bin: "node_modules/@openai/codex/bin/codex.js",
-			},
-			"arm64": {
-				Packages: []Package{
-					{Name: "@openai/codex", Version: "0.167.1", Integrity: "sha512-39uApTRT9bkhE8tMXTIfZxaZ27oi7hPqWoF2Coyp+iQFAD3NVHgH838IYVUfJaX85leMSP2s4JOmVw0mMSCN5Q=="},
-					{Name: "@openai/codex", Version: "0.167.1-linux-arm64", Folder: "@openai/codex-linux-arm64", Integrity: "sha512-z13jj4X4GDk7CTd1kXHkhXC8Gj8zomd1jYsU2//0KjevbLelPxowWLSTqIcR1rarJCtzveBHsS8gR7B9pAWB0g=="},
-				},
-				Bin: "node_modules/@openai/codex/bin/codex.js",
 			},
 		},
 	},

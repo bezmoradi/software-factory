@@ -11,10 +11,9 @@ var baseNames = []string{"PATH", "HOME", "LANG", "TERM", "HTTPS_PROXY", "HTTP_PR
 
 var keyNames = map[string]bool{
 	"ANTHROPIC_API_KEY": true, "ANTHROPIC_AUTH_TOKEN": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
-	"GOOGLE_APPLICATION_CREDENTIALS": true, "CODEX_API_KEY": true, "OPENAI_API_KEY": true,
-	"GH_TOKEN": true, "GITHUB_TOKEN": true,
+	"GOOGLE_APPLICATION_CREDENTIALS": true, "GH_TOKEN": true, "GITHUB_TOKEN": true,
 	"AWS_ACCESS_KEY_ID": true, "AWS_SECRET_ACCESS_KEY": true, "AWS_SESSION_TOKEN": true, "AWS_BEARER_TOKEN_BEDROCK": true,
-	"AZURE_OPENAI_API_KEY": true, "NODE_OPTIONS": true, "SF_PUSH_TOKEN": true,
+	"NODE_OPTIONS": true, "SF_PUSH_TOKEN": true,
 }
 
 var keyLike = regexp.MustCompile(`(?i)(API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|PRIVATE_KEY|ALLOW_ALL)`)

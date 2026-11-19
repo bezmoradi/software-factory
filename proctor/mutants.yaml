@@ -290,8 +290,8 @@
   title: "A failed session-work change is swallowed and the view sent with 200"
   edits:
     - file: "internal/adapters/http/page/sessionwork.go"
-      find: "\tif err != nil {\n\t\tcode, p := status(err)\n\t\tsend(w, code, p)\n\t\treturn\n\t}\n\tv, err := s.work.View(ctx, sid)"
-      replace: "\tv, err := s.work.View(ctx, sid)"
+      find: "\tif err != nil {\n\t\tcode, p := status(err)\n\t\tsend(w, code, p)\n\t\treturn\n\t}\n\tv, err := s.work.View(sid)"
+      replace: "\tv, err := s.work.View(sid)"
 - id: PAGE-037
   title: "NotebookEdit is no longer treated as a write tool"
   edits:
@@ -617,7 +617,7 @@
       find: "\tdefer h.close(ctx, l.run)\n\tif snapshot != \"\" {"
       replace: "\tif snapshot != \"\" {"
 - id: GATE-001
-  title: "A Codex config folder below the worktree root (sub/.codex/config.toml) is no longer a protected write: only the first path segment is checked"
+  title: "A .codex settings folder below the worktree root (sub/.codex/config.toml) is no longer a protected write: only the first path segment is checked"
   edits:
     - file: "internal/core/gate/writes.go"
       find: "for _, s := range segments {"
@@ -1334,8 +1334,8 @@
   title: "Bring in main runs on a stopped session"
   edits:
     - file: "internal/core/session/fetchmain.go"
-      find: "\tcase !running:\n\t\treturn \"\", explained(conflict(\"not running\")"
-      replace: "\tcase !running && handed:\n\t\treturn \"\", explained(conflict(\"not running\")"
+      find: "\tif !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
+      replace: "\tif false && !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
 - id: SESS-052
   title: "Bring in main messages the agent while Pause all or Stop everything is on"
   edits:
@@ -1436,8 +1436,8 @@
   title: "A start may name both a branch and a pull request"
   edits:
     - file: "internal/core/session/fork.go"
-      find: "case n > 1 || n == 1 && q.Continues != nil:"
-      replace: "case n > 2 || n == 1 && q.Continues != nil:"
+      find: "case n > 1:"
+      replace: "case n > 2:"
 - id: SESS-069
   title: "A start with only a commit is accepted and starts from main"
   edits:
@@ -1480,12 +1480,6 @@
     - file: "internal/core/session/haltpush.go"
       find: "if p.halted(ByPage) == \"\" {"
       replace: "if p.halted(ByAgent) == \"\" {"
-- id: SESS-076
-  title: "A session can be handed over to the agent it already runs"
-  edits:
-    - file: "internal/core/session/handover.go"
-      find: "\tcase spec.ID == r.spec.ID:\n\t\treturn Started{}, explained(invalid(\"agent\"), \"Choose another agent than the one this session runs.\")\n"
-      replace: ""
 - id: SESS-077
   title: "The commit name may hold < or >, which breaks the author line"
   edits:
@@ -2444,8 +2438,8 @@
   title: "The default allowlist also names example.org, so every session's agent can reach it through egress (the engine reads the same list, so the sandbox check still passes)"
   edits:
     - file: "compose.yaml"
-      find: "chatgpt.com},${SF_EXTRA_ALLOW:-}"
-      replace: "chatgpt.com,example.org},${SF_EXTRA_ALLOW:-}"
+      find: "platform.claude.com},${SF_EXTRA_ALLOW:-}"
+      replace: "platform.claude.com,example.org},${SF_EXTRA_ALLOW:-}"
 - id: STACK-002
   title: "The control network between the engine and egress isn't internal, so it has a route out"
   edits:
@@ -2923,33 +2917,3 @@
     - file: "internal/adapters/engines/acp/client.go"
       find: "\tc.cancelPermissionsLocked()\n\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
       replace: "\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
-- id: ENG-012
-  title: "A Codex command approval asking for network access counts as whole"
-  edits:
-    - file: "internal/adapters/engines/codex/approve.go"
-      find: "\t\tisNull(p.NetworkApprovalContext) &&\n"
-      replace: ""
-- id: ENG-013
-  title: "A Codex file approval that grants a root folder counts as whole"
-  edits:
-    - file: "internal/adapters/engines/codex/approve.go"
-      find: "req.whole = len(it.changes) > 0 && !it.tooBig && !grant"
-      replace: "req.whole = len(it.changes) > 0 && !it.tooBig"
-- id: ENG-014
-  title: "Codex requests from another thread are shown instead of declined"
-  edits:
-    - file: "internal/adapters/engines/codex/approve.go"
-      find: "\tif req.foreign {\n\t\tc.reply("
-      replace: "\tif false && req.foreign {\n\t\tc.reply("
-- id: ENG-015
-  title: "Codex's approvals reviewer isn't checked, only the policy"
-  edits:
-    - file: "internal/adapters/engines/codex/notify.go"
-      find: "\tif mode == policyOnRequest && who == reviewerUser {"
-      replace: "\tif mode == policyOnRequest {"
-- id: ENG-016
-  title: "A Codex allow is accepted after the thread reported a changed approval policy"
-  edits:
-    - file: "internal/adapters/engines/codex/client.go"
-      find: "\t\tcase c.violated:\n\t\t\terr = ErrPolicy\n"
-      replace: ""

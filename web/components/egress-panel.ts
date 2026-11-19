@@ -9,13 +9,6 @@ const LOGIN_ROUTE = '/api/claude-login'
 
 export const GATEWAY_WARNING = "The gateway sees all code and decides every tool call; use only your own company's gateway or the vendors' hosts"
 
-interface AgentUse {
-  id: string
-  name: string
-  hosts: string[]
-  inUse: boolean
-}
-
 interface AddedHost {
   host: string
   expires: number
@@ -33,7 +26,6 @@ interface GatewayView {
 interface EgressView {
   saved: boolean
   pending: boolean
-  agents: AgentUse[]
   added: AddedHost[]
   gateway: GatewayView | null
   lists: { agents: string[]; reviewers: string[] }
@@ -55,7 +47,7 @@ interface Refusal {
 }
 
 type Answer = { ok: boolean; body: Record<string, unknown> }
-type Refill = 'agents' | 'gateway' | null
+type Refill = 'gateway' | null
 
 async function call(post: Post, body: unknown, route = ROUTE): Promise<Answer> {
   const res = await post(route, body).catch(() => null)
@@ -69,13 +61,12 @@ const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is 
 const record = (v: unknown): Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
 
 function viewOf(b: Record<string, unknown>): EgressView | null {
-  if (!Array.isArray(b.agents) || !Array.isArray(b.added)) return null
+  if (!Array.isArray(b.added)) return null
   const lists = record(b.lists)
   const g = record(b.gateway)
   return {
     saved: b.saved === true,
     pending: b.pending === true,
-    agents: b.agents.map(record).map(a => ({ id: text(a.id), name: text(a.name), hosts: strings(a.hosts), inUse: a.inUse === true })).filter(a => a.id),
     added: b.added.map(record).map(h => ({ host: text(h.host), expires: Number(h.expires) || 0, uploads: h.uploads === true })).filter(h => h.host),
     gateway: text(g.url) ? { url: text(g.url), host: text(g.host), agents: g.agents === true, reviewers: g.reviewers === true } : null,
     lists: { agents: strings(record(lists.agents).allow), reviewers: strings(record(lists.reviewers).allow) },
@@ -122,7 +113,7 @@ export function openEgress(post: Post): void {
   const intro = el('p', 'small', 'Agents and reviewers reach the internet only through egress, which allows HTTPS to the hosts below and refuses every git host: the engine pushes for them. A change here takes effect at once, without a restart.')
   const startNote = el('p', 'small muted')
   const pending = el('p', 'small bad')
-  const agentsBox = el('fieldset', 'egress-agents')
+  const vendorNote = el('p', 'small muted', 'Once you save a change here, Claude Code’s own hosts are on both lists, except on a side a gateway is on for.')
   const addedList = el('ul', 'list egress-added')
   const hostInput = el('input', 'textbox')
   hostInput.name = 'host'
@@ -168,7 +159,6 @@ export function openEgress(post: Post): void {
   const listsNote = el('p', 'small muted')
   let view: EgressView | null = null
   let gwFilled: { url: string; agents: boolean; reviewers: boolean } | null = null
-  const agentsFilled = new Map<string, boolean>()
   const gwEdited = () => !!gwFilled && (gatewayURL.value !== gwFilled.url || gwAgents.checked !== gwFilled.agents || gwReviewers.checked !== gwFilled.reviewers)
 
   const failed = (a: Answer, fallback: string) => {
@@ -181,26 +171,6 @@ export function openEgress(post: Post): void {
     view = v
     startNote.textContent = v.saved ? '' : 'Until you save a change here, the lists are the starting values from SF_ALLOW and SF_EXTRA_ALLOW.'
     pending.textContent = v.pending ? 'egress hasn’t taken the latest list yet, so the sandbox check fails and sessions are Held until it does.' : ''
-    const edited = new Map<string, boolean>()
-    if (refill !== 'agents') {
-      for (const b of agentsBox.querySelectorAll<HTMLInputElement>('input[type=checkbox]')) {
-        if (agentsFilled.get(b.value) !== b.checked) edited.set(b.value, b.checked)
-      }
-    }
-    agentsFilled.clear()
-    agentsBox.replaceChildren(el('legend', 'label', 'Agents you use'))
-    for (const a of v.agents) {
-      const label = el('label', 'small row')
-      const box = el('input')
-      box.type = 'checkbox'
-      box.value = a.id
-      box.dataset.key = `agent:${a.id}`
-      box.checked = edited.get(a.id) ?? a.inUse
-      agentsFilled.set(a.id, a.inUse)
-      label.append(box, el('span', '', `${visible(a.name)}: ${a.hosts.map(visible).join(', ')}`))
-      agentsBox.append(label)
-    }
-    agentsBox.append(actionButton('Save agents', 'ghost small', saveAgents, 'button', 'save-agents'))
     addedList.replaceChildren()
     if (!v.added.length) addedList.append(el('li', 'muted', 'No hosts added.'))
     for (const h of v.added) {
@@ -242,11 +212,6 @@ export function openEgress(post: Post): void {
     const v = viewOf(a.body)
     if (v) paint(v)
     else failed(a, 'The allowlist couldn’t be read.')
-  }
-
-  const saveAgents = async () => {
-    const ids = [...agentsBox.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].filter(b => b.checked).map(b => b.value)
-    answer(await call(post, { op: 'agents', agents: ids }), 'The agents weren’t saved.', 'agents')
   }
 
   const remove = async (host: string) => {
@@ -392,7 +357,7 @@ export function openEgress(post: Post): void {
     title: 'Network access',
     body: [
       intro, startNote, pending, say,
-      agentsBox,
+      vendorNote,
       el('h3', 'label', 'Hosts you added'),
       el('p', 'small muted', 'For agents only; reviewers reach only Claude Code’s hosts and the gateway. A host you add gives every session a way out, so add only what a task needs, and give it an expiry when you can.'),
       addedList, addForm, hint, uploadWarn,

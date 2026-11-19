@@ -21,8 +21,6 @@ const (
 	TurnEnded  EventType = "turn-ended"
 	Ended      EventType = "ended"
 	Failed     EventType = "error"
-	Notice     EventType = "notice"
-	Subagents  EventType = "subagents"
 )
 
 type Tool struct {
@@ -40,29 +38,10 @@ type Option struct {
 	Name string
 }
 
-type Choice struct {
-	Label       string
-	Description string
-}
-
-type Question struct {
-	ID      string
-	Header  string
-	Text    string
-	Choices []Choice
-}
-
 type Request struct {
-	ID        string
-	Tool      Tool
-	Options   []Option
-	Questions []Question
-}
-
-type Subagent struct {
-	ID     string
-	Name   string
-	Status string
+	ID      string
+	Tool    Tool
+	Options []Option
 }
 
 type Command struct {
@@ -86,15 +65,12 @@ type Event struct {
 	Commands []Command
 	Spend    *Spend
 	Reason   string
-	Agent    string
-	Agents   []Subagent
 }
 
 type Answer struct {
 	Allow    bool
 	OptionID string
 	Note     string
-	Answers  map[string]string
 }
 
 type Session interface {

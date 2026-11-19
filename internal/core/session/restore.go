@@ -29,12 +29,7 @@ type SavedRun struct {
 	ReviewerClaude string
 	ReviewerPlugin string
 
-	CodexThread string
-
-	Origin     string
-	Earlier    []Stint
-	HandedTo   string
-	HandedHead string
+	Origin string
 
 	Group       string
 	GroupKind   string
@@ -47,6 +42,8 @@ type RunStore interface {
 	Load() ([]SavedRun, error)
 	Save([]SavedRun) error
 }
+
+const doubledMessage = "Another session on this engine holds this session's branch, so this one is read-only. Delete it to offer its unpushed commits, or keep working in the other session."
 
 const runsUnreadWhy = "The engine couldn't read its record of sessions (sessions.json) when it started, so it starts no new session: a new one would replace that record and leave every earlier session without it. Fix the file in the engine's state folder and restart the engine."
 
@@ -91,9 +88,7 @@ func (d *Dispatcher) saveRuns() {
 			Branch: r.branch, Cwd: r.cwd, Display: r.display, StartedAt: r.at, InterruptedAt: r.stamp.interruptedAt,
 			AgentVersion: r.stamp.agent, EngineVersion: r.stamp.engine, WorkflowCommit: r.stamp.workflow,
 			ReviewerClaude: r.stamp.reviewer, ReviewerPlugin: r.stamp.reviewerPlugin})
-		out[len(out)-1].CodexThread = savedThread(r.thread)
-		out[len(out)-1].Origin, out[len(out)-1].Earlier = r.origin, slices.Clone(r.earlier)
-		out[len(out)-1].HandedTo, out[len(out)-1].HandedHead = r.handedTo, r.handedHead
+		out[len(out)-1].Origin = r.origin
 		out[len(out)-1].Group, out[len(out)-1].GroupKind = r.group, r.groupKind
 		out[len(out)-1].HistoryOnly = r.history
 		out[len(out)-1].RmDone = r.rmDone
@@ -124,7 +119,7 @@ func (d *Dispatcher) Restore() int {
 		d.cfg.Logger.Warn("sessions", "event", "not-read")
 		return 0
 	}
-	handed := d.oneHolder(saved)
+	doubled := d.oneHolder(saved)
 	var sids []string
 	for _, s := range saved {
 		spec, ok := findAgent(d.cfg.Agents, s.Agent)
@@ -137,10 +132,10 @@ func (d *Dispatcher) Restore() int {
 			stamp: runStamp{interruptedAt: s.InterruptedAt, agent: s.AgentVersion, engine: s.EngineVersion, workflow: s.WorkflowCommit,
 				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
 		r.stamp.interruptedAt = cutAt(s)
-		r.thread = savedThread(s.CodexThread)
-		r.origin, r.earlier, r.handedTo, r.handedHead = s.Origin, slices.Clone(s.Earlier), s.HandedTo, s.HandedHead
+		r.origin = s.Origin
 		r.group, r.groupKind = s.Group, s.GroupKind
 		r.history = s.HistoryOnly
+		r.doubled = doubled[s.SID]
 		r.rmDone = s.RmDone
 		r.aside = s.Aside
 		if ValidBox(s.Box) && !r.history {
@@ -181,9 +176,6 @@ func (d *Dispatcher) Restore() int {
 	if len(sids) > 0 {
 		d.cfg.Logger.Info("sessions", "event", "restored", "count", len(sids))
 	}
-	if handed > 0 {
-		d.saveRuns()
-	}
 	return len(sids)
 }
 
@@ -198,14 +190,6 @@ func (d *Dispatcher) keptBranches(sids []string, recheck bool) map[string]KeptBr
 		if d.cfg.Work != nil {
 			k.Rounds = d.cfg.Work.Rounds(sid, t.Name)
 		}
-		d.mu.Lock()
-		if r := d.runs[sid]; r != nil && len(r.earlier) > 0 {
-			k.Since = r.at
-			for _, st := range slices.Backward(r.earlier) {
-				k.Earlier = append(k.Earlier, st.SID)
-			}
-		}
-		d.mu.Unlock()
 		out[sid] = k
 	}
 	return out
@@ -220,60 +204,36 @@ func (d *Dispatcher) restorable(s SavedRun) bool {
 	return d.runs[s.SID] == nil
 }
 
-func continues(a, b SavedRun) bool {
-	return slices.ContainsFunc(a.Earlier, func(st Stint) bool { return st.SID == b.SID })
+func (d *Dispatcher) doubledRun(sid string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r := d.runs[sid]
+	return r != nil && r.doubled
 }
 
-func (d *Dispatcher) lastHead(s, holder SavedRun) string {
-	if heads, _ := d.reg.worktreeReaders(); heads != nil {
-		if clone := BoxClone(d.cfg.Workspace, s.Box, s.Repo); clone != "" {
-			if h, err := heads.Head(clone, s.Branch); err == nil && sha1Hex.MatchString(h) {
-				return h
-			}
-		}
-	}
-	for _, st := range holder.Earlier {
-		if st.SID == s.SID && sha1Hex.MatchString(st.To) {
-			return st.To
-		}
-	}
-	return s.Base
-}
-
-func (d *Dispatcher) oneHolder(saved []SavedRun) int {
+func (d *Dispatcher) oneHolder(saved []SavedRun) map[string]bool {
 	holder := map[string]int{}
 	for i, s := range saved {
-		if s.HandedTo != "" || s.HistoryOnly || !d.restorable(s) {
+		if s.HistoryOnly || !d.restorable(s) {
 			continue
 		}
 		key := s.Repo + "\x00" + s.Branch
 		j, ok := holder[key]
-		if !ok {
-			holder[key] = i
-			continue
-		}
-		h := saved[j]
-		switch {
-		case continues(s, h):
-			holder[key] = i
-		case continues(h, s):
-		case s.StartedAt.After(h.StartedAt) || s.StartedAt.Equal(h.StartedAt) && s.SID > h.SID:
+		if !ok || s.StartedAt.After(saved[j].StartedAt) || s.StartedAt.Equal(saved[j].StartedAt) && s.SID > saved[j].SID {
 			holder[key] = i
 		}
 	}
-	n := 0
-	for i := range saved {
-		s := &saved[i]
-		if s.HandedTo != "" || s.HistoryOnly || !d.restorable(*s) {
+	out := map[string]bool{}
+	for i, s := range saved {
+		if s.HistoryOnly || !d.restorable(s) {
 			continue
 		}
 		j := holder[s.Repo+"\x00"+s.Branch]
 		if j == i {
 			continue
 		}
-		s.HandedTo, s.HandedHead = saved[j].SID, d.lastHead(*s, saved[j])
-		n++
+		out[s.SID] = true
 		d.cfg.Logger.Warn("sessions", "event", "branch-held-twice", "kept", saved[j].SID)
 	}
-	return n
+	return out
 }

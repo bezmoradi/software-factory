@@ -19,8 +19,6 @@ var InstructionLists = map[string]InstructionList{
 	"claude": {Names: []string{"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"}, Folders: []string{".claude/rules"},
 		Above:  []string{"CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", "AGENTS.md", ".claude/AGENTS.md"},
 		Source: "code.claude.com/docs/en/memory: CLAUDE.md and CLAUDE.local.md load from the starting folder and every folder above it, and, once Claude works there, from subfolders; AGENTS.md and .claude/AGENTS.md in the starting folder and above when no CLAUDE.md applies; .md files in .claude/rules/, recursively, nested .claude/rules/ on demand (Claude Code 2.1.322)"},
-	"codex": {Names: []string{"AGENTS.override.md", "AGENTS.md"},
-		Source: "codex source at tag rust-v0.167.1, core/src/agents_md.rs: AGENTS.override.md, then AGENTS.md, in each folder from the project root (the nearest folder holding .git) down to the working folder, never above the root; learn.chatgpt.com/docs/agent-configuration/agents-md"},
 }
 
 var WalkSkipped = []string{".git", "node_modules", "dist", "build", "out", "target", "vendor", "coverage", "__pycache__", "venv"}
@@ -113,7 +111,7 @@ var scriptExt = []string{".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".cjs", "
 func skillPart(rel string) (inSkill bool, name string) {
 	parts := strings.Split(rel, "/")
 	for i := 0; i+2 < len(parts); i++ {
-		if parts[i+1] == "skills" && (parts[i] == ".claude" || parts[i] == ".agents" || parts[i] == ".codex") {
+		if parts[i+1] == "skills" && parts[i] == ".claude" {
 			return true, strings.Join(parts[i+3:], "/")
 		}
 	}

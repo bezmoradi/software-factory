@@ -55,7 +55,6 @@ tables:
       - ["t01_forge_answer", "/api/forge-answer"]
       - ["t01_halt", "/api/halt"]
       - ["t01_handoff", "/api/handoff"]
-      - ["t01_handover", "/api/handover"]
       - ["t01_import", "/api/import"]
       - ["t01_interrupt", "/api/interrupt"]
       - ["t01_issues", "/api/issues"]
@@ -126,7 +125,6 @@ tables:
     covers: no_key
     columns: ["case", "route"]
     rows:
-      - ["t01r_agent_models", "/api/agent-models"]
       - ["t01r_agent_report", "/api/agent-report"]
       - ["t01r_audit", "/api/audit"]
       - ["t01r_backup", "/api/backup"]
@@ -195,7 +193,6 @@ tables:
       - ["t02_forge_answer", "/api/forge-answer"]
       - ["t02_halt", "/api/halt"]
       - ["t02_handoff", "/api/handoff"]
-      - ["t02_handover", "/api/handover"]
       - ["t02_import", "/api/import"]
       - ["t02_interrupt", "/api/interrupt"]
       - ["t02_issues", "/api/issues"]
@@ -267,7 +264,6 @@ tables:
     covers: other_host
     columns: ["case", "route"]
     rows:
-      - ["t02r_agent_models", "/api/agent-models"]
       - ["t02r_agent_report", "/api/agent-report"]
       - ["t02r_audit", "/api/audit"]
       - ["t02r_backup", "/api/backup"]
@@ -336,7 +332,6 @@ tables:
       - ["t03_forge_answer", "/api/forge-answer"]
       - ["t03_halt", "/api/halt"]
       - ["t03_handoff", "/api/handoff"]
-      - ["t03_handover", "/api/handover"]
       - ["t03_import", "/api/import"]
       - ["t03_interrupt", "/api/interrupt"]
       - ["t03_issues", "/api/issues"]
@@ -408,7 +403,6 @@ tables:
     covers: other_origin
     columns: ["case", "route"]
     rows:
-      - ["t03r_agent_models", "/api/agent-models"]
       - ["t03r_agent_report", "/api/agent-report"]
       - ["t03r_audit", "/api/audit"]
       - ["t03r_backup", "/api/backup"]
@@ -477,7 +471,6 @@ tables:
       - ["t04_forge_answer", "/api/forge-answer"]
       - ["t04_halt", "/api/halt"]
       - ["t04_handoff", "/api/handoff"]
-      - ["t04_handover", "/api/handover"]
       - ["t04_import", "/api/import"]
       - ["t04_interrupt", "/api/interrupt"]
       - ["t04_issues", "/api/issues"]
@@ -549,7 +542,6 @@ tables:
     covers: cross_site
     columns: ["case", "route"]
     rows:
-      - ["t04r_agent_models", "/api/agent-models"]
       - ["t04r_agent_report", "/api/agent-report"]
       - ["t04r_audit", "/api/audit"]
       - ["t04r_backup", "/api/backup"]
@@ -617,7 +609,6 @@ tables:
       - ["t05_forge_answer", "/api/forge-answer"]
       - ["t05_halt", "/api/halt"]
       - ["t05_handoff", "/api/handoff"]
-      - ["t05_handover", "/api/handover"]
       - ["t05_import", "/api/import"]
       - ["t05_interrupt", "/api/interrupt"]
       - ["t05_issues", "/api/issues"]
@@ -688,7 +679,6 @@ tables:
     covers: no_origin
     columns: ["case", "route"]
     rows:
-      - ["t05r_agent_models", "/api/agent-models"]
       - ["t05r_agent_report", "/api/agent-report"]
       - ["t05r_audit", "/api/audit"]
       - ["t05r_backup", "/api/backup"]
@@ -757,7 +747,6 @@ tables:
       - ["t06_forge_answer", "/api/forge-answer"]
       - ["t06_halt", "/api/halt"]
       - ["t06_handoff", "/api/handoff"]
-      - ["t06_handover", "/api/handover"]
       - ["t06_import", "/api/import"]
       - ["t06_interrupt", "/api/interrupt"]
       - ["t06_issues", "/api/issues"]
@@ -829,7 +818,6 @@ tables:
     covers: not_json
     columns: ["case", "route"]
     rows:
-      - ["t06r_agent_models", "/api/agent-models"]
       - ["t06r_agent_report", "/api/agent-report"]
       - ["t06r_audit", "/api/audit"]
       - ["t06r_backup", "/api/backup"]
@@ -896,7 +884,6 @@ tables:
       - ["t07_forge_answer", "/api/forge-answer"]
       - ["t07_halt", "/api/halt"]
       - ["t07_handoff", "/api/handoff"]
-      - ["t07_handover", "/api/handover"]
       - ["t07_interrupt", "/api/interrupt"]
       - ["t07_issues", "/api/issues"]
       - ["t07_keep", "/api/keep"]
@@ -965,7 +952,6 @@ tables:
     covers: json_over_64k
     columns: ["case", "route"]
     rows:
-      - ["t07r_agent_models", "/api/agent-models"]
       - ["t07r_agent_report", "/api/agent-report"]
       - ["t07r_audit", "/api/audit"]
       - ["t07r_backup", "/api/backup"]
@@ -1064,7 +1050,6 @@ tables:
       - ["t09_forge_answer", "/api/forge-answer"]
       - ["t09_halt", "/api/halt"]
       - ["t09_handoff", "/api/handoff"]
-      - ["t09_handover", "/api/handover"]
       - ["t09_import", "/api/import"]
       - ["t09_interrupt", "/api/interrupt"]
       - ["t09_issues", "/api/issues"]
@@ -1137,7 +1122,6 @@ tables:
     covers: query
     columns: ["case", "route"]
     rows:
-      - ["t09r_agent_models", "/api/agent-models"]
       - ["t09r_agent_report", "/api/agent-report"]
       - ["t09r_audit", "/api/audit"]
       - ["t09r_backup", "/api/backup"]
@@ -1176,7 +1160,6 @@ tables:
     columns: ["case", "route"]
     rows:
       - ["t10_add_repo", "/api/add-repo"]
-      - ["t10_agent_models", "/api/agent-models"]
       - ["t10_agent_report", "/api/agent-report"]
       - ["t10_allow_commit", "/api/allow-commit"]
       - ["t10_allow_file", "/api/allow-file"]
@@ -1212,7 +1195,6 @@ tables:
       - ["t10_gate", "/api/gate"]
       - ["t10_halt", "/api/halt"]
       - ["t10_handoff", "/api/handoff"]
-      - ["t10_handover", "/api/handover"]
       - ["t10_import", "/api/import"]
       - ["t10_interrupt", "/api/interrupt"]
       - ["t10_issues", "/api/issues"]
@@ -1293,7 +1275,6 @@ tables:
         reason: "PUT, DELETE and PATCH count as destructive on every route, and each row is refused with 405 before the route's handler runs, since the route takes only POST; its body holds only a field no route takes, which names no repository, session or other record, so nothing can be removed or overwritten; every row is named, since a waived row guards no later row on its route"
         rows:
           - t11_put_add_repo
-          - t11_put_agent_models
           - t11_put_agent_report
           - t11_put_allow_commit
           - t11_put_allow_file
@@ -1329,7 +1310,6 @@ tables:
           - t11_put_gate
           - t11_put_halt
           - t11_put_handoff
-          - t11_put_handover
           - t11_put_import
           - t11_put_interrupt
           - t11_put_issues
@@ -1382,7 +1362,6 @@ tables:
           - t11_put_walkthrough_check
           - t11_put_workspace
           - t11_delete_add_repo
-          - t11_delete_agent_models
           - t11_delete_agent_report
           - t11_delete_allow_commit
           - t11_delete_allow_file
@@ -1418,7 +1397,6 @@ tables:
           - t11_delete_gate
           - t11_delete_halt
           - t11_delete_handoff
-          - t11_delete_handover
           - t11_delete_import
           - t11_delete_interrupt
           - t11_delete_issues
@@ -1471,7 +1449,6 @@ tables:
           - t11_delete_walkthrough_check
           - t11_delete_workspace
           - t11_patch_add_repo
-          - t11_patch_agent_models
           - t11_patch_agent_report
           - t11_patch_allow_commit
           - t11_patch_allow_file
@@ -1507,7 +1484,6 @@ tables:
           - t11_patch_gate
           - t11_patch_halt
           - t11_patch_handoff
-          - t11_patch_handover
           - t11_patch_import
           - t11_patch_interrupt
           - t11_patch_issues
@@ -1563,7 +1539,6 @@ tables:
     columns: ["case", "route", "method"]
     rows:
       - ["t11_put_add_repo", "/api/add-repo", "PUT"]
-      - ["t11_put_agent_models", "/api/agent-models", "PUT"]
       - ["t11_put_agent_report", "/api/agent-report", "PUT"]
       - ["t11_put_allow_commit", "/api/allow-commit", "PUT"]
       - ["t11_put_allow_file", "/api/allow-file", "PUT"]
@@ -1599,7 +1574,6 @@ tables:
       - ["t11_put_gate", "/api/gate", "PUT"]
       - ["t11_put_halt", "/api/halt", "PUT"]
       - ["t11_put_handoff", "/api/handoff", "PUT"]
-      - ["t11_put_handover", "/api/handover", "PUT"]
       - ["t11_put_import", "/api/import", "PUT"]
       - ["t11_put_interrupt", "/api/interrupt", "PUT"]
       - ["t11_put_issues", "/api/issues", "PUT"]
@@ -1652,7 +1626,6 @@ tables:
       - ["t11_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
       - ["t11_put_workspace", "/api/workspace", "PUT"]
       - ["t11_delete_add_repo", "/api/add-repo", "DELETE"]
-      - ["t11_delete_agent_models", "/api/agent-models", "DELETE"]
       - ["t11_delete_agent_report", "/api/agent-report", "DELETE"]
       - ["t11_delete_allow_commit", "/api/allow-commit", "DELETE"]
       - ["t11_delete_allow_file", "/api/allow-file", "DELETE"]
@@ -1688,7 +1661,6 @@ tables:
       - ["t11_delete_gate", "/api/gate", "DELETE"]
       - ["t11_delete_halt", "/api/halt", "DELETE"]
       - ["t11_delete_handoff", "/api/handoff", "DELETE"]
-      - ["t11_delete_handover", "/api/handover", "DELETE"]
       - ["t11_delete_import", "/api/import", "DELETE"]
       - ["t11_delete_interrupt", "/api/interrupt", "DELETE"]
       - ["t11_delete_issues", "/api/issues", "DELETE"]
@@ -1741,7 +1713,6 @@ tables:
       - ["t11_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
       - ["t11_delete_workspace", "/api/workspace", "DELETE"]
       - ["t11_patch_add_repo", "/api/add-repo", "PATCH"]
-      - ["t11_patch_agent_models", "/api/agent-models", "PATCH"]
       - ["t11_patch_agent_report", "/api/agent-report", "PATCH"]
       - ["t11_patch_allow_commit", "/api/allow-commit", "PATCH"]
       - ["t11_patch_allow_file", "/api/allow-file", "PATCH"]
@@ -1777,7 +1748,6 @@ tables:
       - ["t11_patch_gate", "/api/gate", "PATCH"]
       - ["t11_patch_halt", "/api/halt", "PATCH"]
       - ["t11_patch_handoff", "/api/handoff", "PATCH"]
-      - ["t11_patch_handover", "/api/handover", "PATCH"]
       - ["t11_patch_import", "/api/import", "PATCH"]
       - ["t11_patch_interrupt", "/api/interrupt", "PATCH"]
       - ["t11_patch_issues", "/api/issues", "PATCH"]
@@ -1856,7 +1826,6 @@ tables:
         reason: "PUT, DELETE and PATCH count as destructive on every route, and each row, which sends no Origin, is refused with 405 before the route's handler runs, since the route takes only POST; its body holds only a field no route takes, which names no repository, session or other record, so nothing can be removed or overwritten; every row is named, since a waived row guards no later row on its route"
         rows:
           - t12_put_add_repo
-          - t12_put_agent_models
           - t12_put_agent_report
           - t12_put_allow_commit
           - t12_put_allow_file
@@ -1892,7 +1861,6 @@ tables:
           - t12_put_gate
           - t12_put_halt
           - t12_put_handoff
-          - t12_put_handover
           - t12_put_import
           - t12_put_interrupt
           - t12_put_issues
@@ -1945,7 +1913,6 @@ tables:
           - t12_put_walkthrough_check
           - t12_put_workspace
           - t12_delete_add_repo
-          - t12_delete_agent_models
           - t12_delete_agent_report
           - t12_delete_allow_commit
           - t12_delete_allow_file
@@ -1981,7 +1948,6 @@ tables:
           - t12_delete_gate
           - t12_delete_halt
           - t12_delete_handoff
-          - t12_delete_handover
           - t12_delete_import
           - t12_delete_interrupt
           - t12_delete_issues
@@ -2034,7 +2000,6 @@ tables:
           - t12_delete_walkthrough_check
           - t12_delete_workspace
           - t12_patch_add_repo
-          - t12_patch_agent_models
           - t12_patch_agent_report
           - t12_patch_allow_commit
           - t12_patch_allow_file
@@ -2070,7 +2035,6 @@ tables:
           - t12_patch_gate
           - t12_patch_halt
           - t12_patch_handoff
-          - t12_patch_handover
           - t12_patch_import
           - t12_patch_interrupt
           - t12_patch_issues
@@ -2126,7 +2090,6 @@ tables:
     columns: ["case", "route", "method"]
     rows:
       - ["t12_put_add_repo", "/api/add-repo", "PUT"]
-      - ["t12_put_agent_models", "/api/agent-models", "PUT"]
       - ["t12_put_agent_report", "/api/agent-report", "PUT"]
       - ["t12_put_allow_commit", "/api/allow-commit", "PUT"]
       - ["t12_put_allow_file", "/api/allow-file", "PUT"]
@@ -2162,7 +2125,6 @@ tables:
       - ["t12_put_gate", "/api/gate", "PUT"]
       - ["t12_put_halt", "/api/halt", "PUT"]
       - ["t12_put_handoff", "/api/handoff", "PUT"]
-      - ["t12_put_handover", "/api/handover", "PUT"]
       - ["t12_put_import", "/api/import", "PUT"]
       - ["t12_put_interrupt", "/api/interrupt", "PUT"]
       - ["t12_put_issues", "/api/issues", "PUT"]
@@ -2215,7 +2177,6 @@ tables:
       - ["t12_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
       - ["t12_put_workspace", "/api/workspace", "PUT"]
       - ["t12_delete_add_repo", "/api/add-repo", "DELETE"]
-      - ["t12_delete_agent_models", "/api/agent-models", "DELETE"]
       - ["t12_delete_agent_report", "/api/agent-report", "DELETE"]
       - ["t12_delete_allow_commit", "/api/allow-commit", "DELETE"]
       - ["t12_delete_allow_file", "/api/allow-file", "DELETE"]
@@ -2251,7 +2212,6 @@ tables:
       - ["t12_delete_gate", "/api/gate", "DELETE"]
       - ["t12_delete_halt", "/api/halt", "DELETE"]
       - ["t12_delete_handoff", "/api/handoff", "DELETE"]
-      - ["t12_delete_handover", "/api/handover", "DELETE"]
       - ["t12_delete_import", "/api/import", "DELETE"]
       - ["t12_delete_interrupt", "/api/interrupt", "DELETE"]
       - ["t12_delete_issues", "/api/issues", "DELETE"]
@@ -2304,7 +2264,6 @@ tables:
       - ["t12_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
       - ["t12_delete_workspace", "/api/workspace", "DELETE"]
       - ["t12_patch_add_repo", "/api/add-repo", "PATCH"]
-      - ["t12_patch_agent_models", "/api/agent-models", "PATCH"]
       - ["t12_patch_agent_report", "/api/agent-report", "PATCH"]
       - ["t12_patch_allow_commit", "/api/allow-commit", "PATCH"]
       - ["t12_patch_allow_file", "/api/allow-file", "PATCH"]
@@ -2340,7 +2299,6 @@ tables:
       - ["t12_patch_gate", "/api/gate", "PATCH"]
       - ["t12_patch_halt", "/api/halt", "PATCH"]
       - ["t12_patch_handoff", "/api/handoff", "PATCH"]
-      - ["t12_patch_handover", "/api/handover", "PATCH"]
       - ["t12_patch_import", "/api/import", "PATCH"]
       - ["t12_patch_interrupt", "/api/interrupt", "PATCH"]
       - ["t12_patch_issues", "/api/issues", "PATCH"]
@@ -2447,7 +2405,6 @@ tables:
       - ["t13_forge_answer", "/api/forge-answer"]
       - ["t13_halt", "/api/halt"]
       - ["t13_handoff", "/api/handoff"]
-      - ["t13_handover", "/api/handover"]
       - ["t13_import", "/api/import"]
       - ["t13_interrupt", "/api/interrupt"]
       - ["t13_issues", "/api/issues"]
@@ -2519,7 +2476,6 @@ tables:
     covers: same_site
     columns: ["case", "route"]
     rows:
-      - ["t13r_agent_models", "/api/agent-models"]
       - ["t13r_agent_report", "/api/agent-report"]
       - ["t13r_audit", "/api/audit"]
       - ["t13r_backup", "/api/backup"]
@@ -2718,3 +2674,57 @@ scenarios:
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
         no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+  - id: SEC-007
+    name: "The removed agent-models and hand-over routes are refused as paths that name no route, even with the page key, and Network access's removed agents op is refused as an op the egress route doesn't take; each body holds only what the old route took or a field no route takes, so a route that came back would answer otherwise"
+    steps:
+      - id: agent-models-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/agent-models"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, agent: claude }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+      - id: handover-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/handover"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+      - id: egress-agents-op-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: agents, agents: [claude] }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: op }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the egress route refuses an op it doesn't take before it reads or changes the allowlist, so there is no change to read back"

@@ -16,7 +16,6 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/engines/acp"
-	"github.com/bezmoradi/software-factory/internal/adapters/engines/codex"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	gitpush "github.com/bezmoradi/software-factory/internal/adapters/git/push"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
@@ -365,7 +364,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Folders:      boxFolders{workspace: cfg.Workspace, uploads: uploads},
 		Clones:       remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
 		CloneReader:  files.Reader{},
-		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions, RateWindows: reg.Limits().CodexWindows}},
+		Stdio:        acp.Opener{Logger: logger},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
 		PluginSocket: cfg.PluginSocket,

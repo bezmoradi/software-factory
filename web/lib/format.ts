@@ -32,7 +32,7 @@ export function modeLabel(mode: string): string {
   return MODE_LABELS[mode] ?? mode
 }
 
-const AGENT_WORDS: Record<string, string> = { claude: 'Claude', codex: 'Codex' }
+const AGENT_WORDS: Record<string, string> = { claude: 'Claude' }
 const agentNames = new Map<string, string>()
 
 export function setAgentNames(list: { id: string; name: string }[]): void {
@@ -78,8 +78,8 @@ export function logsCommand(id: string, box: string): string {
   return name ? `docker exec ${name} claude logs ${id}` : ''
 }
 
-export function signInStep(agent: string | undefined, box: string | undefined): string {
+export function signInStep(box: string | undefined): string {
   const name = boxContainer(box ?? '')
   if (!name) return "the session's sign-in panel, which Wake opens"
-  return agent === 'codex' ? `docker exec -it ${name} codex login --device-auth` : `docker exec -it ${name} claude, then /login`
+  return `docker exec -it ${name} claude, then /login`
 }

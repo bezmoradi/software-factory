@@ -7,7 +7,6 @@ drivers:
     official: http
     policy:
       reads:
-        - { method: POST, path: /api/agent-models }
         - { method: POST, path: /api/agent-report }
         - { method: POST, path: /api/audit, shows: [/api/dispatch, /api/remove-session, /api/stop-session] }
         - { method: POST, path: /api/backup, shows: [/api/import] }

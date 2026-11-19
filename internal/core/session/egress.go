@@ -62,7 +62,6 @@ type Gateway struct {
 }
 
 type EgressSettings struct {
-	Agents  []string
 	Added   []AddedHost
 	Gateway Gateway
 }
@@ -91,17 +90,9 @@ type GatewayKeys interface {
 	RunningOn(side string) []string
 }
 
-type AgentUse struct {
-	ID    string
-	Name  string
-	Hosts []string
-	InUse bool
-}
-
 type EgressView struct {
 	Saved   bool
 	Pending bool
-	Agents  []AgentUse
 	Added   []AddedHost
 	Gateway *Gateway
 	Lists   EgressLists
@@ -121,7 +112,6 @@ type RefusalView struct {
 
 type EgressPage interface {
 	EgressView() (EgressView, error)
-	SetAgentsInUse(ctx context.Context, ids []string) error
 	AddHost(ctx context.Context, name, expiry string, uploadsOk bool, reason string) error
 	RemoveHost(ctx context.Context, name string) error
 	SetGateway(ctx context.Context, rawURL string, agents, reviewers bool) error
@@ -228,9 +218,6 @@ func (a *Allowlist) derived() EgressSettings {
 		for _, h := range ag.Hosts {
 			known[h] = true
 		}
-		if slices.ContainsFunc(ag.Hosts, func(h string) bool { return slices.Contains(a.cfg.Base, h) }) {
-			s.Agents = append(s.Agents, ag.ID)
-		}
 	}
 	for _, h := range a.cfg.Base {
 		if !known[h] {
@@ -253,22 +240,11 @@ func (a *Allowlist) wantLocked(side string) EgressList {
 	}
 	s := a.settings
 	fixed := map[string]bool{}
-	if side == SideReviewers {
-		for _, h := range agentHostsOf("claude") {
-			fixed[h] = true
-		}
-		if s.Gateway.Reviewers && s.Gateway.Host != "" {
-			fixed[s.Gateway.Host] = true
-		}
-	} else {
-		for _, id := range s.Agents {
-			for _, h := range agentHostsOf(id) {
-				fixed[h] = true
-			}
-		}
-		if s.Gateway.Agents && s.Gateway.Host != "" {
-			fixed[s.Gateway.Host] = true
-		}
+	for _, h := range agentHostsOf("claude") {
+		fixed[h] = true
+	}
+	if side == SideReviewers && s.Gateway.Reviewers && s.Gateway.Host != "" || side != SideReviewers && s.Gateway.Agents && s.Gateway.Host != "" {
+		fixed[s.Gateway.Host] = true
 	}
 	expires := map[string]time.Time{}
 	allow := slices.Collect(maps.Keys(fixed))
@@ -456,9 +432,6 @@ func (a *Allowlist) EgressView() (EgressView, error) {
 	defer a.mu.Unlock()
 	s := a.current()
 	v := EgressView{Saved: a.saved, Pending: a.pending, Lists: a.lists(), Base: slices.Clone(a.cfg.Base), Deny: slices.Clone(a.cfg.Deny), Now: a.cfg.Now(), Added: slices.Clone(s.Added)}
-	for _, ag := range AgentHostTable() {
-		v.Agents = append(v.Agents, AgentUse{ID: ag.ID, Name: ag.Name, Hosts: slices.Clone(ag.Hosts), InUse: slices.Contains(s.Agents, ag.ID)})
-	}
 	if s.Gateway.URL != "" {
 		g := s.Gateway
 		v.Gateway = &g
@@ -475,7 +448,6 @@ func (a *Allowlist) change(ctx context.Context, what, words string, edit func(*E
 	}
 	a.mu.Lock()
 	s := a.current()
-	s.Agents = slices.Clone(s.Agents)
 	s.Added = slices.Clone(s.Added)
 	if err := edit(&s); err != nil {
 		a.mu.Unlock()
@@ -506,27 +478,6 @@ func (a *Allowlist) audit(what, words string) {
 	if err := masking(a.cfg.Audit).Append(AuditEntry{Time: a.cfg.Now(), Kind: AuditEgress, By: "page", Result: what, Reason: words}); err != nil {
 		a.cfg.Logger.Warn("egress allowlist", "event", "audit-not-written")
 	}
-}
-
-func (a *Allowlist) SetAgentsInUse(ctx context.Context, ids []string) error {
-	var picked []string
-	for _, ag := range AgentHostTable() {
-		if slices.Contains(ids, ag.ID) {
-			picked = append(picked, ag.ID)
-		}
-	}
-	for _, id := range ids {
-		if agentHostsOf(id) == nil {
-			return explained(invalid("agent"), "The engine knows no agent "+clipWords(id)+".")
-		}
-	}
-	if len(picked) == 0 {
-		return explained(invalid("agent"), "Choose at least one agent you use.")
-	}
-	return a.change(ctx, "agents", strings.Join(picked, ","), func(s *EgressSettings) error {
-		s.Agents = picked
-		return nil
-	})
 }
 
 func (a *Allowlist) refuseHost(name string) error {

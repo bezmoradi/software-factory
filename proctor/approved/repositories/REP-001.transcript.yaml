@@ -97,11 +97,6 @@ steps:
             name: "Claude Code"
           - enabled: true
             expect: "any"
-            id: "codex"
-            method: "codex"
-            name: "Codex CLI"
-          - enabled: true
-            expect: "any"
             id: "dev-acp"
             method: "acp"
             name: "Development ACP agent"
@@ -109,7 +104,7 @@ steps:
         cache-control:
           - "no-store"
         content-length:
-          - "693"
+          - "612"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:
@@ -130,7 +125,7 @@ steps:
         cache-control:
           - "no-store"
         content-length:
-          - "693"
+          - "612"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:

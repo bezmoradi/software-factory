@@ -234,7 +234,7 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	byBox := map[string]map[string]*run{}
 	dirs := map[string]string{}
 	for sid, r := range d.runs {
-		if r.spec.Method == MethodPlugin && r.cwd != "" && r.box != "" && r.handedTo == "" && !r.handing {
+		if r.spec.Method == MethodPlugin && r.cwd != "" && r.box != "" && !r.doubled {
 			if byBox[r.box] == nil {
 				byBox[r.box] = map[string]*run{}
 			}

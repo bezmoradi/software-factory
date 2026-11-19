@@ -72,7 +72,6 @@ var (
 	looseCloud = [][]*regexp.Regexp{
 		steps(`(?i)\bclaude\b`, `(?i)--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b`),
 		steps(`(?i)\bclaude\b`, `(?i)\bultrareview\b`, `(?i)--post\b`),
-		steps(`(?i)\bcodex\b`, `(?i)\b(?:cloud|apply)\b`),
 	}
 	looseUndoneAll = [][]*regexp.Regexp{
 		steps(`(?i)\bgit\b`, `(?i)\breset\b`, `(?i)--hard`),
@@ -80,7 +79,7 @@ var (
 		steps(`(?i)\b(?:terraform|tofu|terragrunt)\b`, `(?i)\bdestroy\b`),
 		steps(`(?i)\b(?:kubectl|oc)\b`, `(?i)\bdelete\b`),
 		steps(`(?i)\b(?:drop|truncate|dropdb)\b`),
-		steps(`(?i)\b(?:claude|codex)\b`),
+		steps(`(?i)\bclaude\b`),
 		steps(`(?i)\b`+downloader+`\b`, `(?i)\|&?\s*`+lead+runner+`\b`),
 		steps(`(?i)(?:^|[\s;&|])\.\s+<\(\s*` + downloader + `\b`),
 	}

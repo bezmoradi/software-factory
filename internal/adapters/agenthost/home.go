@@ -71,10 +71,6 @@ func sum(parts ...string) string {
 
 func homeSources(home string) []homeSource {
 	claude := filepath.Clean(claudeConfigDir(home))
-	codex := filepath.Join(home, ".codex")
-	if dir := os.Getenv("CODEX_HOME"); filepath.IsAbs(dir) {
-		codex = filepath.Clean(dir)
-	}
 	out := []homeSource{
 		{base: claude, rel: "settings.json"},
 		{base: claude, rel: "CLAUDE.md"},
@@ -82,8 +78,6 @@ func homeSources(home string) []homeSource {
 		{base: claude, rel: "skills", folder: true},
 		{base: claude, rel: "commands", folder: true},
 		{base: claude, rel: "hooks", folder: true},
-		{base: codex, rel: "config.toml"},
-		{base: codex, rel: "AGENTS.md"},
 		{base: home, rel: ".gitconfig"},
 		{base: home, rel: ".config/git/config"},
 		{base: home, rel: ".npmrc", metadata: true},

@@ -2,7 +2,7 @@ version: 2
 suite: repositories
 scenarios:
   - id: REP-001
-    name: "Saving the git host's token again keeps one entry for the host, named by its URL"
+    name: "Saving the git host's token again keeps one entry for the host, named by its URL; the project list offers only Claude Code and, in the development overlay, the development ACP agent"
     transcript: true
     approved_log: true
     steps:
@@ -33,6 +33,9 @@ scenarios:
         expect:
           equal:
             "$.status": 200
+            "$.body.starters":
+              - { enabled: true, expect: any, id: claude, method: plugin, name: "Claude Code" }
+              - { enabled: true, expect: any, id: dev-acp, method: acp, name: "Development ACP agent" }
           count:
             "$.body.hosts": { where: { host: "https://gitserver.test:8443" }, is: 1 }
           any:

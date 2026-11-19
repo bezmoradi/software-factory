@@ -181,7 +181,7 @@ class SfProjectMetrics extends HTMLElement {
   #cost(v: MetricsView): HTMLElement {
     const box = el('div')
     box.append(el('p', 'small', 'Cost, the agents\' own estimate'))
-    box.append(el('p', 'small muted', 'Claude Code and Codex report these numbers themselves; the engine adds them up and checks nothing. On a subscription they are what the same use would cost per token, not a bill.'))
+    box.append(el('p', 'small muted', 'Claude Code reports these numbers itself; the engine adds them up and checks nothing. On a subscription they are what the same use would cost per token, not a bill.'))
     const ul = el('ul', 'small list')
     ul.append(el('li', '', `Agents: $${v.agentCost.toFixed(2)} over ${plural(v.agentSessions, 'session')} the caps record still holds`))
     ul.append(el('li', '', `Reviewers: $${v.reviewCost.toFixed(2)} over ${plural(v.reviewRuns, 'review')}${v.reviewsSince ? ` since ${date(v.reviewsSince)}` : ''}, from the review records (at most 500)${v.importedRuns ? `, including $${v.importedCost.toFixed(2)} over ${plural(v.importedRuns, 'review')} imported from another engine, shown for the record` : ''}`))

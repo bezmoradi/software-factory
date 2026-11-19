@@ -47,7 +47,7 @@ import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
 import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
 import { saveSessionCaps } from './components/caps.ts'
-import { agentName, otherAgents, setBranchStarters } from './components/lineage.ts'
+import { agentName, setBranchStarters } from './components/lineage.ts'
 import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
@@ -64,7 +64,7 @@ import { startPalette } from './palette-items.ts'
 setPainter(paint)
 
 const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 'session-wake': 'Session woken', 'session-stop': 'Session stopped', 'session-fork': 'Session forked', 'session-delete': 'Session deleted' }
-const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
+const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', pinned: 'from a pinned commit' }
 
 function lifecycleLine(e: AuditEntry): string {
   const what = Object.hasOwn(LIFECYCLE, e.kind) ? LIFECYCLE[e.kind] : visible(e.kind)
@@ -462,7 +462,7 @@ function paintControl(s: Session) {
   byId('menu-wake').hidden = !(sleeping(s) && i.controlled)
   paintBranchMenu(s)
   byId('session-more').hidden = !id && action !== 'Make it read-only'
-  modelMenu.hidden = !(i.agent === 'claude' || i.agent === 'codex') || !i.controlled
+  modelMenu.hidden = i.agent !== 'claude' || !i.controlled
   if (!modelMenu.hidden) byId('session-more').hidden = false
   if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
   byId('foot-text').textContent = notice ? '' : text
@@ -907,12 +907,8 @@ async function loadProjects(force = false) {
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
 }
 
-function twinRole(i: SessionInfo): string {
-  return i.lineage?.handedTo ? 'earlier' : i.lineage?.earlier?.length ? 'took over' : ''
-}
-
 function twinWords(i: SessionInfo): string {
-  return [i.agent ? agentName(i.agent) : '', twinRole(i)].filter(Boolean).join(', ')
+  return i.agent ? agentName(i.agent) : ''
 }
 
 function sessionTwin(x: Session): { description: string; short: string } {
@@ -925,8 +921,7 @@ function sessionTwin(x: Session): { description: string; short: string } {
   const words = twinWords(x.info)
   const sid = x.sid.slice(0, 8)
   if (twins.some(y => twinWords(y.info) === words)) return { description: [words, sid].filter(Boolean).join(', '), short: sid }
-  const role = twinRole(x.info)
-  return { description: words, short: role && twins.every(y => twinRole(y.info) !== role) ? role : words }
+  return { description: words, short: words }
 }
 
 async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -1195,38 +1190,15 @@ function usageText(s: Session): string {
 }
 function branchOwned(s: Session): boolean {
   const i = s.info
-  return state.connected && !!i.verified && i.kind === 'background' && !!i.project && !i.lineage?.handedTo
+  return state.connected && !!i.verified && i.kind === 'background' && !!i.project
 }
 
 function paintBranchMenu(s: Session) {
-  const menu = byId('session-menu')
   const owned = branchOwned(s)
-  const others = owned ? otherAgents(s.info.agent) : []
-  const key = others.map(a => a.id).join(' ')
-  if (menu.dataset.continue !== key) {
-    menu.dataset.continue = key
-    for (const b of menu.querySelectorAll('button[data-continue]')) b.remove()
-    const before = byId('menu-bring-main')
-    for (const a of others) {
-      const b = el('button', '', `Continue with ${a.name}`)
-      b.type = 'button'
-      b.setAttribute('role', 'menuitem')
-      b.dataset.continue = a.id
-      menu.insertBefore(b, before)
-    }
-  }
   byId('menu-bring-main').hidden = !(owned && s.info.running && s.info.live && s.info.controlled)
   byId('menu-fork').hidden = !forkable(s)
 }
 
-byId('session-menu').addEventListener('click', e => {
-  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-continue]')
-  const s = current()
-  if (!b || !s) return
-  byId('session-menu').hidePopover()
-  byId('session-more').focus()
-  void handOver(s, b.dataset.continue ?? '')
-})
 byId('menu-bring-main').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
@@ -1247,13 +1219,6 @@ byId('changes').addEventListener('sf-fork-commit', e => {
   if (!s || !p) return
   go('projects')
   projects.fork(p.path, s.sid, e.detail.sha)
-})
-byId('lineage').addEventListener('sf-handover', e => {
-  const s = sessions.get(e.detail.sid)
-  if (s) void whilePressed(() => handOver(s, e.detail.agent))
-})
-byId('lineage').addEventListener('sf-open-session', e => {
-  if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
 })
 for (const id of ['split', 'compare']) {
   byId(id).addEventListener('sf-open-session', e => {
@@ -1576,7 +1541,7 @@ byId('overview').addEventListener('sf-counts', e => {
 
 startLayout({ jumpLatest: () => composer.jump('latest') })
 
-const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain } = startSessionActions({ reply, loadGate, loadProjects, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
+const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain } = startSessionActions({ reply, loadGate, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
 
 const composer = startComposer({ send })
 const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })

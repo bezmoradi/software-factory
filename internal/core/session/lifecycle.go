@@ -17,12 +17,11 @@ const (
 )
 
 const (
-	StartFromMain     = "main"
-	StartFromBranch   = "branch"
-	StartFromPull     = "pull-request"
-	StartFromFork     = "fork"
-	StartFromHandover = "hand-over"
-	StartFromPinned   = "pinned"
+	StartFromMain   = "main"
+	StartFromBranch = "branch"
+	StartFromPull   = "pull-request"
+	StartFromFork   = "fork"
+	StartFromPinned = "pinned"
 )
 
 const (
@@ -51,8 +50,6 @@ func startFromOf(q Dispatch) startedFrom {
 	switch {
 	case q.pinned != nil:
 		return startedFrom{kind: StartFromPinned}
-	case q.Continues != nil:
-		return startedFrom{kind: StartFromHandover, source: q.Continues.SID}
 	case q.From.SID != "":
 		return startedFrom{kind: StartFromFork, source: q.From.SID}
 	case q.From.Branch != "":

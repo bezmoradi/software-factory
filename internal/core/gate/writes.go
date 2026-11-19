@@ -31,7 +31,7 @@ func ProtectedWrite(top, file string) string {
 	segments := strings.Split(p, "/")
 	for _, s := range segments {
 		if agentConfigDirs[s] {
-			return "it is Codex CLI's configuration in the worktree, which decides what runs when Codex starts here"
+			return "it is a settings folder other coding tools read in the worktree, which can decide what runs when one of them starts here"
 		}
 	}
 	if environmentFile(segments[len(segments)-1]) {

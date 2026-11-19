@@ -25,7 +25,6 @@ const RUNNER = String.raw`(?:sh|bash|zsh|dash|ksh|ash|fish|python[\d.]*|node|per
 const LOOSE_CLOUD: RegExp[][] = [
   [/\bclaude\b/i, /--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b/i],
   [/\bclaude\b/i, /\bultrareview\b/i, /--post\b/i],
-  [/\bcodex\b/i, /\b(?:cloud|apply)\b/i],
 ]
 const LOOSE_UNDONE: RegExp[][] = [
   [/\bgit\b/i, /\breset\b/i, /--hard/i],
@@ -33,7 +32,7 @@ const LOOSE_UNDONE: RegExp[][] = [
   [/\b(?:terraform|tofu|terragrunt)\b/i, /\bdestroy\b/i],
   [/\b(?:kubectl|oc)\b/i, /\bdelete\b/i],
   [/\b(?:drop|truncate|dropdb)\b/i],
-  [/\b(?:claude|codex)\b/i],
+  [/\bclaude\b/i],
   [new RegExp(String.raw`\b${DOWNLOADER}\b`, 'i'), new RegExp(String.raw`\|&?\s*${LEAD}${RUNNER}\b`, 'i')],
   [new RegExp(String.raw`(?:^|[\s;&|])\.\s+<\(\s*${DOWNLOADER}\b`, 'i')],
 ]

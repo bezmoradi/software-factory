@@ -47,16 +47,6 @@ var StartupLists = map[string][]StartupEntry{
 		{Path: ".claude/hooks", Folder: true, Place: InWorktree, Why: "the conventional folder for the scripts settings.json hooks run",
 			Source: "code.claude.com/docs/en/hooks (scripts referenced from settings hooks); read when it exists"},
 	},
-	"codex": {
-		{Path: ".codex", Folder: true, Place: InWorktree, Why: "project config.toml (approval and sandbox settings, MCP servers, profiles), hooks.json, rules/*.rules (exec-policy allow rules), agents/ and skills/; app-server marks the folder trusted itself, so they load",
-			Source: "learn.chatgpt.com/docs/config-file/config-reference: \"Untrusted projects skip project-scoped .codex/ layers, including project-local config, hooks, and rules\"; .codex/config.toml, .codex/hooks.json, .codex/agents and .codex/skills named in the codex 0.167.1 binary"},
-		{Path: ".agents/skills", Folder: true, Place: InWorktree, Why: "repository skills Codex discovers and may run",
-			Source: "\".agents/skills\" named in the codex 0.167.1 binary's skill discovery"},
-		{Path: ".agents/plugins", Folder: true, Place: InWorktree, Why: "a repository plugin marketplace (.agents/plugins/marketplace.json)",
-			Source: "learn.chatgpt.com/docs/config-file/config-reference, marketplaces; \".agents/plugins/marketplace.json\" in the codex 0.167.1 binary"},
-		{Path: ".claude-plugin", Folder: true, Place: InWorktree, Why: "a Claude Code plugin manifest (plugin.json) or marketplace (marketplace.json) that Codex also loads, with the skills, MCP servers and hooks it names",
-			Source: "codex source at tag rust-v0.167.1, core-plugins: reads .claude-plugin/plugin.json and .claude-plugin/marketplace.json"},
-	},
 }
 
 const (

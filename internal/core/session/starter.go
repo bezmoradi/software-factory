@@ -23,6 +23,7 @@ const (
 	claudeList   = 20 * time.Second
 	openFor      = 45 * time.Second
 	stopFor      = 10 * time.Second
+	stopSettle   = 10 * time.Second
 	maxName      = 80
 	maxOutput    = 2000
 	findAttempts = 5
@@ -51,7 +52,6 @@ type Dispatch struct {
 	Consent Consent
 
 	From      StartFrom
-	Continues *Continuation
 	Issue     int
 	IssueHash string
 	Effort    string
@@ -92,7 +92,7 @@ type DispatcherConfig struct {
 	Folders      BoxFolders
 	Clones       SessionClones
 	CloneReader  CloneReader
-	Openers      map[Method]Opener
+	Stdio        Opener
 	Repositories Repositories
 	PluginDir    string
 	PluginSocket string
@@ -145,21 +145,17 @@ type run struct {
 	typ        string
 	at         time.Time
 	stamp      runStamp
-	thread     string
 
-	origin     string
-	from       startedFrom
-	earlier    []Stint
-	handedTo   string
-	handedHead string
-	handing    bool
-	model      string
-	effort     string
-	ports      int
+	origin string
+	from   startedFrom
+	model  string
+	effort string
+	ports  int
 
 	group     string
 	groupKind string
 	history   bool
+	doubled   bool
 	asked     string
 	waitAt    time.Time
 	aside     string
@@ -276,7 +272,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	if spec = d.installed(spec); !spec.Enabled {
 		return Started{}, explained(conflict("not installed"), spec.Off)
 	}
-	if err := d.checkChoice(ctx, spec, q.Model, q.Effort); err != nil {
+	if err := checkChoice(spec, q.Model, q.Effort); err != nil {
 		return Started{}, err
 	}
 	if utf16Len(q.Name) > maxName || controlChars.MatchString(q.Name) || !utf8Valid(q.Name) {
@@ -355,27 +351,19 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	short := randomHex(4)
 	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
 	r.box, r.clone = box, BoxClone(d.cfg.Workspace, box, repo.Name)
-	r.origin, r.earlier = at.origin, at.earlier
+	r.origin = at.origin
 	r.from = startFromOf(q)
 	r.group, r.groupKind, r.asked = q.group, q.groupKind, q.asked
-	if q.Continues != nil {
-		r.branch = q.Continues.Branch
-	}
 	if err := d.branchFree(r.branch); err != nil {
 		return Started{}, err
 	}
 	r.model, r.effort = q.Model, q.Effort
 	r.stamp = d.stampOf(spec.ID, time.Time{})
-	if err := d.makeClone(ctx, r, main, from, q.Continues != nil); err != nil {
+	if err := d.makeClone(ctx, r, main, from); err != nil {
 		return Started{}, err
 	}
 	host := d.host(r)
-	var cwd string
-	if q.Continues != nil {
-		cwd, err = host.AddExistingWorktree(ctx, repo.Name, r.name, r.branch, id)
-	} else {
-		cwd, err = host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
-	}
+	cwd, err := host.AddWorktree(ctx, repo.Name, r.name, r.branch, base, id)
 	if err != nil {
 		shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "worktree-failed")
 		return Started{}, explained(conflict("worktree"), "agent-host couldn't create the session's worktree: "+hostMessage(err))
@@ -403,9 +391,6 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 	} else {
 		err = d.startStdio(ctx, r)
 	}
-	if err != nil && r.sid != "" && q.Continues != nil {
-		d.forgetStart(r)
-	}
 	if r.sid != "" {
 		*kept = true
 		d.unwait(r.box)
@@ -426,24 +411,6 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 	}
 	d.audited(ctx, r)
 	return Started{SID: r.sid, ID: r.id}, nil
-}
-
-func (d *Dispatcher) forgetStart(r *run) {
-	d.mu.Lock()
-	sid := r.sid
-	if d.runs[sid] == r {
-		delete(d.runs, sid)
-	}
-	r.sid = ""
-	b := r.bridge
-	r.bridge, r.process, r.running = nil, nil, false
-	d.mu.Unlock()
-	if b != nil {
-		b.close()
-	}
-	d.saveRuns()
-	d.reg.Forget(sid)
-	d.cfg.Logger.Info("dispatch", "event", "failed-start-dropped")
 }
 
 func utf8Valid(s string) bool {
@@ -670,7 +637,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		d.reg.Ended(r.sid, false)
 		return explained(conflict("register"), "The engine couldn't open the session's conversation.")
 	}
-	opener := d.cfg.Openers[r.spec.Method]
+	opener := d.cfg.Stdio
 	if opener == nil {
 		b.fail("This engine can't speak that agent's protocol.")
 		d.reg.Ended(r.sid, false)
@@ -685,8 +652,7 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 		return explained(conflict("start"), msg)
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor)
-	choice := d.launchChoice(r)
-	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b, r.spec, r.box), Version: d.cfg.Version, Thread: d.threadOf(r), Model: choice.Model, Effort: choice.Effort})
+	sess, err := opener.Open(octx, p, Launch{Cwd: r.cwd, AskingModes: r.spec.AskingModes, MCP: d.mcpFor(b, r.spec, r.box), Version: d.cfg.Version})
 	cancel()
 	if err != nil {
 		_ = p.Close()
@@ -704,8 +670,6 @@ func (d *Dispatcher) startStdio(ctx context.Context, r *run) error {
 	r.running = true
 	r.stopping = false
 	d.mu.Unlock()
-	d.keepThread(r, sess)
-	d.keepModels(sess)
 	b.start(sess, func(byEngine bool) { d.ended(r, b, p, byEngine) })
 	return nil
 }
@@ -890,11 +854,7 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 	defer d.release(r)
 	d.mu.Lock()
 	running := r.running
-	handed := r.handedTo != ""
 	d.mu.Unlock()
-	if handed {
-		return explained(conflict("handed over"), handedMessage)
-	}
 	if running {
 		return explained(conflict("not stopped"), "This session is still running.")
 	}
@@ -1054,23 +1014,19 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 		linked, lerr := d.worktreeLinked(r)
 		treeGone = lerr == nil && !linked
 	}
-	if treeGone && !r.rmDone && r.handedTo == "" {
-		if o, msg := d.goneOffer(r, goneLead, ""); o != nil && (!held || *given != *o) {
+	if (treeGone || r.doubled) && !r.rmDone {
+		lead := goneLead
+		if r.doubled && !treeGone {
+			lead = doubledLead
+		}
+		if o, msg := d.goneOffer(r, lead); o != nil && (!held || *given != *o) {
 			d.setOffer(r, o)
 			return o, explained(conflict("unpushed"), msg)
 		}
 		d.rmFinished(r)
 		held = false
 	}
-	if r.handedTo != "" && !r.rmDone {
-		if o, msg := d.goneOffer(r, strandedLead, d.handedFrom(r)); o != nil && (!held || *given != *o) {
-			d.setOffer(r, o)
-			return o, explained(conflict("unpushed"), msg)
-		}
-		d.rmFinished(r)
-		held = false
-	}
-	if r.spec.Method == MethodPlugin && !r.rmDone && r.handedTo == "" {
+	if r.spec.Method == MethodPlugin && !r.rmDone {
 		args := d.claude("rm", r.id)
 		if held && (given.Flag == "discard" || given.Flag == "force") {
 			name := "--discard-unpushed=" + given.Value
@@ -1163,26 +1119,11 @@ func (d *Dispatcher) UseBranchState(read func(WorkspaceSession) (string, string,
 }
 
 const (
-	goneLead     = "The session's worktree is gone, so the agent can't check its branch before the session is deleted. "
-	strandedLead = "This session committed on its branch while it was being stopped for the hand-over, after the session that continues the branch had started, so that one doesn't have it. "
+	goneLead    = "The session's worktree is gone, so the agent can't check its branch before the session is deleted. "
+	doubledLead = "Another session on this engine holds this session's branch, so this one is read-only and its agent can't check the branch before the session is deleted. "
 )
 
-func (d *Dispatcher) handedFrom(r *run) string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	next := d.runs[r.handedTo]
-	if next == nil {
-		return ""
-	}
-	for _, st := range next.earlier {
-		if st.SID == r.sid {
-			return st.To
-		}
-	}
-	return ""
-}
-
-func (d *Dispatcher) goneOffer(r *run, lead, covered string) (*Offer, string) {
+func (d *Dispatcher) goneOffer(r *run, lead string) (*Offer, string) {
 	d.mu.Lock()
 	read := d.branchState
 	s := WorkspaceSession{SID: r.sid, Name: r.display, Repo: r.repo, Path: r.clone, Branch: r.branch, Tree: r.name, Box: r.box}
@@ -1191,7 +1132,7 @@ func (d *Dispatcher) goneOffer(r *run, lead, covered string) (*Offer, string) {
 	if read != nil {
 		head, state, why = read(s)
 	}
-	if state == TreeMerged || state == TreePushed || covered != "" && head == covered {
+	if state == TreeMerged || state == TreePushed {
 		return nil, ""
 	}
 	value := r.name
@@ -1200,8 +1141,8 @@ func (d *Dispatcher) goneOffer(r *run, lead, covered string) (*Offer, string) {
 	}
 	if state == TreeUnpushed {
 		then := " Push them first, or press the button again to discard them and delete the session."
-		if lead == strandedLead {
-			then = " Only this session's clone holds them, and this session can't push or wake; press the button again to discard them and delete it."
+		if lead == doubledLead {
+			then = " Only this session's clone may hold them, and this session can't push or wake; press the button again to discard them and delete it, or start a session from its commit first to keep them."
 		}
 		return &Offer{Flag: "discard", Value: value}, lead + "The engine's own read finds commits on the branch " + r.branch + ", at " + shortSHA(head) + ", that aren't pushed or on main." + then
 	}
@@ -1278,7 +1219,7 @@ func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[sid]
-	if r == nil || r.handedTo != "" || r.handing || r.box == "" || r.clone == "" {
+	if r == nil || r.doubled || r.box == "" || r.clone == "" {
 		return PushTarget{}, false
 	}
 	failed, why := d.unsyncedAt(r.box)
@@ -1348,3 +1289,39 @@ func (d *Dispatcher) Expect(agent string, x Expect) error {
 }
 
 func (d *Dispatcher) Expectations() map[string]Expect { return d.cfg.Expected.All() }
+
+func (r *Registry) worktreeReaders() (Heads, WorktreeReader) {
+	r.mu.Lock()
+	b := r.bookLocked()
+	r.mu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.watch == nil {
+		return nil, nil
+	}
+	return b.watch.Heads, b.watch.Reader
+}
+
+func (d *Dispatcher) branchFree(branch string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, r := range d.runs {
+		if r.branch == branch {
+			return explained(conflict("branch held"), "Another session works on the branch "+branch+", and two sessions never hold one branch.")
+		}
+	}
+	return nil
+}
+
+func (d *Dispatcher) waitStopped(r *run) {
+	until := d.reg.now().Add(stopSettle)
+	for {
+		d.mu.Lock()
+		running := r.running
+		d.mu.Unlock()
+		if !running || !d.reg.now().Before(until) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
