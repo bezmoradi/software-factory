@@ -1,6 +1,7 @@
 import { el, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
-import type { AgentCheck, DependencyChange, LockedTests, PushExtra, SessionPush, WorkflowRun } from '../types.ts'
+import { isRecord } from '../lib/json.ts'
+import type { AgentCheck, DependencyChange, LockedTests, PushExtra, SessionPush, TypeChange, TypeLine, WorkflowRun } from '../types.ts'
 
 const KINDS: Record<string, string> = { test: 'Tests', lint: 'Lint', 'type-check': 'Type check', build: 'Build' }
 const ECOSYSTEMS: Record<string, string> = { go: 'Go', npm: 'npm', pypi: 'PyPI', crates: 'crates.io' }
@@ -109,6 +110,43 @@ function lockedTests(l: LockedTests): HTMLElement[] {
   return [section(`Locked tests changed since ${shortSha(l.commit)}: ${l.count}`, el('p', 'small muted', 'Changed, deleted or moved away from their path since you locked them, however the change was made. A new test file doesn\'t count.'), list(rows))]
 }
 
+function stringOf(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function typeLineOf(v: unknown): TypeLine | null {
+  if (!isRecord(v) || typeof v.what !== 'string' || !Array.isArray(v.files)) return null
+  const files = v.files.filter(isRecord).filter(f => typeof f.path === 'string').map(f => ({ path: stringOf(f.path), what: stringOf(f.what) }))
+  return { what: v.what, files, more: Math.max(0, Number(v.more) || 0) }
+}
+
+export function typeChangeOf(v: unknown): TypeChange | null {
+  if (!isRecord(v) || typeof v.type !== 'string' || !Array.isArray(v.lines)) return null
+  const lines = v.lines.map(typeLineOf).filter((l): l is TypeLine => l !== null)
+  return lines.length ? { type: v.type, lines } : null
+}
+
+function capital(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+export function typeChangeParts(t: TypeChange): HTMLElement[] {
+  const parts: HTMLElement[] = [el('p', 'small muted', `This session's work type, as set on the page: ${text(t.type)}. The files come from the engine's own reading of the commits. These lines don't hold or allow the push themselves.`)]
+  for (const l of t.lines) {
+    parts.push(el('p', 'small warn', `${text(capital(l.what))}.`))
+    const rows = l.files.map(f => item('warn', code(f.path), ...(f.what ? [`: ${text(f.what)}`] : [])))
+    if (l.more) rows.push(item('muted', `and ${l.more} more`))
+    if (rows.length) parts.push(list(rows))
+  }
+  return parts
+}
+
+function typeChangePart(t: TypeChange): HTMLElement {
+  const box = el('div', 'push-facts-part')
+  box.append(el('p', 'small', 'The change and its work type'), ...typeChangeParts(t))
+  return box
+}
+
 function extraParts(x: PushExtra): HTMLElement[] {
   const parts: HTMLElement[] = []
   if (x.locked) parts.push(...lockedTests(x.locked))
@@ -133,10 +171,11 @@ function extraParts(x: PushExtra): HTMLElement[] {
   return parts
 }
 
-export function changeFacts(p: SessionPush, all: AgentCheck[]): HTMLElement | null {
+export function changeFacts(p: SessionPush, all: AgentCheck[], typed: TypeChange | null = null): HTMLElement | null {
   if (!p.commit || !p.result) return null
   const x = p.extra && p.extra.commit === p.commit ? p.extra : null
   const parts: HTMLElement[] = []
+  if (typed) parts.push(typeChangePart(typed))
   if (x) parts.push(...extraParts(x))
   else parts.push(el('p', 'small muted', 'Reading the change for tests, dependencies, file kinds and workflows…'))
   parts.push(checks(p, all))

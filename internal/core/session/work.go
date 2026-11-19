@@ -99,6 +99,7 @@ type WorkConfig struct {
 	History    History
 	Files      WorkFiles
 	Bounded    BoundedFiles
+	Blobs      ChangeBlobs
 	Repos      WorkRepos
 	Reported   func(sid string) (Workflow, bool)
 	Reviews    ReviewEntries
@@ -148,6 +149,10 @@ type Work struct {
 	sizeMu   sync.Mutex
 	sizes    map[string]changeSize
 	lockShow func(sid string)
+
+	looseMu   sync.Mutex
+	loose     map[string]loosening
+	looseKeys []string
 
 	digestKey [32]byte
 }
@@ -216,6 +221,7 @@ type GateView struct {
 	Catalog       workflow.CatalogState
 	CatalogWhy    string
 	Lock          LockView
+	Change        *TypeChange
 }
 
 type TeamView struct {
@@ -347,7 +353,7 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	w := &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}}
+	w := &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}, loose: map[string]loosening{}}
 	if _, err := rand.Read(w.digestKey[:]); err != nil {
 		return nil, errors.New("work: no random key for the flagged files' digests")
 	}
@@ -1261,6 +1267,11 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	v.Catalog, v.CatalogWhy = g.setup.setup.Catalog.State, g.setup.setup.Catalog.Reason
 	v.Lock = w.lockView(ctx, g)
 	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
+	if g.head != "" {
+		if tc := w.typeChange(g.t.Repo, g.chosen, g.setup.setup.Protect, g.specs, g.base, g.head, g.net, g.listed); len(tc.Lines) > 0 {
+			v.Change = &tc
+		}
+	}
 	for _, p := range g.scan.lfs {
 		v.LFS = append(v.LFS, maskLines(p, true))
 	}

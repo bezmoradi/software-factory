@@ -27,6 +27,7 @@ import './components/reviewer-agents.ts'
 import './components/reviewer-checks.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
+import { typeChangeOf } from './components/push-facts.ts'
 import './components/session-facts.ts'
 import './components/session-work.ts'
 import './components/screenshots.ts'
@@ -609,7 +610,7 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const review = i.review
   const ran = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles : []
   const since = (verdict: string) => push ? push.missing.filter(m => ran.some(r => r.state === verdict && m.startsWith(`a review by ${r.agent} `))) : []
-  return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
+  return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [], typeChange: gate && push && gate.head === push.commit ? typeChangeOf(gate.typeChange) : null }
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {

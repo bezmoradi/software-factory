@@ -257,6 +257,7 @@ type Reviews struct {
 	changeFacts  ChangeBlobs
 	changeLocks  TestLocks
 	changeSpecs  SpecProjects
+	changeTypes  TypeChanges
 
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice

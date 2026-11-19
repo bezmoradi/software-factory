@@ -222,6 +222,22 @@ export interface PushExtra {
   locked?: LockedTests | null
 }
 
+export interface TypeFile {
+  path: string
+  what: string
+}
+
+export interface TypeLine {
+  what: string
+  files: TypeFile[]
+  more: number
+}
+
+export interface TypeChange {
+  type: string
+  lines: TypeLine[]
+}
+
 export interface LockedTests {
   commit: string
   count: number
@@ -426,6 +442,7 @@ export interface PushPanelView {
   flagged?: FlaggedFile[]
   flagsRead?: boolean
   checks?: AgentCheck[]
+  typeChange?: TypeChange | null
   passedSince?: string[]
   blockedSince?: string[]
 }
@@ -896,6 +913,7 @@ export interface GateEvent {
   catalog?: string
   catalogWhy?: string
   testLock?: TestLockView
+  typeChange?: TypeChange
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }

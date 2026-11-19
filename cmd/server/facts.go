@@ -21,11 +21,12 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 		Commits: files.Reader{}, History: files.Reader{}, Main: parts.repos.Main})
 	var locks session.TestLocks
 	var specs session.SpecProjects
+	var types session.TypeChanges
 	if parts.work != nil {
-		locks, specs = parts.work, parts.work
+		locks, specs, types = parts.work, parts.work, parts.work
 	}
 	if parts.reviews != nil {
-		parts.reviews.UseChangeFacts(files.Reader{}, locks, specs)
+		parts.reviews.UseChangeFacts(files.Reader{}, locks, specs, types)
 	}
 	var reader session.ProtectionReader
 	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {

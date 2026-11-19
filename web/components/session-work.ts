@@ -2,7 +2,8 @@ import { api } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { isRecord } from '../lib/json.ts'
-import type { LockedTests, TestLockView } from '../types.ts'
+import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
+import { typeChangeOf, typeChangeParts } from './push-facts.ts'
 
 export interface AgentModel {
   id: string
@@ -130,6 +131,7 @@ function readView(v: unknown): WorkView | null {
 interface LockRead {
   head: string
   lock: TestLockView
+  typeChange: TypeChange | null
 }
 
 function lockedOf(v: unknown): LockedTests | null {
@@ -143,6 +145,7 @@ function readLock(v: unknown): LockRead | null {
   const text = (x: unknown) => (typeof x === 'string' ? x : '')
   return {
     head: text(v.gate.head),
+    typeChange: typeChangeOf(v.gate.typeChange),
     lock: { offered: l.offered === true, why: text(l.why), commit: text(l.commit), at: Number(l.at) || 0, files: Number(l.files) || 0, paths: strings(l.paths), cut: l.cut === true, branchLeft: Number(l.branchLeft) || 0, changed: lockedOf(l.changed) },
   }
 }
@@ -507,6 +510,7 @@ class SfSessionWork extends HTMLElement {
     const parts: HTMLElement[] = [...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
     if (v.ports) parts.push(el('h3', 'label', 'Ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
     parts.push(...this.#lockPart(off))
+    if (this.#lock?.typeChange) parts.push(el('h3', 'label', 'The change and its work type'), ...typeChangeParts(this.#lock.typeChange))
     parts.push(this.#status)
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? this.#notable(v)

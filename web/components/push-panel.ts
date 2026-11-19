@@ -144,7 +144,7 @@ class SfPushPanel extends HTMLElement {
     }
     if (p.running) parts.push(el('p', 'small muted', 'The engine is checking the gate and the remote…'))
     else if (p.result) parts.push(this.#result(p))
-    const facts = p.running ? null : changeFacts(p, value.checks ?? [])
+    const facts = p.running ? null : changeFacts(p, value.checks ?? [], value.typeChange ?? null)
     if (facts) parts.push(facts)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {

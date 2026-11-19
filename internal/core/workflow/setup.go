@@ -174,10 +174,8 @@ func Effective(t WorkType, files []string, listed bool) (WorkType, string) {
 	if !listed {
 		return feature, "Docs only needs what a Feature needs until the gate can list the files this branch changes."
 	}
-	for _, f := range files {
-		if !DocFile(f) {
-			return feature, "Docs only covers documentation, but this branch also changes " + clip(f, 120) + ", so it needs what a Feature needs."
-		}
+	if others := NotDocs(files); len(others) > 0 {
+		return feature, "Docs only covers documentation, but this branch also changes " + clip(others[0], 120) + ", so it needs what a Feature needs."
 	}
 	return t, ""
 }

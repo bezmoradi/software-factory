@@ -259,6 +259,24 @@ for r in /api/allow-file /allow-file /api/push-answer; do docker exec "$(ctr d)"
 - `d`: `proctor/specs/credentials.yaml` keeps kind `name`, its reason `its name is one that usually holds secrets; it is also a Proctor specification under proctor/, …`, and its Remove sends the revert message too (`flag event=asked kind=name`, and the event stream shows `Revert this branch's change to it: …`); `proctor/specs/x.yaml` is flagged `specification` with the reason ending `; this push deletes it`, and its Allow's audit line has `"blobs":["0000000000000000000000000000000000000000"]`. A rename (`git mv`) flags both paths, the old one as deleted. Remove logs `flag event=asked kind=…`, and for a `specification` file the session's message asks it to revert the branch's change, not to add it to `.gitignore`; the page says `The session was asked to revert the change to the file.`
 - Nothing on the agent listener allows a file: the three routes sent to `http://engine-agents:8081` from a session's container answer `{"error":"route"} 404`.
 
+**The change and its work type.** After the Proctor checks, so main holds `proctor/proctor.yaml` and `proctor/specs/x.yaml` with `X-001` and `X-002`. `tc <name>` prints the gate view's `typeChange` (ARCHITECTURE.md "Facts about the change"), and `facts` prints the `change-facts.md` of the reviewer container a review starts, while the `SLOW-REVIEW` file keeps it running. The work type is the one `start` sent from the page, or `/api/size` set.
+
+```bash
+tc() { gate $1 | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(json.dumps(json.loads(t[:t.rindex(" ")])["gate"].get("typeChange"), indent=1))'; }
+facts() { for i in $(seq 40); do c=$(docker ps -q --filter label=dev.software-factory.reviewer | head -n 1); [ -n "$c" ] && docker exec "$c" sh -c 'cat /reviews/*/change-facts.md' 2>/dev/null && return; sleep 1; done; }
+start o docs; commit o notes.md one; commit o main.go 'package main'; tc o
+sf /api/size "{\"sid\":\"$(sid o)\",\"size\":\"fix\"}"; tc o; sf /api/size "{\"sid\":\"$(sid o)\",\"size\":\"docs\"}"
+start x docs; docker exec -w "$(wt x)" "$(ctr x)" sh -c 'for i in $(seq -w 1 60); do echo x > f$i.go; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm many'; tc x
+start u; commit u proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n    waive: { FIX-05: "fixed" }')"; commit u SLOW-REVIEW slow; tc u; review u; facts
+team '{"version":1,"protect":["secret/**"]}'; start g; commit g secret/a.txt one; tc g
+```
+
+- `o`, Docs only with `main.go`: `{"type":"Docs only","lines":[{"what":"Docs only is for documentation, and the branch changes files that aren't documentation, so it needs what a Feature needs: an approved plan and a Feature's reviews","files":[{"path":"main.go"}],"more":0}]}`, beside the gate's `effective` `feature`. Set to Fix, `tc o` prints `null`; the person's type is read at each view, not kept with the facts.
+- `x`, 60 such files: the line lists `f01.go` to `f50.go` and `"more": 10`; the page shows `and 10 more`.
+- `u`, a Fix: a line `Files under proctor/ or the root Makefile, …` listing `proctor/specs/x.yaml`, and a line `A Fix that loosens the specifications: …` listing it with `"what": "1 new waiver, 1 fewer scenarios or table rows"`. `facts` shows both under `## The change and its work type`, after `The session's work type, which the person set on the page: Fix.` A Docs only session that changes a file under `proctor/` lists it twice, as not documentation and under `proctor/`, and has no loosening line, which is a Fix's only.
+- `g`, the protect list: a line `Files that match the protect list of the team file on main, …` with `{"path":"secret/a.txt","what":"matches secret/**"}`.
+- The push card shows the same section while the gate's `head` is the card's `commit`; none of it changes the push's result.
+
 **Reviewer containers: at most 8 at once, each with only its own snapshot.** Five reviews of two runs each; the fifth would make 10.
 
 ```bash

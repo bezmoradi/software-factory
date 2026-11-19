@@ -100,6 +100,38 @@ type gateJSON struct {
 	Catalog      string             `json:"catalog"`
 	CatalogWhy   string             `json:"catalogWhy,omitempty"`
 	TestLock     testLockJSON       `json:"testLock"`
+	TypeChange   *typeChangeJSON    `json:"typeChange,omitempty"`
+}
+
+type typeFileJSON struct {
+	Path string `json:"path"`
+	What string `json:"what,omitempty"`
+}
+
+type typeLineJSON struct {
+	What  string         `json:"what"`
+	Files []typeFileJSON `json:"files"`
+	More  int            `json:"more"`
+}
+
+type typeChangeJSON struct {
+	Type  string         `json:"type"`
+	Lines []typeLineJSON `json:"lines"`
+}
+
+func typeChangeOf(c *session.TypeChange) *typeChangeJSON {
+	if c == nil {
+		return nil
+	}
+	out := &typeChangeJSON{Type: c.Type, Lines: make([]typeLineJSON, 0, len(c.Lines))}
+	for _, l := range c.Lines {
+		line := typeLineJSON{What: l.What, Files: make([]typeFileJSON, 0, len(l.Files)), More: l.More}
+		for _, f := range l.Files {
+			line.Files = append(line.Files, typeFileJSON{Path: f.Path, What: f.What})
+		}
+		out.Lines = append(out.Lines, line)
+	}
+	return out
 }
 
 type lockedJSON struct {
@@ -167,7 +199,7 @@ func gateOf(v session.GateView) gateJSON {
 		Research: v.Research, Tasks: v.TasksNeeded, TasksWritten: v.TasksWritten, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
 		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
-		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock)}
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change)}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
