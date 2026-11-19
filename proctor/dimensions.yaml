@@ -22,7 +22,6 @@ dimensions:
     - "/api/control"
     - "/api/decision-log"
     - "/api/diagnostics"
-    - "/api/disconnect"
     - "/api/dispatch"
     - "/api/docs"
     - "/api/egress"

@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 401
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: token }
+        "$.body": { error: token, why: replaced }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]"]
@@ -39,13 +39,13 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, why: replaced }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
 
   - id: EVS-002
-    name: "The event stream opens for no key the page never issued"
+    name: "The event stream opens for no key the page never issued, and its refusal says another key is active (why replaced), as the page reads it for a key a newer sign-in replaced"
     steps:
       - id: unknown-key
         do: http.request
@@ -59,7 +59,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, why: replaced }
 
   - id: EVS-003
     name: "The event stream refuses another site's Origin, even with the page key"

@@ -57,7 +57,7 @@ import { sendState } from './api.ts'
 import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
-import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
+import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
 import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
 
@@ -395,8 +395,6 @@ function paint() {
     byId('working').hidden = true
     paintSide(null)
   }
-  byId('account-item').hidden = !state.connected
-  if (!state.connected && byId('account').matches(':popover-open')) byId('account').hidePopover()
   watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0, busy: x.info.busy === true, seq: x.info.lastSeq ?? 0, reviewRunning: x.info.review?.running === true, review: x.info.review ? `${x.info.review.commit}:${(x.info.review.roles ?? []).map(r => r.state).join(',')}` : '' })))
   byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden)
   document.title = needs ? 'Needs you · Software Factory' : 'Software Factory'
@@ -1339,10 +1337,10 @@ byId('control-button').addEventListener('click', async () => {
   const res = await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null))
   if (!res || !res.ok) toast({ title: 'The page could not take control of this session.', tone: 'bad' })
 })
-byId('signin').addEventListener('click', async () => {
+byId('use-tab').addEventListener('click', async () => {
   showGone('Signing in…', '', false, true)
   await trade()
-  void connect()
+  void connect(true)
 })
 function followView(e: MouseEvent) {
   const link = (e.target as Element).closest<HTMLElement>('a[data-view]')
@@ -1615,11 +1613,6 @@ restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
 onNotifyOpen(sid => {
   if (sessions.has(sid)) go(`s/${sid}`)
-})
-byId('disconnect').addEventListener('click', async () => {
-  await whileBusy(byId<HTMLButtonElement>('disconnect'), () => api('/api/disconnect', {}).catch(() => null))
-  if (byId('account').matches(':popover-open')) byId('account').hidePopover()
-  signOut('Disconnected', SIGN_IN_HINT)
 })
 paint()
 initPrefs(body => api('/api/prefs', body).catch(() => null))

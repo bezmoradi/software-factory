@@ -25,7 +25,6 @@ tables:
       - ["fld_control", "/api/control", { proctorUnknownField: true }, "fields"]
       - ["fld_control_unconfirmed", "/api/control", { sid: "00000000-0000-4000-8000-000000000000", on: true }, "confirm"]
       - ["fld_release", "/api/release", { proctorUnknownField: true }, "fields"]
-      - ["fld_disconnect", "/api/disconnect", { proctorUnknownField: true }, "fields"]
       - ["fld_session", "/api/session", { proctorUnknownField: true }, "body"]
       - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs"]
       - ["fld_message", "/api/message", { proctorUnknownField: true }, "text"]

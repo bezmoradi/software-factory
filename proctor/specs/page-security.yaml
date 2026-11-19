@@ -18,7 +18,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token }
+        "$.body": { error: token, why: replaced }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -43,7 +43,6 @@ tables:
       - ["t01_control", "/api/control"]
       - ["t01_decision_log", "/api/decision-log"]
       - ["t01_diagnostics", "/api/diagnostics"]
-      - ["t01_disconnect", "/api/disconnect"]
       - ["t01_dispatch", "/api/dispatch"]
       - ["t01_egress", "/api/egress"]
       - ["t01_exceptions", "/api/exceptions"]
@@ -120,7 +119,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token }
+        "$.body": { error: token, why: replaced }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -184,7 +183,6 @@ tables:
       - ["t02_control", "/api/control"]
       - ["t02_decision_log", "/api/decision-log"]
       - ["t02_diagnostics", "/api/diagnostics"]
-      - ["t02_disconnect", "/api/disconnect"]
       - ["t02_dispatch", "/api/dispatch"]
       - ["t02_egress", "/api/egress"]
       - ["t02_exceptions", "/api/exceptions"]
@@ -326,7 +324,6 @@ tables:
       - ["t03_control", "/api/control"]
       - ["t03_decision_log", "/api/decision-log"]
       - ["t03_diagnostics", "/api/diagnostics"]
-      - ["t03_disconnect", "/api/disconnect"]
       - ["t03_dispatch", "/api/dispatch"]
       - ["t03_egress", "/api/egress"]
       - ["t03_exceptions", "/api/exceptions"]
@@ -468,7 +465,6 @@ tables:
       - ["t04_control", "/api/control"]
       - ["t04_decision_log", "/api/decision-log"]
       - ["t04_diagnostics", "/api/diagnostics"]
-      - ["t04_disconnect", "/api/disconnect"]
       - ["t04_dispatch", "/api/dispatch"]
       - ["t04_egress", "/api/egress"]
       - ["t04_exceptions", "/api/exceptions"]
@@ -609,7 +605,6 @@ tables:
       - ["t05_control", "/api/control"]
       - ["t05_decision_log", "/api/decision-log"]
       - ["t05_diagnostics", "/api/diagnostics"]
-      - ["t05_disconnect", "/api/disconnect"]
       - ["t05_dispatch", "/api/dispatch"]
       - ["t05_egress", "/api/egress"]
       - ["t05_exceptions", "/api/exceptions"]
@@ -750,7 +745,6 @@ tables:
       - ["t06_control", "/api/control"]
       - ["t06_decision_log", "/api/decision-log"]
       - ["t06_diagnostics", "/api/diagnostics"]
-      - ["t06_disconnect", "/api/disconnect"]
       - ["t06_dispatch", "/api/dispatch"]
       - ["t06_egress", "/api/egress"]
       - ["t06_exceptions", "/api/exceptions"]
@@ -890,7 +884,6 @@ tables:
       - ["t07_control", "/api/control"]
       - ["t07_decision_log", "/api/decision-log"]
       - ["t07_diagnostics", "/api/diagnostics"]
-      - ["t07_disconnect", "/api/disconnect"]
       - ["t07_dispatch", "/api/dispatch"]
       - ["t07_egress", "/api/egress"]
       - ["t07_exceptions", "/api/exceptions"]
@@ -1059,7 +1052,6 @@ tables:
       - ["t09_control", "/api/control"]
       - ["t09_decision_log", "/api/decision-log"]
       - ["t09_diagnostics", "/api/diagnostics"]
-      - ["t09_disconnect", "/api/disconnect"]
       - ["t09_dispatch", "/api/dispatch"]
       - ["t09_egress", "/api/egress"]
       - ["t09_exceptions", "/api/exceptions"]
@@ -1204,7 +1196,6 @@ tables:
       - ["t10_control", "/api/control"]
       - ["t10_decision_log", "/api/decision-log"]
       - ["t10_diagnostics", "/api/diagnostics"]
-      - ["t10_disconnect", "/api/disconnect"]
       - ["t10_dispatch", "/api/dispatch"]
       - ["t10_docs", "/api/docs"]
       - ["t10_egress", "/api/egress"]
@@ -1322,7 +1313,6 @@ tables:
           - t11_put_control
           - t11_put_decision_log
           - t11_put_diagnostics
-          - t11_put_disconnect
           - t11_put_dispatch
           - t11_put_docs
           - t11_put_egress
@@ -1412,7 +1402,6 @@ tables:
           - t11_delete_control
           - t11_delete_decision_log
           - t11_delete_diagnostics
-          - t11_delete_disconnect
           - t11_delete_dispatch
           - t11_delete_docs
           - t11_delete_egress
@@ -1502,7 +1491,6 @@ tables:
           - t11_patch_control
           - t11_patch_decision_log
           - t11_patch_diagnostics
-          - t11_patch_disconnect
           - t11_patch_dispatch
           - t11_patch_docs
           - t11_patch_egress
@@ -1595,7 +1583,6 @@ tables:
       - ["t11_put_control", "/api/control", "PUT"]
       - ["t11_put_decision_log", "/api/decision-log", "PUT"]
       - ["t11_put_diagnostics", "/api/diagnostics", "PUT"]
-      - ["t11_put_disconnect", "/api/disconnect", "PUT"]
       - ["t11_put_dispatch", "/api/dispatch", "PUT"]
       - ["t11_put_docs", "/api/docs", "PUT"]
       - ["t11_put_egress", "/api/egress", "PUT"]
@@ -1685,7 +1672,6 @@ tables:
       - ["t11_delete_control", "/api/control", "DELETE"]
       - ["t11_delete_decision_log", "/api/decision-log", "DELETE"]
       - ["t11_delete_diagnostics", "/api/diagnostics", "DELETE"]
-      - ["t11_delete_disconnect", "/api/disconnect", "DELETE"]
       - ["t11_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t11_delete_docs", "/api/docs", "DELETE"]
       - ["t11_delete_egress", "/api/egress", "DELETE"]
@@ -1775,7 +1761,6 @@ tables:
       - ["t11_patch_control", "/api/control", "PATCH"]
       - ["t11_patch_decision_log", "/api/decision-log", "PATCH"]
       - ["t11_patch_diagnostics", "/api/diagnostics", "PATCH"]
-      - ["t11_patch_disconnect", "/api/disconnect", "PATCH"]
       - ["t11_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t11_patch_docs", "/api/docs", "PATCH"]
       - ["t11_patch_egress", "/api/egress", "PATCH"]
@@ -1891,7 +1876,6 @@ tables:
           - t12_put_control
           - t12_put_decision_log
           - t12_put_diagnostics
-          - t12_put_disconnect
           - t12_put_dispatch
           - t12_put_docs
           - t12_put_egress
@@ -1981,7 +1965,6 @@ tables:
           - t12_delete_control
           - t12_delete_decision_log
           - t12_delete_diagnostics
-          - t12_delete_disconnect
           - t12_delete_dispatch
           - t12_delete_docs
           - t12_delete_egress
@@ -2071,7 +2054,6 @@ tables:
           - t12_patch_control
           - t12_patch_decision_log
           - t12_patch_diagnostics
-          - t12_patch_disconnect
           - t12_patch_dispatch
           - t12_patch_docs
           - t12_patch_egress
@@ -2164,7 +2146,6 @@ tables:
       - ["t12_put_control", "/api/control", "PUT"]
       - ["t12_put_decision_log", "/api/decision-log", "PUT"]
       - ["t12_put_diagnostics", "/api/diagnostics", "PUT"]
-      - ["t12_put_disconnect", "/api/disconnect", "PUT"]
       - ["t12_put_dispatch", "/api/dispatch", "PUT"]
       - ["t12_put_docs", "/api/docs", "PUT"]
       - ["t12_put_egress", "/api/egress", "PUT"]
@@ -2254,7 +2235,6 @@ tables:
       - ["t12_delete_control", "/api/control", "DELETE"]
       - ["t12_delete_decision_log", "/api/decision-log", "DELETE"]
       - ["t12_delete_diagnostics", "/api/diagnostics", "DELETE"]
-      - ["t12_delete_disconnect", "/api/disconnect", "DELETE"]
       - ["t12_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t12_delete_docs", "/api/docs", "DELETE"]
       - ["t12_delete_egress", "/api/egress", "DELETE"]
@@ -2344,7 +2324,6 @@ tables:
       - ["t12_patch_control", "/api/control", "PATCH"]
       - ["t12_patch_decision_log", "/api/decision-log", "PATCH"]
       - ["t12_patch_diagnostics", "/api/diagnostics", "PATCH"]
-      - ["t12_patch_disconnect", "/api/disconnect", "PATCH"]
       - ["t12_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t12_patch_docs", "/api/docs", "PATCH"]
       - ["t12_patch_egress", "/api/egress", "PATCH"]
@@ -2456,7 +2435,6 @@ tables:
       - ["t13_control", "/api/control"]
       - ["t13_decision_log", "/api/decision-log"]
       - ["t13_diagnostics", "/api/diagnostics"]
-      - ["t13_disconnect", "/api/disconnect"]
       - ["t13_dispatch", "/api/dispatch"]
       - ["t13_egress", "/api/egress"]
       - ["t13_exceptions", "/api/exceptions"]
@@ -2719,3 +2697,24 @@ scenarios:
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
           differs: { "$.headers.x-sf-request[0]": "${first_request}" }
+
+  - id: SEC-006
+    name: "The removed Disconnect route is refused as a path that names no route, even with the page key; its body holds only a field no route takes, so a Disconnect that came back would refuse it with 400 fields before ending the run's key"
+    steps:
+      - id: disconnect-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/disconnect"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"

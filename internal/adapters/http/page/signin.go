@@ -56,12 +56,13 @@ func (k *keys) check(given string) bool {
 	return true
 }
 
-func (k *keys) revoke() bool {
+func (k *keys) why() string {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	had := k.active != ""
-	k.active = ""
-	return had
+	if k.active == "" {
+		return "ended"
+	}
+	return "replaced"
 }
 
 func (k *keys) expire(streams int) bool {

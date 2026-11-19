@@ -269,7 +269,7 @@ Run the commands below from the repository folder. The page's own commands, such
 7. **Review and push.** Press **Review**, then **Push**, or let the agent call its push tool. The engine pushes the session's branch once the reviews pass ([Reviews and the push gate](#reviews-and-the-push-gate)).
 8. **Get the work** from your git host: `git fetch origin sf/<id>` in your own clone, then `git switch sf/<id>`, or open a pull request from that branch on the host.
 
-**The page's sign-in.** Opening the page signs it in, with no code or password. **Any program on this computer can do the same and use the page,** including approving pushes; other websites and the agents can't. One tab is signed in at a time: opening the page in another tab or browser ends the earlier one, which then offers **Sign in** to take it back. Refreshing a tab keeps it signed in. After 15 minutes with no tab open, 24 hours, **Disconnect** in the account menu, or an engine restart, press **Sign in** again.
+**The page's sign-in.** Opening the page signs it in, with no code or password. **Any program on this computer can do the same and use the page,** including approving pushes; other websites and the agents can't. One tab is signed in at a time: opening the page in another tab or browser, or any program on this computer signing in, moves the sign-in there, and the earlier tab shows a note with **Use this tab** to take it back. Refreshing a tab keeps it signed in. After 15 minutes with no tab open, 24 hours or an engine restart, the page signs in again by itself.
 
 ### Projects and new sessions
 

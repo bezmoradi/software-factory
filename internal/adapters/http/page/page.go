@@ -171,7 +171,7 @@ const signinRoute = "/api/session"
 
 var pageRoutes = map[string]bool{
 	"/api/events": true, "/api/replay": true, "/api/message": true, "/api/interrupt": true, "/api/answer": true,
-	"/api/control": true, "/api/release": true, "/api/disconnect": true, "/api/prefs": true,
+	"/api/control": true, "/api/release": true, "/api/prefs": true,
 	"/api/projects": true, "/api/changes": true, "/api/docs": true, "/api/audit": true,
 	"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true,
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
@@ -215,6 +215,11 @@ func (s *Server) pageRoute(r *http.Request) string {
 func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why string) {
 	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", why)
 	refuse(w, status, why)
+}
+
+func (s *Server) refuseKey(w http.ResponseWriter, r *http.Request) {
+	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", "token")
+	send(w, http.StatusUnauthorized, map[string]string{"error": "token", "why": s.keys.why()})
 }
 
 func siteAllowed(site []string, visit bool) bool {
@@ -276,7 +281,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
-		s.reject(w, r, http.StatusUnauthorized, "token")
+		s.refuseKey(w, r)
 		return
 	}
 	if r.URL.Path == "/api/events" {
@@ -548,7 +553,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.reg.Detach(id)
 	if !s.authorized(r) {
-		s.reject(w, r, http.StatusUnauthorized, "token")
+		s.refuseKey(w, r)
 		return
 	}
 	shared.For(r.Context(), s.logger).Info("page stream opened")
@@ -641,14 +646,13 @@ func present(v any) bool {
 }
 
 var apiFields = map[string][]string{
-	"/api/disconnect": {},
-	"/api/replay":     {"stream", "sid", "epoch", "since"},
-	"/api/interrupt":  {"sid"},
-	"/api/answer":     {"sid", "id", "answer"},
-	"/api/control":    {"sid", "on", "confirm"},
-	"/api/release":    {"sid"},
-	"/api/projects":   {},
-	"/api/docs":       {},
+	"/api/replay":    {"stream", "sid", "epoch", "since"},
+	"/api/interrupt": {"sid"},
+	"/api/answer":    {"sid", "id", "answer"},
+	"/api/control":   {"sid", "on", "confirm"},
+	"/api/release":   {"sid"},
+	"/api/projects":  {},
+	"/api/docs":      {},
 }
 
 func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
@@ -666,12 +670,6 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	}
 	sid := str(body["sid"], 80)
 	switch path {
-	case "/api/disconnect":
-		if s.keys.revoke() {
-			s.logger.Info("page signed out", "why", "disconnect")
-		}
-		s.reg.DetachAll()
-		send(w, http.StatusOK, map[string]bool{"ok": true})
 	case "/api/prefs":
 		if !s.assets.save(body) {
 			refuse(w, http.StatusBadRequest, "prefs")

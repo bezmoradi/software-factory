@@ -124,12 +124,6 @@
     - file: "internal/adapters/http/page/page.go"
       find: "\tsend(w, okStatus, map[string]bool{\"ok\": true})"
       replace: "\tsend(w, http.StatusOK, map[string]bool{\"ok\": true})"
-- id: PAGE-008
-  title: "Disconnect no longer revokes the page key"
-  edits:
-    - file: "internal/adapters/http/page/page.go"
-      find: "\t\tif s.keys.revoke() {"
-      replace: "\t\tif s.keys.active != \"\" {"
 - id: PAGE-009
   title: "Sign-in accepts a non-empty body"
   edits:
@@ -484,6 +478,12 @@
     - file: "internal/adapters/http/page/assets.go"
       find: "if !ok || (s != \"left\" && s != \"right\") {"
       replace: "if !ok {"
+- id: PAGE-069
+  title: "A refused key says the sign-in ended while another key is active"
+  edits:
+    - file: "internal/adapters/http/page/signin.go"
+      find: "\treturn \"replaced\"\n"
+      replace: "\treturn \"ended\"\n"
 - id: CMD-001
   title: "The 0.0.0.0 page listener no longer refuses connections to the engine's other addresses"
   edits:
