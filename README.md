@@ -191,7 +191,7 @@ Software Factory has no server deployment. It publishes its page only on `127.0.
 
 ## Run the agents under gVisor
 
-On a Linux computer, `compose.gvisor.yaml` runs every session's container under [gVisor](https://gvisor.dev) (the runtime `runsc`). It sets `SF_BOX_RUNTIME=runsc` on the box helper, which then makes each session's container with that runtime, and refuses to start one, saying why, while Docker lists no `runsc` runtime; it never falls back to Docker's default. gVisor answers the agents' system calls with a kernel of its own, so an exploit an agent runs meets gVisor before it reaches the host's kernel. The `engine`, `helper`, `egress` and `reviewer` containers stay on Docker's default runtime. The overlay isn't for Docker Desktop, which has no supported way to add a runtime.
+On a Linux computer, `compose.gvisor.yaml` runs every session's container and every reviewer container under [gVisor](https://gvisor.dev) (the runtime `runsc`). It sets `SF_BOX_RUNTIME=runsc` on the box helper, which then makes each of those containers with that runtime, and refuses to start a session or a reviewer, saying why, while Docker lists no `runsc` runtime; it never falls back to Docker's default. gVisor answers the agents' system calls with a kernel of its own, so an exploit an agent runs meets gVisor before it reaches the host's kernel. The `engine`, `helper` and `egress` containers stay on Docker's default runtime. The overlay isn't for Docker Desktop, which has no supported way to add a runtime.
 
 1. **Install gVisor** (x86_64 or ARM64, Linux 5.6 or later). These commands from gVisor's install guide download the latest release and check its SHA-512; gVisor's apt repository works too:
 
@@ -230,7 +230,7 @@ Limits:
 
 - **Fixed addresses in place of DNS.** gVisor's network stack doesn't reach Docker's embedded DNS server (gVisor's FAQ). Every session's container already finds the engine and the proxy by fixed addresses on its own network, written into its `/etc/hosts` (`engine-agents`, `egress`, `egress-agents`), so the overlay needs no addresses of its own. Every other name doesn't resolve in a session's container.
 - **Slower.** System calls and file access cost more under gVisor, so git in a large repository, installs and builds in a session take longer.
-- **The reviewers get it too.** The helper makes each reviewer container with the same runtime as the sessions'. A real Claude Code review under gVisor isn't checked yet.
+- **Reviews not checked.** A real Claude Code review under gVisor isn't checked yet.
 - **Tested in Docker-in-Docker.** The overlay was checked with Docker Engine 29.9.3 and Compose 5.7.1 in a privileged `docker:dind` container on Docker Desktop for macOS (arm64), with gVisor release-20261109.0 registered as `runsc`, not on a Linux computer of its own, and not on amd64. A session of the development fake agent got a container on `runsc`, with gVisor in its `dmesg`; the sandbox check of that container passed, its probe of the network's gateway included; and the session took a turn and wrote its file. Without `runsc` registered, the start was refused with the reason and no container was made. A real Claude Code session under gVisor isn't checked yet, since it needs a real sign-in.
 
 ## A headless browser for screenshots
