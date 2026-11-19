@@ -662,7 +662,7 @@ For work on the page alone, `make run` runs the engine on your computer without 
 2. Work on a branch, and open a pull request whose description closes the issue, such as `Closes #12`.
 3. CI runs its checks, and Claude reviews every push against `CLAUDE.md`, the rule files in `.claude/rules/` and `ARCHITECTURE.md`. Every problem it confirms blocks the merge, however minor; fix it and push again.
 
-A pull request that changes the checks themselves (`.github/`, `scripts/`, the `Makefile` or a linter's settings) also needs the owner's `review-override` label after its latest push. [`.claude/rules/ci.md`](.claude/rules/ci.md) says what each check does.
+A pull request that changes the checks themselves (`.github/`, `scripts/`, `proctor/`, the `Makefile` or a linter's settings) also needs the owner's `review-override` label after its latest push. [`.claude/rules/ci.md`](.claude/rules/ci.md) says what each check does.
 
 ## Privacy
 
