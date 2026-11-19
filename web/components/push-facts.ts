@@ -80,6 +80,7 @@ function workflow(w: WorkflowRun): HTMLElement {
 const HIDDEN: Record<string, string> = {
   pipe: 'result unknown: its exit status is that of the command its output was piped into, and it doesn\'t set pipefail',
   or: 'result unknown: it ends in || and a command that isn\'t a check, such as || true or || echo failed, so its exit status is that command\'s',
+  background: 'result unknown: it ran in the background, so the call returned before the check finished',
 }
 
 function result(c: AgentCheck): string {

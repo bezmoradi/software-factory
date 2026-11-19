@@ -3,6 +3,7 @@ package session
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -178,7 +179,8 @@ func commandRuns(command string) (tests, build bool) {
 
 func splitCommand(command string) (segments [][]string, ops []string) {
 	flat := strings.NewReplacer("'", " ", "\"", " ").Replace(command)
-	seps := commandSplit.FindAllStringIndex(flat, -1)
+	seps := append(commandSplit.FindAllStringIndex(flat, -1), loneAmpersands(flat)...)
+	slices.SortFunc(seps, func(a, b []int) int { return a[0] - b[0] })
 	segments = make([][]string, 0, len(seps)+1)
 	ops = make([]string, 0, len(seps))
 	from := 0
@@ -189,6 +191,17 @@ func splitCommand(command string) (segments [][]string, ops []string) {
 	}
 	segments = append(segments, strings.Fields(strings.TrimPrefix(strings.TrimSpace(flat[from:]), "&")))
 	return segments, ops
+}
+
+func loneAmpersands(flat string) [][]int {
+	var out [][]int
+	for i := range len(flat) {
+		if flat[i] != '&' || i > 0 && strings.IndexByte("&<>|;", flat[i-1]) >= 0 || i+1 < len(flat) && (flat[i+1] == '&' || flat[i+1] == '>') {
+			continue
+		}
+		out = append(out, []int{i, i + 1})
+	}
+	return out
 }
 
 func endsPipeline(op string) bool {
@@ -262,8 +275,9 @@ func commandPrefixless(words []string) []string {
 type HiddenStatus string
 
 const (
-	HiddenByPipe HiddenStatus = "pipe"
-	HiddenByOr   HiddenStatus = "or"
+	HiddenByPipe       HiddenStatus = "pipe"
+	HiddenByOr         HiddenStatus = "or"
+	HiddenByBackground HiddenStatus = "background"
 )
 
 var (
@@ -273,6 +287,9 @@ var (
 
 func statusHiddenBy(command string, isCheck func(words []string) bool) HiddenStatus {
 	segments, ops := splitCommand(command)
+	if runsInBackground(segments, ops, isCheck) {
+		return HiddenByBackground
+	}
 	pipefail := pipefailSet.MatchString(command)
 	checkBefore, checkNow, piped, seenCheck, last := false, false, false, false, -1
 	checkEarlier, lastCheck := false, false
@@ -284,7 +301,7 @@ func statusHiddenBy(command string, isCheck func(words []string) bool) HiddenSta
 			switch ops[i-1] {
 			case "|":
 				piped = true
-			case ";", "\n", "&&", "||", "$(", "`":
+			case ";", "\n", "&", "&&", "||", "$(", "`":
 				if hidden() {
 					return HiddenByPipe
 				}
@@ -308,6 +325,29 @@ func statusHiddenBy(command string, isCheck func(words []string) bool) HiddenSta
 		return HiddenByOr
 	}
 	return ""
+}
+
+func runsInBackground(segments [][]string, ops []string, isCheck func(words []string) bool) bool {
+	starts := []int{0}
+	for i := 1; i < len(segments); i++ {
+		top := len(starts) - 1
+		switch ops[i-1] {
+		case "(", "$(":
+			starts = append(starts, i)
+		case ")":
+			if top > 0 {
+				starts = starts[:top]
+			}
+		case ";", "\n", "`":
+			starts[top] = i
+		case "&":
+			if slices.ContainsFunc(segments[starts[top]:i], func(words []string) bool { return len(words) > 0 && isCheck(words) }) {
+				return true
+			}
+			starts[top] = i
+		}
+	}
+	return false
 }
 
 func programOf(words []string) string {

@@ -1096,7 +1096,8 @@ export const register: Register = on => {
     if (e.tool === 'Skill') noteRan($, input.skill ?? input.command, 'skill')
     const ran = await next(e)
     dropShown($, e.agentId ?? '')
-    if (visibleLoop) record($, { type: 'tool_done', id, ok: !(ran.deny !== undefined || ran.isError === true), outcome: outcome(e.tool, ran) })
+    const background = e.tool === 'Monitor' || (e.tool === 'Bash' && (input.run_in_background === true || !!obj(ran.result).backgroundTaskId))
+    if (visibleLoop) record($, { type: 'tool_done', id, ok: !(ran.deny !== undefined || ran.isError === true), outcome: outcome(e.tool, ran), ...(background ? { background: true } : {}) })
     const file = e.tool === 'Write' ? input.file_path : undefined
     if (typeof file === 'string' && file.length <= 500 && file.startsWith('/') && !file.includes('/../') && SESSION_FILE.test(file) && ran.deny === undefined && ran.isError !== true) {
       kept = { ...kept, written: [...kept.written.filter(f => f !== file), file].slice(-20) }

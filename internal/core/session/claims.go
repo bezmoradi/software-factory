@@ -50,19 +50,21 @@ type TurnMarks struct {
 }
 
 type turnTool struct {
-	shell    bool
-	unknown  bool
-	command  string
-	order    int
-	finished bool
-	ok       bool
+	shell      bool
+	unknown    bool
+	command    string
+	order      int
+	finished   bool
+	ok         bool
+	background bool
 }
 
 type turnCommand struct {
-	command  string
-	extra    bool
-	finished bool
-	ok       bool
+	command    string
+	extra      bool
+	finished   bool
+	ok         bool
+	background bool
 }
 
 type turnHead struct {
@@ -165,6 +167,9 @@ func (r *Registry) trackTurn(c *conn, kind string, ev map[string]any, seq int64,
 		if ok, reported := ev["ok"].(bool); reported {
 			t.finished, t.ok = true, ok
 		}
+		if background, _ := ev["background"].(bool); background {
+			t.background = true
+		}
 	case "text":
 		if log.open {
 			text, _ := ev["text"].(string)
@@ -232,7 +237,7 @@ func classifyTool(tool, summary string, ev map[string]any) turnTool {
 		if summary == "" || strings.HasSuffix(summary, "…") || utf8.RuneCountInString(summary) >= 300 {
 			return turnTool{unknown: true}
 		}
-		return turnTool{shell: true, command: summary}
+		return turnTool{shell: true, command: summary, background: tool == "Monitor"}
 	case tool == "execute":
 		if command, _ := ev["command"].(string); command != "" {
 			return turnTool{shell: true, command: command}
@@ -321,7 +326,7 @@ func (r *Registry) endTurn(sid string, a *admitted, log *turnLog, checks ClaimCh
 	}
 	slices.SortFunc(tools, func(a, b *turnTool) int { return a.order - b.order })
 	for _, t := range tools {
-		ran = append(ran, turnCommand{command: t.command, finished: t.finished, ok: t.ok})
+		ran = append(ran, turnCommand{command: t.command, finished: t.finished, ok: t.ok, background: t.background})
 	}
 	commands := make([]string, 0, len(ran))
 	for _, c := range ran {
@@ -391,17 +396,25 @@ func (t endedTurn) testsUnbacked() string {
 	if !t.known {
 		return ""
 	}
-	ran, last := false, -1
+	ran, background, last := false, false, -1
 	for i, c := range t.ran {
 		narrow := runsTestCheck(c.command)
-		if tests, _ := commandRuns(c.command); tests || narrow {
+		tests, _ := commandRuns(c.command)
+		if (tests || narrow) && c.background || narrow && statusHiddenBy(c.command, isTestSegment) == HiddenByBackground {
+			background = true
+			continue
+		}
+		if tests || narrow {
 			ran = true
 		}
 		if narrow {
 			last = i
 		}
 	}
-	if !ran {
+	switch {
+	case !ran && background:
+		return "The test commands in this turn ran in the background, so the engine didn't see whether they passed."
+	case !ran:
 		return "No test command ran in this turn."
 	}
 	if last < 0 {

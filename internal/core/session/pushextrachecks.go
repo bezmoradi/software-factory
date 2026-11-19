@@ -174,7 +174,7 @@ func (b *worktreeBook) noteCheck(sid, kind string, ev map[string]any, now time.T
 			list = map[string]pendingCheck{}
 			b.tools[sid] = list
 		}
-		list[id] = pendingCheck{kind: k, command: clip(t.command, maxCheckCommand), hidden: statusHiddenBy(t.command, isCheckSegment), at: now}
+		list[id] = pendingCheck{kind: k, command: clip(t.command, maxCheckCommand), hidden: checkHidden(t.command, t.background), at: now}
 	case "tool_done":
 		done, _ := ev["ok"].(bool)
 		if b.edits[sid][id] {
@@ -185,13 +185,20 @@ func (b *worktreeBook) noteCheck(sid, kind string, ev map[string]any, now time.T
 			return
 		}
 		p, ok := b.tools[sid][id]
+		background, _ := ev["background"].(bool)
 		if command, _ := ev["command"].(string); command != "" {
 			if k, found := checkOf(command); found {
-				p, ok = pendingCheck{kind: k, command: clip(command, maxCheckCommand), hidden: statusHiddenBy(command, isCheckSegment), at: now, editedAt: p.editedAt}, true
+				p, ok = pendingCheck{kind: k, command: clip(command, maxCheckCommand), hidden: checkHidden(command, p.hidden == HiddenByBackground), at: now, editedAt: p.editedAt}, true
 			}
 		}
 		if !ok {
 			return
+		}
+		if background {
+			p.hidden = HiddenByBackground
+		}
+		if p.hidden == HiddenByBackground {
+			done = false
 		}
 		delete(b.tools[sid], id)
 		if b.checks[sid] == nil {
@@ -199,6 +206,13 @@ func (b *worktreeBook) noteCheck(sid, kind string, ev map[string]any, now time.T
 		}
 		b.checks[sid][p.kind] = AgentCheck{Kind: p.kind, Command: CleanLine(maskSecrets(p.command), maxCheckCommand), OK: done, Done: true, At: now, EditedAt: p.editedAt, Hidden: p.hidden}
 	}
+}
+
+func checkHidden(command string, background bool) HiddenStatus {
+	if background {
+		return HiddenByBackground
+	}
+	return statusHiddenBy(command, isCheckSegment)
 }
 
 func (b *worktreeBook) editedLocked(sid string, now time.Time) {
