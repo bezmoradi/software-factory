@@ -59,6 +59,7 @@ type PushExtras struct {
 	Registry  PackageRegistry
 	LookupsOn func(project string) bool
 	Locks     TestLocks
+	Specs     SpecProjects
 	Base      context.Context
 	Now       func() time.Time
 }
@@ -162,7 +163,8 @@ func (p *Pushes) computeExtra(b *pushExtras, sid, head string) *PushExtra {
 	if base == "" {
 		out.Problems = append(out.Problems, "the branch shares no history with the main branch the engine fetched, so every file counts as new")
 	}
-	scan := scanChange(b.cfg.Files, t.Repo, base, head)
+	specs := b.cfg.Specs != nil && b.cfg.Specs.Specs(b.cfg.Base, sid, head)
+	scan := scanChange(b.cfg.Files, t.Repo, base, head, specs)
 	out.Problems = append(out.Problems, scan.problems...)
 	out.Tests, out.Kinds = scan.tests, scan.kinds
 	out.Dependencies, out.MoreDependencies = scan.deps, scan.moreDeps

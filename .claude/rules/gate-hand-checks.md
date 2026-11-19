@@ -6,6 +6,8 @@ paths:
   - "internal/core/session/review*.go"
   - "internal/core/session/push*.go"
   - "internal/core/session/teamrules.go"
+  - "internal/core/session/specs.go"
+  - "internal/core/session/flag.go"
   - "internal/core/session/work.go"
   - "internal/core/session/login.go"
   - "internal/core/session/resume.go"
@@ -15,7 +17,9 @@ paths:
   - "internal/core/workflow/catalog.go"
   - "internal/core/workflow/artifacts.go"
   - "internal/core/workflow/team.go"
+  - "internal/core/workflow/items.go"
   - "internal/adapters/http/page/agent.go"
+  - "internal/adapters/http/page/flag.go"
   - "internal/adapters/http/page/listener.go"
   - "internal/adapters/http/page/push.go"
   - "internal/adapters/http/page/pushes.go"
@@ -208,6 +212,52 @@ team '{"version":1,"fileRules":[{"pattern":"docs/**","instruction":"Rule A2."},{
 ```
 
 After the `docs/**` change, `gate r` lists no review item, since the change touches only `src/`. After the `src/**` change it lists `a review by knackpack:adversarial-reviewer that counts: the team rules changed since it reviewed: the per-path rules of the approved software-factory.json that apply to this change aren't the ones it was given, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review`, and the same for the simplicity checker, until `review r` passes again.
+
+**Proctor's specifications: writes ask, and changes hold the push.** `spec <path> <text>` commits one file to the git host's main, like `team`, in a new folder of its own each time. `wcheck <name> <path>` has that session's fake agent ask `/check` about a `Write` to the path from its own container, with the check-only key the engine gives the development agent (ARCHITECTURE.md "Trust boundary"), and prints the answer the fake wrote to `gate-answers/`, whose quotes show escaped inside `text`. The fake writes the file when the answer allows it, as Claude Code would, and `commit`'s `git add -A` then commits `gate-answers/` too. `digest <name> <path>` prints the digest `/api/gate` shows for a flagged file, and `allow <name> <path> <digest> <reason>` sends `/api/allow-file` with it, as the page does. The first session runs before main holds `proctor/proctor.yaml`.
+
+```bash
+spec() { printf '%s\n' "$2" | docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sh -c 'd=$(mktemp -d) && git clone -q /srv/git/demo.git "$d/m" && mkdir -p "$d/m/$(dirname "$1")" && cat > "$d/m/$1" && cd "$d/m" && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm "$1" && git push -q origin HEAD:main' sh "$1"; }
+wcheck() { n=w$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n'); sf /api/message "{\"sid\":\"$(sid $1)\",\"text\":\"say: wcheck\\ntry: $n $2\"}"; sleep 3; sf /api/file "{\"sid\":\"$(sid $1)\",\"path\":\"gate-answers/$n.json\"}"; }
+digest() { gate $1 | python3 -I -c 'import sys,json; t=sys.stdin.read(); j=json.loads(t[:t.rindex(" ")])["gate"]; print(next((f["digest"] for f in j.get("flagged") or [] if f["path"]==sys.argv[1]), ""))' "$2"; }
+allow() { sf /api/allow-file "{\"sid\":\"$(sid $1)\",\"path\":\"$2\",\"digest\":\"$3\",\"reason\":\"$4\"}"; }
+start q; wcheck q proctor/specs/x.yaml; commit q proctor/specs/x.yaml 'no_state_check: "x"'; commit q Makefile 'proctor:'; gate q
+spec proctor/proctor.yaml 'version: 2'
+spec proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n  - id: X-002')"
+start p; wcheck p proctor/specs/x.yaml
+commit p proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n    "no_state_check": "nothing to read"')"; review p
+D1=$(digest p proctor/specs/x.yaml)
+commit p proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n    "no_state_check": "nothing to read"\n    waive: { FIX-05: "fixed" }')"
+allow p proctor/specs/x.yaml "$D1" 'the waiver is right'; gate p
+allow p proctor/specs/x.yaml "$(digest p proctor/specs/x.yaml)" 'both waivers are right'; review p
+push p; sleep 3; remote | grep "$(branch p)"; events | grep -o '"what":"[^"]*"'
+commit p proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001')"; review p
+push p; sleep 3; audit
+start m; wcheck m Makefile; commit m Makefile "$(printf 'proctor:\n\t@echo pass')"; commit m proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n  - id: X-002\n  - id: X-003')"; push m; sleep 3; gate m; events | grep -o '"what":"[^"]*"'
+start l; docker exec -w "$(wt l)" "$(ctr l)" sh -c 'ln -s ../../README.md proctor/specs/out.yaml && ln -s x.yaml proctor/specs/in.yaml && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm links'
+gate l; allow l proctor/specs/out.yaml "$(digest l proctor/specs/out.yaml)" fine; allow l proctor/specs/in.yaml "$(digest l proctor/specs/in.yaml)" fine; push l; sleep 3; audit
+start c; commit c proctor/specs/x.yaml 'no_state_check: "old"'
+docker exec -w "$(wt c)" "$(ctr c)" sh -c 'mkdir -p keys && for i in $(seq -w 1 201); do echo k$i > keys/k$i.pem; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm keys'; gate c
+start d; commit d proctor/specs/credentials.yaml 'version: 2'; docker exec -w "$(wt d)" "$(ctr d)" git rm -q proctor/specs/x.yaml; docker exec -w "$(wt d)" "$(ctr d)" git -c user.name=Dev -c user.email=dev@example.invalid commit -qm delete; gate d
+allow d proctor/specs/x.yaml "$(digest d proctor/specs/x.yaml)" 'x.yaml is retired'; audit; sf /api/flag-remove "{\"sid\":\"$(sid d)\",\"path\":\"proctor/specs/credentials.yaml\"}"; logs engine 'msg=flag '
+start b; docker exec -w "$(wt b)" "$(ctr b)" sh -c 'mkdir -p proctor/specs/many && for i in $(seq -w 1 5000); do echo same > proctor/specs/many/f$i.yaml; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm many'; gate b; push b; sleep 6; docker compose -f compose.yaml -f compose.dev.yaml exec -T engine sh -c 'tail -n 1 /var/lib/software-factory/audit.jsonl | wc -c'
+start k; docker exec -w "$(wt k)" "$(ctr k)" sh -c 'mkdir -p mk && printf "proctor:\n\t@echo pass\n" > mk/x.mk && ln -s mk/x.mk Makefile && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm mklink'; gate k; allow k Makefile "$(digest k Makefile)" fine; push k; sleep 3; audit
+start z; commit z proctor/specs/gone.yaml "unique $(date +%s%N)"; B=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse HEAD:proctor/specs/gone.yaml); G=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse --git-common-dir)
+docker exec "$(ctr z)" rm -f "$G/objects/$(echo $B | cut -c1-2)/$(echo $B | cut -c3-)"; push z; sleep 3; audit
+for r in /api/allow-file /allow-file /api/push-answer; do docker exec "$(ctr d)" curl -sS --noproxy '*' -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' http://engine-agents:8081$r -d '{}'; done
+```
+
+- `q`, before main holds `proctor/proctor.yaml`: the write check answers `"guarded":""`, and `gate q` lists no `flagged` file, only the two reviews, for a spec and a `Makefile` alike.
+- `p`: the write check answers `"guarded":"it is under proctor/, Proctor's specifications on main, which decide what a pass means; the person answers every write to it"` (also for `PROCTOR/specs/y.yaml`; `src/proctor/x.go` and `notes.txt` answer `""`). `gate p` flags `proctor/specs/x.yaml` with kind `specification` and a 64-hex `digest`, and lists `the developer's decision on proctor/specs/x.yaml, because it is a Proctor specification change: …`.
+- The stale Allow: with `D1`, the digest from before the second commit, `/api/allow-file` answers `{"error":"stale","message":"This file changed on the branch since the page showed it, so nothing was allowed and it still holds the push. …"} 409`, and `gate p` still lists the file with `allowed: false` and another digest. On the page, a card open across that commit marks the row `It changed on the branch since the page first showed it, so your reason was cleared` and empties the reason box. `/api/allow-file` without `digest`, with one that isn't 64 hex digits, or with another field answers 400 `fields`. With the new digest, `{"ok":true} 200`; after the reviews, the push logs `push event=pushed by=page`, the git host has `$(branch p)` at that commit, and the facts hold `2 new waivers` (the quoted key counts) and `1 fewer scenarios or table rows`.
+- The further change: the push is held again, `"result":"held"`, the git host keeps the earlier commit, and `gate p` flags the file with `allowed: false`.
+- `m`, the Makefile: the write check answers `"guarded":"it is the root Makefile, whose proctor target is how make proctor runs Proctor's specifications, which decide what a pass means; the person answers every write to it"`, and `gate m` flags `Makefile` with kind `specification` and the reason `it is the root Makefile, whose proctor target is how make proctor runs Proctor's specifications, so a change to it can change what a pass means: …`. The facts say `the root Makefile, whose proctor target runs Proctor's specifications, was added`, and for the spec change that adds a scenario `Proctor specification changed; the engine's line counts found no new waiver, … so a count of 0 doesn't prove there are none`.
+- `l`, the links: `proctor/specs/out.yaml` is flagged with `link: true` and the reason `it is a symbolic link under proctor/ whose target leaves proctor/, or can't be read, …; it can't be allowed, only taken out of the branch`, and its Allow answers `{"error":"link",…} 409`; `in.yaml`, which points inside `proctor/`, is allowed with `{"ok":true} 200`. The push is refused, `"result":"refused"`, with `this push carries a symbolic link under proctor/ whose target leaves proctor/ (proctor/specs/out.yaml), …`, which the push card's Allow can't override.
+- `c`, the cap: with 201 secret-named files after the spec change, `gate c` has 200 `name` flags plus the `specification` flag for `proctor/specs/x.yaml`, `flagsRead: false`, and beside the secrets item `a check of this branch's changes to Proctor's specifications under proctor/ and to the root Makefile: this project uses Proctor, and they may be among the files and commits the gate couldn't read, …`.
+- `b`, 5,000 specification files in one commit: `gate b` lists 200 `specification` flags and, first among `missing`, `the developer's decision on Proctor's specifications: this push changes 5000 files under proctor/ or the root Makefile, more than the 200 the gate lists one by one, so 4800 of them aren't listed and can't be allowed one by one: …`. The push is held, and its audit line is about 44 KB: `missing` holds 100 items, that one first, the last `and 104 more items, which the page's gate panel lists`.
+- `k`, a root `Makefile` that is a symbolic link: flagged `specification` with `link: true` and `it is the root Makefile as a symbolic link, so make proctor would run a file this hold doesn't cover; …`; its Allow answers `{"error":"link",…} 409`, the item reads `Makefile out of every commit on the branch that holds it, because …`, and the push is refused with `this push carries a symbolic link under proctor/ whose target leaves proctor/, or a root Makefile that is a symbolic link (Makefile), …`.
+- `z`, a commit whose blob is gone from the session's clone: the engine logs `flag scan event=unreadable` and the push is refused, `"result":"refused"`, with `this project uses Proctor, and the engine couldn't list this change or read the commits the push sends, so it couldn't check them for a symbolic link under proctor/ that leaves it or a root Makefile that is a link; …`, which the card's Allow can't override.
+- `d`: `proctor/specs/credentials.yaml` keeps kind `name`, its reason `its name is one that usually holds secrets; it is also a Proctor specification under proctor/, …`, and its Remove sends the revert message too (`flag event=asked kind=name`, and the event stream shows `Revert this branch's change to it: …`); `proctor/specs/x.yaml` is flagged `specification` with the reason ending `; this push deletes it`, and its Allow's audit line has `"blobs":["0000000000000000000000000000000000000000"]`. A rename (`git mv`) flags both paths, the old one as deleted. Remove logs `flag event=asked kind=…`, and for a `specification` file the session's message asks it to revert the branch's change, not to add it to `.gitignore`; the page says `The session was asked to revert the change to the file.`
+- Nothing on the agent listener allows a file: the three routes sent to `http://engine-agents:8081` from a session's container answer `{"error":"route"} 404`.
 
 **Reviewer containers: at most 8 at once, each with only its own snapshot.** Five reviews of two runs each; the fifth would make 10.
 

@@ -2,12 +2,14 @@ package session
 
 import (
 	"context"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/bezmoradi/software-factory/internal/core/gate"
 	"github.com/bezmoradi/software-factory/internal/core/push"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
@@ -17,6 +19,7 @@ const (
 	FlagBudget      = 32 << 20
 	maxFlagVersions = 20
 	maxFlagged      = 200
+	maxSpecFlags    = 200
 	keptScans       = 16
 
 	maxReviewedTrees = 32
@@ -31,6 +34,7 @@ const (
 	FlagPassword FlagKind = "password"
 	FlagEncoding FlagKind = "encoding"
 	FlagUnread   FlagKind = "unreviewed"
+	FlagSpec     FlagKind = "specification"
 )
 
 type CommitField string
@@ -65,7 +69,9 @@ var (
 		FlagPassword: "it contains what looks like a password in a URL",
 		FlagEncoding: "it uses a text encoding other than UTF-8, which the engine can't scan for secrets",
 		FlagUnread:   "a commit the push sends holds a version of it that neither the branch's head, a reviewed commit nor the main branch holds, so no reviewer read that version",
+		FlagSpec:     "it is a Proctor specification change: a commit the push sends adds, changes, deletes or renames this file under proctor/, and Proctor's specifications decide what a pass means, so the person allows each change",
 	}
+	absentBlob    = strings.Repeat("0", 40)
 	secretPathWhy = "its path holds what looks like an access token"
 )
 
@@ -119,6 +125,7 @@ type Flag struct {
 	Size     int64
 	Versions []string
 	Full     bool
+	Link     bool
 }
 
 func (f Flag) key() string {
@@ -143,12 +150,17 @@ type FlagView struct {
 	Flag
 	Shown   string
 	Allowed bool
+	Digest  string
+	Spec    bool
 }
 
 type scanned struct {
 	flags    []Flag
 	complete bool
 	lfs      []string
+	specOver []string
+	linkOver bool
+	failed   bool
 }
 
 func secretName(p string) bool {
@@ -218,45 +230,85 @@ func flagOf(f PushedFile) (FlagKind, string, bool) {
 	return "", "", false
 }
 
-func scanPushed(set PushedSet) scanned {
+func addVersion(fl *Flag, sha string) {
+	switch {
+	case fl.Full || slices.Contains(fl.Versions, sha):
+	case len(fl.Versions) >= maxFlagVersions:
+		fl.Full, fl.Versions = true, nil
+	default:
+		fl.Versions = append(fl.Versions, sha)
+	}
+}
+
+func scanPushed(set PushedSet, specs bool) scanned {
 	out := scanned{complete: set.Complete}
 	byPath := map[string]int{}
+	plain, specCount := 0, 0
+	over := map[string]bool{}
 	var paths []string
+	listed := map[string]bool{}
+	version := func(p string, kind FlagKind, why string, size int64, sha string, spec bool) *Flag {
+		i, seen := byPath[p]
+		if !seen {
+			switch {
+			case spec && specCount >= maxSpecFlags:
+				over[p] = true
+				return nil
+			case spec:
+				specCount++
+			case plain >= maxFlagged:
+				out.complete = false
+				return nil
+			default:
+				plain++
+			}
+			byPath[p] = len(out.flags)
+			out.flags = append(out.flags, Flag{Path: p, Kind: kind, Why: why, Size: size})
+			i = len(out.flags) - 1
+		}
+		fl := &out.flags[i]
+		if fl.Kind == FlagSpec && kind != FlagSpec {
+			fl.Kind, fl.Why = kind, why
+		}
+		if size > fl.Size {
+			fl.Size = size
+		}
+		addVersion(fl, sha)
+		return fl
+	}
 	for _, f := range set.Files {
 		linked := f.Mode == push.ModeSubmodule || f.Mode == push.ModeFolder
-		if !linked && !slices.Contains(paths, f.Path) {
+		spec := specs && gate.SpecPath(f.Path)
+		leaves := spec && f.Mode == push.ModeSymlink && (gate.SpecMakefile(f.Path) || f.Data == nil || gate.SpecLinkLeaves(f.Path, string(f.Data)))
+		if !linked && !listed[f.Path] {
+			listed[f.Path] = true
 			paths = append(paths, f.Path)
 		}
 		if !linked && f.Data == nil && f.Size >= 0 && f.Size <= MaxFlaggedFile && !secretName(f.Path) && !secretText(f.Path) {
 			out.complete = false
+			if spec {
+				if fl := version(f.Path, FlagSpec, specWhy(f.Path), f.Size, f.SHA, true); fl != nil && leaves {
+					fl.Link = true
+				} else if fl == nil && leaves {
+					out.linkOver = true
+				}
+			}
 			continue
 		}
 		kind, why, flagged := flagOf(f)
+		if spec && (!flagged || kind == FlagUnread) {
+			kind, why, flagged = FlagSpec, specWhy(f.Path), true
+		}
 		if !flagged {
 			continue
 		}
-		i, seen := byPath[f.Path]
-		if !seen {
-			if len(out.flags) >= maxFlagged {
-				out.complete = false
-				continue
-			}
-			byPath[f.Path] = len(out.flags)
-			out.flags = append(out.flags, Flag{Path: f.Path, Kind: kind, Why: why, Size: f.Size})
-			i = len(out.flags) - 1
-		}
-		fl := &out.flags[i]
-		if f.Size > fl.Size {
-			fl.Size = f.Size
-		}
-		switch {
-		case fl.Full || slices.Contains(fl.Versions, f.SHA):
-		case len(fl.Versions) >= maxFlagVersions:
-			fl.Full, fl.Versions = true, nil
-		default:
-			fl.Versions = append(fl.Versions, f.SHA)
+		if fl := version(f.Path, kind, why, f.Size, f.SHA, spec); fl != nil && leaves {
+			fl.Link = true
+		} else if fl == nil && leaves {
+			out.linkOver = true
 		}
 	}
+	out.specOver = slices.Sorted(maps.Keys(over))
 	slices.SortFunc(out.flags, func(a, b Flag) int { return strings.Compare(a.Path, b.Path) })
 	for _, c := range set.Commits {
 		for _, f := range c.fields() {
@@ -268,10 +320,11 @@ func scanPushed(set PushedSet) scanned {
 			default:
 				continue
 			}
-			if len(out.flags) >= maxFlagged {
+			if plain >= maxFlagged {
 				out.complete = false
 				break
 			}
+			plain++
 			out.flags = append(out.flags, Flag{Commit: c.SHA, Field: f.field, Kind: kind, Why: flagWhy[kind], Versions: []string{c.SHA}})
 		}
 	}
@@ -281,7 +334,7 @@ func scanPushed(set PushedSet) scanned {
 
 func allowedFlag(f Flag, allowed map[string]map[string]bool) bool {
 	set := allowed[f.key()]
-	if f.Full || len(f.Versions) == 0 || set == nil {
+	if f.Full || f.Link || len(f.Versions) == 0 || set == nil {
 		return false
 	}
 	for _, v := range f.Versions {

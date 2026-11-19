@@ -66,7 +66,7 @@ var (
 
 func isTestPath(p string) bool { return testPath.MatchString(p) }
 
-func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
+func scanChange(files ChangeBlobs, repo, base, head string, specs bool) changeScan {
 	var out changeScan
 	list, err := files.ChangedFiles(context.Background(), repo, base, head)
 	if err != nil {
@@ -124,14 +124,23 @@ func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
 	for _, c := range list {
 		if c.NewMode == push.ModeSubmodule || c.OldMode == push.ModeSubmodule {
 			out.kinds = append(out.kinds, pointerMove(c))
+			if specs {
+				out.tests = append(out.tests, specNotes(c, "", "", false)...)
+			}
 			continue
 		}
 		out.kinds = append(out.kinds, kindsOf(c, blobs)...)
 		if c.NewMode == push.ModeSymlink || c.OldMode == push.ModeSymlink {
+			if specs {
+				out.tests = append(out.tests, specNotes(c, "", "", false)...)
+			}
 			continue
 		}
 		before, okBefore := text(c.OldSHA)
 		after, okAfter := text(c.NewSHA)
+		if specs {
+			out.tests = append(out.tests, specNotes(c, before, after, okBefore && okAfter)...)
+		}
 		if !okBefore || !okAfter || isBinaryText(before) || isBinaryText(after) {
 			continue
 		}

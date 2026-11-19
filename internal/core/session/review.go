@@ -256,6 +256,7 @@ type Reviews struct {
 	testStore    sync.Mutex
 	changeFacts  ChangeBlobs
 	changeLocks  TestLocks
+	changeSpecs  SpecProjects
 
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice

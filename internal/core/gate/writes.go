@@ -72,6 +72,42 @@ func GuardedWrite(top, file string, protect []string) string {
 	return ""
 }
 
+const SpecFolder = "proctor"
+
+func SpecFolderPath(rel string) bool {
+	first, _, _ := strings.Cut(rel, "/")
+	return strings.EqualFold(first, SpecFolder)
+}
+
+func SpecMakefile(rel string) bool {
+	return strings.EqualFold(rel, "Makefile") || strings.EqualFold(rel, "GNUmakefile")
+}
+
+func SpecPath(rel string) bool {
+	return SpecFolderPath(rel) || SpecMakefile(rel)
+}
+
+func SpecLinkLeaves(rel, target string) bool {
+	if target == "" || path.IsAbs(target) || strings.ContainsAny(target, "\x00\\") {
+		return true
+	}
+	to := path.Join(path.Dir(rel), target)
+	return to == ".." || strings.HasPrefix(to, "../") || !SpecFolderPath(to)
+}
+
+func SpecWrite(top, file string) string {
+	rel, ok := worktreePath(top, file)
+	switch {
+	case !ok:
+		return ""
+	case SpecMakefile(rel):
+		return "it is the root Makefile, whose proctor target is how make proctor runs Proctor's specifications, which decide what a pass means; the person answers every write to it"
+	case SpecFolderPath(rel):
+		return "it is under proctor/, Proctor's specifications on main, which decide what a pass means; the person answers every write to it"
+	}
+	return ""
+}
+
 func LockedWrite(top, file string, locked map[string]bool) bool {
 	if len(locked) == 0 {
 		return false

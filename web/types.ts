@@ -413,9 +413,13 @@ export interface FlaggedFile {
   kind?: string
   size?: number
   full?: boolean
+  link?: boolean
+  spec?: boolean
+  digest?: string
 }
 
 export interface PushPanelView {
+  sid?: string
   push: SessionPush | null
   disabled: string
   answering: boolean
@@ -1210,8 +1214,8 @@ declare global {
     'sf-plan-review': CustomEvent<{ hash: string }>
     'sf-insert-prompt': CustomEvent<{ text: string }>
     'sf-walkthrough-check': CustomEvent<{ commit: string; step: number; done: boolean; settle: (ok: boolean) => void }>
-    'sf-allow-file': CustomEvent<{ path: string; reason: string }>
-    'sf-remove-file': CustomEvent<{ path: string }>
+    'sf-allow-file': CustomEvent<{ path: string; digest: string; reason: string }>
+    'sf-remove-file': CustomEvent<{ path: string; revert: boolean }>
     'sf-allow-commit': CustomEvent<{ commit: string; field: string; reason: string }>
     'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>

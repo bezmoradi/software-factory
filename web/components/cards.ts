@@ -301,7 +301,7 @@ class SfPermission extends HTMLElement {
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
     if (hidesText(detail || summary)) this.append(hiddenMark(detail || summary, 'This call'))
     if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
-    if (guarded) this.append(el('p', 'small warn', "This file is protected: it matches the team file's protect list on main, or it's a test you locked. Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
+    if (guarded) this.append(el('p', 'small warn', "This file is protected: it matches the team file's protect list on main, it's a test you locked, or it's under proctor/, Proctor's specifications. Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {

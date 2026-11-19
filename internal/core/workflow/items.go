@@ -8,6 +8,7 @@ type Flag struct {
 	Path    string
 	Why     string
 	Allowed bool
+	Fixed   bool
 }
 
 type Progress struct {
@@ -48,7 +49,11 @@ func Items(p Progress) ([]string, bool) {
 		say("a check of this branch's files for secrets, which the gate couldn't finish, so the developer has to check them and allow the push")
 	}
 	for _, f := range p.Flagged {
-		if !f.Allowed {
+		switch {
+		case f.Allowed:
+		case f.Fixed:
+			say(clip(f.Path, 200) + " out of every commit on the branch that holds it, because " + f.Why + "; removing it in a new commit still pushes the earlier ones")
+		default:
 			say("the developer's decision on " + clip(f.Path, 200) + ", because " + f.Why + ": they allow it on the page, or it comes out of every commit on the branch that holds it, since removing it in a new commit still pushes the earlier ones")
 		}
 	}

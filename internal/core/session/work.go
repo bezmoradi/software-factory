@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -146,6 +148,8 @@ type Work struct {
 	sizeMu   sync.Mutex
 	sizes    map[string]changeSize
 	lockShow func(sid string)
+
+	digestKey [32]byte
 }
 
 type WorkDoc struct {
@@ -261,7 +265,7 @@ type WorkPage interface {
 	SetAutoFindings(path string, on bool) error
 	SetProjectOption(path, op string, on bool) error
 	SetHold(path string, h HoldSettings) error
-	AllowFile(ctx context.Context, sid, path, reason string) error
+	AllowFile(ctx context.Context, sid, path, digest, reason string) error
 	AskRemove(ctx context.Context, sid, path string) error
 	AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error
 	AskRewrite(ctx context.Context, sid, commit string, field CommitField) error
@@ -343,7 +347,11 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	return &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}}, nil
+	w := &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}}
+	if _, err := rand.Read(w.digestKey[:]); err != nil {
+		return nil, errors.New("work: no random key for the flagged files' digests")
+	}
+	return w, nil
 }
 
 func textHash(s string) string {
@@ -762,6 +770,8 @@ type gathered struct {
 	scan      scanned
 	flags     []FlagView
 	flagsRead bool
+	specs     bool
+	net       []push.Change
 }
 
 func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
@@ -775,6 +785,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	}
 	g.chosen = kind
 	if head != "" {
+		g.specs = w.specsProtected(t, main, head)
 		if main != "" {
 			base, err := w.cfg.History.MergeBase(ctx, t.Repo, head, main)
 			if err != nil {
@@ -796,6 +807,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 			for _, c := range changes {
 				g.files = append(g.files, c.Path)
 			}
+			g.net = changes
 		}
 	}
 	eff, note := workflow.Effective(kind, g.files, g.listed)
@@ -839,14 +851,17 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	var flagged []workflow.Flag
 	if head != "" {
 		if g.listed {
-			g.scan = w.scanOf(ctx, t.Repo, g.base, head, w.reviewedOn(t.Branch, head))
+			g.scan = w.scanOf(ctx, t.Repo, g.base, head, w.reviewedOn(t.Branch, head), g.specs)
+			if g.specs {
+				g.scan = w.withSpecs(t, head, g.scan, g.net)
+			}
 		}
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
 		for _, f := range g.scan.flags {
-			v := FlagView{Flag: f, Shown: f.maskedPath(), Allowed: allowedFlag(f, ws.allowed)}
+			v := FlagView{Flag: f, Shown: f.maskedPath(), Allowed: allowedFlag(f, ws.allowed), Digest: w.flagDigest(f), Spec: g.specs && f.Commit == "" && gate.SpecPath(f.Path)}
 			g.flags = append(g.flags, v)
-			flagged = append(flagged, workflow.Flag{Path: f.Label(), Why: f.Why, Allowed: v.Allowed})
+			flagged = append(flagged, workflow.Flag{Path: f.Label(), Why: f.Why, Allowed: v.Allowed, Fixed: f.Link})
 		}
 	}
 	g.items, g.toApprove = workflow.Items(workflow.Progress{
@@ -855,6 +870,12 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile, TasksWritten: g.docs.tasks,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
 	})
+	if item := specOverItem(g); item != "" {
+		g.items = append([]string{item}, g.items...)
+	}
+	if g.specs && !flagsRead {
+		g.items = append(g.items, "a check of this branch's changes to Proctor's specifications under proctor/ and to the root Makefile: this project uses Proctor, and they may be among the files and commits the gate couldn't read, so the developer has to check them too before allowing the push")
+	}
 	g.required = w.notInstalled(g.required)
 	for _, q := range g.required {
 		if q.Missing {
@@ -878,7 +899,11 @@ func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, ma
 	if err != nil {
 		items = append(slices.Clone(items), workUnreadItem)
 	}
-	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: lfsRefusal(g.scan.lfs), Hold: hold,
+	refusal := lfsRefusal(g.scan.lfs)
+	if refusal == "" {
+		refusal = linkRefusal(g)
+	}
+	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: refusal, Hold: hold,
 		Approval: w.givenOf(g)}, true
 }
 
@@ -1496,11 +1521,11 @@ func (w *Work) reviewedOn(branch, head string) []string {
 	return out[:min(len(out), maxReviewedTrees)]
 }
 
-func (w *Work) scanOf(ctx context.Context, repo, base, head string, reviewed []string) scanned {
+func (w *Work) scanOf(ctx context.Context, repo, base, head string, reviewed []string, specs bool) scanned {
 	if w.cfg.Contents == nil {
 		return scanned{}
 	}
-	key := repo + "\x00" + base + "\x00" + head + "\x00" + strings.Join(reviewed, ",")
+	key := repo + "\x00" + base + "\x00" + head + "\x00" + strings.Join(reviewed, ",") + "\x00" + strconv.FormatBool(specs)
 	w.scanMu.Lock()
 	defer w.scanMu.Unlock()
 	if c, ok := w.scans[key]; ok {
@@ -1509,9 +1534,9 @@ func (w *Work) scanOf(ctx context.Context, repo, base, head string, reviewed []s
 	set, err := w.cfg.Contents.Pushed(ctx, repo, base, head, reviewed, FlagBudget)
 	if err != nil {
 		w.cfg.Logger.Warn("flag scan", "event", "unreadable")
-		return scanned{}
+		return scanned{failed: true}
 	}
-	out := scanPushed(set)
+	out := scanPushed(set, specs)
 	w.scans[key] = out
 	w.scanKeys = append(w.scanKeys, key)
 	if len(w.scanKeys) > keptScans {
@@ -1568,7 +1593,7 @@ func (w *Work) allow(sid string, f Flag) error {
 	return nil
 }
 
-func (w *Work) AllowFile(ctx context.Context, sid, path, reason string) error {
+func (w *Work) AllowFile(ctx context.Context, sid, path, digest, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
 		return explained(invalid("reason"), "Allowing a flagged file needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
@@ -1576,6 +1601,12 @@ func (w *Work) AllowFile(ctx context.Context, sid, path, reason string) error {
 	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
+	}
+	if f.Link {
+		return explained(conflict("link"), "This is a symbolic link the hold on Proctor's specifications can't follow (under proctor/ and pointing outside it, or a root Makefile that is a link), so it can't be allowed. Ask the agent to take it out of the branch.")
+	}
+	if !hmac.Equal([]byte(w.flagDigest(f)), []byte(digest)) {
+		return explained(conflict("stale"), "This file changed on the branch since the page showed it, so nothing was allowed and it still holds the push. Look at it again, then allow it with your reason.")
 	}
 	if f.Full || len(f.Versions) == 0 {
 		return explained(conflict("versions"), "This file has more than 20 flagged versions on the branch, the most the gate lists, so it can't be allowed. Take it out of the commits that hold it.")
@@ -1599,13 +1630,18 @@ func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 	if w.cfg.Tell == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message.")
 	}
-	_, f, err := w.flagged(ctx, sid, path)
+	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
 	text := "The software factory's push gate flagged the file " + strconv.Quote(f.Label()) + " on this branch: " + f.Why + ". " +
 		"Remove it from the branch: take it out of every commit on this branch that holds it, since deleting it in a new commit still pushes the earlier ones, " +
 		"and add it to .gitignore so it isn't committed again. Change nothing else, don't push, and tell me when it's done."
+	if f.Kind == FlagSpec || g.specs && gate.SpecPath(f.Path) {
+		text = "The software factory's push gate flagged the file " + strconv.Quote(f.Label()) + " on this branch: " + f.Why + ". " +
+			"Revert this branch's change to it: take the change out of every commit on this branch that makes it, so that no commit the push sends adds, changes, deletes or renames it and it is as the main branch has it, since reverting it in a new commit still pushes the earlier ones. " +
+			"Don't add it to .gitignore. Change nothing else, don't push, and tell me when it's done."
+	}
 	if err := w.cfg.Tell(sid, text); err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e

@@ -107,6 +107,9 @@ func (w *Work) Guarded(sid, top string, paths []string) string {
 			return why
 		}
 	}
+	if why := w.specWrite(t, top, paths); why != "" {
+		return why
+	}
 	return w.lockedWrite(ws, top, paths)
 }
 
