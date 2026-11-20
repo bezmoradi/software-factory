@@ -240,6 +240,9 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
 	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
+	}
 	clean, ok := CheckCaps(c)
 	if !ok {
 		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes or 10,000 turns.")
@@ -288,6 +291,9 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
 	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	s := l.sessions[sid]
 	if s == nil || s.reached == "" || s.reached != kind {
@@ -330,6 +336,9 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
 	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	s := l.sessions[sid]
 	stop := l.cfg.Stop
@@ -353,4 +362,11 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapStopped, Reason: "the person pressed Stop at the " + words + ", so the engine stopped the session; it stays at the cap until the person raises it"})
 	l.flush(true)
 	return nil
+}
+
+func (l *Limits) branchHeld(sid string) error {
+	l.mu.Lock()
+	doubled := l.cfg.Doubled
+	l.mu.Unlock()
+	return heldBranch(doubled, sid)
 }

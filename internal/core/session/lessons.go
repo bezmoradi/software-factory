@@ -467,7 +467,7 @@ func (l *Lessons) Lessons(project string) (LessonsView, error) {
 	}
 	l.mu.Unlock()
 	for _, i := range l.cfg.Sessions() {
-		if i.Project == project && len(v.Sessions) < 50 {
+		if i.Project == project && !i.Doubled && len(v.Sessions) < 50 {
 			v.Sessions = append(v.Sessions, LessonSession{SID: i.SID, Name: i.Name, Running: i.Running})
 		}
 	}

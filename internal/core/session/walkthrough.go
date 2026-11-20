@@ -193,7 +193,7 @@ func (d *Dispatcher) CheckStep(_ context.Context, sid, commit string, step int, 
 		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it keeps no walkthroughs.")
 	}
 	if _, ok := d.PushTarget(sid); !ok {
-		return explained(conflict("not started here"), "Only a session this engine started has a walkthrough here.")
+		return notStartedHere(d.Doubled, sid, "Only a session this engine started has a walkthrough here.")
 	}
 	return d.cfg.Reviews.CheckStep(sid, commit, step, done)
 }

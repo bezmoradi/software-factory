@@ -4,6 +4,7 @@ import type { WalkStep } from '../types.ts'
 export interface WalkthroughView {
   commit: string
   steps: WalkStep[]
+  readOnly?: string
 }
 
 class SfWalkthrough extends HTMLElement {
@@ -22,17 +23,19 @@ class SfWalkthrough extends HTMLElement {
     count.id = `walkthrough-count-${value.commit.slice(0, 12)}`
     const list = el('ol', 'walkthrough-steps')
     list.setAttribute('aria-describedby', count.id)
-    value.steps.forEach((step, i) => list.append(this.#step(value.commit, step, i + 1)))
+    value.steps.forEach((step, i) => list.append(this.#step(value.commit, step, i + 1, !!value.readOnly)))
+    if (value.readOnly) count.append(' ', value.readOnly)
     this.append(count, list)
   }
 
-  #step(commit: string, step: WalkStep, n: number): HTMLLIElement {
+  #step(commit: string, step: WalkStep, n: number, readOnly: boolean): HTMLLIElement {
     const li = el('li', 'walkthrough-step')
     const box = el('input')
     box.type = 'checkbox'
     box.id = `walk-${commit.slice(0, 12)}-${n}`
     box.dataset.key = box.id
     box.checked = step.done
+    box.disabled = readOnly
     const label = el('label', 'walkthrough-do', `Step ${n}: ${shown(step.do)}`)
     label.htmlFor = box.id
     const row = el('div', 'row walkthrough-row')

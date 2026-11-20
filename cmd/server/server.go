@@ -348,7 +348,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -435,7 +435,7 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 	}
 	pc := session.PushesConfig{
 		Pusher: gitpush.Pusher{Reader: files.Reader{}, Client: client}, Heads: files.Reviews{}, History: files.Reader{}, Changes: files.Reader{},
-		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
+		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Held: d.HeldTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
 		Tell: tellSession(reg), Note: reg.NoteFor("push"), Denials: state.NewDenials(cfg.StateDir), Waiting: state.NewWaiting(cfg.StateDir),
 		TurnBase: reg.TurnBase, Branch: files.Reader{}, Checks: reg.AgentChecks,
 	}

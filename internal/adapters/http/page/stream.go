@@ -58,6 +58,7 @@ type sessionJSON struct {
 	Splits      []splitJSON      `json:"splits,omitempty"`
 	Box         string           `json:"box,omitempty"`
 	SignInWait  bool             `json:"signInWait,omitempty"`
+	Doubled     bool             `json:"doubled"`
 	Branch      string           `json:"branch,omitempty"`
 }
 
@@ -219,6 +220,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Follow:      pullFollowOf(s.Follow),
 			Splits:      splitsOf(s.Splits),
 			Box:         s.Box,
+			Doubled:     s.Doubled,
 			SignInWait:  s.SignInWait,
 			Branch:      s.Branch,
 		})

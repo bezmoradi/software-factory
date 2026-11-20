@@ -165,7 +165,7 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	f := fl.cfg.Forges
 	t, ok := f.cfg.Targets(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can open a pull request from the page.")
+		return notStartedHere(f.cfg.Doubled, sid, "Only a session this engine started can open a pull request from the page.")
 	}
 	_, _, mainName, err := f.cfg.Repos.ForgeTarget(t.Name)
 	if err != nil {
@@ -226,6 +226,9 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 
 func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	f := fl.cfg.Forges
+	if err := heldBranch(f.cfg.Doubled, sid); err != nil {
+		return err
+	}
 	ft, why := f.target(sid, NeedPulls)
 	if why != "" {
 		return explained(conflict("target"), strings.ToUpper(why[:1])+why[1:]+".")

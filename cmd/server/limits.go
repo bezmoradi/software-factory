@@ -10,7 +10,7 @@ func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, logger sha
 	limits := reg.Limits()
 	lc := session.LimitsConfig{Store: state.NewCaps(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger}
 	if d := p.dispatcher; d != nil {
-		lc.Targets, lc.Stop = d.PushTarget, d.Stop
+		lc.Targets, lc.Doubled, lc.Stop = d.PushTarget, d.Doubled, d.Stop
 		lc.Wake = d.WakeAtReset
 	}
 	if p.reviews != nil {

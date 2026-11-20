@@ -124,18 +124,19 @@ type AuditPage interface {
 type AuditLog struct {
 	reader  AuditReader
 	targets func(sid string) (PushTarget, bool)
+	held    func(sid string) (PushTarget, bool)
 	mu      sync.Mutex
 	counts  map[string]map[string]int
 }
 
 var _ AuditPage = (*AuditLog)(nil)
 
-func NewAuditLog(reader AuditReader, targets func(sid string) (PushTarget, bool)) *AuditLog {
-	return &AuditLog{reader: reader, targets: targets, counts: map[string]map[string]int{}}
+func NewAuditLog(reader AuditReader, targets, held func(sid string) (PushTarget, bool)) *AuditLog {
+	return &AuditLog{reader: reader, targets: targets, held: held, counts: map[string]map[string]int{}}
 }
 
 func (a *AuditLog) View(sid string) (AuditView, error) {
-	t, ok := a.targets(sid)
+	t, ok := targetOrHeld(a.targets, a.held, sid)
 	if !ok {
 		return AuditView{}, explained(conflict("not started here"), "Only a session this engine started has an audit view here.")
 	}

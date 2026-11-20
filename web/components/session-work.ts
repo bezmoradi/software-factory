@@ -44,6 +44,7 @@ interface WorkView {
 export interface SessionWorkTarget {
   sid: string
   disabled: boolean
+  reason?: string
 }
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -480,7 +481,7 @@ class SfSessionWork extends HTMLElement {
     if (!t?.sid || !v) return this.replaceChildren()
     const focused = focusedKey(this)
     const off = t.disabled || this.#busy
-    const parts: HTMLElement[] = [...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
+    const parts: HTMLElement[] = [...(t.reason ? [el('p', 'small muted', t.reason)] : []), ...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
     if (v.ports) parts.push(el('h3', 'label', 'Ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
     parts.push(...this.#lockPart(off))
     if (this.#lock?.typeChange) parts.push(el('h3', 'label', 'The change and its work type'), ...typeChangeParts(this.#lock.typeChange))

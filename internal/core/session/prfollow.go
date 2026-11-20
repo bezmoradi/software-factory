@@ -206,6 +206,7 @@ type loginAt struct {
 
 type Follows struct {
 	cfg      FollowsConfig
+	skips    doubledSkips
 	mu       sync.Mutex
 	list     map[string]*follow
 	projects map[ProjectID]FollowSettings
@@ -272,7 +273,8 @@ func (fl *Follows) Restore() int {
 	}
 	for _, s := range rec.Follows {
 		t, ok := fl.cfg.Forges.cfg.Targets(s.SID)
-		if !ok || t.Name != s.Project || t.Branch != s.Branch || fl.list[s.SID] != nil {
+		held := !ok && isDoubled(fl.cfg.Forges.cfg.Doubled, s.SID)
+		if !held && (!ok || t.Name != s.Project || t.Branch != s.Branch) || fl.list[s.SID] != nil {
 			continue
 		}
 		fl.list[s.SID] = &follow{saved: s}
@@ -360,9 +362,9 @@ func (fl *Follows) ForgetProject(id ProjectID) {
 }
 
 func (fl *Follows) Settings(sid string) (string, FollowSettings, error) {
-	t, ok := fl.cfg.Forges.cfg.Targets(sid)
+	t, ok := targetOrHeld(fl.cfg.Forges.cfg.Targets, fl.cfg.Forges.cfg.Held, sid)
 	if !ok {
-		return "", FollowSettings{}, explained(conflict("not started here"), "Only a session this engine started has pull request settings.")
+		return "", FollowSettings{}, notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started has pull request settings.")
 	}
 	return t.Name, fl.settingsOf(t.Name), nil
 }
@@ -370,7 +372,7 @@ func (fl *Follows) Settings(sid string) (string, FollowSettings, error) {
 func (fl *Follows) SetSettings(sid string, s FollowSettings) error {
 	t, ok := fl.cfg.Forges.cfg.Targets(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started has pull request settings.")
+		return notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started has pull request settings.")
 	}
 	if len(s.Bots) > MaxFollowBots {
 		return explained(invalid("bots"), "A project lists at most "+strconv.Itoa(MaxFollowBots)+" bot logins.")
@@ -531,9 +533,14 @@ func (fl *Follows) round(ctx context.Context) {
 	}
 	var due []string
 	var gone []string
+	var held []string
 	for sid, x := range fl.list {
 		if _, ok := fl.cfg.Forges.cfg.Targets(sid); !ok {
-			gone = append(gone, sid)
+			if isDoubled(fl.cfg.Forges.cfg.Doubled, sid) {
+				held = append(held, sid)
+			} else {
+				gone = append(gone, sid)
+			}
 			continue
 		}
 		if x.saved.Watch && x.saved.Done == "" && now.Sub(x.polled) >= FollowEvery {
@@ -544,6 +551,9 @@ func (fl *Follows) round(ctx context.Context) {
 		delete(fl.list, sid)
 	}
 	fl.mu.Unlock()
+	for _, sid := range held {
+		fl.skips.skip(fl.cfg.Forges.cfg.Doubled, fl.cfg.Logger, sid, "pull-follow")
+	}
 	if len(gone) > 0 {
 		fl.save()
 	}
@@ -918,6 +928,9 @@ func (fl *Follows) auditKind(kind, sid string, t PushTarget, repo ForgeRepo, by,
 }
 
 func (fl *Follows) Send(sid string) error {
+	if err := heldBranch(fl.cfg.Forges.cfg.Doubled, sid); err != nil {
+		return err
+	}
 	return fl.send(sid, ByPage)
 }
 

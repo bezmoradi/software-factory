@@ -69,6 +69,7 @@ type Admission struct {
 	Lineage   *Lineage
 	Box       string
 	Branch    string
+	Doubled   bool
 }
 
 type Registration struct {
@@ -152,6 +153,7 @@ type Info struct {
 	Box          string
 	SignInWait   bool
 	Branch       string
+	Doubled      bool
 }
 
 type conn struct {
@@ -1228,7 +1230,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
 		info.Lineage = a.Lineage
-		info.Box, info.SignInWait, info.Branch = a.Box, a.waitSignIn && !a.running, a.Branch
+		info.Box, info.SignInWait, info.Branch, info.Doubled = a.Box, a.waitSignIn && !a.running, a.Branch, a.Doubled
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v

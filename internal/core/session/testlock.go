@@ -187,7 +187,7 @@ func (w *Work) LockTests(ctx context.Context, sid, head string) error {
 func (w *Work) UnlockTests(sid string) error {
 	t, ok := w.cfg.Targets(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
+		return notStartedHere(w.cfg.Doubled, sid, "Only a session this engine started has a workflow here.")
 	}
 	w.mu.Lock()
 	s := w.sessions[sid]

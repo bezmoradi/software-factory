@@ -205,6 +205,9 @@ func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string
 	if !ok {
 		return explained(notFound("session"), "The engine has no session of that id.")
 	}
+	if err := w.branchHeld(sid); err != nil {
+		return err
+	}
 	if info.Agent != "claude" {
 		return explained(conflict("agent"), "This agent's model can't be switched from the page.")
 	}

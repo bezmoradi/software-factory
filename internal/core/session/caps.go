@@ -87,6 +87,7 @@ type LimitsConfig struct {
 	Store     CapsStore
 	Audit     Audit
 	Targets   func(sid string) (PushTarget, bool)
+	Doubled   func(sid string) bool
 	Stop      func(ctx context.Context, sid string) error
 	Wake      func(ctx context.Context, sid string) error
 	Reviewer  func() (SignIn, bool)

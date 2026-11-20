@@ -162,6 +162,8 @@ type ForgesConfig struct {
 	API        ForgeAPI
 	Repos      ForgeTargets
 	Targets    func(sid string) (PushTarget, bool)
+	Doubled    func(sid string) bool
+	Held       func(sid string) (PushTarget, bool)
 	Show       func(sid string, list []ForgeView)
 	Note       func(sid, text string)
 	Audit      Audit
@@ -288,6 +290,10 @@ type forgeTarget struct {
 
 func (f *Forges) target(sid string, need string) (forgeTarget, string) {
 	t, ok := f.cfg.Targets(sid)
+	return f.targetOf(t, ok, need)
+}
+
+func (f *Forges) targetOf(t PushTarget, ok bool, need string) (forgeTarget, string) {
 	if !ok {
 		return forgeTarget{}, "only a session this engine started can use this tool"
 	}
@@ -522,6 +528,13 @@ func (f *Forges) audit(ctx context.Context, sid string, t PushTarget, v ForgeVie
 }
 
 func (f *Forges) Answer(ctx context.Context, sid, card string, approve, draft, confirmed bool) error {
+	if err := heldBranch(f.cfg.Doubled, sid); err != nil {
+		f.mu.Lock()
+		f.trim(sid)
+		f.mu.Unlock()
+		f.show(sid)
+		return err
+	}
 	f.mu.Lock()
 	f.trim(sid)
 	var c *forgeCard

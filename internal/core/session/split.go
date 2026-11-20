@@ -295,6 +295,9 @@ func (s *Splits) Edit(sid, card, title, message string) error {
 	if why != "" {
 		return explained(invalid("text"), strings.ToUpper(why[:1])+why[1:]+".")
 	}
+	if err := heldBranch(s.cfg.Dispatcher.Doubled, sid); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	c := s.cardLocked(sid, card)
 	if c == nil || c.State != SplitWaiting && c.State != SplitQueued {
@@ -311,6 +314,9 @@ func (s *Splits) Edit(sid, card, title, message string) error {
 }
 
 func (s *Splits) Dismiss(sid, card string) error {
+	if err := heldBranch(s.cfg.Dispatcher.Doubled, sid); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	c := s.cardLocked(sid, card)
 	if c == nil || c.State != SplitWaiting && c.State != SplitQueued {

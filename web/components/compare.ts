@@ -1,7 +1,7 @@
 import { api } from '../api.ts'
 import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import { confirmDialog } from '../lib/dialog.ts'
-import { label, shortSha } from '../lib/format.ts'
+import { DOUBLED_NOTE, label, shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import { agentName } from './lineage.ts'
 import type { Changes, SessionInfo } from '../types.ts'
@@ -211,7 +211,8 @@ class SfCompare extends HTMLElement {
     col.append(facts)
     const row = el('div', 'actions')
     row.append(button('Open', 'ghost small', () => emit(this, 'sf-open-session', { sid: m.sid }), 'button', `open:${m.sid}`))
-    if (p.kept !== m.sid && !p.historyOnly) row.append(this.#keep(v, p, m.sid))
+    if (s.info.doubled) col.append(el('p', 'small muted', DOUBLED_NOTE))
+    else if (p.kept !== m.sid && !p.historyOnly) row.append(this.#keep(v, p, m.sid))
     if (p.kept && p.kept !== m.sid && !s.info.running) row.append(button('Delete this session', 'small danger', () => {
       if (!v.disabled) emit(this, 'sf-delete-session', { sid: m.sid })
     }, 'button', `delete:${m.sid}`))

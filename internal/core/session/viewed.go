@@ -43,6 +43,7 @@ type ViewedFiles interface {
 type ViewedConfig struct {
 	Store   ViewedStore
 	Targets func(sid string) (PushTarget, bool)
+	Doubled func(sid string) bool
 	Heads   Heads
 	History History
 	Main    func(name string) (string, error)
@@ -106,7 +107,7 @@ func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) erro
 	}
 	t, ok := v.cfg.Targets(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started has a changes view here.")
+		return notStartedHere(v.cfg.Doubled, sid, "Only a session this engine started has a changes view here.")
 	}
 	if !ViewedPath(path) || !changeCommit.MatchString(blob) {
 		return explained(invalid("fields"), "A viewed mark needs the file's path and its blob hash.")
@@ -145,7 +146,7 @@ func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) erro
 		next[sid] = ViewedMarks{At: v.cfg.Now(), Files: files}
 	}
 	for other := range next {
-		if _, ok := v.cfg.Targets(other); !ok {
+		if _, ok := v.cfg.Targets(other); !ok && !isDoubled(v.cfg.Doubled, other) {
 			delete(next, other)
 		}
 	}

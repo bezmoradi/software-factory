@@ -243,6 +243,7 @@ class SfChanges extends HTMLElement {
   #key = ''
   #value: Changes | null = null
   #forkable = false
+  #readOnly = ''
   #branch = ''
   #rows: DiffRow[] = []
   #diff = ''
@@ -369,7 +370,7 @@ class SfChanges extends HTMLElement {
       return li
     }))
     busy(this.#send, false)
-    this.#send.disabled = !mine.length
+    this.#send.disabled = !mine.length || !!this.#readOnly
     this.#send.textContent = mine.length ? `Send ${mine.length} ${plural(mine.length, 'comment')}` : 'Send comments'
     if (this.#sending) busy(this.#send, true)
   }
@@ -571,6 +572,7 @@ class SfChanges extends HTMLElement {
       const box = el('input')
       box.type = 'checkbox'
       box.checked = !!f.viewed
+      box.disabled = !!this.#readOnly
       box.dataset.key = `viewed:${f.path}`
       box.setAttribute('aria-label', `Viewed: ${visible(f.path)}`)
       box.addEventListener('change', () => emit(this, 'sf-viewed', { path: f.path, blob: f.blob!, viewed: box.checked }))
@@ -588,8 +590,14 @@ class SfChanges extends HTMLElement {
     this.changes = this.#value
   }
 
+  set readOnly(why: string) {
+    if (why === this.#readOnly) return
+    this.#readOnly = why
+    this.changes = this.#value
+  }
+
   set changes(value: Changes | null) {
-    const key = JSON.stringify([value, this.#forkable, this.#layout])
+    const key = JSON.stringify([value, this.#forkable, this.#readOnly, this.#layout])
     if (key === this.#key) return
     this.#key = key
     this.#value = value
@@ -608,6 +616,7 @@ class SfChanges extends HTMLElement {
     base.append(el('span', 'muted', `${where}, compared with `), el('strong', '', value.baseRef ? visible(value.baseRef) : 'nothing, so every file is new'))
     const parts: HTMLElement[] = [el('h2', 'label', 'Changes'), base, this.#toolbar(value)]
     if (value.note) parts.push(el('p', 'small muted', value.note))
+    if (this.#readOnly) parts.push(el('p', 'small muted', this.#readOnly))
     const skipped = value.files.filter(f => f.notDiffed)
     if (skipped.length) parts.push(el('p', 'small muted', `${skipped.length} ${plural(skipped.length, 'file')} ${skipped.length === 1 ? 'isn’t' : 'aren’t'} diffed here: the view diffs no file over 1 MiB and reads at most 8 MiB of file contents in all; a binary file shows only as changed, with its lines still counted for a project’s size limits, and a file whose stored object can’t be read is named as such. Each is marked in the file list with its size; read it in your own clone.`))
     const group = (key: string, title: string, items: HTMLElement[], openByDefault: boolean) => {

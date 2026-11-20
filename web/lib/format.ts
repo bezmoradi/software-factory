@@ -1,3 +1,5 @@
+export const DOUBLED_NOTE = "Read-only: another session on this engine holds this session's branch. Its changes, gate, recap and audit still open here; delete it to offer its unpushed commits, or keep working in the other session."
+
 export function age(startedAt: number | undefined, now = Date.now()): string {
   if (!startedAt || startedAt > now) return ''
   const m = Math.floor((now - startedAt) / 60000)

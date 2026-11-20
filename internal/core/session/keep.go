@@ -580,10 +580,7 @@ func (k *Keep) holdsCommit(ctx context.Context, repo, last, head string) bool {
 }
 
 func (k *Keep) View(ctx context.Context, sid string) (KeepView, error) {
-	t, ok := k.d.PushTarget(sid)
-	if !ok && k.d.doubledRun(sid) {
-		return KeepView{}, explained(conflict("branch held"), doubledMessage)
-	}
+	t, ok := targetOrHeld(k.d.PushTarget, k.d.HeldTarget, sid)
 	if !ok {
 		return KeepView{}, explained(notFound("session"), "This engine holds no branch for that session: it was deleted or not started here.")
 	}
@@ -618,11 +615,17 @@ func (k *Keep) View(ctx context.Context, sid string) (KeepView, error) {
 		linked, err := k.d.worktreeLinked(r)
 		broken = err == nil && !linked
 	}
-	history := k.d.historyOnly(sid) != nil
+	blocked := ""
+	if k.d.historyOnly(sid) != nil {
+		blocked = historyMessage
+		if k.d.Doubled(sid) {
+			blocked = doubledMessage
+		}
+	}
 	inTurn := !k.reg.TurnSince(sid).IsZero()
 	switch {
-	case history:
-		v.Refusal = historyMessage
+	case blocked != "":
+		v.Refusal = blocked
 	case v.Commit == "":
 		v.Refusal = "Nothing is copied yet: the engine copies the branch's commits that main lacks when a turn ends."
 	case v.Holds && !broken:
@@ -632,7 +635,7 @@ func (k *Keep) View(ctx context.Context, sid string) (KeepView, error) {
 	default:
 		v.Restorable = true
 	}
-	v.Heads = k.keptHeads(rctx, sid, t, rec, v, history, inTurn, broken)
+	v.Heads = k.keptHeads(rctx, sid, t, rec, v, blocked, inTurn, broken)
 	return v, nil
 }
 

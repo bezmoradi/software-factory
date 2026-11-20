@@ -333,7 +333,7 @@ class SfReviews extends HTMLElement {
     if (t.reason) box.append(el('p', `small ${t.state === 'withheld' ? 'warn' : 'bad'}`, sentence(`${t.state === 'withheld' ? 'Not shown' : 'It failed'}: ${text(t.reason)}`)))
     if (t.state === 'done' && t.steps?.length) {
       const walk = el('sf-walkthrough')
-      walk.view = { commit: t.commit, steps: t.steps }
+      walk.view = { commit: t.commit, steps: t.steps, readOnly: value.readOnly }
       box.append(walk, el('p', 'small muted', 'From a reviewer run that read the commit; check each step makes sense before you rely on it.'))
     } else if (t.state === 'done' && t.text) {
       const pre = el('pre', 'review-message small', text(t.text))

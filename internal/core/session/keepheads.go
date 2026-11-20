@@ -56,7 +56,7 @@ func earlier(chosen, last string) string {
 	return ", an earlier kept commit than the last copied one, " + shortSHA(last)
 }
 
-func (k *Keep) keptHeads(ctx context.Context, sid string, t PushTarget, rec KeepRecord, v KeepView, history, inTurn, broken bool) []KeptHead {
+func (k *Keep) keptHeads(ctx context.Context, sid string, t PushTarget, rec KeepRecord, v KeepView, blocked string, inTurn, broken bool) []KeptHead {
 	last := rec.Last()
 	past := v.Holds && v.Head != last
 	out := make([]KeptHead, 0, len(rec.Packs))
@@ -70,8 +70,8 @@ func (k *Keep) keptHeads(ctx context.Context, sid string, t PushTarget, rec Keep
 		switch {
 		case p.Commit == last:
 			h.Holds, h.Restorable, h.Refusal = v.Holds, v.Restorable, v.Refusal
-		case history:
-			h.Refusal = historyMessage
+		case blocked != "":
+			h.Refusal = blocked
 		case h.Holds && !broken:
 			h.Refusal = "The branch is at this commit, so there is nothing to restore."
 		case inTurn:

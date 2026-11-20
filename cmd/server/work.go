@@ -12,12 +12,12 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
+func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
 	if repos == nil {
 		return nil, nil
 	}
 	wc := session.WorkConfig{
-		Targets: targets, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
+		Targets: targets, Doubled: doubled, Held: held, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
 		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), DocsInRepo: docs,
 		Changes: files.Reader{}, Level: reg.PushLevel,
@@ -69,7 +69,7 @@ func (p engineParts) auditPage(cfg PageConfig) session.AuditPage {
 	if p.dispatcher == nil {
 		return nil
 	}
-	return session.NewAuditLog(state.NewAudit(cfg.StateDir), p.dispatcher.PushTarget)
+	return session.NewAuditLog(state.NewAudit(cfg.StateDir), p.dispatcher.PushTarget, p.dispatcher.HeldTarget)
 }
 
 func (p engineParts) workPage() session.WorkPage {

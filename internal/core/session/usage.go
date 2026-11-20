@@ -365,6 +365,11 @@ func (p *Pushes) automaticHeld(sid string) string {
 
 func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	side = sideOf(side)
+	if side == SideAgents {
+		if err := l.branchHeld(sid); err != nil {
+			return err
+		}
+	}
 	now := l.now()
 	l.mu.Lock()
 	box := ""
@@ -478,6 +483,9 @@ func (l *Limits) wakeOfferLocked(sid string, now time.Time) time.Time {
 func (l *Limits) WakeAtReset(sid string, on bool) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
+	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
 	}
 	now := l.now()
 	l.mu.Lock()

@@ -45,6 +45,7 @@ export interface SessionInfo {
   box?: string
   signInWait?: boolean
   branch?: string
+  doubled?: boolean
 }
 
 export interface SplitCard {
@@ -135,6 +136,7 @@ export interface PullFollowView {
   review: SessionReview | null
   running: boolean
   disabled: string
+  connected: boolean
 }
 
 export interface Uncommitted {
@@ -558,6 +560,7 @@ export interface ReviewsView {
   overriding?: string
   testList?: TestList | null
   testAsking?: boolean
+  readOnly?: string
 }
 
 export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'

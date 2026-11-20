@@ -318,7 +318,7 @@ scenarios:
         eventually: { within: 30s, every: 200ms }
         expect:
           any:
-            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].id": "${id}", "json.sessions[0].name": "proctor stream ${run.id}", "json.sessions[0].project": demo, "json.sessions[0].agent": dev-acp, "json.sessions[0].box": "${box}", "json.sessions[0].branch": "sf/${id}", "json.sessions[0].running": true, "json.sessions[0].live": true, "json.sessions[0].controlled": true }
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].id": "${id}", "json.sessions[0].name": "proctor stream ${run.id}", "json.sessions[0].project": demo, "json.sessions[0].agent": dev-acp, "json.sessions[0].box": "${box}", "json.sessions[0].branch": "sf/${id}", "json.sessions[0].running": true, "json.sessions[0].live": true, "json.sessions[0].controlled": true, "json.sessions[0].doubled": false }
       - id: say
         do: http.request
         identity: page

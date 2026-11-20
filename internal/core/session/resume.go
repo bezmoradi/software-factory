@@ -162,6 +162,10 @@ func (p *Pushes) Resume(_ context.Context) int {
 	queued := 0
 	for _, sid := range slices.Sorted(maps.Keys(plans)) {
 		commit := plans[sid]
+		if p.skips.skip(p.cfg.Doubled, p.cfg.Logger, sid, "push-resume") {
+			delete(plans, sid)
+			continue
+		}
 		if why := p.stale(sid, commit); why != "" {
 			p.drop(sid, commit)
 			p.cfg.Logger.Info("push resume", "event", "dropped", "why", why)

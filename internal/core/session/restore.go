@@ -3,7 +3,10 @@ package session
 import (
 	"cmp"
 	"slices"
+	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 type SavedRun struct {
@@ -155,7 +158,9 @@ func (d *Dispatcher) Restore() int {
 			a.StartedAt = s.StartedAt
 		}
 		d.reg.Restore(s.SID, a, s.Sandboxed)
-		d.interrupted(s.SID, r.stamp.interruptedAt)
+		if r.stamp.interruptedAt.IsZero() || !d.SkipDoubled(s.SID, "interrupted-note") {
+			d.interrupted(s.SID, r.stamp.interruptedAt)
+		}
 		sids = append(sids, s.SID)
 	}
 	if d.cfg.Work != nil {
@@ -204,11 +209,68 @@ func (d *Dispatcher) restorable(s SavedRun) bool {
 	return d.runs[s.SID] == nil
 }
 
-func (d *Dispatcher) doubledRun(sid string) bool {
+func (d *Dispatcher) Doubled(sid string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[sid]
 	return r != nil && r.doubled
+}
+
+func (d *Dispatcher) SkipDoubled(sid, what string) bool {
+	return d.skips.skip(d.Doubled, d.cfg.Logger, sid, what)
+}
+
+func targetOrHeld(targets, held func(sid string) (PushTarget, bool), sid string) (PushTarget, bool) {
+	if t, ok := targets(sid); ok {
+		return t, true
+	}
+	if held == nil {
+		return PushTarget{}, false
+	}
+	return held(sid)
+}
+
+func isDoubled(doubled func(sid string) bool, sid string) bool {
+	return doubled != nil && doubled(sid)
+}
+
+func heldBranch(doubled func(sid string) bool, sid string) error {
+	if isDoubled(doubled, sid) {
+		return explained(conflict("branch held"), doubledMessage)
+	}
+	return nil
+}
+
+type doubledSkips struct {
+	mu     sync.Mutex
+	logged map[string]bool
+}
+
+func (s *doubledSkips) skip(doubled func(sid string) bool, logger shared.Logger, sid, what string) bool {
+	if !isDoubled(doubled, sid) {
+		return false
+	}
+	key := what + "\x00" + sid
+	s.mu.Lock()
+	first := !s.logged[key]
+	if first {
+		if s.logged == nil {
+			s.logged = map[string]bool{}
+		}
+		s.logged[key] = true
+	}
+	s.mu.Unlock()
+	if first {
+		logger.Info("sessions", "event", "doubled-skipped", "what", what, "sid", sid)
+	}
+	return true
+}
+
+func notStartedHere(doubled func(sid string) bool, sid, why string) error {
+	if err := heldBranch(doubled, sid); err != nil {
+		return err
+	}
+	return explained(conflict("not started here"), why)
 }
 
 func (d *Dispatcher) oneHolder(saved []SavedRun) map[string]bool {

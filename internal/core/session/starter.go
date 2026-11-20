@@ -163,6 +163,7 @@ type run struct {
 
 type Dispatcher struct {
 	cfg        DispatcherConfig
+	skips      doubledSkips
 	checks     checks
 	reg        *Registry
 	mu         sync.Mutex
@@ -448,7 +449,7 @@ func (d *Dispatcher) admission(r *run, control bool) Admission {
 		signIn = &s
 	}
 	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn,
-		Lineage: lineageOf(r), Box: r.box, Branch: r.branch}
+		Lineage: lineageOf(r), Box: r.box, Branch: r.branch, Doubled: r.doubled}
 }
 
 func launched(a Admission) Admission {
@@ -1215,11 +1216,15 @@ func (d *Dispatcher) SessionsOf(repo string) int {
 	return n
 }
 
-func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) {
+func (d *Dispatcher) PushTarget(sid string) (PushTarget, bool) { return d.targetOf(sid, false) }
+
+func (d *Dispatcher) HeldTarget(sid string) (PushTarget, bool) { return d.targetOf(sid, true) }
+
+func (d *Dispatcher) targetOf(sid string, doubled bool) (PushTarget, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r := d.runs[sid]
-	if r == nil || r.doubled || r.box == "" || r.clone == "" {
+	if r == nil || r.doubled != doubled || r.box == "" || r.clone == "" {
 		return PushTarget{}, false
 	}
 	failed, why := d.unsyncedAt(r.box)

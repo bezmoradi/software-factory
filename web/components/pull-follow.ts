@@ -1,6 +1,7 @@
 import { api } from '../api.ts'
 import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
 import type { Tone } from '../lib/dom.ts'
+import { DOUBLED_NOTE } from '../lib/format.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
 
 type Answer = { ok: boolean; status: number; body: Record<string, unknown> }
@@ -63,7 +64,7 @@ function reviewKey(v: PullFollowView): string {
 
 export function pullFollowOf(sid: string, info: SessionInfo, connected: boolean): PullFollowView | null {
   if (!info.verified) return null
-  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: connected ? '' : 'Actions work once the page is connected again.' }
+  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.doubled ? DOUBLED_NOTE : connected ? '' : 'Actions work once the page is connected again.', connected }
 }
 
 class SfPullFollow extends HTMLElement {
@@ -111,7 +112,7 @@ class SfPullFollow extends HTMLElement {
 
   async #loadFindings(v: PullFollowView) {
     const key = reviewKey(v)
-    if (!key || this.#findings.has(key) || this.#loading === key || v.disabled) return
+    if (!key || this.#findings.has(key) || this.#loading === key || !v.connected) return
     this.#loading = key
     const a = await call('/api/finding-issues', { op: 'read', sid: v.sid })
     this.#loading = ''

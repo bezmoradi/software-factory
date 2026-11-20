@@ -135,7 +135,14 @@ func (w *SessionWork) admitted(sid string) error {
 	if _, ok := w.reg.workInfo(sid); !ok {
 		return explained(notFound("session"), "The engine has no session of that id.")
 	}
-	return nil
+	return w.branchHeld(sid)
+}
+
+func (w *SessionWork) branchHeld(sid string) error {
+	if w.d == nil {
+		return nil
+	}
+	return heldBranch(w.d.Doubled, sid)
 }
 
 func checkQueued(text string) (string, error) {
@@ -203,6 +210,9 @@ func (w *SessionWork) QueueMove(sid, id string, to int) error {
 }
 
 func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i int)) error {
+	if err := w.branchHeld(sid); err != nil {
+		return err
+	}
 	w.mu.Lock()
 	q := w.queues[sid]
 	i := -1

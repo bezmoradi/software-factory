@@ -94,6 +94,8 @@ type WorkStore interface {
 
 type WorkConfig struct {
 	Targets    func(sid string) (PushTarget, bool)
+	Doubled    func(sid string) bool
+	Held       func(sid string) (PushTarget, bool)
 	Heads      Heads
 	History    History
 	Files      WorkFiles
@@ -595,6 +597,9 @@ func (w *Work) session(sid string) (workSession, bool) {
 }
 
 func (w *Work) SetType(ctx context.Context, sid, id string) error {
+	if err := heldBranch(w.cfg.Doubled, sid); err != nil {
+		return err
+	}
 	ws, ok := w.session(sid)
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
@@ -912,13 +917,17 @@ func ReviewerName(q workflow.Requirement) string {
 }
 
 func (w *Work) current(ctx context.Context, sid string) (gathered, error) {
+	return w.currentOf(ctx, sid, w.cfg.Targets)
+}
+
+func (w *Work) currentOf(ctx context.Context, sid string, lookup func(sid string) (PushTarget, bool)) (gathered, error) {
 	ws, ok := w.session(sid)
 	if !ok {
 		return gathered{}, explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
 	}
-	t, ok := w.cfg.Targets(sid)
+	t, ok := lookup(sid)
 	if !ok {
-		return gathered{}, explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
+		return gathered{}, notStartedHere(w.cfg.Doubled, sid, "Only a session this engine started has a workflow here.")
 	}
 	head, err := w.cfg.Heads.Head(t.Repo, t.Branch)
 	headError := ""
@@ -1167,7 +1176,7 @@ func (w *Work) reviewerStates(g gathered) ([]WorkReviewer, []string) {
 }
 
 func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
-	g, err := w.current(ctx, sid)
+	g, err := w.currentOf(ctx, sid, func(sid string) (PushTarget, bool) { return targetOrHeld(w.cfg.Targets, w.cfg.Held, sid) })
 	if err != nil {
 		return GateView{}, err
 	}

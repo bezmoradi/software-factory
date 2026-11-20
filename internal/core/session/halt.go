@@ -49,6 +49,8 @@ type HaltConfig struct {
 	Store   HaltStore
 	Audit   Audit
 	Targets func(sid string) (PushTarget, bool)
+	Doubled func(sid string) bool
+	Known   func(sid string) bool
 	Stopper HaltStopper
 	Resume  func(ctx context.Context) int
 	Logger  shared.Logger
@@ -253,6 +255,15 @@ func (h *Halt) Release() error {
 func (h *Halt) SetAway(sid string, on bool) error {
 	if sid != "" && !sidPattern.MatchString(sid) {
 		return invalid("sid")
+	}
+	h.mu.Lock()
+	doubled, known := h.cfg.Doubled, h.cfg.Known
+	h.mu.Unlock()
+	if on && sid != "" && known != nil && !known(sid) {
+		return notStartedHere(doubled, sid, "Only a session this engine started can have away mode of its own.")
+	}
+	if err := heldBranch(doubled, sid); err != nil {
+		return err
 	}
 	h.mu.Lock()
 	changed := false

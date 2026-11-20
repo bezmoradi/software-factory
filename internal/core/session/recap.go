@@ -58,6 +58,8 @@ type RecapsConfig struct {
 	Audit   AuditAll
 	Store   RecapSeenStore
 	Targets func(sid string) (PushTarget, bool)
+	Doubled func(sid string) bool
+	Held    func(sid string) (PushTarget, bool)
 	Waiting func(sid string) int
 	Now     func() time.Time
 	Logger  shared.Logger
@@ -104,14 +106,17 @@ func (r *Recaps) target(sid string) (PushTarget, error) {
 	if r.cfg.Targets == nil {
 		return PushTarget{}, explained(conflict("not started here"), "Only a session this engine started has a recap.")
 	}
-	t, ok := r.cfg.Targets(sid)
+	t, ok := targetOrHeld(r.cfg.Targets, r.cfg.Held, sid)
 	if !ok {
-		return PushTarget{}, explained(conflict("not started here"), "Only a session this engine started has a recap.")
+		return PushTarget{}, notStartedHere(r.cfg.Doubled, sid, "Only a session this engine started has a recap.")
 	}
 	return t, nil
 }
 
 func (r *Recaps) Seen(sid string) error {
+	if err := heldBranch(r.cfg.Doubled, sid); err != nil {
+		return err
+	}
 	if _, err := r.target(sid); err != nil {
 		return err
 	}

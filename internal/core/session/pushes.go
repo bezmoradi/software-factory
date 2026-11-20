@@ -161,6 +161,8 @@ type PushesConfig struct {
 	Reviews     ReviewEntries
 	Audit       Audit
 	Targets     func(sid string) (PushTarget, bool)
+	Doubled     func(sid string) bool
+	Held        func(sid string) (PushTarget, bool)
 	Level       func(sid string) (level.Result, bool)
 	Show        func(sid string, v PushView)
 	Agents      map[review.Role]string
@@ -205,6 +207,7 @@ type heldPush struct {
 
 type Pushes struct {
 	cfg     PushesConfig
+	skips   doubledSkips
 	kind    workflow.WorkType
 	mu      sync.Mutex
 	busy    map[string]bool
@@ -590,7 +593,7 @@ func (p *Pushes) ReviewDone(sid, head string) {
 
 func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can be pushed from here.")
+		return notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started can be pushed from here.")
 	}
 	if err := p.pageHalted(); err != nil {
 		return err
@@ -1206,9 +1209,9 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 }
 
 func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (ChangeView, error) {
-	t, ok := p.cfg.Targets(sid)
+	t, ok := targetOrHeld(p.cfg.Targets, p.cfg.Held, sid)
 	if !ok {
-		return ChangeView{}, explained(conflict("not started here"), "Only a session this engine started has a changes view here.")
+		return ChangeView{}, notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started has a changes view here.")
 	}
 	head, err := p.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {

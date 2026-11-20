@@ -397,6 +397,9 @@ func (p *Pairs) View(id string) (Pair, error) {
 }
 
 func (p *Pairs) Keep(id, sid string) error {
+	if err := heldBranch(p.cfg.Dispatcher.Doubled, sid); err != nil {
+		return err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pr := p.find(id)

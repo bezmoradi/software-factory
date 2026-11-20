@@ -29,7 +29,7 @@ func useSessionWork(base context.Context, srv *page.Server, reg *session.Registr
 	if !d.RunsUnread() {
 		w.PrunePorts(func(sid string) bool {
 			_, ok := d.PushTarget(sid)
-			return ok
+			return ok || d.SkipDoubled(sid, "ports-prune")
 		})
 	}
 	if parts.reviews != nil {

@@ -5,7 +5,7 @@ import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
-import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
+import { agentWord, attachCommand, baseName, DOUBLED_NOTE, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Step, type Turn } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
@@ -137,6 +137,7 @@ function syncChecks(list: Reviewer[]): { check: Check; node: HTMLElementTagNameM
 
 function stageOff(s: Session): string {
   if (!state.connected) return 'Step buttons are available once the page reconnects to the engine.'
+  if (s.info.doubled) return DOUBLED_NOTE
   if (!controllable(s)) return 'Step buttons are off: this session is read-only on this page.'
   return inTurn(s) ? `Step buttons are available when ${agentWord(s.info.agent)} finishes.` : ''
 }
@@ -262,8 +263,8 @@ function saveCheckpoints() {
 
 function paint() {
   const s = current()
-  setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
-  setLimitsSession(s?.info.verified ? s.sid : '')
+  setHaltSession(s && !s.info.doubled ? { sid: s.sid, name: label(s.info), own: !!s.info.verified } : null)
+  setLimitsSession(s?.info.verified && !s.info.doubled ? s.sid : '')
   if (current.key.startsWith('s/')) keepTab(current.key)
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
@@ -292,7 +293,7 @@ function paint() {
   void loadProjects()
   byId('live-view').hidden = !s
   byId('composer').hidden = !s
-  composer.paint(s, !!s && waitingOf(s).length > 0)
+  composer.paint(s, !!s && waitingOf(s).length > 0, s?.info.doubled ? DOUBLED_NOTE : '')
   const picking = !!s && pickingSize(s)
   byId('size-pick').hidden = !picking
   if (picking) paintTeamPicks(s)
@@ -362,9 +363,9 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
-    sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s) } : null
+    sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s), reason: s.info.doubled ? DOUBLED_NOTE : '' } : null
     byId<HTMLElementTagNameMap['sf-screenshots']>('screenshots').view = state.connected ? { sid: s.sid, busy: inTurn(s) } : null
-    keepPanel.view = state.connected ? { sid: s.sid, disabled: inTurn(s) ? `Restore works once ${agentWord(s.info.agent)} finishes its turn.` : '' } : null
+    keepPanel.view = state.connected ? { sid: s.sid, disabled: s.info.doubled ? DOUBLED_NOTE : inTurn(s) ? `Restore works once ${agentWord(s.info.agent)} finishes its turn.` : '' } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
     byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
@@ -396,7 +397,7 @@ function paint() {
     paintSide(null)
   }
   watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0, busy: x.info.busy === true, seq: x.info.lastSeq ?? 0, reviewRunning: x.info.review?.running === true, review: x.info.review ? `${x.info.review.commit}:${(x.info.review.roles ?? []).map(r => r.state).join(',')}` : '' })))
-  byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden)
+  byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden, !!s?.info.doubled)
   document.title = needs ? 'Needs you · Software Factory' : 'Software Factory'
   saveTabs()
 }
@@ -418,6 +419,7 @@ function paintChangesTab() {
     return
   }
   view.forkable = forkable(s)
+  view.readOnly = s.info.doubled ? DOUBLED_NOTE : ''
   view.changes = s.changes
   void loadChanges(s)
 }
@@ -433,6 +435,7 @@ function paintControl(s: Session) {
     text = `${claims.length ? `Claimed by ${claims.length} connections: ${claims.join(', ')}. ` : 'Two connections claim to be this session. '}This page sends it nothing while they disagree. One of them may be a program pretending to be it.`
     action = 'End both connections'
   } else if (!i.verified) text = 'Read-only: this engine didn’t start this session, so the page only shows what it reports.'
+  else if (i.doubled) text = DOUBLED_NOTE
   else if (!i.running && i.state === 'done') {
     text = 'This session is done: its agent finished its work and ended by itself. A message wakes it again.'
     if (sleeping(s) && !i.controlled) action = 'Wake it'
@@ -462,7 +465,7 @@ function paintControl(s: Session) {
   byId('menu-wake').hidden = !(sleeping(s) && i.controlled)
   paintBranchMenu(s)
   byId('session-more').hidden = !id && action !== 'Make it read-only'
-  modelMenu.hidden = i.agent !== 'claude' || !i.controlled
+  modelMenu.hidden = i.agent !== 'claude' || !i.controlled || !!i.doubled
   if (!modelMenu.hidden) byId('session-more').hidden = false
   if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
   byId('foot-text').textContent = notice ? '' : text
@@ -570,9 +573,10 @@ function reviewsOf(s: Session): ReviewsView | null {
   const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.filter(r => r.state !== 'not-installed').map(r => ({ name: r.name, agent: r.type, why: r.why ?? '', summary: typeof r.summary === 'string' ? r.summary : '' })) : []
   const unpicked = gate?.chosen === false
   const disabled = !state.connected ? 'Reviews start once the page is connected again.'
+    : i.doubled ? DOUBLED_NOTE
     : unpicked ? 'Pick a work type first: it decides which reviews run.'
     : startedOf(s) === false ? 'Nothing to review or push yet: this session has no commits.' : ''
-  return { sid: s.sid, review, disabled, asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
+  return { sid: s.sid, review, disabled, readOnly: i.doubled ? DOUBLED_NOTE : '', asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
     linked: findingLinks(s.sid, review), catalog: gate?.catalog ? { state: gate.catalog, why: typeof gate.catalogWhy === 'string' ? gate.catalogWhy : '' } : undefined }
 }
 
@@ -607,13 +611,13 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const review = i.review
   const ran = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles : []
   const since = (verdict: string) => push ? push.missing.filter(m => ran.some(r => r.state === verdict && m.startsWith(`a review by ${r.agent} `))) : []
-  return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [], typeChange: gate && push && gate.head === push.commit ? typeChangeOf(gate.typeChange) : null }
+  return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: i.doubled ? DOUBLED_NOTE : state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [], typeChange: gate && push && gate.head === push.commit ? typeChangeOf(gate.typeChange) : null }
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {
   const i = s.info
   if (!i.verified || !Array.isArray(i.forge) || !i.forge.length) return null
-  return { forge: i.forge, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
+  return { forge: i.forge, disabled: i.doubled ? DOUBLED_NOTE : state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
 }
 
 function paintAgents(s: Session) {
@@ -784,7 +788,7 @@ async function openTeam() {
 function paintExceptions(s: Session) {
   const gate = s.gate
   const key = gate ? `${s.sid}:${gate.branch}:${gate.head}:${s.auditSeen}` : ''
-  if (key && s.audit?.key !== key && state.connected && controllable(s)) {
+  if (key && s.audit?.key !== key && state.connected && (controllable(s) || !!s.info.doubled)) {
     s.audit = { key, entries: s.audit?.entries ?? [], refusals: s.audit?.refusals ?? {} }
     void api('/api/audit', { sid: s.sid, branch: gate?.branch ?? '' }).then(r => (r.ok ? r.json() : null)).then((v: { entries?: AuditEntry[]; refusals?: Record<string, number> } | null) => {
       if (!v || s.audit?.key !== key) return

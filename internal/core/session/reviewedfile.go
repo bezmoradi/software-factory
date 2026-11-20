@@ -18,7 +18,7 @@ type ReviewedRead struct {
 }
 
 func (w *Work) ReviewedFiles(sid, commit string, paths []string, limit int64) ([]ReviewedRead, error) {
-	t, ok := w.cfg.Targets(sid)
+	t, ok := targetOrHeld(w.cfg.Targets, w.cfg.Held, sid)
 	if !ok || !commitSHA.MatchString(commit) || w.cfg.Reviews == nil || w.cfg.Bounded == nil {
 		return nil, ErrNotReviewed
 	}
