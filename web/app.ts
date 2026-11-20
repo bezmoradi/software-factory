@@ -1466,6 +1466,10 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'diagnostics') openDiagnostics(api)
   if (start === 'session' || start === 'add') go('projects')
 })
+byId('account-identity').addEventListener('click', () => {
+  byId('account').hidePopover()
+  openIdentity()
+})
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
 async function changeRepo(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
   try {
