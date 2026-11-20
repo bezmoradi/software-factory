@@ -219,7 +219,13 @@ func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why 
 
 func (s *Server) refuseKey(w http.ResponseWriter, r *http.Request) {
 	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", "token")
-	send(w, http.StatusUnauthorized, map[string]string{"error": "token", "why": s.keys.why()})
+	body := map[string]string{"error": "token"}
+	if given, ok := presentedKey(r); ok {
+		if why := s.keys.why(given); why != "" {
+			body["why"] = why
+		}
+	}
+	send(w, http.StatusUnauthorized, body)
 }
 
 func siteAllowed(site []string, visit bool) bool {
@@ -468,13 +474,21 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	s.api(w, r.URL.Path, body)
 }
 
-func (s *Server) authorized(r *http.Request) bool {
+func presentedKey(r *http.Request) (string, bool) {
 	values := r.Header.Values("Authorization")
 	if len(values) != 1 {
-		return false
+		return "", false
 	}
 	scheme, given, ok := strings.Cut(values[0], " ")
-	return ok && strings.EqualFold(scheme, "Bearer") && s.keys.check(strings.TrimLeft(given, " "))
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	return strings.TrimLeft(given, " "), true
+}
+
+func (s *Server) authorized(r *http.Request) bool {
+	given, ok := presentedKey(r)
+	return ok && s.keys.check(given)
 }
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {

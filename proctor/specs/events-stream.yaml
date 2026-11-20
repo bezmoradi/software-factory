@@ -2,7 +2,7 @@ version: 2
 suite: events-stream
 tables:
   - id: EVS-T01
-    name: "The event stream opens for no other form of the page key, or the page's key under another scheme than Bearer"
+    name: "The event stream opens for no other form of the page key, or the page's key under another scheme than Bearer, and its refusal gives no why, since the header isn't a Bearer key"
     do: http.request
     identity: page
     variant: "${row.variant}"
@@ -14,10 +14,10 @@ tables:
       equal:
         "$.status": 401
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: token, why: replaced }
+        "$.body": { error: token }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
-      absent: ["$.headers.x-sf-request[1]"]
+      absent: ["$.headers.x-sf-request[1]", "$.body.why"]
     columns: ["case", "variant"]
     rows:
       - ["evs_t01_basic_scheme", "basic_scheme"]
@@ -26,7 +26,7 @@ tables:
 
 scenarios:
   - id: EVS-001
-    name: "The event stream opens for no request without the page key"
+    name: "The event stream opens for no request without the page key, and its refusal gives no why, since no key was presented"
     steps:
       - id: no-key
         do: http.request
@@ -39,13 +39,13 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token, why: replaced }
+            "$.body": { error: token }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
-          absent: ["$.headers.x-sf-request[1]"]
+          absent: ["$.headers.x-sf-request[1]", "$.body.why"]
 
   - id: EVS-002
-    name: "The event stream opens for no key the page never issued, and its refusal says another key is active (why replaced), as the page reads it for a key a newer sign-in replaced"
+    name: "The event stream opens for no key the page never issued, and its refusal gives no why, so a made-up key isn't told a newer sign-in replaced it"
     steps:
       - id: unknown-key
         do: http.request
@@ -59,7 +59,8 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token, why: replaced }
+            "$.body": { error: token }
+          absent: ["$.body.why"]
 
   - id: EVS-003
     name: "The event stream refuses another site's Origin, even with the page key"
@@ -492,3 +493,23 @@ scenarios:
         expect:
           any:
             "$.frames": { json.type: sessions, json.sessions: [] }
+
+  - id: EVS-012
+    name: "The event stream opens for no key a newer sign-in replaced, and its refusal says why replaced, which the page shows as opened somewhere else"
+    steps:
+      - id: replaced-key
+        do: http.request
+        identity: page
+        variant: replaced
+        with:
+          method: GET
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 401
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: token, why: replaced }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]

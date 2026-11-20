@@ -36,7 +36,7 @@ drivers:
 identities:
   page:
     type: bearer
-    variants: [unknown, basic_scheme, token_scheme, no_scheme]
+    variants: [unknown, replaced, basic_scheme, token_scheme, no_scheme]
     accepted_variants: [lowercase_scheme]
   anonymous: { type: none }
 secrets: [git_token]

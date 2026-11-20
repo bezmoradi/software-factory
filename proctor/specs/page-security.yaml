@@ -2,7 +2,7 @@ version: 2
 suite: page-security
 tables:
   - id: SEC-T01
-    name: "A POST route without the page key is refused before its handler"
+    name: "A POST route without the page key is refused before its handler, with no why, since no key was presented"
     do: http.request
     identity: anonymous
     with:
@@ -18,10 +18,10 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token, why: replaced }
+        "$.body": { error: token }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
-      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
     no_state_check: "refused with 401 before the route's handler runs, since the request carries no key, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
     waive: { EXE-09: { rows: [t01_remove_repo, t01_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 401 before the route's handler runs, since the request carries no key, so nothing can be removed" } }
     covers: no_key
@@ -102,7 +102,7 @@ tables:
       - ["t01_workspace", "/api/workspace"]
 
   - id: SEC-T01R
-    name: "A POST route without the page key is refused before its handler (routes that only read)"
+    name: "A POST route without the page key is refused before its handler, with no why, since no key was presented (routes that only read)"
     do: http.request
     identity: anonymous
     with:
@@ -118,10 +118,10 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token, why: replaced }
+        "$.body": { error: token }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
-      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
     covers: no_key
     columns: ["case", "route"]
     rows:

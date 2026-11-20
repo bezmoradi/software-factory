@@ -130,13 +130,22 @@ echo "engine-logs $!" >>"$state/pids"
 
 curl -fsS -o /dev/null "$base/healthz" || fail "$base/healthz didn't answer"
 
-say "signing in to the page"
-curl -sS -o "$state/signin.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: $origin" \
-	--data '{}' "$base/api/session" >"$state/signin.status" || fail "the sign-in request failed"
-key=$(sed -nE 's/^\{"token":"([A-Za-z0-9_-]{43})"\}$/\1/p' "$state/signin.json")
-rm -f "$state/signin.json"
-[ "$(cat "$state/signin.status")" = 200 ] && [ -n "$key" ] || fail "the page didn't sign in (status $(cat "$state/signin.status"))"
-rm -f "$state/signin.status"
+sign_in() {
+	curl -sS -o "$state/signin.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: $origin" \
+		--data '{}' "$base/api/session" >"$state/signin.status" || fail "the sign-in request failed"
+	signed=$(sed -nE 's/^\{"token":"([A-Za-z0-9_-]{43})"\}$/\1/p' "$state/signin.json")
+	rm -f "$state/signin.json"
+	[ "$(cat "$state/signin.status")" = 200 ] && [ -n "$signed" ] || fail "the page didn't sign in (status $(cat "$state/signin.status"))"
+	rm -f "$state/signin.status"
+}
+
+say "signing in to the page twice, so the first key is one a newer sign-in replaced"
+sign_in
+replaced=$signed
+sign_in
+key=$signed
+signed=""
+[ "$replaced" != "$key" ] || fail "the second sign-in gave the first key again"
 printf 'Authorization: Bearer %s\n' "$key" >"$state/auth-header"
 
 post() {
@@ -176,21 +185,22 @@ rm -f "$state/answer.json"
 unknown=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
 basic="Basic $key"
 token="Token $key"
-[ ${#unknown} -eq 43 ] && [ "$unknown" != "$key" ] || fail "couldn't make an unknown key"
-for v in "$key" "$unknown" "$basic" "$token" "$git_token"; do
+[ ${#unknown} -eq 43 ] && [ "$unknown" != "$key" ] && [ "$unknown" != "$replaced" ] || fail "couldn't make an unknown key"
+for v in "$key" "$replaced" "$unknown" "$basic" "$token" "$git_token"; do
 	case "$v" in *"'"* | *'\'*) fail "a generated value holds a quote or backslash" ;; esac
 done
 
 {
 	printf "export PROCTOR_SF_PAGE_KEY='%s'\n" "$key"
 	printf "export PROCTOR_SF_UNKNOWN_KEY='%s'\n" "$unknown"
+	printf "export PROCTOR_SF_REPLACED_KEY='%s'\n" "$replaced"
 	printf "export PROCTOR_SF_BASIC_AUTH='%s'\n" "$basic"
 	printf "export PROCTOR_SF_TOKEN_SCHEME_AUTH='%s'\n" "$token"
 	printf "export PROCTOR_SF_NO_SCHEME_AUTH='%s'\n" "$key"
 	printf "export PROCTOR_SF_LOWERCASE_AUTH='bearer %s'\n" "$key"
 	printf "export PROCTOR_SF_GIT_TOKEN='%s'\n" "$git_token"
 } >"$state/proctor.env"
-printf '%s\n' "$key" "$unknown" "$basic" "$token" "$git_token" >"$state/scrub-patterns"
+printf '%s\n' "$key" "$replaced" "$unknown" "$basic" "$token" "$git_token" >"$state/scrub-patterns"
 
 {
 	printf 'environment: local\n'
@@ -213,6 +223,7 @@ printf '%s\n' "$key" "$unknown" "$basic" "$token" "$git_token" >"$state/scrub-pa
 	printf '      port: "%s"\n' "$port"
 	printf '    variants:\n'
 	printf '      unknown: { token_env: PROCTOR_SF_UNKNOWN_KEY }\n'
+	printf '      replaced: { token_env: PROCTOR_SF_REPLACED_KEY }\n'
 	printf '      basic_scheme: { header_env: PROCTOR_SF_BASIC_AUTH }\n'
 	printf '      token_scheme: { header_env: PROCTOR_SF_TOKEN_SCHEME_AUTH }\n'
 	printf '      no_scheme: { header_env: PROCTOR_SF_NO_SCHEME_AUTH }\n'
