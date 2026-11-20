@@ -23,6 +23,7 @@ type Setup struct {
 	Protect     []string
 	Verify      []string
 	Catalog     Catalog
+	Workflow    Adapter
 }
 
 func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string) {
@@ -64,7 +65,7 @@ func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string)
 			roles[r] = a
 		}
 	}
-	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect), Verify: slices.Clone(team.Verify)}, problems
+	return Setup{Adapter: chosen, Workflow: Adapters[Knackpack], Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect), Verify: slices.Clone(team.Verify)}, problems
 }
 
 type Requirement struct {

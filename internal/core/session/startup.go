@@ -15,6 +15,7 @@ type StartupPlace string
 const (
 	InWorktree StartupPlace = "worktree"
 	InClone    StartupPlace = "clone"
+	InPack     StartupPlace = "pack"
 )
 
 type StartupEntry struct {
@@ -305,6 +306,19 @@ func (d *Dispatcher) approve(repo, agent, hash string, seen []string) error {
 
 var errNoApprovals = fmt.Errorf("this engine keeps no approvals")
 
+func (d *Dispatcher) packStartup(r *run, read *StartupRead) (string, error) {
+	if r.spec.Method != MethodPlugin || r.pack.Path == "" || d.cfg.Packs == nil {
+		return "", nil
+	}
+	files, err := d.cfg.Packs.SessionCode(r.pack)
+	if err != nil {
+		d.cfg.Logger.Warn("start-up files", "event", "pack-unreadable")
+		return "", explained(conflict("start-up files"), clip("The engine couldn't read the files of the pack "+r.pack.Name+" that run code in a session, so it can't show them and doesn't start the session: "+err.Error(), maxOutput))
+	}
+	read.Files = append(read.Files, files...)
+	return "\x00pack\x00" + r.pack.Name + "\x00" + r.pack.SessionDigest, nil
+}
+
 func (d *Dispatcher) startup(r *run, consent Consent) error {
 	list := r.spec.Startup
 	entries, ok := StartupLists[list]
@@ -326,10 +340,14 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 		d.cfg.Logger.Warn("start-up files", "event", "unreadable")
 		return explained(conflict("start-up files"), clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
 	}
+	packList, err := d.packStartup(r, &read)
+	if err != nil {
+		return err
+	}
 	if len(read.Files) == 0 && len(read.Walk) == 0 {
 		return nil
 	}
-	hash := startupHash(list, read)
+	hash := startupHash(list+packList, read)
 	last, err := d.lastApproval(r.repo, r.spec.ID)
 	if err != nil {
 		return explained(conflict("approvals"), "The engine couldn't read its approvals of start-up files, so it doesn't start the agent.")

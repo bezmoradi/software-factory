@@ -109,7 +109,7 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 		return ApprovedText{}
 	}
 	out := ApprovedText{Steps: true}
-	names := workflow.Adapters[g.adapter].Documents
+	names := g.setup.setup.Workflow.Documents
 	add := func(what, name, from, text string) {
 		if secretText(text) {
 			out.Withheld = append(out.Withheld, what)

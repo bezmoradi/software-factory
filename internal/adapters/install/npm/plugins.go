@@ -85,8 +85,6 @@ type Plugins struct {
 	failing map[string]string
 }
 
-var _ session.PluginSource = (*Plugins)(nil)
-
 func NewPlugins(cfg PluginConfig) (*Plugins, error) {
 	if !filepath.IsAbs(cfg.Dir) {
 		return nil, errors.New("plugin installs: the agents folder must be an absolute path")

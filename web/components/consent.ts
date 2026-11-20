@@ -11,7 +11,7 @@ function size(n: number): string {
 function fileItem(f: StartupFile, watch: ResizeObserver[]): HTMLLIElement {
   const li = el('li', 'consent-file')
   const head = el('div', 'row')
-  const path = el('code', '', visible(f.place === 'clone' ? `(clone folder) ${f.path}` : f.path))
+  const path = el('code', '', visible(f.place === 'clone' ? `(clone folder) ${f.path}` : f.place === 'pack' ? `(pack) ${f.path}` : f.path))
   head.append(path, el('span', 'spacer'))
   if (f.hidden) head.append(el('span', 'tag warn', 'hidden characters'))
   if (f.marks?.length) head.append(el('span', 'tag warn', `${f.marks.length} risky ${f.marks.length === 1 ? 'line' : 'lines'}`))
@@ -20,6 +20,7 @@ function fileItem(f: StartupFile, watch: ResizeObserver[]): HTMLLIElement {
   if (f.marks?.length) li.append(markList(f.marks))
   const notes: string[] = []
   if (f.place === 'clone') notes.push("In the clone's own folder, where Claude Code reads a worktree's local settings, and its skills when the worktree has none. It comes from no commit.")
+  else if (f.place === 'pack') notes.push('From the pack this project uses, which the session loads as a plugin: it runs in this session’s container. A new version of the pack asks again.')
   else if (f.place === 'above') notes.push('In a folder above the worktree, inside this session’s own folder, which only this session’s container writes. Claude Code loads it at start. It comes from no commit.')
   else if (f.uncommitted) notes.push('Differs from that commit: it was changed or added in the worktree.')
   if (f.link) {

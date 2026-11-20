@@ -284,7 +284,7 @@ export interface SignIn {
 
 export interface StartupFile {
   path: string
-  place: 'worktree' | 'clone' | 'above'
+  place: 'worktree' | 'clone' | 'above' | 'pack'
   link: boolean
   target?: string
   size: number
@@ -471,6 +471,9 @@ export interface ReviewRole {
   previous?: boolean
   override?: string
   pluginCommit?: string
+  pack?: string
+  packVersion?: string
+  packDigest?: string
   claudeCode?: string
   models?: string[]
   progress?: ReviewProgress
@@ -1233,5 +1236,6 @@ declare global {
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
     'sf-commit-ask': Event
     'sf-session-deleted': CustomEvent<{ sid: string }>
+    'sf-packs-changed': Event
   }
 }

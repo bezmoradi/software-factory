@@ -29,6 +29,7 @@ type SavedRun struct {
 	AgentVersion   string
 	EngineVersion  string
 	WorkflowCommit string
+	Pack           string
 	ReviewerClaude string
 	ReviewerPlugin string
 
@@ -97,6 +98,7 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].RmDone = r.rmDone
 		out[len(out)-1].Aside = r.aside
 		out[len(out)-1].Box = r.box
+		out[len(out)-1].Pack = r.pack.Choice
 	}
 	d.mu.Unlock()
 	for i := range out {
@@ -136,6 +138,10 @@ func (d *Dispatcher) Restore() int {
 				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
 		r.stamp.interruptedAt = cutAt(s)
 		r.origin = s.Origin
+		r.pack = SessionPack{Choice: s.Pack}
+		if s.Pack == "" {
+			r.pack.Choice = PackKnackpack
+		}
 		r.group, r.groupKind = s.Group, s.GroupKind
 		r.history = s.HistoryOnly
 		r.doubled = doubled[s.SID]

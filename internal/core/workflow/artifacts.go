@@ -5,14 +5,19 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 const KnackpackFeature = ".knackpack/feature.json"
 
-var knackpackDir = regexp.MustCompile(`^\.knackpack/[a-z0-9][a-z0-9-]{0,63}$`)
+var featureName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 func KnackpackFeatureDir(featureJSON []byte) string {
-	if len(featureJSON) == 0 || len(featureJSON) > 65536 {
+	return FeatureDir(featureJSON, ".knackpack")
+}
+
+func FeatureDir(featureJSON []byte, folder string) string {
+	if folder == "" || len(featureJSON) == 0 || len(featureJSON) > 65536 {
 		return ""
 	}
 	var v map[string]any
@@ -20,7 +25,8 @@ func KnackpackFeatureDir(featureJSON []byte) string {
 		return ""
 	}
 	s, ok := v["feature_directory"].(string)
-	if !ok || !knackpackDir.MatchString(s) {
+	name, inside := strings.CutPrefix(s, folder+"/")
+	if !ok || !inside || !featureName.MatchString(name) {
 		return ""
 	}
 	return s
@@ -28,6 +34,14 @@ func KnackpackFeatureDir(featureJSON []byte) string {
 
 func StepArtifacts(adapter AdapterID, steps []Step, dir string) []string {
 	a, ok := Adapters[adapter]
+	if !ok {
+		return nil
+	}
+	return StepArtifactsOf(a, steps, dir)
+}
+
+func StepArtifactsOf(a Adapter, steps []Step, dir string) []string {
+	ok := a.AnyFolder != ""
 	if ok && dir == "" {
 		dir = a.AnyFolder
 	}

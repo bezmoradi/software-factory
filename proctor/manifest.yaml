@@ -24,5 +24,7 @@ specifications:
     path: specs/sessions.yaml
   - id: gate
     path: specs/gate.yaml
+  - id: packs
+    path: specs/packs.yaml
   - id: diagnostics
     path: specs/diagnostics.yaml

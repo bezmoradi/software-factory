@@ -127,14 +127,15 @@ func portNote(base int, inEnv bool) string {
 
 func (d *Dispatcher) claudeSettings(r *run) string {
 	env := map[string]string{}
-	if d.cfg.DocsInRepo {
+	knackpack := r.pack.Choice == "" || r.pack.Choice == PackKnackpack
+	if d.cfg.DocsInRepo && knackpack {
 		env["KNACKPACK_DOCS"] = "repo"
 	}
 	maps.Copy(env, claudePortEnv(r.ports))
 	if len(env) == 0 {
 		return ""
 	}
-	if d.cfg.DocsInRepo && len(env) == 1 {
+	if d.cfg.DocsInRepo && knackpack && len(env) == 1 {
 		return DocsSettings
 	}
 	data, err := json.Marshal(map[string]map[string]string{"env": env})

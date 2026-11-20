@@ -47,6 +47,7 @@ dimensions:
     - "/api/message"
     - "/api/metrics"
     - "/api/override"
+    - "/api/packs"
     - "/api/pair"
     - "/api/plan-review"
     - "/api/prefs"
@@ -120,6 +121,8 @@ sets:
         reason: "/api/approve-requirements takes a body of up to 1 MiB (MaxApproveBody), so a 64 KiB body isn't over its limit; json_over_1m checks it"
       - cells: { route: "/api/reviewer-agents" }
         reason: "/api/reviewer-agents takes a body of up to 1 MiB (MaxApproveBody), so a 64 KiB body isn't over its limit; json_over_1m checks it"
+      - cells: { route: "/api/packs" }
+        reason: "/api/packs takes a body of up to 2 MiB (MaxPackBody), for an uploaded pack's files, so a 64 KiB body isn't over its limit; packs.yaml's PCK-002 sends one over 2 MiB and one just under"
   json_over_1m:
     columns: { route: body_limited_routes }
   query:

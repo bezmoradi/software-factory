@@ -113,10 +113,12 @@ type WorkConfig struct {
 	DocsInRepo bool
 	Logger     shared.Logger
 
-	RoleAgents RoleAgents
-	Changes    ChangeReader
-	Level      func(sid string) (level.Result, bool)
-	Catalog    func() workflow.Catalog
+	RoleAgents  RoleAgents
+	Packs       ProjectPacks
+	SessionPack func(sid string) (string, bool)
+	Changes     ChangeReader
+	Level       func(sid string) (level.Result, bool)
+	Catalog     func() workflow.Catalog
 
 	ApprovalMoved func(sid string, at func(commit string) (ApprovalGiven, bool))
 }
@@ -140,6 +142,7 @@ type workSession struct {
 
 type Work struct {
 	cfg      WorkConfig
+	packMu   sync.Mutex
 	mu       sync.Mutex
 	sessions map[string]*workSession
 	store    sync.Mutex
@@ -470,7 +473,7 @@ func (w *Work) readTeam(r Repository) teamRead {
 	out.text = string(f.Data)
 	team, problems := workflow.ParseTeam(out.text)
 	problems = append(problems, instructionProblems(team)...)
-	problems = append(problems, workflow.AgentProblems(team, w.cfg.Installed())...)
+	problems = append(problems, workflow.AgentProblems(team, w.installed(r.Name))...)
 	out.team, out.problems = team, problems
 	if len(problems) > 0 {
 		out.team = nil
@@ -497,6 +500,7 @@ func (w *Work) teamFor(r Repository, st WorkState) (*workflow.Team, bool, string
 }
 
 type setupOf struct {
+	all      []workflow.WorkType
 	setup    workflow.Setup
 	problems []string
 	approved bool
@@ -521,6 +525,18 @@ func (w *Work) setupFor(name string) setupOf {
 	}
 	out.setup, out.problems = workflow.SetupOf(team, personal, workflow.Knackpack)
 	out.setup.Catalog = w.cfg.Catalog()
+	if w.cfg.Packs != nil {
+		if ps := w.cfg.Packs.PackSetup(name); ps.Kind != PackKnackpack {
+			out.setup.Catalog = workflow.OffCatalog()
+			for _, role := range review.Roles {
+				out.setup.Roles[role] = ps.Roles[role]
+			}
+			out.setup.Workflow = ps.Workflow
+		}
+	}
+	out.all = out.setup.Types
+	out.setup.Adapter = workflow.AdapterID(out.setup.Workflow.Name)
+	out.setup.Types = workflow.Offered(out.all, out.setup.Workflow)
 	if w.cfg.RoleAgents != nil {
 		maps.Copy(out.setup.Roles, w.cfg.RoleAgents.RolesFor(name))
 	}
@@ -605,7 +621,7 @@ func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	if !ok {
 		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
 	}
-	if _, ok := typeIn(w.setupFor(ws.repo).setup.Types, id); !ok {
+	if _, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id); !ok {
 		return explained(invalid("type"), "That work type isn't one this project offers.")
 	}
 	w.mu.Lock()
@@ -666,7 +682,7 @@ func shownDoc(path, text string) *WorkDoc {
 	return d
 }
 
-func (w *Work) committedKnackpack(sid, repo, head string) workDocs {
+func (w *Work) committedDocs(sid, repo, head string, def workflow.Adapter) workDocs {
 	out := workDocs{held: true}
 	if rep, ok := w.cfg.Reported(sid); ok {
 		out.shownReq, out.shownPlan = docFrom(rep.Requirements), docFrom(rep.Plan)
@@ -677,9 +693,9 @@ func (w *Work) committedKnackpack(sid, repo, head string) workDocs {
 	if head == "" {
 		return out
 	}
-	names := workflow.Adapters[workflow.Knackpack].Documents
+	names := def.Documents
 	feature, _ := w.readDoc(repo, head, names.Feature)
-	out.dir = workflow.KnackpackFeatureDir([]byte(feature))
+	out.dir = workflow.FeatureDir([]byte(feature), def.Folder)
 	if out.dir == "" {
 		return out
 	}
@@ -694,9 +710,12 @@ func (w *Work) committedKnackpack(sid, repo, head string) workDocs {
 	return out
 }
 
-func (w *Work) docs(sid, repo, head string) workDocs {
+func (w *Work) docs(sid, repo, head string, def workflow.Adapter) workDocs {
+	if w.cfg.DocsInRepo && !def.HasDocuments() {
+		return workDocs{}
+	}
 	if w.cfg.DocsInRepo {
-		return w.committedKnackpack(sid, repo, head)
+		return w.committedDocs(sid, repo, head, def)
 	}
 	rep, ok := w.cfg.Reported(sid)
 	if !ok {
@@ -743,7 +762,7 @@ type gathered struct {
 
 func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
 	g := gathered{ws: ws, t: t, head: head, main: main}
-	g.setup = w.setupFor(ws.repo)
+	g.setup = w.packSetup(sid, ws.repo)
 	g.adapter = g.setup.setup.Adapter
 	kind, ok := typeIn(g.setup.setup.Types, ws.typeID)
 	if !ok {
@@ -782,7 +801,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	if note != "" {
 		g.effNote = strings.TrimSpace(g.effNote + " " + note)
 	}
-	g.docs = w.docs(sid, t.Repo, head)
+	g.docs = w.docs(sid, t.Repo, head, g.setup.setup.Workflow)
 	if g.docs.held {
 		g.docs.onBranch(g.files, g.listed)
 	}
@@ -831,7 +850,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 		}
 	}
 	g.items, g.toApprove = workflow.Items(workflow.Progress{
-		Chosen: g.chosen.Profile(), Effective: g.eff, Adapter: g.adapter,
+		Chosen: g.chosen.Profile(), Effective: g.eff, Adapter: g.adapter, Commands: g.setup.setup.Workflow.Commands,
 		FilesListed: g.listed || head == "", FilesNote: g.note, FlagsRead: flagsRead, Flagged: flagged,
 		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
@@ -842,7 +861,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	if g.specs && !flagsRead {
 		g.items = append(g.items, "a check of this branch's changes to Proctor's specifications under proctor/ and to the root Makefile: this project uses Proctor, and they may be among the files and commits the gate couldn't read, so the developer has to check them too before allowing the push")
 	}
-	g.required = w.notInstalled(g.required)
+	g.required = w.notInstalled(ws.repo, g.required)
 	for _, q := range g.required {
 		if q.Missing {
 			g.items = append(g.items, "a review by "+q.Agent+", which no plugin installed in the reviewer image provides")
@@ -899,7 +918,7 @@ func (w *Work) Reviewers(ctx context.Context, sid string, t PushTarget, base, he
 	if !ok {
 		ws = workSession{repo: t.Name, typeID: DefaultWorkType}
 	}
-	setup := w.setupFor(ws.repo)
+	setup := w.packSetup(sid, ws.repo)
 	kind, ok := typeIn(setup.setup.Types, ws.typeID)
 	if !ok {
 		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
@@ -910,7 +929,7 @@ func (w *Work) Reviewers(ctx context.Context, sid string, t PushTarget, base, he
 		files = append(files, c.Path)
 	}
 	eff, _ := workflow.Effective(kind, files, err == nil)
-	required := w.notInstalled(w.deepened(ctx, t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
+	required := w.notInstalled(ws.repo, w.deepened(ctx, t, workflow.Required(setup.setup, eff, files), base, head, err == nil))
 	return append(required, workflow.Advisory(required, w.depthOf(t.Name))...)
 }
 
@@ -958,9 +977,9 @@ func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 		f.ReqBaseline = g.ws.req.Commit
 	}
 	if f.UsesArtifacts {
-		f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Plan}, g.docs.dir)
+		f.Artifacts = workflow.StepArtifactsOf(g.setup.setup.Workflow, []workflow.Step{workflow.Plan}, g.docs.dir)
 		if !g.reqOk {
-			f.Artifacts = workflow.StepArtifacts(g.adapter, []workflow.Step{workflow.Define}, "")
+			f.Artifacts = workflow.StepArtifactsOf(g.setup.setup.Workflow, []workflow.Step{workflow.Define}, "")
 		}
 		if f.ReqBaseline != "" && g.head != "" {
 			if f.ReqBaseline == g.head {
@@ -1095,7 +1114,7 @@ const implementText = "The developer approved the plan on the software factory p
 func nextStep(g gathered, plan bool) string {
 	steps := g.eff.Steps
 	has := func(s workflow.Step) bool { return slices.Contains(steps, s) }
-	cmds := workflow.Adapters[g.adapter].Commands
+	cmds := g.setup.setup.Workflow.Commands
 	var want []workflow.Step
 	if plan {
 		want = []workflow.Step{workflow.Implement}
@@ -1118,9 +1137,69 @@ func nextStep(g gathered, plan bool) string {
 
 const WorkNotInstalled = "not-installed"
 
-func (w *Work) notInstalled(list []workflow.Requirement) []workflow.Requirement {
-	installed := w.cfg.Installed()
-	if len(installed) == 0 {
+func (w *Work) installed(project string) []string {
+	if w.cfg.Packs != nil {
+		if ps := w.cfg.Packs.PackSetup(project); ps.Kind != PackKnackpack {
+			return ps.Agents
+		}
+	}
+	if w.cfg.Installed == nil {
+		return nil
+	}
+	return w.cfg.Installed()
+}
+
+func (w *Work) packKnown(project string) bool {
+	return w.cfg.Packs != nil && w.cfg.Packs.PackSetup(project).Kind != PackKnackpack
+}
+
+func (w *Work) Pushes(sid, repo string) bool {
+	ws, ok := w.session(sid)
+	if !ok {
+		return false
+	}
+	s := w.packSetup(sid, repo)
+	t, ok := typeIn(s.setup.Types, ws.typeID)
+	if !ok {
+		t, ok = typeIn(s.setup.Types, DefaultWorkType)
+	}
+	return ok && t.Push
+}
+
+func (w *Work) UseSessionPacks(fn func(sid string) (string, bool)) {
+	w.packMu.Lock()
+	w.cfg.SessionPack = fn
+	w.packMu.Unlock()
+}
+
+func (w *Work) sessionPackOf(sid string) (string, bool) {
+	w.packMu.Lock()
+	fn := w.cfg.SessionPack
+	w.packMu.Unlock()
+	if fn == nil {
+		return "", false
+	}
+	return fn(sid)
+}
+
+func (w *Work) packSetup(sid, repo string) setupOf {
+	s := w.setupFor(repo)
+	if w.cfg.Packs == nil {
+		return s
+	}
+	choice, ok := w.sessionPackOf(sid)
+	if !ok {
+		return s
+	}
+	def := w.cfg.Packs.WorkflowOf(choice)
+	s.setup.Workflow, s.setup.Adapter = def, workflow.AdapterID(def.Name)
+	s.setup.Types = workflow.Offered(s.all, def)
+	return s
+}
+
+func (w *Work) notInstalled(project string, list []workflow.Requirement) []workflow.Requirement {
+	installed := w.installed(project)
+	if len(installed) == 0 && !w.packKnown(project) {
 		return list
 	}
 	for i, q := range list {
@@ -1186,7 +1265,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 		return GateView{}, err
 	}
 	v := GateView{Head: g.head, Branch: g.t.Branch, Adapter: g.adapter, Type: g.chosen.ID, Chosen: g.ws.chosen, Effective: g.eff.Profile(), Note: g.effNote,
-		Types: g.setup.setup.Types, Commands: workflow.Adapters[g.adapter].Commands, TeamApproved: g.setup.approved, TeamNote: g.setup.note,
+		Types: g.setup.setup.Types, Commands: g.setup.setup.Workflow.Commands, TeamApproved: g.setup.approved, TeamNote: g.setup.note,
 		Research: g.docs.research, Rounds: g.setup.rounds, FilesListed: g.listed, ChangedFiles: len(g.files), PlanApprovals: g.docs.held}
 	if d := g.docs.req; d != nil {
 		c := *d

@@ -17,17 +17,21 @@ func ReviewArgvWith(command, plugin, agent, prompt string, m ModelChoice) []stri
 	argv := []string{
 		command, "-p",
 		"--setting-sources", "user",
-		"--plugin-dir=" + plugin,
+	}
+	if plugin != "" {
+		argv = append(argv, "--plugin-dir="+plugin)
+	}
+	argv = append(argv,
 		"--agent", agent,
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
-		"--tools=" + strings.Join(ReviewTools, ","),
-		"--allowedTools=" + strings.Join(ReviewAllowed, ","),
-		"--settings=" + reviewSettings,
+		"--tools="+strings.Join(ReviewTools, ","),
+		"--allowedTools="+strings.Join(ReviewAllowed, ","),
+		"--settings="+reviewSettings,
 		"--output-format", "stream-json",
 		"--verbose",
 		"--no-session-persistence",
-	}
+	)
 	if m.Model != "" {
 		argv = append(argv, "--model="+m.Model)
 	}

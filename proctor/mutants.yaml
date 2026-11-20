@@ -1010,8 +1010,8 @@
   title: "A knackpack: agent from any plugin, not only knackpack@knackpack, is trusted"
   edits:
     - file: "internal/core/review/role.go"
-      find: "if strings.HasPrefix(agent, \"knackpack:\") && o.Plugin != knackpackProvider {"
-      replace: "if strings.HasPrefix(agent, \"knackpack:\") && o.Plugin == \"\" {"
+      find: "\t\tif o.Plugin != want {"
+      replace: "\t\tif o.Plugin != want && prefix != \"knackpack\" {"
 - id: CORE-007
   title: "A reply that gives both pass and block no longer counts as a conflict"
   edits:
@@ -2935,3 +2935,45 @@
     - file: "internal/adapters/engines/acp/client.go"
       find: "\tc.cancelPermissionsLocked()\n\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
       replace: "\tc.cancelToolsLocked()\n\tc.note(\"cancel\")"
+- id: SESS-590
+  title: "Adding a pack no longer checks that its commit still gives the digest the page showed"
+  edits:
+    - file: "internal/core/session/packs.go"
+      find: "\tif sp.Digest != digest {"
+      replace: "\tif sp.Digest == \"\" {"
+- id: SESS-591
+  title: "A pack a project uses can be removed"
+  edits:
+    - file: "internal/core/session/packs.go"
+      find: "\t\tif len(users) > 0 {"
+      replace: "\t\tif len(users) > 9 {"
+- id: SESS-592
+  title: "No pack keeps knackpack's agents in the roles"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\t\tif ps := w.cfg.Packs.PackSetup(name); ps.Kind != PackKnackpack {"
+      replace: "\t\tif ps := w.cfg.Packs.PackSetup(name); ps.Kind == PackKindPack {"
+- id: SESS-593
+  title: "Picking a project's pack writes no audit line"
+  edits:
+    - file: "internal/core/session/packs.go"
+      find: "\tp.audit(e)\n"
+      replace: ""
+- id: INST-019
+  title: "A pack agent whose front matter holds hooks is copied for the reviewers"
+  edits:
+    - file: "internal/adapters/install/npm/reviewerview.go"
+      find: "\t\t\"hooks\":          \"hooks would run commands in the trusted reviewer container\",\n"
+      replace: ""
+- id: FLOW-018
+  title: "A pack manifest may set the reviewers' tools"
+  edits:
+    - file: "internal/core/workflow/pack.go"
+      find: "\t\t\"tools\":       \"the engine sets the reviewers' tools: read-only, the same for every pack\",\n"
+      replace: ""
+- id: PAGE-073
+  title: "/api/packs list takes fields it doesn't know"
+  edits:
+    - file: "internal/adapters/http/page/packs.go"
+      find: "\t\tif !keysWithin(body, \"op\", \"path\") {"
+      replace: "\t\tif !keysWithin(body, \"op\", \"path\", \"proctorUnknownField\") {"

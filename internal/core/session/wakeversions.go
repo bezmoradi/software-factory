@@ -62,6 +62,28 @@ func (d *Dispatcher) WorkflowCommits() []string {
 	return out
 }
 
+func (d *Dispatcher) SessionPacks() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []string
+	for _, r := range d.runs {
+		if PackDigest.MatchString(r.pack.Choice) && !slices.Contains(out, r.pack.Choice) {
+			out = append(out, r.pack.Choice)
+		}
+	}
+	return out
+}
+
+func (d *Dispatcher) SessionPackOf(sid string) (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r := d.runs[sid]
+	if r == nil {
+		return "", false
+	}
+	return r.pack.Choice, true
+}
+
 func (d *Dispatcher) showVersions(sid, text string) {
 	if text != "" {
 		d.reg.Notify(Fields{"type": "versions", "sid": sid, "text": text})

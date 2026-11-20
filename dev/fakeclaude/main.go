@@ -134,8 +134,19 @@ func review(args []string, st *stream) (reply, error) {
 	}
 	agent, named := value(args, "--agent")
 	prompt := args[len(args)-1]
-	userAgent := ""
-	if named && !strings.HasPrefix(agent, "knackpack:") {
+	plugin, hasPlugin := value(args, "--plugin-dir")
+	userAgent, packAgent := "", false
+	switch {
+	case named && strings.Contains(agent, ":"):
+		if !hasPlugin {
+			return reply{}, fmt.Errorf("--agent %s names a plugin's agent, and no --plugin-dir was given", agent)
+		}
+		name, err := pluginAgent(plugin, agent)
+		if err != nil {
+			return reply{}, err
+		}
+		packAgent = name != "knackpack"
+	case named:
 		found, err := userAgentFile(agent)
 		if err != nil {
 			return reply{}, err
@@ -146,9 +157,10 @@ func review(args []string, st *stream) (reply, error) {
 	if !named && aside == "" && !strings.Contains(strings.ToLower(prompt), "manual test list") {
 		return reply{}, errors.New("no knackpack agent named")
 	}
-	plugin, _ := value(args, "--plugin-dir")
-	if info, err := os.Stat(filepath.Join(plugin, ".claude-plugin", "plugin.json")); err != nil || !info.Mode().IsRegular() {
-		return reply{}, errors.New("--plugin-dir doesn't name an installed plugin")
+	if hasPlugin {
+		if _, err := reviewerView(plugin); err != nil {
+			return reply{}, err
+		}
 	}
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
@@ -185,6 +197,9 @@ func review(args []string, st *stream) (reply, error) {
 	r.text = strings.Replace(r.text, "\n", given(args)+"\n", 1)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)
+	}
+	if packAgent {
+		r.text = packReply(r.text)
 	}
 	return r, nil
 }
@@ -231,7 +246,7 @@ func verdict(agent, prompt string, st *stream) reply {
 	if has("READ-OUTSIDE") {
 		r.denials = []denial{{ToolName: "Read", ToolUseID: "fake", ToolInput: map[string]any{"file_path": "/home/reviewer/.claude/.credentials.json"}}}
 	}
-	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
+	report := "/tmp/review-report-" + strings.ReplaceAll(strings.TrimPrefix(agent, "knackpack:"), ":", "-") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
 	if has("SLOW-REVIEW") {
 		st.slow(slowness())
 	}

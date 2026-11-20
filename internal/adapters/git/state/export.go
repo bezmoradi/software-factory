@@ -68,6 +68,7 @@ var stores = map[string]storeRow{
 	keyRoutesFile:       {class: classOff, version: 1, label: "whether a pasted key may be saved"},
 	projectCommandsFile: {class: classOff, version: 1, label: "check and setup commands"},
 	reviewerAgentsFile:  {class: classOff, version: 1, label: "reviewer agent files and the roles they fill"},
+	packsFile:           {class: classOff, version: 1, label: "packs from git and the pack each project uses"},
 	prFollowFile:        {class: classOff, version: 1, label: "pull request follows, send on its own and assign"},
 	lookupsFile:         {class: classOff, version: 1, label: "public-registry lookups"},
 	signInFile:          {class: classOff, version: 1, label: "the expected sign-in methods, reset to the default"},
@@ -174,6 +175,8 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewProjectCommands(d).Load)
 	case reviewerAgentsFile:
 		err = loaded(NewReviewerAgents(d).Load)
+	case packsFile:
+		err = loaded(NewPacks(d).Load)
 	case prFollowFile:
 		err = loaded(NewPRFollows(d).Load)
 	case lookupsFile:

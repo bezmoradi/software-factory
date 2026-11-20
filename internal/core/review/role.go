@@ -56,14 +56,29 @@ func RoleProblem(agent string, o *Offer) string {
 		}
 		return agent + " comes from an unknown source, and " + only
 	}
-	if strings.HasPrefix(agent, "knackpack:") && o.Plugin != knackpackProvider {
-		from := "an unknown provider"
-		if o.Plugin != "" {
-			from = "the plugin " + clip(o.Plugin, 80)
+	if prefix, _, ok := strings.Cut(agent, ":"); ok {
+		want, whose := prefix+PackProviderSuffix, "the pack "+clip(prefix, 64)+" the engine installed ("+clip(prefix, 64)+PackProviderSuffix+")"
+		if prefix == "knackpack" {
+			want, whose = knackpackProvider, "knackpack's own marketplace ("+knackpackProvider+")"
 		}
-		return agent + " comes from " + from + ", not from knackpack's own marketplace (" + knackpackProvider + ")"
+		if o.Plugin != want {
+			from := "an unknown provider"
+			if o.Plugin != "" {
+				from = "the plugin " + clip(o.Plugin, 80)
+			}
+			return agent + " comes from " + from + ", not from " + whose
+		}
 	}
 	return ""
+}
+
+const PackProviderSuffix = "@pack"
+
+func PackProvider(name string) string {
+	if name == "knackpack" {
+		return knackpackProvider
+	}
+	return name + PackProviderSuffix
 }
 
 func spawned(agent, provider string, o *Offer) *Offer {

@@ -35,8 +35,8 @@ var (
 	skillsBlock   = regexp.MustCompile(`^skills:[ \t]*$`)
 	skillsItem    = regexp.MustCompile(`^[ \t]+-[ \t]+` + skillName + `[ \t]*$`)
 	topLevelKey   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*[ \t]*:`)
-	promptReason  = "the engine doesn't install a knackpack using argument placeholders or inline shell in its skills or commands, which Claude Code runs as it loads them, in the trusted reviewer container too when an agent preloads one"
-	preloadReason = "which this engine can't read as preloading only knackpack's own skills (knackpack:<name>); the engine doesn't install a knackpack whose agents may preload other skills or commands"
+	promptReason  = "the engine doesn't install %s using argument placeholders or inline shell in its skills or commands, which Claude Code runs as it loads them, in the trusted reviewer container too when an agent preloads one"
+	preloadReason = "which this engine can't read as preloading only knackpack's own skills (knackpack:<name>); the engine doesn't install %s whose agents may preload other skills or commands"
 )
 
 func bangBeforeBacktick(data []byte) bool {
@@ -144,6 +144,10 @@ func squeezed(s string) string {
 }
 
 func shellRefused(dir string) error {
+	return shellRefusedAs(dir, "a knackpack")
+}
+
+func shellRefusedAs(dir, what string) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return errors.New("the plugin's tree couldn't be opened to check its skills, commands and agents for inline shell")
@@ -152,7 +156,7 @@ func shellRefused(dir string) error {
 	budget := int64(maxShellScan)
 	check := func(rel string, agent bool) error {
 		if unsafeName.MatchString(rel) {
-			return fmt.Errorf("the commit's %s has !, a backtick, $ or white space in its path, which Claude Code puts into a skill's text as ${CLAUDE_SKILL_DIR}, where it could complete inline shell; %s", shown(rel), "the engine doesn't install a knackpack with such names in its skills, commands or agents")
+			return fmt.Errorf("the commit's %s has !, a backtick, $ or white space in its path, which Claude Code puts into a skill's text as ${CLAUDE_SKILL_DIR}, where it could complete inline shell; the engine doesn't install %s with such names in its skills, commands or agents", shown(rel), what)
 		}
 		info, err := root.Lstat(rel)
 		switch {
@@ -171,13 +175,13 @@ func shellRefused(dir string) error {
 			return fmt.Errorf("%s couldn't be read to check it for inline shell", rel)
 		}
 		if !agent {
-			if what := promptProblem(data); what != "" {
-				return fmt.Errorf("the commit's %s holds %s; %s", rel, what, promptReason)
+			if problem := promptProblem(data); problem != "" {
+				return fmt.Errorf("the commit's %s holds %s; "+promptReason, rel, problem, what)
 			}
 			return nil
 		}
 		if preloadsOthers(data) {
-			return fmt.Errorf("the commit's agent %s has front matter %s", rel, preloadReason)
+			return fmt.Errorf("the commit's agent %s has front matter "+preloadReason, rel, what)
 		}
 		return nil
 	}

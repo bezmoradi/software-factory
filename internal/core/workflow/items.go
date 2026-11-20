@@ -11,6 +11,7 @@ type Progress struct {
 	Chosen          Profile
 	Effective       WorkType
 	Adapter         AdapterID
+	Commands        map[Step]string
 	FilesListed     bool
 	FilesNote       string
 	FlagsRead       bool
@@ -65,6 +66,9 @@ func Items(p Progress) ([]string, bool) {
 	commands := Adapters[Knackpack].Commands
 	if a, ok := Adapters[p.Adapter]; ok {
 		commands = a.Commands
+	}
+	if p.Commands != nil {
+		commands = p.Commands
 	}
 	switch {
 	case feature && p.PlanFile == "":

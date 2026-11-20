@@ -122,6 +122,9 @@ type roleJSON struct {
 	Findings []findingRefJSON `json:"findings,omitempty"`
 
 	PluginCommit string   `json:"pluginCommit,omitempty"`
+	Pack         string   `json:"pack,omitempty"`
+	PackVersion  string   `json:"packVersion,omitempty"`
+	PackDigest   string   `json:"packDigest,omitempty"`
 	ClaudeCode   string   `json:"claudeCode,omitempty"`
 	Models       []string `json:"models,omitempty"`
 
@@ -175,7 +178,7 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 	for _, r := range v.Roles {
 		out.Roles = append(out.Roles, roleJSON{Role: string(r.Role), Name: r.Name, Agent: r.Agent, State: string(r.State), Verdict: r.Verdict, Message: r.Message, Reason: r.Reason, CostUSD: r.CostUSD, Why: r.Why,
 			Round: r.Round, Limit: r.Limit, Since: r.Since, Incremental: r.Since != "", Previous: r.Previous, Override: r.Override,
-			PluginCommit: r.PluginCommit, ClaudeCode: r.ClaudeCode, Models: r.Models})
+			PluginCommit: r.PluginCommit, Pack: r.Pack, PackVersion: r.PackVersion, PackDigest: r.PackDigest, ClaudeCode: r.ClaudeCode, Models: r.Models})
 		out.Roles[len(out.Roles)-1].Progress, out.Roles[len(out.Roles)-1].Given = progressOf(r.Progress), givenOf(r.Given)
 		out.Roles[len(out.Roles)-1].Run, out.Roles[len(out.Roles)-1].Runs, out.Roles[len(out.Roles)-1].Advisory = r.Run, r.Runs, r.Advisory
 		out.Roles[len(out.Roles)-1].Cited = citedOf(r.Cited)

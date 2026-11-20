@@ -41,7 +41,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 			fn(t.SID)
 		}
 	}
-	plugin, pluginCommit, err := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
+	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
@@ -90,6 +90,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if !slices.ContainsFunc(required, func(q workflow.Requirement) bool { return !q.Advisory }) {
 		release()
+		if t.Pushes {
+			return explained(conflict("no reviewer"), NoReviewerText)
+		}
 		return explained(conflict("no reviews"), "This session's work type needs no review, and it can't push. Pick another work type to review and push it.")
 	}
 	entries, err := r.Entries()
@@ -233,7 +236,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	r.began()
 	launched = true
 	r.wg.Go(func() {
-		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, pluginCommit, view, held, given)
+		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, pack, view, held, given)
 		r.ended()
 		release()
 		if r.cfg.Base.Err() == nil {
@@ -242,6 +245,8 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	})
 	return nil
 }
+
+const NoReviewerText = "No reviewer is configured for this project, so nothing reviews this branch: every push needs your Allow with a reason."
 
 func reviewedMessage(head string) string {
 	return "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."

@@ -24,6 +24,7 @@ import './components/projects.ts'
 import './components/reviews.ts'
 import './components/saved-prompts.ts'
 import './components/reviewer-agents.ts'
+import './components/packs.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import { typeChangeOf } from './components/push-facts.ts'
@@ -75,7 +76,7 @@ function lifecycleLine(e: AuditEntry): string {
 }
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
-const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'lock-tests': 'Tests locked', 'unlock-tests': 'Tests unlocked', 'reviewer-agent': 'Reviewer agent file', 'after-review': 'After review', 'home-settings': 'Changed agent settings' }
+const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'lock-tests': 'Tests locked', 'unlock-tests': 'Tests unlocked', 'reviewer-agent': 'Reviewer agent file', pack: 'Reviewer pack', 'after-review': 'After review', 'home-settings': 'Changed agent settings' }
 EXCEPTION['permission-answer'] = 'Permission card answered'
 EXCEPTION['pr-follow'] = 'Pull request followed'
 EXCEPTION['pr-ready'] = 'Pull request marked ready for review'
@@ -682,6 +683,7 @@ function paintChecks(s: Session) {
   paintExceptions(s)
   const project = projectFor(s)
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 3, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
+  byId<HTMLElementTagNameMap['sf-packs']>('packs').view = gate && project?.path ? { project: project.path, disabled } : null
   byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
   reviewModels.view = gate && project?.path ? { project: project.path, disabled } : null
 }
@@ -715,7 +717,12 @@ function paintAdapter(gate: GateEvent | null) {
   const c = gate?.commands
   for (const [stage, command] of [['define', c?.define], ['plan', c?.plan]] as const) {
     const b = document.querySelector<HTMLButtonElement>(`#path li[data-stage="${stage}"] > div > button.stage`)
-    if (!b || !command) continue
+    if (!b) continue
+    if (!command) {
+      delete b.dataset.command
+      b.removeAttribute('title')
+      continue
+    }
     b.dataset.command = command
     b.title = `Sends ${command} to this session`
   }
@@ -1001,6 +1008,10 @@ byId('conversations').addEventListener('sf-answer', async e => {
 })
 byId('conversations').addEventListener('sf-settled', () => {
   if (!byId<HTMLTextAreaElement>('text').disabled) byId('text').focus()
+})
+byId('packs').addEventListener('sf-packs-changed', () => {
+  const s = current()
+  if (s) void loadGate(s, true)
 })
 byId('reviews').addEventListener('sf-review', e => void startReview(current(), e.detail.all))
 byId('reviews').addEventListener('sf-test-list', () => void startTestList(current()))

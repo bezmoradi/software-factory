@@ -22,7 +22,11 @@ type Reviews struct {
 
 var _ session.ReviewRecords = Reviews{}
 
-var approvalDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var (
+	approvalDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	packName       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	packVersion    = regexp.MustCompile(`^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}([-+][0-9A-Za-z.+-]{1,64})?$`)
+)
 
 var citedID = regexp.MustCompile(`^(CVE-\d{4}-\d{4,7}|GHSA(-[23456789cfghjmpqrvwx]{4}){3})$`)
 
@@ -49,6 +53,9 @@ type reviewJSON struct {
 	Clipped      bool      `json:"clipped,omitempty"`
 	Auto         bool      `json:"auto,omitempty"`
 	PluginCommit string    `json:"pluginCommit,omitempty"`
+	Pack         string    `json:"pack,omitempty"`
+	PackVersion  string    `json:"packVersion,omitempty"`
+	PackDigest   string    `json:"packDigest,omitempty"`
 	ClaudeCode   string    `json:"claudeCode,omitempty"`
 	Models       []string  `json:"models,omitempty"`
 	RunModel     string    `json:"runModel,omitempty"`
@@ -104,6 +111,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 			Models: matchingAll(r.Models, modelName, maxModels), RunModel: r.RunModel, RunEffort: r.RunEffort, Turns: inRange(r.Turns, 0, maxTurns), Denied: matchingAll(r.Denied, toolName, maxDenied),
 			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1), AutoAttempts: inRange(r.AutoAttempts, 0, maxAttempt),
 			Approved: matching(r.Approved, approvalDigest), Team: matching(r.Team, approvalDigest),
+			Pack: matching(r.Pack, packName), PackVersion: matching(r.PackVersion, packVersion), PackDigest: matching(r.PackDigest, approvalDigest),
 		})
 	}
 	return out, nil
@@ -129,6 +137,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
 			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts, Approved: e.Approved, Team: e.Team,
+			Pack: e.Pack, PackVersion: e.PackVersion, PackDigest: e.PackDigest,
 		})
 	}
 	gone := reviewsGone(s.Dir, list)

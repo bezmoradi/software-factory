@@ -547,6 +547,17 @@ func offLines(name, in string) []string {
 		for _, r := range st.Roles {
 			out = append(out, r.Project+": "+r.Name+" no longer fills the "+string(r.Role)+" role")
 		}
+	case packsFile:
+		st, err := NewPacks(in).Load()
+		if err != nil {
+			return nil
+		}
+		for _, p := range st.Packs {
+			out = append(out, "the pack "+p.Name+" "+p.Version+" isn't kept; add it again from git to use it")
+		}
+		for _, c := range st.Choices {
+			out = append(out, c.Project+": reviewed by knackpack again, not by the pack it used; pick its pack again")
+		}
 	case prFollowFile:
 		rec, err := NewPRFollows(in).Load()
 		if err != nil {

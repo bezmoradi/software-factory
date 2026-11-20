@@ -107,6 +107,7 @@ type ReviewerAgentsPage interface {
 
 type ReviewerAgentsConfig struct {
 	Store  AgentFileStore
+	Packs  ProjectPacks
 	Repos  interface{ List() ([]Repository, error) }
 	Audit  Audit
 	Now    func() time.Time
@@ -233,23 +234,39 @@ func (a *ReviewerAgents) Offer(agent string) review.Offer {
 	if _, ok := a.Uploaded(agent); ok {
 		return review.Offer{Agent: agent, Source: "userSettings", Plugin: UploadedProvider}
 	}
+	return pluginOffer(agent)
+}
+
+func pluginOffer(agent string) review.Offer {
+	if prefix, _, ok := strings.Cut(agent, ":"); ok && prefix != PackKnackpack {
+		return review.Offer{Agent: agent, Source: "plugin", Plugin: review.PackProvider(prefix)}
+	}
 	return review.Offer{Agent: agent, Source: "plugin", Plugin: ReviewProvider}
 }
 
 func offerFor(a RoleAgents, agent string) review.Offer {
 	if a == nil {
-		return review.Offer{Agent: agent, Source: "plugin", Plugin: ReviewProvider}
+		return pluginOffer(agent)
 	}
 	return a.Offer(agent)
 }
 
-func providerFor(a ReviewAgentFiles, agent string) string {
+func providerFor(a ReviewAgentFiles, pack ReviewerPack, agent string) string {
 	if a != nil {
 		if _, ok := a.Uploaded(agent); ok {
 			return UploadedProvider
 		}
 	}
-	return ReviewProvider
+	prefix, _, prefixed := strings.Cut(agent, ":")
+	switch {
+	case pack.None():
+		return ""
+	case prefixed && prefix == pack.Name:
+		return pack.Provider
+	case !prefixed && pack.Name == PackKnackpack:
+		return ReviewProvider
+	}
+	return ""
 }
 
 func (a *ReviewerAgents) repoByPath(path string) (Repository, error) {
@@ -265,10 +282,7 @@ func (a *ReviewerAgents) repoByPath(path string) (Repository, error) {
 }
 
 func (a *ReviewerAgents) viewFor(r Repository, st AgentFileState, files []UploadedAgent) ReviewerAgentsView {
-	v := ReviewerAgentsView{Roles: map[review.Role]string{}, Defaults: map[review.Role]string{}}
-	for _, role := range review.Roles {
-		v.Defaults[role] = DefaultReviewers[role]
-	}
+	v := ReviewerAgentsView{Roles: map[review.Role]string{}, Defaults: a.defaultsFor(r.Name)}
 	for _, u := range files {
 		if u.Project != r.Name || u.URL != r.URL {
 			continue
@@ -282,6 +296,21 @@ func (a *ReviewerAgents) viewFor(r Repository, st AgentFileState, files []Upload
 		}
 	}
 	return v
+}
+
+func (a *ReviewerAgents) defaultsFor(project string) map[review.Role]string {
+	out := map[review.Role]string{}
+	var ps PackSetup
+	if a.cfg.Packs != nil {
+		ps = a.cfg.Packs.PackSetup(project)
+	}
+	for _, role := range review.Roles {
+		out[role] = DefaultReviewers[role]
+		if a.cfg.Packs != nil && ps.Kind != PackKnackpack {
+			out[role] = ps.Roles[role]
+		}
+	}
+	return out
 }
 
 func (a *ReviewerAgents) AgentFiles(path string) (ReviewerAgentsView, error) {
@@ -391,7 +420,7 @@ func (a *ReviewerAgents) RemoveAgentFile(path, name string) (ReviewerAgentsView,
 		return ReviewerAgentsView{}, err
 	}
 	a.audit(AuditEntry{Repository: r.Name, Result: ResultRemoved, Reviewer: removed,
-		Reason: "the developer removed the reviewer agent file " + clip(name, 80) + " on the page; its roles fall back to knackpack's agents"})
+		Reason: "the developer removed the reviewer agent file " + clip(name, 80) + " on the page; its roles fall back to the project's pack"})
 	a.cfg.Logger.Info("reviewer agents", "event", ResultRemoved)
 	return v, nil
 }
@@ -405,7 +434,7 @@ func (a *ReviewerAgents) PickAgentFile(path string, role review.Role, name strin
 		return ReviewerAgentsView{}, err
 	}
 	mine := ownedBy(r)
-	agent := DefaultReviewers[role]
+	agent := a.defaultsFor(r.Name)[role]
 	v, err := a.change(r, func(st *AgentFileState) error {
 		if name != "" {
 			i := slices.IndexFunc(st.Files, func(f StoredAgentFile) bool {
@@ -427,8 +456,12 @@ func (a *ReviewerAgents) PickAgentFile(path string, role review.Role, name strin
 	if err != nil {
 		return ReviewerAgentsView{}, err
 	}
+	picked := agent
+	if picked == "" {
+		picked = "no agent"
+	}
 	a.audit(AuditEntry{Repository: r.Name, Result: ResultPicked, Reviewer: agent,
-		Reason: "the developer picked " + agent + " for the " + role.Name() + " role on the page"})
+		Reason: "the developer picked " + picked + " for the " + role.Name() + " role on the page"})
 	a.cfg.Logger.Info("reviewer agents", "event", ResultPicked)
 	return v, nil
 }

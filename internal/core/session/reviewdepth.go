@@ -154,14 +154,17 @@ func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
 	if err != nil {
 		return err
 	}
-	installed := w.cfg.Installed()
+	installed, known := w.installed(r.Name), w.packKnown(r.Name)
 	for _, a := range append(slices.Clone(d.Advisory), d.Extra...) {
 		offer := offerFor(w.cfg.RoleAgents, a)
 		if why := review.RoleProblem(a, &offer); why != "" {
 			return explained(invalid("agent"), clip("The engine didn't save it: "+why+".", maxOutput))
 		}
-		if strings.HasPrefix(a, "knackpack:") && len(installed) > 0 && !slices.Contains(installed, a) {
+		if strings.HasPrefix(a, "knackpack:") && !known && len(installed) > 0 && !slices.Contains(installed, a) {
 			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent the knackpack installed in the reviewer image provides.", maxOutput))
+		}
+		if strings.Contains(a, ":") && known && !slices.Contains(installed, a) {
+			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent of the pack this project uses.", maxOutput))
 		}
 	}
 	clean := workflow.Depth{Advisory: unique(d.Advisory), Extra: unique(d.Extra), MaxFiles: d.MaxFiles, MaxLines: d.MaxLines, ExtraRuns: d.ExtraRuns}

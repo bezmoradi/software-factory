@@ -185,6 +185,8 @@ type engineParts struct {
 	dispatcher *session.Dispatcher
 	installer  *npm.Installer
 	plugins    *npm.Plugins
+	packs      *session.Packs
+	packFiles  *npm.Packs
 	reviews    *session.Reviews
 	repos      *session.Repos
 	pushes     *session.Pushes
@@ -331,12 +333,16 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if err != nil {
 		return engineParts{}, err
 	}
+	packs, packFiles, err := packParts(cfg, pins, repos, logger)
+	if err != nil {
+		return engineParts{}, err
+	}
 	var source session.PluginSource
-	if pins != nil {
-		source = pins
+	if packs != nil {
+		source = packs
 	}
 	expected := &session.Expected{Store: state.NewExpectations(cfg.StateDir)}
-	agentFiles, err := reviewerAgents(cfg, repos, logger)
+	agentFiles, err := reviewerAgents(cfg, repos, packs, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -354,7 +360,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -379,6 +385,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Approvals:    state.NewApprovals(cfg.StateDir),
 		Expected:     expected,
 		Work:         work,
+		Packs:        sessionPacks(packs),
 		Workflow:     knackpackDir(pins),
 		Refused:      knackpackRefused(pins),
 		Workspace:    cfg.Workspace,
@@ -406,6 +413,12 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		reviews.UseKeyGate(func(ctx context.Context) error { return d.KeyRouted(ctx, session.SideReviewers) })
 	}
 	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace, OpenTree: files.OpenTree}})
+	if packs != nil {
+		packs.UseSessions(d.SessionPacks)
+	}
+	if work != nil {
+		work.UseSessionPacks(d.SessionPackOf)
+	}
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
 		repos.OnFetched(d.SyncClones)
@@ -429,7 +442,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, packs: packs, packFiles: packFiles, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -550,7 +563,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	shots := useScreenshots(reg, cfg.Workspace, parts.routes, parts.dispatcher, logger)
 	updates := newUpdates(os.Getenv, cfg, logger)
 	go updates.Watch(sends)
-	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, updates, logger)}, reg, logger)
+	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), Packs: parts.packsPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, updates, logger)}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err
@@ -693,6 +706,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		}
 		cancelPrune()
 	}
+	prunePacks(ctx, parts, logger)
 	if parts.installer != nil && cfg.Install.AtStart {
 		go func() {
 			if err := parts.installer.InstallMissing(ctx, nil); err != nil {

@@ -106,6 +106,7 @@ type DispatcherConfig struct {
 	Approvals    Approvals
 	Expected     *Expected
 	Work         *Work
+	Packs        SessionPacks
 	Workflow     func() (dir, commit string, err error)
 	Refused      func(workflowCommit string) bool
 	Workspace    string
@@ -164,6 +165,7 @@ type run struct {
 	homeAsk   string
 	homeClear bool
 	homeGated bool
+	pack      SessionPack
 }
 
 type Dispatcher struct {
@@ -480,7 +482,11 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	if d.cfg.PluginDir != "" {
 		argv = append(argv, "--plugin-dir="+d.cfg.PluginDir)
 	}
-	if d.cfg.Workflow != nil {
+	switch {
+	case r.pack.Choice == PackNone:
+	case r.pack.Path != "":
+		argv = append(argv, "--plugin-dir="+r.pack.Path)
+	case d.cfg.Workflow != nil:
 		if dir, commit, err := d.cfg.Workflow(); err == nil {
 			argv = append(argv, "--plugin-dir="+dir)
 			r.stamp.workflow = commit
@@ -1241,6 +1247,7 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 			return required, ctx.Err()
 		}
 		rt.Rounds = w.Rounds(sid, t.Name)
+		rt.Pushes = w.Pushes(sid, t.Name)
 	}
 	d.reviewGiven(&rt, sid, t)
 	return d.cfg.Reviews.Start(ctx, rt)
@@ -1298,6 +1305,21 @@ func (quiet) Info(string, ...any)  {}
 func (quiet) Warn(string, ...any)  {}
 
 func (d *Dispatcher) admit(ctx context.Context, r *run, consent Consent) error {
+	if d.cfg.Packs != nil && (r.pack.Choice == "" || r.pack.Path == "" && PackDigest.MatchString(r.pack.Choice)) {
+		var sp SessionPack
+		var err error
+		if r.pack.Choice == "" {
+			sp, err = d.cfg.Packs.SessionPack(r.repo)
+		} else {
+			sp, err = d.cfg.Packs.SessionPackFor(r.pack.Choice)
+		}
+		if err != nil {
+			return explained(conflict("pack"), clip("The project's pack isn't ready for a session, so the engine doesn't start one: "+err.Error(), maxOutput))
+		}
+		d.mu.Lock()
+		r.pack = sp
+		d.mu.Unlock()
+	}
 	if err := d.startup(r, consent); err != nil {
 		return err
 	}

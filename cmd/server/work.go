@@ -11,7 +11,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
+func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, packs *session.Packs, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
 	if repos == nil {
 		return nil, nil
 	}
@@ -31,6 +31,9 @@ func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, 
 	}
 	if agentFiles != nil {
 		wc.RoleAgents = agentFiles
+	}
+	if packs != nil {
+		wc.Packs = packs
 	}
 	w, err := session.NewWork(wc)
 	if err == nil {

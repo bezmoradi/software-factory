@@ -21,7 +21,7 @@ function text(value: string): string {
 
 function provenance(role: ReviewRole): string {
   const parts = [
-    role.pluginCommit ? `knackpack ${shortSha(role.pluginCommit)}` : '',
+    role.pack ? `${text(role.pack)}${role.packVersion ? ` ${text(role.packVersion)}` : ''}${role.pluginCommit ? ` ${shortSha(role.pluginCommit)}` : ''}${role.packDigest ? `, reviewers' digest ${text(role.packDigest.slice(0, 12))}` : ''}` : role.pluginCommit ? `knackpack ${shortSha(role.pluginCommit)}` : '',
     role.claudeCode ? (role.claudeCode === 'sf-fake-claude' ? 'the development fake reviewer' : `Claude Code ${text(role.claudeCode)}`) : '',
     ...(role.models ?? []).slice(0, 1).map(text),
   ]
@@ -238,6 +238,7 @@ class SfReviews extends HTMLElement {
     }
     if (value.catalog?.state === 'refused') parts.push(el('p', 'small warn', `knackpack's reviewer catalog was refused: ${sentence(text(value.catalog.why || 'it could not be read'))} The engine's built-in list chooses the file reviewers.`))
     else if (value.catalog?.state === 'used') parts.push(el('p', 'small muted', "knackpack's reviewer catalog chooses the file reviewers. It names reviewers and the files they cover; it grants no tool or permission."))
+    else if (value.catalog?.state === 'off') parts.push(el('p', 'small muted', 'This project\'s pack isn\'t knackpack, so no file reviewer is added for the files the branch changes: only the roles its pack fills and the agents you add review it.'))
     if (r) {
       const cost = money(r.costUsd)
       const total = money(r.sessionCostUsd)

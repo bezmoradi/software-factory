@@ -70,6 +70,9 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	kind := ""
 	if v.State == review.Unknown {
 		e.Reason = "its reply had no verdict the engine recognizes"
+		if strings.HasSuffix(e.Record.Provider, review.PackProviderSuffix) && v.Channel == "" {
+			e.Reason = PackNoVerdict
+		}
 		kind = "no-verdict"
 		if v.Channel == review.Conflict {
 			e.Reason = "its reply gave both pass and block"
@@ -104,6 +107,8 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	e.EndedAt = r.cfg.Now()
 	return e, kind
 }
+
+const PackNoVerdict = "its reply ended without a Verdict: pass or Verdict: block line, which every pack's reviewer must write, so it counts as no verdict"
 
 func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	if r.cfg.AgentFiles == nil {

@@ -64,6 +64,7 @@ type runJSON struct {
 	AgentVersion   string    `json:"agentVersion,omitempty"`
 	EngineVersion  string    `json:"engineVersion,omitempty"`
 	WorkflowCommit string    `json:"workflowCommit,omitempty"`
+	Pack           string    `json:"pack,omitempty"`
 	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
 	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
 
@@ -108,7 +109,7 @@ func runOf(r runJSON) (session.SavedRun, bool) {
 	return session.SavedRun{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 		Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt, Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt,
 		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
-		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)}, true
+		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID), Pack: savedPack(r.Pack)}, true
 }
 
 func (s Sessions) Load() ([]session.SavedRun, error) {
@@ -152,7 +153,7 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		f.Sessions = append(f.Sessions, runJSON{Owner: owner, SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
 			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
-			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
+			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID), Pack: savedPack(r.Pack)})
 		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
@@ -234,4 +235,11 @@ func testLockJSONOf(l *session.TestLock) *testLockJSON {
 		return nil
 	}
 	return &testLockJSON{Commit: l.Commit, At: l.At.UTC(), Files: l.Files, Cut: l.Cut, BranchLeft: l.BranchLeft}
+}
+
+func savedPack(p string) string {
+	if p == session.PackKnackpack || p == session.PackNone || session.PackDigest.MatchString(p) {
+		return p
+	}
+	return ""
 }

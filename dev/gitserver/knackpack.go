@@ -134,16 +134,17 @@ func knackpackCommit(root, name, version, extra, date string) (string, error) {
 		if _, err := git(work, "remote", "add", "origin", bare); err != nil {
 			return "", err
 		}
-		if err := os.MkdirAll(filepath.Join(work, "agents"), 0o755); err != nil {
-			return "", err
-		}
-		for _, a := range knackpackAgents {
-			if err := os.WriteFile(filepath.Join(work, "agents", a+".md"), []byte("# "+a+"\n"), 0o644); err != nil {
-				return "", err
-			}
-		}
 	} else if _, err := git(work, "clone", "-q", bare, "."); err != nil {
 		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(work, "agents"), 0o755); err != nil {
+		return "", err
+	}
+	for _, a := range knackpackAgents {
+		text := "---\nname: " + a + "\ndescription: The dev git host's stand-in for knackpack's " + a + "\n---\n# " + a + "\n"
+		if err := os.WriteFile(filepath.Join(work, "agents", a+".md"), []byte(text), 0o644); err != nil {
+			return "", err
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(work, ".claude-plugin"), 0o755); err != nil {
 		return "", err
@@ -203,16 +204,20 @@ func knackpackCommand(root string, args []string) error {
 }
 
 func knackpackHandler(backend http.Handler) http.HandlerFunc {
+	return publicHandler(backend, knackpackPublic, knackpackRepo, "knackpack")
+}
+
+func publicHandler(backend http.Handler, public, repo, label string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rest := strings.TrimPrefix(r.URL.Path, knackpackPublic)
+		rest := strings.TrimPrefix(r.URL.Path, public)
 		listing := r.Method == http.MethodGet && rest == "/info/refs" && r.URL.Query().Get("service") == "git-upload-pack"
 		fetching := r.Method == http.MethodPost && rest == "/git-upload-pack"
 		if !listing && !fetching {
 			http.NotFound(w, r)
 			return
 		}
-		log.Printf("knackpack %s %s", r.Method, rest)
-		r.URL.Path = "/" + knackpackRepo + rest
+		log.Printf("%s %s %s", label, r.Method, rest)
+		r.URL.Path = "/" + repo + rest
 		r.URL.RawPath = ""
 		backend.ServeHTTP(w, r)
 	}

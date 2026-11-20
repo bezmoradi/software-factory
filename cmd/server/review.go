@@ -121,11 +121,15 @@ func reviewSandbox(cfg PageConfig, hosts func() []string) (session.Sandbox, erro
 	})
 }
 
-func reviewerAgents(cfg PageConfig, repos *session.Repos, logger shared.Logger) (*session.ReviewerAgents, error) {
+func reviewerAgents(cfg PageConfig, repos *session.Repos, packs *session.Packs, logger shared.Logger) (*session.ReviewerAgents, error) {
 	if repos == nil {
 		return nil, nil
 	}
-	return session.NewReviewerAgents(session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger})
+	rc := session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger}
+	if packs != nil {
+		rc.Packs = packs
+	}
+	return session.NewReviewerAgents(rc)
 }
 
 func (p engineParts) reviewerAgentsPage() session.ReviewerAgentsPage {

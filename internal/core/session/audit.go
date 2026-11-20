@@ -104,7 +104,7 @@ func (e AuditEntry) masked() AuditEntry {
 }
 
 func ProjectLevelAudit(kind string) bool {
-	return slices.Contains([]string{AuditReviewerAgent, AuditApproveTeam, AuditForgetTeam, AuditApproveStartup}, kind)
+	return slices.Contains([]string{AuditReviewerAgent, AuditPack, AuditApproveTeam, AuditForgetTeam, AuditApproveStartup}, kind)
 }
 
 type AuditReader interface {

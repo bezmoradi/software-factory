@@ -23,7 +23,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
     no_state_check: "refused with 401 before the route's handler runs, since the request carries no key, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t01_remove_repo, t01_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 401 before the route's handler runs, since the request carries no key, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t01_remove_repo, t01_remove_session, t01_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 401 before the route's handler runs, since the request carries no key, so nothing can be removed" } }
     covers: no_key
     columns: ["case", "route"]
     rows:
@@ -64,6 +64,7 @@ tables:
       - ["t01_lock_tests", "/api/lock-tests"]
       - ["t01_message", "/api/message"]
       - ["t01_override", "/api/override"]
+      - ["t01_packs", "/api/packs"]
       - ["t01_pair", "/api/pair"]
       - ["t01_plan_review", "/api/plan-review"]
       - ["t01_prefs", "/api/prefs"]
@@ -162,7 +163,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 421 before any other check, since the Host isn't 127.0.0.1 and the page's port, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t02_remove_repo, t02_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 421 before any other check, since the Host isn't 127.0.0.1 and the page's port, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t02_remove_repo, t02_remove_session, t02_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 421 before any other check, since the Host isn't 127.0.0.1 and the page's port, so nothing can be removed" } }
     covers: other_host
     columns: ["case", "route"]
     rows:
@@ -203,6 +204,7 @@ tables:
       - ["t02_lock_tests", "/api/lock-tests"]
       - ["t02_message", "/api/message"]
       - ["t02_override", "/api/override"]
+      - ["t02_packs", "/api/packs"]
       - ["t02_pair", "/api/pair"]
       - ["t02_plan_review", "/api/plan-review"]
       - ["t02_prefs", "/api/prefs"]
@@ -302,7 +304,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 403 before the route's handler runs, since the Origin is another site's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t03_remove_repo, t03_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 403 before the route's handler runs, since the Origin is another site's, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t03_remove_repo, t03_remove_session, t03_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since the Origin is another site's, so nothing can be removed" } }
     covers: other_origin
     columns: ["case", "route"]
     rows:
@@ -343,6 +345,7 @@ tables:
       - ["t03_lock_tests", "/api/lock-tests"]
       - ["t03_message", "/api/message"]
       - ["t03_override", "/api/override"]
+      - ["t03_packs", "/api/packs"]
       - ["t03_pair", "/api/pair"]
       - ["t03_plan_review", "/api/plan-review"]
       - ["t03_prefs", "/api/prefs"]
@@ -442,7 +445,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 403 before the route's handler runs, since Sec-Fetch-Site is cross-site, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t04_remove_repo, t04_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is cross-site, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t04_remove_repo, t04_remove_session, t04_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is cross-site, so nothing can be removed" } }
     covers: cross_site
     columns: ["case", "route"]
     rows:
@@ -483,6 +486,7 @@ tables:
       - ["t04_lock_tests", "/api/lock-tests"]
       - ["t04_message", "/api/message"]
       - ["t04_override", "/api/override"]
+      - ["t04_packs", "/api/packs"]
       - ["t04_pair", "/api/pair"]
       - ["t04_plan_review", "/api/plan-review"]
       - ["t04_prefs", "/api/prefs"]
@@ -581,7 +585,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 403 before the route's handler runs, since a POST without Origin can't be told from another site's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t05_remove_repo, t05_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 403 before the route's handler runs, since the request has no Origin, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t05_remove_repo, t05_remove_session, t05_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since the request has no Origin, so nothing can be removed" } }
     covers: no_origin
     columns: ["case", "route"]
     rows:
@@ -622,6 +626,7 @@ tables:
       - ["t05_lock_tests", "/api/lock-tests"]
       - ["t05_message", "/api/message"]
       - ["t05_override", "/api/override"]
+      - ["t05_packs", "/api/packs"]
       - ["t05_pair", "/api/pair"]
       - ["t05_plan_review", "/api/plan-review"]
       - ["t05_prefs", "/api/prefs"]
@@ -720,7 +725,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 415 before the route's handler reads the body, since its Content-Type isn't the route's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t06_remove_repo, t06_remove_session], reason: "the remove-repo and remove-session rows send the text {} as text/plain, which names no repository or session, and every row is refused with 415 before the route's handler reads the body, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t06_remove_repo, t06_remove_session, t06_packs], reason: "the remove-repo, remove-session and packs rows send the text {} as text/plain, which names no repository, session or pack, and every row is refused with 415 before the route's handler reads the body, so nothing can be removed" } }
     covers: not_json
     columns: ["case", "route"]
     rows:
@@ -761,6 +766,7 @@ tables:
       - ["t06_lock_tests", "/api/lock-tests"]
       - ["t06_message", "/api/message"]
       - ["t06_override", "/api/override"]
+      - ["t06_packs", "/api/packs"]
       - ["t06_pair", "/api/pair"]
       - ["t06_plan_review", "/api/plan-review"]
       - ["t06_prefs", "/api/prefs"]
@@ -1025,7 +1031,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 400 before the route's handler runs, since the URL has a query string, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t09_remove_repo, t09_remove_session], reason: "the remove-repo and remove-session rows send an empty body, which names no repository or session, and every row is refused with 400 before the route's handler runs, since the URL has a query string, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t09_remove_repo, t09_remove_session, t09_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 400 before the route's handler runs, since the URL has a query string, so nothing can be removed" } }
     covers: query
     columns: ["case", "route"]
     rows:
@@ -1066,6 +1072,7 @@ tables:
       - ["t09_lock_tests", "/api/lock-tests"]
       - ["t09_message", "/api/message"]
       - ["t09_override", "/api/override"]
+      - ["t09_packs", "/api/packs"]
       - ["t09_pair", "/api/pair"]
       - ["t09_plan_review", "/api/plan-review"]
       - ["t09_prefs", "/api/prefs"]
@@ -1213,6 +1220,7 @@ tables:
       - ["t10_message", "/api/message"]
       - ["t10_metrics", "/api/metrics"]
       - ["t10_override", "/api/override"]
+      - ["t10_packs", "/api/packs"]
       - ["t10_pair", "/api/pair"]
       - ["t10_plan_review", "/api/plan-review"]
       - ["t10_prefs", "/api/prefs"]
@@ -1329,6 +1337,7 @@ tables:
           - t11_put_message
           - t11_put_metrics
           - t11_put_override
+          - t11_put_packs
           - t11_put_pair
           - t11_put_plan_review
           - t11_put_prefs
@@ -1417,6 +1426,7 @@ tables:
           - t11_delete_message
           - t11_delete_metrics
           - t11_delete_override
+          - t11_delete_packs
           - t11_delete_pair
           - t11_delete_plan_review
           - t11_delete_prefs
@@ -1505,6 +1515,7 @@ tables:
           - t11_patch_message
           - t11_patch_metrics
           - t11_patch_override
+          - t11_patch_packs
           - t11_patch_pair
           - t11_patch_plan_review
           - t11_patch_prefs
@@ -1596,6 +1607,7 @@ tables:
       - ["t11_put_message", "/api/message", "PUT"]
       - ["t11_put_metrics", "/api/metrics", "PUT"]
       - ["t11_put_override", "/api/override", "PUT"]
+      - ["t11_put_packs", "/api/packs", "PUT"]
       - ["t11_put_pair", "/api/pair", "PUT"]
       - ["t11_put_plan_review", "/api/plan-review", "PUT"]
       - ["t11_put_prefs", "/api/prefs", "PUT"]
@@ -1684,6 +1696,7 @@ tables:
       - ["t11_delete_message", "/api/message", "DELETE"]
       - ["t11_delete_metrics", "/api/metrics", "DELETE"]
       - ["t11_delete_override", "/api/override", "DELETE"]
+      - ["t11_delete_packs", "/api/packs", "DELETE"]
       - ["t11_delete_pair", "/api/pair", "DELETE"]
       - ["t11_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t11_delete_prefs", "/api/prefs", "DELETE"]
@@ -1772,6 +1785,7 @@ tables:
       - ["t11_patch_message", "/api/message", "PATCH"]
       - ["t11_patch_metrics", "/api/metrics", "PATCH"]
       - ["t11_patch_override", "/api/override", "PATCH"]
+      - ["t11_patch_packs", "/api/packs", "PATCH"]
       - ["t11_patch_pair", "/api/pair", "PATCH"]
       - ["t11_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t11_patch_prefs", "/api/prefs", "PATCH"]
@@ -1886,6 +1900,7 @@ tables:
           - t12_put_message
           - t12_put_metrics
           - t12_put_override
+          - t12_put_packs
           - t12_put_pair
           - t12_put_plan_review
           - t12_put_prefs
@@ -1974,6 +1989,7 @@ tables:
           - t12_delete_message
           - t12_delete_metrics
           - t12_delete_override
+          - t12_delete_packs
           - t12_delete_pair
           - t12_delete_plan_review
           - t12_delete_prefs
@@ -2062,6 +2078,7 @@ tables:
           - t12_patch_message
           - t12_patch_metrics
           - t12_patch_override
+          - t12_patch_packs
           - t12_patch_pair
           - t12_patch_plan_review
           - t12_patch_prefs
@@ -2153,6 +2170,7 @@ tables:
       - ["t12_put_message", "/api/message", "PUT"]
       - ["t12_put_metrics", "/api/metrics", "PUT"]
       - ["t12_put_override", "/api/override", "PUT"]
+      - ["t12_put_packs", "/api/packs", "PUT"]
       - ["t12_put_pair", "/api/pair", "PUT"]
       - ["t12_put_plan_review", "/api/plan-review", "PUT"]
       - ["t12_put_prefs", "/api/prefs", "PUT"]
@@ -2241,6 +2259,7 @@ tables:
       - ["t12_delete_message", "/api/message", "DELETE"]
       - ["t12_delete_metrics", "/api/metrics", "DELETE"]
       - ["t12_delete_override", "/api/override", "DELETE"]
+      - ["t12_delete_packs", "/api/packs", "DELETE"]
       - ["t12_delete_pair", "/api/pair", "DELETE"]
       - ["t12_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t12_delete_prefs", "/api/prefs", "DELETE"]
@@ -2329,6 +2348,7 @@ tables:
       - ["t12_patch_message", "/api/message", "PATCH"]
       - ["t12_patch_metrics", "/api/metrics", "PATCH"]
       - ["t12_patch_override", "/api/override", "PATCH"]
+      - ["t12_patch_packs", "/api/packs", "PATCH"]
       - ["t12_patch_pair", "/api/pair", "PATCH"]
       - ["t12_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t12_patch_prefs", "/api/prefs", "PATCH"]
@@ -2394,7 +2414,7 @@ tables:
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 403 before the route's handler runs, since Sec-Fetch-Site is same-site, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { EXE-09: { rows: [t13_remove_repo, t13_remove_session], reason: "the remove-repo and remove-session rows send only a field no route takes, which names no repository or session, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is same-site, so nothing can be removed" } }
+    waive: { EXE-09: { rows: [t13_remove_repo, t13_remove_session, t13_packs], reason: "the remove-repo, remove-session and packs rows send only a field no route takes, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is same-site, so nothing can be removed" } }
     covers: same_site
     columns: ["case", "route"]
     rows:
@@ -2435,6 +2455,7 @@ tables:
       - ["t13_lock_tests", "/api/lock-tests"]
       - ["t13_message", "/api/message"]
       - ["t13_override", "/api/override"]
+      - ["t13_packs", "/api/packs"]
       - ["t13_pair", "/api/pair"]
       - ["t13_plan_review", "/api/plan-review"]
       - ["t13_prefs", "/api/prefs"]

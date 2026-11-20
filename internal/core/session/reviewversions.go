@@ -27,8 +27,7 @@ func (r *Reviews) Current() (string, string) {
 	r.mu.Lock()
 	claude := r.claude
 	r.mu.Unlock()
-	_, commit, _ := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
-	return claude, commit
+	return claude, r.cfg.Plugins.KnackpackCommit()
 }
 
 func (r *Reviews) reviewerVersion(ctx context.Context) string {
