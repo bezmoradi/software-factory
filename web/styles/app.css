@@ -905,7 +905,10 @@ sf-projects > .label { margin-top: .5rem; }
 .welcome { display: grid; grid-template-columns: 1fr 6fr 1fr 6fr 1fr; grid-template-areas: ". head head head ." ". left . right ." ". recent recent recent ."; max-width: 1200px; margin: 0 auto; padding: 0 0 1.5rem; font-size: .8125rem; line-height: 1.4; }
 .view:has(> .welcome:not([hidden])) { padding-top: 0; padding-bottom: 0; }
 .welcome .recent sf-overview > :last-child, .welcome .recent sf-overview > :last-child .sessions { margin-bottom: 0; }
-.welcome-head { grid-area: head; padding: 0 0 2rem; }
+.welcome-head { grid-area: head; display: flex; align-items: center; gap: .75rem; padding: 0 0 2rem; }
+.welcome-repo { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 4px; border-radius: 6px; color: var(--soft); text-decoration: none; }
+.welcome-repo:hover { color: var(--ink); }
+.welcome-repo .icon { display: block; width: 2em; height: 2em; }
 .scroller:has(> #home:not([hidden]) > .welcome:not([hidden])) { display: flex; flex-direction: column; }
 .scroller:has(> #home:not([hidden]) > .welcome:not([hidden])) > #home { flex: none; width: 100%; margin: auto; padding-block: 1rem; }
 .welcome h1 { margin: 0; font-size: clamp(1.75em, 8cqi, 2.7em); font-weight: 600; line-height: 1.2; color: var(--ink); text-wrap: balance; }
