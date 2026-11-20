@@ -90,9 +90,10 @@ class SfApproval extends HTMLElement {
       return this.replaceChildren()
     }
     const reqs = v.kind === 'requirements'
-    const what = reqs ? 'the requirements' : 'the plan'
+    const cause = v.kind === 'root-cause'
+    const what = reqs ? 'the requirements' : cause ? 'the root cause' : 'the plan'
     this.#field.setAttribute('aria-label', `What the agent should change in ${what}`)
-    const What = reqs ? 'The requirements' : 'The plan'
+    const What = reqs ? 'The requirements' : cause ? 'The root cause' : 'The plan'
     const them = reqs ? 'them' : 'it'
     const status = v.onBase
       ? `${What} ${reqs ? 'are' : 'is'} from an earlier task, already on the base branch, so ${reqs ? 'they aren’t' : 'it isn’t'} approvable here. The engine counts only text this session’s own commits added or changed${v.changed ? ', so your earlier approval no longer counts' : ''}.`
@@ -104,11 +105,11 @@ class SfApproval extends HTMLElement {
           ? v.approvedAt && v.commit
             ? `${What} in commit ${shortSha(v.commit)} ${reqs ? 'differ' : 'differs'} from the version you approved in commit ${shortSha(v.approvedAt)}, so that approval no longer counts. Read ${them} and approve again.`
             : `${What} changed after you approved ${them}. Read ${them} and approve again.`
-          : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : 'Implement starts once you read the plan and approve it.'
+          : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : cause ? 'Fix starts once you read the confirmed root cause and approve it. Approving it lets this branch push code; an edit to the file clears it.' : 'Implement starts once you read the plan and approve it.'
     const body = el('div', 'reply')
     const text = el('sf-markdown', 'body')
     text.exact = true
-    text.text = v.text || (reqs ? 'Nothing is agreed yet.' : 'The plan is empty.')
+    text.text = v.text || (reqs ? 'Nothing is agreed yet.' : cause ? 'The root cause is empty.' : 'The plan is empty.')
     body.append(text)
     const file = visible(v.path.split('/').pop() ?? 'the plan')
     const draft = !!v.draft && !v.approved
@@ -119,12 +120,12 @@ class SfApproval extends HTMLElement {
     const parts: HTMLElement[] = [el('p', `small ${v.approved ? 'ok' : 'warn'}`, status)]
     if (reqs && v.changed && !v.approved) parts.push(this.#changes(v))
     parts.push(details)
-    if (!reqs) {
+    if (!reqs && !cause) {
       this.#planBox = this.#planReview(v)
       parts.push(this.#planBox)
     }
     if (v.approved) return this.#quiet(parts)
-    const approve = button(reqs ? 'Approve requirements' : 'Approve plan', 'ghost', () => {
+    const approve = button(reqs ? 'Approve requirements' : cause ? 'Approve root cause' : 'Approve plan', 'ghost', () => {
       if (!this.#open.has(v.hash)) {
         details.open = true
         this.#why.textContent = `Read this version of ${what} first: it is open above. Then approve.`
@@ -153,7 +154,7 @@ class SfApproval extends HTMLElement {
     parts.push(row)
     if (v.note) parts.push(el('p', 'small muted', v.note))
     const why = v.refused || v.hold || ''
-    this.#why.id = `${reqs ? 'req' : 'plan'}-approval-why`
+    this.#why.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-approval-why`
     if (why) approve.setAttribute('aria-describedby', this.#why.id)
     this.#why.classList.remove('status-slot')
     replaceKeeping(this, [...parts, this.#why, form])

@@ -62,8 +62,6 @@ type bridge struct {
 	turns     int
 	cards     map[string]string
 	reqs      map[string]string
-	asks      map[string]map[string]string
-	names     map[string]string
 	ended     bool
 	polling   bool
 	waiting   []Fields
@@ -91,7 +89,6 @@ func newBridge(reg *Registry, log shared.Logger, sid, cwd, box, version string) 
 		reg: reg, log: log, sid: sid, cwd: cwd, box: box, version: version, now: reg.now,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		epoch: randomHex(8), cards: map[string]string{}, reqs: map[string]string{},
-		asks: map[string]map[string]string{}, names: map[string]string{},
 	}
 	if err := b.register(); err != nil {
 		cancel()
@@ -189,7 +186,6 @@ func (b *bridge) finish() {
 	}
 	b.reqs = map[string]string{}
 	b.cards = map[string]string{}
-	b.asks = map[string]map[string]string{}
 	b.recordLocked(Fields{"type": "ended"})
 	b.ended = true
 	if b.timer != nil {
@@ -316,42 +312,7 @@ func shownPrompt(text string, parts []Attachment) Fields {
 	return shown
 }
 
-func (b *bridge) steer(st SteeringSession, text string, parts []Attachment, m Fields) {
-	b.prompting.Lock()
-	ctx, cancel := context.WithTimeout(b.ctx, bridgeCall)
-	err := st.Steer(ctx, text, parts)
-	cancel()
-	b.prompting.Unlock()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.ended {
-		return
-	}
-	switch {
-	case err == nil:
-		b.recordLocked(shownPrompt(text, parts))
-		b.log.Info("agent session", "event", "steer")
-	case errors.Is(err, ErrSteerRefused) && b.turn != "":
-		b.queueLocked(m)
-	case errors.Is(err, ErrSteerRefused):
-		go b.handleAfterSteer(m)
-	default:
-		b.log.Warn("agent session", "event", "steer-refused")
-		b.recordLocked(Fields{"type": "command", "name": "error", "text": "The agent didn't take the message: " + clip(err.Error(), 500), "failed": true})
-	}
-}
-
-func (b *bridge) handleAfterSteer(m Fields) {
-	if text, ok := m["text"].(string); ok {
-		b.promptOnce(text, m, true)
-	}
-}
-
 func (b *bridge) prompt(text string, m Fields) {
-	b.promptOnce(text, m, false)
-}
-
-func (b *bridge) promptOnce(text string, m Fields, steered bool) {
 	_, attached := m["images"]
 	if _, files := m["files"]; files {
 		attached = true
@@ -373,11 +334,6 @@ func (b *bridge) promptOnce(text string, m Fields, steered bool) {
 		return
 	}
 	if b.turn != "" {
-		if st, ok := sess.(SteeringSession); ok && !steered {
-			b.mu.Unlock()
-			go b.steer(st, text, parts, m)
-			return
-		}
 		b.queueLocked(m)
 		b.mu.Unlock()
 		return
@@ -463,7 +419,7 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 	case agent.ToolCall:
 		if ev.Tool != nil && ev.Tool.ID != "" {
-			b.recordLocked(b.ofAgentLocked(withCommand(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)}, ev.Tool), ev.Agent))
+			b.recordLocked(withCommand(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)}, ev.Tool))
 			if done, ok := toolDone(ev.Tool.Status); ok {
 				b.recordLocked(withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""}, ev.Tool))
 			}
@@ -476,20 +432,13 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 	case agent.Permission:
 		if ev.Request != nil {
-			b.cardLocked(*ev.Request, ev.Agent)
-		}
-	case agent.Subagents:
-		b.subagentsLocked(ev.Agents)
-	case agent.Notice:
-		if ev.Text != "" {
-			b.recordLocked(Fields{"type": "notice", "text": clip(ev.Text, MaxText)})
+			b.cardLocked(*ev.Request)
 		}
 	case agent.Withdrawn:
 		if ev.Request != nil {
 			if card := b.cards[ev.Request.ID]; card != "" {
 				delete(b.cards, ev.Request.ID)
 				delete(b.reqs, card)
-				delete(b.asks, card)
 				b.recordLocked(Fields{"type": "resolved", "id": card})
 			}
 		}
@@ -617,18 +566,8 @@ func (b *bridge) flushLocked() {
 	b.recordLocked(t)
 }
 
-func (b *bridge) cardLocked(req agent.Request, sub string) {
+func (b *bridge) cardLocked(req agent.Request) {
 	id := randomHex(16)
-	if len(req.Questions) > 0 {
-		f, texts := askFields(id, req.Questions)
-		b.cards[req.ID] = id
-		b.reqs[id] = req.ID
-		b.asks[id] = texts
-		b.recordLocked(b.ofAgentLocked(f, sub))
-		b.log.Info("agent session", "event", "question")
-		go b.waitCard(id, req.ID)
-		return
-	}
 	allow := false
 	for _, o := range req.Options {
 		if o.Kind == "allow_once" {
@@ -646,10 +585,10 @@ func (b *bridge) cardLocked(req agent.Request, sub string) {
 	}
 	b.cards[req.ID] = id
 	b.reqs[id] = req.ID
-	b.recordLocked(b.ofAgentLocked(Fields{
+	b.recordLocked(Fields{
 		"type": "permission", "id": id, "tool": clip(tool, maxSummary), "toolKind": toolName(&req.Tool), "summary": clip(req.Tool.Title, maxSummary),
 		"detail": clip(detail, maxDetail), "complete": complete, "always": "", "auto": false,
-	}, sub))
+	})
 	b.log.Info("agent session", "event", "card")
 	go b.waitCard(id, req.ID)
 }
@@ -708,15 +647,11 @@ func (b *bridge) waitCard(card, req string) {
 			b.mu.Unlock()
 			return
 		}
-		texts := b.asks[card]
 		delete(b.reqs, card)
 		delete(b.cards, req)
-		delete(b.asks, card)
 		b.mu.Unlock()
 		given := answerOf(answer)
-		if texts != nil {
-			given = askAnswer(texts, answer)
-		} else if awayAnswered(answer) {
+		if awayAnswered(answer) {
 			b.reg.NoteFor("away")(b.sid, awayAgentNote)
 		}
 		actx, acancel := context.WithTimeout(b.ctx, bridgeCall)

@@ -123,6 +123,11 @@ func (f *Forges) Restore(open AuditOpen) int {
 			need = NeedPulls
 		}
 		ft, why := f.target(s.SID, need)
+		if why != "" && f.cfg.Held != nil {
+			if t, held := f.cfg.Held(s.SID); held {
+				ft, why = f.targetOf(t, true, need)
+			}
+		}
 		if why != "" || (s.Kind == ForgePull && (s.Head != ft.t.Branch || s.Base == "")) {
 			continue
 		}

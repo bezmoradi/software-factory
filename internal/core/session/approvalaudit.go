@@ -26,10 +26,10 @@ func (w *Work) SetHold(path string, h HoldSettings) error {
 	})
 }
 
-func (w *Work) approved(sid string, t PushTarget, head string, plan bool, hash string) {
-	kind, what := AuditApproveRequirements, "requirements"
+func (w *Work) approved(sid string, t PushTarget, head string, plan bool, hash, what string) {
+	kind := AuditApproveRequirements
 	if plan {
-		kind, what = AuditApprovePlan, "plan"
+		kind = AuditApprovePlan
 	}
 	w.audit(AuditEntry{Session: sid, Repository: t.Name, Branch: t.Branch, Commit: head, Kind: kind, Hash: hash,
 		Reason: "the developer approved the " + what + " shown on the page, at commit " + shortSHA(head)})

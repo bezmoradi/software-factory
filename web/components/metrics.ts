@@ -9,6 +9,8 @@ interface RoleNumbers {
   noVerdict: number
   failed: number
   overridden: number
+  afterCi: number
+  afterComments: number
 }
 
 interface DonePull {
@@ -31,6 +33,8 @@ interface MetricsView {
   allows: number
   denied: number
   overrides: number
+  afterCi: number
+  afterComments: number
   reviewsSince: number
   reviewRuns: number
   reviewCost: number
@@ -55,7 +59,7 @@ function readRole(x: unknown): RoleNumbers[] {
   if (!x || typeof x !== 'object') return []
   const r = x as Record<string, unknown>
   if (typeof r.role !== 'string') return []
-  return [{ role: shown(r.role), reviews: count(r.reviews), passed: count(r.passed), blocked: count(r.blocked), noVerdict: count(r.noVerdict), failed: count(r.failed), overridden: count(r.overridden) }]
+  return [{ role: shown(r.role), reviews: count(r.reviews), passed: count(r.passed), blocked: count(r.blocked), noVerdict: count(r.noVerdict), failed: count(r.failed), overridden: count(r.overridden), afterCi: count(r.afterCi), afterComments: count(r.afterComments) }]
 }
 
 function readPull(x: unknown): DonePull[] {
@@ -72,7 +76,7 @@ function readView(body: unknown): MetricsView | null {
   return {
     auditSince: count(v.auditSince), auditLines: count(v.auditLines), auditCut: v.auditCut === true, pushes: count(v.pushes), timed: count(v.timed),
     median: count(v.startToPushMedian), mean: count(v.startToPushMean), longest: count(v.startToPushLongest), rounds: count(v.rounds), roles: v.roles.flatMap(readRole),
-    allows: count(v.allows), denied: count(v.denied), overrides: count(v.overrides), reviewsSince: count(v.reviewsSince), reviewRuns: count(v.reviewRuns), reviewCost: count(v.reviewCostUsd), importedRuns: count(v.importedReviewRuns), importedCost: count(v.importedReviewCostUsd),
+    allows: count(v.allows), denied: count(v.denied), overrides: count(v.overrides), afterCi: count(v.afterCi), afterComments: count(v.afterComments), reviewsSince: count(v.reviewsSince), reviewRuns: count(v.reviewRuns), reviewCost: count(v.reviewCostUsd), importedRuns: count(v.importedReviewRuns), importedCost: count(v.importedReviewCostUsd),
     agentSessions: count(v.agentSessions), agentCost: count(v.agentCostUsd), pullsSince: count(v.pullsSince), pullsOpened: count(v.pullsOpened), pullsMerged: count(v.pullsMerged),
     pullsClosed: count(v.pullsClosed), pulls: Array.isArray(v.pulls) ? v.pulls.flatMap(readPull) : [],
     problems: Array.isArray(v.problems) ? v.problems.filter((s): s is string => typeof s === 'string').map(shown) : [],
@@ -158,9 +162,20 @@ class SfProjectMetrics extends HTMLElement {
     const ul = el('ul', 'small list')
     for (const r of v.roles) {
       const li = el('li')
-      li.append(el('code', '', r.role), `: ${plural(r.reviews, 'review')}, ${share(r.passed, r.reviews)} passed, ${share(r.blocked, r.reviews)} blocked, ${share(r.overridden, r.reviews)} overridden, ${share(r.noVerdict, r.reviews)} with no verdict${r.failed ? `, ${share(r.failed, r.reviews)} failed` : ''}`)
+      li.append(el('code', '', r.role), `: ${plural(r.reviews, 'review')}, ${share(r.passed, r.reviews)} passed, ${share(r.blocked, r.reviews)} blocked, ${share(r.overridden, r.reviews)} overridden, ${share(r.noVerdict, r.reviews)} with no verdict${r.failed ? `, ${share(r.failed, r.reviews)} failed` : ''}, ${plural(r.afterCi, 'CI failure')} and ${plural(r.afterComments, 'review comment')} after it passed`)
       ul.append(li)
     }
+    box.append(ul)
+    return box
+  }
+
+  #after(v: MetricsView): HTMLElement {
+    const box = el('div')
+    box.append(el('p', 'small', 'After review'))
+    box.append(el('p', 'small muted', 'These are "after review" counts, not defects: a CI failure can be flaky, and a comment may not point at a defect. The engine reads them only while a pull request is open for a branch it pushed, and counts each once.'))
+    const ul = el('ul', 'small list')
+    ul.append(el('li', v.afterCi ? 'warn' : '', `CI failures on commits whose required reviews had all passed: ${v.afterCi}`))
+    ul.append(el('li', v.afterComments ? 'warn' : '', `Pull request review comments on those commits after the push: ${v.afterComments}`))
     box.append(ul)
     return box
   }
@@ -181,7 +196,7 @@ class SfProjectMetrics extends HTMLElement {
   #cost(v: MetricsView): HTMLElement {
     const box = el('div')
     box.append(el('p', 'small', 'Cost, the agents\' own estimate'))
-    box.append(el('p', 'small muted', 'Claude Code and Codex report these numbers themselves; the engine adds them up and checks nothing. On a subscription they are what the same use would cost per token, not a bill.'))
+    box.append(el('p', 'small muted', 'Claude Code reports these numbers itself; the engine adds them up and checks nothing. On a subscription they are what the same use would cost per token, not a bill.'))
     const ul = el('ul', 'small list')
     ul.append(el('li', '', `Agents: $${v.agentCost.toFixed(2)} over ${plural(v.agentSessions, 'session')} the caps record still holds`))
     ul.append(el('li', '', `Reviewers: $${v.reviewCost.toFixed(2)} over ${plural(v.reviewRuns, 'review')}${v.reviewsSince ? ` since ${date(v.reviewsSince)}` : ''}, from the review records (at most 500)${v.importedRuns ? `, including $${v.importedCost.toFixed(2)} over ${plural(v.importedRuns, 'review')} imported from another engine, shown for the record` : ''}`))
@@ -196,7 +211,7 @@ class SfProjectMetrics extends HTMLElement {
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Counting…' : 'Nothing read yet.'))
     else {
-      parts.push(...this.#numbers(v), this.#roles(v), this.#pulls(v), this.#cost(v))
+      parts.push(...this.#numbers(v), this.#roles(v), this.#after(v), this.#pulls(v), this.#cost(v))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
     }
     const again = button('Count again', 'link small', () => void this.#read(), 'button', 'metrics-again')

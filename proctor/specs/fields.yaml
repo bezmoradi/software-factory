@@ -1,0 +1,390 @@
+version: 2
+suite: fields
+tables:
+  - id: FLD-T01
+    name: "A route refuses a body its field check doesn't accept, naming the field"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}" }
+    no_state_check: "refused with 400 by the route's own field check before it acts, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [fld_remove_session, fld_remove_session_offer, fld_remove_repo], reason: "every row is refused with 400 by the route's own field check before it acts, so nothing can be removed: the remove-repo row's empty body names no repository, the fld_remove_session row's body names no session, and the fld_remove_session_offer row's flag and value are fields the route refuses" } }
+    columns: ["case", "route", "body", "error"]
+    rows:
+      - ["fld_replay", "/api/replay", { proctorUnknownField: true }, "fields"]
+      - ["fld_interrupt", "/api/interrupt", { proctorUnknownField: true }, "fields"]
+      - ["fld_answer", "/api/answer", { proctorUnknownField: true }, "fields"]
+      - ["fld_control", "/api/control", { proctorUnknownField: true }, "fields"]
+      - ["fld_control_unconfirmed", "/api/control", { sid: "00000000-0000-4000-8000-000000000000", on: true }, "confirm"]
+      - ["fld_release", "/api/release", { proctorUnknownField: true }, "fields"]
+      - ["fld_session", "/api/session", { proctorUnknownField: true }, "body"]
+      - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs"]
+      - ["fld_message", "/api/message", { proctorUnknownField: true }, "text"]
+      - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text"]
+      - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields"]
+      - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path"]
+      - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields"]
+      - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields"]
+      - ["fld_wake_home_short", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: abc }, "fields"]
+      - ["fld_wake_home_upper", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" }, "fields"]
+      - ["fld_wake_home_empty", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "" }, "fields"]
+      - ["fld_wake_home_type", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: 1 }, "fields"]
+      - ["fld_wake_refuse_false", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: false }, "fields"]
+      - ["fld_wake_refuse_text", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: "true" }, "fields"]
+      - ["fld_wake_refuse_home", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
+      - ["fld_wake_refuse_approve", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, approve: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
+      - ["fld_message_home", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, home: abc }, "text"]
+      - ["fld_dispatch_home", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
+      - ["fld_remove_session", "/api/remove-session", { proctorUnknownField: true }, "fields"]
+      - ["fld_remove_session_offer", "/api/remove-session", { sid: "00000000-0000-4000-8000-000000000000", flag: proctor, value: x }, "offer"]
+      - ["fld_review", "/api/review", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_override", "/api/override", { sid: "00000000-0000-4000-8000-000000000000", agent: "knackpack:adversarial-reviewer", commit: abc, reason: proctor }, "fields"]
+      - ["fld_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
+      - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields"]
+      - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
+      - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op"]
+      - ["fld_lock_no_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock }, "fields"]
+      - ["fld_lock_bad_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock, head: abc }, "fields"]
+      - ["fld_unlock_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: unlock, head: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
+      - ["fld_lock_no_sid", "/api/lock-tests", { op: unlock }, "fields"]
+      - ["fld_team", "/api/team", { proctorUnknownField: true }, "fields"]
+      - ["fld_team_op", "/api/team", { path: /workspace/base/demo, op: proctor }, "op"]
+      - ["fld_viewed_blob", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: xyz, viewed: true }, "fields"]
+      - ["fld_viewed_long_path", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: "${fill(4097)}", blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "fields"]
+      - ["fld_viewed_missing", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md }, "fields"]
+      - ["fld_keep_commit_read", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
+      - ["fld_keep_extra", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_halt", "/api/halt", {}, "op"]
+      - ["fld_halt_extra", "/api/halt", { op: read, proctorUnknownField: true }, "fields"]
+      - ["fld_diagnostics", "/api/diagnostics", { proctorUnknownField: true }, "fields"]
+      - ["fld_update_two", "/api/update", { check: true, later: "1.0.0" }, "fields"]
+      - ["fld_update_type", "/api/update", { check: "yes" }, "fields"]
+      - ["fld_update_empty_later", "/api/update", { later: "" }, "fields"]
+      - ["fld_save_token", "/api/save-token", { host: "gitserver.test:8443" }, "token"]
+      - ["fld_save_token_extra", "/api/save-token", { proctorUnknownField: true }, "fields"]
+      - ["fld_add_repo", "/api/add-repo", { proctorUnknownField: true }, "fields"]
+      - ["fld_add_repo_type", "/api/add-repo", { url: 1 }, "url"]
+      - ["fld_remove_repo", "/api/remove-repo", {}, "name"]
+      - ["fld_remove_token", "/api/remove-token", {}, "host"]
+      - ["fld_export", "/api/export", { proctorUnknownField: true }, "fields"]
+      - ["fld_clone_again", "/api/clone-again", {}, "name"]
+      - ["fld_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_files", "/api/files", { proctorUnknownField: true }, "fields"]
+      - ["fld_file_match", "/api/file-match", { proctorUnknownField: true }, "fields"]
+      - ["fld_limits_op", "/api/limits", { op: proctor }, "op"]
+      - ["fld_limits_disk_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
+      - ["fld_limits_disk_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "fields"]
+      - ["fld_limits_disk_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
+      - ["fld_limits_disk_text", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "fields"]
+      - ["fld_limits_disk_null", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "fields"]
+      - ["fld_limits_project_disk_negative", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
+      - ["fld_limits_project_disk_fraction", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "fields"]
+      - ["fld_limits_project_disk_over", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
+      - ["fld_limits_session_extra", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_project_extra", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_session_no_money", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "fields"]
+      - ["fld_limits_money_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "fields"]
+      - ["fld_limits_money_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "fields"]
+      - ["fld_limits_minutes_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "fields"]
+      - ["fld_limits_minutes_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "fields"]
+      - ["fld_limits_turns_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "fields"]
+      - ["fld_limits_turns_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "fields"]
+      - ["fld_limits_raise_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: 2 }, "fields"]
+      - ["fld_limits_raise_extra", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_measure_extra", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields"]
+      - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields"]
+      - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields"]
+      - ["fld_verify", "/api/verify", { proctorUnknownField: true }, "fields"]
+      - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
+      - ["fld_verify_stop_id", "/api/verify", { op: stop, sid: "00000000-0000-4000-8000-000000000000", id: xyz }, "fields"]
+      - ["fld_verify_main_both", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", repo: demo, kind: check }, "fields"]
+      - ["fld_verify_main_repo", "/api/verify", { op: start, repo: 5, kind: check }, "fields"]
+      - ["fld_verify_main_name", "/api/verify", { op: read, repo: "../demo" }, "fields"]
+      - ["fld_verify_main_extra", "/api/verify", { op: start, repo: demo, kind: check, proctorUnknownField: true }, "fields"]
+      - ["fld_verify_main_no_kind", "/api/verify", { op: start, repo: demo }, "fields"]
+      - ["fld_verify_main_read_extra", "/api/verify", { op: read, repo: demo, kind: check }, "fields"]
+      - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields"]
+      - ["fld_push_record", "/api/push-record", { proctorUnknownField: true }, "fields"]
+      - ["fld_push_record_extra", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567", proctorUnknownField: true }, "fields"]
+      - ["fld_push_record_short", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456" }, "fields"]
+      - ["fld_push_record_upper", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789ABCDEF0123456789ABCDEF01234567" }, "fields"]
+      - ["fld_push_record_no_sid", "/api/push-record", { commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
+      - ["fld_project_commands_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: 1 }, "fields"]
+      - ["fld_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: 1 }, "fields"]
+      - ["fld_verify_attachment_id", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: xyz, name: home.png }, "fields"]
+      - ["fld_verify_attachment_extra", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png, proctorUnknownField: true }, "fields"]
+
+  - id: FLD-T01R
+    name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}" }
+    columns: ["case", "route", "body", "error"]
+    rows:
+      - ["fld_projects", "/api/projects", { proctorUnknownField: true }, "fields"]
+      - ["fld_docs", "/api/docs", { proctorUnknownField: true }, "fields"]
+      - ["fld_audit_extra", "/api/audit", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_audit_no_sid", "/api/audit", {}, "fields"]
+      - ["fld_gate", "/api/gate", {}, "fields"]
+      - ["fld_gate_extra", "/api/gate", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_changes_from", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: later }, "fields"]
+      - ["fld_changes_commit_alone", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
+      - ["fld_changes_commit_missing", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: commit }, "fields"]
+      - ["fld_changes_extra", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_backup", "/api/backup", { proctorUnknownField: true }, "fields"]
+      - ["fld_metrics_no_repo", "/api/metrics", { op: read }, "fields"]
+      - ["fld_agent_report", "/api/agent-report", { op: list }, "fields"]
+      - ["fld_screenshots", "/api/screenshots", {}, "fields"]
+      - ["fld_screenshot_name", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000" }, "name"]
+      - ["fld_review_reply", "/api/review-reply", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
+      - ["fld_file", "/api/file", {}, "fields"]
+      - ["fld_file_check", "/api/file-check", { proctorUnknownField: true }, "fields"]
+
+  - id: FLD-T02
+    name: "A route refuses an operation or mode it doesn't have, with a message saying what it does"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.body.error": "${row.error}"
+        "$.body.message": "${row.message}"
+    no_state_check: "refused with 400 by the route's own field check before it acts, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["msg_dispatch_mode", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, mode: bypassPermissions }, "mode", "The page starts every session in the agent's asking mode, never auto mode."]
+      - ["msg_keep_op", "/api/keep", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads its copy of a session's commits and restores the branch from it only."]
+      - ["msg_verify_op", "/api/verify", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, starts and stops a session's verification runs and reads a browser run's files only."]
+      - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: video }, "kind", "The engine runs two kinds of verification: check and browser."]
+      - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
+      - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
+      - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
+      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "A browser command is one line of at most 300 bytes, with no control characters."]
+      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
+
+  - id: FLD-T02R
+    name: "A route that only reads refuses an operation other than read, with a message saying so"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.body.error": "${row.error}"
+        "$.body.message": "${row.message}"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["msg_metrics_op", "/api/metrics", { op: write, repo: demo }, "op", "The engine reads a project's numbers, nothing else."]
+
+  - id: FLD-T03
+    name: "A route that acts on a session refuses an id the engine didn't start"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "not started here", message: "${row.message}" }
+    no_state_check: "refused with 409 because the engine started no session with this id, before the route acts, so nothing changed; no single read shows the state of every route in this table, and a table row can't name a read of its own"
+    columns: ["case", "route", "body", "message"]
+    rows:
+      - ["unk_lock", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock, head: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has a workflow here."]
+      - ["unk_unlock", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: unlock }, "Only a session this engine started has a workflow here."]
+      - ["unk_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be pushed from here."]
+      - ["unk_viewed", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "Only a session this engine started has a changes view here."]
+      - ["unk_stop", "/api/stop-session", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be stopped, woken or deleted from here."]
+      - ["unk_verify_read", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has verification runs here."]
+      - ["unk_verify_start", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: check }, "Only a session this engine started can be verified here."]
+      - ["unk_push_record", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has push records here."]
+      - ["unk_verify_start_browser", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "Only a session this engine started can be verified here."]
+      - ["unk_verify_attachment", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png }, "Only a session this engine started has verification runs here."]
+
+  - id: FLD-T05
+    name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/limits"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 409 before the route acts: no session has this id, so none is at a cap, and Limits.SetSession, Raise, StopAtCap and MeasureNow change nothing; /api/limits isn't declared a read, since its op decides read or write, and no other read shows caps"
+    columns: ["case", "body", "error", "message"]
+    rows:
+      - ["lim_measure_unknown", { op: measure, sid: "00000000-0000-4000-8000-000000000000" }, "not reached", "This session isn't at its disk cap, so there is nothing to check again."]
+      - ["lim_raise_disk_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_money_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: money, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_time_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: time, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_turns_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: turns, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_stop_unknown", { op: stop, sid: "00000000-0000-4000-8000-000000000000" }, "not reached", "This session isn't at a cap."]
+      - ["lim_session_unknown", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 1, minutes: 1, turns: 1 }, "not started here", "Only a session this engine started can have caps."]
+      - ["lim_session_disk_unknown", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1 }, "not started here", "Only a session this engine started can have caps."]
+
+  - id: FLD-T03R
+    name: "A route that reads a session refuses an id the engine didn't start"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "not started here", message: "${row.message}" }
+    columns: ["case", "route", "body", "message"]
+    rows:
+      - ["unk_audit", "/api/audit", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has an audit view here."]
+      - ["unk_gate", "/api/gate", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has a workflow here."]
+      - ["unk_changes", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has a changes view here."]
+
+  - id: FLD-T04R
+    name: "A route that reads a session's screenshots or reviewers' reports refuses an id the engine didn't start"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 404
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["unk_screenshots", "/api/screenshots", { sid: "00000000-0000-4000-8000-000000000000" }, "session", "Only a session this engine started shows screenshots."]
+      - ["unk_screenshot", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000", name: a.png }, "session", "Only a session this engine started shows screenshots."]
+      - ["unk_screenshot_dotdot", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000", name: ../a.png }, "session", "Only a session this engine started shows screenshots."]
+      - ["unk_review_reply", "/api/review-reply", { sid: "00000000-0000-4000-8000-000000000000", agent: "knackpack:adversarial-reviewer", commit: "0123456789abcdef0123456789abcdef01234567", run: 1 }, "reply", "The engine keeps no whole report for that review."]
+
+scenarios:
+  - id: FLD-001
+    name: "Deleting a session the engine didn't start is refused, with no offer to force it"
+    steps:
+      - id: unknown-before
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "not started here", message: "Only a session this engine started has a workflow here." }
+      - id: remove-unknown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "not started here", message: "Only a session this engine started can be stopped, woken or deleted from here.", offer: null }
+      - id: still-unknown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "not started here", message: "Only a session this engine started has a workflow here." }
+
+  - id: FLD-002
+    name: "The file reads refuse a session the engine didn't start, before opening anything"
+    steps:
+      - id: file-outside
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000", path: README.md }
+        expect:
+          equal:
+            "$.status": 422
+            "$.body": { error: outside }
+      - id: file-check-unverified
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000", paths: [README.md] }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: unverified }
+
+  - id: FLD-003
+    name: "The engine's copy of a session's commits isn't shown for a session it holds no branch of"
+    steps:
+      - id: keep-unknown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/keep"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "00000000-0000-4000-8000-000000000000" }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: session, message: "This engine holds no branch for that session: it was deleted or not started here." }
+        no_state_check: "op read changes nothing, and it's refused with 404 since no session has this id; /api/keep isn't declared a read, since op restore on the same path rewrites a branch and HTTP-11 matches the path only, and no other read shows the engine's copy"

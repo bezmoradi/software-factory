@@ -29,6 +29,9 @@ func (h *Helper) Sweep(ctx context.Context) error {
 			if _, reviewer := reviewerLabelled(h.rec.project, c.Labels); reviewer {
 				continue
 			}
+			if _, verifier := verifierLabelled(h.rec.project, c.Labels); verifier {
+				continue
+			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "container", "name", name, "reason", "it carries the stack's label without every one of the helper's labels and names")
 			continue
 		}
@@ -79,6 +82,7 @@ func (h *Helper) Sweep(ctx context.Context) error {
 		}
 	}
 	h.SweepReviewers(ctx, h.cfg.SweepDry)
+	h.SweepVerifiers(ctx, h.cfg.SweepDry)
 	h.Reconnect(ctx)
 	return nil
 }
@@ -148,6 +152,7 @@ func (h *Helper) nudge() {
 }
 
 func (h *Helper) Watch(ctx context.Context) {
+	go h.watchVerifiers(ctx)
 	go func() {
 		for {
 			select {
@@ -218,6 +223,7 @@ func (h *Helper) StopAll(ctx context.Context) {
 		})
 	}
 	wg.Go(func() { h.SweepReviewers(ctx, false) })
+	wg.Go(func() { h.SweepVerifiers(ctx, false) })
 	wg.Wait()
 	h.logger.Info("box helper", "event", "stopped_every_box", "boxes", len(boxes))
 }

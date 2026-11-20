@@ -340,9 +340,6 @@ class SfConversation extends HTMLElement {
       case 'ended':
         this.#entry('reset small muted').textContent = 'The session ended.'
         break
-      case 'notice':
-        if (typeof ev.text === 'string' && ev.text) this.#entry('reset small muted').textContent = `${ev.reported ? 'Reported by the session: ' : ''}${shown(ev.text)}`
-        break
       case 'compact': {
         if (ev.state === 'start') break
         this.#reply = null

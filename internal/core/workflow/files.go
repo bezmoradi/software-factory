@@ -36,3 +36,13 @@ func DocFile(path string) bool {
 	}
 	return true
 }
+
+func NotDocs(files []string) []string {
+	var out []string
+	for _, f := range files {
+		if !DocFile(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}

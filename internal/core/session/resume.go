@@ -45,6 +45,7 @@ type resumeState struct {
 	mu      sync.Mutex
 	queue   []queuedReview
 	running bool
+	active  map[string]string
 }
 
 var transientStart = []string{"sign-in check", "fetch", "no plugin", "branch", "records", "merge base"}
@@ -162,6 +163,10 @@ func (p *Pushes) Resume(_ context.Context) int {
 	queued := 0
 	for _, sid := range slices.Sorted(maps.Keys(plans)) {
 		commit := plans[sid]
+		if p.skips.skip(p.cfg.Doubled, p.cfg.Logger, sid, "push-resume") {
+			delete(plans, sid)
+			continue
+		}
 		if why := p.stale(sid, commit); why != "" {
 			p.drop(sid, commit)
 			p.cfg.Logger.Info("push resume", "event", "dropped", "why", why)
@@ -249,20 +254,43 @@ func (p *Pushes) work() {
 		}
 		q.queue = slices.Delete(q.queue, i, i+1)
 		q.mu.Unlock()
-		if !p.resumeOne(ctx, item) {
-			continue
-		}
+		retry := p.resumeOne(ctx, item)
 		item.next = p.cfg.Now().Add(ResumeEvery)
 		q.mu.Lock()
-		if !slices.ContainsFunc(q.queue, func(x queuedReview) bool { return x.sid == item.sid }) {
+		if retry && !slices.ContainsFunc(q.queue, func(x queuedReview) bool { return x.sid == item.sid }) {
 			q.queue = append(q.queue, item)
+		}
+		if q.active[item.sid] == item.commit {
+			delete(q.active, item.sid)
 		}
 		q.mu.Unlock()
 	}
 }
 
+func (p *Pushes) resuming(sid, commit string, on bool) {
+	q := &p.resume
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !on {
+		delete(q.active, sid)
+		return
+	}
+	if q.active == nil {
+		q.active = map[string]string{}
+	}
+	q.active[sid] = commit
+}
+
+func (p *Pushes) reviewsQueued(sid, commit string) bool {
+	q := &p.resume
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.active[sid] == commit || slices.ContainsFunc(q.queue, func(x queuedReview) bool { return x.sid == sid && x.commit == commit })
+}
+
 func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	sid, commit := item.sid, item.commit
+	p.resuming(sid, commit, true)
 	p.mu.Lock()
 	ctx = shared.WithRequest(ctx, p.waitedReq(sid, commit))
 	p.mu.Unlock()
@@ -291,7 +319,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 			case !ok:
 				needs = true
 			case e.Record.State == review.Running:
-				return false
+				return true
 			case Retryable(e), Rerunnable(e):
 				needs = true
 			}
@@ -299,6 +327,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	}
 	if !needs {
 		shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "deciding")
+		p.resuming(sid, commit, false)
 		p.ReviewDone(sid, commit)
 		return false
 	}
@@ -307,6 +336,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		start = p.cfg.StartReview
 	}
 	if start == nil {
+		p.resuming(sid, commit, false)
 		p.ReviewDone(sid, commit)
 		return false
 	}
@@ -317,7 +347,9 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	}
 	e, ok := errors.AsType[*Error](err)
 	switch {
-	case ok && (e.Reason == "reviewing" || e.Reason == "halted"):
+	case ok && e.Reason == "reviewing":
+		return true
+	case ok && e.Reason == "halted":
 		return false
 	case ok && e.Reason == "reviews":
 		return true
@@ -329,6 +361,7 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 		why = e.Reason
 	}
 	shared.For(ctx, p.cfg.Logger).Info("push resume", "event", "review-not-started", "why", why)
+	p.resuming(sid, commit, false)
 	p.ReviewDone(sid, commit)
 	return false
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/docker"
+	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
@@ -83,7 +85,29 @@ func plugins(cfg InstallConfig, logger shared.Logger) (*npm.Plugins, error) {
 	if cfg.Dir == "" {
 		return nil, nil
 	}
-	return npm.NewPlugins(npm.PluginConfig{Dir: cfg.Dir, Fetch: remote.Remote{}, Trees: files.Reader{}, Logger: logger})
+	tracked, fetch, err := knackpackSource(cfg, developmentImage(boxes.DevMarker), logger)
+	if err != nil {
+		return nil, err
+	}
+	return npm.NewPlugins(npm.PluginConfig{Dir: cfg.Dir, Plugins: []npm.Tracked{tracked}, Fetch: fetch, Trees: files.Reader{}, Logger: logger})
+}
+
+func knackpackSource(cfg InstallConfig, dev bool, logger shared.Logger) (npm.Tracked, remote.Remote, error) {
+	k := npm.Knackpack
+	if cfg.DevKnackpack == "" {
+		return k, remote.Remote{}, nil
+	}
+	if !dev {
+		logger.Warn("plugin install", "event", "dev-source-ignored", "why", devKnackpackURL+" installs knackpack from another repository, so the engine honours it only in a development image, and this image has no "+boxes.DevMarker)
+		return k, remote.Remote{}, nil
+	}
+	u, err := url.Parse(cfg.DevKnackpack)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path == "" || u.Path == "/" {
+		return k, remote.Remote{}, errors.New(devKnackpackURL + " must be an https URL with a path and no user, query or fragment, such as https://gitserver.test:8443/public/knackpack.git")
+	}
+	logger.Warn("development switch: knackpack follows the main branch of another repository, not "+npm.Knackpack.URL, "variable", devKnackpackURL)
+	k.URL = cfg.DevKnackpack
+	return k, remote.Remote{CAFile: cfg.DevGitCA}, nil
 }
 
 func reviewSandbox(cfg PageConfig, hosts func() []string) (session.Sandbox, error) {
@@ -97,18 +121,15 @@ func reviewSandbox(cfg PageConfig, hosts func() []string) (session.Sandbox, erro
 	})
 }
 
-func reviewerAgents(cfg PageConfig, repos *session.Repos, logger shared.Logger) (*session.ReviewerAgents, error) {
+func reviewerAgents(cfg PageConfig, repos *session.Repos, packs *session.Packs, logger shared.Logger) (*session.ReviewerAgents, error) {
 	if repos == nil {
 		return nil, nil
 	}
-	return session.NewReviewerAgents(session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger})
-}
-
-func (p engineParts) reviewerChecksPage() session.ReviewerChecksPage {
-	if p.reviews == nil {
-		return nil
+	rc := session.ReviewerAgentsConfig{Store: state.NewReviewerAgents(cfg.StateDir), Repos: repos, Audit: state.NewAudit(cfg.StateDir), Logger: logger}
+	if packs != nil {
+		rc.Packs = packs
 	}
-	return p.reviews
+	return session.NewReviewerAgents(rc)
 }
 
 func (p engineParts) reviewerAgentsPage() session.ReviewerAgentsPage {
@@ -147,7 +168,7 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 		logger.Warn("development reviewer switched on; reviews run a fake, not Claude Code", "variable", "SF_DEV_REVIEWER")
 	}
 	rc := session.ReviewsConfig{
-		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Replies: state.Replies{Dir: cfg.StateDir}, Checks: state.Checks{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
+		Host: host, Snapshots: files.Reviews{Dir: cfg.Review.Dir}, Records: state.Reviews{Dir: cfg.StateDir}, Replies: state.Replies{Dir: cfg.StateDir}, Plugins: source, Mains: mains, History: files.Reader{},
 		Dir: cfg.Review.SeenAs, Command: command, Base: base, Show: reg.SetReview, Logger: logger,
 		Expected: expected, ShowSignIn: func(si session.SignIn) { reg.Notify(page.ReviewerFrame(si)) }, Audit: state.NewAudit(cfg.StateDir),
 	}
@@ -163,8 +184,8 @@ func reviewsWith(base context.Context, cfg PageConfig, reg *session.Registry, so
 	if agentFiles != nil {
 		rc.AgentFiles = agentFiles
 	}
-	rc.PluginCommit, rc.ClaudeCode = pinnedProvenance(cfg.Review.Dev != "")
-	rc.Minimum = reviewerMinimum(rc.PluginCommit)
+	rc.ClaudeCode = pinnedClaudeCode(cfg.Review.Dev != "")
+	rc.Minimum = review.Minimum{ClaudeCode: npm.MinimumReviewerClaudeCode, RefusedPlugins: npm.RefusedKnackpack}
 	if sb != nil {
 		rc.Sandbox = sb
 	} else {

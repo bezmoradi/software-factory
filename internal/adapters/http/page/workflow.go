@@ -11,10 +11,13 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-const MaxApproveBody = 1 << 20
+const (
+	MaxApproveBody = 1 << 20
+	lockTestsRoute = "/api/lock-tests"
+)
 
 var (
-	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true, allowCommitRoute: true, commitRewriteRoute: true}
+	workflowRoutes = map[string]bool{"/api/gate": true, "/api/size": true, "/api/approve-plan": true, "/api/approve-requirements": true, "/api/team": true, "/api/project": true, allowFileRoute: true, flagRemoveRoute: true, allowCommitRoute: true, commitRewriteRoute: true, lockTestsRoute: true}
 	approveRoutes  = map[string]bool{"/api/approve-plan": true, "/api/approve-requirements": true}
 	hash256        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	workTypeID     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -79,8 +82,6 @@ type gateJSON struct {
 	PlanHash     string             `json:"planHash"`
 	Approved     bool               `json:"approved"`
 	Research     string             `json:"research"`
-	Tasks        bool               `json:"tasks"`
-	TasksWritten bool               `json:"tasksWritten"`
 	Define       bool               `json:"define"`
 	Reviewers    []gateReviewerJSON `json:"reviewers"`
 	Missing      []string           `json:"missing"`
@@ -96,6 +97,73 @@ type gateJSON struct {
 	Handoff      bool               `json:"handoff"`
 	Catalog      string             `json:"catalog"`
 	CatalogWhy   string             `json:"catalogWhy,omitempty"`
+	TestLock     testLockJSON       `json:"testLock"`
+	TypeChange   *typeChangeJSON    `json:"typeChange,omitempty"`
+}
+
+type typeFileJSON struct {
+	Path string `json:"path"`
+	What string `json:"what,omitempty"`
+}
+
+type typeLineJSON struct {
+	What  string         `json:"what"`
+	Files []typeFileJSON `json:"files"`
+	More  int            `json:"more"`
+}
+
+type typeChangeJSON struct {
+	Type  string         `json:"type"`
+	Lines []typeLineJSON `json:"lines"`
+}
+
+func typeChangeOf(c *session.TypeChange) *typeChangeJSON {
+	if c == nil {
+		return nil
+	}
+	out := &typeChangeJSON{Type: c.Type, Lines: make([]typeLineJSON, 0, len(c.Lines))}
+	for _, l := range c.Lines {
+		line := typeLineJSON{What: l.What, Files: make([]typeFileJSON, 0, len(l.Files)), More: l.More}
+		for _, f := range l.Files {
+			line.Files = append(line.Files, typeFileJSON{Path: f.Path, What: f.What})
+		}
+		out.Lines = append(out.Lines, line)
+	}
+	return out
+}
+
+type lockedJSON struct {
+	Commit  string   `json:"commit"`
+	Count   int      `json:"count"`
+	Paths   []string `json:"paths"`
+	Problem string   `json:"problem,omitempty"`
+}
+
+type testLockJSON struct {
+	Offered    bool        `json:"offered"`
+	Why        string      `json:"why,omitempty"`
+	Commit     string      `json:"commit,omitempty"`
+	At         int64       `json:"at,omitempty"`
+	Files      int         `json:"files"`
+	Paths      []string    `json:"paths"`
+	Cut        bool        `json:"cut"`
+	BranchLeft int         `json:"branchLeft"`
+	Changed    *lockedJSON `json:"changed"`
+}
+
+func lockedOf(c *session.LockedChange) *lockedJSON {
+	if c == nil {
+		return nil
+	}
+	return &lockedJSON{Commit: c.Commit, Count: c.Count, Paths: nonNil(c.Paths), Problem: c.Problem}
+}
+
+func testLockOf(v session.LockView) testLockJSON {
+	out := testLockJSON{Offered: v.Offered, Why: v.Why, Commit: v.Commit, Files: v.Files, Paths: nonNil(v.Paths), Cut: v.Cut, BranchLeft: v.BranchLeft, Changed: lockedOf(v.Changed)}
+	if v.Commit != "" {
+		out.At = millis(v.At)
+	}
+	return out
 }
 
 func docJSON(d *session.WorkDoc) *workDocJSON {
@@ -126,10 +194,10 @@ func gateOf(v session.GateView) gateJSON {
 	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(profileSize(v)), WorkType: v.Type, Chosen: v.Chosen,
 		Effective: string(v.Effective), SizeNote: v.Note, Types: typesJSON(v.Types), Commands: map[string]string{},
 		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
-		Research: v.Research, Tasks: v.TasksNeeded, TasksWritten: v.TasksWritten, Define: v.Define, Reviewers: []gateReviewerJSON{},
+		Research: v.Research, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
 		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
-		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy}
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change)}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
@@ -233,6 +301,33 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		}
 		err := s.cfg.Work.Approve(r.Context(), sid, path == "/api/approve-plan", hash, text)
 		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
+		reply(w, err, http.StatusOK)
+	case lockTestsRoute:
+		op, okOp := body["op"].(string)
+		if !okOp || sid == "" {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+		var err error
+		switch op {
+		case "lock":
+			head, okHead := body["head"].(string)
+			if !keysWithin(body, "sid", "op", "head") || !okHead || !flagCommit.MatchString(head) {
+				refuse(w, http.StatusBadRequest, "fields")
+				return
+			}
+			err = s.cfg.Work.LockTests(r.Context(), sid, head)
+		case "unlock":
+			if !keysWithin(body, "sid", "op") {
+				refuse(w, http.StatusBadRequest, "fields")
+				return
+			}
+			err = s.cfg.Work.UnlockTests(sid)
+		default:
+			refuse(w, http.StatusBadRequest, "op")
+			return
+		}
+		shared.For(r.Context(), s.logger).Info("test lock", "op", op, "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case "/api/team":
 		repo, okPath := body["path"].(string)

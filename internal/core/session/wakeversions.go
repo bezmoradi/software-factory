@@ -1,6 +1,9 @@
 package session
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 func (d *Dispatcher) reviewerStamp() (string, string) {
 	if d.cfg.Reviews == nil {
@@ -9,27 +12,76 @@ func (d *Dispatcher) reviewerStamp() (string, string) {
 	return d.cfg.Reviews.Current()
 }
 
-func versionsChanged(name string, was, now runStamp) string {
-	var parts []string
-	reviewer := false
-	add := func(what, from, to string, ofReviewer bool) {
-		if from != "" && to != "" && from != to {
-			parts = append(parts, what+" went from "+from+" to "+to)
-			reviewer = reviewer || ofReviewer
-		}
-	}
-	add(name, was.agent, now.agent, false)
-	add(name+"'s workflow plugin", shortSHA7(was.workflow), shortSHA7(now.workflow), false)
-	add("the reviewer's Claude Code", was.reviewer, now.reviewer, true)
-	add("the reviewers' plugin", shortSHA7(was.reviewerPlugin), shortSHA7(now.reviewerPlugin), true)
-	if len(parts) == 0 {
+func (d *Dispatcher) installedWorkflow() string {
+	if d.cfg.Workflow == nil {
 		return ""
 	}
-	text := "Since this session last ran, " + strings.Join(parts, ", ") + "."
-	if reviewer {
-		text += " The engine checks each reviewer after an update before its next pass counts."
+	_, commit, err := d.cfg.Workflow()
+	if err != nil {
+		return ""
 	}
-	return text
+	return commit
+}
+
+func (d *Dispatcher) refusedWorkflow(commit string) bool {
+	return commit != "" && d.cfg.Refused != nil && d.cfg.Refused(commit)
+}
+
+func versionsChanged(name string, was, now runStamp, installed string, refused bool) string {
+	var parts []string
+	add := func(what, from, to string) {
+		if from != "" && to != "" && from != to {
+			parts = append(parts, what+" went from "+from+" to "+to)
+		}
+	}
+	add(name, was.agent, now.agent)
+	add("the reviewer's Claude Code", was.reviewer, now.reviewer)
+	add("the reviewers' plugin", shortSHA7(was.reviewerPlugin), shortSHA7(now.reviewerPlugin))
+	var out []string
+	if len(parts) > 0 {
+		out = append(out, "Since this session last ran, "+strings.Join(parts, ", ")+".")
+	}
+	switch {
+	case refused:
+		out = append(out, "This session runs knackpack "+shortSHA7(now.workflow)+", which this engine refuses; start a new session.")
+	case now.workflow != "" && installed != "" && installed != now.workflow:
+		out = append(out, "This session still runs knackpack "+shortSHA7(now.workflow)+"; a new session gets "+shortSHA7(installed)+".")
+	}
+	return strings.Join(out, " ")
+}
+
+func (d *Dispatcher) WorkflowCommits() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []string
+	for _, r := range d.runs {
+		if r.stamp.workflow != "" && !slices.Contains(out, r.stamp.workflow) {
+			out = append(out, r.stamp.workflow)
+		}
+	}
+	return out
+}
+
+func (d *Dispatcher) SessionPacks() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []string
+	for _, r := range d.runs {
+		if PackDigest.MatchString(r.pack.Choice) && !slices.Contains(out, r.pack.Choice) {
+			out = append(out, r.pack.Choice)
+		}
+	}
+	return out
+}
+
+func (d *Dispatcher) SessionPackOf(sid string) (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r := d.runs[sid]
+	if r == nil {
+		return "", false
+	}
+	return r.pack.Choice, true
 }
 
 func (d *Dispatcher) showVersions(sid, text string) {

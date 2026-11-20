@@ -1,19 +1,17 @@
 package workflow
 
-import (
-	"slices"
-)
-
 type Flag struct {
 	Path    string
 	Why     string
 	Allowed bool
+	Fixed   bool
 }
 
 type Progress struct {
 	Chosen          Profile
 	Effective       WorkType
 	Adapter         AdapterID
+	Commands        map[Step]string
 	FilesListed     bool
 	FilesNote       string
 	FlagsRead       bool
@@ -21,11 +19,11 @@ type Progress struct {
 	ReqOk           bool
 	ReqWasApproved  bool
 	PlanFile        string
-	TasksWritten    bool
 	PlanOk          bool
 	PlanWasApproved bool
 	PlanBase        string
 	Built           bool
+	ChangesCode     bool
 }
 
 func Items(p Progress) ([]string, bool) {
@@ -37,6 +35,7 @@ func Items(p Progress) ([]string, bool) {
 		unapproved = true
 	}
 	feature := p.Effective.Profile() == Feature
+	incident := p.Effective.Profile() == Incident && !p.PlanOk && p.ChangesCode
 	if !p.FilesListed {
 		note := ""
 		if p.FilesNote != "" {
@@ -48,7 +47,11 @@ func Items(p Progress) ([]string, bool) {
 		say("a check of this branch's files for secrets, which the gate couldn't finish, so the developer has to check them and allow the push")
 	}
 	for _, f := range p.Flagged {
-		if !f.Allowed {
+		switch {
+		case f.Allowed:
+		case f.Fixed:
+			say(clip(f.Path, 200) + " out of every commit on the branch that holds it, because " + f.Why + "; removing it in a new commit still pushes the earlier ones")
+		default:
 			say("the developer's decision on " + clip(f.Path, 200) + ", because " + f.Why + ": they allow it on the page, or it comes out of every commit on the branch that holds it, since removing it in a new commit still pushes the earlier ones")
 		}
 	}
@@ -66,19 +69,22 @@ func Items(p Progress) ([]string, bool) {
 	if a, ok := Adapters[p.Adapter]; ok {
 		commands = a.Commands
 	}
+	if p.Commands != nil {
+		commands = p.Commands
+	}
 	switch {
+	case incident && p.PlanFile == "":
+		say("the developer's approval of the root cause, since this branch changes code: the root cause isn't approved, and no " + RootCauseFile + " from the Triage, Reproduce and Root cause steps is committed on the branch yet")
+	case incident && p.PlanWasApproved:
+		ask("the developer's approval of the root cause again, since this branch changes code: the root cause isn't approved, because " + RootCauseFile + " changed after they approved it")
+	case incident:
+		ask("the developer's approval of the root cause, on the page, since this branch changes code: the root cause isn't approved")
 	case feature && p.PlanFile == "":
 		from := commands[Plan]
 		if from == "" {
 			from = "the Plan step"
 		}
 		say("a plan from " + from + ", which only the developer can start")
-	case feature && slices.Contains(p.Effective.Steps, Tasks) && !p.TasksWritten:
-		from := commands[Tasks]
-		if from == "" {
-			from = "the Tasks step"
-		}
-		say("tasks from " + from + ", written beside the plan")
 	case feature && !p.PlanOk:
 		switch {
 		case p.PlanWasApproved:

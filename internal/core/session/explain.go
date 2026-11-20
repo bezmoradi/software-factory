@@ -145,11 +145,12 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		release()
 		return err
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
+	plugin := pack.Path
 	head, err := r.cfg.Snapshots.Head(t.Repo, t.Branch)
 	if err != nil {
 		release()

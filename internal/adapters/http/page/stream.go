@@ -58,6 +58,8 @@ type sessionJSON struct {
 	Splits      []splitJSON      `json:"splits,omitempty"`
 	Box         string           `json:"box,omitempty"`
 	SignInWait  bool             `json:"signInWait,omitempty"`
+	Doubled     bool             `json:"doubled"`
+	HomeHeld    bool             `json:"homeHeld,omitempty"`
 	Branch      string           `json:"branch,omitempty"`
 }
 
@@ -119,7 +121,15 @@ type roleJSON struct {
 	Cited    *citedJSON       `json:"cited,omitempty"`
 	Findings []findingRefJSON `json:"findings,omitempty"`
 
+	ReqIDs          []string       `json:"reqIds,omitempty"`
+	Coverage        []coverageJSON `json:"coverage,omitempty"`
+	CoverageDropped int            `json:"coverageDropped,omitempty"`
+	CoverageCut     bool           `json:"coverageCut,omitempty"`
+
 	PluginCommit string   `json:"pluginCommit,omitempty"`
+	Pack         string   `json:"pack,omitempty"`
+	PackVersion  string   `json:"packVersion,omitempty"`
+	PackDigest   string   `json:"packDigest,omitempty"`
 	ClaudeCode   string   `json:"claudeCode,omitempty"`
 	Models       []string `json:"models,omitempty"`
 
@@ -144,6 +154,27 @@ func findingRefsOf(list []session.FindingRef) []findingRefJSON {
 		out = append(out, findingRefJSON{Severity: f.Severity, Title: f.Title, Where: f.Where, Path: f.Path, Line: f.Line})
 	}
 	return out
+}
+
+type coverageJSON struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Evidence string `json:"evidence,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	EndLine  int    `json:"endLine,omitempty"`
+	Note     string `json:"note,omitempty"`
+}
+
+func coverageOf(r session.RoleReview) ([]string, []coverageJSON, int, bool) {
+	if len(r.ReqIDs) == 0 {
+		return nil, nil, 0, false
+	}
+	out := make([]coverageJSON, 0, len(r.Coverage.Lines))
+	for _, c := range r.Coverage.Lines {
+		out = append(out, coverageJSON{ID: c.ID, Status: c.Status, Evidence: c.Evidence, Path: c.Path, Line: c.Line, EndLine: c.EndLine, Note: c.Note})
+	}
+	return r.ReqIDs, out, r.Coverage.Dropped, r.Coverage.Cut
 }
 
 type reviewJSON struct {
@@ -173,12 +204,14 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 	for _, r := range v.Roles {
 		out.Roles = append(out.Roles, roleJSON{Role: string(r.Role), Name: r.Name, Agent: r.Agent, State: string(r.State), Verdict: r.Verdict, Message: r.Message, Reason: r.Reason, CostUSD: r.CostUSD, Why: r.Why,
 			Round: r.Round, Limit: r.Limit, Since: r.Since, Incremental: r.Since != "", Previous: r.Previous, Override: r.Override,
-			PluginCommit: r.PluginCommit, ClaudeCode: r.ClaudeCode, Models: r.Models})
+			PluginCommit: r.PluginCommit, Pack: r.Pack, PackVersion: r.PackVersion, PackDigest: r.PackDigest, ClaudeCode: r.ClaudeCode, Models: r.Models})
 		out.Roles[len(out.Roles)-1].Progress, out.Roles[len(out.Roles)-1].Given = progressOf(r.Progress), givenOf(r.Given)
 		out.Roles[len(out.Roles)-1].Run, out.Roles[len(out.Roles)-1].Runs, out.Roles[len(out.Roles)-1].Advisory = r.Run, r.Runs, r.Advisory
 		out.Roles[len(out.Roles)-1].Cited = citedOf(r.Cited)
 		out.Roles[len(out.Roles)-1].HasFull, out.Roles[len(out.Roles)-1].Unchecked = r.HasFull, r.Unchecked
 		out.Roles[len(out.Roles)-1].Findings = findingRefsOf(r.Findings)
+		last := &out.Roles[len(out.Roles)-1]
+		last.ReqIDs, last.Coverage, last.CoverageDropped, last.CoverageCut = coverageOf(r)
 	}
 	return out
 }
@@ -219,7 +252,9 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Follow:      pullFollowOf(s.Follow),
 			Splits:      splitsOf(s.Splits),
 			Box:         s.Box,
+			Doubled:     s.Doubled,
 			SignInWait:  s.SignInWait,
+			HomeHeld:    s.HomeHeld,
 			Branch:      s.Branch,
 		})
 	}

@@ -1,7 +1,10 @@
-import { busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { api } from '../api.ts'
+import { actionButton, busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { saveFile } from '../lib/download.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
+import { coverageFacts } from './push-coverage.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 
 const RESULTS: Record<string, [string, string, string, string]> = {
@@ -14,6 +17,12 @@ const RESULTS: Record<string, [string, string, string, string]> = {
 }
 
 const FULL_SHA = /^[0-9a-f]{40}$/
+const RECORD_ROUTE = '/api/push-record'
+const RECORD_NAME = /filename="(software-factory-push-[0-9a-f]{7,12}\.json)"/
+
+function recordName(res: Response, commit: string): string {
+  return RECORD_NAME.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `software-factory-push-${commit.slice(0, 12)}.json`
+}
 
 function text(value: string): string {
   return visible(unspoofed(value))
@@ -88,9 +97,13 @@ class SfPushPanel extends HTMLElement {
   #card = ''
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
+  #fileShown = new Map<string, string>()
+  #fileChanged = new Set<string>()
   #answered = ''
   #heldCard = el('div', 'push-card')
   #passedSaid = statusLine('small muted status-slot')
+  #recordFor = ''
+  #recordBox = el('div', 'row push-line')
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -142,8 +155,11 @@ class SfPushPanel extends HTMLElement {
     }
     if (p.running) parts.push(el('p', 'small muted', 'The engine is checking the gate and the remote…'))
     else if (p.result) parts.push(this.#result(p))
-    const facts = p.running ? null : changeFacts(p, value.checks ?? [])
+    if (!p.running && p.result === 'pushed' && FULL_SHA.test(p.commit) && value.sid) parts.push(this.#record(value.sid, p.commit))
+    const facts = p.running ? null : changeFacts(p, value.checks ?? [], value.typeChange ?? null)
     if (facts) parts.push(facts)
+    const coverage = p.running ? null : coverageFacts(value.coverage ?? [])
+    if (coverage) parts.push(coverage)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''
@@ -156,7 +172,7 @@ class SfPushPanel extends HTMLElement {
 
   #flagged(list: FlaggedFile[], value: PushPanelView): HTMLElement {
     const box = el('div', 'push-flagged')
-    if (value.flagsRead === false) box.append(el('p', 'small warn', "The engine couldn't finish checking this branch's files and commits for secrets, so the push needs your Allow with a reason."))
+    if (value.flagsRead === false) box.append(el('p', 'small warn', "The engine couldn't finish checking this branch's files and commits for secrets, and in a project that uses Proctor for changes to its specifications, so the push needs your Allow with a reason."))
     if (!list.length) return box
     const commits = list.filter(f => f.commit).length
     const files = list.length - commits
@@ -174,12 +190,22 @@ class SfPushPanel extends HTMLElement {
       const id = commit ? `${commit}:${field}` : f.path
       const name = commit ? `the ${text(f.label ?? field)} of commit ${shortSha(commit)}` : text(f.shown)
       const li = el('li', 'warn')
+      const digest = f.digest ?? ''
+      const seen = `${value.sid ?? ''}\u0000${id}`
+      const was = this.#fileShown.get(seen)
+      if (was !== undefined && was !== digest) {
+        this.#fileChanged.add(seen)
+        this.#fileReasons.delete(id)
+      }
+      this.#fileShown.set(seen, digest)
       const size = !commit && f.size && f.size > 0 ? `, ${f.size >= 1048576 ? `${(f.size / 1048576).toFixed(1)} MiB` : `${Math.max(1, Math.round(f.size / 1024))} KiB`}` : ''
       if (commit) {
         const sha = el('code', '', shortSha(commit))
         sha.title = commit
         li.append(`The ${text(f.label ?? field)} of commit `, sha, ` is flagged: ${text(f.why)}.`)
       } else li.append(el('code', '', text(f.shown)), ` is flagged: ${text(f.why)}${size}.`)
+      if (!commit && this.#fileChanged.has(seen)) li.append(el('p', 'small warn', 'It changed on the branch since the page first showed it, so your reason was cleared: look at the change again before you allow it.'))
+      if (!commit && f.link) li.append(el('p', 'small warn', "This symbolic link is one the hold can't follow, under proctor/ and pointing outside it or a root Makefile that is a link, so it can't be allowed and the engine refuses the push: only asking the agent to take it out of the branch clears it."))
       const input = el('input', 'textbox')
       input.maxLength = 500
       input.id = `flag-reason-${i}`
@@ -189,7 +215,7 @@ class SfPushPanel extends HTMLElement {
       const label = el('label', 'small', 'Your reason for allowing it (the audit file keeps it)')
       label.htmlFor = input.id
       const allow = button('Allow it', 'small', () => {
-        if (off || f.full) return
+        if (off || f.full || f.link) return
         const reason = input.value.trim()
         if (!reason) {
           input.setAttribute('aria-invalid', 'true')
@@ -199,24 +225,29 @@ class SfPushPanel extends HTMLElement {
         input.removeAttribute('aria-invalid')
         this.#fileReasons.delete(id)
         if (commit) emit(this, 'sf-allow-commit', { commit, field, reason })
-        else emit(this, 'sf-allow-file', { path: f.path, reason })
+        else emit(this, 'sf-allow-file', { path: f.path, digest, reason })
       }, 'button', `allow:${id}`)
       allow.setAttribute('aria-label', `Allow it: ${name}`)
-      allow.setAttribute('aria-disabled', String(off || !!f.full))
+      allow.setAttribute('aria-disabled', String(off || !!f.full || !!f.link))
       if (f.full) allow.title = 'It has more than 20 flagged versions on the branch, so it can\'t be allowed'
+      if (f.link) allow.title = 'A link the hold on Proctor\'s specifications can\'t follow can\'t be allowed'
       if (commit) allow.title = 'Allows this commit only: another commit with the same text is flagged again'
+      const spec = !commit && (!!f.spec || f.kind === 'specification')
+      const removeText = commit ? 'Ask the agent to rewrite it' : spec ? 'Ask the agent to revert it' : 'Ask the agent to remove it'
       const remove = commit
-        ? button('Ask the agent to rewrite it', 'small', () => {
+        ? button(removeText, 'small', () => {
           if (!off) emit(this, 'sf-rewrite-commit', { commit, field })
         }, 'button', `rewrite:${id}`)
-        : button('Ask the agent to remove it', 'small', () => {
-          if (!off) emit(this, 'sf-remove-file', { path: f.path })
+        : button(removeText, 'small', () => {
+          if (!off) emit(this, 'sf-remove-file', { path: f.path, revert: spec })
         }, 'button', `remove:${id}`)
-      remove.setAttribute('aria-label', `${commit ? 'Ask the agent to rewrite it' : 'Ask the agent to remove it'}: ${name}`)
+      remove.setAttribute('aria-label', `${removeText}: ${name}`)
       remove.setAttribute('aria-disabled', String(off))
       remove.title = commit
         ? 'Sends the session a message asking it to rewrite this commit if it isn\'t on the remote branch yet'
-        : 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
+        : spec
+          ? 'Sends the session a message asking it to take this change to a Proctor specification out of every commit on the branch, so the file is as the main branch has it'
+          : 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
       const row = el('div', 'row field-row')
       row.append(label, input)
       const actions = el('div', 'actions')
@@ -258,6 +289,36 @@ class SfPushPanel extends HTMLElement {
     const person = p.audit?.personReason ?? ''
     if (person && ok) box.append(el('p', 'push-line small muted', `Your reason: ${text(person)}`))
     return box
+  }
+
+  #record(sid: string, commit: string): HTMLElement {
+    const key = `${sid}\u0000${commit}`
+    if (this.#recordFor === key) return this.#recordBox
+    this.#recordFor = key
+    const said = statusLine('small muted')
+    const download = actionButton('Download this push\'s record', 'ghost small', async () => {
+      said.textContent = 'Building the record…'
+      const res = await api(RECORD_ROUTE, { sid, commit }).catch(() => null)
+      if (this.#recordFor !== key) return
+      if (!res || !res.ok) {
+        const parsed: unknown = res ? await res.json().catch(() => null) : null
+        const message = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>).message : undefined
+        said.textContent = typeof message === 'string' && message ? visible(message) : 'The engine didn’t build the record.'
+        return
+      }
+      const blob = await res.blob().catch(() => null)
+      if (!blob || this.#recordFor !== key) {
+        if (!blob) said.textContent = 'The record was cut off. Try again.'
+        return
+      }
+      const name = recordName(res, commit)
+      saveFile(blob, name)
+      said.textContent = `Saved ${name}. Nothing was sent anywhere.`
+    }, 'button', 'push-record')
+    download.setAttribute('aria-label', `Download the record of the push of commit ${shortSha(commit)}`)
+    download.title = 'One JSON file built from the engine’s own records: the commit, each review with its versions, the approvals, overrides and Allows with your reasons, the verification run, and the checks the agent reported, labelled as such'
+    this.#recordBox.replaceChildren(download, said)
+    return this.#recordBox
   }
 
   #heldInPlace(p: SessionPush, value: PushPanelView): HTMLElement {

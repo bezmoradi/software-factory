@@ -14,8 +14,6 @@ const (
 	maxEgressHost = 300
 	maxHostReason = session.MaxHostReason * 4
 	maxEgressURL  = session.MaxGatewayURL + 64
-	maxAgentIDs   = 8
-	maxAgentID    = 32
 	egressFor     = 20 * time.Second
 )
 
@@ -43,10 +41,6 @@ func egressListJSON(l session.EgressList) map[string]any {
 }
 
 func egressViewJSON(v session.EgressView) map[string]any {
-	agents := make([]map[string]any, 0, len(v.Agents))
-	for _, a := range v.Agents {
-		agents = append(agents, map[string]any{"id": a.ID, "name": a.Name, "hosts": a.Hosts, "inUse": a.InUse})
-	}
 	added := make([]map[string]any, 0, len(v.Added))
 	for _, h := range v.Added {
 		added = append(added, map[string]any{"host": h.Name, "expires": unixOr(h.Expires), "addedAt": unixOr(h.AddedAt), "uploads": session.UploadHost(h.Name), "reason": h.Reason})
@@ -56,7 +50,7 @@ func egressViewJSON(v session.EgressView) map[string]any {
 		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host, "agents": v.Gateway.Agents, "reviewers": v.Gateway.Reviewers}
 	}
 	return map[string]any{
-		"saved": v.Saved, "pending": v.Pending, "agents": agents, "added": added, "gateway": gateway,
+		"saved": v.Saved, "pending": v.Pending, "added": added, "gateway": gateway,
 		"lists": map[string]any{"agents": egressListJSON(v.Lists.Agents), "reviewers": egressListJSON(v.Lists.Reviewers)},
 		"base":  v.Base, "deny": v.Deny, "now": v.Now.Unix(),
 		"gatewayKeyNote": session.GatewayKeyNote, "pypiNote": session.PyPIReadHostsNote,
@@ -110,22 +104,6 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 		}
 		send(w, http.StatusOK, refusalsJSON(list, s.cfg.Now()))
 		return
-	case "agents":
-		raw, ok := body["agents"].([]any)
-		if !keysWithin(body, "op", "agents") || !ok || len(raw) > maxAgentIDs {
-			refuse(w, http.StatusBadRequest, "fields")
-			return
-		}
-		ids := make([]string, 0, len(raw))
-		for _, v := range raw {
-			id, ok := v.(string)
-			if !ok || len(id) > maxAgentID {
-				refuse(w, http.StatusBadRequest, "fields")
-				return
-			}
-			ids = append(ids, id)
-		}
-		err = s.cfg.Egress.SetAgentsInUse(ctx, ids)
 	case "add":
 		host, okHost := body["host"].(string)
 		expires, okExp := body["expires"].(string)

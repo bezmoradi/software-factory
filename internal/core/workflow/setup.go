@@ -21,7 +21,9 @@ type Setup struct {
 	FileRules   []FileRule
 	Rounds      int
 	Protect     []string
+	Verify      []string
 	Catalog     Catalog
+	Workflow    Adapter
 }
 
 func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string) {
@@ -63,7 +65,7 @@ func SetupOf(team *Team, personal Personal, adapter AdapterID) (Setup, []string)
 			roles[r] = a
 		}
 	}
-	return Setup{Adapter: chosen, Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect)}, problems
+	return Setup{Adapter: chosen, Workflow: Adapters[Knackpack], Types: types, DefaultType: defaultType, Roles: roles, Agents: agents, FileRules: slices.Clone(team.FileRules), Rounds: rounds, Protect: slices.Clone(team.Protect), Verify: slices.Clone(team.Verify)}, problems
 }
 
 type Requirement struct {
@@ -174,10 +176,8 @@ func Effective(t WorkType, files []string, listed bool) (WorkType, string) {
 	if !listed {
 		return feature, "Docs only needs what a Feature needs until the gate can list the files this branch changes."
 	}
-	for _, f := range files {
-		if !DocFile(f) {
-			return feature, "Docs only covers documentation, but this branch also changes " + clip(f, 120) + ", so it needs what a Feature needs."
-		}
+	if others := NotDocs(files); len(others) > 0 {
+		return feature, "Docs only covers documentation, but this branch also changes " + clip(others[0], 120) + ", so it needs what a Feature needs."
 	}
 	return t, ""
 }
@@ -190,8 +190,11 @@ func Required(s Setup, t WorkType, files []string) []Requirement {
 		}
 	}
 	article := "a "
-	if t.ID == "docs" {
+	switch t.ID {
+	case "docs":
 		article = ""
+	case IncidentType:
+		article = "an "
 	}
 	for _, r := range t.Roles {
 		add(Requirement{Agent: s.Roles[r], Role: r, Why: "Needed for " + article + t.Name + ", as its " + r.Name()})

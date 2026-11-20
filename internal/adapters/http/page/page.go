@@ -50,7 +50,7 @@ type Config struct {
 	Logins         session.LoginPage
 	Forge          session.ForgeService
 	ReviewerAgents session.ReviewerAgentsPage
-	ReviewerChecks session.ReviewerChecksPage
+	Packs          session.PacksPage
 	Identity       session.IdentityPage
 	Egress         session.EgressPage
 	Recaps         session.RecapPage
@@ -84,6 +84,7 @@ type Server struct {
 	decisions session.DecisionLogPage
 
 	branchCopy session.KeepPage
+	verify     session.VerifyPage
 
 	pairs  session.PairsPage
 	splits *session.Splits
@@ -96,6 +97,8 @@ type Server struct {
 	viewed session.ViewedPage
 
 	updates session.UpdatesPage
+
+	pushRecords session.PushRecordPage
 
 	inflight *oneAtATime
 	decodes  chan struct{}
@@ -172,12 +175,12 @@ const signinRoute = "/api/session"
 
 var pageRoutes = map[string]bool{
 	"/api/events": true, "/api/replay": true, "/api/message": true, "/api/interrupt": true, "/api/answer": true,
-	"/api/control": true, "/api/release": true, "/api/disconnect": true, "/api/prefs": true,
+	"/api/control": true, "/api/release": true, "/api/prefs": true,
 	"/api/projects": true, "/api/changes": true, "/api/docs": true, "/api/audit": true,
 	"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true,
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
-	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, reviewerChecksRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
+	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, packsRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
 	haltRoute:       true,
 	limitsRoute:     true,
 	egressRoute:     true,
@@ -187,12 +190,12 @@ var pageRoutes = map[string]bool{
 	projectFactsRoute: true,
 	planReviewRoute:   true, explainRoute: true,
 	savedPromptsRoute: true,
-	bringMainRoute:    true, handoverRoute: true, startPointsRoute: true,
+	bringMainRoute:    true, startPointsRoute: true,
 	pullRoute: true, issuesRoute: true, findingIssuesRoute: true,
-	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true, agentModelsRoute: true,
+	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true,
 	screenshotsRoute: true, screenshotRoute: true,
 	metricsRoute: true, decisionLogRoute: true,
-	keepRoute: true,
+	keepRoute: true, verifyRoute: true,
 	pairRoute: true, splitPageRoute: true,
 	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
@@ -200,6 +203,7 @@ var pageRoutes = map[string]bool{
 	diagnosticsRoute: true,
 	viewedRoute:      true,
 	updateRoute:      true,
+	pushRecordRoute:  true,
 }
 
 func (s *Server) pageRoute(r *http.Request) string {
@@ -216,6 +220,17 @@ func (s *Server) pageRoute(r *http.Request) string {
 func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why string) {
 	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", why)
 	refuse(w, status, why)
+}
+
+func (s *Server) refuseKey(w http.ResponseWriter, r *http.Request) {
+	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", "token")
+	body := map[string]string{"error": "token"}
+	if given, ok := presentedKey(r); ok {
+		if why := s.keys.why(given); why != "" {
+			body["why"] = why
+		}
+	}
+	send(w, http.StatusUnauthorized, body)
 }
 
 func siteAllowed(site []string, visit bool) bool {
@@ -277,7 +292,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
-		s.reject(w, r, http.StatusUnauthorized, "token")
+		s.refuseKey(w, r)
 		return
 	}
 	if r.URL.Path == "/api/events" {
@@ -299,6 +314,9 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	limit := int64(MaxPageBody)
 	if approveRoutes[r.URL.Path] || r.URL.Path == reviewerAgentsRoute {
 		limit = MaxApproveBody
+	}
+	if r.URL.Path == packsRoute {
+		limit = MaxPackBody
 	}
 	body, bad := readObject(w, r, limit)
 	if bad != 0 {
@@ -337,6 +355,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.diagnostics(w, r, body)
 		return
 	}
+	if r.URL.Path == pushRecordRoute {
+		s.pushRecord(w, r, body)
+		return
+	}
 	if r.URL.Path == updateRoute {
 		s.update(w, r, body)
 		return
@@ -349,8 +371,8 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.reviewerAgents(w, body)
 		return
 	}
-	if r.URL.Path == reviewerChecksRoute {
-		s.reviewerChecks(w, r, body)
+	if r.URL.Path == packsRoute {
+		s.packs(w, r, body)
 		return
 	}
 	if r.URL.Path == expectRoute {
@@ -453,6 +475,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.keepAPI(w, r, body)
 		return
 	}
+	if r.URL.Path == verifyRoute {
+		s.verifyAPI(w, r, body)
+		return
+	}
 	if r.URL.Path == pairRoute {
 		s.pairAPI(w, r, body)
 		return
@@ -468,13 +494,21 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	s.api(w, r.URL.Path, body)
 }
 
-func (s *Server) authorized(r *http.Request) bool {
+func presentedKey(r *http.Request) (string, bool) {
 	values := r.Header.Values("Authorization")
 	if len(values) != 1 {
-		return false
+		return "", false
 	}
 	scheme, given, ok := strings.Cut(values[0], " ")
-	return ok && strings.EqualFold(scheme, "Bearer") && s.keys.check(strings.TrimLeft(given, " "))
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	return strings.TrimLeft(given, " "), true
+}
+
+func (s *Server) authorized(r *http.Request) bool {
+	given, ok := presentedKey(r)
+	return ok && s.keys.check(given)
 }
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
@@ -553,7 +587,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.reg.Detach(id)
 	if !s.authorized(r) {
-		s.reject(w, r, http.StatusUnauthorized, "token")
+		s.refuseKey(w, r)
 		return
 	}
 	shared.For(r.Context(), s.logger).Info("page stream opened")
@@ -646,14 +680,13 @@ func present(v any) bool {
 }
 
 var apiFields = map[string][]string{
-	"/api/disconnect": {},
-	"/api/replay":     {"stream", "sid", "epoch", "since"},
-	"/api/interrupt":  {"sid"},
-	"/api/answer":     {"sid", "id", "answer"},
-	"/api/control":    {"sid", "on", "confirm"},
-	"/api/release":    {"sid"},
-	"/api/projects":   {},
-	"/api/docs":       {},
+	"/api/replay":    {"stream", "sid", "epoch", "since"},
+	"/api/interrupt": {"sid"},
+	"/api/answer":    {"sid", "id", "answer"},
+	"/api/control":   {"sid", "on", "confirm"},
+	"/api/release":   {"sid"},
+	"/api/projects":  {},
+	"/api/docs":      {},
 }
 
 func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
@@ -671,12 +704,6 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	}
 	sid := str(body["sid"], 80)
 	switch path {
-	case "/api/disconnect":
-		if s.keys.revoke() {
-			s.logger.Info("page signed out", "why", "disconnect")
-		}
-		s.reg.DetachAll()
-		send(w, http.StatusOK, map[string]bool{"ok": true})
 	case "/api/prefs":
 		if !s.assets.save(body) {
 			refuse(w, http.StatusBadRequest, "prefs")

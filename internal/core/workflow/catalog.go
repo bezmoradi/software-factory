@@ -34,6 +34,7 @@ const (
 	CatalogNone    CatalogState = "none"
 	CatalogUsed    CatalogState = "used"
 	CatalogRefused CatalogState = "refused"
+	CatalogOff     CatalogState = "off"
 )
 
 var catalogName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -69,6 +70,10 @@ var (
 
 func NoCatalog() Catalog {
 	return Catalog{State: CatalogNone}
+}
+
+func OffCatalog() Catalog {
+	return Catalog{State: CatalogOff}
 }
 
 func RefusedCatalog(reason string) Catalog {
@@ -216,6 +221,9 @@ func (c Catalog) Clone() Catalog {
 }
 
 func (c Catalog) fileList() []fileReviewer {
+	if c.State == CatalogOff {
+		return nil
+	}
 	if c.State != CatalogUsed {
 		return fileReviewers
 	}

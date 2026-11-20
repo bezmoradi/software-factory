@@ -1,0 +1,138 @@
+version: 1
+dimensions:
+  post_routes:
+    - "/api/add-repo"
+    - "/api/agent-report"
+    - "/api/allow-commit"
+    - "/api/allow-file"
+    - "/api/allow-rules"
+    - "/api/answer"
+    - "/api/approve-plan"
+    - "/api/approve-requirements"
+    - "/api/audit"
+    - "/api/backup"
+    - "/api/bring-main"
+    - "/api/changes"
+    - "/api/claude-login"
+    - "/api/claude-trust"
+    - "/api/clone-again"
+    - "/api/commit-identity"
+    - "/api/commit-rewrite"
+    - "/api/control"
+    - "/api/decision-log"
+    - "/api/diagnostics"
+    - "/api/dispatch"
+    - "/api/docs"
+    - "/api/egress"
+    - "/api/exceptions"
+    - "/api/explain"
+    - "/api/export"
+    - "/api/file"
+    - "/api/file-check"
+    - "/api/file-match"
+    - "/api/files"
+    - "/api/finding-issues"
+    - "/api/flag-remove"
+    - "/api/forge-answer"
+    - "/api/gate"
+    - "/api/halt"
+    - "/api/handoff"
+    - "/api/import"
+    - "/api/interrupt"
+    - "/api/issues"
+    - "/api/keep"
+    - "/api/lessons"
+    - "/api/limits"
+    - "/api/lock-tests"
+    - "/api/message"
+    - "/api/metrics"
+    - "/api/override"
+    - "/api/packs"
+    - "/api/pair"
+    - "/api/plan-review"
+    - "/api/prefs"
+    - "/api/project"
+    - "/api/project-commands"
+    - "/api/project-facts"
+    - "/api/projects"
+    - "/api/pull-request"
+    - "/api/push"
+    - "/api/push-answer"
+    - "/api/push-record"
+    - "/api/recap"
+    - "/api/release"
+    - "/api/remove-repo"
+    - "/api/remove-session"
+    - "/api/remove-token"
+    - "/api/replay"
+    - "/api/review"
+    - "/api/review-depth"
+    - "/api/review-models"
+    - "/api/review-reply"
+    - "/api/reviewer-agents"
+    - "/api/save-token"
+    - "/api/saved-prompts"
+    - "/api/screenshot"
+    - "/api/screenshots"
+    - "/api/send-findings"
+    - "/api/session"
+    - "/api/session-work"
+    - "/api/sign-in-expect"
+    - "/api/size"
+    - "/api/split"
+    - "/api/start-points"
+    - "/api/stop-session"
+    - "/api/team"
+    - "/api/test-list"
+    - "/api/update"
+    - "/api/upload"
+    - "/api/verify"
+    - "/api/viewed"
+    - "/api/wake"
+    - "/api/walkthrough-check"
+    - "/api/workspace"
+  body_limited_routes: ["/api/approve-plan", "/api/approve-requirements", "/api/reviewer-agents"]
+  other_methods: [PUT, DELETE, PATCH]
+sets:
+  no_key:
+    columns: { route: post_routes }
+    except:
+      - cells: { route: "/api/session" }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it takes no key: a row without a key would sign in and end the run's key; sign-in.yaml checks its refusals"
+  other_host:
+    columns: { route: post_routes }
+  other_origin:
+    columns: { route: post_routes }
+  cross_site:
+    columns: { route: post_routes }
+  no_origin:
+    columns: { route: post_routes }
+  not_json:
+    columns: { route: post_routes }
+  json_over_64k:
+    columns: { route: post_routes }
+    except:
+      - cells: { route: "/api/upload" }
+        reason: "/api/upload takes an image or a file, not JSON, so a JSON body is refused with 415 before any size check; its own limits, 2.5 MiB for an image and 10 MiB for a file, are checked in bodies.yaml"
+      - cells: { route: "/api/import" }
+        reason: "/api/import takes application/gzip, not JSON, so a JSON body is refused with 415 before any size check; its own 256 MiB limit is checked in bodies.yaml"
+      - cells: { route: "/api/approve-plan" }
+        reason: "/api/approve-plan takes a body of up to 1 MiB (MaxApproveBody), so a 64 KiB body isn't over its limit; json_over_1m checks it"
+      - cells: { route: "/api/approve-requirements" }
+        reason: "/api/approve-requirements takes a body of up to 1 MiB (MaxApproveBody), so a 64 KiB body isn't over its limit; json_over_1m checks it"
+      - cells: { route: "/api/reviewer-agents" }
+        reason: "/api/reviewer-agents takes a body of up to 1 MiB (MaxApproveBody), so a 64 KiB body isn't over its limit; json_over_1m checks it"
+      - cells: { route: "/api/packs" }
+        reason: "/api/packs takes a body of up to 2 MiB (MaxPackBody), for an uploaded pack's files, so a 64 KiB body isn't over its limit; packs.yaml's PCK-002 sends one over 2 MiB and one just under"
+  json_over_1m:
+    columns: { route: body_limited_routes }
+  query:
+    columns: { route: post_routes }
+  get:
+    columns: { route: post_routes }
+  other_method:
+    columns: { route: post_routes, method: other_methods }
+  other_method_no_origin:
+    columns: { route: post_routes, method: other_methods }
+  same_site:
+    columns: { route: post_routes }

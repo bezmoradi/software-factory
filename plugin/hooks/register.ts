@@ -174,54 +174,111 @@ async function worktreeTop($: EngineInterface): Promise<string> {
 
 const MAX_PATH_BYTES = 4096
 const MAX_PATH_STEPS = 256
+const MAX_LINK_HOPS = 40
+const READLINK = '/usr/bin/readlink'
 const PATH_TOO_LONG = "Software Factory refused this tool call: the file's path is too long for Software Factory to check. Use a shorter path."
+const PATH_UNPLACED = "Software Factory refused this tool call: it couldn't work out where the file is, so it couldn't check the write. Try again, or use the file's full path."
+const LINK_UNTOLD = "Software Factory refused this tool call: the file's path goes through symbolic links that loop, chain more than 40 times or can't be read, so Software Factory can't tell where the write lands. Write to the file's real path."
 const tooLong = (p: string) => encoder.encode(p).length > MAX_PATH_BYTES
+const partsOf = (p: string) => p.split('/').filter(part => part && part !== '.')
 
-async function placed($: EngineInterface, path: string): Promise<{ real: string; plain: string } | null> {
+async function linkOf($: EngineInterface, p: string): Promise<string> {
+  const out = (await $.process.run([READLINK, p]).catch(() => null))?.stdout ?? ''
+  return out.endsWith('\n') ? out.slice(0, -1) : out
+}
+
+async function walked($: EngineInterface, steps: string[]): Promise<string | { held: string }> {
+  const left = [...steps]
+  let cur = ''
+  let goneAt = 0
+  let hops = 0
+  const depth = () => cur.split('/').length - 1
+  for (let part = left.shift(); part !== undefined; part = left.shift()) {
+    if (part === '..') {
+      cur = cur.replace(/\/[^/]*$/, '')
+      if (goneAt && depth() < goneAt) goneAt = 0
+      continue
+    }
+    cur = `${cur}/${part}`
+    if (goneAt) continue
+    const found = await $.fs.stat(cur, { resolve: true }).catch(() => null)
+    if (found?.realPath) {
+      cur = found.realPath.replace(/\/+$/, '')
+      continue
+    }
+    if (found && !found.isLink) {
+      goneAt = depth()
+      continue
+    }
+    const target = await linkOf($, cur)
+    if (!target) {
+      if (found) return { held: LINK_UNTOLD }
+      goneAt = depth()
+      continue
+    }
+    if (++hops > MAX_LINK_HOPS || target.includes('\uFFFD')) return { held: LINK_UNTOLD }
+    cur = target.startsWith('/') ? '' : cur.replace(/\/[^/]*$/, '')
+    left.unshift(...partsOf(target))
+  }
+  const resolved = cur || '/'
+  return tooLong(resolved) ? { held: PATH_TOO_LONG } : resolved
+}
+
+async function placed($: EngineInterface, path: string): Promise<string[] | string> {
+  const trimmed = path.trim()
+  const spellings = trimmed && trimmed !== path ? [path, trimmed] : [path]
+  const forms: string[] = []
+  for (const spelling of spellings) {
+    const place = await placedAs($, spelling)
+    if (typeof place === 'string') return place
+    for (const x of place) if (!forms.includes(x)) forms.push(x)
+  }
+  return forms
+}
+
+async function placedAs($: EngineInterface, path: string): Promise<string[] | string> {
+  let given = path
+  if (given === '~' || given.startsWith('~/')) {
+    const home = (await $.env.get('HOME')) ?? ''
+    if (!home.startsWith('/')) return PATH_UNPLACED
+    given = home + given.slice(1)
+  }
   const here = (await $.session.cwd()).replace(/\/+$/, '')
-  const raw = (path.startsWith('/') ? path : `${here}/${path}`).split('/')
-  const steps = raw.filter(part => part && part !== '.')
-  if (steps.length > MAX_PATH_STEPS) return null
+  const steps = partsOf(given.startsWith('/') ? given : `${here}/${given}`)
+  if (steps.length > MAX_PATH_STEPS) return PATH_TOO_LONG
   const parts: string[] = []
   for (const part of steps) {
     if (part === '..') parts.pop()
     else parts.push(part)
   }
   const plain = `/${parts.join('/')}`
-  let cur = ''
-  let gone = false
-  for (const part of steps) {
-    if (part === '..') {
-      cur = cur.replace(/\/[^/]*$/, '')
-      continue
-    }
-    cur = `${cur}/${part}`
-    if (gone) continue
-    const real = (await $.fs.stat(cur, { resolve: true }).catch(() => null))?.realPath
-    if (real) cur = real.replace(/\/+$/, '')
-    else gone = true
-  }
-  const resolved = cur || '/'
-  return tooLong(plain) || tooLong(resolved) ? null : { real: resolved, plain }
+  if (tooLong(plain)) return PATH_TOO_LONG
+  const real = await walked($, steps)
+  if (typeof real !== 'string') return real.held
+  const folded = await walked($, parts)
+  if (typeof folded !== 'string') return folded.held
+  return [plain, real, folded]
 }
 
-async function placeOf($: EngineInterface, input: Record<string, unknown>): Promise<{ top: string; paths: string[] } | null> {
+async function placeOf($: EngineInterface, input: Record<string, unknown>): Promise<{ top: string; paths: string[] } | string> {
   const top = await worktreeTop($).catch(() => '')
   const paths: string[] = []
   for (const p of [input.file_path, input.notebook_path]) {
     if (typeof p !== 'string' || !p) continue
-    if (tooLong(p)) return null
+    if (tooLong(p)) return PATH_TOO_LONG
     const place = await placed($, p)
-    if (!place) return null
-    for (const x of [place.plain, place.real]) if (!paths.includes(x)) paths.push(x)
+    if (typeof place === 'string') return place
+    for (const x of place) if (!paths.includes(x)) paths.push(x)
   }
-  if (tooLong(top)) return paths.length ? null : { top: '', paths }
+  if (tooLong(top)) return paths.length ? PATH_TOO_LONG : { top: '', paths }
   return { top, paths }
 }
 
+const hasPath = (input: Record<string, unknown>) => [input.file_path, input.notebook_path].some(p => typeof p === 'string' && p !== '')
+
 async function checkFor($: EngineInterface, tool: string, input: Record<string, unknown>): Promise<Checked> {
-  const place = await placeOf($, input).catch(() => ({ top: '', paths: [] }))
-  return place ? check($, tool, input, place) : { ...fallback(tool, input), held: PATH_TOO_LONG }
+  const place = await placeOf($, input).catch(() => (hasPath(input) ? PATH_UNPLACED : { top: '', paths: [] }))
+  return typeof place === 'string' ? { ...fallback(tool, input), held: place } : check($, tool, input, place)
 }
 
 function refusalOf(v: Checked): string {
@@ -1039,7 +1096,8 @@ export const register: Register = on => {
     if (e.tool === 'Skill') noteRan($, input.skill ?? input.command, 'skill')
     const ran = await next(e)
     dropShown($, e.agentId ?? '')
-    if (visibleLoop) record($, { type: 'tool_done', id, ok: !(ran.deny !== undefined || ran.isError === true), outcome: outcome(e.tool, ran) })
+    const background = e.tool === 'Monitor' || (e.tool === 'Bash' && (input.run_in_background === true || !!obj(ran.result).backgroundTaskId))
+    if (visibleLoop) record($, { type: 'tool_done', id, ok: !(ran.deny !== undefined || ran.isError === true), outcome: outcome(e.tool, ran), ...(background ? { background: true } : {}) })
     const file = e.tool === 'Write' ? input.file_path : undefined
     if (typeof file === 'string' && file.length <= 500 && file.startsWith('/') && !file.includes('/../') && SESSION_FILE.test(file) && ran.deny === undefined && ran.isError !== true) {
       kept = { ...kept, written: [...kept.written.filter(f => f !== file), file].slice(-20) }

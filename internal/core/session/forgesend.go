@@ -74,7 +74,7 @@ func (f *Forges) sending(t PushTarget, v ForgeView) error {
 }
 
 func (f *Forges) expired(c *forgeCard) {
-	t, _ := f.cfg.Targets(c.sid)
+	t, _ := targetOrHeld(f.cfg.Targets, f.cfg.Held, c.sid)
 	f.audit(context.Background(), c.sid, t, c.view, ByEngine, ResultExpired, "the card for "+kindWord(c.view.Kind)+" expired after 24 hours without an answer: "+c.view.Title)
 }
 

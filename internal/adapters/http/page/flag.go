@@ -16,7 +16,10 @@ const (
 	maxFlagPath        = 4096
 )
 
-var flagCommit = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+var (
+	flagCommit = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	flagDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 type flagJSON struct {
 	Path    string `json:"path"`
@@ -29,12 +32,15 @@ type flagJSON struct {
 	Size    int64  `json:"size"`
 	Allowed bool   `json:"allowed"`
 	Full    bool   `json:"full"`
+	Link    bool   `json:"link"`
+	Spec    bool   `json:"spec"`
+	Digest  string `json:"digest"`
 }
 
 func flagsJSON(list []session.FlagView) []flagJSON {
 	out := make([]flagJSON, 0, len(list))
 	for _, f := range list {
-		j := flagJSON{Path: f.Path, Shown: f.Shown, Kind: string(f.Kind), Why: f.Why, Size: f.Size, Allowed: f.Allowed, Full: f.Full}
+		j := flagJSON{Path: f.Path, Shown: f.Shown, Kind: string(f.Kind), Why: f.Why, Size: f.Size, Allowed: f.Allowed, Full: f.Full, Link: f.Link, Spec: f.Spec, Digest: f.Digest}
 		if f.Commit != "" {
 			j.Commit, j.Field, j.Label = f.Commit, string(f.Field), session.FieldWords[f.Field]
 		}
@@ -53,11 +59,12 @@ func (s *Server) flag(ctx context.Context, w http.ResponseWriter, route, sid str
 	switch route {
 	case allowFileRoute:
 		reason, okReason := body["reason"].(string)
-		if !keysWithin(body, "sid", "path", "reason") || !okReason || len(reason) > 2000 {
+		digest, okDigest := body["digest"].(string)
+		if !keysWithin(body, "sid", "path", "digest", "reason") || !okReason || len(reason) > 2000 || !okDigest || !flagDigest.MatchString(digest) {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err = s.cfg.Work.AllowFile(ctx, sid, path, reason)
+		err = s.cfg.Work.AllowFile(ctx, sid, path, digest, reason)
 		s.logger.Info("flagged file", "op", "allow", "ok", err == nil)
 	default:
 		if !keysWithin(body, "sid", "path") {

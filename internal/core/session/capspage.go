@@ -49,7 +49,7 @@ func ms(t time.Time) float64 {
 }
 
 func capsFields(c Caps) Fields {
-	return Fields{"money": c.MoneyUSD, "minutes": float64(c.Minutes), "turns": float64(c.Turns)}
+	return Fields{"money": c.MoneyUSD, "minutes": float64(c.Minutes), "turns": float64(c.Turns), "disk": float64(c.DiskGiB)}
 }
 
 func capLevel(kind string, c Caps, u CapsUsed) string {
@@ -95,7 +95,7 @@ func (l *Limits) Frame() Fields {
 	}
 	addMeter(SideReviewers, "", "")
 	for _, sid := range sids {
-		if side, box := meterOf(l.known[sid]); side == SideAgents || side == SideCodex {
+		if side, box := meterOf(l.known[sid]); side == SideAgents {
 			addMeter(side, box, sid)
 		}
 	}
@@ -119,8 +119,8 @@ func (l *Limits) Frame() Fields {
 			c := l.capsOfLocked(s)
 			f["caps"] = capsFields(c)
 			f["own"] = s.own != nil
-			f["used"] = Fields{"costUsd": math.Round(s.used.CostUSD*10000) / 10000, "minutes": math.Floor(s.used.Time.Minutes()*10) / 10, "turns": float64(s.used.Turns)}
-			f["levels"] = Fields{CapMoney: capLevel(CapMoney, c, s.used), CapTime: capLevel(CapTime, c, s.used), CapTurns: capLevel(CapTurns, c, s.used)}
+			f["used"] = Fields{"costUsd": math.Round(s.used.CostUSD*10000) / 10000, "minutes": math.Floor(s.used.Time.Minutes()*10) / 10, "turns": float64(s.used.Turns), "diskBytes": float64(s.used.DiskBytes), "diskMore": s.used.DiskMore, "diskAt": ms(s.used.DiskAt)}
+			f["levels"] = Fields{CapMoney: capLevel(CapMoney, c, s.used), CapTime: capLevel(CapTime, c, s.used), CapTurns: capLevel(CapTurns, c, s.used), CapDisk: capLevel(CapDisk, c, s.used)}
 			f["reached"] = s.reached
 			f["reachedAt"] = ms(s.reachedAt)
 		}
@@ -212,7 +212,7 @@ func (l *Limits) ProjectCaps(name string) Caps {
 func (l *Limits) SetProject(name string, c Caps) error {
 	clean, ok := CheckCaps(c)
 	if !ok || name == "" || len(name) > 400 {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes or 10,000 turns.")
+		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
 	_, had := l.projects[name]
@@ -240,9 +240,12 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
 	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
+	}
 	clean, ok := CheckCaps(c)
 	if !ok {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes or 10,000 turns.")
+		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
 	k, known := l.known[sid]
@@ -250,6 +253,9 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 		l.mu.Unlock()
 		known = l.reg.admittedProject(sid, &k)
 		l.mu.Lock()
+		if _, seen := l.known[sid]; known && !seen {
+			l.known[sid] = k
+		}
 	}
 	if !known {
 		l.mu.Unlock()
@@ -267,7 +273,11 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	s.own = &clean
 	l.checkLocked(sid, s)
 	l.unsaved = true
+	measure := clean.DiskGiB > 0 && k.running && l.cfg.Disk != nil
 	l.mu.Unlock()
+	if measure {
+		l.measureSoon(sid, k.box)
+	}
 	err := l.save()
 	l.flush(true)
 	return err
@@ -288,6 +298,9 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
 	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	s := l.sessions[sid]
 	if s == nil || s.reached == "" || s.reached != kind {
@@ -304,11 +317,17 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 		next.Minutes = int(value)
 	case CapTurns:
 		next.Turns = int(value)
+	case CapDisk:
+		next.DiskGiB = int(value)
 	}
 	clean, ok := CheckCaps(next)
 	if !ok || value != math.Trunc(value) && kind != CapMoney || overCap(kind, clean, s.used) || capValue(kind, clean) <= capValue(kind, c) {
 		l.mu.Unlock()
-		return explained(invalid("value"), "The new cap must be more than this session has used ("+usedWords(kind, s.used)+") and more than the cap now, and at most $100,000, 43,200 minutes or 10,000 turns.")
+		most := "$100,000, 43,200 minutes or 10,000 turns"
+		if kind == CapDisk {
+			most = "4,096 GiB, a whole number"
+		}
+		return explained(invalid("value"), "The new cap must be more than this session has used ("+usedWords(kind, s.used)+") and more than the cap now, and at most "+most+".")
 	}
 	if least := (s.used.Time + raiseTimeMargin + time.Minute - 1).Truncate(time.Minute); kind == CapTime && time.Duration(clean.Minutes)*time.Minute < least {
 		l.mu.Unlock()
@@ -319,7 +338,12 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	l.unsaved = true
 	l.checkLocked(sid, s)
 	reason := "the person pressed Raise the cap: the " + old + " is now a " + capWords(kind, clean)
+	k := l.known[sid]
+	measure := kind == CapDisk && l.cfg.Disk != nil
 	l.mu.Unlock()
+	if measure {
+		l.measureSoon(sid, k.box)
+	}
 	l.audit(AuditEntry{Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapRaised, Reason: reason})
 	err := l.save()
 	l.flush(true)
@@ -329,6 +353,9 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
+	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
 	}
 	l.mu.Lock()
 	s := l.sessions[sid]
@@ -350,7 +377,18 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 			return err
 		}
 	}
-	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapStopped, Reason: "the person pressed Stop at the " + words + ", so the engine stopped the session; it stays at the cap until the person raises it"})
+	until := "the person raises it"
+	if kind == CapDisk {
+		until = "the person raises it or the engine measures the session's folder under the cap, as Check again does"
+	}
+	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditCapAnswer, Result: kind, Verdict: CapStopped, Reason: "the person pressed Stop at the " + words + ", so the engine stopped the session; it stays at the cap until " + until})
 	l.flush(true)
 	return nil
+}
+
+func (l *Limits) branchHeld(sid string) error {
+	l.mu.Lock()
+	doubled := l.cfg.Doubled
+	l.mu.Unlock()
+	return heldBranch(doubled, sid)
 }

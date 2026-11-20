@@ -301,7 +301,7 @@ class SfPermission extends HTMLElement {
     if (detail || summary) showCommand(this, detail || summary, `What ${visible(tool)} would run`)
     if (hidesText(detail || summary)) this.append(hiddenMark(detail || summary, 'This call'))
     if (irreversible) this.append(el('p', 'small warn', "This command can't be undone, so Software Factory asks about it every time: a saved “don't ask again” rule doesn't skip the question."))
-    if (guarded) this.append(el('p', 'small warn', "This file is in the protect list of the team file on the main branch, so Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
+    if (guarded) this.append(el('p', 'small warn', "This file is protected: it matches the team file's protect list on main, it's a test you locked, or it's under proctor/, Proctor's specifications. Software Factory asks before every write to it: a saved “don't ask again” rule doesn't skip the question."))
     if (readOnly) return this.append(el('p', 'small muted', readOnlyText(attach)))
     const choices = el('div', 'choices')
     if (complete === false) {
@@ -321,7 +321,7 @@ class SfPermission extends HTMLElement {
         choices.append(switching)
       }
     }
-    const name = who === 'Claude' || who === 'Codex' ? who : 'the agent'
+    const name = who === 'Claude' ? who : 'the agent'
     const note = (this.#note ??= new NoteForm({ name: 'note', placeholder: `What should ${name} do instead? Optional`, label: `What ${name} should do instead`, send: 'Deny', maxLength: 2000, toggle: `No, and tell ${name} what to do differently` })).ready()
     note.onSend = text => reply(this, id, text ? { choice: 'no', note: text } : { choice: 'no' }, note.send)
     choices.append(note.toggle!)

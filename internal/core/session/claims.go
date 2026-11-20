@@ -50,9 +50,21 @@ type TurnMarks struct {
 }
 
 type turnTool struct {
-	shell   bool
-	unknown bool
-	command string
+	shell      bool
+	unknown    bool
+	command    string
+	order      int
+	finished   bool
+	ok         bool
+	background bool
+}
+
+type turnCommand struct {
+	command    string
+	extra      bool
+	finished   bool
+	ok         bool
+	background bool
 }
 
 type turnHead struct {
@@ -70,6 +82,7 @@ type turnLog struct {
 	lastSeq int64
 	head    *turnHead
 	tools   map[string]*turnTool
+	started int
 	extra   []string
 	edits   []string
 	early   []string
@@ -86,6 +99,7 @@ type endedTurn struct {
 	start    time.Time
 	known    bool
 	commands []string
+	ran      []turnCommand
 	edits    []string
 	message  string
 	head     *turnHead
@@ -143,8 +157,18 @@ func (r *Registry) trackTurn(c *conn, kind string, ev map[string]any, seq int64,
 	case "tool_done":
 		id, _ := ev["id"].(string)
 		command, _ := ev["command"].(string)
-		if t := log.tools[id]; log.open && t != nil && command != "" {
+		t := log.tools[id]
+		if !log.open || t == nil {
+			return
+		}
+		if command != "" {
 			t.shell, t.unknown, t.command = true, false, command
+		}
+		if ok, reported := ev["ok"].(bool); reported {
+			t.finished, t.ok = true, ok
+		}
+		if background, _ := ev["background"].(bool); background {
+			t.background = true
 		}
 	case "text":
 		if log.open {
@@ -202,6 +226,8 @@ func (r *Registry) trackTool(log *turnLog, ev map[string]any) {
 		log.unknown = true
 		return
 	}
+	t.order = log.started
+	log.started++
 	log.tools[id] = &t
 }
 
@@ -211,7 +237,7 @@ func classifyTool(tool, summary string, ev map[string]any) turnTool {
 		if summary == "" || strings.HasSuffix(summary, "…") || utf8.RuneCountInString(summary) >= 300 {
 			return turnTool{unknown: true}
 		}
-		return turnTool{shell: true, command: summary}
+		return turnTool{shell: true, command: summary, background: tool == "Monitor"}
 	case tool == "execute":
 		if command, _ := ev["command"].(string); command != "" {
 			return turnTool{shell: true, command: command}
@@ -281,21 +307,32 @@ func (h *turnHead) wait() string {
 
 func (r *Registry) endTurn(sid string, a *admitted, log *turnLog, checks ClaimChecks) {
 	known := log.whole && !log.unknown
-	commands := slices.Clone(log.extra)
+	var ran []turnCommand
+	for _, c := range log.extra {
+		if c == "" {
+			known = false
+			continue
+		}
+		ran = append(ran, turnCommand{command: c, extra: true})
+	}
+	tools := make([]*turnTool, 0, len(log.tools))
 	for _, t := range log.tools {
 		if t.unknown || (t.shell && t.command == "") {
 			known = false
 		}
 		if t.command != "" {
-			commands = append(commands, t.command)
+			tools = append(tools, t)
 		}
 	}
-	for _, c := range log.extra {
-		if c == "" {
-			known = false
-		}
+	slices.SortFunc(tools, func(a, b *turnTool) int { return a.order - b.order })
+	for _, t := range tools {
+		ran = append(ran, turnCommand{command: t.command, finished: t.finished, ok: t.ok, background: t.background})
 	}
-	ended := endedTurn{sid: sid, serial: log.serial, turnID: log.turnID, epoch: log.epoch, cwd: a.Cwd, start: log.start, known: known, commands: commands, edits: slices.Clone(log.edits), message: log.message, head: log.head}
+	commands := make([]string, 0, len(ran))
+	for _, c := range ran {
+		commands = append(commands, c.command)
+	}
+	ended := endedTurn{sid: sid, serial: log.serial, turnID: log.turnID, epoch: log.epoch, cwd: a.Cwd, start: log.start, known: known, commands: commands, ran: ran, edits: slices.Clone(log.edits), message: log.message, head: log.head}
 	go r.checkTurn(ended, checks)
 }
 
@@ -304,10 +341,10 @@ func (r *Registry) checkTurn(t endedTurn, checks ClaimChecks) {
 	if len(claims) == 0 {
 		return
 	}
-	tests, build := false, false
+	build := false
 	for _, c := range t.commands {
-		ct, cb := commandRuns(c)
-		tests, build = tests || ct, build || cb
+		_, cb := commandRuns(c)
+		build = build || cb
 	}
 	var marks []ClaimMark
 	var notes []string
@@ -315,8 +352,8 @@ func (r *Registry) checkTurn(t endedTurn, checks ClaimChecks) {
 	for _, c := range claims {
 		switch c.kind {
 		case ClaimTests:
-			if t.known && !tests {
-				marks = append(marks, ClaimMark{Kind: c.kind, Quote: claimQuote(c.sentence), Why: "No test command ran in this turn."})
+			if why := t.testsUnbacked(); why != "" {
+				marks = append(marks, ClaimMark{Kind: c.kind, Quote: claimQuote(c.sentence), Why: why})
 			}
 		case ClaimBuild:
 			if t.known && !build {
@@ -353,6 +390,41 @@ func (r *Registry) checkTurn(t endedTurn, checks ClaimChecks) {
 		a.unbacked = slices.Clone(a.unbacked[len(a.unbacked)-maxMarkedTurns:])
 	}
 	r.announce(r.now())
+}
+
+func (t endedTurn) testsUnbacked() string {
+	if !t.known {
+		return ""
+	}
+	ran, background, last := false, false, -1
+	for i, c := range t.ran {
+		narrow := runsTestCheck(c.command)
+		tests, _ := commandRuns(c.command)
+		if (tests || narrow) && c.background || narrow && statusHiddenBy(c.command, isTestSegment) == HiddenByBackground {
+			background = true
+			continue
+		}
+		if tests || narrow {
+			ran = true
+		}
+		if narrow {
+			last = i
+		}
+	}
+	switch {
+	case !ran && background:
+		return "The test commands in this turn ran in the background, so the engine didn't see whether they passed."
+	case !ran:
+		return "No test command ran in this turn."
+	}
+	if last < 0 {
+		return ""
+	}
+	c := t.ran[last]
+	if c.extra || !c.finished || c.ok || statusHiddenBy(c.command, isCheckSegment) != "" || !testDecides(c.command) {
+		return ""
+	}
+	return "The last test command in this turn failed."
 }
 
 func (t endedTurn) namedByTurn(rel string) bool {

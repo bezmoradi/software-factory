@@ -60,11 +60,13 @@ var (
 	}
 	loggingCall = regexp.MustCompile(`\b(?:log|logger|logging|slog|klog|zap|zerolog|console|metrics|statsd|tracer|span|sentry|Sentry|otel|telemetry|audit)\s*\.\s*[A-Za-z_]+\s*\(|\blog(?:ger)?\.(?:Info|Warn|Error|Debug|Print)`)
 	runLater    = regexp.MustCompile(`(?i)(^|/)(makefile|gnumakefile|[^/]+\.mk|justfile|taskfile\.ya?ml|\.pre-commit-config\.ya?ml)$|^\.github/workflows/|^\.husky/|^\.githooks/`)
+	runnerSetup = regexp.MustCompile(`(?i)(^|/)(pytest\.ini|(jest|vitest|playwright|cypress)\.config\.[^/]+|vitest\.workspace\.[^/]+|karma\.conf\.[^/]+|\.mocharc(\.[^/]+)?|phpunit\.xml(\.dist)?|\.rspec)$`)
+	goTestMain  = regexp.MustCompile(`(?m)^func\s+TestMain\s*\(`)
 )
 
 func isTestPath(p string) bool { return testPath.MatchString(p) }
 
-func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
+func scanChange(files ChangeBlobs, repo, base, head string, specs bool) changeScan {
 	var out changeScan
 	list, err := files.ChangedFiles(context.Background(), repo, base, head)
 	if err != nil {
@@ -122,14 +124,23 @@ func scanChange(files ChangeBlobs, repo, base, head string) changeScan {
 	for _, c := range list {
 		if c.NewMode == push.ModeSubmodule || c.OldMode == push.ModeSubmodule {
 			out.kinds = append(out.kinds, pointerMove(c))
+			if specs {
+				out.tests = append(out.tests, specNotes(c, "", "", false)...)
+			}
 			continue
 		}
 		out.kinds = append(out.kinds, kindsOf(c, blobs)...)
 		if c.NewMode == push.ModeSymlink || c.OldMode == push.ModeSymlink {
+			if specs {
+				out.tests = append(out.tests, specNotes(c, "", "", false)...)
+			}
 			continue
 		}
 		before, okBefore := text(c.OldSHA)
 		after, okAfter := text(c.NewSHA)
+		if specs {
+			out.tests = append(out.tests, specNotes(c, before, after, okBefore && okAfter)...)
+		}
 		if !okBefore || !okAfter || isBinaryText(before) || isBinaryText(after) {
 			continue
 		}
@@ -279,6 +290,16 @@ func testNotes(c push.Change, before, after string) []ChangeNote {
 	}
 	if runLater.MatchString(c.Path) {
 		note("a file a person or CI runs later was " + string(c.Status))
+	}
+	if c.Status != push.Deleted {
+		switch {
+		case strings.HasSuffix(c.Path, "_test.go") && countMatches(goTestMain, after) > countMatches(goTestMain, before):
+			note("a new TestMain, which decides whether this package's tests run")
+		case path.Base(c.Path) == "conftest.py":
+			note("pytest's conftest.py, which runs before the tests, was " + string(c.Status))
+		case runnerSetup.MatchString(c.Path):
+			note("test runner configuration, which decides which tests run and how, was " + string(c.Status))
+		}
 	}
 	if path.Base(c.Path) == "package.json" {
 		if what := scriptChanges(before, after); what != "" {

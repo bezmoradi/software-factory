@@ -2,7 +2,7 @@ import { api, events, forget, signedIn, trade } from './api.ts'
 import { controllable, current, paint, say, schedulePaint, scroller, sessions, state, type Session } from './app-state.ts'
 import { openTabs } from './navigation.ts'
 import { byId, el } from './lib/dom.ts'
-import { agentWord, attachCommand, composeCommand, isClaude } from './lib/format.ts'
+import { agentWord, attachCommand, isClaude } from './lib/format.ts'
 import { isRecord } from './lib/json.ts'
 import type { Step } from './lib/path.ts'
 import { loadUpdate } from './components/update.ts'
@@ -15,15 +15,16 @@ interface StreamDeps {
 }
 
 interface Stream {
-  connect: () => Promise<void>
+  connect: (useTab?: boolean) => Promise<void>
   applySession: (s: Session, ev: SessionEvent) => void
 }
 
 let retry = 1000
 let lost = 0
 
-export const SIGN_IN_HINT = 'Press Sign in to use the page in this tab.'
 let fresh = true
+let parked = false
+let signedInAgainAt = 0
 
 let goneNext: { head: string; detail: string } | null = null
 
@@ -34,9 +35,9 @@ function goneSay(head: string, detail: string) {
   }
 }
 
-export function showGone(head: string, detail: string, offerSignIn: boolean, busy = false) {
+export function showGone(head: string, detail: string, offerUseTab: boolean, busy = false) {
   byId('gone-progress').hidden = !busy
-  byId('signin').hidden = !offerSignIn
+  byId('use-tab').hidden = !offerUseTab
   if (goneNext) {
     goneNext.head = head
     goneNext.detail = detail
@@ -56,7 +57,9 @@ export function showGone(head: string, detail: string, offerSignIn: boolean, bus
 let generation = 0
 let reading: ReadableStreamDefaultReader<string> | null = null
 
-export function signOut(head: string, detail: string) {
+function replaced() {
+  const head = 'This page was opened somewhere else.'
+  parked = true
   generation++
   void reading?.cancel().catch(() => undefined)
   reading = null
@@ -68,8 +71,18 @@ export function signOut(head: string, detail: string) {
   state.note = head
   for (const s of sessions.values()) s.view.remove()
   sessions.clear()
-  showGone(head, detail, true)
+  showGone(head, 'Another tab, browser or program on this computer signed in. Use this tab to work here again.', true)
   paint()
+}
+
+async function signInAgain(): Promise<void> {
+  signedInAgainAt = Date.now()
+  await trade()
+}
+
+async function whyOf(res: Response): Promise<string> {
+  const body: unknown = await res.json().catch(() => null)
+  return isRecord(body) && typeof body.why === 'string' ? body.why : ''
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -80,8 +93,8 @@ async function restarted(): Promise<boolean> {
 }
 
 function stepOf(text: string): Step {
-  const skill = /^\s*(?:<command-name>\s*)?\/?(?:knackpack:(challenge-requirements|plan-implementation)|speckit-(specify|plan|tasks))\b/.exec(text)
-  return skill?.[1] === 'challenge-requirements' || skill?.[2] === 'specify' ? 'define' : skill?.[1] === 'plan-implementation' || skill?.[2] === 'plan' ? 'plan' : skill?.[2] === 'tasks' ? 'tasks' : ''
+  const skill = /^\s*(?:<command-name>\s*)?\/?knackpack:(challenge-requirements|plan-implementation)\b/.exec(text)
+  return skill?.[1] === 'challenge-requirements' ? 'define' : skill?.[1] === 'plan-implementation' ? 'plan' : ''
 }
 
 export function ensure(sid: string): Session {
@@ -211,19 +224,33 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
     schedulePaint()
   }
 
-  async function connect(): Promise<void> {
-    if (!signedIn()) return signOut('You’re signed out', `The engine didn’t answer. Check that it’s running (${composeCommand('ps')}), then press Sign in.`)
+  async function connect(useTab = false): Promise<void> {
+    if (parked && !useTab) return
+    parked = false
     const gen = generation
     let openedAt = 0
+    let again = false
     try {
+      if (!signedIn()) await signInAgain()
+      if (gen !== generation) return
+      if (!signedIn()) throw new Error('signed out')
       const res = await events()
       if (gen !== generation) return void res.body?.cancel().catch(() => undefined)
       if (res.status === 401) {
+        const why = await whyOf(res)
         forget()
-        if (!fresh && await restarted()) return location.reload()
-        if (!fresh) return signOut('You were signed out', `The page was opened in another tab, the engine restarted, or the sign-in expired. ${SIGN_IN_HINT}`)
-        fresh = false
-        await trade()
+        if (gen !== generation) return
+        if (fresh) {
+          fresh = false
+          await trade()
+          return gen === generation ? connect() : undefined
+        }
+        if (await restarted()) return location.reload()
+        if (gen !== generation) return
+        if (why === 'replaced') return replaced()
+        again = Date.now() - signedInAgainAt < 5000
+        if (again) throw new Error('ended again')
+        await signInAgain()
         return gen === generation ? connect() : undefined
       }
       if (res.status === 403) {
@@ -261,7 +288,7 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
         }
       }
     } catch {
-      state.note = 'The engine may have stopped. Retrying…'
+      state.note = again ? 'Signing in again…' : 'The engine may have stopped. Retrying…'
     }
     if (gen !== generation) return
     reading = null

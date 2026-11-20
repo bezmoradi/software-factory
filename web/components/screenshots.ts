@@ -1,6 +1,7 @@
 import { api } from '../api.ts'
 import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
+import { pngBlob } from '../lib/files.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -13,8 +14,6 @@ interface Shot {
   at: number
 }
 
-const MAX_DATA = 34 << 20
-
 function shotsOf(v: unknown): Shot[] {
   if (!isRecord(v) || !Array.isArray(v.screenshots)) return []
   return v.screenshots.filter(isRecord).filter(s => typeof s.name === 'string' && typeof s.size === 'number' && typeof s.at === 'number').map(s => ({ name: s.name as string, size: s.size as number, at: s.at as number })).slice(0, 50)
@@ -24,20 +23,6 @@ function size(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1 << 20) return `${(n / 1024).toFixed(0)} KiB`
   return `${(n / (1 << 20)).toFixed(1)} MiB`
-}
-
-function pngBlob(data: string): Blob | null {
-  if (data.length > MAX_DATA || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) return null
-  let raw: string
-  try {
-    raw = atob(data)
-  } catch {
-    return null
-  }
-  const bytes = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-  if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return null
-  return new Blob([bytes], { type: 'image/png' })
 }
 
 class SfScreenshots extends HTMLElement {

@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	diskBlock          = 4 << 10
 	maxSnapshotEntries = 500_000
 	maxSnapshotBytes   = 8 << 30
 	maxLinkTarget      = 4096
@@ -29,10 +30,13 @@ type planned struct {
 }
 
 type plan struct {
-	r     *repo
-	items []planned
-	links map[string]string
-	kinds map[string]push.Mode
+	limit   int64
+	block   int64
+	entries int
+	r       *repo
+	items   []planned
+	links   map[string]string
+	kinds   map[string]push.Mode
 }
 
 func unsafe(format string, args ...any) error {
@@ -41,12 +45,19 @@ func unsafe(format string, args ...any) error {
 
 func (Reader) WriteTree(path, commit, dest string) error {
 	_, err := with(path, func(r *repo) (struct{}, error) {
-		return struct{}{}, writeTree(r, commit, dest)
+		return struct{}{}, writeTree(r, commit, dest, &plan{limit: maxSnapshotBytes, entries: maxSnapshotEntries})
 	})
 	return err
 }
 
-func writeTree(r *repo, commit, dest string) error {
+func (Reader) WriteTreeBounded(path, commit, dest string, limit, block int64, entries int) error {
+	_, err := with(path, func(r *repo) (struct{}, error) {
+		return struct{}{}, writeTree(r, commit, dest, &plan{limit: min(max(limit, 0), maxSnapshotBytes), block: max(block, 1), entries: min(max(entries, 1), maxSnapshotEntries)})
+	})
+	return err
+}
+
+func writeTree(r *repo, commit, dest string, p *plan) error {
 	info, err := os.Lstat(dest)
 	if err != nil || !info.IsDir() {
 		return unsafe("the snapshot folder isn't a folder")
@@ -59,7 +70,7 @@ func writeTree(r *repo, commit, dest string) error {
 	if err != nil {
 		return err
 	}
-	p := &plan{r: r, links: map[string]string{}, kinds: map[string]push.Mode{}}
+	p.r, p.links, p.kinds = r, map[string]string{}, map[string]push.Mode{}
 	if err := p.walk(c.Tree, "", 0); err != nil {
 		return err
 	}
@@ -143,8 +154,8 @@ func (p *plan) walk(tree, prefix string, depth int) error {
 			return unsafe("the tree has two entries that differ only in case at %s", short(path))
 		}
 		p.kinds[key] = e.mode
-		if len(p.items) >= maxSnapshotEntries {
-			return fmt.Errorf("%w: more than %d entries in the tree", push.ErrTooLarge, maxSnapshotEntries)
+		if len(p.items) >= p.entries {
+			return fmt.Errorf("%w: more than %d entries in the tree", push.ErrTooLarge, p.entries)
 		}
 		it := planned{path: path, mode: e.mode, sha: e.sha}
 		if e.mode == push.ModeSymlink {
@@ -220,8 +231,19 @@ func (p *plan) follow(base []string, target string, hops *int) ([]string, error)
 
 func (p *plan) write(root *os.Root) error {
 	var total int64
+	if p.block > 0 && int64(len(p.items))*p.block > p.limit {
+		return p.tooLarge()
+	}
 	for _, it := range p.items {
 		name := filepath.FromSlash(it.path)
+		if p.block > 0 {
+			if total+p.block > p.limit {
+				return p.tooLarge()
+			}
+			if it.mode != push.ModeFile && it.mode != push.ModeExecutable {
+				total += p.block
+			}
+		}
 		switch it.mode {
 		case push.ModeFolder, push.ModeSubmodule:
 			if err := root.Mkdir(name, 0o755); err != nil {
@@ -244,7 +266,7 @@ func (p *plan) write(root *os.Root) error {
 			if cerr != nil {
 				return unsafe("%s can't be written", short(it.path))
 			}
-			total += n
+			total += p.charged(n)
 		}
 	}
 	for _, it := range p.items {
@@ -260,8 +282,8 @@ func (p *plan) write(root *os.Root) error {
 
 func (p *plan) copyBlob(sha string, f *os.File, total int64) (int64, error) {
 	if pr, err := p.r.store.probe(sha); err == nil && pr.whole && !pr.cached && pr.size > streamAbove {
-		if total+pr.size > maxSnapshotBytes {
-			return 0, fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
+		if total+pr.size > p.limit {
+			return 0, p.tooLarge()
 		}
 		_, ok, err := p.r.store.streamWhole(context.Background(), sha, pr, f)
 		if err != nil {
@@ -281,11 +303,25 @@ func (p *plan) copyBlob(sha string, f *os.File, total int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if total+int64(len(data)) > maxSnapshotBytes {
-		return 0, fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
+	if total+int64(len(data)) > p.limit {
+		return 0, p.tooLarge()
 	}
 	if _, err := f.Write(data); err != nil {
 		return 0, unsafe("a file can't be written")
 	}
 	return int64(len(data)), nil
+}
+
+func (p *plan) tooLarge() error {
+	if p.limit < maxSnapshotBytes {
+		return fmt.Errorf("%w: the tree holds more than the %d MiB there is room for", push.ErrTooLarge, p.limit>>20)
+	}
+	return fmt.Errorf("%w: the tree holds more than %d GiB", push.ErrTooLarge, maxSnapshotBytes>>30)
+}
+
+func (p *plan) charged(n int64) int64 {
+	if p.block <= 0 {
+		return n
+	}
+	return max((n+p.block-1)/p.block, 1) * p.block
 }

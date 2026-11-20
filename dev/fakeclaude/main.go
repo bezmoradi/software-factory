@@ -47,10 +47,12 @@ var (
 )
 
 const (
-	slowFor   = 45 * time.Second
-	slowMost  = 3600
-	fakeModel = "sf-fake-model"
-	fakeCost  = 0.0125
+	slowFor        = 45 * time.Second
+	slowMost       = 3600
+	fakeModel      = "sf-fake-model"
+	fakeSmallModel = "sf-fake-small-model"
+	fakeCost       = 0.0125
+	fakeSmallCost  = 0.0025
 )
 
 func main() {
@@ -61,6 +63,10 @@ func main() {
 	r, err := review(os.Args[1:], st)
 	out := result{Type: "result", Subtype: "success", NumTurns: r.turns, Result: r.text, SessionID: "fake-reviewer", Cost: fakeCost,
 		Denials: r.denials, ModelUsage: map[string]usage{modelOf(os.Args[1:]): {CostUSD: fakeCost}}}
+	if err == nil && has("TWO-MODELS") {
+		out.ModelUsage[fakeSmallModel] = usage{CostUSD: fakeSmallCost}
+		out.Cost += fakeSmallCost
+	}
 	if out.Denials == nil {
 		out.Denials = []denial{}
 	}
@@ -128,8 +134,19 @@ func review(args []string, st *stream) (reply, error) {
 	}
 	agent, named := value(args, "--agent")
 	prompt := args[len(args)-1]
-	userAgent := ""
-	if named && !strings.HasPrefix(agent, "knackpack:") {
+	plugin, hasPlugin := value(args, "--plugin-dir")
+	userAgent, packAgent := "", false
+	switch {
+	case named && strings.Contains(agent, ":"):
+		if !hasPlugin {
+			return reply{}, fmt.Errorf("--agent %s names a plugin's agent, and no --plugin-dir was given", agent)
+		}
+		name, err := pluginAgent(plugin, agent)
+		if err != nil {
+			return reply{}, err
+		}
+		packAgent = name != "knackpack"
+	case named:
 		found, err := userAgentFile(agent)
 		if err != nil {
 			return reply{}, err
@@ -140,9 +157,10 @@ func review(args []string, st *stream) (reply, error) {
 	if !named && aside == "" && !strings.Contains(strings.ToLower(prompt), "manual test list") {
 		return reply{}, errors.New("no knackpack agent named")
 	}
-	plugin, _ := value(args, "--plugin-dir")
-	if info, err := os.Stat(filepath.Join(plugin, ".claude-plugin", "plugin.json")); err != nil || !info.Mode().IsRegular() {
-		return reply{}, errors.New("--plugin-dir doesn't name an installed plugin")
+	if hasPlugin {
+		if _, err := reviewerView(plugin); err != nil {
+			return reply{}, err
+		}
 	}
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
@@ -176,9 +194,13 @@ func review(args []string, st *stream) (reply, error) {
 	}
 	r := verdict(agent, prompt, st)
 	r.text = findingLines(r.text)
+	r.text = coverageLines(agent, r.text)
 	r.text = strings.Replace(r.text, "\n", given(args)+"\n", 1)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)
+	}
+	if packAgent {
+		r.text = packReply(r.text)
 	}
 	return r, nil
 }
@@ -225,7 +247,7 @@ func verdict(agent, prompt string, st *stream) reply {
 	if has("READ-OUTSIDE") {
 		r.denials = []denial{{ToolName: "Read", ToolUseID: "fake", ToolInput: map[string]any{"file_path": "/home/reviewer/.claude/.credentials.json"}}}
 	}
-	report := "/tmp/review-report-" + strings.TrimPrefix(agent, "knackpack:") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
+	report := "/tmp/review-report-" + strings.ReplaceAll(strings.TrimPrefix(agent, "knackpack:"), ":", "-") + "/report.md\n" + seen(prompt) + earlier(prompt) + approvedSeen(prompt) + longReport()
 	if has("SLOW-REVIEW") {
 		st.slow(slowness())
 	}
@@ -248,14 +270,6 @@ func verdict(agent, prompt string, st *stream) reply {
 	}
 	if has("BLOCK-REVIEW") {
 		r.text = report + "\n**Changes required:** head/BLOCK-REVIEW asks the fake reviewer to block.\nknackpack-verdict/1: block"
-		return r
-	}
-	if plantedDefect() && agent == slopReviewer {
-		r.text = report + "\n**Verdict: SIMPLER CHANGE AVAILABLE**\n### [Medium] change.diff adds a line that is only `" + plantedLine + "`\n" + plantedFindings + "\nknackpack-verdict/1: pass"
-		return r
-	}
-	if plantedDefect() {
-		r.text = report + "\n**Changes required:** change.diff adds a line that is only `" + plantedLine + "`.\nknackpack-verdict/1: block"
 		return r
 	}
 	if has("SEVERE-PASS") {
@@ -295,6 +309,18 @@ func earlier(prompt string) string {
 			state = "present"
 		}
 		out.WriteString("\n" + name + ": " + state)
+	}
+	return out.String()
+}
+
+func approvedSeen(prompt string) string {
+	var out strings.Builder
+	if strings.Contains(prompt, "fixes a production incident") {
+		out.WriteString("\nIncident fix: the prompt says so")
+	}
+	entries, _ := os.ReadDir("approved")
+	for _, e := range entries {
+		out.WriteString("\napproved/" + e.Name() + ": present")
 	}
 	return out.String()
 }

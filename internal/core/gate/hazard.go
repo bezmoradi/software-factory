@@ -17,16 +17,11 @@ const (
 
 var (
 	claudeNames      = set("claude", "claude-code")
-	codexNames       = set("codex")
 	claudeCloudFlags = set("--remote", "--cloud", "--teleport", "--remote-control", "--rc")
 	claudeCloudWords = set("remote-control", "rc")
 	claudeCloudSlash = regexp.MustCompile(`^[` + space + `]*/(?:remote-control|rc|teleport)(?:[` + space + `]|$)|^[` + space + `]*/ultrareview\b(?s:.)*--post\b`)
-	codexCloudFirst  = set("cloud", "cloud-tasks", "apply", "a")
-	codexCloudAny    = set("cloud", "cloud-tasks", "apply")
-	codexValueOpts   = set("-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "-C", "--cd", "-i", "--image", "--enable", "--disable", "--add-dir", "--local-provider")
 	infoOnly         = set("--version", "-v", "-V", "--help", "-h")
 	claudeTools      = set("mcp", "config", "doctor", "update", "upgrade", "install", "auth", "plugin", "plugins", "migrate-installer", "help")
-	codexTools       = set("login", "logout", "mcp", "completion", "features", "help")
 	launchers        = set("npx", "bunx", "pnpx")
 	applets          = set("busybox", "toybox")
 	jsRuntimes       = map[string]map[string]bool{"node": nil, "nodejs": nil, "bun": set("run", "x"), "deno": set("run")}
@@ -41,8 +36,8 @@ var (
 	stdinRunners     = set("iex", "invoke-expression")
 	downloadPipe     = regexp.MustCompile(`(?i)\b` + downloader + `\b(?s:.)*?\|&?[` + space + `]*` + lead + runner + `\b`)
 	downloadRuns     = regexp.MustCompile(`(?i)\b(?:` + runner + `|eval|source)\b[^\n;|&]*?(?:<\(|\$\(|` + "`" + `)[` + space + `]*` + lead + downloader + `\b|(?:^|[` + space + `;&|])\.[` + space + `]+<\([` + space + `]*` + downloader + `\b`)
-	looseCloud       = regexp.MustCompile(`(?i)\bclaude\b(?s:.)*?(?:--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b|\bultrareview\b(?s:.)*?--post\b)|\bcodex\b(?s:.)*?\b(?:cloud|apply)\b`)
-	looseUndone      = regexp.MustCompile(`(?i)\brm\b[^\n;&|]*[` + space + `]-(?:-recursive|[a-z]*r)|\bgit\b(?s:.)*?\breset\b(?s:.)*?--hard|\bgit\b(?s:.)*?\bclean\b(?s:.)*?[` + space + `]-(?:-force|[a-z]*f)|\bfind\b(?s:.)*?[` + space + `]-delete\b|\b(?:terraform|tofu|terragrunt)\b(?s:.)*?\bdestroy\b|\b(?:kubectl|oc)\b(?s:.)*?\bdelete\b|\b(?:drop|truncate|dropdb)\b|\b(?:claude|codex)\b`)
+	looseCloud       = regexp.MustCompile(`(?i)\bclaude\b(?s:.)*?(?:--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b|\bultrareview\b(?s:.)*?--post\b)`)
+	looseUndone      = regexp.MustCompile(`(?i)\brm\b[^\n;&|]*[` + space + `]-(?:-recursive|[a-z]*r)|\bgit\b(?s:.)*?\breset\b(?s:.)*?--hard|\bgit\b(?s:.)*?\bclean\b(?s:.)*?[` + space + `]-(?:-force|[a-z]*f)|\bfind\b(?s:.)*?[` + space + `]-delete\b|\b(?:terraform|tofu|terragrunt)\b(?s:.)*?\bdestroy\b|\b(?:kubectl|oc)\b(?s:.)*?\bdelete\b|\b(?:drop|truncate|dropdb)\b|\bclaude\b`)
 )
 
 type hazardScan struct {
@@ -166,12 +161,6 @@ func (h *hazardScan) agent(name string, args []string) bool {
 		} else if childSession(args, claudeTools) {
 			h.undone = true
 		}
-	case codexNames[name]:
-		if codexCloud(args) {
-			h.cloud = true
-		} else if childSession(args, codexTools) {
-			h.undone = true
-		}
 	default:
 		return false
 	}
@@ -206,8 +195,6 @@ func agentPath(script string) string {
 	switch {
 	case strings.Contains(lower, "claude-code/") || claudeNames[base]:
 		return "claude"
-	case strings.Contains(lower, "@openai/codex") || codexNames[base]:
-		return "codex"
 	}
 	return ""
 }
@@ -313,23 +300,6 @@ func claudeCloud(args []string) bool {
 		}
 	}
 	return slices.Contains(args, "ultrareview") && slices.ContainsFunc(args, func(a string) bool { return a == "--post" || strings.HasPrefix(a, "--post=") })
-}
-
-func codexCloud(args []string) bool {
-	if slices.ContainsFunc(args, func(a string) bool { return codexCloudAny[a] }) {
-		return true
-	}
-	for j := 0; j < len(args); j++ {
-		a := args[j]
-		if codexValueOpts[a] {
-			j++
-			continue
-		}
-		if !optionLike.MatchString(a) {
-			return codexCloudFirst[a]
-		}
-	}
-	return false
 }
 
 func childSession(args []string, tools map[string]bool) bool {

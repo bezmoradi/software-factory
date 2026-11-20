@@ -37,8 +37,6 @@ func (r Remote) SessionClone(ctx context.Context, q session.CloneSpec) error {
 		return errors.New("the session's clone isn't one the engine makes")
 	case !sha1Pattern.MatchString(q.Head):
 		return errors.New("the session's start commit isn't a full commit id")
-	case q.Branch != "" && !push.ValidBranch(q.Branch):
-		return errors.New("the session's branch isn't one the engine writes")
 	case r.OpenBox == nil:
 		return errors.New("the engine can't open the session's folder")
 	}
@@ -139,9 +137,6 @@ func buildClone(ctx context.Context, tmp, base *os.Root, q session.CloneSpec) er
 			files = append(files, struct{ name, data string }{ref, q.Main + "\n"})
 		}
 		head = "ref: refs/heads/" + q.MainBranch + "\n"
-	}
-	if q.Branch != "" && q.Branch != q.MainBranch {
-		files = append(files, struct{ name, data string }{"refs/heads/" + q.Branch, q.Head + "\n"})
 	}
 	files = append(files, struct{ name, data string }{"HEAD", head})
 	for _, f := range files {

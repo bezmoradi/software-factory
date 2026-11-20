@@ -30,6 +30,7 @@ function stamp(ms: number): HTMLTimeElement {
 class SfRecap extends HTMLElement {
   #post: Post | null = null
   #sid = ''
+  #readOnly = false
   #loading = false
   #seenAt = 0
   #hiddenAt = 0
@@ -64,21 +65,23 @@ class SfRecap extends HTMLElement {
     this.#post = p
   }
 
-  show(sid: string, looking: boolean) {
+  show(sid: string, looking: boolean, readOnly = false) {
     if (sid !== this.#sid) {
       if (this.#sid && looking && !this.#loading) void this.#seen(this.#sid)
       this.#sid = sid
+      this.#readOnly = readOnly
       this.#seenAt = 0
       this.hidden = true
       this.replaceChildren()
       if (sid) void this.#load(sid)
       return
     }
+    this.#readOnly = readOnly
     if (sid && looking && !this.#loading && Date.now() - this.#seenAt > SEEN_EVERY_MS) void this.#seen(sid)
   }
 
   async #seen(sid: string) {
-    if (!this.#post) return
+    if (!this.#post || this.#readOnly) return
     this.#seenAt = Date.now()
     await this.#post(ROUTE, { op: 'seen', sid }).catch(() => null)
   }

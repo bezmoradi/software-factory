@@ -76,8 +76,6 @@ func settled(e ReviewEntry) bool {
 	switch e.Record.State {
 	case review.Pass, review.Block:
 		return true
-	case review.Unknown:
-		return e.Record.Channel == review.Checking
 	}
 	return false
 }
@@ -122,6 +120,7 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 			return required, ctx.Err()
 		}
 		rt.Rounds = w.Rounds(sid, t.Name)
+		rt.Pushes = w.Pushes(sid, t.Name)
 	}
 	d.reviewGiven(&rt, sid, t)
 	return d.cfg.Reviews.Start(ctx, rt)

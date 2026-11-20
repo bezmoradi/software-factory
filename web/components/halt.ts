@@ -12,6 +12,7 @@ export interface HaltView {
 export interface HaltSession {
   sid: string
   name: string
+  own: boolean
 }
 
 const SID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
@@ -56,7 +57,7 @@ export function openAway(forSession = false): void {
 }
 
 export function setHaltSession(s: HaltSession | null): void {
-  if (s?.sid === session?.sid && s?.name === session?.name) return
+  if (s?.sid === session?.sid && s?.name === session?.name && s?.own === session?.own) return
   session = s && SID.test(s.sid) ? s : null
   paintAll()
 }
@@ -193,9 +194,10 @@ class SfHalt extends HTMLElement {
     dress(this.#away, on ? 'Away: on' : 'Away', 'moon', `ghost small${on ? ' warn' : ''}`, 'Away mode denies each new permission card with a note to the agent, so a session doesn’t wait for you.')
     this.#away.disabled = !!sending
     check(this.#all, 'Away for every session', view.awayAll, 'away-all')
-    if (session) check(this.#one, `Away for ${visible(session.name)}`, awayHere(), 'away-one')
+    const offered = session && (session.own || awayHere()) ? session : null
+    if (offered) check(this.#one, `Away for ${visible(offered.name)}`, awayHere(), 'away-one')
     else if (document.activeElement === this.#one) this.#all.focus()
-    this.#one.hidden = !session
+    this.#one.hidden = !offered
     const focused = focusedKey(this)
     while (this.#menu.nextSibling) this.#menu.nextSibling.remove()
     const parts: Node[] = []

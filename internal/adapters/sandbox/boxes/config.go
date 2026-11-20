@@ -10,13 +10,17 @@ import (
 )
 
 const (
-	DefaultMemory   = 2 << 30
-	DefaultNanoCPUs = 2_000_000_000
-	DefaultSubnets  = "10.213.0.0/20"
-	RuntimeGVisor   = "runsc"
-	boxBits         = 28
-	maxPoolNetworks = 4096
-	maxBoxesLimit   = 256
+	DefaultMemory        = 2 << 30
+	DefaultNanoCPUs      = 2_000_000_000
+	DefaultSubnets       = "10.213.0.0/20"
+	DefaultVerifyMemory  = 4 << 30
+	DefaultVerifyDisk    = 2 << 30
+	DefaultVerifyMinutes = 15
+	maxVerifyMinutes     = 120
+	RuntimeGVisor        = "runsc"
+	boxBits              = 28
+	maxPoolNetworks      = 4096
+	maxBoxesLimit        = 256
 )
 
 type Config struct {
@@ -24,6 +28,10 @@ type Config struct {
 	NanoCPUs       int64
 	ReviewerMemory int64
 	ReviewerCPUs   int64
+	VerifyMemory   int64
+	VerifyCPUs     int64
+	VerifyDisk     int64
+	VerifyMinutes  int
 	MaxBoxes       int
 	Runtime        string
 	Ranges         []netip.Prefix
@@ -44,6 +52,9 @@ func ParseConfig(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ReviewerCPUs, err = cpusOf(getenv, "SF_REVIEWER_CPUS"); err != nil {
+		return Config{}, err
+	}
+	if err := verifyConfig(getenv, &cfg); err != nil {
 		return Config{}, err
 	}
 	if v := strings.TrimSpace(getenv("SF_MAX_BOXES")); v != "" {
@@ -78,6 +89,39 @@ func ParseConfig(getenv func(string) string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func verifyConfig(getenv func(string) string, cfg *Config) error {
+	var err error
+	if cfg.VerifyCPUs, err = cpusOf(getenv, "SF_VERIFY_CPUS"); err != nil {
+		return err
+	}
+	cfg.VerifyMemory, cfg.VerifyDisk, cfg.VerifyMinutes = DefaultVerifyMemory, DefaultVerifyDisk, DefaultVerifyMinutes
+	if v := strings.TrimSpace(getenv("SF_VERIFY_MEMORY")); v != "" {
+		m, err := parseBytes(v)
+		if err != nil || m < 256<<20 || m > 256<<30 {
+			return fmt.Errorf("SF_VERIFY_MEMORY must be a size from 256m to 256g, such as 4g, got %q", v)
+		}
+		cfg.VerifyMemory = m
+	}
+	if v := strings.TrimSpace(getenv("SF_VERIFY_DISK")); v != "" {
+		d, err := parseBytes(v)
+		if err != nil || d < 64<<20 || d > 256<<30 {
+			return fmt.Errorf("SF_VERIFY_DISK must be a size from 64m to 256g, such as 2g, got %q", v)
+		}
+		cfg.VerifyDisk = d
+	}
+	if cfg.VerifyDisk > cfg.VerifyMemory {
+		cfg.VerifyDisk = cfg.VerifyMemory
+	}
+	if v := strings.TrimSpace(getenv("SF_VERIFY_MINUTES")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > maxVerifyMinutes {
+			return fmt.Errorf("SF_VERIFY_MINUTES must be a whole number of minutes from 1 to %d, got %q", maxVerifyMinutes, v)
+		}
+		cfg.VerifyMinutes = n
+	}
+	return nil
 }
 
 func memoryOf(getenv func(string) string, key string) (int64, error) {

@@ -77,7 +77,7 @@ func (f *Forges) live(request string) bool {
 }
 
 func (f *Forges) known(sid string) bool {
-	_, ok := f.cfg.Targets(sid)
+	_, ok := targetOrHeld(f.cfg.Targets, f.cfg.Held, sid)
 	return ok
 }
 

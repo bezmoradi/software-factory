@@ -44,7 +44,9 @@ export interface SessionInfo {
   splits?: SplitCard[]
   box?: string
   signInWait?: boolean
+  homeHeld?: boolean
   branch?: string
+  doubled?: boolean
 }
 
 export interface SplitCard {
@@ -59,21 +61,10 @@ export interface SplitCard {
   secretAt?: string
 }
 
-export interface Stint {
-  agent: string
-  sid: string
-  name?: string
-  from: string
-  to: string
-}
-
 export interface Lineage {
   branch: string
   origin?: string
   from: string
-  earlier: Stint[]
-  handedTo?: string
-  last?: string
   group?: string
   groupKind?: 'pair' | 'goal'
 }
@@ -146,6 +137,7 @@ export interface PullFollowView {
   review: SessionReview | null
   running: boolean
   disabled: string
+  connected: boolean
 }
 
 export interface Uncommitted {
@@ -167,6 +159,8 @@ export interface AgentCheck {
   command: string
   ok: boolean
   at: number
+  editedAt?: number
+  hidden?: string
 }
 
 export interface ChangeNote {
@@ -217,6 +211,42 @@ export interface PushExtra {
   workflows: WorkflowRun[]
   workflowsProblem?: string
   lookup: string
+  locked?: LockedTests | null
+}
+
+export interface TypeFile {
+  path: string
+  what: string
+}
+
+export interface TypeLine {
+  what: string
+  files: TypeFile[]
+  more: number
+}
+
+export interface TypeChange {
+  type: string
+  lines: TypeLine[]
+}
+
+export interface LockedTests {
+  commit: string
+  count: number
+  paths: string[]
+  problem?: string
+}
+
+export interface TestLockView {
+  offered: boolean
+  why?: string
+  commit?: string
+  at?: number
+  files: number
+  paths: string[]
+  cut: boolean
+  branchLeft: number
+  changed: LockedTests | null
 }
 
 export interface SessionFactsView {
@@ -254,7 +284,7 @@ export interface SignIn {
 
 export interface StartupFile {
   path: string
-  place: 'worktree' | 'clone' | 'above'
+  place: 'worktree' | 'clone' | 'above' | 'pack'
   link: boolean
   target?: string
   size: number
@@ -285,8 +315,18 @@ export interface StartupApproval {
   skipped?: string[]
 }
 
+export interface HomeApproval {
+  box: string
+  digest: string
+  changed: string[]
+  more: number
+  first: boolean
+  problem?: string
+}
+
 export interface Needs {
   approval?: StartupApproval
+  home?: HomeApproval
   signIn?: SignIn
   expected?: Expect
   step?: string
@@ -299,6 +339,7 @@ export interface Needs {
 
 export interface Consent {
   approve?: string
+  home?: string
   costOk?: boolean
   box?: string
 }
@@ -341,6 +382,7 @@ export interface SessionPush {
   findings?: boolean
   findingsSent?: number
   extra?: PushExtra
+  checks?: AgentCheck[]
 }
 
 export interface SessionForge {
@@ -390,17 +432,31 @@ export interface FlaggedFile {
   kind?: string
   size?: number
   full?: boolean
+  link?: boolean
+  spec?: boolean
+  digest?: string
 }
 
 export interface PushPanelView {
+  sid?: string
   push: SessionPush | null
   disabled: string
   answering: boolean
   flagged?: FlaggedFile[]
   flagsRead?: boolean
   checks?: AgentCheck[]
+  typeChange?: TypeChange | null
   passedSince?: string[]
   blockedSince?: string[]
+  coverage?: CoverageRole[]
+}
+
+export interface CoverageRole {
+  name: string
+  reqIds: string[]
+  lines: CoverageRow[]
+  dropped: number
+  cut: boolean
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -424,6 +480,9 @@ export interface ReviewRole {
   previous?: boolean
   override?: string
   pluginCommit?: string
+  pack?: string
+  packVersion?: string
+  packDigest?: string
   claudeCode?: string
   models?: string[]
   progress?: ReviewProgress
@@ -433,6 +492,20 @@ export interface ReviewRole {
   advisory?: boolean
   cited?: CitedIDs
   findings?: FindingRef[]
+  reqIds?: string[]
+  coverage?: CoverageRow[]
+  coverageDropped?: number
+  coverageCut?: boolean
+}
+
+export interface CoverageRow {
+  id: string
+  status: string
+  evidence?: string
+  path?: string
+  line?: number
+  endLine?: number
+  note?: string
 }
 
 export interface FindingRef {
@@ -525,6 +598,7 @@ export interface ReviewsView {
   overriding?: string
   testList?: TestList | null
   testAsking?: boolean
+  readOnly?: string
 }
 
 export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
@@ -616,7 +690,7 @@ export interface Dispatch extends Consent {
   model: string
   mode: string
   type?: string
-  caps?: { money: number; minutes: number; turns: number }
+  caps?: { money: number; minutes: number; turns: number; disk: number }
   from?: StartFrom
   issue?: number
   issueHash?: string
@@ -636,7 +710,7 @@ export interface PairDispatch {
   agents: PairAgent[]
   message?: string
   benchmark?: { number: number; hash: string; base: string }
-  caps?: { money: number; minutes: number; turns: number }
+  caps?: { money: number; minutes: number; turns: number; disk: number }
 }
 
 export interface HelloEvent {
@@ -731,12 +805,6 @@ export interface ToolEvent extends Stamped {
   summary: string
   agentId?: string
   agentName?: string
-}
-
-export interface NoticeEvent extends Stamped {
-  type: 'notice'
-  text: string
-  reported?: boolean
 }
 
 export interface ToolDoneEvent extends Stamped {
@@ -861,19 +929,19 @@ export interface GateEvent {
   requirements?: WorkflowDoc | null
   implemented?: boolean
   waiting?: string
-  holds?: { define: string; plan: string; tasks?: string; reviewer?: string; approveRequirements?: string; approvePlan?: string; ignore?: string }
+  holds?: { define: string; plan: string; reviewer?: string; approveRequirements?: string; approvePlan?: string; ignore?: string }
   flagged?: FlaggedFile[]
   flagsRead?: boolean
   lfs?: string[]
   handoff?: boolean
   catalog?: string
   catalogWhy?: string
+  testLock?: TestLockView
+  typeChange?: TypeChange
   workType?: string
   types?: { id: string; name: string; steps: string[]; builtin: boolean }[]
   team?: { approved: boolean; note: string }
-  commands?: { define?: string; plan?: string; tasks?: string; implement?: string }
-  tasks?: boolean
-  tasksWritten?: boolean
+  commands?: { define?: string; plan?: string }
   rounds?: number
   committed?: boolean
 }
@@ -925,7 +993,7 @@ export interface TeamView {
   remote: { branch: string; present: boolean; same: boolean }[]
 }
 
-export type Size = 'feature' | 'fix' | 'docs' | 'explore' | 'review'
+export type Size = 'feature' | 'fix' | 'incident' | 'docs' | 'explore' | 'review'
 
 export interface PlanFileEvent extends Stamped {
   type: 'planfile'
@@ -935,7 +1003,7 @@ export interface PlanFileEvent extends Stamped {
 }
 
 export interface PlanApproval {
-  kind?: 'plan' | 'requirements'
+  kind?: 'plan' | 'requirements' | 'root-cause'
   path: string
   text: string
   hash: string
@@ -1072,7 +1140,6 @@ export type SessionEvent =
   | UsageEvent
   | CompactEvent
   | AuditEvent
-  | NoticeEvent
 
 export interface RepoEvent {
   type: 'repo'
@@ -1169,7 +1236,6 @@ declare global {
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-pair': CustomEvent<PairDispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
-    'sf-handover': CustomEvent<{ sid: string; agent: string }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event
@@ -1186,12 +1252,13 @@ declare global {
     'sf-plan-review': CustomEvent<{ hash: string }>
     'sf-insert-prompt': CustomEvent<{ text: string }>
     'sf-walkthrough-check': CustomEvent<{ commit: string; step: number; done: boolean; settle: (ok: boolean) => void }>
-    'sf-allow-file': CustomEvent<{ path: string; reason: string }>
-    'sf-remove-file': CustomEvent<{ path: string }>
+    'sf-allow-file': CustomEvent<{ path: string; digest: string; reason: string }>
+    'sf-remove-file': CustomEvent<{ path: string; revert: boolean }>
     'sf-allow-commit': CustomEvent<{ commit: string; field: string; reason: string }>
     'sf-rewrite-commit': CustomEvent<{ commit: string; field: string }>
     'sf-override': CustomEvent<{ agent: string; commit: string; reason: string }>
     'sf-commit-ask': Event
     'sf-session-deleted': CustomEvent<{ sid: string }>
+    'sf-packs-changed': Event
   }
 }

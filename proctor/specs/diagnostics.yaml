@@ -1,0 +1,26 @@
+version: 2
+suite: diagnostics
+scenarios:
+  - id: DGN-001
+    name: "Diagnostics, built after every other suite has run, is a software-factory-diagnostics/1 text with no project name, git host, path, URL or address in it"
+    steps:
+      - id: diagnostics
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/diagnostics"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+          keys: { "$.body": [text] }
+          matches:
+            "$.body.text": "(?s)software-factory-diagnostics/1\\n.*"
+            "$.headers.x-sf-request[0]": "[0-9a-f]{16}"
+          excludes:
+            "$.body.text": [demo, proctor, gitserver, /workspace, /var/lib, /tmp, "https://", "http://", "@"]
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the handler takes only {} and builds the text from what the engine holds, changing nothing a read shows: the one thing it refreshes is the box helper's cached Docker facts, which only this route shows"

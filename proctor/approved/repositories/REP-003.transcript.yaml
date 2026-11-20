@@ -1,0 +1,316 @@
+format: "proctor-transcript/1"
+scenario: "REP-003"
+specification: "repositories"
+steps:
+  - do: "http.request"
+    fact:
+      body:
+        name: "demo"
+        ok: true
+        url: "https://gitserver.test:8443/demo.git"
+      header_lists:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "71"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date_list>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id_list-1>"
+      headers:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "71"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id-1>"
+      status: 202
+    id: "add"
+    identity: "page"
+    phase: "verification"
+    with:
+      body:
+        url: "https://gitserver.test:8443/demo.git"
+      headers:
+        Origin: "${page.origin}"
+      method: "POST"
+      path: "/api/add-repo"
+  - do: "http.request"
+    fact:
+      body:
+        cloning: []
+        hosts:
+          - host: "https://gitserver.test:8443"
+            savedAt: "<hosts_saved_at-1>"
+        projects:
+          - addedAt: "<added_at-1>"
+            agents: []
+            autoFindings: false
+            branch: "main"
+            hold:
+              afterBlock: false
+              maxFiles: 0
+              maxLines: 0
+            instructions: []
+            name: "demo"
+            path: "/workspace/base/demo"
+            prComment: false
+            rounds: 3
+            type: ""
+            url: "https://gitserver.test:8443/dev/demo.git"
+          - addedAt: "<second_added_at-1>"
+            agents: []
+            autoFindings: false
+            branch: "main"
+            hold:
+              afterBlock: false
+              maxFiles: 0
+              maxLines: 0
+            instructions: []
+            name: "demo-2"
+            path: "/workspace/base/demo-2"
+            prComment: false
+            rounds: 3
+            type: ""
+            url: "https://gitserver.test:8443/demo.git"
+        repos: true
+        reviewer:
+          expect: "any"
+        starters:
+          - enabled: true
+            expect: "any"
+            id: "claude"
+            method: "plugin"
+            name: "Claude Code"
+          - enabled: true
+            expect: "any"
+            id: "dev-acp"
+            method: "acp"
+            name: "Development ACP agent"
+      header_lists:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "891"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date_list>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id_list-2>"
+      headers:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "891"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id-2>"
+      status: 200
+    id: "cloned"
+    identity: "page"
+    phase: "verification"
+    poll:
+      mode: "eventually"
+      window: "1m0s"
+    with:
+      body: {}
+      headers:
+        Origin: "${page.origin}"
+      method: "POST"
+      path: "/api/projects"
+  - do: "http.request"
+    fact:
+      body:
+        ok: true
+      header_lists:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "12"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date_list>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id_list-3>"
+      headers:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "12"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id-3>"
+      status: 200
+    id: "remove"
+    identity: "page"
+    phase: "verification"
+    with:
+      body:
+        name: "demo-2"
+      headers:
+        Origin: "${page.origin}"
+      method: "POST"
+      path: "/api/remove-repo"
+  - do: "http.request"
+    fact:
+      body:
+        cloning: []
+        hosts:
+          - host: "https://gitserver.test:8443"
+            savedAt: "<hosts_saved_at-1>"
+        projects:
+          - addedAt: "<added_at-1>"
+            agents: []
+            autoFindings: false
+            branch: "main"
+            hold:
+              afterBlock: false
+              maxFiles: 0
+              maxLines: 0
+            instructions: []
+            name: "demo"
+            path: "/workspace/base/demo"
+            prComment: false
+            rounds: 3
+            type: ""
+            url: "https://gitserver.test:8443/dev/demo.git"
+        repos: true
+        reviewer:
+          expect: "any"
+        starters:
+          - enabled: true
+            expect: "any"
+            id: "claude"
+            method: "plugin"
+            name: "Claude Code"
+          - enabled: true
+            expect: "any"
+            id: "dev-acp"
+            method: "acp"
+            name: "Development ACP agent"
+      header_lists:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "612"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date_list>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id_list-4>"
+      headers:
+        cache-control:
+          - "no-store"
+        content-length:
+          - "612"
+        content-security-policy:
+          - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+        content-type:
+          - "application/json; charset=utf-8"
+        cross-origin-opener-policy:
+          - "same-origin"
+        cross-origin-resource-policy:
+          - "same-origin"
+        date: "<date>"
+        referrer-policy:
+          - "no-referrer"
+        x-content-type-options:
+          - "nosniff"
+        x-frame-options:
+          - "DENY"
+        x-sf-request: "<request_id-4>"
+      status: 200
+    id: "removed"
+    identity: "page"
+    phase: "verification"
+    with:
+      body: {}
+      headers:
+        Origin: "${page.origin}"
+      method: "POST"
+      path: "/api/projects"

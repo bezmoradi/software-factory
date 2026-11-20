@@ -58,7 +58,7 @@ body.out > .gone { display: grid !important; grid-template-columns: minmax(0, 1f
 .gone-progress span { position: absolute; inset: 0 auto 0 0; width: 30%; background: var(--accent); animation: progress 1.4s ease-in-out infinite; }
 @keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 @media (prefers-reduced-motion: reduce) { .gone-progress span { width: 100%; opacity: .6; animation: none; } }
-#signin { width: 16rem; max-width: 100%; padding: .45rem 1rem; }
+#use-tab { width: 16rem; max-width: 100%; padding: .45rem 1rem; }
 p, li { text-wrap: pretty; }
 a { color: var(--accent); }
 button {
@@ -299,7 +299,7 @@ pre {
 .tool.sub { padding-left: 1rem; }
 .sub-list { list-style: none; margin: .4rem 0 0; padding: 0; }
 .subagent > details > summary { min-height: 24px; color: var(--soft); }
-:is(sf-reviewer-checks, sf-changes) details > summary { min-height: 24px; }
+sf-changes details > summary { min-height: 24px; }
 
 .card {
   background: var(--card);
@@ -333,8 +333,6 @@ sf-reviewer-agents { display: block; margin-top: .8rem; }
 sf-reviewer-agents .field-row { flex-wrap: wrap; margin-top: .4rem; }
 sf-reviewer-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-reviewer-agents .field-row > input[type="file"] { min-width: 0; max-width: 100%; }
-sf-reviewer-checks .list > li > .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
-sf-reviewer-checks .list > li > .row > .row { flex-wrap: wrap; justify-content: flex-end; }
 sf-reviewer-agents .list .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 sf-project-agents .check-row { align-items: center; gap: .4rem; margin-top: .4rem; }
 sf-project-agents .check-row input { flex: none; margin: 0; accent-color: var(--accent); }
@@ -370,6 +368,9 @@ sf-push-panel .push-card .field-row { flex-wrap: wrap; gap: .35rem; }
 sf-push-panel .push-facts { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
 sf-push-panel .push-facts-part { margin-top: .5rem; }
 sf-push-panel .push-facts code, sf-session-facts code { overflow-wrap: anywhere; }
+sf-push-panel .coverage-table { width: 100%; margin-top: .35rem; table-layout: fixed; border-collapse: collapse; }
+sf-push-panel .coverage-table :is(th, td) { padding: .25rem .35rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+sf-push-panel .coverage-table thead th { font-weight: 600; color: var(--soft); }
 sf-push-panel .push-reason { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-push-panel .push-missing { margin: .2rem 0 .4rem; padding-left: 1.1rem; }
 sf-push-panel .flagged { margin: .2rem 0 .4rem; padding-left: 1.1rem; overflow-wrap: anywhere; }
@@ -381,7 +382,7 @@ sf-reviews .reviews-head { flex-wrap: wrap; align-items: center; margin-bottom: 
 sf-reviews .reviews-head .label { margin-bottom: 0; }
 sf-reviews .review-findings { margin: .35rem 0 0; padding-left: 1.1rem; }
 sf-reviews .review-findings li + li { margin-top: .2rem; }
-sf-reviews .review-message, sf-reviewer-checks .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
+sf-reviews .review-message { margin: .35rem 0 0; padding: .4rem .5rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 4px; }
 .path { list-style: none; margin: 0; padding: 0; }
 .path > li { position: relative; display: grid; grid-template-columns: 1rem minmax(0, 1fr); column-gap: .65rem; padding-bottom: .85rem; }
 .path > li:not(:last-child)::before { content: ''; position: absolute; left: calc(.5rem - 1px); top: 1.35rem; bottom: .15rem; width: 2px; background: var(--line); }
@@ -603,7 +604,6 @@ sf-toasts { position: fixed; top: 2.5rem; left: 50%; z-index: 5; display: flex; 
 }
 .prefs:popover-open { display: grid; }
 .prefs.menu { gap: .25rem; width: max-content; min-width: 11rem; padding: .4rem; }
-#account { bottom: calc(1.75rem + var(--rail) + 8px); }
 .menu p { margin: 0; padding: .25rem .5rem; }
 .menu button { width: 100%; padding: .2rem .5rem; border: 0; text-align: left; }
 .themes { display: grid; gap: 0; margin: 0; padding: 0; border: 0; min-width: 0; }
@@ -1190,6 +1190,8 @@ sf-screenshots .screenshot-list button.link { text-align: start; overflow-wrap: 
 sf-screenshots .screenshot-list button[aria-pressed="true"] { font-weight: 600; }
 sf-screenshots .screenshot-view { margin: .5rem 0 0; }
 sf-screenshots .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
+sf-verify .screenshot-view { margin: .5rem 0 0; }
+sf-verify .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
 form.dispatch .benchmark-picker, form.dispatch .pair-field { display: block; }
 form.dispatch .benchmark-picker .issue-items { margin: .3rem 0; }
 form.dispatch .benchmark-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }

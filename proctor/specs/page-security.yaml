@@ -1,0 +1,2795 @@
+version: 2
+suite: page-security
+tables:
+  - id: SEC-T01
+    name: "A POST route without the page key is refused before its handler, with no why, since no key was presented"
+    do: http.request
+    identity: anonymous
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 401
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: token }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
+    no_state_check: "refused with 401 before the route's handler runs, since the request carries no key, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t01_remove_repo, t01_remove_session, t01_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 401 before the route's handler runs, since the request carries no key, so nothing can be removed" } }
+    covers: no_key
+    columns: ["case", "route"]
+    rows:
+      - ["t01_add_repo", "/api/add-repo"]
+      - ["t01_allow_commit", "/api/allow-commit"]
+      - ["t01_allow_file", "/api/allow-file"]
+      - ["t01_allow_rules", "/api/allow-rules"]
+      - ["t01_answer", "/api/answer"]
+      - ["t01_approve_plan", "/api/approve-plan"]
+      - ["t01_approve_requirements", "/api/approve-requirements"]
+      - ["t01_bring_main", "/api/bring-main"]
+      - ["t01_claude_login", "/api/claude-login"]
+      - ["t01_claude_trust", "/api/claude-trust"]
+      - ["t01_clone_again", "/api/clone-again"]
+      - ["t01_commit_identity", "/api/commit-identity"]
+      - ["t01_commit_rewrite", "/api/commit-rewrite"]
+      - ["t01_control", "/api/control"]
+      - ["t01_decision_log", "/api/decision-log"]
+      - ["t01_diagnostics", "/api/diagnostics"]
+      - ["t01_dispatch", "/api/dispatch"]
+      - ["t01_egress", "/api/egress"]
+      - ["t01_exceptions", "/api/exceptions"]
+      - ["t01_explain", "/api/explain"]
+      - ["t01_export", "/api/export"]
+      - ["t01_file_match", "/api/file-match"]
+      - ["t01_files", "/api/files"]
+      - ["t01_finding_issues", "/api/finding-issues"]
+      - ["t01_flag_remove", "/api/flag-remove"]
+      - ["t01_forge_answer", "/api/forge-answer"]
+      - ["t01_halt", "/api/halt"]
+      - ["t01_handoff", "/api/handoff"]
+      - ["t01_import", "/api/import"]
+      - ["t01_interrupt", "/api/interrupt"]
+      - ["t01_issues", "/api/issues"]
+      - ["t01_keep", "/api/keep"]
+      - ["t01_lessons", "/api/lessons"]
+      - ["t01_limits", "/api/limits"]
+      - ["t01_lock_tests", "/api/lock-tests"]
+      - ["t01_message", "/api/message"]
+      - ["t01_override", "/api/override"]
+      - ["t01_packs", "/api/packs"]
+      - ["t01_pair", "/api/pair"]
+      - ["t01_plan_review", "/api/plan-review"]
+      - ["t01_prefs", "/api/prefs"]
+      - ["t01_project", "/api/project"]
+      - ["t01_project_commands", "/api/project-commands"]
+      - ["t01_project_facts", "/api/project-facts"]
+      - ["t01_pull_request", "/api/pull-request"]
+      - ["t01_push", "/api/push"]
+      - ["t01_push_answer", "/api/push-answer"]
+      - ["t01_push_record", "/api/push-record"]
+      - ["t01_recap", "/api/recap"]
+      - ["t01_release", "/api/release"]
+      - ["t01_remove_repo", "/api/remove-repo"]
+      - ["t01_remove_session", "/api/remove-session"]
+      - ["t01_remove_token", "/api/remove-token"]
+      - ["t01_replay", "/api/replay"]
+      - ["t01_review", "/api/review"]
+      - ["t01_review_depth", "/api/review-depth"]
+      - ["t01_review_models", "/api/review-models"]
+      - ["t01_reviewer_agents", "/api/reviewer-agents"]
+      - ["t01_save_token", "/api/save-token"]
+      - ["t01_saved_prompts", "/api/saved-prompts"]
+      - ["t01_send_findings", "/api/send-findings"]
+      - ["t01_session_work", "/api/session-work"]
+      - ["t01_sign_in_expect", "/api/sign-in-expect"]
+      - ["t01_size", "/api/size"]
+      - ["t01_split", "/api/split"]
+      - ["t01_start_points", "/api/start-points"]
+      - ["t01_stop_session", "/api/stop-session"]
+      - ["t01_team", "/api/team"]
+      - ["t01_test_list", "/api/test-list"]
+      - ["t01_update", "/api/update"]
+      - ["t01_upload", "/api/upload"]
+      - ["t01_verify", "/api/verify"]
+      - ["t01_viewed", "/api/viewed"]
+      - ["t01_wake", "/api/wake"]
+      - ["t01_walkthrough_check", "/api/walkthrough-check"]
+      - ["t01_workspace", "/api/workspace"]
+
+  - id: SEC-T01R
+    name: "A POST route without the page key is refused before its handler, with no why, since no key was presented (routes that only read)"
+    do: http.request
+    identity: anonymous
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 401
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: token }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
+    covers: no_key
+    columns: ["case", "route"]
+    rows:
+      - ["t01r_agent_report", "/api/agent-report"]
+      - ["t01r_audit", "/api/audit"]
+      - ["t01r_backup", "/api/backup"]
+      - ["t01r_changes", "/api/changes"]
+      - ["t01r_docs", "/api/docs"]
+      - ["t01r_file", "/api/file"]
+      - ["t01r_file_check", "/api/file-check"]
+      - ["t01r_gate", "/api/gate"]
+      - ["t01r_metrics", "/api/metrics"]
+      - ["t01r_projects", "/api/projects"]
+      - ["t01r_review_reply", "/api/review-reply"]
+      - ["t01r_screenshot", "/api/screenshot"]
+      - ["t01r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T02
+    name: "A POST route under another Host name, as DNS rebinding would send it, is refused as misdirected, even with the page key"
+    do: http_misdirected.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 421
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: host }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 421 before any other check, since the Host isn't 127.0.0.1 and the page's port, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t02_remove_repo, t02_remove_session, t02_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 421 before any other check, since the Host isn't 127.0.0.1 and the page's port, so nothing can be removed" } }
+    covers: other_host
+    columns: ["case", "route"]
+    rows:
+      - ["t02_add_repo", "/api/add-repo"]
+      - ["t02_allow_commit", "/api/allow-commit"]
+      - ["t02_allow_file", "/api/allow-file"]
+      - ["t02_allow_rules", "/api/allow-rules"]
+      - ["t02_answer", "/api/answer"]
+      - ["t02_approve_plan", "/api/approve-plan"]
+      - ["t02_approve_requirements", "/api/approve-requirements"]
+      - ["t02_bring_main", "/api/bring-main"]
+      - ["t02_claude_login", "/api/claude-login"]
+      - ["t02_claude_trust", "/api/claude-trust"]
+      - ["t02_clone_again", "/api/clone-again"]
+      - ["t02_commit_identity", "/api/commit-identity"]
+      - ["t02_commit_rewrite", "/api/commit-rewrite"]
+      - ["t02_control", "/api/control"]
+      - ["t02_decision_log", "/api/decision-log"]
+      - ["t02_diagnostics", "/api/diagnostics"]
+      - ["t02_dispatch", "/api/dispatch"]
+      - ["t02_egress", "/api/egress"]
+      - ["t02_exceptions", "/api/exceptions"]
+      - ["t02_explain", "/api/explain"]
+      - ["t02_export", "/api/export"]
+      - ["t02_file_match", "/api/file-match"]
+      - ["t02_files", "/api/files"]
+      - ["t02_finding_issues", "/api/finding-issues"]
+      - ["t02_flag_remove", "/api/flag-remove"]
+      - ["t02_forge_answer", "/api/forge-answer"]
+      - ["t02_halt", "/api/halt"]
+      - ["t02_handoff", "/api/handoff"]
+      - ["t02_import", "/api/import"]
+      - ["t02_interrupt", "/api/interrupt"]
+      - ["t02_issues", "/api/issues"]
+      - ["t02_keep", "/api/keep"]
+      - ["t02_lessons", "/api/lessons"]
+      - ["t02_limits", "/api/limits"]
+      - ["t02_lock_tests", "/api/lock-tests"]
+      - ["t02_message", "/api/message"]
+      - ["t02_override", "/api/override"]
+      - ["t02_packs", "/api/packs"]
+      - ["t02_pair", "/api/pair"]
+      - ["t02_plan_review", "/api/plan-review"]
+      - ["t02_prefs", "/api/prefs"]
+      - ["t02_project", "/api/project"]
+      - ["t02_project_commands", "/api/project-commands"]
+      - ["t02_project_facts", "/api/project-facts"]
+      - ["t02_pull_request", "/api/pull-request"]
+      - ["t02_push", "/api/push"]
+      - ["t02_push_answer", "/api/push-answer"]
+      - ["t02_push_record", "/api/push-record"]
+      - ["t02_recap", "/api/recap"]
+      - ["t02_release", "/api/release"]
+      - ["t02_remove_repo", "/api/remove-repo"]
+      - ["t02_remove_session", "/api/remove-session"]
+      - ["t02_remove_token", "/api/remove-token"]
+      - ["t02_replay", "/api/replay"]
+      - ["t02_review", "/api/review"]
+      - ["t02_review_depth", "/api/review-depth"]
+      - ["t02_review_models", "/api/review-models"]
+      - ["t02_reviewer_agents", "/api/reviewer-agents"]
+      - ["t02_save_token", "/api/save-token"]
+      - ["t02_saved_prompts", "/api/saved-prompts"]
+      - ["t02_send_findings", "/api/send-findings"]
+      - ["t02_session", "/api/session"]
+      - ["t02_session_work", "/api/session-work"]
+      - ["t02_sign_in_expect", "/api/sign-in-expect"]
+      - ["t02_size", "/api/size"]
+      - ["t02_split", "/api/split"]
+      - ["t02_start_points", "/api/start-points"]
+      - ["t02_stop_session", "/api/stop-session"]
+      - ["t02_team", "/api/team"]
+      - ["t02_test_list", "/api/test-list"]
+      - ["t02_update", "/api/update"]
+      - ["t02_upload", "/api/upload"]
+      - ["t02_verify", "/api/verify"]
+      - ["t02_viewed", "/api/viewed"]
+      - ["t02_wake", "/api/wake"]
+      - ["t02_walkthrough_check", "/api/walkthrough-check"]
+      - ["t02_workspace", "/api/workspace"]
+
+  - id: SEC-T02R
+    name: "A POST route under another Host name, as DNS rebinding would send it, is refused as misdirected, even with the page key (routes that only read)"
+    do: http_misdirected.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 421
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: host }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: other_host
+    columns: ["case", "route"]
+    rows:
+      - ["t02r_agent_report", "/api/agent-report"]
+      - ["t02r_audit", "/api/audit"]
+      - ["t02r_backup", "/api/backup"]
+      - ["t02r_changes", "/api/changes"]
+      - ["t02r_docs", "/api/docs"]
+      - ["t02r_file", "/api/file"]
+      - ["t02r_file_check", "/api/file-check"]
+      - ["t02r_gate", "/api/gate"]
+      - ["t02r_metrics", "/api/metrics"]
+      - ["t02r_projects", "/api/projects"]
+      - ["t02r_review_reply", "/api/review-reply"]
+      - ["t02r_screenshot", "/api/screenshot"]
+      - ["t02r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T03
+    name: "A POST route refuses another site's Origin, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "https://proctor.invalid" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 403 before the route's handler runs, since the Origin is another site's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t03_remove_repo, t03_remove_session, t03_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since the Origin is another site's, so nothing can be removed" } }
+    covers: other_origin
+    columns: ["case", "route"]
+    rows:
+      - ["t03_add_repo", "/api/add-repo"]
+      - ["t03_allow_commit", "/api/allow-commit"]
+      - ["t03_allow_file", "/api/allow-file"]
+      - ["t03_allow_rules", "/api/allow-rules"]
+      - ["t03_answer", "/api/answer"]
+      - ["t03_approve_plan", "/api/approve-plan"]
+      - ["t03_approve_requirements", "/api/approve-requirements"]
+      - ["t03_bring_main", "/api/bring-main"]
+      - ["t03_claude_login", "/api/claude-login"]
+      - ["t03_claude_trust", "/api/claude-trust"]
+      - ["t03_clone_again", "/api/clone-again"]
+      - ["t03_commit_identity", "/api/commit-identity"]
+      - ["t03_commit_rewrite", "/api/commit-rewrite"]
+      - ["t03_control", "/api/control"]
+      - ["t03_decision_log", "/api/decision-log"]
+      - ["t03_diagnostics", "/api/diagnostics"]
+      - ["t03_dispatch", "/api/dispatch"]
+      - ["t03_egress", "/api/egress"]
+      - ["t03_exceptions", "/api/exceptions"]
+      - ["t03_explain", "/api/explain"]
+      - ["t03_export", "/api/export"]
+      - ["t03_file_match", "/api/file-match"]
+      - ["t03_files", "/api/files"]
+      - ["t03_finding_issues", "/api/finding-issues"]
+      - ["t03_flag_remove", "/api/flag-remove"]
+      - ["t03_forge_answer", "/api/forge-answer"]
+      - ["t03_halt", "/api/halt"]
+      - ["t03_handoff", "/api/handoff"]
+      - ["t03_import", "/api/import"]
+      - ["t03_interrupt", "/api/interrupt"]
+      - ["t03_issues", "/api/issues"]
+      - ["t03_keep", "/api/keep"]
+      - ["t03_lessons", "/api/lessons"]
+      - ["t03_limits", "/api/limits"]
+      - ["t03_lock_tests", "/api/lock-tests"]
+      - ["t03_message", "/api/message"]
+      - ["t03_override", "/api/override"]
+      - ["t03_packs", "/api/packs"]
+      - ["t03_pair", "/api/pair"]
+      - ["t03_plan_review", "/api/plan-review"]
+      - ["t03_prefs", "/api/prefs"]
+      - ["t03_project", "/api/project"]
+      - ["t03_project_commands", "/api/project-commands"]
+      - ["t03_project_facts", "/api/project-facts"]
+      - ["t03_pull_request", "/api/pull-request"]
+      - ["t03_push", "/api/push"]
+      - ["t03_push_answer", "/api/push-answer"]
+      - ["t03_push_record", "/api/push-record"]
+      - ["t03_recap", "/api/recap"]
+      - ["t03_release", "/api/release"]
+      - ["t03_remove_repo", "/api/remove-repo"]
+      - ["t03_remove_session", "/api/remove-session"]
+      - ["t03_remove_token", "/api/remove-token"]
+      - ["t03_replay", "/api/replay"]
+      - ["t03_review", "/api/review"]
+      - ["t03_review_depth", "/api/review-depth"]
+      - ["t03_review_models", "/api/review-models"]
+      - ["t03_reviewer_agents", "/api/reviewer-agents"]
+      - ["t03_save_token", "/api/save-token"]
+      - ["t03_saved_prompts", "/api/saved-prompts"]
+      - ["t03_send_findings", "/api/send-findings"]
+      - ["t03_session", "/api/session"]
+      - ["t03_session_work", "/api/session-work"]
+      - ["t03_sign_in_expect", "/api/sign-in-expect"]
+      - ["t03_size", "/api/size"]
+      - ["t03_split", "/api/split"]
+      - ["t03_start_points", "/api/start-points"]
+      - ["t03_stop_session", "/api/stop-session"]
+      - ["t03_team", "/api/team"]
+      - ["t03_test_list", "/api/test-list"]
+      - ["t03_update", "/api/update"]
+      - ["t03_upload", "/api/upload"]
+      - ["t03_verify", "/api/verify"]
+      - ["t03_viewed", "/api/viewed"]
+      - ["t03_wake", "/api/wake"]
+      - ["t03_walkthrough_check", "/api/walkthrough-check"]
+      - ["t03_workspace", "/api/workspace"]
+
+  - id: SEC-T03R
+    name: "A POST route refuses another site's Origin, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "https://proctor.invalid" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: other_origin
+    columns: ["case", "route"]
+    rows:
+      - ["t03r_agent_report", "/api/agent-report"]
+      - ["t03r_audit", "/api/audit"]
+      - ["t03r_backup", "/api/backup"]
+      - ["t03r_changes", "/api/changes"]
+      - ["t03r_docs", "/api/docs"]
+      - ["t03r_file", "/api/file"]
+      - ["t03r_file_check", "/api/file-check"]
+      - ["t03r_gate", "/api/gate"]
+      - ["t03r_metrics", "/api/metrics"]
+      - ["t03r_projects", "/api/projects"]
+      - ["t03r_review_reply", "/api/review-reply"]
+      - ["t03r_screenshot", "/api/screenshot"]
+      - ["t03r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T04
+    name: "A POST route refuses a cross-site fetch, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Sec-Fetch-Site: cross-site }
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: site }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 403 before the route's handler runs, since Sec-Fetch-Site is cross-site, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t04_remove_repo, t04_remove_session, t04_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is cross-site, so nothing can be removed" } }
+    covers: cross_site
+    columns: ["case", "route"]
+    rows:
+      - ["t04_add_repo", "/api/add-repo"]
+      - ["t04_allow_commit", "/api/allow-commit"]
+      - ["t04_allow_file", "/api/allow-file"]
+      - ["t04_allow_rules", "/api/allow-rules"]
+      - ["t04_answer", "/api/answer"]
+      - ["t04_approve_plan", "/api/approve-plan"]
+      - ["t04_approve_requirements", "/api/approve-requirements"]
+      - ["t04_bring_main", "/api/bring-main"]
+      - ["t04_claude_login", "/api/claude-login"]
+      - ["t04_claude_trust", "/api/claude-trust"]
+      - ["t04_clone_again", "/api/clone-again"]
+      - ["t04_commit_identity", "/api/commit-identity"]
+      - ["t04_commit_rewrite", "/api/commit-rewrite"]
+      - ["t04_control", "/api/control"]
+      - ["t04_decision_log", "/api/decision-log"]
+      - ["t04_diagnostics", "/api/diagnostics"]
+      - ["t04_dispatch", "/api/dispatch"]
+      - ["t04_egress", "/api/egress"]
+      - ["t04_exceptions", "/api/exceptions"]
+      - ["t04_explain", "/api/explain"]
+      - ["t04_export", "/api/export"]
+      - ["t04_file_match", "/api/file-match"]
+      - ["t04_files", "/api/files"]
+      - ["t04_finding_issues", "/api/finding-issues"]
+      - ["t04_flag_remove", "/api/flag-remove"]
+      - ["t04_forge_answer", "/api/forge-answer"]
+      - ["t04_halt", "/api/halt"]
+      - ["t04_handoff", "/api/handoff"]
+      - ["t04_import", "/api/import"]
+      - ["t04_interrupt", "/api/interrupt"]
+      - ["t04_issues", "/api/issues"]
+      - ["t04_keep", "/api/keep"]
+      - ["t04_lessons", "/api/lessons"]
+      - ["t04_limits", "/api/limits"]
+      - ["t04_lock_tests", "/api/lock-tests"]
+      - ["t04_message", "/api/message"]
+      - ["t04_override", "/api/override"]
+      - ["t04_packs", "/api/packs"]
+      - ["t04_pair", "/api/pair"]
+      - ["t04_plan_review", "/api/plan-review"]
+      - ["t04_prefs", "/api/prefs"]
+      - ["t04_project", "/api/project"]
+      - ["t04_project_commands", "/api/project-commands"]
+      - ["t04_project_facts", "/api/project-facts"]
+      - ["t04_pull_request", "/api/pull-request"]
+      - ["t04_push", "/api/push"]
+      - ["t04_push_answer", "/api/push-answer"]
+      - ["t04_push_record", "/api/push-record"]
+      - ["t04_recap", "/api/recap"]
+      - ["t04_release", "/api/release"]
+      - ["t04_remove_repo", "/api/remove-repo"]
+      - ["t04_remove_session", "/api/remove-session"]
+      - ["t04_remove_token", "/api/remove-token"]
+      - ["t04_replay", "/api/replay"]
+      - ["t04_review", "/api/review"]
+      - ["t04_review_depth", "/api/review-depth"]
+      - ["t04_review_models", "/api/review-models"]
+      - ["t04_reviewer_agents", "/api/reviewer-agents"]
+      - ["t04_save_token", "/api/save-token"]
+      - ["t04_saved_prompts", "/api/saved-prompts"]
+      - ["t04_send_findings", "/api/send-findings"]
+      - ["t04_session", "/api/session"]
+      - ["t04_session_work", "/api/session-work"]
+      - ["t04_sign_in_expect", "/api/sign-in-expect"]
+      - ["t04_size", "/api/size"]
+      - ["t04_split", "/api/split"]
+      - ["t04_start_points", "/api/start-points"]
+      - ["t04_stop_session", "/api/stop-session"]
+      - ["t04_team", "/api/team"]
+      - ["t04_test_list", "/api/test-list"]
+      - ["t04_update", "/api/update"]
+      - ["t04_upload", "/api/upload"]
+      - ["t04_verify", "/api/verify"]
+      - ["t04_viewed", "/api/viewed"]
+      - ["t04_wake", "/api/wake"]
+      - ["t04_walkthrough_check", "/api/walkthrough-check"]
+      - ["t04_workspace", "/api/workspace"]
+
+  - id: SEC-T04R
+    name: "A POST route refuses a cross-site fetch, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Sec-Fetch-Site: cross-site }
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: site }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: cross_site
+    columns: ["case", "route"]
+    rows:
+      - ["t04r_agent_report", "/api/agent-report"]
+      - ["t04r_audit", "/api/audit"]
+      - ["t04r_backup", "/api/backup"]
+      - ["t04r_changes", "/api/changes"]
+      - ["t04r_docs", "/api/docs"]
+      - ["t04r_file", "/api/file"]
+      - ["t04r_file_check", "/api/file-check"]
+      - ["t04r_gate", "/api/gate"]
+      - ["t04r_metrics", "/api/metrics"]
+      - ["t04r_projects", "/api/projects"]
+      - ["t04r_review_reply", "/api/review-reply"]
+      - ["t04r_screenshot", "/api/screenshot"]
+      - ["t04r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T05
+    name: "A POST route refuses a request with no Origin, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 403 before the route's handler runs, since a POST without Origin can't be told from another site's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t05_remove_repo, t05_remove_session, t05_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since the request has no Origin, so nothing can be removed" } }
+    covers: no_origin
+    columns: ["case", "route"]
+    rows:
+      - ["t05_add_repo", "/api/add-repo"]
+      - ["t05_allow_commit", "/api/allow-commit"]
+      - ["t05_allow_file", "/api/allow-file"]
+      - ["t05_allow_rules", "/api/allow-rules"]
+      - ["t05_answer", "/api/answer"]
+      - ["t05_approve_plan", "/api/approve-plan"]
+      - ["t05_approve_requirements", "/api/approve-requirements"]
+      - ["t05_bring_main", "/api/bring-main"]
+      - ["t05_claude_login", "/api/claude-login"]
+      - ["t05_claude_trust", "/api/claude-trust"]
+      - ["t05_clone_again", "/api/clone-again"]
+      - ["t05_commit_identity", "/api/commit-identity"]
+      - ["t05_commit_rewrite", "/api/commit-rewrite"]
+      - ["t05_control", "/api/control"]
+      - ["t05_decision_log", "/api/decision-log"]
+      - ["t05_diagnostics", "/api/diagnostics"]
+      - ["t05_dispatch", "/api/dispatch"]
+      - ["t05_egress", "/api/egress"]
+      - ["t05_exceptions", "/api/exceptions"]
+      - ["t05_explain", "/api/explain"]
+      - ["t05_export", "/api/export"]
+      - ["t05_file_match", "/api/file-match"]
+      - ["t05_files", "/api/files"]
+      - ["t05_finding_issues", "/api/finding-issues"]
+      - ["t05_flag_remove", "/api/flag-remove"]
+      - ["t05_forge_answer", "/api/forge-answer"]
+      - ["t05_halt", "/api/halt"]
+      - ["t05_handoff", "/api/handoff"]
+      - ["t05_import", "/api/import"]
+      - ["t05_interrupt", "/api/interrupt"]
+      - ["t05_issues", "/api/issues"]
+      - ["t05_keep", "/api/keep"]
+      - ["t05_lessons", "/api/lessons"]
+      - ["t05_limits", "/api/limits"]
+      - ["t05_lock_tests", "/api/lock-tests"]
+      - ["t05_message", "/api/message"]
+      - ["t05_override", "/api/override"]
+      - ["t05_packs", "/api/packs"]
+      - ["t05_pair", "/api/pair"]
+      - ["t05_plan_review", "/api/plan-review"]
+      - ["t05_prefs", "/api/prefs"]
+      - ["t05_project", "/api/project"]
+      - ["t05_project_commands", "/api/project-commands"]
+      - ["t05_project_facts", "/api/project-facts"]
+      - ["t05_pull_request", "/api/pull-request"]
+      - ["t05_push", "/api/push"]
+      - ["t05_push_answer", "/api/push-answer"]
+      - ["t05_push_record", "/api/push-record"]
+      - ["t05_recap", "/api/recap"]
+      - ["t05_release", "/api/release"]
+      - ["t05_remove_repo", "/api/remove-repo"]
+      - ["t05_remove_session", "/api/remove-session"]
+      - ["t05_remove_token", "/api/remove-token"]
+      - ["t05_replay", "/api/replay"]
+      - ["t05_review", "/api/review"]
+      - ["t05_review_depth", "/api/review-depth"]
+      - ["t05_review_models", "/api/review-models"]
+      - ["t05_reviewer_agents", "/api/reviewer-agents"]
+      - ["t05_save_token", "/api/save-token"]
+      - ["t05_saved_prompts", "/api/saved-prompts"]
+      - ["t05_send_findings", "/api/send-findings"]
+      - ["t05_session", "/api/session"]
+      - ["t05_session_work", "/api/session-work"]
+      - ["t05_sign_in_expect", "/api/sign-in-expect"]
+      - ["t05_size", "/api/size"]
+      - ["t05_split", "/api/split"]
+      - ["t05_start_points", "/api/start-points"]
+      - ["t05_stop_session", "/api/stop-session"]
+      - ["t05_team", "/api/team"]
+      - ["t05_test_list", "/api/test-list"]
+      - ["t05_update", "/api/update"]
+      - ["t05_upload", "/api/upload"]
+      - ["t05_verify", "/api/verify"]
+      - ["t05_viewed", "/api/viewed"]
+      - ["t05_wake", "/api/wake"]
+      - ["t05_walkthrough_check", "/api/walkthrough-check"]
+      - ["t05_workspace", "/api/workspace"]
+
+  - id: SEC-T05R
+    name: "A POST route refuses a request with no Origin, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      body: {}
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: no_origin
+    columns: ["case", "route"]
+    rows:
+      - ["t05r_agent_report", "/api/agent-report"]
+      - ["t05r_audit", "/api/audit"]
+      - ["t05r_backup", "/api/backup"]
+      - ["t05r_changes", "/api/changes"]
+      - ["t05r_docs", "/api/docs"]
+      - ["t05r_file", "/api/file"]
+      - ["t05r_file_check", "/api/file-check"]
+      - ["t05r_gate", "/api/gate"]
+      - ["t05r_metrics", "/api/metrics"]
+      - ["t05r_projects", "/api/projects"]
+      - ["t05r_review_reply", "/api/review-reply"]
+      - ["t05r_screenshot", "/api/screenshot"]
+      - ["t05r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T06
+    name: "A POST route refuses a body that isn't declared JSON, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Content-Type: text/plain }
+      body_text: "{}"
+    expect:
+      equal:
+        "$.status": 415
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: type }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 415 before the route's handler reads the body, since its Content-Type isn't the route's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t06_remove_repo, t06_remove_session, t06_packs], reason: "the remove-repo, remove-session and packs rows send the text {} as text/plain, which names no repository, session or pack, and every row is refused with 415 before the route's handler reads the body, so nothing can be removed" } }
+    covers: not_json
+    columns: ["case", "route"]
+    rows:
+      - ["t06_add_repo", "/api/add-repo"]
+      - ["t06_allow_commit", "/api/allow-commit"]
+      - ["t06_allow_file", "/api/allow-file"]
+      - ["t06_allow_rules", "/api/allow-rules"]
+      - ["t06_answer", "/api/answer"]
+      - ["t06_approve_plan", "/api/approve-plan"]
+      - ["t06_approve_requirements", "/api/approve-requirements"]
+      - ["t06_bring_main", "/api/bring-main"]
+      - ["t06_claude_login", "/api/claude-login"]
+      - ["t06_claude_trust", "/api/claude-trust"]
+      - ["t06_clone_again", "/api/clone-again"]
+      - ["t06_commit_identity", "/api/commit-identity"]
+      - ["t06_commit_rewrite", "/api/commit-rewrite"]
+      - ["t06_control", "/api/control"]
+      - ["t06_decision_log", "/api/decision-log"]
+      - ["t06_diagnostics", "/api/diagnostics"]
+      - ["t06_dispatch", "/api/dispatch"]
+      - ["t06_egress", "/api/egress"]
+      - ["t06_exceptions", "/api/exceptions"]
+      - ["t06_explain", "/api/explain"]
+      - ["t06_export", "/api/export"]
+      - ["t06_file_match", "/api/file-match"]
+      - ["t06_files", "/api/files"]
+      - ["t06_finding_issues", "/api/finding-issues"]
+      - ["t06_flag_remove", "/api/flag-remove"]
+      - ["t06_forge_answer", "/api/forge-answer"]
+      - ["t06_halt", "/api/halt"]
+      - ["t06_handoff", "/api/handoff"]
+      - ["t06_import", "/api/import"]
+      - ["t06_interrupt", "/api/interrupt"]
+      - ["t06_issues", "/api/issues"]
+      - ["t06_keep", "/api/keep"]
+      - ["t06_lessons", "/api/lessons"]
+      - ["t06_limits", "/api/limits"]
+      - ["t06_lock_tests", "/api/lock-tests"]
+      - ["t06_message", "/api/message"]
+      - ["t06_override", "/api/override"]
+      - ["t06_packs", "/api/packs"]
+      - ["t06_pair", "/api/pair"]
+      - ["t06_plan_review", "/api/plan-review"]
+      - ["t06_prefs", "/api/prefs"]
+      - ["t06_project", "/api/project"]
+      - ["t06_project_commands", "/api/project-commands"]
+      - ["t06_project_facts", "/api/project-facts"]
+      - ["t06_pull_request", "/api/pull-request"]
+      - ["t06_push", "/api/push"]
+      - ["t06_push_answer", "/api/push-answer"]
+      - ["t06_push_record", "/api/push-record"]
+      - ["t06_recap", "/api/recap"]
+      - ["t06_release", "/api/release"]
+      - ["t06_remove_repo", "/api/remove-repo"]
+      - ["t06_remove_session", "/api/remove-session"]
+      - ["t06_remove_token", "/api/remove-token"]
+      - ["t06_replay", "/api/replay"]
+      - ["t06_review", "/api/review"]
+      - ["t06_review_depth", "/api/review-depth"]
+      - ["t06_review_models", "/api/review-models"]
+      - ["t06_reviewer_agents", "/api/reviewer-agents"]
+      - ["t06_save_token", "/api/save-token"]
+      - ["t06_saved_prompts", "/api/saved-prompts"]
+      - ["t06_send_findings", "/api/send-findings"]
+      - ["t06_session", "/api/session"]
+      - ["t06_session_work", "/api/session-work"]
+      - ["t06_sign_in_expect", "/api/sign-in-expect"]
+      - ["t06_size", "/api/size"]
+      - ["t06_split", "/api/split"]
+      - ["t06_start_points", "/api/start-points"]
+      - ["t06_stop_session", "/api/stop-session"]
+      - ["t06_team", "/api/team"]
+      - ["t06_test_list", "/api/test-list"]
+      - ["t06_update", "/api/update"]
+      - ["t06_upload", "/api/upload"]
+      - ["t06_verify", "/api/verify"]
+      - ["t06_viewed", "/api/viewed"]
+      - ["t06_wake", "/api/wake"]
+      - ["t06_walkthrough_check", "/api/walkthrough-check"]
+      - ["t06_workspace", "/api/workspace"]
+
+  - id: SEC-T06R
+    name: "A POST route refuses a body that isn't declared JSON, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Content-Type: text/plain }
+      body_text: "{}"
+    expect:
+      equal:
+        "$.status": 415
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: type }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: not_json
+    columns: ["case", "route"]
+    rows:
+      - ["t06r_agent_report", "/api/agent-report"]
+      - ["t06r_audit", "/api/audit"]
+      - ["t06r_backup", "/api/backup"]
+      - ["t06r_changes", "/api/changes"]
+      - ["t06r_docs", "/api/docs"]
+      - ["t06r_file", "/api/file"]
+      - ["t06r_file_check", "/api/file-check"]
+      - ["t06r_gate", "/api/gate"]
+      - ["t06r_metrics", "/api/metrics"]
+      - ["t06r_projects", "/api/projects"]
+      - ["t06r_review_reply", "/api/review-reply"]
+      - ["t06r_screenshot", "/api/screenshot"]
+      - ["t06r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T07
+    name: "A JSON route refuses a body over 64 KiB"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: { pad: "${fill(65536)}" }
+    expect:
+      equal:
+        "$.status": 413
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: body }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 413 while the body is read, before the route's handler runs, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t07_remove_repo, t07_remove_session], reason: "the remove-repo and remove-session rows send only a pad field, which names no repository or session, and every row is refused with 413 while the body is read, before the route's handler runs, so nothing can be removed" } }
+    covers: json_over_64k
+    columns: ["case", "route"]
+    rows:
+      - ["t07_add_repo", "/api/add-repo"]
+      - ["t07_allow_commit", "/api/allow-commit"]
+      - ["t07_allow_file", "/api/allow-file"]
+      - ["t07_allow_rules", "/api/allow-rules"]
+      - ["t07_answer", "/api/answer"]
+      - ["t07_bring_main", "/api/bring-main"]
+      - ["t07_claude_login", "/api/claude-login"]
+      - ["t07_claude_trust", "/api/claude-trust"]
+      - ["t07_clone_again", "/api/clone-again"]
+      - ["t07_commit_identity", "/api/commit-identity"]
+      - ["t07_commit_rewrite", "/api/commit-rewrite"]
+      - ["t07_control", "/api/control"]
+      - ["t07_decision_log", "/api/decision-log"]
+      - ["t07_diagnostics", "/api/diagnostics"]
+      - ["t07_dispatch", "/api/dispatch"]
+      - ["t07_egress", "/api/egress"]
+      - ["t07_exceptions", "/api/exceptions"]
+      - ["t07_explain", "/api/explain"]
+      - ["t07_export", "/api/export"]
+      - ["t07_file_match", "/api/file-match"]
+      - ["t07_files", "/api/files"]
+      - ["t07_finding_issues", "/api/finding-issues"]
+      - ["t07_flag_remove", "/api/flag-remove"]
+      - ["t07_forge_answer", "/api/forge-answer"]
+      - ["t07_halt", "/api/halt"]
+      - ["t07_handoff", "/api/handoff"]
+      - ["t07_interrupt", "/api/interrupt"]
+      - ["t07_issues", "/api/issues"]
+      - ["t07_keep", "/api/keep"]
+      - ["t07_lessons", "/api/lessons"]
+      - ["t07_limits", "/api/limits"]
+      - ["t07_lock_tests", "/api/lock-tests"]
+      - ["t07_message", "/api/message"]
+      - ["t07_override", "/api/override"]
+      - ["t07_pair", "/api/pair"]
+      - ["t07_plan_review", "/api/plan-review"]
+      - ["t07_prefs", "/api/prefs"]
+      - ["t07_project", "/api/project"]
+      - ["t07_project_commands", "/api/project-commands"]
+      - ["t07_project_facts", "/api/project-facts"]
+      - ["t07_pull_request", "/api/pull-request"]
+      - ["t07_push", "/api/push"]
+      - ["t07_push_answer", "/api/push-answer"]
+      - ["t07_push_record", "/api/push-record"]
+      - ["t07_recap", "/api/recap"]
+      - ["t07_release", "/api/release"]
+      - ["t07_remove_repo", "/api/remove-repo"]
+      - ["t07_remove_session", "/api/remove-session"]
+      - ["t07_remove_token", "/api/remove-token"]
+      - ["t07_replay", "/api/replay"]
+      - ["t07_review", "/api/review"]
+      - ["t07_review_depth", "/api/review-depth"]
+      - ["t07_review_models", "/api/review-models"]
+      - ["t07_save_token", "/api/save-token"]
+      - ["t07_saved_prompts", "/api/saved-prompts"]
+      - ["t07_send_findings", "/api/send-findings"]
+      - ["t07_session", "/api/session"]
+      - ["t07_session_work", "/api/session-work"]
+      - ["t07_sign_in_expect", "/api/sign-in-expect"]
+      - ["t07_size", "/api/size"]
+      - ["t07_split", "/api/split"]
+      - ["t07_start_points", "/api/start-points"]
+      - ["t07_stop_session", "/api/stop-session"]
+      - ["t07_team", "/api/team"]
+      - ["t07_test_list", "/api/test-list"]
+      - ["t07_update", "/api/update"]
+      - ["t07_verify", "/api/verify"]
+      - ["t07_viewed", "/api/viewed"]
+      - ["t07_wake", "/api/wake"]
+      - ["t07_walkthrough_check", "/api/walkthrough-check"]
+      - ["t07_workspace", "/api/workspace"]
+
+  - id: SEC-T07R
+    name: "A JSON route refuses a body over 64 KiB (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: { pad: "${fill(65536)}" }
+    expect:
+      equal:
+        "$.status": 413
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: body }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: json_over_64k
+    columns: ["case", "route"]
+    rows:
+      - ["t07r_agent_report", "/api/agent-report"]
+      - ["t07r_audit", "/api/audit"]
+      - ["t07r_backup", "/api/backup"]
+      - ["t07r_changes", "/api/changes"]
+      - ["t07r_docs", "/api/docs"]
+      - ["t07r_file", "/api/file"]
+      - ["t07r_file_check", "/api/file-check"]
+      - ["t07r_gate", "/api/gate"]
+      - ["t07r_metrics", "/api/metrics"]
+      - ["t07r_projects", "/api/projects"]
+      - ["t07r_review_reply", "/api/review-reply"]
+      - ["t07r_screenshot", "/api/screenshot"]
+      - ["t07r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T08
+    name: "The approval routes and the reviewer agents route refuse a body over 1 MiB"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: { pad: "${fill(1048576)}" }
+    expect:
+      equal:
+        "$.status": 413
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: body }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 413 while the body is read, before the route's handler runs, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    covers: json_over_1m
+    columns: ["case", "route"]
+    rows:
+      - ["t08_approve_plan", "/api/approve-plan"]
+      - ["t08_approve_requirements", "/api/approve-requirements"]
+      - ["t08_reviewer_agents", "/api/reviewer-agents"]
+
+  - id: SEC-T09
+    name: "A POST route refuses a query string, so nothing it takes travels in a URL"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      query: { proctor: "1" }
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: query }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 400 before the route's handler runs, since the URL has a query string, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t09_remove_repo, t09_remove_session, t09_packs], reason: "the remove-repo, remove-session and packs rows send an empty body, which names no repository, session or pack, and every row is refused with 400 before the route's handler runs, since the URL has a query string, so nothing can be removed" } }
+    covers: query
+    columns: ["case", "route"]
+    rows:
+      - ["t09_add_repo", "/api/add-repo"]
+      - ["t09_allow_commit", "/api/allow-commit"]
+      - ["t09_allow_file", "/api/allow-file"]
+      - ["t09_allow_rules", "/api/allow-rules"]
+      - ["t09_answer", "/api/answer"]
+      - ["t09_approve_plan", "/api/approve-plan"]
+      - ["t09_approve_requirements", "/api/approve-requirements"]
+      - ["t09_bring_main", "/api/bring-main"]
+      - ["t09_claude_login", "/api/claude-login"]
+      - ["t09_claude_trust", "/api/claude-trust"]
+      - ["t09_clone_again", "/api/clone-again"]
+      - ["t09_commit_identity", "/api/commit-identity"]
+      - ["t09_commit_rewrite", "/api/commit-rewrite"]
+      - ["t09_control", "/api/control"]
+      - ["t09_decision_log", "/api/decision-log"]
+      - ["t09_diagnostics", "/api/diagnostics"]
+      - ["t09_dispatch", "/api/dispatch"]
+      - ["t09_egress", "/api/egress"]
+      - ["t09_exceptions", "/api/exceptions"]
+      - ["t09_explain", "/api/explain"]
+      - ["t09_export", "/api/export"]
+      - ["t09_file_match", "/api/file-match"]
+      - ["t09_files", "/api/files"]
+      - ["t09_finding_issues", "/api/finding-issues"]
+      - ["t09_flag_remove", "/api/flag-remove"]
+      - ["t09_forge_answer", "/api/forge-answer"]
+      - ["t09_halt", "/api/halt"]
+      - ["t09_handoff", "/api/handoff"]
+      - ["t09_import", "/api/import"]
+      - ["t09_interrupt", "/api/interrupt"]
+      - ["t09_issues", "/api/issues"]
+      - ["t09_keep", "/api/keep"]
+      - ["t09_lessons", "/api/lessons"]
+      - ["t09_limits", "/api/limits"]
+      - ["t09_lock_tests", "/api/lock-tests"]
+      - ["t09_message", "/api/message"]
+      - ["t09_override", "/api/override"]
+      - ["t09_packs", "/api/packs"]
+      - ["t09_pair", "/api/pair"]
+      - ["t09_plan_review", "/api/plan-review"]
+      - ["t09_prefs", "/api/prefs"]
+      - ["t09_project", "/api/project"]
+      - ["t09_project_commands", "/api/project-commands"]
+      - ["t09_project_facts", "/api/project-facts"]
+      - ["t09_pull_request", "/api/pull-request"]
+      - ["t09_push", "/api/push"]
+      - ["t09_push_answer", "/api/push-answer"]
+      - ["t09_push_record", "/api/push-record"]
+      - ["t09_recap", "/api/recap"]
+      - ["t09_release", "/api/release"]
+      - ["t09_remove_repo", "/api/remove-repo"]
+      - ["t09_remove_session", "/api/remove-session"]
+      - ["t09_remove_token", "/api/remove-token"]
+      - ["t09_replay", "/api/replay"]
+      - ["t09_review", "/api/review"]
+      - ["t09_review_depth", "/api/review-depth"]
+      - ["t09_review_models", "/api/review-models"]
+      - ["t09_reviewer_agents", "/api/reviewer-agents"]
+      - ["t09_save_token", "/api/save-token"]
+      - ["t09_saved_prompts", "/api/saved-prompts"]
+      - ["t09_send_findings", "/api/send-findings"]
+      - ["t09_session", "/api/session"]
+      - ["t09_session_work", "/api/session-work"]
+      - ["t09_sign_in_expect", "/api/sign-in-expect"]
+      - ["t09_size", "/api/size"]
+      - ["t09_split", "/api/split"]
+      - ["t09_start_points", "/api/start-points"]
+      - ["t09_stop_session", "/api/stop-session"]
+      - ["t09_team", "/api/team"]
+      - ["t09_test_list", "/api/test-list"]
+      - ["t09_update", "/api/update"]
+      - ["t09_upload", "/api/upload"]
+      - ["t09_verify", "/api/verify"]
+      - ["t09_viewed", "/api/viewed"]
+      - ["t09_wake", "/api/wake"]
+      - ["t09_walkthrough_check", "/api/walkthrough-check"]
+      - ["t09_workspace", "/api/workspace"]
+
+  - id: SEC-T09R
+    name: "A POST route refuses a query string, so nothing it takes travels in a URL (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      query: { proctor: "1" }
+      headers: { Origin: "${page.origin}" }
+      body: {}
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: query }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: query
+    columns: ["case", "route"]
+    rows:
+      - ["t09r_agent_report", "/api/agent-report"]
+      - ["t09r_audit", "/api/audit"]
+      - ["t09r_backup", "/api/backup"]
+      - ["t09r_changes", "/api/changes"]
+      - ["t09r_docs", "/api/docs"]
+      - ["t09r_file", "/api/file"]
+      - ["t09r_file_check", "/api/file-check"]
+      - ["t09r_gate", "/api/gate"]
+      - ["t09r_metrics", "/api/metrics"]
+      - ["t09r_projects", "/api/projects"]
+      - ["t09r_review_reply", "/api/review-reply"]
+      - ["t09r_screenshot", "/api/screenshot"]
+      - ["t09r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T10
+    name: "A POST route refuses GET, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: GET
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+    expect:
+      equal:
+        "$.status": 405
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: method }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: get
+    columns: ["case", "route"]
+    rows:
+      - ["t10_add_repo", "/api/add-repo"]
+      - ["t10_agent_report", "/api/agent-report"]
+      - ["t10_allow_commit", "/api/allow-commit"]
+      - ["t10_allow_file", "/api/allow-file"]
+      - ["t10_allow_rules", "/api/allow-rules"]
+      - ["t10_answer", "/api/answer"]
+      - ["t10_approve_plan", "/api/approve-plan"]
+      - ["t10_approve_requirements", "/api/approve-requirements"]
+      - ["t10_audit", "/api/audit"]
+      - ["t10_backup", "/api/backup"]
+      - ["t10_bring_main", "/api/bring-main"]
+      - ["t10_changes", "/api/changes"]
+      - ["t10_claude_login", "/api/claude-login"]
+      - ["t10_claude_trust", "/api/claude-trust"]
+      - ["t10_clone_again", "/api/clone-again"]
+      - ["t10_commit_identity", "/api/commit-identity"]
+      - ["t10_commit_rewrite", "/api/commit-rewrite"]
+      - ["t10_control", "/api/control"]
+      - ["t10_decision_log", "/api/decision-log"]
+      - ["t10_diagnostics", "/api/diagnostics"]
+      - ["t10_dispatch", "/api/dispatch"]
+      - ["t10_docs", "/api/docs"]
+      - ["t10_egress", "/api/egress"]
+      - ["t10_exceptions", "/api/exceptions"]
+      - ["t10_explain", "/api/explain"]
+      - ["t10_export", "/api/export"]
+      - ["t10_file", "/api/file"]
+      - ["t10_file_check", "/api/file-check"]
+      - ["t10_file_match", "/api/file-match"]
+      - ["t10_files", "/api/files"]
+      - ["t10_finding_issues", "/api/finding-issues"]
+      - ["t10_flag_remove", "/api/flag-remove"]
+      - ["t10_forge_answer", "/api/forge-answer"]
+      - ["t10_gate", "/api/gate"]
+      - ["t10_halt", "/api/halt"]
+      - ["t10_handoff", "/api/handoff"]
+      - ["t10_import", "/api/import"]
+      - ["t10_interrupt", "/api/interrupt"]
+      - ["t10_issues", "/api/issues"]
+      - ["t10_keep", "/api/keep"]
+      - ["t10_lessons", "/api/lessons"]
+      - ["t10_limits", "/api/limits"]
+      - ["t10_lock_tests", "/api/lock-tests"]
+      - ["t10_message", "/api/message"]
+      - ["t10_metrics", "/api/metrics"]
+      - ["t10_override", "/api/override"]
+      - ["t10_packs", "/api/packs"]
+      - ["t10_pair", "/api/pair"]
+      - ["t10_plan_review", "/api/plan-review"]
+      - ["t10_prefs", "/api/prefs"]
+      - ["t10_project", "/api/project"]
+      - ["t10_project_commands", "/api/project-commands"]
+      - ["t10_project_facts", "/api/project-facts"]
+      - ["t10_projects", "/api/projects"]
+      - ["t10_pull_request", "/api/pull-request"]
+      - ["t10_push", "/api/push"]
+      - ["t10_push_answer", "/api/push-answer"]
+      - ["t10_push_record", "/api/push-record"]
+      - ["t10_recap", "/api/recap"]
+      - ["t10_release", "/api/release"]
+      - ["t10_remove_repo", "/api/remove-repo"]
+      - ["t10_remove_session", "/api/remove-session"]
+      - ["t10_remove_token", "/api/remove-token"]
+      - ["t10_replay", "/api/replay"]
+      - ["t10_review", "/api/review"]
+      - ["t10_review_depth", "/api/review-depth"]
+      - ["t10_review_models", "/api/review-models"]
+      - ["t10_review_reply", "/api/review-reply"]
+      - ["t10_reviewer_agents", "/api/reviewer-agents"]
+      - ["t10_save_token", "/api/save-token"]
+      - ["t10_saved_prompts", "/api/saved-prompts"]
+      - ["t10_screenshot", "/api/screenshot"]
+      - ["t10_screenshots", "/api/screenshots"]
+      - ["t10_send_findings", "/api/send-findings"]
+      - ["t10_session", "/api/session"]
+      - ["t10_session_work", "/api/session-work"]
+      - ["t10_sign_in_expect", "/api/sign-in-expect"]
+      - ["t10_size", "/api/size"]
+      - ["t10_split", "/api/split"]
+      - ["t10_start_points", "/api/start-points"]
+      - ["t10_stop_session", "/api/stop-session"]
+      - ["t10_team", "/api/team"]
+      - ["t10_test_list", "/api/test-list"]
+      - ["t10_update", "/api/update"]
+      - ["t10_upload", "/api/upload"]
+      - ["t10_verify", "/api/verify"]
+      - ["t10_viewed", "/api/viewed"]
+      - ["t10_wake", "/api/wake"]
+      - ["t10_walkthrough_check", "/api/walkthrough-check"]
+      - ["t10_workspace", "/api/workspace"]
+
+
+  - id: SEC-T11
+    name: "A POST route refuses PUT, DELETE and PATCH, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: "${row.method}"
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 405
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: method }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 405 before the route's handler runs, since the route takes only POST, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive:
+      EXE-09:
+        reason: "PUT, DELETE and PATCH count as destructive on every route, and each row is refused with 405 before the route's handler runs, since the route takes only POST; its body holds only a field no route takes, which names no repository, session or other record, so nothing can be removed or overwritten; every row is named, since a waived row guards no later row on its route"
+        rows:
+          - t11_put_add_repo
+          - t11_put_agent_report
+          - t11_put_allow_commit
+          - t11_put_allow_file
+          - t11_put_allow_rules
+          - t11_put_answer
+          - t11_put_approve_plan
+          - t11_put_approve_requirements
+          - t11_put_audit
+          - t11_put_backup
+          - t11_put_bring_main
+          - t11_put_changes
+          - t11_put_claude_login
+          - t11_put_claude_trust
+          - t11_put_clone_again
+          - t11_put_commit_identity
+          - t11_put_commit_rewrite
+          - t11_put_control
+          - t11_put_decision_log
+          - t11_put_diagnostics
+          - t11_put_dispatch
+          - t11_put_docs
+          - t11_put_egress
+          - t11_put_exceptions
+          - t11_put_explain
+          - t11_put_export
+          - t11_put_file
+          - t11_put_file_check
+          - t11_put_file_match
+          - t11_put_files
+          - t11_put_finding_issues
+          - t11_put_flag_remove
+          - t11_put_forge_answer
+          - t11_put_gate
+          - t11_put_halt
+          - t11_put_handoff
+          - t11_put_import
+          - t11_put_interrupt
+          - t11_put_issues
+          - t11_put_keep
+          - t11_put_lessons
+          - t11_put_limits
+          - t11_put_lock_tests
+          - t11_put_message
+          - t11_put_metrics
+          - t11_put_override
+          - t11_put_packs
+          - t11_put_pair
+          - t11_put_plan_review
+          - t11_put_prefs
+          - t11_put_project
+          - t11_put_project_commands
+          - t11_put_project_facts
+          - t11_put_projects
+          - t11_put_pull_request
+          - t11_put_push
+          - t11_put_push_answer
+          - t11_put_push_record
+          - t11_put_recap
+          - t11_put_release
+          - t11_put_remove_repo
+          - t11_put_remove_session
+          - t11_put_remove_token
+          - t11_put_replay
+          - t11_put_review
+          - t11_put_review_depth
+          - t11_put_review_models
+          - t11_put_review_reply
+          - t11_put_reviewer_agents
+          - t11_put_save_token
+          - t11_put_saved_prompts
+          - t11_put_screenshot
+          - t11_put_screenshots
+          - t11_put_send_findings
+          - t11_put_session
+          - t11_put_session_work
+          - t11_put_sign_in_expect
+          - t11_put_size
+          - t11_put_split
+          - t11_put_start_points
+          - t11_put_stop_session
+          - t11_put_team
+          - t11_put_test_list
+          - t11_put_update
+          - t11_put_upload
+          - t11_put_verify
+          - t11_put_viewed
+          - t11_put_wake
+          - t11_put_walkthrough_check
+          - t11_put_workspace
+          - t11_delete_add_repo
+          - t11_delete_agent_report
+          - t11_delete_allow_commit
+          - t11_delete_allow_file
+          - t11_delete_allow_rules
+          - t11_delete_answer
+          - t11_delete_approve_plan
+          - t11_delete_approve_requirements
+          - t11_delete_audit
+          - t11_delete_backup
+          - t11_delete_bring_main
+          - t11_delete_changes
+          - t11_delete_claude_login
+          - t11_delete_claude_trust
+          - t11_delete_clone_again
+          - t11_delete_commit_identity
+          - t11_delete_commit_rewrite
+          - t11_delete_control
+          - t11_delete_decision_log
+          - t11_delete_diagnostics
+          - t11_delete_dispatch
+          - t11_delete_docs
+          - t11_delete_egress
+          - t11_delete_exceptions
+          - t11_delete_explain
+          - t11_delete_export
+          - t11_delete_file
+          - t11_delete_file_check
+          - t11_delete_file_match
+          - t11_delete_files
+          - t11_delete_finding_issues
+          - t11_delete_flag_remove
+          - t11_delete_forge_answer
+          - t11_delete_gate
+          - t11_delete_halt
+          - t11_delete_handoff
+          - t11_delete_import
+          - t11_delete_interrupt
+          - t11_delete_issues
+          - t11_delete_keep
+          - t11_delete_lessons
+          - t11_delete_limits
+          - t11_delete_lock_tests
+          - t11_delete_message
+          - t11_delete_metrics
+          - t11_delete_override
+          - t11_delete_packs
+          - t11_delete_pair
+          - t11_delete_plan_review
+          - t11_delete_prefs
+          - t11_delete_project
+          - t11_delete_project_commands
+          - t11_delete_project_facts
+          - t11_delete_projects
+          - t11_delete_pull_request
+          - t11_delete_push
+          - t11_delete_push_answer
+          - t11_delete_push_record
+          - t11_delete_recap
+          - t11_delete_release
+          - t11_delete_remove_repo
+          - t11_delete_remove_session
+          - t11_delete_remove_token
+          - t11_delete_replay
+          - t11_delete_review
+          - t11_delete_review_depth
+          - t11_delete_review_models
+          - t11_delete_review_reply
+          - t11_delete_reviewer_agents
+          - t11_delete_save_token
+          - t11_delete_saved_prompts
+          - t11_delete_screenshot
+          - t11_delete_screenshots
+          - t11_delete_send_findings
+          - t11_delete_session
+          - t11_delete_session_work
+          - t11_delete_sign_in_expect
+          - t11_delete_size
+          - t11_delete_split
+          - t11_delete_start_points
+          - t11_delete_stop_session
+          - t11_delete_team
+          - t11_delete_test_list
+          - t11_delete_update
+          - t11_delete_upload
+          - t11_delete_verify
+          - t11_delete_viewed
+          - t11_delete_wake
+          - t11_delete_walkthrough_check
+          - t11_delete_workspace
+          - t11_patch_add_repo
+          - t11_patch_agent_report
+          - t11_patch_allow_commit
+          - t11_patch_allow_file
+          - t11_patch_allow_rules
+          - t11_patch_answer
+          - t11_patch_approve_plan
+          - t11_patch_approve_requirements
+          - t11_patch_audit
+          - t11_patch_backup
+          - t11_patch_bring_main
+          - t11_patch_changes
+          - t11_patch_claude_login
+          - t11_patch_claude_trust
+          - t11_patch_clone_again
+          - t11_patch_commit_identity
+          - t11_patch_commit_rewrite
+          - t11_patch_control
+          - t11_patch_decision_log
+          - t11_patch_diagnostics
+          - t11_patch_dispatch
+          - t11_patch_docs
+          - t11_patch_egress
+          - t11_patch_exceptions
+          - t11_patch_explain
+          - t11_patch_export
+          - t11_patch_file
+          - t11_patch_file_check
+          - t11_patch_file_match
+          - t11_patch_files
+          - t11_patch_finding_issues
+          - t11_patch_flag_remove
+          - t11_patch_forge_answer
+          - t11_patch_gate
+          - t11_patch_halt
+          - t11_patch_handoff
+          - t11_patch_import
+          - t11_patch_interrupt
+          - t11_patch_issues
+          - t11_patch_keep
+          - t11_patch_lessons
+          - t11_patch_limits
+          - t11_patch_lock_tests
+          - t11_patch_message
+          - t11_patch_metrics
+          - t11_patch_override
+          - t11_patch_packs
+          - t11_patch_pair
+          - t11_patch_plan_review
+          - t11_patch_prefs
+          - t11_patch_project
+          - t11_patch_project_commands
+          - t11_patch_project_facts
+          - t11_patch_projects
+          - t11_patch_pull_request
+          - t11_patch_push
+          - t11_patch_push_answer
+          - t11_patch_push_record
+          - t11_patch_recap
+          - t11_patch_release
+          - t11_patch_remove_repo
+          - t11_patch_remove_session
+          - t11_patch_remove_token
+          - t11_patch_replay
+          - t11_patch_review
+          - t11_patch_review_depth
+          - t11_patch_review_models
+          - t11_patch_review_reply
+          - t11_patch_reviewer_agents
+          - t11_patch_save_token
+          - t11_patch_saved_prompts
+          - t11_patch_screenshot
+          - t11_patch_screenshots
+          - t11_patch_send_findings
+          - t11_patch_session
+          - t11_patch_session_work
+          - t11_patch_sign_in_expect
+          - t11_patch_size
+          - t11_patch_split
+          - t11_patch_start_points
+          - t11_patch_stop_session
+          - t11_patch_team
+          - t11_patch_test_list
+          - t11_patch_update
+          - t11_patch_upload
+          - t11_patch_verify
+          - t11_patch_viewed
+          - t11_patch_wake
+          - t11_patch_walkthrough_check
+          - t11_patch_workspace
+    covers: other_method
+    columns: ["case", "route", "method"]
+    rows:
+      - ["t11_put_add_repo", "/api/add-repo", "PUT"]
+      - ["t11_put_agent_report", "/api/agent-report", "PUT"]
+      - ["t11_put_allow_commit", "/api/allow-commit", "PUT"]
+      - ["t11_put_allow_file", "/api/allow-file", "PUT"]
+      - ["t11_put_allow_rules", "/api/allow-rules", "PUT"]
+      - ["t11_put_answer", "/api/answer", "PUT"]
+      - ["t11_put_approve_plan", "/api/approve-plan", "PUT"]
+      - ["t11_put_approve_requirements", "/api/approve-requirements", "PUT"]
+      - ["t11_put_audit", "/api/audit", "PUT"]
+      - ["t11_put_backup", "/api/backup", "PUT"]
+      - ["t11_put_bring_main", "/api/bring-main", "PUT"]
+      - ["t11_put_changes", "/api/changes", "PUT"]
+      - ["t11_put_claude_login", "/api/claude-login", "PUT"]
+      - ["t11_put_claude_trust", "/api/claude-trust", "PUT"]
+      - ["t11_put_clone_again", "/api/clone-again", "PUT"]
+      - ["t11_put_commit_identity", "/api/commit-identity", "PUT"]
+      - ["t11_put_commit_rewrite", "/api/commit-rewrite", "PUT"]
+      - ["t11_put_control", "/api/control", "PUT"]
+      - ["t11_put_decision_log", "/api/decision-log", "PUT"]
+      - ["t11_put_diagnostics", "/api/diagnostics", "PUT"]
+      - ["t11_put_dispatch", "/api/dispatch", "PUT"]
+      - ["t11_put_docs", "/api/docs", "PUT"]
+      - ["t11_put_egress", "/api/egress", "PUT"]
+      - ["t11_put_exceptions", "/api/exceptions", "PUT"]
+      - ["t11_put_explain", "/api/explain", "PUT"]
+      - ["t11_put_export", "/api/export", "PUT"]
+      - ["t11_put_file", "/api/file", "PUT"]
+      - ["t11_put_file_check", "/api/file-check", "PUT"]
+      - ["t11_put_file_match", "/api/file-match", "PUT"]
+      - ["t11_put_files", "/api/files", "PUT"]
+      - ["t11_put_finding_issues", "/api/finding-issues", "PUT"]
+      - ["t11_put_flag_remove", "/api/flag-remove", "PUT"]
+      - ["t11_put_forge_answer", "/api/forge-answer", "PUT"]
+      - ["t11_put_gate", "/api/gate", "PUT"]
+      - ["t11_put_halt", "/api/halt", "PUT"]
+      - ["t11_put_handoff", "/api/handoff", "PUT"]
+      - ["t11_put_import", "/api/import", "PUT"]
+      - ["t11_put_interrupt", "/api/interrupt", "PUT"]
+      - ["t11_put_issues", "/api/issues", "PUT"]
+      - ["t11_put_keep", "/api/keep", "PUT"]
+      - ["t11_put_lessons", "/api/lessons", "PUT"]
+      - ["t11_put_limits", "/api/limits", "PUT"]
+      - ["t11_put_lock_tests", "/api/lock-tests", "PUT"]
+      - ["t11_put_message", "/api/message", "PUT"]
+      - ["t11_put_metrics", "/api/metrics", "PUT"]
+      - ["t11_put_override", "/api/override", "PUT"]
+      - ["t11_put_packs", "/api/packs", "PUT"]
+      - ["t11_put_pair", "/api/pair", "PUT"]
+      - ["t11_put_plan_review", "/api/plan-review", "PUT"]
+      - ["t11_put_prefs", "/api/prefs", "PUT"]
+      - ["t11_put_project", "/api/project", "PUT"]
+      - ["t11_put_project_commands", "/api/project-commands", "PUT"]
+      - ["t11_put_project_facts", "/api/project-facts", "PUT"]
+      - ["t11_put_projects", "/api/projects", "PUT"]
+      - ["t11_put_pull_request", "/api/pull-request", "PUT"]
+      - ["t11_put_push", "/api/push", "PUT"]
+      - ["t11_put_push_answer", "/api/push-answer", "PUT"]
+      - ["t11_put_push_record", "/api/push-record", "PUT"]
+      - ["t11_put_recap", "/api/recap", "PUT"]
+      - ["t11_put_release", "/api/release", "PUT"]
+      - ["t11_put_remove_repo", "/api/remove-repo", "PUT"]
+      - ["t11_put_remove_session", "/api/remove-session", "PUT"]
+      - ["t11_put_remove_token", "/api/remove-token", "PUT"]
+      - ["t11_put_replay", "/api/replay", "PUT"]
+      - ["t11_put_review", "/api/review", "PUT"]
+      - ["t11_put_review_depth", "/api/review-depth", "PUT"]
+      - ["t11_put_review_models", "/api/review-models", "PUT"]
+      - ["t11_put_review_reply", "/api/review-reply", "PUT"]
+      - ["t11_put_reviewer_agents", "/api/reviewer-agents", "PUT"]
+      - ["t11_put_save_token", "/api/save-token", "PUT"]
+      - ["t11_put_saved_prompts", "/api/saved-prompts", "PUT"]
+      - ["t11_put_screenshot", "/api/screenshot", "PUT"]
+      - ["t11_put_screenshots", "/api/screenshots", "PUT"]
+      - ["t11_put_send_findings", "/api/send-findings", "PUT"]
+      - ["t11_put_session", "/api/session", "PUT"]
+      - ["t11_put_session_work", "/api/session-work", "PUT"]
+      - ["t11_put_sign_in_expect", "/api/sign-in-expect", "PUT"]
+      - ["t11_put_size", "/api/size", "PUT"]
+      - ["t11_put_split", "/api/split", "PUT"]
+      - ["t11_put_start_points", "/api/start-points", "PUT"]
+      - ["t11_put_stop_session", "/api/stop-session", "PUT"]
+      - ["t11_put_team", "/api/team", "PUT"]
+      - ["t11_put_test_list", "/api/test-list", "PUT"]
+      - ["t11_put_update", "/api/update", "PUT"]
+      - ["t11_put_upload", "/api/upload", "PUT"]
+      - ["t11_put_verify", "/api/verify", "PUT"]
+      - ["t11_put_viewed", "/api/viewed", "PUT"]
+      - ["t11_put_wake", "/api/wake", "PUT"]
+      - ["t11_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
+      - ["t11_put_workspace", "/api/workspace", "PUT"]
+      - ["t11_delete_add_repo", "/api/add-repo", "DELETE"]
+      - ["t11_delete_agent_report", "/api/agent-report", "DELETE"]
+      - ["t11_delete_allow_commit", "/api/allow-commit", "DELETE"]
+      - ["t11_delete_allow_file", "/api/allow-file", "DELETE"]
+      - ["t11_delete_allow_rules", "/api/allow-rules", "DELETE"]
+      - ["t11_delete_answer", "/api/answer", "DELETE"]
+      - ["t11_delete_approve_plan", "/api/approve-plan", "DELETE"]
+      - ["t11_delete_approve_requirements", "/api/approve-requirements", "DELETE"]
+      - ["t11_delete_audit", "/api/audit", "DELETE"]
+      - ["t11_delete_backup", "/api/backup", "DELETE"]
+      - ["t11_delete_bring_main", "/api/bring-main", "DELETE"]
+      - ["t11_delete_changes", "/api/changes", "DELETE"]
+      - ["t11_delete_claude_login", "/api/claude-login", "DELETE"]
+      - ["t11_delete_claude_trust", "/api/claude-trust", "DELETE"]
+      - ["t11_delete_clone_again", "/api/clone-again", "DELETE"]
+      - ["t11_delete_commit_identity", "/api/commit-identity", "DELETE"]
+      - ["t11_delete_commit_rewrite", "/api/commit-rewrite", "DELETE"]
+      - ["t11_delete_control", "/api/control", "DELETE"]
+      - ["t11_delete_decision_log", "/api/decision-log", "DELETE"]
+      - ["t11_delete_diagnostics", "/api/diagnostics", "DELETE"]
+      - ["t11_delete_dispatch", "/api/dispatch", "DELETE"]
+      - ["t11_delete_docs", "/api/docs", "DELETE"]
+      - ["t11_delete_egress", "/api/egress", "DELETE"]
+      - ["t11_delete_exceptions", "/api/exceptions", "DELETE"]
+      - ["t11_delete_explain", "/api/explain", "DELETE"]
+      - ["t11_delete_export", "/api/export", "DELETE"]
+      - ["t11_delete_file", "/api/file", "DELETE"]
+      - ["t11_delete_file_check", "/api/file-check", "DELETE"]
+      - ["t11_delete_file_match", "/api/file-match", "DELETE"]
+      - ["t11_delete_files", "/api/files", "DELETE"]
+      - ["t11_delete_finding_issues", "/api/finding-issues", "DELETE"]
+      - ["t11_delete_flag_remove", "/api/flag-remove", "DELETE"]
+      - ["t11_delete_forge_answer", "/api/forge-answer", "DELETE"]
+      - ["t11_delete_gate", "/api/gate", "DELETE"]
+      - ["t11_delete_halt", "/api/halt", "DELETE"]
+      - ["t11_delete_handoff", "/api/handoff", "DELETE"]
+      - ["t11_delete_import", "/api/import", "DELETE"]
+      - ["t11_delete_interrupt", "/api/interrupt", "DELETE"]
+      - ["t11_delete_issues", "/api/issues", "DELETE"]
+      - ["t11_delete_keep", "/api/keep", "DELETE"]
+      - ["t11_delete_lessons", "/api/lessons", "DELETE"]
+      - ["t11_delete_limits", "/api/limits", "DELETE"]
+      - ["t11_delete_lock_tests", "/api/lock-tests", "DELETE"]
+      - ["t11_delete_message", "/api/message", "DELETE"]
+      - ["t11_delete_metrics", "/api/metrics", "DELETE"]
+      - ["t11_delete_override", "/api/override", "DELETE"]
+      - ["t11_delete_packs", "/api/packs", "DELETE"]
+      - ["t11_delete_pair", "/api/pair", "DELETE"]
+      - ["t11_delete_plan_review", "/api/plan-review", "DELETE"]
+      - ["t11_delete_prefs", "/api/prefs", "DELETE"]
+      - ["t11_delete_project", "/api/project", "DELETE"]
+      - ["t11_delete_project_commands", "/api/project-commands", "DELETE"]
+      - ["t11_delete_project_facts", "/api/project-facts", "DELETE"]
+      - ["t11_delete_projects", "/api/projects", "DELETE"]
+      - ["t11_delete_pull_request", "/api/pull-request", "DELETE"]
+      - ["t11_delete_push", "/api/push", "DELETE"]
+      - ["t11_delete_push_answer", "/api/push-answer", "DELETE"]
+      - ["t11_delete_push_record", "/api/push-record", "DELETE"]
+      - ["t11_delete_recap", "/api/recap", "DELETE"]
+      - ["t11_delete_release", "/api/release", "DELETE"]
+      - ["t11_delete_remove_repo", "/api/remove-repo", "DELETE"]
+      - ["t11_delete_remove_session", "/api/remove-session", "DELETE"]
+      - ["t11_delete_remove_token", "/api/remove-token", "DELETE"]
+      - ["t11_delete_replay", "/api/replay", "DELETE"]
+      - ["t11_delete_review", "/api/review", "DELETE"]
+      - ["t11_delete_review_depth", "/api/review-depth", "DELETE"]
+      - ["t11_delete_review_models", "/api/review-models", "DELETE"]
+      - ["t11_delete_review_reply", "/api/review-reply", "DELETE"]
+      - ["t11_delete_reviewer_agents", "/api/reviewer-agents", "DELETE"]
+      - ["t11_delete_save_token", "/api/save-token", "DELETE"]
+      - ["t11_delete_saved_prompts", "/api/saved-prompts", "DELETE"]
+      - ["t11_delete_screenshot", "/api/screenshot", "DELETE"]
+      - ["t11_delete_screenshots", "/api/screenshots", "DELETE"]
+      - ["t11_delete_send_findings", "/api/send-findings", "DELETE"]
+      - ["t11_delete_session", "/api/session", "DELETE"]
+      - ["t11_delete_session_work", "/api/session-work", "DELETE"]
+      - ["t11_delete_sign_in_expect", "/api/sign-in-expect", "DELETE"]
+      - ["t11_delete_size", "/api/size", "DELETE"]
+      - ["t11_delete_split", "/api/split", "DELETE"]
+      - ["t11_delete_start_points", "/api/start-points", "DELETE"]
+      - ["t11_delete_stop_session", "/api/stop-session", "DELETE"]
+      - ["t11_delete_team", "/api/team", "DELETE"]
+      - ["t11_delete_test_list", "/api/test-list", "DELETE"]
+      - ["t11_delete_update", "/api/update", "DELETE"]
+      - ["t11_delete_upload", "/api/upload", "DELETE"]
+      - ["t11_delete_verify", "/api/verify", "DELETE"]
+      - ["t11_delete_viewed", "/api/viewed", "DELETE"]
+      - ["t11_delete_wake", "/api/wake", "DELETE"]
+      - ["t11_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
+      - ["t11_delete_workspace", "/api/workspace", "DELETE"]
+      - ["t11_patch_add_repo", "/api/add-repo", "PATCH"]
+      - ["t11_patch_agent_report", "/api/agent-report", "PATCH"]
+      - ["t11_patch_allow_commit", "/api/allow-commit", "PATCH"]
+      - ["t11_patch_allow_file", "/api/allow-file", "PATCH"]
+      - ["t11_patch_allow_rules", "/api/allow-rules", "PATCH"]
+      - ["t11_patch_answer", "/api/answer", "PATCH"]
+      - ["t11_patch_approve_plan", "/api/approve-plan", "PATCH"]
+      - ["t11_patch_approve_requirements", "/api/approve-requirements", "PATCH"]
+      - ["t11_patch_audit", "/api/audit", "PATCH"]
+      - ["t11_patch_backup", "/api/backup", "PATCH"]
+      - ["t11_patch_bring_main", "/api/bring-main", "PATCH"]
+      - ["t11_patch_changes", "/api/changes", "PATCH"]
+      - ["t11_patch_claude_login", "/api/claude-login", "PATCH"]
+      - ["t11_patch_claude_trust", "/api/claude-trust", "PATCH"]
+      - ["t11_patch_clone_again", "/api/clone-again", "PATCH"]
+      - ["t11_patch_commit_identity", "/api/commit-identity", "PATCH"]
+      - ["t11_patch_commit_rewrite", "/api/commit-rewrite", "PATCH"]
+      - ["t11_patch_control", "/api/control", "PATCH"]
+      - ["t11_patch_decision_log", "/api/decision-log", "PATCH"]
+      - ["t11_patch_diagnostics", "/api/diagnostics", "PATCH"]
+      - ["t11_patch_dispatch", "/api/dispatch", "PATCH"]
+      - ["t11_patch_docs", "/api/docs", "PATCH"]
+      - ["t11_patch_egress", "/api/egress", "PATCH"]
+      - ["t11_patch_exceptions", "/api/exceptions", "PATCH"]
+      - ["t11_patch_explain", "/api/explain", "PATCH"]
+      - ["t11_patch_export", "/api/export", "PATCH"]
+      - ["t11_patch_file", "/api/file", "PATCH"]
+      - ["t11_patch_file_check", "/api/file-check", "PATCH"]
+      - ["t11_patch_file_match", "/api/file-match", "PATCH"]
+      - ["t11_patch_files", "/api/files", "PATCH"]
+      - ["t11_patch_finding_issues", "/api/finding-issues", "PATCH"]
+      - ["t11_patch_flag_remove", "/api/flag-remove", "PATCH"]
+      - ["t11_patch_forge_answer", "/api/forge-answer", "PATCH"]
+      - ["t11_patch_gate", "/api/gate", "PATCH"]
+      - ["t11_patch_halt", "/api/halt", "PATCH"]
+      - ["t11_patch_handoff", "/api/handoff", "PATCH"]
+      - ["t11_patch_import", "/api/import", "PATCH"]
+      - ["t11_patch_interrupt", "/api/interrupt", "PATCH"]
+      - ["t11_patch_issues", "/api/issues", "PATCH"]
+      - ["t11_patch_keep", "/api/keep", "PATCH"]
+      - ["t11_patch_lessons", "/api/lessons", "PATCH"]
+      - ["t11_patch_limits", "/api/limits", "PATCH"]
+      - ["t11_patch_lock_tests", "/api/lock-tests", "PATCH"]
+      - ["t11_patch_message", "/api/message", "PATCH"]
+      - ["t11_patch_metrics", "/api/metrics", "PATCH"]
+      - ["t11_patch_override", "/api/override", "PATCH"]
+      - ["t11_patch_packs", "/api/packs", "PATCH"]
+      - ["t11_patch_pair", "/api/pair", "PATCH"]
+      - ["t11_patch_plan_review", "/api/plan-review", "PATCH"]
+      - ["t11_patch_prefs", "/api/prefs", "PATCH"]
+      - ["t11_patch_project", "/api/project", "PATCH"]
+      - ["t11_patch_project_commands", "/api/project-commands", "PATCH"]
+      - ["t11_patch_project_facts", "/api/project-facts", "PATCH"]
+      - ["t11_patch_projects", "/api/projects", "PATCH"]
+      - ["t11_patch_pull_request", "/api/pull-request", "PATCH"]
+      - ["t11_patch_push", "/api/push", "PATCH"]
+      - ["t11_patch_push_answer", "/api/push-answer", "PATCH"]
+      - ["t11_patch_push_record", "/api/push-record", "PATCH"]
+      - ["t11_patch_recap", "/api/recap", "PATCH"]
+      - ["t11_patch_release", "/api/release", "PATCH"]
+      - ["t11_patch_remove_repo", "/api/remove-repo", "PATCH"]
+      - ["t11_patch_remove_session", "/api/remove-session", "PATCH"]
+      - ["t11_patch_remove_token", "/api/remove-token", "PATCH"]
+      - ["t11_patch_replay", "/api/replay", "PATCH"]
+      - ["t11_patch_review", "/api/review", "PATCH"]
+      - ["t11_patch_review_depth", "/api/review-depth", "PATCH"]
+      - ["t11_patch_review_models", "/api/review-models", "PATCH"]
+      - ["t11_patch_review_reply", "/api/review-reply", "PATCH"]
+      - ["t11_patch_reviewer_agents", "/api/reviewer-agents", "PATCH"]
+      - ["t11_patch_save_token", "/api/save-token", "PATCH"]
+      - ["t11_patch_saved_prompts", "/api/saved-prompts", "PATCH"]
+      - ["t11_patch_screenshot", "/api/screenshot", "PATCH"]
+      - ["t11_patch_screenshots", "/api/screenshots", "PATCH"]
+      - ["t11_patch_send_findings", "/api/send-findings", "PATCH"]
+      - ["t11_patch_session", "/api/session", "PATCH"]
+      - ["t11_patch_session_work", "/api/session-work", "PATCH"]
+      - ["t11_patch_sign_in_expect", "/api/sign-in-expect", "PATCH"]
+      - ["t11_patch_size", "/api/size", "PATCH"]
+      - ["t11_patch_split", "/api/split", "PATCH"]
+      - ["t11_patch_start_points", "/api/start-points", "PATCH"]
+      - ["t11_patch_stop_session", "/api/stop-session", "PATCH"]
+      - ["t11_patch_team", "/api/team", "PATCH"]
+      - ["t11_patch_test_list", "/api/test-list", "PATCH"]
+      - ["t11_patch_update", "/api/update", "PATCH"]
+      - ["t11_patch_upload", "/api/upload", "PATCH"]
+      - ["t11_patch_verify", "/api/verify", "PATCH"]
+      - ["t11_patch_viewed", "/api/viewed", "PATCH"]
+      - ["t11_patch_wake", "/api/wake", "PATCH"]
+      - ["t11_patch_walkthrough_check", "/api/walkthrough-check", "PATCH"]
+      - ["t11_patch_workspace", "/api/workspace", "PATCH"]
+
+  - id: SEC-T12
+    name: "A POST route refuses PUT, DELETE and PATCH with no Origin, even with the page key, so another method can't skip the POST-only Origin check"
+    do: http.request
+    identity: page
+    with:
+      method: "${row.method}"
+      path: "${row.route}"
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 405
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: method }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 405 before the route's handler runs, since the route takes only POST, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive:
+      EXE-09:
+        reason: "PUT, DELETE and PATCH count as destructive on every route, and each row, which sends no Origin, is refused with 405 before the route's handler runs, since the route takes only POST; its body holds only a field no route takes, which names no repository, session or other record, so nothing can be removed or overwritten; every row is named, since a waived row guards no later row on its route"
+        rows:
+          - t12_put_add_repo
+          - t12_put_agent_report
+          - t12_put_allow_commit
+          - t12_put_allow_file
+          - t12_put_allow_rules
+          - t12_put_answer
+          - t12_put_approve_plan
+          - t12_put_approve_requirements
+          - t12_put_audit
+          - t12_put_backup
+          - t12_put_bring_main
+          - t12_put_changes
+          - t12_put_claude_login
+          - t12_put_claude_trust
+          - t12_put_clone_again
+          - t12_put_commit_identity
+          - t12_put_commit_rewrite
+          - t12_put_control
+          - t12_put_decision_log
+          - t12_put_diagnostics
+          - t12_put_dispatch
+          - t12_put_docs
+          - t12_put_egress
+          - t12_put_exceptions
+          - t12_put_explain
+          - t12_put_export
+          - t12_put_file
+          - t12_put_file_check
+          - t12_put_file_match
+          - t12_put_files
+          - t12_put_finding_issues
+          - t12_put_flag_remove
+          - t12_put_forge_answer
+          - t12_put_gate
+          - t12_put_halt
+          - t12_put_handoff
+          - t12_put_import
+          - t12_put_interrupt
+          - t12_put_issues
+          - t12_put_keep
+          - t12_put_lessons
+          - t12_put_limits
+          - t12_put_lock_tests
+          - t12_put_message
+          - t12_put_metrics
+          - t12_put_override
+          - t12_put_packs
+          - t12_put_pair
+          - t12_put_plan_review
+          - t12_put_prefs
+          - t12_put_project
+          - t12_put_project_commands
+          - t12_put_project_facts
+          - t12_put_projects
+          - t12_put_pull_request
+          - t12_put_push
+          - t12_put_push_answer
+          - t12_put_push_record
+          - t12_put_recap
+          - t12_put_release
+          - t12_put_remove_repo
+          - t12_put_remove_session
+          - t12_put_remove_token
+          - t12_put_replay
+          - t12_put_review
+          - t12_put_review_depth
+          - t12_put_review_models
+          - t12_put_review_reply
+          - t12_put_reviewer_agents
+          - t12_put_save_token
+          - t12_put_saved_prompts
+          - t12_put_screenshot
+          - t12_put_screenshots
+          - t12_put_send_findings
+          - t12_put_session
+          - t12_put_session_work
+          - t12_put_sign_in_expect
+          - t12_put_size
+          - t12_put_split
+          - t12_put_start_points
+          - t12_put_stop_session
+          - t12_put_team
+          - t12_put_test_list
+          - t12_put_update
+          - t12_put_upload
+          - t12_put_verify
+          - t12_put_viewed
+          - t12_put_wake
+          - t12_put_walkthrough_check
+          - t12_put_workspace
+          - t12_delete_add_repo
+          - t12_delete_agent_report
+          - t12_delete_allow_commit
+          - t12_delete_allow_file
+          - t12_delete_allow_rules
+          - t12_delete_answer
+          - t12_delete_approve_plan
+          - t12_delete_approve_requirements
+          - t12_delete_audit
+          - t12_delete_backup
+          - t12_delete_bring_main
+          - t12_delete_changes
+          - t12_delete_claude_login
+          - t12_delete_claude_trust
+          - t12_delete_clone_again
+          - t12_delete_commit_identity
+          - t12_delete_commit_rewrite
+          - t12_delete_control
+          - t12_delete_decision_log
+          - t12_delete_diagnostics
+          - t12_delete_dispatch
+          - t12_delete_docs
+          - t12_delete_egress
+          - t12_delete_exceptions
+          - t12_delete_explain
+          - t12_delete_export
+          - t12_delete_file
+          - t12_delete_file_check
+          - t12_delete_file_match
+          - t12_delete_files
+          - t12_delete_finding_issues
+          - t12_delete_flag_remove
+          - t12_delete_forge_answer
+          - t12_delete_gate
+          - t12_delete_halt
+          - t12_delete_handoff
+          - t12_delete_import
+          - t12_delete_interrupt
+          - t12_delete_issues
+          - t12_delete_keep
+          - t12_delete_lessons
+          - t12_delete_limits
+          - t12_delete_lock_tests
+          - t12_delete_message
+          - t12_delete_metrics
+          - t12_delete_override
+          - t12_delete_packs
+          - t12_delete_pair
+          - t12_delete_plan_review
+          - t12_delete_prefs
+          - t12_delete_project
+          - t12_delete_project_commands
+          - t12_delete_project_facts
+          - t12_delete_projects
+          - t12_delete_pull_request
+          - t12_delete_push
+          - t12_delete_push_answer
+          - t12_delete_push_record
+          - t12_delete_recap
+          - t12_delete_release
+          - t12_delete_remove_repo
+          - t12_delete_remove_session
+          - t12_delete_remove_token
+          - t12_delete_replay
+          - t12_delete_review
+          - t12_delete_review_depth
+          - t12_delete_review_models
+          - t12_delete_review_reply
+          - t12_delete_reviewer_agents
+          - t12_delete_save_token
+          - t12_delete_saved_prompts
+          - t12_delete_screenshot
+          - t12_delete_screenshots
+          - t12_delete_send_findings
+          - t12_delete_session
+          - t12_delete_session_work
+          - t12_delete_sign_in_expect
+          - t12_delete_size
+          - t12_delete_split
+          - t12_delete_start_points
+          - t12_delete_stop_session
+          - t12_delete_team
+          - t12_delete_test_list
+          - t12_delete_update
+          - t12_delete_upload
+          - t12_delete_verify
+          - t12_delete_viewed
+          - t12_delete_wake
+          - t12_delete_walkthrough_check
+          - t12_delete_workspace
+          - t12_patch_add_repo
+          - t12_patch_agent_report
+          - t12_patch_allow_commit
+          - t12_patch_allow_file
+          - t12_patch_allow_rules
+          - t12_patch_answer
+          - t12_patch_approve_plan
+          - t12_patch_approve_requirements
+          - t12_patch_audit
+          - t12_patch_backup
+          - t12_patch_bring_main
+          - t12_patch_changes
+          - t12_patch_claude_login
+          - t12_patch_claude_trust
+          - t12_patch_clone_again
+          - t12_patch_commit_identity
+          - t12_patch_commit_rewrite
+          - t12_patch_control
+          - t12_patch_decision_log
+          - t12_patch_diagnostics
+          - t12_patch_dispatch
+          - t12_patch_docs
+          - t12_patch_egress
+          - t12_patch_exceptions
+          - t12_patch_explain
+          - t12_patch_export
+          - t12_patch_file
+          - t12_patch_file_check
+          - t12_patch_file_match
+          - t12_patch_files
+          - t12_patch_finding_issues
+          - t12_patch_flag_remove
+          - t12_patch_forge_answer
+          - t12_patch_gate
+          - t12_patch_halt
+          - t12_patch_handoff
+          - t12_patch_import
+          - t12_patch_interrupt
+          - t12_patch_issues
+          - t12_patch_keep
+          - t12_patch_lessons
+          - t12_patch_limits
+          - t12_patch_lock_tests
+          - t12_patch_message
+          - t12_patch_metrics
+          - t12_patch_override
+          - t12_patch_packs
+          - t12_patch_pair
+          - t12_patch_plan_review
+          - t12_patch_prefs
+          - t12_patch_project
+          - t12_patch_project_commands
+          - t12_patch_project_facts
+          - t12_patch_projects
+          - t12_patch_pull_request
+          - t12_patch_push
+          - t12_patch_push_answer
+          - t12_patch_push_record
+          - t12_patch_recap
+          - t12_patch_release
+          - t12_patch_remove_repo
+          - t12_patch_remove_session
+          - t12_patch_remove_token
+          - t12_patch_replay
+          - t12_patch_review
+          - t12_patch_review_depth
+          - t12_patch_review_models
+          - t12_patch_review_reply
+          - t12_patch_reviewer_agents
+          - t12_patch_save_token
+          - t12_patch_saved_prompts
+          - t12_patch_screenshot
+          - t12_patch_screenshots
+          - t12_patch_send_findings
+          - t12_patch_session
+          - t12_patch_session_work
+          - t12_patch_sign_in_expect
+          - t12_patch_size
+          - t12_patch_split
+          - t12_patch_start_points
+          - t12_patch_stop_session
+          - t12_patch_team
+          - t12_patch_test_list
+          - t12_patch_update
+          - t12_patch_upload
+          - t12_patch_verify
+          - t12_patch_viewed
+          - t12_patch_wake
+          - t12_patch_walkthrough_check
+          - t12_patch_workspace
+    covers: other_method_no_origin
+    columns: ["case", "route", "method"]
+    rows:
+      - ["t12_put_add_repo", "/api/add-repo", "PUT"]
+      - ["t12_put_agent_report", "/api/agent-report", "PUT"]
+      - ["t12_put_allow_commit", "/api/allow-commit", "PUT"]
+      - ["t12_put_allow_file", "/api/allow-file", "PUT"]
+      - ["t12_put_allow_rules", "/api/allow-rules", "PUT"]
+      - ["t12_put_answer", "/api/answer", "PUT"]
+      - ["t12_put_approve_plan", "/api/approve-plan", "PUT"]
+      - ["t12_put_approve_requirements", "/api/approve-requirements", "PUT"]
+      - ["t12_put_audit", "/api/audit", "PUT"]
+      - ["t12_put_backup", "/api/backup", "PUT"]
+      - ["t12_put_bring_main", "/api/bring-main", "PUT"]
+      - ["t12_put_changes", "/api/changes", "PUT"]
+      - ["t12_put_claude_login", "/api/claude-login", "PUT"]
+      - ["t12_put_claude_trust", "/api/claude-trust", "PUT"]
+      - ["t12_put_clone_again", "/api/clone-again", "PUT"]
+      - ["t12_put_commit_identity", "/api/commit-identity", "PUT"]
+      - ["t12_put_commit_rewrite", "/api/commit-rewrite", "PUT"]
+      - ["t12_put_control", "/api/control", "PUT"]
+      - ["t12_put_decision_log", "/api/decision-log", "PUT"]
+      - ["t12_put_diagnostics", "/api/diagnostics", "PUT"]
+      - ["t12_put_dispatch", "/api/dispatch", "PUT"]
+      - ["t12_put_docs", "/api/docs", "PUT"]
+      - ["t12_put_egress", "/api/egress", "PUT"]
+      - ["t12_put_exceptions", "/api/exceptions", "PUT"]
+      - ["t12_put_explain", "/api/explain", "PUT"]
+      - ["t12_put_export", "/api/export", "PUT"]
+      - ["t12_put_file", "/api/file", "PUT"]
+      - ["t12_put_file_check", "/api/file-check", "PUT"]
+      - ["t12_put_file_match", "/api/file-match", "PUT"]
+      - ["t12_put_files", "/api/files", "PUT"]
+      - ["t12_put_finding_issues", "/api/finding-issues", "PUT"]
+      - ["t12_put_flag_remove", "/api/flag-remove", "PUT"]
+      - ["t12_put_forge_answer", "/api/forge-answer", "PUT"]
+      - ["t12_put_gate", "/api/gate", "PUT"]
+      - ["t12_put_halt", "/api/halt", "PUT"]
+      - ["t12_put_handoff", "/api/handoff", "PUT"]
+      - ["t12_put_import", "/api/import", "PUT"]
+      - ["t12_put_interrupt", "/api/interrupt", "PUT"]
+      - ["t12_put_issues", "/api/issues", "PUT"]
+      - ["t12_put_keep", "/api/keep", "PUT"]
+      - ["t12_put_lessons", "/api/lessons", "PUT"]
+      - ["t12_put_limits", "/api/limits", "PUT"]
+      - ["t12_put_lock_tests", "/api/lock-tests", "PUT"]
+      - ["t12_put_message", "/api/message", "PUT"]
+      - ["t12_put_metrics", "/api/metrics", "PUT"]
+      - ["t12_put_override", "/api/override", "PUT"]
+      - ["t12_put_packs", "/api/packs", "PUT"]
+      - ["t12_put_pair", "/api/pair", "PUT"]
+      - ["t12_put_plan_review", "/api/plan-review", "PUT"]
+      - ["t12_put_prefs", "/api/prefs", "PUT"]
+      - ["t12_put_project", "/api/project", "PUT"]
+      - ["t12_put_project_commands", "/api/project-commands", "PUT"]
+      - ["t12_put_project_facts", "/api/project-facts", "PUT"]
+      - ["t12_put_projects", "/api/projects", "PUT"]
+      - ["t12_put_pull_request", "/api/pull-request", "PUT"]
+      - ["t12_put_push", "/api/push", "PUT"]
+      - ["t12_put_push_answer", "/api/push-answer", "PUT"]
+      - ["t12_put_push_record", "/api/push-record", "PUT"]
+      - ["t12_put_recap", "/api/recap", "PUT"]
+      - ["t12_put_release", "/api/release", "PUT"]
+      - ["t12_put_remove_repo", "/api/remove-repo", "PUT"]
+      - ["t12_put_remove_session", "/api/remove-session", "PUT"]
+      - ["t12_put_remove_token", "/api/remove-token", "PUT"]
+      - ["t12_put_replay", "/api/replay", "PUT"]
+      - ["t12_put_review", "/api/review", "PUT"]
+      - ["t12_put_review_depth", "/api/review-depth", "PUT"]
+      - ["t12_put_review_models", "/api/review-models", "PUT"]
+      - ["t12_put_review_reply", "/api/review-reply", "PUT"]
+      - ["t12_put_reviewer_agents", "/api/reviewer-agents", "PUT"]
+      - ["t12_put_save_token", "/api/save-token", "PUT"]
+      - ["t12_put_saved_prompts", "/api/saved-prompts", "PUT"]
+      - ["t12_put_screenshot", "/api/screenshot", "PUT"]
+      - ["t12_put_screenshots", "/api/screenshots", "PUT"]
+      - ["t12_put_send_findings", "/api/send-findings", "PUT"]
+      - ["t12_put_session", "/api/session", "PUT"]
+      - ["t12_put_session_work", "/api/session-work", "PUT"]
+      - ["t12_put_sign_in_expect", "/api/sign-in-expect", "PUT"]
+      - ["t12_put_size", "/api/size", "PUT"]
+      - ["t12_put_split", "/api/split", "PUT"]
+      - ["t12_put_start_points", "/api/start-points", "PUT"]
+      - ["t12_put_stop_session", "/api/stop-session", "PUT"]
+      - ["t12_put_team", "/api/team", "PUT"]
+      - ["t12_put_test_list", "/api/test-list", "PUT"]
+      - ["t12_put_update", "/api/update", "PUT"]
+      - ["t12_put_upload", "/api/upload", "PUT"]
+      - ["t12_put_verify", "/api/verify", "PUT"]
+      - ["t12_put_viewed", "/api/viewed", "PUT"]
+      - ["t12_put_wake", "/api/wake", "PUT"]
+      - ["t12_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
+      - ["t12_put_workspace", "/api/workspace", "PUT"]
+      - ["t12_delete_add_repo", "/api/add-repo", "DELETE"]
+      - ["t12_delete_agent_report", "/api/agent-report", "DELETE"]
+      - ["t12_delete_allow_commit", "/api/allow-commit", "DELETE"]
+      - ["t12_delete_allow_file", "/api/allow-file", "DELETE"]
+      - ["t12_delete_allow_rules", "/api/allow-rules", "DELETE"]
+      - ["t12_delete_answer", "/api/answer", "DELETE"]
+      - ["t12_delete_approve_plan", "/api/approve-plan", "DELETE"]
+      - ["t12_delete_approve_requirements", "/api/approve-requirements", "DELETE"]
+      - ["t12_delete_audit", "/api/audit", "DELETE"]
+      - ["t12_delete_backup", "/api/backup", "DELETE"]
+      - ["t12_delete_bring_main", "/api/bring-main", "DELETE"]
+      - ["t12_delete_changes", "/api/changes", "DELETE"]
+      - ["t12_delete_claude_login", "/api/claude-login", "DELETE"]
+      - ["t12_delete_claude_trust", "/api/claude-trust", "DELETE"]
+      - ["t12_delete_clone_again", "/api/clone-again", "DELETE"]
+      - ["t12_delete_commit_identity", "/api/commit-identity", "DELETE"]
+      - ["t12_delete_commit_rewrite", "/api/commit-rewrite", "DELETE"]
+      - ["t12_delete_control", "/api/control", "DELETE"]
+      - ["t12_delete_decision_log", "/api/decision-log", "DELETE"]
+      - ["t12_delete_diagnostics", "/api/diagnostics", "DELETE"]
+      - ["t12_delete_dispatch", "/api/dispatch", "DELETE"]
+      - ["t12_delete_docs", "/api/docs", "DELETE"]
+      - ["t12_delete_egress", "/api/egress", "DELETE"]
+      - ["t12_delete_exceptions", "/api/exceptions", "DELETE"]
+      - ["t12_delete_explain", "/api/explain", "DELETE"]
+      - ["t12_delete_export", "/api/export", "DELETE"]
+      - ["t12_delete_file", "/api/file", "DELETE"]
+      - ["t12_delete_file_check", "/api/file-check", "DELETE"]
+      - ["t12_delete_file_match", "/api/file-match", "DELETE"]
+      - ["t12_delete_files", "/api/files", "DELETE"]
+      - ["t12_delete_finding_issues", "/api/finding-issues", "DELETE"]
+      - ["t12_delete_flag_remove", "/api/flag-remove", "DELETE"]
+      - ["t12_delete_forge_answer", "/api/forge-answer", "DELETE"]
+      - ["t12_delete_gate", "/api/gate", "DELETE"]
+      - ["t12_delete_halt", "/api/halt", "DELETE"]
+      - ["t12_delete_handoff", "/api/handoff", "DELETE"]
+      - ["t12_delete_import", "/api/import", "DELETE"]
+      - ["t12_delete_interrupt", "/api/interrupt", "DELETE"]
+      - ["t12_delete_issues", "/api/issues", "DELETE"]
+      - ["t12_delete_keep", "/api/keep", "DELETE"]
+      - ["t12_delete_lessons", "/api/lessons", "DELETE"]
+      - ["t12_delete_limits", "/api/limits", "DELETE"]
+      - ["t12_delete_lock_tests", "/api/lock-tests", "DELETE"]
+      - ["t12_delete_message", "/api/message", "DELETE"]
+      - ["t12_delete_metrics", "/api/metrics", "DELETE"]
+      - ["t12_delete_override", "/api/override", "DELETE"]
+      - ["t12_delete_packs", "/api/packs", "DELETE"]
+      - ["t12_delete_pair", "/api/pair", "DELETE"]
+      - ["t12_delete_plan_review", "/api/plan-review", "DELETE"]
+      - ["t12_delete_prefs", "/api/prefs", "DELETE"]
+      - ["t12_delete_project", "/api/project", "DELETE"]
+      - ["t12_delete_project_commands", "/api/project-commands", "DELETE"]
+      - ["t12_delete_project_facts", "/api/project-facts", "DELETE"]
+      - ["t12_delete_projects", "/api/projects", "DELETE"]
+      - ["t12_delete_pull_request", "/api/pull-request", "DELETE"]
+      - ["t12_delete_push", "/api/push", "DELETE"]
+      - ["t12_delete_push_answer", "/api/push-answer", "DELETE"]
+      - ["t12_delete_push_record", "/api/push-record", "DELETE"]
+      - ["t12_delete_recap", "/api/recap", "DELETE"]
+      - ["t12_delete_release", "/api/release", "DELETE"]
+      - ["t12_delete_remove_repo", "/api/remove-repo", "DELETE"]
+      - ["t12_delete_remove_session", "/api/remove-session", "DELETE"]
+      - ["t12_delete_remove_token", "/api/remove-token", "DELETE"]
+      - ["t12_delete_replay", "/api/replay", "DELETE"]
+      - ["t12_delete_review", "/api/review", "DELETE"]
+      - ["t12_delete_review_depth", "/api/review-depth", "DELETE"]
+      - ["t12_delete_review_models", "/api/review-models", "DELETE"]
+      - ["t12_delete_review_reply", "/api/review-reply", "DELETE"]
+      - ["t12_delete_reviewer_agents", "/api/reviewer-agents", "DELETE"]
+      - ["t12_delete_save_token", "/api/save-token", "DELETE"]
+      - ["t12_delete_saved_prompts", "/api/saved-prompts", "DELETE"]
+      - ["t12_delete_screenshot", "/api/screenshot", "DELETE"]
+      - ["t12_delete_screenshots", "/api/screenshots", "DELETE"]
+      - ["t12_delete_send_findings", "/api/send-findings", "DELETE"]
+      - ["t12_delete_session", "/api/session", "DELETE"]
+      - ["t12_delete_session_work", "/api/session-work", "DELETE"]
+      - ["t12_delete_sign_in_expect", "/api/sign-in-expect", "DELETE"]
+      - ["t12_delete_size", "/api/size", "DELETE"]
+      - ["t12_delete_split", "/api/split", "DELETE"]
+      - ["t12_delete_start_points", "/api/start-points", "DELETE"]
+      - ["t12_delete_stop_session", "/api/stop-session", "DELETE"]
+      - ["t12_delete_team", "/api/team", "DELETE"]
+      - ["t12_delete_test_list", "/api/test-list", "DELETE"]
+      - ["t12_delete_update", "/api/update", "DELETE"]
+      - ["t12_delete_upload", "/api/upload", "DELETE"]
+      - ["t12_delete_verify", "/api/verify", "DELETE"]
+      - ["t12_delete_viewed", "/api/viewed", "DELETE"]
+      - ["t12_delete_wake", "/api/wake", "DELETE"]
+      - ["t12_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
+      - ["t12_delete_workspace", "/api/workspace", "DELETE"]
+      - ["t12_patch_add_repo", "/api/add-repo", "PATCH"]
+      - ["t12_patch_agent_report", "/api/agent-report", "PATCH"]
+      - ["t12_patch_allow_commit", "/api/allow-commit", "PATCH"]
+      - ["t12_patch_allow_file", "/api/allow-file", "PATCH"]
+      - ["t12_patch_allow_rules", "/api/allow-rules", "PATCH"]
+      - ["t12_patch_answer", "/api/answer", "PATCH"]
+      - ["t12_patch_approve_plan", "/api/approve-plan", "PATCH"]
+      - ["t12_patch_approve_requirements", "/api/approve-requirements", "PATCH"]
+      - ["t12_patch_audit", "/api/audit", "PATCH"]
+      - ["t12_patch_backup", "/api/backup", "PATCH"]
+      - ["t12_patch_bring_main", "/api/bring-main", "PATCH"]
+      - ["t12_patch_changes", "/api/changes", "PATCH"]
+      - ["t12_patch_claude_login", "/api/claude-login", "PATCH"]
+      - ["t12_patch_claude_trust", "/api/claude-trust", "PATCH"]
+      - ["t12_patch_clone_again", "/api/clone-again", "PATCH"]
+      - ["t12_patch_commit_identity", "/api/commit-identity", "PATCH"]
+      - ["t12_patch_commit_rewrite", "/api/commit-rewrite", "PATCH"]
+      - ["t12_patch_control", "/api/control", "PATCH"]
+      - ["t12_patch_decision_log", "/api/decision-log", "PATCH"]
+      - ["t12_patch_diagnostics", "/api/diagnostics", "PATCH"]
+      - ["t12_patch_dispatch", "/api/dispatch", "PATCH"]
+      - ["t12_patch_docs", "/api/docs", "PATCH"]
+      - ["t12_patch_egress", "/api/egress", "PATCH"]
+      - ["t12_patch_exceptions", "/api/exceptions", "PATCH"]
+      - ["t12_patch_explain", "/api/explain", "PATCH"]
+      - ["t12_patch_export", "/api/export", "PATCH"]
+      - ["t12_patch_file", "/api/file", "PATCH"]
+      - ["t12_patch_file_check", "/api/file-check", "PATCH"]
+      - ["t12_patch_file_match", "/api/file-match", "PATCH"]
+      - ["t12_patch_files", "/api/files", "PATCH"]
+      - ["t12_patch_finding_issues", "/api/finding-issues", "PATCH"]
+      - ["t12_patch_flag_remove", "/api/flag-remove", "PATCH"]
+      - ["t12_patch_forge_answer", "/api/forge-answer", "PATCH"]
+      - ["t12_patch_gate", "/api/gate", "PATCH"]
+      - ["t12_patch_halt", "/api/halt", "PATCH"]
+      - ["t12_patch_handoff", "/api/handoff", "PATCH"]
+      - ["t12_patch_import", "/api/import", "PATCH"]
+      - ["t12_patch_interrupt", "/api/interrupt", "PATCH"]
+      - ["t12_patch_issues", "/api/issues", "PATCH"]
+      - ["t12_patch_keep", "/api/keep", "PATCH"]
+      - ["t12_patch_lessons", "/api/lessons", "PATCH"]
+      - ["t12_patch_limits", "/api/limits", "PATCH"]
+      - ["t12_patch_lock_tests", "/api/lock-tests", "PATCH"]
+      - ["t12_patch_message", "/api/message", "PATCH"]
+      - ["t12_patch_metrics", "/api/metrics", "PATCH"]
+      - ["t12_patch_override", "/api/override", "PATCH"]
+      - ["t12_patch_packs", "/api/packs", "PATCH"]
+      - ["t12_patch_pair", "/api/pair", "PATCH"]
+      - ["t12_patch_plan_review", "/api/plan-review", "PATCH"]
+      - ["t12_patch_prefs", "/api/prefs", "PATCH"]
+      - ["t12_patch_project", "/api/project", "PATCH"]
+      - ["t12_patch_project_commands", "/api/project-commands", "PATCH"]
+      - ["t12_patch_project_facts", "/api/project-facts", "PATCH"]
+      - ["t12_patch_projects", "/api/projects", "PATCH"]
+      - ["t12_patch_pull_request", "/api/pull-request", "PATCH"]
+      - ["t12_patch_push", "/api/push", "PATCH"]
+      - ["t12_patch_push_answer", "/api/push-answer", "PATCH"]
+      - ["t12_patch_push_record", "/api/push-record", "PATCH"]
+      - ["t12_patch_recap", "/api/recap", "PATCH"]
+      - ["t12_patch_release", "/api/release", "PATCH"]
+      - ["t12_patch_remove_repo", "/api/remove-repo", "PATCH"]
+      - ["t12_patch_remove_session", "/api/remove-session", "PATCH"]
+      - ["t12_patch_remove_token", "/api/remove-token", "PATCH"]
+      - ["t12_patch_replay", "/api/replay", "PATCH"]
+      - ["t12_patch_review", "/api/review", "PATCH"]
+      - ["t12_patch_review_depth", "/api/review-depth", "PATCH"]
+      - ["t12_patch_review_models", "/api/review-models", "PATCH"]
+      - ["t12_patch_review_reply", "/api/review-reply", "PATCH"]
+      - ["t12_patch_reviewer_agents", "/api/reviewer-agents", "PATCH"]
+      - ["t12_patch_save_token", "/api/save-token", "PATCH"]
+      - ["t12_patch_saved_prompts", "/api/saved-prompts", "PATCH"]
+      - ["t12_patch_screenshot", "/api/screenshot", "PATCH"]
+      - ["t12_patch_screenshots", "/api/screenshots", "PATCH"]
+      - ["t12_patch_send_findings", "/api/send-findings", "PATCH"]
+      - ["t12_patch_session", "/api/session", "PATCH"]
+      - ["t12_patch_session_work", "/api/session-work", "PATCH"]
+      - ["t12_patch_sign_in_expect", "/api/sign-in-expect", "PATCH"]
+      - ["t12_patch_size", "/api/size", "PATCH"]
+      - ["t12_patch_split", "/api/split", "PATCH"]
+      - ["t12_patch_start_points", "/api/start-points", "PATCH"]
+      - ["t12_patch_stop_session", "/api/stop-session", "PATCH"]
+      - ["t12_patch_team", "/api/team", "PATCH"]
+      - ["t12_patch_test_list", "/api/test-list", "PATCH"]
+      - ["t12_patch_update", "/api/update", "PATCH"]
+      - ["t12_patch_upload", "/api/upload", "PATCH"]
+      - ["t12_patch_verify", "/api/verify", "PATCH"]
+      - ["t12_patch_viewed", "/api/viewed", "PATCH"]
+      - ["t12_patch_wake", "/api/wake", "PATCH"]
+      - ["t12_patch_walkthrough_check", "/api/walkthrough-check", "PATCH"]
+      - ["t12_patch_workspace", "/api/workspace", "PATCH"]
+
+  - id: SEC-T13
+    name: "A POST route refuses a same-site fetch, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Sec-Fetch-Site: same-site }
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: site }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 403 before the route's handler runs, since Sec-Fetch-Site is same-site, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t13_remove_repo, t13_remove_session, t13_packs], reason: "the remove-repo, remove-session and packs rows send only a field no route takes, which names no repository, session or pack, and every row is refused with 403 before the route's handler runs, since Sec-Fetch-Site is same-site, so nothing can be removed" } }
+    covers: same_site
+    columns: ["case", "route"]
+    rows:
+      - ["t13_add_repo", "/api/add-repo"]
+      - ["t13_allow_commit", "/api/allow-commit"]
+      - ["t13_allow_file", "/api/allow-file"]
+      - ["t13_allow_rules", "/api/allow-rules"]
+      - ["t13_answer", "/api/answer"]
+      - ["t13_approve_plan", "/api/approve-plan"]
+      - ["t13_approve_requirements", "/api/approve-requirements"]
+      - ["t13_bring_main", "/api/bring-main"]
+      - ["t13_claude_login", "/api/claude-login"]
+      - ["t13_claude_trust", "/api/claude-trust"]
+      - ["t13_clone_again", "/api/clone-again"]
+      - ["t13_commit_identity", "/api/commit-identity"]
+      - ["t13_commit_rewrite", "/api/commit-rewrite"]
+      - ["t13_control", "/api/control"]
+      - ["t13_decision_log", "/api/decision-log"]
+      - ["t13_diagnostics", "/api/diagnostics"]
+      - ["t13_dispatch", "/api/dispatch"]
+      - ["t13_egress", "/api/egress"]
+      - ["t13_exceptions", "/api/exceptions"]
+      - ["t13_explain", "/api/explain"]
+      - ["t13_export", "/api/export"]
+      - ["t13_file_match", "/api/file-match"]
+      - ["t13_files", "/api/files"]
+      - ["t13_finding_issues", "/api/finding-issues"]
+      - ["t13_flag_remove", "/api/flag-remove"]
+      - ["t13_forge_answer", "/api/forge-answer"]
+      - ["t13_halt", "/api/halt"]
+      - ["t13_handoff", "/api/handoff"]
+      - ["t13_import", "/api/import"]
+      - ["t13_interrupt", "/api/interrupt"]
+      - ["t13_issues", "/api/issues"]
+      - ["t13_keep", "/api/keep"]
+      - ["t13_lessons", "/api/lessons"]
+      - ["t13_limits", "/api/limits"]
+      - ["t13_lock_tests", "/api/lock-tests"]
+      - ["t13_message", "/api/message"]
+      - ["t13_override", "/api/override"]
+      - ["t13_packs", "/api/packs"]
+      - ["t13_pair", "/api/pair"]
+      - ["t13_plan_review", "/api/plan-review"]
+      - ["t13_prefs", "/api/prefs"]
+      - ["t13_project", "/api/project"]
+      - ["t13_project_commands", "/api/project-commands"]
+      - ["t13_project_facts", "/api/project-facts"]
+      - ["t13_pull_request", "/api/pull-request"]
+      - ["t13_push", "/api/push"]
+      - ["t13_push_answer", "/api/push-answer"]
+      - ["t13_push_record", "/api/push-record"]
+      - ["t13_recap", "/api/recap"]
+      - ["t13_release", "/api/release"]
+      - ["t13_remove_repo", "/api/remove-repo"]
+      - ["t13_remove_session", "/api/remove-session"]
+      - ["t13_remove_token", "/api/remove-token"]
+      - ["t13_replay", "/api/replay"]
+      - ["t13_review", "/api/review"]
+      - ["t13_review_depth", "/api/review-depth"]
+      - ["t13_review_models", "/api/review-models"]
+      - ["t13_reviewer_agents", "/api/reviewer-agents"]
+      - ["t13_save_token", "/api/save-token"]
+      - ["t13_saved_prompts", "/api/saved-prompts"]
+      - ["t13_send_findings", "/api/send-findings"]
+      - ["t13_session", "/api/session"]
+      - ["t13_session_work", "/api/session-work"]
+      - ["t13_sign_in_expect", "/api/sign-in-expect"]
+      - ["t13_size", "/api/size"]
+      - ["t13_split", "/api/split"]
+      - ["t13_start_points", "/api/start-points"]
+      - ["t13_stop_session", "/api/stop-session"]
+      - ["t13_team", "/api/team"]
+      - ["t13_test_list", "/api/test-list"]
+      - ["t13_update", "/api/update"]
+      - ["t13_upload", "/api/upload"]
+      - ["t13_verify", "/api/verify"]
+      - ["t13_viewed", "/api/viewed"]
+      - ["t13_wake", "/api/wake"]
+      - ["t13_walkthrough_check", "/api/walkthrough-check"]
+      - ["t13_workspace", "/api/workspace"]
+
+  - id: SEC-T13R
+    name: "A POST route refuses a same-site fetch, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}", Sec-Fetch-Site: same-site }
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: site }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    covers: same_site
+    columns: ["case", "route"]
+    rows:
+      - ["t13r_agent_report", "/api/agent-report"]
+      - ["t13r_audit", "/api/audit"]
+      - ["t13r_backup", "/api/backup"]
+      - ["t13r_changes", "/api/changes"]
+      - ["t13r_docs", "/api/docs"]
+      - ["t13r_file", "/api/file"]
+      - ["t13r_file_check", "/api/file-check"]
+      - ["t13r_gate", "/api/gate"]
+      - ["t13r_metrics", "/api/metrics"]
+      - ["t13r_projects", "/api/projects"]
+      - ["t13r_review_reply", "/api/review-reply"]
+      - ["t13r_screenshot", "/api/screenshot"]
+      - ["t13r_screenshots", "/api/screenshots"]
+
+  - id: SEC-T14
+    name: "A POST route refuses an Origin that only starts with the page's origin, even with the page key"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}${row.suffix}" }
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    no_state_check: "refused with 403 before the route's handler runs, since the Origin isn't the page's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { EXE-09: { rows: [t14_remove_repo_host, t14_remove_repo_digit], reason: "each remove-repo row sends only a field the route doesn't take, which names no repository, and is refused with 403 before the route's handler runs, since its Origin only starts with the page's and so isn't the page's, so nothing can be removed; both rows are named, since a waived row guards no later row on its route" } }
+    columns: ["case", "route", "suffix"]
+    rows:
+      - ["t14_add_repo_host", "/api/add-repo", ".proctor.invalid"]
+      - ["t14_add_repo_digit", "/api/add-repo", "0"]
+      - ["t14_remove_repo_host", "/api/remove-repo", ".proctor.invalid"]
+      - ["t14_remove_repo_digit", "/api/remove-repo", "0"]
+      - ["t14_save_token_host", "/api/save-token", ".proctor.invalid"]
+      - ["t14_save_token_digit", "/api/save-token", "0"]
+
+  - id: SEC-T14R
+    name: "A POST route refuses an Origin that only starts with the page's origin, even with the page key (routes that only read)"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}${row.suffix}" }
+      body: { proctorUnknownField: true }
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.referrer-policy": ["no-referrer"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: origin }
+      present: ["$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    columns: ["case", "route", "suffix"]
+    rows:
+      - ["t14r_projects_host", "/api/projects", ".proctor.invalid"]
+      - ["t14r_projects_digit", "/api/projects", "0"]
+      - ["t14r_gate_host", "/api/gate", ".proctor.invalid"]
+      - ["t14r_gate_digit", "/api/gate", "0"]
+
+scenarios:
+  - id: SEC-001
+    name: "A POST to a path under /api/ that names no route is refused, even with the page key"
+    steps:
+      - id: unknown-route
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/proctor-unknown"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+
+  - id: SEC-002
+    name: "A path outside /api/ that isn't the page or its files is refused"
+    steps:
+      - id: unknown-path
+        do: http.request
+        identity: page
+        with:
+          method: GET
+          path: "/proctor-unknown"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+
+  - id: SEC-003
+    name: "A CORS preflight from another site gets no grant"
+    steps:
+      - id: preflight
+        do: http.request
+        identity: anonymous
+        with:
+          method: OPTIONS
+          path: "/api/projects"
+          headers: { Origin: "https://proctor.invalid", Access-Control-Request-Method: POST, Access-Control-Request-Headers: "authorization, content-type" }
+        expect:
+          equal:
+            "$.status": 403
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: origin }
+          absent: ["$.headers.access-control-allow-origin", "$.headers.access-control-allow-methods", "$.headers.access-control-allow-headers"]
+
+  - id: SEC-004
+    name: "A same-origin preflight gets no grant either, since the page needs none and answers only POST"
+    steps:
+      - id: preflight-same-origin
+        do: http.request
+        identity: anonymous
+        with:
+          method: OPTIONS
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}", Access-Control-Request-Method: POST }
+        expect:
+          equal:
+            "$.status": 405
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: method }
+          absent: ["$.headers.access-control-allow-origin", "$.headers.access-control-allow-methods"]
+
+  - id: SEC-005
+    name: "Each answer carries one X-SF-Request of 16 lowercase hex digits, a new one on each request"
+    steps:
+      - id: first-read
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        save: { first_request: "$.headers.x-sf-request[0]" }
+      - id: second-read
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+          differs: { "$.headers.x-sf-request[0]": "${first_request}" }
+
+  - id: SEC-006
+    name: "The removed Disconnect route is refused as a path that names no route, even with the page key; its body holds only a field no route takes, so a Disconnect that came back would refuse it with 400 fields before ending the run's key"
+    steps:
+      - id: disconnect-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/disconnect"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+  - id: SEC-007
+    name: "The removed agent-models and hand-over routes are refused as paths that name no route, even with the page key, and Network access's removed agents op is refused as an op the egress route doesn't take; each body holds only what the old route took or a field no route takes, so a route that came back would answer otherwise"
+    steps:
+      - id: agent-models-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/agent-models"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, agent: claude }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+      - id: handover-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/handover"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"
+      - id: egress-agents-op-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: agents, agents: [claude] }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: op }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the egress route refuses an op it doesn't take before it reads or changes the allowlist, so there is no change to read back"

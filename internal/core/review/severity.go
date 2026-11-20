@@ -13,11 +13,9 @@ var (
 )
 
 const (
-	countCritical = iota + 1
-	countHigh
-	countMedium
-	countLow
-	countBlocking
+	countCritical = 1
+	countHigh     = 2
+	countBlocking = 5
 )
 
 func SevereFinding(reply string) bool {
@@ -31,10 +29,6 @@ func SevereFinding(reply string) bool {
 
 func SevereCount(reply string) bool {
 	return counted(reply, countCritical, countHigh, countBlocking)
-}
-
-func AnyCount(reply string) bool {
-	return counted(reply, countCritical, countHigh, countMedium, countLow, countBlocking)
 }
 
 func counted(reply string, groups ...int) bool {

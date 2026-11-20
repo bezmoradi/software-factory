@@ -5,7 +5,7 @@ import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
-import { agentWord, attachCommand, baseName, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
+import { agentWord, attachCommand, baseName, DOUBLED_NOTE, isClaude, label, logsCommand, modeLabel, plural, setAgentNames, setCompose, shortSha } from './lib/format.ts'
 import { stalled } from './lib/stall.ts'
 import { paintPath, type Step, type Turn } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
@@ -24,13 +24,16 @@ import './components/projects.ts'
 import './components/reviews.ts'
 import './components/saved-prompts.ts'
 import './components/reviewer-agents.ts'
-import './components/reviewer-checks.ts'
+import './components/packs.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
+import { typeChangeOf } from './components/push-facts.ts'
+import { reviewCoverage } from './components/push-coverage.ts'
 import './components/session-facts.ts'
 import './components/session-work.ts'
 import './components/screenshots.ts'
 import './components/keep.ts'
+import './components/verify.ts'
 import './components/review-models.ts'
 import './components/forge-panel.ts'
 import { pullFollowOf } from './components/pull-follow.ts'
@@ -47,7 +50,7 @@ import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
 import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
 import { saveSessionCaps } from './components/caps.ts'
-import { agentName, otherAgents, setBranchStarters } from './components/lineage.ts'
+import { agentName, setBranchStarters } from './components/lineage.ts'
 import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
@@ -57,14 +60,14 @@ import { sendState } from './api.ts'
 import { armed, changesSession, controllable, current, inTurn, pickingSize, reviewsActive, say, schedulePaint, sessions, setPainter, sleeping, startedOf, state, toast, waitingOf, working, type AuditEntry, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
-import { ensure, requestReplay, SIGN_IN_HINT, showGone, signOut, startStream, updateSessions } from './stream.ts'
+import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
 import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
 
 setPainter(paint)
 
 const LIFECYCLE: Record<string, string> = { 'session-start': 'Session started', 'session-wake': 'Session woken', 'session-stop': 'Session stopped', 'session-fork': 'Session forked', 'session-delete': 'Session deleted' }
-const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', 'hand-over': 'handed over from session', pinned: 'from a pinned commit' }
+const START_FROM: Record<string, string> = { main: 'from main', branch: 'from branch', 'pull-request': 'from pull request #', fork: 'from a commit of session', pinned: 'from a pinned commit' }
 
 function lifecycleLine(e: AuditEntry): string {
   const what = Object.hasOwn(LIFECYCLE, e.kind) ? LIFECYCLE[e.kind] : visible(e.kind)
@@ -74,15 +77,15 @@ function lifecycleLine(e: AuditEntry): string {
 }
 
 const HISTORY: Record<string, string> = { pushed: 'Pushed', 'up-to-date': 'Already on the remote', held: 'Held', denied: 'Denied', refused: 'Refused', unclear: 'Push outcome unclear' }
-const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'reviewer-agent': 'Reviewer agent file' }
+const EXCEPTION: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', issue: 'Issue', 'pull-request': 'Pull request', review: 'Review', findings: 'Blocking findings for the agent', 'pr-comment': 'Pull request comment', 'approve-startup': 'Start-up files approved', 'approve-requirements': 'Requirements approved', 'approve-plan': 'Plan approved', 'approve-team': 'Team approved', 'forget-team': 'Team approval forgotten', 'lock-tests': 'Tests locked', 'unlock-tests': 'Tests unlocked', 'reviewer-agent': 'Reviewer agent file', pack: 'Reviewer pack', 'after-review': 'After review', 'home-settings': 'Changed agent settings' }
 EXCEPTION['permission-answer'] = 'Permission card answered'
 EXCEPTION['pr-follow'] = 'Pull request followed'
 EXCEPTION['pr-ready'] = 'Pull request marked ready for review'
 EXCEPTION.assign = 'Assigned to the token\'s user'
 EXCEPTION.away = 'Away mode'
-const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent' }
+const OUTCOME: Record<string, string> = { unclear: 'outcome unclear', abandoned: 'abandoned', expired: 'expired', commented: 'posted', sent: 'sent', withheld: 'withheld', 'not-sent': 'not sent', 'ci-failure': 'a CI failure', 'review-comment': 'a review comment' }
 const HIDDEN_RESULTS = ['sending', 'posting']
-const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'tasks-held': 'Tasks was started before its step', 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
+const FRICTION: Record<string, string> = { 'edit-held': 'Claude tried to edit before the plan was approved', 'define-held': 'Define was started with uncommitted files', 'plan-held': 'Plan was started before the requirements were approved', 'reviewer-early': 'a reviewer was started before Implement was done', 'reviewer-fence': 'a reviewer tried to change the repository', 'reviewer-capped': 'a reviewer was started past the round limit', 'reviewer-workflow': 'a reviewer was started from a workflow', 'reviewer-resumed': 'Claude tried to continue a finished reviewer', 'push-held': 'a push was held for what it was missing', 'push-refused': 'the agent ran a push-shaped command, which the gate turned away', 'remote-held': 'a remote tool was held for you', 'protected-write': 'a write by Claude\'s file tools was refused as protected', 'reviewer-provider': "a reviewer came from a provider the gate doesn't trust", 'implement-held': 'Implement was started before the plan was approved', 'cloud-refused': "the agent ran a command that hands work to the vendor's cloud, which was refused" }
 
 
 const COMMIT_ASK = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore. Each commit message says what changed and why."
@@ -94,6 +97,7 @@ const RESET_NOTE = 'The session restarted, so what came before this point is sho
 
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
 const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
+const verifyPanel = byId<HTMLElementTagNameMap['sf-verify']>('verify')
 const reviewModels = el('sf-review-models')
 reviewModels.hidden = true
 byId('reviewer-agents').after(reviewModels)
@@ -137,6 +141,7 @@ function syncChecks(list: Reviewer[]): { check: Check; node: HTMLElementTagNameM
 
 function stageOff(s: Session): string {
   if (!state.connected) return 'Step buttons are available once the page reconnects to the engine.'
+  if (s.info.doubled) return DOUBLED_NOTE
   if (!controllable(s)) return 'Step buttons are off: this session is read-only on this page.'
   return inTurn(s) ? `Step buttons are available when ${agentWord(s.info.agent)} finishes.` : ''
 }
@@ -161,6 +166,8 @@ function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'keep') return void keepPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
+  if ((ev as { type?: unknown }).type === 'verify' && typeof (ev as { repo?: unknown }).repo === 'string') return void byId<HTMLElementTagNameMap['sf-projects']>('projects').verifiedOnMain(String((ev as { repo?: unknown }).repo))
+  if ((ev as { type?: unknown }).type === 'verify') return void verifyPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
@@ -205,7 +212,7 @@ function onEvent(ev: StreamEvent) {
   }
   if (ev.type === 'versions') {
     const known = sessions.get(ev.sid)
-    toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with new versions.`, description: visible(ev.text), tone: 'info', timeout: 0 })
+    toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with a note on what it runs.`, description: visible(ev.text), tone: 'info', timeout: 0 })
     return
   }
   if (ev.type === 'worktree-aside') {
@@ -262,8 +269,8 @@ function saveCheckpoints() {
 
 function paint() {
   const s = current()
-  setHaltSession(s ? { sid: s.sid, name: label(s.info) } : null)
-  setLimitsSession(s?.info.verified ? s.sid : '')
+  setHaltSession(s && !s.info.doubled ? { sid: s.sid, name: label(s.info), own: !!s.info.verified } : null)
+  setLimitsSession(s?.info.verified && !s.info.doubled ? s.sid : '')
   if (current.key.startsWith('s/')) keepTab(current.key)
   const list = [...sessions.values()]
   byId<HTMLElementTagNameMap['sf-overview']>('overview').supervisor = state.supervisor
@@ -292,7 +299,7 @@ function paint() {
   void loadProjects()
   byId('live-view').hidden = !s
   byId('composer').hidden = !s
-  composer.paint(s, !!s && waitingOf(s).length > 0)
+  composer.paint(s, !!s && waitingOf(s).length > 0, s?.info.doubled ? DOUBLED_NOTE : '')
   const picking = !!s && pickingSize(s)
   byId('size-pick').hidden = !picking
   if (picking) paintTeamPicks(s)
@@ -345,11 +352,11 @@ function paint() {
     if (inTurn(s)) for (const k of [...stepping.keys()]) if (k.startsWith(`${s.sid}:`)) stepping.delete(k)
     for (const b of byId('path').querySelectorAll<HTMLButtonElement>('button.stage')) {
       const stage = b.closest<HTMLElement>('li[data-stage]')?.dataset.stage
-      const step = b.id === 'tasks-start' ? 'tasks' : stage === 'define' || stage === 'plan' ? stage : ''
+      const step = stage === 'define' || stage === 'plan' ? stage : ''
       const hold = step && s.gate?.holds ? (s.gate.holds[step] ?? '') : ''
       b.setAttribute('aria-disabled', String(!!off || !!hold || b.getAttribute('aria-busy') === 'true'))
       if (off) b.setAttribute('aria-describedby', 'path-busy')
-      else if (hold) b.setAttribute('aria-describedby', `${step === 'tasks' ? 'plan' : step}-detail`)
+      else if (hold) b.setAttribute('aria-describedby', `${step}-detail`)
       else b.removeAttribute('aria-describedby')
     }
     if (byId('path-busy').textContent !== off) byId('path-busy').textContent = off
@@ -359,12 +366,13 @@ function paint() {
     paintSide(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = reviewsOf(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').explain = { run: s.info.review?.explain ?? null, asking: explainAsking.has(s.sid) }
-    byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
+    byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = withCoverage(pushPanelOf(s), s)
+    verifyPanel.view = state.connected && s.info.verified ? { sid: s.sid, disabled: '' } : null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
-    sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s) } : null
+    sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s), reason: s.info.doubled ? DOUBLED_NOTE : '' } : null
     byId<HTMLElementTagNameMap['sf-screenshots']>('screenshots').view = state.connected ? { sid: s.sid, busy: inTurn(s) } : null
-    keepPanel.view = state.connected ? { sid: s.sid, disabled: inTurn(s) ? `Restore works once ${agentWord(s.info.agent)} finishes its turn.` : '' } : null
+    keepPanel.view = state.connected ? { sid: s.sid, disabled: s.info.doubled ? DOUBLED_NOTE : inTurn(s) ? `Restore works once ${agentWord(s.info.agent)} finishes its turn.` : '' } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
     byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
@@ -380,6 +388,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-rules']>('rules').view = null
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = null
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = null
+    verifyPanel.view = null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = null
     sessionWork.view = null
@@ -395,10 +404,8 @@ function paint() {
     byId('working').hidden = true
     paintSide(null)
   }
-  byId('account-item').hidden = !state.connected
-  if (!state.connected && byId('account').matches(':popover-open')) byId('account').hidePopover()
   watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0, busy: x.info.busy === true, seq: x.info.lastSeq ?? 0, reviewRunning: x.info.review?.running === true, review: x.info.review ? `${x.info.review.commit}:${(x.info.review.roles ?? []).map(r => r.state).join(',')}` : '' })))
-  byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden)
+  byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden, !!s?.info.doubled)
   document.title = needs ? 'Needs you · Software Factory' : 'Software Factory'
   saveTabs()
 }
@@ -420,6 +427,7 @@ function paintChangesTab() {
     return
   }
   view.forkable = forkable(s)
+  view.readOnly = s.info.doubled ? DOUBLED_NOTE : ''
   view.changes = s.changes
   void loadChanges(s)
 }
@@ -435,6 +443,7 @@ function paintControl(s: Session) {
     text = `${claims.length ? `Claimed by ${claims.length} connections: ${claims.join(', ')}. ` : 'Two connections claim to be this session. '}This page sends it nothing while they disagree. One of them may be a program pretending to be it.`
     action = 'End both connections'
   } else if (!i.verified) text = 'Read-only: this engine didn’t start this session, so the page only shows what it reports.'
+  else if (i.doubled) text = DOUBLED_NOTE
   else if (!i.running && i.state === 'done') {
     text = 'This session is done: its agent finished its work and ended by itself. A message wakes it again.'
     if (sleeping(s) && !i.controlled) action = 'Wake it'
@@ -464,7 +473,7 @@ function paintControl(s: Session) {
   byId('menu-wake').hidden = !(sleeping(s) && i.controlled)
   paintBranchMenu(s)
   byId('session-more').hidden = !id && action !== 'Make it read-only'
-  modelMenu.hidden = !(i.agent === 'claude' || i.agent === 'codex') || !i.controlled
+  modelMenu.hidden = i.agent !== 'claude' || !i.controlled || !!i.doubled
   if (!modelMenu.hidden) byId('session-more').hidden = false
   if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
   byId('foot-text').textContent = notice ? '' : text
@@ -572,9 +581,10 @@ function reviewsOf(s: Session): ReviewsView | null {
   const planned = gate && gate.head && review?.commit !== gate.head ? gate.reviewers.filter(r => r.state !== 'not-installed').map(r => ({ name: r.name, agent: r.type, why: r.why ?? '', summary: typeof r.summary === 'string' ? r.summary : '' })) : []
   const unpicked = gate?.chosen === false
   const disabled = !state.connected ? 'Reviews start once the page is connected again.'
+    : i.doubled ? DOUBLED_NOTE
     : unpicked ? 'Pick a work type first: it decides which reviews run.'
     : startedOf(s) === false ? 'Nothing to review or push yet: this session has no commits.' : ''
-  return { sid: s.sid, review, disabled, asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
+  return { sid: s.sid, review, disabled, readOnly: i.doubled ? DOUBLED_NOTE : '', asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
     linked: findingLinks(s.sid, review), catalog: gate?.catalog ? { state: gate.catalog, why: typeof gate.catalogWhy === 'string' ? gate.catalogWhy : '' } : undefined }
 }
 
@@ -609,13 +619,20 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const review = i.review
   const ran = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles : []
   const since = (verdict: string) => push ? push.missing.filter(m => ran.some(r => r.state === verdict && m.startsWith(`a review by ${r.agent} `))) : []
-  return { passedSince: since('pass'), blockedSince: since('block'), push, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [] }
+  return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: i.doubled ? DOUBLED_NOTE : state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [], typeChange: gate && push && gate.head === push.commit ? typeChangeOf(gate.typeChange) : null }
+}
+
+function withCoverage(view: PushPanelView | null, s: Session): PushPanelView | null {
+  const commit = view?.push?.commit ?? ''
+  if (!view || !commit) return view
+  const coverage = reviewCoverage(s.info.review, commit)
+  return coverage.length ? { ...view, coverage } : view
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {
   const i = s.info
   if (!i.verified || !Array.isArray(i.forge) || !i.forge.length) return null
-  return { forge: i.forge, disabled: state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
+  return { forge: i.forge, disabled: i.doubled ? DOUBLED_NOTE : state.connected ? '' : 'Answers go through once the page is connected again.', answering: forgeAsking.has(s.sid) }
 }
 
 function paintAgents(s: Session) {
@@ -642,9 +659,10 @@ function paintChecks(s: Session) {
     node.status = { gate: r, sid: s.sid }
   }
   const turn = turnOf(s)
+  paintFix(gate)
   paintPath(byId('path'), gate, started, byId('path-card'), reviewsActive(s) ? 'verify' : state.connected && working(s) && !waitingOf(s).length ? turn.running || s.step || 'work' : '', !!stageOff(s), turn, pushedHead(s))
   byId('path-section').hidden = !s.gate || pickingSize(s)
-  for (const b of byId('path').querySelectorAll<HTMLButtonElement>('li[data-stage="deliver"] button.stage')) b.hidden = gate?.adapter !== 'knackpack'
+  for (const b of byId('path').querySelectorAll<HTMLButtonElement>('li[data-stage="deliver"] button.stage')) b.hidden = gate?.adapter !== 'knackpack' || ('incident' in b.dataset && gate.effective !== 'incident')
   const size = byId<HTMLSelectElement>('size')
   const types = gate?.types ?? []
   const typesKey = JSON.stringify(types.map(t => [t.id, t.name]))
@@ -660,7 +678,7 @@ function paintChecks(s: Session) {
   }
   const typeNow = gate?.workType ?? gate?.size
   if (typeNow && !focused && [...size.options].some(o => o.value === typeNow)) size.value = typeNow
-  paintAdapter(gate, turn)
+  paintAdapter(gate)
   paintTeam(s, gate)
   size.disabled = disabled || !gate
   byId('size-note').textContent = gate?.sizeNote ?? ''
@@ -669,15 +687,17 @@ function paintChecks(s: Session) {
   const from = (d: WorkflowDoc) => gate?.committed && !d.reported ? ` Read from commit ${shortSha(d.commit || gate.head)} by the engine.` : ''
   const plan = doc && gate?.effective === 'feature' ? doc : null
   byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: `${plan.clipped ? 'The plan is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(plan)}`.trim(), path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '', commit: plan.commit ?? '', approvedAt: plan.approvedAt ?? '', reported: !!plan.reported, onBase: !!plan.onBase }
+  const cause = doc && gate?.effective === 'incident' ? doc : null
+  byId<HTMLElementTagNameMap['sf-approval']>('cause-approval').view = cause && { kind: 'root-cause', note: `${cause.clipped ? 'The root cause is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(cause)}`.trim(), path: cause.path, text: cause.text, hash: cause.hash, approved: !!cause.approved, changed: !!cause.changed, draft: turn.busy && !cause.approved, disabled: disabled || waiting(s.asked.plan, cause.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === cause.hash ? s.refused.plan.text : '', commit: cause.commit ?? '', approvedAt: cause.approvedAt ?? '', reported: !!cause.reported, onBase: !!cause.onBase }
   byId<HTMLElementTagNameMap['sf-approval']>('approval').planReview = plan ? { run: s.info.review?.planReview ?? null, asking: planAsking.has(s.sid) } : null
   const reqs = gate?.size === 'feature' && gate.requirements?.hash ? gate.requirements : null
   byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: from(reqs).trim(), path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase }
   paintExceptions(s)
   const project = projectFor(s)
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 3, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
+  byId<HTMLElementTagNameMap['sf-packs']>('packs').view = gate && project?.path ? { project: project.path, disabled } : null
   byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
   reviewModels.view = gate && project?.path ? { project: project.path, disabled } : null
-  byId<HTMLElementTagNameMap['sf-reviewer-checks']>('reviewer-checks').view = gate ? { disabled, review: `${s.info.review?.commit ?? ''}:${s.info.review?.running ? 'running' : 'done'}` } : null
 }
 
 function projectFor(s: Session): Project | null {
@@ -705,23 +725,32 @@ async function loadGate(s: Session, force = false) {
 let teamShown: TeamView | null = null
 let teamFor = ''
 
-function paintAdapter(gate: GateEvent | null, turn: Turn) {
+function paintAdapter(gate: GateEvent | null) {
   const c = gate?.commands
   for (const [stage, command] of [['define', c?.define], ['plan', c?.plan]] as const) {
     const b = document.querySelector<HTMLButtonElement>(`#path li[data-stage="${stage}"] > div > button.stage`)
-    if (!b || !command) continue
+    if (!b) continue
+    if (!command) {
+      delete b.dataset.command
+      b.removeAttribute('title')
+      continue
+    }
     b.dataset.command = command
     b.title = `Sends ${command} to this session`
   }
-  const tasks = byId<HTMLButtonElement>('tasks-start')
-  const steps = gate?.types?.find(t => t.id === gate.workType)?.steps ?? []
-  tasks.hidden = !c?.tasks || !steps.includes('tasks') || gate?.effective !== 'feature' || !gate.plan || gate.approved === true || !!gate.tasksWritten || turn.running === 'tasks'
-  const word = turn.ran.has('tasks') ? 'Continue tasks' : 'Tasks'
-  if (tasks.textContent !== word) tasks.textContent = word
-  if (c?.tasks) {
-    tasks.dataset.command = c.tasks
-    tasks.title = `Sends ${c.tasks} to this session`
+}
+
+function paintFix(gate: GateEvent | null) {
+  const b = document.querySelector<HTMLButtonElement>('#path li[data-stage="implement"] button[data-fix]')
+  if (!b) return
+  const doc = gate?.effective === 'incident' && gate.planDoc?.approved ? gate.planDoc : null
+  if (!doc) {
+    delete b.dataset.command
+    b.removeAttribute('title')
+    return
   }
+  b.dataset.command = `/knackpack:fix-incident The developer approved ${doc.path} on the Software Factory page: its committed text has the SHA-256 ${doc.hash}. Run incident-check.sh with KNACKPACK_INCIDENT_APPROVED_SHA256=${doc.hash} in its environment, as in KNACKPACK_INCIDENT_APPROVED_SHA256=${doc.hash} sh "\${CLAUDE_PLUGIN_ROOT}/scripts/incident-check.sh" followed by that file's absolute path.`
+  b.title = 'Sends /knackpack:fix-incident to this session, with the SHA-256 of the root cause you approved'
 }
 
 function setupLines(v: TeamView): HTMLElement[] {
@@ -729,7 +758,7 @@ function setupLines(v: TeamView): HTMLElement[] {
   if (!setup) return []
   const own = setup.types.filter(t => !t.builtin)
   const items = [
-    `Workflow: ${setup.adapter === 'spec-kit' ? 'GitHub Spec Kit' : setup.adapter === 'knackpack' ? 'knackpack' : 'the built-in steps'}`,
+    `Workflow: ${setup.adapter === 'knackpack' ? 'knackpack' : 'the built-in steps'}`,
     `Bug hunter: ${visible(setup.roles['bug-hunter'] ?? '')}; simplicity checker: ${visible(setup.roles.simplicity ?? '')}`,
     ...own.map(t => `Work type ${visible(t.name)}: ${t.steps.join(', ')}; ${t.push ? 'pushes' : "doesn't push"}; edits ${t.edits}${t.roles.length ? `; needs ${t.roles.join(' and ')}` : ''}`),
     ...(setup.defaultType ? [`Default work type: ${visible(setup.defaultType)}`] : []),
@@ -796,7 +825,7 @@ async function openTeam() {
 function paintExceptions(s: Session) {
   const gate = s.gate
   const key = gate ? `${s.sid}:${gate.branch}:${gate.head}:${s.auditSeen}` : ''
-  if (key && s.audit?.key !== key && state.connected && controllable(s)) {
+  if (key && s.audit?.key !== key && state.connected && (controllable(s) || !!s.info.doubled)) {
     s.audit = { key, entries: s.audit?.entries ?? [], refusals: s.audit?.refusals ?? {} }
     void api('/api/audit', { sid: s.sid, branch: gate?.branch ?? '' }).then(r => (r.ok ? r.json() : null)).then((v: { entries?: AuditEntry[]; refusals?: Record<string, number> } | null) => {
       if (!v || s.audit?.key !== key) return
@@ -910,12 +939,8 @@ async function loadProjects(force = false) {
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
 }
 
-function twinRole(i: SessionInfo): string {
-  return i.lineage?.handedTo ? 'earlier' : i.lineage?.earlier?.length ? 'took over' : ''
-}
-
 function twinWords(i: SessionInfo): string {
-  return [i.agent ? agentName(i.agent) : '', twinRole(i)].filter(Boolean).join(', ')
+  return i.agent ? agentName(i.agent) : ''
 }
 
 function sessionTwin(x: Session): { description: string; short: string } {
@@ -928,8 +953,7 @@ function sessionTwin(x: Session): { description: string; short: string } {
   const words = twinWords(x.info)
   const sid = x.sid.slice(0, 8)
   if (twins.some(y => twinWords(y.info) === words)) return { description: [words, sid].filter(Boolean).join(', '), short: sid }
-  const role = twinRole(x.info)
-  return { description: words, short: role && twins.every(y => twinRole(y.info) !== role) ? role : words }
+  return { description: words, short: words }
 }
 
 async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -1010,6 +1034,10 @@ byId('conversations').addEventListener('sf-answer', async e => {
 byId('conversations').addEventListener('sf-settled', () => {
   if (!byId<HTMLTextAreaElement>('text').disabled) byId('text').focus()
 })
+byId('packs').addEventListener('sf-packs-changed', () => {
+  const s = current()
+  if (s) void loadGate(s, true)
+})
 byId('reviews').addEventListener('sf-review', e => void startReview(current(), e.detail.all))
 byId('reviews').addEventListener('sf-test-list', () => void startTestList(current()))
 byId('reviews').addEventListener('sf-explain', () => {
@@ -1034,7 +1062,7 @@ byId('pull-follow').addEventListener('sf-session-deleted', e => forgetSession(e.
 byId('push-panel').addEventListener('sf-send-findings', e => void sessionAsk(current(), '/api/send-findings', e.detail, "The findings weren't sent.", 'The blocking findings were sent to the session. The push stays held.'))
 byId('push-panel').addEventListener('sf-handoff', e => void sessionAsk(current(), '/api/handoff', e.detail, "The push wasn't handed off.", 'The push was denied, and the session was asked for a handoff.'))
 byId('push-panel').addEventListener('sf-allow-file', e => void sessionAsk(current(), '/api/allow-file', e.detail, "The file wasn't allowed.", 'You allowed that version of the file. A later change to it is flagged again.'))
-byId('push-panel').addEventListener('sf-remove-file', e => void sessionAsk(current(), '/api/flag-remove', e.detail, "The message wasn't sent.", 'The session was asked to remove the file from the branch.'))
+byId('push-panel').addEventListener('sf-remove-file', e => void sessionAsk(current(), '/api/flag-remove', { path: e.detail.path }, "The message wasn't sent.", e.detail.revert ? 'The session was asked to revert the change to the file.' : 'The session was asked to remove the file from the branch.'))
 byId('push-panel').addEventListener('sf-allow-commit', e => void sessionAsk(current(), '/api/allow-commit', e.detail, "The commit wasn't allowed.", 'You allowed that field of that commit. Another commit with the same text is flagged again.'))
 byId('push-panel').addEventListener('sf-rewrite-commit', e => void sessionAsk(current(), '/api/commit-rewrite', e.detail, "The message wasn't sent.", 'The session was asked to rewrite the commit.'))
 byId('changes').addEventListener('sf-line-comments', e => void send(e.detail.text, [], changesSession()).then(ok => e.detail.done(ok), () => e.detail.done(false)))
@@ -1061,11 +1089,13 @@ byId('path').addEventListener('click', e => {
 let teamPicks = ''
 
 function paintTeamPicks(s: Session) {
-  const own = (s.gate?.types ?? []).filter(t => !t.builtin)
-  const key = JSON.stringify(own.map(t => [t.id, t.name, t.steps]))
+  const types = s.gate?.types ?? []
+  const own = types.filter(t => !t.builtin)
+  const key = JSON.stringify(types.map(t => [t.id, t.name, t.steps]))
   if (key === teamPicks) return
   teamPicks = key
   const box = byId('size-pick').querySelector('.size-options')!
+  for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-size]:not([data-team])')) b.hidden = !!types.length && !types.some(t => t.id === b.dataset.size)
   for (const b of box.querySelectorAll('button[data-team]')) b.remove()
   for (const t of own) {
     const b = el('button', 'size-option')
@@ -1114,6 +1144,17 @@ byId('req-approval').addEventListener('sf-revise', e => {
   })))
 })
 byId('approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
+byId('cause-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
+byId('cause-approval').addEventListener('sf-revise', e => {
+  const s = current()
+  const path = s?.gate?.planDoc?.path
+  if (!s || !path) return void toast({ title: "This page doesn't know the root cause's file.", description: 'Ask for the change in the conversation instead.', tone: 'warn' })
+  const note = e.detail.note
+  once(s, `revise-cause:${note}`, () => whilePressed(() => send(`/knackpack:debug-incident Correct the diagnosis in ${path}: ${note}`, [], s).then(ok => {
+    if (ok) byId<HTMLElementTagNameMap['sf-approval']>('cause-approval').sent(note)
+    return ok
+  })))
+})
 byId('approval').addEventListener('sf-revise', e => {
   const s = current()
   const path = s?.gate?.planDoc?.path
@@ -1198,38 +1239,15 @@ function usageText(s: Session): string {
 }
 function branchOwned(s: Session): boolean {
   const i = s.info
-  return state.connected && !!i.verified && i.kind === 'background' && !!i.project && !i.lineage?.handedTo
+  return state.connected && !!i.verified && i.kind === 'background' && !!i.project
 }
 
 function paintBranchMenu(s: Session) {
-  const menu = byId('session-menu')
   const owned = branchOwned(s)
-  const others = owned ? otherAgents(s.info.agent) : []
-  const key = others.map(a => a.id).join(' ')
-  if (menu.dataset.continue !== key) {
-    menu.dataset.continue = key
-    for (const b of menu.querySelectorAll('button[data-continue]')) b.remove()
-    const before = byId('menu-bring-main')
-    for (const a of others) {
-      const b = el('button', '', `Continue with ${a.name}`)
-      b.type = 'button'
-      b.setAttribute('role', 'menuitem')
-      b.dataset.continue = a.id
-      menu.insertBefore(b, before)
-    }
-  }
   byId('menu-bring-main').hidden = !(owned && s.info.running && s.info.live && s.info.controlled)
   byId('menu-fork').hidden = !forkable(s)
 }
 
-byId('session-menu').addEventListener('click', e => {
-  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-continue]')
-  const s = current()
-  if (!b || !s) return
-  byId('session-menu').hidePopover()
-  byId('session-more').focus()
-  void handOver(s, b.dataset.continue ?? '')
-})
 byId('menu-bring-main').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
@@ -1250,13 +1268,6 @@ byId('changes').addEventListener('sf-fork-commit', e => {
   if (!s || !p) return
   go('projects')
   projects.fork(p.path, s.sid, e.detail.sha)
-})
-byId('lineage').addEventListener('sf-handover', e => {
-  const s = sessions.get(e.detail.sid)
-  if (s) void whilePressed(() => handOver(s, e.detail.agent))
-})
-byId('lineage').addEventListener('sf-open-session', e => {
-  if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
 })
 for (const id of ['split', 'compare']) {
   byId(id).addEventListener('sf-open-session', e => {
@@ -1340,10 +1351,10 @@ byId('control-button').addEventListener('click', async () => {
   const res = await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null))
   if (!res || !res.ok) toast({ title: 'The page could not take control of this session.', tone: 'bad' })
 })
-byId('signin').addEventListener('click', async () => {
+byId('use-tab').addEventListener('click', async () => {
   showGone('Signing in…', '', false, true)
   await trade()
-  void connect()
+  void connect(true)
 })
 function followView(e: MouseEvent) {
   const link = (e.target as Element).closest<HTMLElement>('a[data-view]')
@@ -1579,7 +1590,7 @@ byId('overview').addEventListener('sf-counts', e => {
 
 startLayout({ jumpLatest: () => composer.jump('latest') })
 
-const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain } = startSessionActions({ reply, loadGate, loadProjects, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
+const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain } = startSessionActions({ reply, loadGate, starterNames: () => starterNames, identityAction, markCheckpoint, copy, forgetSession })
 
 const composer = startComposer({ send })
 const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
@@ -1616,11 +1627,6 @@ restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
 onNotifyOpen(sid => {
   if (sessions.has(sid)) go(`s/${sid}`)
-})
-byId('disconnect').addEventListener('click', async () => {
-  await whileBusy(byId<HTMLButtonElement>('disconnect'), () => api('/api/disconnect', {}).catch(() => null))
-  if (byId('account').matches(':popover-open')) byId('account').hidePopover()
-  signOut('Disconnected', SIGN_IN_HINT)
 })
 paint()
 initPrefs(body => api('/api/prefs', body).catch(() => null))

@@ -51,6 +51,9 @@ type ReviewEntry struct {
 	Clipped      bool
 	Auto         bool
 	PluginCommit string
+	Pack         string
+	PackVersion  string
+	PackDigest   string
 	ClaudeCode   string
 	Models       []string
 	RunModel     string
@@ -65,6 +68,7 @@ type ReviewEntry struct {
 	Team         string
 	Reply        string
 	ReplyClipped bool
+	ReqIDs       []string
 }
 
 type ReviewRecords interface {
@@ -103,7 +107,8 @@ type Snapshots interface {
 }
 
 type PluginSource interface {
-	PluginPath(id string) (string, error)
+	ReviewerPack(project string) (ReviewerPack, error)
+	KnackpackCommit() string
 }
 
 type RoleReview struct {
@@ -127,8 +132,13 @@ type RoleReview struct {
 	Advisory bool
 	Cited    CitedIDs
 	Findings []FindingRef
+	ReqIDs   []string
+	Coverage Coverage
 
 	PluginCommit string
+	Pack         string
+	PackVersion  string
+	PackDigest   string
 	ClaudeCode   string
 	Models       []string
 
@@ -188,6 +198,7 @@ type ReviewTarget struct {
 
 	TeamRules func(ctx context.Context, base, head string) (TeamRules, error)
 	CloneSync func(main string) string
+	Pushes    bool
 
 	Req string
 }
@@ -204,12 +215,10 @@ type ReviewsConfig struct {
 	Snapshots  Snapshots
 	Records    ReviewRecords
 	Replies    ReviewReplies
-	Checks     ReviewerChecks
 	Minimum    review.Minimum
 	Plugins    PluginSource
 	Mains      Mains
 	History    History
-	Plugin     string
 	Dir        string
 	Command    string
 	Agents     map[review.Role]string
@@ -226,21 +235,20 @@ type ReviewsConfig struct {
 
 	Walkthroughs Walkthroughs
 
-	PluginCommit string
-	ClaudeCode   string
+	ClaudeCode string
 }
 
 type Reviews struct {
 	cfg        ReviewsConfig
 	mu         sync.Mutex
 	running    map[string]int
+	heads      map[string]string
+	refused    func(sid string)
 	views      map[string]ReviewView
 	rebuilt    map[string]string
 	approvals  map[string]viewApproval
 	approvalAt uint64
 	store      sync.Mutex
-	checkStore sync.Mutex
-	checking   map[string]chan struct{}
 	claude     string
 	wg         sync.WaitGroup
 	reviewing  int
@@ -255,6 +263,9 @@ type Reviews struct {
 	rateHandlers []func(side string, w []RateWindow)
 	testStore    sync.Mutex
 	changeFacts  ChangeBlobs
+	changeLocks  TestLocks
+	changeSpecs  SpecProjects
+	changeTypes  TypeChanges
 
 	asides     map[string]AsideView
 	roleModels func(path string, role review.Role) ModelChoice
@@ -287,9 +298,6 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 		return nil, errors.New("reviews: the reviews folder must be an absolute path")
 	}
 	cfg.Audit = masking(cfg.Audit)
-	if cfg.Plugin == "" {
-		cfg.Plugin = "knackpack"
-	}
 	if cfg.Command == "" {
 		cfg.Command = "claude"
 	}
@@ -314,11 +322,8 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, checking: map[string]chan struct{}{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]int{}, heads: map[string]string{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
-		return nil, err
-	}
-	if err := r.settleChecks(); err != nil {
 		return nil, err
 	}
 	r.loadTests()
@@ -538,7 +543,12 @@ func (r *Reviews) ApprovalMoved(sid string, at func(commit string) (ApprovalGive
 	r.cfg.Show(sid, shown)
 }
 
-func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin string, view ReviewView, held string, given reviewGiven) {
+func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, pack ReviewerPack, view ReviewView, held string, given reviewGiven) {
+	plugin := pack.Path
+	pluginCommit := ""
+	if pack.Name == PackKnackpack {
+		pluginCommit = pack.Commit
+	}
 	ctx := shared.WithRequest(r.cfg.Base, t.Req)
 	main := given.rules.main
 	if why := r.check(ctx); why != "" {
@@ -560,8 +570,9 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	entries := make([]ReviewEntry, len(plans))
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
-			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
-			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest()}
+			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, pack, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: pluginCommit, ClaudeCode: claude,
+			Pack: pack.Name, PackVersion: pack.Version, PackDigest: pack.Digest,
+			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest(), ReqIDs: slices.Clone(given.approved.reqIDs)}
 	}
 	r.put(entries...)
 	r.mu.Lock()
@@ -592,7 +603,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		givens[i] = given
 		givens[i].run, givens[i].runs = p.run, p.runs
 		if _, ok := extra[p.base]; !ok {
-			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.Repo, p.base, head)
+			extra[p.base], facts[p.base] = r.withChangeFacts(slices.Clone(common), t.SID, t.Repo, p.base, head)
 		}
 		givens[i].facts = facts[p.base]
 		var f SnapshotFile
@@ -660,7 +671,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 			continue
 		}
 		prompts[i] = promptFor(entries[i], givens[i])
-		if providerFor(r.cfg.AgentFiles, entries[i].Key.Agent) == UploadedProvider {
+		if entries[i].Record.Provider != ReviewProvider {
 			prompts[i] += AgentVerdictAsk
 		}
 		view.Roles[i].Given = givenOf(ReviewArgvWith(r.cfg.Command, plugin, entries[i].Key.Agent, prompts[i], r.roleModelFor(t.Repo, entries[i].Role)), plans[i].base, head, extra[plans[i].base])
@@ -719,11 +730,6 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		r.running[t.SID] = 0
 	}
 	r.mu.Unlock()
-	if due := r.checksDue(entries); len(due) > 0 {
-		view.Note = strings.TrimSpace(held + " Checking the reviewer after an update: it reviews a change with a planted defect and a clean one, the same way as this review.")
-		r.show(t.SID, view.clone())
-		view.Note = strings.TrimSpace(held + " " + r.checkAfter(ctx, due, plugin))
-	}
 	view.Running = false
 	mu.Lock()
 	shown := view.clone()
@@ -750,6 +756,20 @@ func (r *Reviews) holdRunsLocked(key string, runs int) error {
 	}
 	r.running[key] = runs
 	return nil
+}
+
+func (r *Reviews) OnRefused(fn func(sid string)) {
+	r.mu.Lock()
+	r.refused = fn
+	r.mu.Unlock()
+}
+
+func (r *Reviews) Busy(sid, head string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, busy := r.running[sid]
+	at := r.heads[sid]
+	return busy && (at == "" || at == head)
 }
 
 func (r *Reviews) growRuns(key string, runs int) bool {
@@ -801,14 +821,19 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.Reason = e.Reason
 	v.CostUSD = e.CostUSD
 	v.PluginCommit, v.ClaudeCode, v.Models = e.PluginCommit, e.ClaudeCode, slices.Clone(e.Models)
+	v.Pack, v.PackVersion, v.PackDigest = e.Pack, e.PackVersion, e.PackDigest
 	v.Cited = e.Cited.clone()
 	v.Findings = nil
+	v.ReqIDs, v.Coverage = slices.Clone(e.ReqIDs), Coverage{}
 	if e.Record.State == review.Pass || e.Record.State == review.Block || e.Record.State == review.Unknown {
 		text := e.Message
 		if e.Reply != "" {
 			text = e.Reply
 		}
 		v.Findings = FindingRefs(text)
+		if len(e.ReqIDs) > 0 {
+			v.Coverage = CoverageLines(text, e.ReqIDs)
+		}
 	}
 	v.started = e.StartedAt
 	v.approved, v.team = e.Approved, e.Team

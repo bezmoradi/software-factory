@@ -16,7 +16,6 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/engines/acp"
-	"github.com/bezmoradi/software-factory/internal/adapters/engines/codex"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	gitpush "github.com/bezmoradi/software-factory/internal/adapters/git/push"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
@@ -46,12 +45,12 @@ type PageConfig struct {
 	HelperKey    string
 	BoxRanges    []netip.Prefix
 	Workspace    string
+	Verify       string
 	PluginDir    string
 	PluginSocket string
 	AgentBinary  string
 	DevACPAgent  string
 	DevGitCA     string
-	DevDocs      bool
 	Sandbox      SandboxConfig
 	Install      InstallConfig
 	Review       ReviewConfig
@@ -102,9 +101,6 @@ func ParsePageConfig(getenv func(string) string) (PageConfig, error) {
 	if err := parseStarts(&cfg, getenv); err != nil {
 		return cfg, err
 	}
-	if err := parseDocs(&cfg, getenv); err != nil {
-		return cfg, err
-	}
 	if cfg.Install, err = parseInstall(getenv); err != nil {
 		return cfg, err
 	}
@@ -120,6 +116,12 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 	cfg.AgentBinary = "/usr/local/bin/software-factory"
 	if getenv("SF_AGENT_HOST") != "" {
 		return errors.New("SF_AGENT_HOST is gone: each session runs in its own container, which the box helper makes; set SF_HELPER to the helper's host:port instead")
+	}
+	if v := getenv("SF_VERIFY"); v != "" {
+		if !filepath.IsAbs(v) || strings.ContainsAny(v, "\x00\n") {
+			return errors.New("SF_VERIFY must be an absolute path")
+		}
+		cfg.Verify = filepath.Clean(v)
 	}
 	if v := getenv("SF_HELPER"); v != "" && v != "off" {
 		if _, _, err := net.SplitHostPort(v); err != nil {
@@ -183,6 +185,8 @@ type engineParts struct {
 	dispatcher *session.Dispatcher
 	installer  *npm.Installer
 	plugins    *npm.Plugins
+	packs      *session.Packs
+	packFiles  *npm.Packs
 	reviews    *session.Reviews
 	repos      *session.Repos
 	pushes     *session.Pushes
@@ -329,12 +333,16 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	if err != nil {
 		return engineParts{}, err
 	}
+	packs, packFiles, err := packParts(cfg, pins, repos, logger)
+	if err != nil {
+		return engineParts{}, err
+	}
 	var source session.PluginSource
-	if pins != nil {
-		source = pins
+	if packs != nil {
+		source = packs
 	}
 	expected := &session.Expected{Store: state.NewExpectations(cfg.StateDir)}
-	agentFiles, err := reviewerAgents(cfg, repos, logger)
+	agentFiles, err := reviewerAgents(cfg, repos, packs, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -345,14 +353,14 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	agents := session.Agents()
 	if cfg.DevACPAgent != "" {
-		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent, cfg.DevDocs))
+		agents = append(agents, session.DevelopmentAgent(cfg.DevACPAgent))
 		logger.Warn("development ACP agent switched on", "variable", "SF_DEV_ACP_AGENT")
 	}
-	docs := docsInRepo(cfg, logger)
+	devChecks := devCheckKeys(cfg.DevACPAgent, developmentImage(boxes.DevMarker), logger)
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -364,7 +372,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Folders:      boxFolders{workspace: cfg.Workspace, uploads: uploads},
 		Clones:       remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
 		CloneReader:  files.Reader{},
-		Openers:      map[session.Method]session.Opener{session.MethodACP: acp.Opener{Logger: logger}, session.MethodCodex: codex.Opener{Logger: logger, DeveloperInstructions: agenthost.MCPInstructions, RateWindows: reg.Limits().CodexWindows}},
+		Stdio:        acp.Opener{Logger: logger},
 		Repositories: repos,
 		PluginDir:    cfg.PluginDir,
 		PluginSocket: cfg.PluginSocket,
@@ -377,15 +385,18 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Approvals:    state.NewApprovals(cfg.StateDir),
 		Expected:     expected,
 		Work:         work,
+		Packs:        sessionPacks(packs),
 		Workflow:     knackpackDir(pins),
+		Refused:      knackpackRefused(pins),
 		Workspace:    cfg.Workspace,
 		Runs:         state.NewSessions(cfg.StateDir),
 		Versions:     agentVersions,
 		Note:         reg.NoteFor("restart"),
 		Audit:        state.NewAudit(cfg.StateDir),
 		Identity:     identity,
-		DocsInRepo:   docs,
+		DocsInRepo:   true,
 		KeyRoutes:    state.NewKeyRoutes(cfg.StateDir),
+		DevChecks:    devChecks,
 		Logger:       logger,
 	})
 	if allow != nil {
@@ -402,6 +413,12 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		reviews.UseKeyGate(func(ctx context.Context) error { return d.KeyRouted(ctx, session.SideReviewers) })
 	}
 	reg.CheckClaims(session.ClaimChecks{Targets: d.PushTarget, Heads: files.Reviews{}, Commits: files.Reader{}, Files: page.TurnFiles{Workspace: cfg.Workspace, OpenTree: files.OpenTree}})
+	if packs != nil {
+		packs.UseSessions(d.SessionPacks)
+	}
+	if work != nil {
+		work.UseSessionPacks(d.SessionPackOf)
+	}
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
 		repos.OnFetched(d.SyncClones)
@@ -425,7 +442,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
+	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, packs: packs, packFiles: packFiles, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -438,9 +455,9 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 	}
 	pc := session.PushesConfig{
 		Pusher: gitpush.Pusher{Reader: files.Reader{}, Client: client}, Heads: files.Reviews{}, History: files.Reader{}, Changes: files.Reader{},
-		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
+		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Held: d.HeldTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
 		Tell: tellSession(reg), Note: reg.NoteFor("push"), Denials: state.NewDenials(cfg.StateDir), Waiting: state.NewWaiting(cfg.StateDir),
-		TurnBase: reg.TurnBase, Branch: files.Reader{},
+		TurnBase: reg.TurnBase, Branch: files.Reader{}, Checks: reg.AgentChecks,
 	}
 	if work != nil {
 		pc.Work = work
@@ -461,6 +478,7 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 		return nil, err
 	}
 	reviews.OnDone(p.ReviewDone)
+	reviews.OnRefused(p.Settled)
 	return p, nil
 }
 
@@ -545,7 +563,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	shots := useScreenshots(reg, cfg.Workspace, parts.routes, parts.dispatcher, logger)
 	updates := newUpdates(os.Getenv, cfg, logger)
 	go updates.Watch(sends)
-	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), ReviewerChecks: parts.reviewerChecksPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, updates, logger)}, reg, logger)
+	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), Packs: parts.packsPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, updates, logger)}, reg, logger)
 	if err != nil {
 		_ = pageLn.Close()
 		return err
@@ -556,7 +574,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.reviewing() != nil {
 		srv.UseWholeReplies(parts.dispatcher)
 	}
-	useChangeFacts(sends, srv, reg, parts, cfg, logger)
+	facts := useChangeFacts(sends, srv, reg, parts, cfg, logger)
 	if parts.dispatcher != nil {
 		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)
 		parts.dispatcher.ReconcileKeys(kctx)
@@ -569,14 +587,20 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.dispatcher == nil || !parts.dispatcher.RunsUnread() {
 		reg.DropStrayNotes()
 	}
+	work := useSessionWork(sends, srv, reg, parts, cfg, logger)
+	verifier := useVerify(sends, srv, reg, parts, work, facts, cfg, logger)
+	usePushRecords(srv, reg, parts, cfg, verifier)
 	parts.useHalt(reg, cfg, logger)
-	parts.useLimits(reg, cfg, logger)
+	ws := newWorkspace(parts, cfg, logger)
+	parts.useLimits(reg, cfg, ws, logger)
+	if parts.plugins != nil {
+		_ = parts.plugins.VerifyInstalled(npm.Knackpack.ID)
+	}
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 	useAgentReports(sends, srv, parts, cfg, logger)
-	useViews(srv, parts, cfg, reg, logger)
+	useViews(srv, parts, cfg, reg, ws, logger)
 	useSavedPrompts(srv, parts, cfg, logger)
 	usePulls(sends, srv, reg, parts, cfg, logger)
-	useSessionWork(sends, srv, reg, parts, cfg, logger)
 	useProjectViews(srv, parts, cfg, reg, logger)
 	useKeep(srv, reg, parts, cfg, logger)
 	useStarts(sends, srv, reg, parts, cfg, logger)
@@ -668,15 +692,29 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 			}
 		}()
 	}
+	switch {
+	case parts.plugins == nil:
+	case parts.dispatcher != nil && parts.dispatcher.RunsUnread():
+		logger.Warn("plugin install", "event", "prune-skipped", "plugin", npm.Knackpack.ID, "why", "the saved sessions couldn't be read, so the engine can't tell which old commit folders they still run")
+	default:
+		var keep []string
+		if parts.dispatcher != nil {
+			keep = parts.dispatcher.WorkflowCommits()
+		}
+		pctx, cancelPrune := context.WithTimeout(ctx, time.Minute)
+		if err := parts.plugins.Prune(pctx, npm.Knackpack.ID, keep); err != nil {
+			logger.Warn("plugin install", "event", "prune-failed", "plugin", npm.Knackpack.ID)
+		}
+		cancelPrune()
+	}
+	prunePacks(ctx, parts, logger)
 	if parts.installer != nil && cfg.Install.AtStart {
 		go func() {
 			if err := parts.installer.InstallMissing(ctx, nil); err != nil {
 				logger.Warn("agent install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
 			}
 			if parts.plugins != nil {
-				if err := parts.plugins.InstallMissing(ctx, nil); err != nil {
-					logger.Warn("plugin install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
-				}
+				_, _ = parts.plugins.Update(ctx, npm.Knackpack.ID, nil)
 				parts.catalogs.Load()
 			}
 		}()

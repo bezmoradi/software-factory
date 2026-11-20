@@ -21,11 +21,16 @@ function text(value: string): string {
 
 function provenance(role: ReviewRole): string {
   const parts = [
-    role.pluginCommit ? `knackpack ${shortSha(role.pluginCommit)}` : '',
+    role.pack ? `${text(role.pack)}${role.packVersion ? ` ${text(role.packVersion)}` : ''}${role.pluginCommit ? ` ${shortSha(role.pluginCommit)}` : ''}${role.packDigest ? `, reviewers' digest ${text(role.packDigest.slice(0, 12))}` : ''}` : role.pluginCommit ? `knackpack ${shortSha(role.pluginCommit)}` : '',
     role.claudeCode ? (role.claudeCode === 'sf-fake-claude' ? 'the development fake reviewer' : `Claude Code ${text(role.claudeCode)}`) : '',
-    ...(role.models ?? []).map(text),
+    ...(role.models ?? []).slice(0, 1).map(text),
   ]
   return parts.filter(Boolean).join(' · ')
+}
+
+function alsoUsed(role: ReviewRole): string {
+  const others = (role.models ?? []).slice(1)
+  return others.length ? `Also used: ${others.map(text).join(', ')}` : ''
 }
 
 function duration(ms: number): string {
@@ -233,6 +238,7 @@ class SfReviews extends HTMLElement {
     }
     if (value.catalog?.state === 'refused') parts.push(el('p', 'small warn', `knackpack's reviewer catalog was refused: ${sentence(text(value.catalog.why || 'it could not be read'))} The engine's built-in list chooses the file reviewers.`))
     else if (value.catalog?.state === 'used') parts.push(el('p', 'small muted', "knackpack's reviewer catalog chooses the file reviewers. It names reviewers and the files they cover; it grants no tool or permission."))
+    else if (value.catalog?.state === 'off') parts.push(el('p', 'small muted', 'This project\'s pack isn\'t knackpack, so no file reviewer is added for the files the branch changes: only the roles its pack fills and the agents you add review it.'))
     if (r) {
       const cost = money(r.costUsd)
       const total = money(r.sessionCostUsd)
@@ -328,7 +334,7 @@ class SfReviews extends HTMLElement {
     if (t.reason) box.append(el('p', `small ${t.state === 'withheld' ? 'warn' : 'bad'}`, sentence(`${t.state === 'withheld' ? 'Not shown' : 'It failed'}: ${text(t.reason)}`)))
     if (t.state === 'done' && t.steps?.length) {
       const walk = el('sf-walkthrough')
-      walk.view = { commit: t.commit, steps: t.steps }
+      walk.view = { commit: t.commit, steps: t.steps, readOnly: value.readOnly }
       box.append(walk, el('p', 'small muted', 'From a reviewer run that read the commit; check each step makes sense before you rely on it.'))
     } else if (t.state === 'done' && t.text) {
       const pre = el('pre', 'review-message small', text(t.text))
@@ -360,6 +366,8 @@ class SfReviews extends HTMLElement {
     if (role.advisory) li.append(el('div', 'small muted', 'Advisory for this project: its findings are warnings, and it never counts for the push, the push hold or automatic findings sends.'))
     const made = provenance(role)
     if (made) li.append(el('div', 'small muted', made))
+    const also = alsoUsed(role)
+    if (also) li.append(el('div', 'small muted', also))
     const progress = this.#progress(role)
     if (progress) li.append(progress)
     li.append(el('div', 'small muted', role.incremental && role.since ? `Reviewed only what changed since ${shortSha(role.since)}, which its previous round reviewed${role.previous ? ', and was asked to check that round\'s findings' : ''}` : 'Reviewed the whole branch from where it leaves the remote\'s main branch'))

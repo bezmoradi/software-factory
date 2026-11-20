@@ -3,6 +3,7 @@ package session
 import (
 	"maps"
 	"slices"
+	"strconv"
 	"sync"
 )
 
@@ -60,11 +61,41 @@ func (m maskedAudit) Append(e AuditEntry) error {
 	return m.Audit.Append(e.masked())
 }
 
+const (
+	maxAuditItems     = 100
+	maxAuditItemBytes = 64 << 10
+	maxAuditReason    = 16 << 10
+)
+
+func boundItems(items []string) []string {
+	if items == nil {
+		return nil
+	}
+	out := make([]string, 0, min(len(items), maxAuditItems))
+	used := 0
+	for i, m := range items {
+		if len(out) >= maxAuditItems-1 && i < len(items)-1 || used+len(m) > maxAuditItemBytes {
+			return append(out, "and "+strconv.Itoa(len(items)-i)+" more items, which the page's gate panel lists")
+		}
+		used += len(m)
+		out = append(out, m)
+	}
+	return out
+}
+
+func boundReason(s string) string {
+	if len(s) <= maxAuditReason {
+		return s
+	}
+	return clip(s, maxAuditReason-60) + " … (cut here; the page's gate panel lists every item)"
+}
+
 func (e AuditEntry) masked() AuditEntry {
-	e.Reason, e.PersonReason, e.Path = maskCut(e.Reason), maskCut(e.PersonReason), maskSecrets(e.Path)
+	e.Reason, e.PersonReason, e.Path = maskCut(boundReason(e.Reason)), maskCut(e.PersonReason), maskSecrets(e.Path)
 	if e.Missing != nil {
-		missing := make([]string, len(e.Missing))
-		for i, m := range e.Missing {
+		bounded := boundItems(e.Missing)
+		missing := make([]string, len(bounded))
+		for i, m := range bounded {
 			missing[i] = maskSecrets(m)
 		}
 		e.Missing = missing
@@ -73,7 +104,7 @@ func (e AuditEntry) masked() AuditEntry {
 }
 
 func ProjectLevelAudit(kind string) bool {
-	return slices.Contains([]string{AuditReviewerAgent, AuditApproveTeam, AuditForgetTeam, AuditApproveStartup}, kind)
+	return slices.Contains([]string{AuditReviewerAgent, AuditPack, AuditApproveTeam, AuditForgetTeam, AuditApproveStartup}, kind)
 }
 
 type AuditReader interface {
@@ -93,18 +124,19 @@ type AuditPage interface {
 type AuditLog struct {
 	reader  AuditReader
 	targets func(sid string) (PushTarget, bool)
+	held    func(sid string) (PushTarget, bool)
 	mu      sync.Mutex
 	counts  map[string]map[string]int
 }
 
 var _ AuditPage = (*AuditLog)(nil)
 
-func NewAuditLog(reader AuditReader, targets func(sid string) (PushTarget, bool)) *AuditLog {
-	return &AuditLog{reader: reader, targets: targets, counts: map[string]map[string]int{}}
+func NewAuditLog(reader AuditReader, targets, held func(sid string) (PushTarget, bool)) *AuditLog {
+	return &AuditLog{reader: reader, targets: targets, held: held, counts: map[string]map[string]int{}}
 }
 
 func (a *AuditLog) View(sid string) (AuditView, error) {
-	t, ok := a.targets(sid)
+	t, ok := targetOrHeld(a.targets, a.held, sid)
 	if !ok {
 		return AuditView{}, explained(conflict("not started here"), "Only a session this engine started has an audit view here.")
 	}

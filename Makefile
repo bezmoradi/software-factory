@@ -146,9 +146,12 @@ links:
 secrets:
 	@sh scripts/scan-secrets.sh $(GITLEAKS_IMAGE)
 
+proctor:
+	@sh proctor/env/run.sh
+
 spelling:
 	@command -v typos >/dev/null || { echo "spelling: typos isn't installed; install typos $(TYPOS_VERSION) from https://github.com/crate-ci/typos"; exit 1; }
 	@typos --version | grep -qx 'typos-cli $(TYPOS_VERSION)' || echo "spelling: CI runs typos $(TYPOS_VERSION); this is $$(typos --version)"
 	@sh scripts/files.sh | xargs -0 typos --config .typos.toml
 
-.PHONY: up dev down cross-build no-comments no-tests files instructions review-workflow workflows shell markdown links secrets spelling
+.PHONY: up dev down proctor cross-build no-comments no-tests files instructions review-workflow workflows shell markdown links secrets spelling

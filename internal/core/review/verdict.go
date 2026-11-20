@@ -7,6 +7,8 @@ import (
 	"unicode"
 )
 
+const slopReviewer = "knackpack:slop-reviewer"
+
 type State string
 
 const (
@@ -58,7 +60,7 @@ var (
 	machineLine       = regexp.MustCompile(`(?i)^knackpack-verdict/1:[` + space + `]*(pass|block)$`)
 	verdictLine       = regexp.MustCompile(`(?i)^verdict:[` + space + `]*(pass|block)[` + space + `]*\.?$`)
 	verdictPrefix     = regexp.MustCompile(`(?i)^verdict:[` + space + `]*`)
-	findingsShaped    = regexp.MustCompile(`(?i)^knackpack-findings/|^knackpack-finding/1 \{.*\}$`)
+	findingsShaped    = regexp.MustCompile(`(?i)^knackpack-findings/|^knackpack-finding/1 \{.*\}$|^knackpack-coverage/1 \{.*\}$`)
 	reportConclusion  = regexp.MustCompile(`(?i)^(recommendation|decision):`)
 	markup            = regexp.MustCompile("[*_`#>]")
 )

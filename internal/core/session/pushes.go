@@ -58,6 +58,7 @@ type PushRepos interface {
 type ReviewEntries interface {
 	Entries() (map[review.Key]ReviewEntry, error)
 	ReplyOf(sid string, e ReviewEntry) (string, int)
+	Busy(sid, head string) bool
 }
 
 type AuditEntry struct {
@@ -90,6 +91,8 @@ type AuditEntry struct {
 	PluginCommit string
 	ClaudeCode   string
 	Models       []string
+	Passed       []string
+	AllPassed    bool
 }
 
 type Audit interface {
@@ -117,11 +120,13 @@ type PushView struct {
 	Findings     bool
 	FindingsSent time.Time
 	Extra        *PushExtra
+	Checks       []AgentCheck
 }
 
 func (v PushView) clone() PushView {
 	v.Missing = slices.Clone(v.Missing)
 	v.Unmet = slices.Clone(v.Unmet)
+	v.Checks = slices.Clone(v.Checks)
 	if v.Audit != nil {
 		a := *v.Audit
 		a.Missing = slices.Clone(a.Missing)
@@ -157,6 +162,8 @@ type PushesConfig struct {
 	Reviews     ReviewEntries
 	Audit       Audit
 	Targets     func(sid string) (PushTarget, bool)
+	Doubled     func(sid string) bool
+	Held        func(sid string) (PushTarget, bool)
 	Level       func(sid string) (level.Result, bool)
 	Show        func(sid string, v PushView)
 	Agents      map[review.Role]string
@@ -178,11 +185,29 @@ type PushesConfig struct {
 	AutoFindings   func(project string) bool
 	TurnBase       func(sid string) string
 	Branch         BranchWalker
+	Checks         func(sid string) []AgentCheck
+}
+
+type pushVerifyRef struct{ v PushVerify }
+
+func (p *Pushes) UseVerify(v PushVerify) {
+	p.verify.Store(&pushVerifyRef{v: v})
+}
+
+func (p *Pushes) verifier() PushVerify {
+	if r := p.verify.Load(); r != nil {
+		return r.v
+	}
+	return nil
+}
+
+type PushVerify interface {
+	Items(ctx context.Context, sid string, t PushTarget, head string, kinds []string, ask VerifyAsk) []string
+	Running(sid, head string) bool
 }
 
 type PushWork interface {
 	PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool)
-	HandoffText(sid string) string
 }
 
 type heldPush struct {
@@ -201,6 +226,7 @@ type heldPush struct {
 
 type Pushes struct {
 	cfg     PushesConfig
+	skips   doubledSkips
 	kind    workflow.WorkType
 	mu      sync.Mutex
 	busy    map[string]bool
@@ -222,6 +248,7 @@ type Pushes struct {
 	halt    atomic.Pointer[Halt]
 	extras  atomic.Pointer[pushExtras]
 	limits  atomic.Pointer[Limits]
+	verify  atomic.Pointer[pushVerifyRef]
 
 	denialsUnread bool
 }
@@ -344,11 +371,139 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		reply.Reason = "the engine is reviewing commit " + shortSHA(head) + " now and pushes it itself if every review passes; until then: " + reply.Reason
 	case why != "":
 		reply.Reason = why + "; " + reply.Reason
+	default:
+		p.verifyWait(ctx, sid)
 	}
 	return reply
 }
 
-const awaitingApproval = "the engine doesn't start reviews while the person's approval of the requirements or the plan is missing: it starts them when you push after the person approves on the page, and the person can press Review there any time; until then: "
+func (p *Pushes) verifyWait(ctx context.Context, sid string) (string, bool) {
+	v := p.verifier()
+	if v == nil {
+		return "", false
+	}
+	t, ok := p.cfg.Targets(sid)
+	if !ok {
+		return "", false
+	}
+	head, err := p.cfg.Heads.Head(t.Repo, t.Branch)
+	if err != nil || !p.verifyPending(ctx, v, sid, t, head) {
+		return "", false
+	}
+	p.waitAs(sid, head, shared.RequestOf(ctx))
+	return head, true
+}
+
+func (p *Pushes) VerifyReady(ctx context.Context, sid, head string, kind VerifyKind) bool {
+	if p.cfg.Work == nil {
+		return false
+	}
+	t, ok := p.cfg.Targets(sid)
+	if !ok {
+		return false
+	}
+	if now, err := p.cfg.Heads.Head(t.Repo, t.Branch); err != nil || now != head {
+		return false
+	}
+	p.mu.Lock()
+	denied := p.denialsUnread || p.refusedLocked(sid, head)
+	p.mu.Unlock()
+	if denied {
+		return false
+	}
+	main, _ := p.cfg.Repos.Main(t.Name)
+	wf, ok := p.cfg.Work.PushFacts(ctx, sid, t, head, main)
+	return ok && wf.Type.Push && !wf.NeedsApproval && wf.Refusal == "" && slices.Contains(wf.Verify, string(kind))
+}
+
+func (p *Pushes) verifyPending(ctx context.Context, v PushVerify, sid string, t PushTarget, head string) bool {
+	if !v.Running(sid, head) || p.cfg.Work == nil {
+		return false
+	}
+	main, _ := p.cfg.Repos.Main(t.Name)
+	wf, ok := p.cfg.Work.PushFacts(ctx, sid, t, head, main)
+	if !ok || len(wf.Verify) == 0 {
+		return false
+	}
+	if p.cfg.Reviews == nil {
+		return true
+	}
+	entries, err := p.cfg.Reviews.Entries()
+	if err != nil {
+		return true
+	}
+	for _, q := range wf.Required {
+		if q.Advisory {
+			continue
+		}
+		for _, k := range (review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}).Runs(q.RunCount()) {
+			if e, ok := entries[k]; ok && e.Record.State == review.Block && e.Record.Override == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (p *Pushes) CommitSettled(commit string) {
+	p.mu.Lock()
+	var sids []string
+	for sid, head := range p.waiting {
+		if head == commit {
+			sids = append(sids, sid)
+		}
+	}
+	for sid, h := range p.held {
+		if h.commit == commit && !slices.Contains(sids, sid) {
+			sids = append(sids, sid)
+		}
+	}
+	p.mu.Unlock()
+	slices.Sort(sids)
+	for _, sid := range sids {
+		p.ReviewDone(sid, commit)
+	}
+}
+
+func (p *Pushes) Settled(sid string) {
+	p.mu.Lock()
+	head := p.waiting[sid]
+	p.mu.Unlock()
+	if head != "" {
+		p.ReviewDone(sid, head)
+	}
+}
+
+func (p *Pushes) stillRunning(sid, head string) bool {
+	if p.reviewsQueued(sid, head) {
+		return true
+	}
+	t, ok := p.cfg.Targets(sid)
+	if !ok {
+		return false
+	}
+	if p.cfg.Reviews != nil {
+		if p.cfg.Reviews.Busy(sid, head) {
+			return true
+		}
+		if entries, err := p.cfg.Reviews.Entries(); err == nil {
+			for k, e := range entries {
+				if k.Commit == head && k.Branch == t.Branch && e.Record.State == review.Running {
+					return true
+				}
+			}
+		}
+	}
+	v := p.verifier()
+	if v == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(p.cfg.Base, PushFor)
+	defer cancel()
+	return p.verifyPending(ctx, v, sid, t, head)
+}
+
+const awaitingApproval = "the engine doesn't start reviews while the person's approval of the requirements, the plan or the root cause is missing: it starts them when you push after the person approves on the page, and the person can press Review there any time; until then: "
 
 func (p *Pushes) stillDenied(sid string, now time.Time) (push.Reply, bool) {
 	t, ok := p.cfg.Targets(sid)
@@ -534,6 +689,10 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		p.cfg.Logger.Info("push", "event", "held-by-halt")
 		return
 	}
+	if p.stillRunning(sid, head) {
+		p.cfg.Logger.Info("push", "event", "wait-kept", "why", "a review or verification run of the commit still runs")
+		return
+	}
 	p.mu.Lock()
 	if p.closing || p.refusedLocked(sid, head) {
 		p.mu.Unlock()
@@ -576,7 +735,19 @@ func (p *Pushes) ReviewDone(sid, head string) {
 		defer p.release(sid)
 		ctx, cancel := context.WithTimeout(shared.WithRequest(p.cfg.Base, req), PushFor)
 		defer cancel()
+		if t, ok := p.cfg.Targets(sid); ok {
+			if now, err := p.cfg.Heads.Head(t.Repo, t.Branch); err == nil && now != head {
+				p.saveWaiting()
+				shared.For(ctx, p.cfg.Logger).Info("push", "event", "wait-dropped", "why", "head-moved")
+				return
+			}
+		}
 		reply, _ := p.decide(ctx, sid, ByReviews, nil, "")
+		if reply.Decision == push.DecisionHeld {
+			if _, waits := p.verifyWait(ctx, sid); waits {
+				shared.For(ctx, p.cfg.Logger).Info("push", "event", "wait-kept", "why", "the decision started a verification run of the commit")
+			}
+		}
 		p.decided(sid, head, reply)
 		if reply.Decision == push.DecisionHeld {
 			p.autoFindings(ctx, sid)
@@ -586,7 +757,7 @@ func (p *Pushes) ReviewDone(sid, head string) {
 
 func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can be pushed from here.")
+		return notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started can be pushed from here.")
 	}
 	if err := p.pageHalted(); err != nil {
 		return err
@@ -702,7 +873,7 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 		e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 			Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: clean, Req: shared.RequestOf(ctx)}
 		p.record(e)
-		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(h.missing), At: now, Audit: &e})
+		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
 		said := "The person denied the push of commit " + shortSHA7(h.commit) + " to " + h.branch + " on Software Factory's page"
 		if clean != "" {
 			said += ": " + clip(clean, maxNoteReason)
@@ -748,7 +919,7 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	if p.cfg.Tell == nil || p.cfg.Work == nil {
 		return explained(conflict("no session"), "This engine can't send the session a message, so it can't hand off.")
 	}
-	if err := p.cfg.Tell(sid, p.cfg.Work.HandoffText(sid)); err != nil {
+	if err := p.cfg.Tell(sid, HandoffCommand); err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
@@ -768,7 +939,7 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 		Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: "Hand off", Req: shared.RequestOf(ctx)}
 	p.record(e)
-	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(h.missing), At: now, Audit: &e})
+	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
 	shared.For(ctx, p.cfg.Logger).Info("push", "event", "handoff")
 	return nil
 }
@@ -824,6 +995,7 @@ type pushing struct {
 	overridden int
 	unmet      []string
 	refresh    bool
+	quiet      bool
 }
 
 func (x *pushing) clean(s string) string {
@@ -842,6 +1014,19 @@ func clipAtWord(s string, n int) string {
 		cut = cut[:i]
 	}
 	return strings.TrimRight(cut, " ;,:") + "…"
+}
+
+func (p *Pushes) checksAt(sid string, at time.Time) []AgentCheck {
+	if p.cfg.Checks == nil {
+		return nil
+	}
+	var out []AgentCheck
+	for _, c := range p.cfg.Checks(sid) {
+		if !c.At.After(at) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (x *pushing) refreshCard(result gate.Result, reason string, missing []string) push.Reply {
@@ -864,9 +1049,10 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 	}
 	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent}
 	p.held[x.sid] = h
-	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
+	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
 		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
 	p.mu.Unlock()
+	v.Checks = p.checksAt(x.sid, e.Time)
 	p.show(x.sid, v)
 	shared.Tagged(p.cfg.Logger, x.entry.Req).Info("push", "event", "card-refreshed", "missing", len(missing))
 	return push.Reply{Decision: push.DecisionHeld, Reason: e.Reason}
@@ -882,7 +1068,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
 	e = e.masked()
 	reason = e.Reason
-	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: slices.Clone(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden}
+	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time)}
 	if result == gate.Held {
 		v.Unmet = slices.Clone(x.unmet)
 	}
@@ -914,6 +1100,9 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	p.show(x.sid, v)
 	shared.Tagged(p.cfg.Logger, e.Req).Info("push", "event", string(result), "by", e.By)
 	said := x.said(result, reason, len(missing) > 0)
+	if result == gate.Held && e.By == ByReviews && (x.quiet || slices.ContainsFunc(missing, verifyItem)) {
+		said = ""
+	}
 	if e.By == ByAgent {
 		p.mu.Lock()
 		p.spoken[x.sid] = said
@@ -1057,7 +1246,8 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 			return refuse(CloneBehind(fetched, now.SyncWhy) + "; the engine checks a push against the main it fetched, so it pushed nothing; push again")
 		}
 	}
-	facts, refusal, err := p.facts(ctx, sid, t, head, main, remote.Main, by)
+	facts, refusal, verified, err := p.facts(ctx, sid, t, head, main, remote.Main, by, answer == nil && card == "")
+	x.quiet = verified && by == ByReviews
 	if err != nil {
 		return refuse(err.Error())
 	}
@@ -1090,7 +1280,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	}
 	switch {
 	case d.Result == gate.Allowed && x.refresh:
-		return x.end(gate.Held, "every review of commit "+shortSHA(head)+" now passes and the push needs nothing more; the engine doesn't push a held card when its reviews finish, so press Push to push it", d.Missing, ""), d
+		return x.end(gate.Held, "commit "+shortSHA(head)+" now has everything the push needs; the engine doesn't push a held card on its own when its reviews or verification run finish, so press Push to push it", d.Missing, ""), d
 	case d.Result == gate.Allowed:
 		pre := x.entry
 		pre.Result, pre.Reason, pre.Missing, pre.PersonReason = string(gate.Allowed), "pushing "+shortSHA(head)+" to "+t.Branch+" at "+url+"; the next entry says whether it went out", slices.Clone(d.Missing), x.clean(d.Exception)
@@ -1125,7 +1315,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	return x.end(gate.Refused, d.Reason, d.Missing, ""), d
 }
 
-func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main, mainName, by string) (gate.Facts, string, error) {
+func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main, mainName, by string, couldPush bool) (gate.Facts, string, bool, error) {
 	f := gate.Facts{Type: p.kind, Main: mainName, Now: p.cfg.Now(), Offers: map[string]review.Offer{}, Reviews: map[review.Key]review.Record{}, Capped: map[string]int{}}
 	if lv, ok := p.cfg.Level(sid); ok {
 		f.Level = lv
@@ -1161,7 +1351,7 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 	if p.cfg.Reviews != nil {
 		var err error
 		if entries, err = p.cfg.Reviews.Entries(); err != nil {
-			return f, "", errors.New("the engine couldn't read its review records")
+			return f, "", false, errors.New("the engine couldn't read its review records")
 		}
 	}
 	if worked {
@@ -1184,13 +1374,20 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 	if by != ByPage && worked {
 		f.Items = append(f.Items, p.holdItems(ctx, t, wf.Hold, entries, f.Required, head, main)...)
 	}
-	return f, wf.Refusal, nil
+	if worked && len(wf.Verify) > 0 {
+		if v := p.verifier(); v == nil {
+			f.Items = append(f.Items, "a passing verification run of commit "+shortSHA(head)+", which the approved team file requires and this engine can't run, since it has no box helper or verification folder")
+		} else {
+			f.Items = append(f.Items, v.Items(ctx, sid, t, head, wf.Verify, VerifyAsk{Start: couldPush && wf.Type.Push && !wf.NeedsApproval && wf.Refusal == "", Agent: by != ByPage})...)
+		}
+	}
+	return f, wf.Refusal, worked && len(wf.Verify) > 0, nil
 }
 
 func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (ChangeView, error) {
-	t, ok := p.cfg.Targets(sid)
+	t, ok := targetOrHeld(p.cfg.Targets, p.cfg.Held, sid)
 	if !ok {
-		return ChangeView{}, explained(conflict("not started here"), "Only a session this engine started has a changes view here.")
+		return ChangeView{}, notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started has a changes view here.")
 	}
 	head, err := p.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {

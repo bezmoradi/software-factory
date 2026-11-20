@@ -154,9 +154,14 @@ type containerInspectJSON struct {
 	AppArmorProfile string   `json:"AppArmorProfile"`
 	ExecIDs         []string `json:"ExecIDs"`
 	State           struct {
-		Status  string `json:"Status"`
-		Running bool   `json:"Running"`
-		Health  *struct {
+		Status     string `json:"Status"`
+		Running    bool   `json:"Running"`
+		ExitCode   int    `json:"ExitCode"`
+		OOMKilled  bool   `json:"OOMKilled"`
+		Error      string `json:"Error"`
+		StartedAt  string `json:"StartedAt"`
+		FinishedAt string `json:"FinishedAt"`
+		Health     *struct {
 			Status string `json:"Status"`
 		} `json:"Health"`
 	} `json:"State"`
@@ -184,12 +189,20 @@ type containerListJSON struct {
 }
 
 type imageInspectJSON struct {
-	ID     string `json:"Id"`
-	Config struct {
-		Env        []string          `json:"Env"`
-		Entrypoint []string          `json:"Entrypoint"`
-		Labels     map[string]string `json:"Labels"`
+	ID          string   `json:"Id"`
+	Os          string   `json:"Os"`
+	RepoDigests []string `json:"RepoDigests"`
+	Config      struct {
+		Env        []string                   `json:"Env"`
+		Entrypoint []string                   `json:"Entrypoint"`
+		Labels     map[string]string          `json:"Labels"`
+		Volumes    map[string]json.RawMessage `json:"Volumes"`
 	} `json:"Config"`
+}
+
+type imageListJSON struct {
+	ID          string   `json:"Id"`
+	RepoDigests []string `json:"RepoDigests"`
 }
 
 type ipamConfigJSON struct {

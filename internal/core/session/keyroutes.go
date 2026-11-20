@@ -211,8 +211,6 @@ func (d *Dispatcher) RunningOn(side string) []string {
 		for _, b := range d.cfg.Reviews.busy() {
 			if sid, ok := strings.CutPrefix(b, testListKey); ok {
 				names = append(names, "the manual test list of "+d.shownName(sid))
-			} else if agent, ok := strings.CutPrefix(b, reviewerCheckKey); ok {
-				names = append(names, "the check of the reviewer "+clipWords(agent))
 			} else {
 				names = append(names, "the review of "+d.shownName(b))
 			}
@@ -257,19 +255,12 @@ func runningWords(names []string) string {
 	return strings.Join(names, ", ")
 }
 
-const reviewerCheckKey = "check:"
-
 func (r *Reviews) busy() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]string, 0, len(r.running)+len(r.checking))
+	out := make([]string, 0, len(r.running))
 	for k := range r.running {
 		out = append(out, k)
-	}
-	for agent := range r.checking {
-		if _, held := r.running[reviewerCheckKey+agent]; !held {
-			out = append(out, reviewerCheckKey+agent)
-		}
 	}
 	return out
 }

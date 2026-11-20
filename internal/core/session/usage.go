@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	SideCodex       = "codex"
 	UsageNear       = 0.9
 	maxWindows      = 8
 	maxPauses       = 20
@@ -36,7 +35,7 @@ var windowWords = map[string]string{
 	"seven_day_overage_included": "weekly Fable limit", "overage": "usage credit limit", "spend_limit": "spending limit",
 }
 
-var sideWords = map[string]string{SideAgents: "Claude Code in this session's container", SideReviewers: "Claude Code for the reviewers", SideCodex: "Codex"}
+var sideWords = map[string]string{SideAgents: "Claude Code in this session's container", SideReviewers: "Claude Code for the reviewers"}
 
 var signInEndingWords = map[string]string{SideAgents: "Claude Code in a session's container", SideReviewers: sideWords[SideReviewers]}
 
@@ -80,8 +79,6 @@ func sideOf(s string) string {
 		return SideAgents
 	case SideReviewers, "reviewer", "review":
 		return SideReviewers
-	case SideCodex:
-		return SideCodex
 	}
 	return ""
 }
@@ -129,20 +126,6 @@ func (l *Limits) boxWindows(side, box string, w []RateWindow) {
 	l.mu.Lock()
 	m := l.meterLocked(side, box)
 	m.windows, m.at = clean, now
-	l.mu.Unlock()
-}
-
-func (l *Limits) CodexWindows(plan string, w []RateWindow) {
-	now := l.now()
-	clean := cleanWindows(w, now)
-	l.mu.Lock()
-	m := l.meterLocked(SideCodex, "")
-	if p := CleanPlan(plan); p != "" {
-		m.plan = p
-	}
-	if w != nil {
-		m.windows, m.at = clean, now
-	}
 	l.mu.Unlock()
 }
 
@@ -204,9 +187,6 @@ func (l *Limits) sideShownLocked(side, box string) bool {
 		return s == nil || s.Method == SignInSubscription
 	case SideReviewers:
 		return l.reviewerSignIn == nil || l.reviewerSignIn.Method == SignInSubscription
-	case SideCodex:
-		s := l.boxSignInLocked(box, "codex")
-		return s == nil || s.Method == SignInSubscription
 	}
 	return true
 }
@@ -283,8 +263,6 @@ func agentSide(agent string) string {
 	switch agent {
 	case "claude":
 		return SideAgents
-	case "codex":
-		return SideCodex
 	case DevAgentID:
 		return SideReviewers
 	}
@@ -331,7 +309,11 @@ func (l *Limits) held(sid, what string) string {
 		return capsUnreadHeld
 	}
 	if s := l.sessions[sid]; s != nil && s.reached != "" {
-		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until the person raises the cap on the page; the person can still press Review"
+		until := "the person raises the cap on the page"
+		if s.reached == CapDisk {
+			until = "the engine measures the session's folder under the cap again or the person raises the cap on the page"
+		}
+		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until " + until + "; the person can still press Review"
 	}
 	places := []meterKey{{side: SideReviewers}}
 	if side, box := meterOf(l.known[sid]); side != "" {
@@ -387,6 +369,11 @@ func (p *Pushes) automaticHeld(sid string) string {
 
 func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	side = sideOf(side)
+	if side == SideAgents {
+		if err := l.branchHeld(sid); err != nil {
+			return err
+		}
+	}
 	now := l.now()
 	l.mu.Lock()
 	box := ""
@@ -394,7 +381,7 @@ func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	case side == SideReviewers && sid != "":
 		l.mu.Unlock()
 		return invalid("sid")
-	case side == SideAgents || side == SideCodex:
+	case side == SideAgents:
 		k, known := l.known[sid]
 		if !sidPattern.MatchString(sid) || !known {
 			l.mu.Unlock()
@@ -500,6 +487,9 @@ func (l *Limits) wakeOfferLocked(sid string, now time.Time) time.Time {
 func (l *Limits) WakeAtReset(sid string, on bool) error {
 	if !sidPattern.MatchString(sid) {
 		return invalid("sid")
+	}
+	if err := l.branchHeld(sid); err != nil {
+		return err
 	}
 	now := l.now()
 	l.mu.Lock()

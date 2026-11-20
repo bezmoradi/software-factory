@@ -1,0 +1,30 @@
+version: 2
+specifications:
+  - id: health
+    path: specs/health.yaml
+  - id: stack
+    path: specs/stack.yaml
+  - id: navigation
+    path: specs/navigation.yaml
+  - id: events-stream
+    path: specs/events-stream.yaml
+  - id: page-security
+    path: specs/page-security.yaml
+  - id: bodies
+    path: specs/bodies.yaml
+  - id: credentials
+    path: specs/credentials.yaml
+  - id: sign-in
+    path: specs/sign-in.yaml
+  - id: fields
+    path: specs/fields.yaml
+  - id: repositories
+    path: specs/repositories.yaml
+  - id: sessions
+    path: specs/sessions.yaml
+  - id: gate
+    path: specs/gate.yaml
+  - id: packs
+    path: specs/packs.yaml
+  - id: diagnostics
+    path: specs/diagnostics.yaml

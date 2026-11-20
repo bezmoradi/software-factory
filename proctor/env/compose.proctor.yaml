@@ -1,0 +1,9 @@
+services:
+  engine:
+    image: software-factory-proctor:dev
+  helper:
+    image: software-factory-proctor:dev
+  egress:
+    image: software-factory-proctor:local
+  gitserver:
+    image: software-factory-proctor:gitserver

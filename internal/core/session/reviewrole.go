@@ -70,6 +70,9 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	kind := ""
 	if v.State == review.Unknown {
 		e.Reason = "its reply had no verdict the engine recognizes"
+		if strings.HasSuffix(e.Record.Provider, review.PackProviderSuffix) && v.Channel == "" {
+			e.Reason = PackNoVerdict
+		}
 		kind = "no-verdict"
 		if v.Channel == review.Conflict {
 			e.Reason = "its reply gave both pass and block"
@@ -105,6 +108,8 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 	return e, kind
 }
 
+const PackNoVerdict = "its reply ended without a Verdict: pass or Verdict: block line, which every pack's reviewer must write, so it counts as no verdict"
+
 func (r *Reviews) placeAgents(ctx context.Context, plans []plannedRole) string {
 	if r.cfg.AgentFiles == nil {
 		return ""
@@ -139,13 +144,30 @@ func keptReply(text string, limit int) (string, bool) {
 	}
 	lines := strings.Split(text, "\n")
 	var ending []string
-	closing, size := 0, 0
+	closing, coverage, size := 0, 0, 0
+	inCoverage := false
 	for _, line := range slices.Backward(lines) {
 		l := strings.TrimSpace(line)
 		if l == "" {
 			continue
 		}
 		bare := strings.ToLower(strings.TrimLeft(l, "*_`#> "))
+		if strings.HasPrefix(l, CoverageLinePrefix) {
+			inCoverage = true
+			if len(l) > MaxCoverageLine {
+				continue
+			}
+			if coverage >= MaxCoverageLines || size+len(l)+1 > limit/2 {
+				break
+			}
+			ending = append([]string{l}, ending...)
+			coverage++
+			size += len(l) + 1
+			continue
+		}
+		if inCoverage {
+			break
+		}
 		if strings.HasPrefix(l, FindingLinePrefix) && len(l) <= MaxFindingLine && len(ending)-closing < MaxFindingLines && size+len(l)+1 <= limit/2 {
 			ending = append([]string{l}, ending...)
 			size += len(l) + 1

@@ -55,7 +55,9 @@ type Helper struct {
 	global  sync.Mutex
 	pending map[string]netip.Prefix
 	kick    chan struct{}
-	about   About
+
+	verifying map[string]bool
+	about     About
 }
 
 type About struct {
@@ -133,7 +135,7 @@ func NewHelper(ctx context.Context, hc HelperConfig) (*Helper, error) {
 	}
 	h := &Helper{
 		docker: hc.Docker, cfg: hc.Config, self: self.ID, pool: hc.Config.pool(), logger: hc.Logger,
-		locks: newKeyedLocks(), labels: map[string]map[string]string{self.Image: img.Config.Labels}, pending: map[string]netip.Prefix{}, kick: make(chan struct{}, 1),
+		locks: newKeyedLocks(), labels: map[string]map[string]string{self.Image: img.Config.Labels}, pending: map[string]netip.Prefix{}, kick: make(chan struct{}, 1), verifying: map[string]bool{},
 		rec:   &recipe{project: project, image: self.Image, imageEnv: img.Config.Env, imageLabel: img.Config.Labels, entrypoint: img.Config.Entrypoint, runtime: runtime, cfg: hc.Config},
 		about: About{Docker: version, Image: self.Image, OS: info.OperatingSystem, OSType: info.OSType, Arch: info.Architecture, Kernel: info.KernelVersion, Runtime: runtime},
 	}
@@ -146,7 +148,7 @@ func NewHelper(ctx context.Context, hc HelperConfig) (*Helper, error) {
 		}
 	}
 	h.logger.Info("box helper ready", "project", project, "image", self.Image, "docker", version, "api", APIVersion,
-		"memory", hc.Config.Memory, "nano_cpus", hc.Config.NanoCPUs, "reviewer_memory", hc.Config.ReviewerMemory, "reviewer_nano_cpus", hc.Config.ReviewerCPUs, "max_boxes", hc.Config.MaxBoxes, "runtime", runtime,
+		"memory", hc.Config.Memory, "nano_cpus", hc.Config.NanoCPUs, "reviewer_memory", hc.Config.ReviewerMemory, "reviewer_nano_cpus", hc.Config.ReviewerCPUs, "verify_memory", hc.Config.VerifyMemory, "verify_nano_cpus", hc.Config.VerifyCPUs, "verify_disk", hc.Config.VerifyDisk, "verify_minutes", hc.Config.VerifyMinutes, "max_boxes", hc.Config.MaxBoxes, "runtime", runtime,
 		"subnets", prefixes(hc.Config.Ranges), "sweep_dry", hc.Config.SweepDry, "live", hc.Config.Live)
 	return h, nil
 }

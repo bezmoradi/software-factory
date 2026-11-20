@@ -201,6 +201,14 @@ func (d *Dispatcher) recordedBox(box string) (BoxRecord, error) {
 }
 
 func (d *Dispatcher) boxLogin(ctx context.Context, target string) (boxLogin, error) {
+	b, err := d.boxKeyLogin(ctx, target)
+	if err == nil && d.homeAsking(b.box) {
+		return boxLogin{}, explained(conflict("settings question"), "The session's wake is checking or waiting for your answer about the agent's changed settings, and Claude Code would load them, so the engine runs nothing in the container until you answer.")
+	}
+	return b, err
+}
+
+func (d *Dispatcher) boxKeyLogin(ctx context.Context, target string) (boxLogin, error) {
 	box, ok := TargetBox(target)
 	if !ok {
 		return boxLogin{}, explained(invalid("target"), "")
@@ -395,7 +403,7 @@ func (d *Dispatcher) keyHost(ctx context.Context, target string) (KeyHost, error
 		}
 		return nil, explained(conflict("login"), "This engine can't start a reviewer container, so it can't change the reviewers' API key.")
 	}
-	b, err := d.boxLogin(ctx, target)
+	b, err := d.boxKeyLogin(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -417,8 +425,12 @@ func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error
 	}
 	kctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()
-	box, _ := TargetBox(target)
-	err = host.APIKey(kctx, box, step, key)
+	box, isBox := TargetBox(target)
+	if isBox {
+		err = d.homeAfterKey(kctx, box, func() error { return host.APIKey(kctx, box, step, key) })
+	} else {
+		err = host.APIKey(kctx, box, step, key)
+	}
 	busy := reviewersBusy(err)
 	if reviewers && busy == nil {
 		d.cfg.Reviews.SignInChanged()

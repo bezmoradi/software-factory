@@ -20,17 +20,24 @@ func waitingIn(reg *session.Registry) func(sid string) int {
 	}
 }
 
-func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.Registry, logger shared.Logger) {
+func newWorkspace(parts engineParts, cfg PageConfig, logger shared.Logger) *session.Workspace {
+	d := parts.dispatcher
+	if d == nil || parts.repos == nil || cfg.Workspace == "" {
+		return nil
+	}
+	return session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{OpenTree: files.OpenTree}, Sessions: d.WorkspaceSessions,
+		Heads: files.Reviews{}, History: files.Reader{}, Main: parts.repos.Main, Audit: state.NewAudit(cfg.StateDir), Remove: d.Remove, Logger: logger})
+}
+
+func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.Registry, w *session.Workspace, logger shared.Logger) {
 	d := parts.dispatcher
 	if d == nil {
 		return
 	}
 	audit := state.NewAudit(cfg.StateDir)
-	recaps := session.NewRecaps(session.RecapsConfig{Audit: audit, Store: state.NewRecapSeen(cfg.StateDir), Targets: d.PushTarget, Waiting: waitingIn(reg), Logger: logger})
+	recaps := session.NewRecaps(session.RecapsConfig{Audit: audit, Store: state.NewRecapSeen(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Held: d.HeldTarget, Waiting: waitingIn(reg), Logger: logger})
 	var ws session.WorkspacePage
-	if parts.repos != nil && cfg.Workspace != "" {
-		w := session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{OpenTree: files.OpenTree}, Sessions: d.WorkspaceSessions,
-			Heads: files.Reviews{}, History: files.Reader{}, Main: parts.repos.Main, Audit: audit, Remove: d.Remove, Logger: logger})
+	if w != nil {
 		d.UseBranchState(w.BranchState)
 		ws = w
 	}
@@ -43,7 +50,7 @@ func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.
 		ex.Rules = &session.AllowRules{Hosts: d.RuleHosts, Repos: parts.repos, Audit: audit}
 	}
 	srv.UseViews(recaps, ws, session.NewExceptions(ex))
-	vc := session.ViewedConfig{Store: state.NewViewed(cfg.StateDir), Targets: d.PushTarget, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Logger: logger}
+	vc := session.ViewedConfig{Store: state.NewViewed(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Logger: logger}
 	if parts.repos != nil {
 		vc.Main = parts.repos.Main
 	}

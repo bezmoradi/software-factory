@@ -21,7 +21,7 @@ const FIXED: { what: string; why: string; claude?: boolean }[] = [
   { what: 'Reach a built-in git host or one on the deny list', why: 'Egress always refuses GitHub, githubusercontent.com, GitLab, Bitbucket and the hosts on its deny list. Another git host you add under Network access is reachable like any allowed host.' },
   { what: 'Get the git host token', why: 'The token stays in the engine and never reaches the session’s container; the engine pushes with it, only through the gate. The agent can read its own container’s sign-in, a key you pasted for it included.' },
   { what: 'Run a push-shaped command', why: 'Claude Code’s plugin refuses it and tells the agent to call factory_push.', claude: true },
-  { what: 'Hand the work to a vendor’s cloud', why: 'Commands such as claude --remote and codex cloud are refused, as the agent typed them; a script that runs one gets past this.', claude: true },
+  { what: 'Hand the work to a vendor’s cloud', why: 'Commands such as claude --remote are refused, as the agent typed them; a script that runs one gets past this.', claude: true },
   { what: 'Reach another session', why: 'Each session’s container has its own network, home and workspace folder, and the engine ties every connection to one container.' },
   { what: 'Decide for you', why: 'Nothing from the session’s container counts as an answer to a card, a verdict or a push.' },
 ]
@@ -221,7 +221,8 @@ class SfRules extends HTMLElement {
     for (const i of mine.slice(0, 10)) {
       const li = el('li', 'small')
       const at = Number(i.time) || 0
-      li.append(el('strong', '', KIND[text(i.kind)] ?? visible(text(i.kind))), ' ', el('span', 'muted', at ? new Date(at).toLocaleString() : ''), text(i.reason) ? el('span', '', ` · “${visible(text(i.reason))}”`) : '')
+      const freed = text(i.kind) === 'cap-answer' && text(i.verdict) === 'freed'
+      li.append(el('strong', '', freed ? 'Disk cap cleared by the engine’s measurement' : KIND[text(i.kind)] ?? visible(text(i.kind))), ' ', el('span', 'muted', at ? new Date(at).toLocaleString() : ''), text(i.reason) ? el('span', '', ` · “${visible(text(i.reason))}”`) : '')
       ul.append(li)
     }
     if (mine.length > 10) ul.append(el('li', 'small muted', `And ${mine.length - 10} more in the register.`))

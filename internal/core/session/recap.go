@@ -23,7 +23,7 @@ const (
 var (
 	recapReviewer = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:._-]{0,99}$`)
 	recapBranch   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9/._-]{0,99}$`)
-	capNames      = map[string]string{CapMoney: "spending", CapTime: "time", CapTurns: "turn"}
+	capNames      = map[string]string{CapMoney: "spending", CapTime: "time", CapTurns: "turn", CapDisk: "disk"}
 	recapCommit   = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 )
 
@@ -58,6 +58,8 @@ type RecapsConfig struct {
 	Audit   AuditAll
 	Store   RecapSeenStore
 	Targets func(sid string) (PushTarget, bool)
+	Doubled func(sid string) bool
+	Held    func(sid string) (PushTarget, bool)
 	Waiting func(sid string) int
 	Now     func() time.Time
 	Logger  shared.Logger
@@ -104,14 +106,17 @@ func (r *Recaps) target(sid string) (PushTarget, error) {
 	if r.cfg.Targets == nil {
 		return PushTarget{}, explained(conflict("not started here"), "Only a session this engine started has a recap.")
 	}
-	t, ok := r.cfg.Targets(sid)
+	t, ok := targetOrHeld(r.cfg.Targets, r.cfg.Held, sid)
 	if !ok {
-		return PushTarget{}, explained(conflict("not started here"), "Only a session this engine started has a recap.")
+		return PushTarget{}, notStartedHere(r.cfg.Doubled, sid, "Only a session this engine started has a recap.")
 	}
 	return t, nil
 }
 
 func (r *Recaps) Seen(sid string) error {
+	if err := heldBranch(r.cfg.Doubled, sid); err != nil {
+		return err
+	}
 	if _, err := r.target(sid); err != nil {
 		return err
 	}
@@ -244,7 +249,7 @@ func capKind(e AuditEntry) string {
 }
 
 func capAnswer(e AuditEntry) string {
-	if e.Verdict == CapRaised || e.Verdict == CapStopped {
+	if e.Verdict == CapRaised || e.Verdict == CapStopped || e.Verdict == CapFreed {
 		return e.Verdict
 	}
 	return ""
@@ -300,6 +305,11 @@ func recapText(e AuditEntry) (string, string) {
 		return "approval", "You approved the requirements."
 	case AuditApprovePlan:
 		return "approval", "You approved the plan."
+	case AuditHomeSettings:
+		if e.Result == ResultRefused {
+			return "approval", "You didn't wake the session after the agent's user settings changed."
+		}
+		return "approval", "You approved the agent's changed user settings before a wake."
 	case AuditCapReached:
 		if k := capKind(e); k != "" {
 			return "cap", "The session reached its " + capNames[k] + " cap."
@@ -315,6 +325,8 @@ func recapText(e AuditEntry) (string, string) {
 			return "cap", "You raised " + which + "."
 		case CapStopped:
 			return "cap", "You stopped the session at " + which + "."
+		case CapFreed:
+			return "cap", "The engine measured the session's folder under " + which + " again, so the session can go on."
 		}
 		return "cap", "You answered the card for " + which + "."
 	case AuditUsageAnswer:

@@ -14,10 +14,14 @@ import (
 
 const DefaultAgentsDir = "/opt/software-factory/agents"
 
+const devKnackpackURL = "SF_DEV_KNACKPACK_URL"
+
 type InstallConfig struct {
-	Dir      string
-	Registry string
-	AtStart  bool
+	Dir          string
+	Registry     string
+	AtStart      bool
+	DevKnackpack string
+	DevGitCA     string
 }
 
 func parseInstall(getenv func(string) string) (InstallConfig, error) {
@@ -34,6 +38,7 @@ func parseInstall(getenv func(string) string) (InstallConfig, error) {
 	if v := getenv("SF_NPM_REGISTRY"); v != "" {
 		cfg.Registry = v
 	}
+	cfg.DevKnackpack, cfg.DevGitCA = getenv(devKnackpackURL), getenv("SF_DEV_GIT_CA")
 	switch v := getenv("SF_AGENTS_INSTALL"); v {
 	case "", "start":
 	case "manual":
@@ -69,10 +74,10 @@ func InstallAgents(ctx context.Context, args []string, logger shared.Logger) err
 	}
 	say := func(s string) { _, _ = fmt.Fprintln(os.Stdout, s) }
 	known := inst.Agents()
-	pinned := pins.List()
+	tracked := pins.List()
 	for _, id := range args {
-		if !slices.ContainsFunc(known, func(a npm.Agent) bool { return a.ID == id }) && !slices.ContainsFunc(pinned, func(p npm.Plugin) bool { return p.ID == id }) {
-			return fmt.Errorf("install-agents: no pinned agent or plugin %q", id)
+		if !slices.ContainsFunc(known, func(a npm.Agent) bool { return a.ID == id }) && !slices.ContainsFunc(tracked, func(p npm.Tracked) bool { return p.ID == id }) {
+			return fmt.Errorf("install-agents: no pinned agent or tracked plugin %q", id)
 		}
 	}
 	var errs []error
@@ -95,20 +100,28 @@ func InstallAgents(ctx context.Context, args []string, logger shared.Logger) err
 		}
 		say(fmt.Sprintf("%s %s is installed.", a.Name, a.Version))
 	}
-	for _, p := range pinned {
+	for _, p := range tracked {
 		if len(args) > 0 && !slices.Contains(args, p.ID) {
 			continue
 		}
-		if len(args) == 0 && pins.Installed(p.ID) {
-			say(fmt.Sprintf("%s %s is installed at commit %s.", p.Name, p.Version, p.Commit))
-			continue
-		}
-		if err := pins.Install(ctx, p.ID, say); err != nil {
+		check, err := pins.Update(ctx, p.ID, say)
+		cur, ok := pins.Current(p.ID)
+		switch {
+		case ok && cur.Failing != "":
+			say(fmt.Sprintf("Not used: %s %s at commit %s doesn't pass this engine's install checks, so reviews and new sessions don't use it: %s Run install-agents again once the head of %s passes them. %s", p.Name, cur.Version, cur.Commit, cur.Failing, p.Branch, check.Problem))
+			errs = append(errs, fmt.Errorf("%s: the installed commit %s fails the install checks", p.Name, cur.Commit))
+		case ok && cur.Refused:
+			say(fmt.Sprintf("Refused %s %s at commit %s: this engine's list of refused knackpack commits names it, so reviews and new sessions don't use it. %s", p.Name, cur.Version, cur.Commit, check.Problem))
+			errs = append(errs, fmt.Errorf("%s: the installed commit %s is refused", p.Name, cur.Commit))
+		case err != nil && ok:
+			say(fmt.Sprintf("Kept %s %s at commit %s: %s", p.Name, cur.Version, cur.Commit, check.Problem))
+			errs = append(errs, err)
+		case err != nil:
 			say(err.Error())
 			errs = append(errs, err)
-			continue
+		default:
+			say(fmt.Sprintf("%s %s at %s, the head of its %s branch.", p.Name, cur.Version, cur.Commit, p.Branch))
 		}
-		say(fmt.Sprintf("%s %s is installed at commit %s.", p.Name, p.Version, p.Commit))
 	}
 	return errors.Join(errs...)
 }

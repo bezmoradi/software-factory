@@ -24,12 +24,9 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 	}
 	defer d.release(r)
 	d.mu.Lock()
-	running, handed := r.running, r.handedTo != "" || r.handing
+	running := r.running
 	d.mu.Unlock()
-	switch {
-	case handed:
-		return "", explained(conflict("handed over"), handedMessage)
-	case !running:
+	if !running {
 		return "", explained(conflict("not running"), "The session isn't running. Wake it, then bring in the latest main.")
 	}
 	if why := d.reg.halt.turns(); why != "" {

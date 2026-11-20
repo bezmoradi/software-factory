@@ -16,3 +16,11 @@ condition = "AND"
 paths = ['''^(\./)?compose\.dev\.yaml$''']
 regexTarget = "line"
 regexes = ['''(?m)^[ \t]*GITSERVER_TOKEN:[ \t]*sf-dev-gitserver-token[ \t]*$''']
+
+[[allowlists]]
+description = "proctor/specs/packs.yaml's table rows: a case name, then the 40-character git commit of the dev git server's fixture pack"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^(\./)?proctor/specs/packs\.yaml$''']
+regexTarget = "line"
+regexes = ['''(?m)^[ \t]*- \["pck_[a-z_]+", "[0-9a-f]{40}", "The engine refused this pack: ''']

@@ -161,10 +161,20 @@ type pinJSON struct {
 }
 
 type pluginPinJSON struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Commit  string `json:"commit"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Branch      string `json:"branch"`
+	Version     string `json:"version"`
+	Commit      string `json:"commit"`
+	Refused     bool   `json:"refused,omitempty"`
+	RefusedWhy  string `json:"refusedWhy,omitempty"`
+	InstalledAt int64  `json:"installedAt"`
+	CheckedAt   int64  `json:"checkedAt"`
+	Check       string `json:"check"`
+	Head        string `json:"head,omitempty"`
+	From        string `json:"from,omitempty"`
+	Problem     string `json:"problem,omitempty"`
 }
 
 type advisoryJSON struct {
@@ -204,7 +214,8 @@ func agentReportOf(v session.AgentReport) agentReportJSON {
 		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note})
 	}
 	for _, p := range v.Plugins {
-		out.Plugins = append(out.Plugins, pluginPinJSON{ID: p.ID, Name: p.Name, Version: p.Version, Commit: p.Commit})
+		out.Plugins = append(out.Plugins, pluginPinJSON{ID: p.ID, Name: p.Name, Source: p.Source, Branch: p.Branch, Version: p.Version, Commit: p.Commit, Refused: p.Refused, RefusedWhy: p.RefusedWhy,
+			InstalledAt: millis(p.InstalledAt), CheckedAt: millis(p.CheckedAt), Check: p.CheckResult, Head: p.CheckHead, From: p.CheckFrom, Problem: p.Problem})
 	}
 	for _, a := range v.Advisories.Found {
 		out.Advisories.Found = append(out.Advisories.Found, advisoryJSON{Label: a.Label, ID: a.ID, Summary: a.Summary, Aliases: nonNil(a.Aliases), Link: a.Link})

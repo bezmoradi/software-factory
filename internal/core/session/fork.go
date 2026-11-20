@@ -15,10 +15,8 @@ import (
 const (
 	MaxStartBranches = 300
 	MaxStartPulls    = 100
-	MaxStints        = 20
 	maxPullTitle     = 200
 	OriginMain       = "main"
-	OriginHandover   = "hand-over"
 )
 
 type StartFrom struct {
@@ -82,21 +80,10 @@ type StartPoints struct {
 	PullsWhy string
 }
 
-type Stint struct {
-	Agent string
-	SID   string
-	Name  string
-	From  string
-	To    string
-}
-
 type Lineage struct {
-	Branch   string
-	Origin   string
-	From     string
-	Earlier  []Stint
-	HandedTo string
-	Last     string
+	Branch string
+	Origin string
+	From   string
 
 	Group     string
 	GroupKind string
@@ -104,7 +91,6 @@ type Lineage struct {
 
 type BranchPage interface {
 	StartPoints(ctx context.Context, path string) (StartPoints, error)
-	Handover(ctx context.Context, sid, agent string, consent Consent) (Started, error)
 	BringMain(ctx context.Context, sid string) (string, error)
 }
 
@@ -117,17 +103,16 @@ func (d *Dispatcher) UseForges(f *Forges) {
 }
 
 func lineageOf(r *run) *Lineage {
-	if (r.origin == "" || r.origin == OriginMain) && len(r.earlier) == 0 && r.handedTo == "" && r.group == "" {
+	if (r.origin == "" || r.origin == OriginMain) && r.group == "" {
 		return nil
 	}
-	return &Lineage{Branch: r.branch, Origin: r.origin, From: r.base, Earlier: slices.Clone(r.earlier), HandedTo: r.handedTo, Last: r.handedHead,
-		Group: r.group, GroupKind: r.groupKind}
+	return &Lineage{Branch: r.branch, Origin: r.origin, From: r.base, Group: r.group, GroupKind: r.groupKind}
 }
 
 func checkStartFrom(q Dispatch) error {
 	n := q.From.chosen()
 	switch {
-	case n > 1 || n == 1 && q.Continues != nil:
+	case n > 1:
 		return explained(invalid("from"), "Start from one place: main, a branch, a pull request or a session's commit.")
 	case q.From.Branch != "" && !push.ValidBranch(q.From.Branch):
 		return explained(invalid("from"), "That isn't a branch name the engine accepts.")
@@ -141,16 +126,13 @@ func checkStartFrom(q Dispatch) error {
 		return explained(invalid("from"), "That isn't a commit: choose one of the session's commits again.")
 	case q.From.Commit != "" && q.From.Branch == "" && q.From.Pull == 0 && q.From.SID == "":
 		return explained(invalid("from"), "A commit goes only with a branch, a pull request or a session.")
-	case q.Continues != nil && (!sessionBranch.MatchString(q.Continues.Branch) || !sha1Hex.MatchString(q.Continues.Head) || len(q.Continues.Earlier) > MaxStints):
-		return explained(invalid("continues"), "That branch can't be continued here.")
 	}
 	return nil
 }
 
 type startPoint struct {
-	commit  string
-	origin  string
-	earlier []Stint
+	commit string
+	origin string
 }
 
 func (d *Dispatcher) sources() (StartSources, bool) {
@@ -162,8 +144,6 @@ func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, m
 	switch {
 	case q.pinned != nil:
 		return *q.pinned, nil
-	case q.Continues != nil:
-		return startPoint{commit: q.Continues.Head, origin: OriginHandover, earlier: slices.Clone(q.Continues.Earlier)}, nil
 	case q.From.SID != "":
 		return d.forkPoint(ctx, repo, q.From.SID, q.From.Commit)
 	case q.From.Branch != "":

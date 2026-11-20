@@ -43,6 +43,7 @@ const (
 	MaxUnverified    = 20
 	MaxObservations  = 1000
 	maxRemembered    = 1000
+	DevCheckVariable = "SF_DEV_CHECK_KEY"
 )
 
 type Fields = map[string]any
@@ -68,6 +69,7 @@ type Admission struct {
 	Lineage   *Lineage
 	Box       string
 	Branch    string
+	Doubled   bool
 }
 
 type Registration struct {
@@ -150,7 +152,9 @@ type Info struct {
 	Splits       []SplitView
 	Box          string
 	SignInWait   bool
+	HomeHeld     bool
 	Branch       string
+	Doubled      bool
 }
 
 type conn struct {
@@ -175,10 +179,16 @@ type conn struct {
 	bridged    bool
 }
 
+type checker struct {
+	sid string
+	box string
+}
+
 type admitted struct {
 	Admission
 	running      bool
 	waitSignIn   bool
+	homeHeld     bool
 	observations []level.Observation
 	review       *ReviewView
 	push         *PushView
@@ -203,6 +213,7 @@ type Registry struct {
 	now         func() time.Time
 	version     string
 	conns       map[string]*conn
+	checkers    map[string]checker
 	cards       map[string]*card
 	admitted    map[string]*admitted
 	lastMode    map[string]string
@@ -258,7 +269,7 @@ var forwarded = map[string]bool{
 	"prompt": true, "command": true, "text": true, "tool": true, "tool_done": true, "busy": true, "idle": true,
 	"ask": true, "permission": true, "plan": true, "resolved": true, "ended": true, "agents": true, "catalog": true,
 	"control": true, "mode": true, "login": true, "usage": true, "compact": true, "context": true,
-	"workflow": true, "notice": true,
+	"workflow": true,
 }
 
 func New(version string, now func() time.Time) *Registry {
@@ -269,6 +280,7 @@ func New(version string, now func() time.Time) *Registry {
 		now:         now,
 		version:     version,
 		conns:       map[string]*conn{},
+		checkers:    map[string]checker{},
 		cards:       map[string]*card{},
 		admitted:    map[string]*admitted{},
 		lastMode:    map[string]string{},
@@ -837,6 +849,15 @@ func (r *Registry) WaitSignIn(sid string, on bool) {
 	}
 }
 
+func (r *Registry) HoldHome(sid string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a != nil && a.homeHeld != on {
+		a.homeHeld = on
+		r.announce(r.now())
+	}
+}
+
 func (r *Registry) CheckPassed() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -866,6 +887,7 @@ func (r *Registry) Forget(sid string) {
 	}
 	box := r.admitted[sid].Box
 	delete(r.admitted, sid)
+	r.dropCheckers(func(c checker) bool { return c.sid == sid })
 	for key, c := range r.conns {
 		if c.sid != sid {
 			continue
@@ -897,6 +919,7 @@ func (r *Registry) Forget(sid string) {
 }
 
 func (r *Registry) dropOtherBoxes(sid, box string) {
+	r.dropCheckers(func(c checker) bool { return c.sid == sid && c.box != box })
 	for key, c := range r.conns {
 		if c.sid != sid || c.box == box {
 			continue
@@ -926,6 +949,9 @@ func (r *Registry) FromBox(given, push, box string) error {
 		if c := r.conns[given]; c != nil && !fits(c) {
 			return unauthorized()
 		}
+		if c, ok := r.checkers[given]; ok && c.box != box {
+			return unauthorized()
+		}
 	}
 	if len(push) == 43 {
 		for _, c := range r.conns {
@@ -943,6 +969,7 @@ func (r *Registry) DropBox(box string) int {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.dropCheckers(func(c checker) bool { return c.box == box })
 	n := 0
 	for key, c := range r.conns {
 		if c.box != box {
@@ -1041,6 +1068,7 @@ func (r *Registry) Ended(sid string, lost bool) {
 		return
 	}
 	a.running = false
+	r.dropCheckers(func(c checker) bool { return c.sid == sid })
 	r.endTurnLocked(a)
 	event := level.ProcessEnded
 	if lost {
@@ -1213,7 +1241,8 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
 		info.Lineage = a.Lineage
-		info.Box, info.SignInWait, info.Branch = a.Box, a.waitSignIn && !a.running, a.Branch
+		info.Box, info.SignInWait, info.Branch, info.Doubled = a.Box, a.waitSignIn && !a.running, a.Branch, a.Doubled
+		info.HomeHeld = a.homeHeld && !a.running
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v
@@ -1581,17 +1610,62 @@ func (r *Registry) sweep(now time.Time) {
 }
 
 func (r *Registry) Checking(given string) (string, error) {
+	return r.checking(given, false)
+}
+
+func (r *Registry) ToolChecking(given string) (string, error) {
+	return r.checking(given, true)
+}
+
+func (r *Registry) checking(given string, checkOnly bool) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	c := r.connOf(given, now)
-	if c == nil {
+	sid := ""
+	if c := r.connOf(given, now); c != nil {
+		sid = c.sid
+	} else if ch, ok := r.checkerOf(given); ok && checkOnly {
+		sid = ch.sid
+	} else {
 		return "", unauthorized()
 	}
-	if r.disputed(c.sid, now) {
+	if r.disputed(sid, now) {
 		return "", conflict("disputed")
 	}
-	return c.sid, nil
+	return sid, nil
+}
+
+func (r *Registry) CheckOnly(sid, box string) string {
+	if !ValidBox(box) {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a == nil || !a.running || a.Box != box {
+		return ""
+	}
+	r.dropCheckers(func(c checker) bool { return c.sid == sid })
+	key := secret()
+	r.checkers[key] = checker{sid: sid, box: box}
+	return key
+}
+
+func (r *Registry) checkerOf(given string) (checker, bool) {
+	if len(given) != 43 {
+		return checker{}, false
+	}
+	c, ok := r.checkers[given]
+	if !ok {
+		return checker{}, false
+	}
+	if a := r.admitted[c.sid]; a == nil || !a.running || a.Box != c.box {
+		return checker{}, false
+	}
+	return c, true
+}
+
+func (r *Registry) dropCheckers(drop func(checker) bool) {
+	maps.DeleteFunc(r.checkers, func(_ string, c checker) bool { return drop(c) })
 }
 
 func (r *Registry) Leave(given string) {

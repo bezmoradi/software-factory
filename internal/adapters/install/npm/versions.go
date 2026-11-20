@@ -3,7 +3,6 @@ package npm
 type Package struct {
 	Name      string
 	Version   string
-	Folder    string
 	Integrity string
 }
 
@@ -41,43 +40,19 @@ var Pinned = []Agent{
 			},
 		},
 	},
-	{
-		ID: "codex", Name: "Codex CLI", Version: "0.167.1", Command: "codex",
-		Source: Source{Repository: "https://github.com/openai/codex", Workflow: ".github/workflows/rust-release.yml", Ref: "refs/tags/rust-v0.167.1"},
-		Builds: map[string]Build{
-			"amd64": {
-				Packages: []Package{
-					{Name: "@openai/codex", Version: "0.167.1", Integrity: "sha512-39uApTRT9bkhE8tMXTIfZxaZ27oi7hPqWoF2Coyp+iQFAD3NVHgH838IYVUfJaX85leMSP2s4JOmVw0mMSCN5Q=="},
-					{Name: "@openai/codex", Version: "0.167.1-linux-x64", Folder: "@openai/codex-linux-x64", Integrity: "sha512-qZteglyvMCj1QVymMyPyKdtw38HaXCv5gvw8WN+N0+JJstu3k/d8xiYj9ciL7OwFLhcujgP8bCGJgaREeqrHkw=="},
-				},
-				Bin: "node_modules/@openai/codex/bin/codex.js",
-			},
-			"arm64": {
-				Packages: []Package{
-					{Name: "@openai/codex", Version: "0.167.1", Integrity: "sha512-39uApTRT9bkhE8tMXTIfZxaZ27oi7hPqWoF2Coyp+iQFAD3NVHgH838IYVUfJaX85leMSP2s4JOmVw0mMSCN5Q=="},
-					{Name: "@openai/codex", Version: "0.167.1-linux-arm64", Folder: "@openai/codex-linux-arm64", Integrity: "sha512-z13jj4X4GDk7CTd1kXHkhXC8Gj8zomd1jYsU2//0KjevbLelPxowWLSTqIcR1rarJCtzveBHsS8gR7B9pAWB0g=="},
-				},
-				Bin: "node_modules/@openai/codex/bin/codex.js",
-			},
-		},
-	},
 }
 
-const (
-	MinimumReviewerClaudeCode = ""
-	MinimumReviewerKnackpack  = ""
-)
+const MinimumReviewerClaudeCode = ""
 
-type Plugin struct {
-	ID       string
-	Name     string
-	Version  string
-	URL      string
-	Commit   string
-	Manifest string
+type Tracked struct {
+	ID      string
+	Name    string
+	URL     string
+	Branch  string
+	Floor   string
+	Refused []string
 }
 
-var PinnedPlugins = []Plugin{
-	{ID: "knackpack", Name: "knackpack", Version: "0.26.0", URL: "https://github.com/bezmoradi/knackpack.git", Commit: "7a501d3f1296f632b4cbd7ab825174c1e48daf93"},
-	{ID: "spec-kit", Name: "specify-cli", Version: "1.4.0", URL: "https://github.com/github/spec-kit.git", Commit: "0019fa14d12f45edabc2cc3176c9168a68bd0f97", Manifest: PyProject},
-}
+var RefusedKnackpack = []string{}
+
+var Knackpack = Tracked{ID: "knackpack", Name: "knackpack", URL: "https://github.com/bezmoradi/knackpack.git", Branch: "main", Floor: "0.26.0", Refused: RefusedKnackpack}

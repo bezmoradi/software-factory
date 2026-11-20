@@ -49,6 +49,8 @@ type HaltConfig struct {
 	Store   HaltStore
 	Audit   Audit
 	Targets func(sid string) (PushTarget, bool)
+	Doubled func(sid string) bool
+	Known   func(sid string) bool
 	Stopper HaltStopper
 	Resume  func(ctx context.Context) int
 	Logger  shared.Logger
@@ -64,6 +66,20 @@ type Halt struct {
 	away    map[string]bool
 	now     func() time.Time
 	notify  func(Fields)
+	onStop  []func()
+	onFree  []func()
+}
+
+func (h *Halt) OnRelease(fn func()) {
+	h.mu.Lock()
+	h.onFree = append(h.onFree, fn)
+	h.mu.Unlock()
+}
+
+func (h *Halt) OnStopAll(fn func()) {
+	h.mu.Lock()
+	h.onStop = append(h.onStop, fn)
+	h.mu.Unlock()
 }
 
 func newHalt(now func() time.Time, notify func(Fields)) *Halt {
@@ -194,7 +210,11 @@ func (h *Halt) StopAll() error {
 		h.mode, h.since = HaltStopped, h.now()
 	}
 	cfg := h.cfg
+	stops := slices.Clone(h.onStop)
 	h.mu.Unlock()
+	for _, fn := range stops {
+		fn()
+	}
 	err := h.save()
 	h.audit(AuditEntry{Kind: AuditHalt, Result: HaltStopped, Reason: "the developer pressed Stop everything: every running turn is interrupted and every session stopped, every push is held and no session starts or wakes until Release"})
 	h.show()
@@ -232,7 +252,13 @@ func (h *Halt) Release() error {
 	}
 	h.mode, h.since = HaltOff, time.Time{}
 	cfg := h.cfg
+	frees := slices.Clone(h.onFree)
 	h.mu.Unlock()
+	defer func() {
+		for _, fn := range frees {
+			fn()
+		}
+	}()
 	err := h.save()
 	what := "Pause all"
 	if was == HaltStopped {
@@ -253,6 +279,15 @@ func (h *Halt) Release() error {
 func (h *Halt) SetAway(sid string, on bool) error {
 	if sid != "" && !sidPattern.MatchString(sid) {
 		return invalid("sid")
+	}
+	h.mu.Lock()
+	doubled, known := h.cfg.Doubled, h.cfg.Known
+	h.mu.Unlock()
+	if on && sid != "" && known != nil && !known(sid) {
+		return notStartedHere(doubled, sid, "Only a session this engine started can have away mode of its own.")
+	}
+	if err := heldBranch(doubled, sid); err != nil {
+		return err
 	}
 	h.mu.Lock()
 	changed := false

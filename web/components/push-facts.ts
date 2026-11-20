@@ -1,5 +1,7 @@
 import { el, unspoofed, visible } from '../lib/dom.ts'
-import type { AgentCheck, DependencyChange, PushExtra, SessionPush, WorkflowRun } from '../types.ts'
+import { shortSha } from '../lib/format.ts'
+import { isRecord } from '../lib/json.ts'
+import type { AgentCheck, DependencyChange, LockedTests, PushExtra, SessionPush, TypeChange, TypeLine, WorkflowRun } from '../types.ts'
 
 const KINDS: Record<string, string> = { test: 'Tests', lint: 'Lint', 'type-check': 'Type check', build: 'Build' }
 const ECOSYSTEMS: Record<string, string> = { go: 'Go', npm: 'npm', pypi: 'PyPI', crates: 'crates.io' }
@@ -75,14 +77,80 @@ function workflow(w: WorkflowRun): HTMLElement {
   return li
 }
 
-function checks(p: SessionPush, all: AgentCheck[]): HTMLElement | null {
-  const before = all.filter(c => !p.at || c.at <= p.at)
-  if (!before.length) return null
-  return section('Checks the agent ran before this, reported by the agent:', list(before.map(c => item(c.ok ? '' : 'warn', `${KINDS[c.kind] ?? text(c.kind)}: `, code(c.command), ` ${c.ok ? 'finished without an error' : 'failed or was refused'}`))))
+const HIDDEN: Record<string, string> = {
+  pipe: 'result unknown: its exit status is that of the command its output was piped into, and it doesn\'t set pipefail',
+  or: 'result unknown: it ends in || and a command that isn\'t a check, such as || true or || echo failed, so its exit status is that command\'s',
+  background: 'result unknown: it ran in the background, so the call returned before the check finished',
+}
+
+function result(c: AgentCheck): string {
+  if (c.hidden) return HIDDEN[c.hidden] ?? 'result unknown: its exit status isn\'t the check\'s own'
+  return c.ok ? 'finished without an error' : 'failed or was refused'
+}
+
+function ranCheck(p: SessionPush, c: AgentCheck): HTMLElement {
+  const stale = !!c.editedAt && (!p.at || c.editedAt <= p.at)
+  const li = item(c.ok && !c.hidden && !stale ? '' : 'warn', `${KINDS[c.kind] ?? text(c.kind)}: `, code(c.command), ` ${result(c)}`)
+  if (stale) li.append(' ', tag('the agent edited files after it ran', 'warn'))
+  return li
+}
+
+function checks(p: SessionPush, all: AgentCheck[]): HTMLElement {
+  const before = p.checks ?? all.filter(c => !p.at || c.at <= p.at)
+  const rows = before.map(c => ranCheck(p, c))
+  const missing = Object.keys(KINDS).filter(k => !before.some(c => c.kind === k))
+  if (missing.length) rows.push(item('muted', `Not reported: ${missing.map(k => KINDS[k]).join(', ')}`))
+  return section('Checks the agent ran before this, reported by the agent:', list(rows))
+}
+
+function lockedTests(l: LockedTests): HTMLElement[] {
+  if (l.problem) return [el('p', 'small warn', `${text(l.problem.charAt(0).toUpperCase() + l.problem.slice(1))}.`)]
+  if (!l.count) return []
+  const rows = l.paths.map(p => item('warn', code(p)))
+  if (l.count > l.paths.length) rows.push(item('muted', `and ${l.count - l.paths.length} more`))
+  return [section(`Locked tests changed since ${shortSha(l.commit)}: ${l.count}`, el('p', 'small muted', 'Changed, deleted or moved away from their path since you locked them, however the change was made. A new test file doesn\'t count.'), list(rows))]
+}
+
+function stringOf(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function typeLineOf(v: unknown): TypeLine | null {
+  if (!isRecord(v) || typeof v.what !== 'string' || !Array.isArray(v.files)) return null
+  const files = v.files.filter(isRecord).filter(f => typeof f.path === 'string').map(f => ({ path: stringOf(f.path), what: stringOf(f.what) }))
+  return { what: v.what, files, more: Math.max(0, Number(v.more) || 0) }
+}
+
+export function typeChangeOf(v: unknown): TypeChange | null {
+  if (!isRecord(v) || typeof v.type !== 'string' || !Array.isArray(v.lines)) return null
+  const lines = v.lines.map(typeLineOf).filter((l): l is TypeLine => l !== null)
+  return lines.length ? { type: v.type, lines } : null
+}
+
+function capital(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+export function typeChangeParts(t: TypeChange): HTMLElement[] {
+  const parts: HTMLElement[] = [el('p', 'small muted', `This session's work type, as set on the page: ${text(t.type)}. The files come from the engine's own reading of the commits. These lines don't hold or allow the push themselves.`)]
+  for (const l of t.lines) {
+    parts.push(el('p', 'small warn', `${text(capital(l.what))}.`))
+    const rows = l.files.map(f => item('warn', code(f.path), ...(f.what ? [`: ${text(f.what)}`] : [])))
+    if (l.more) rows.push(item('muted', `and ${l.more} more`))
+    if (rows.length) parts.push(list(rows))
+  }
+  return parts
+}
+
+function typeChangePart(t: TypeChange): HTMLElement {
+  const box = el('div', 'push-facts-part')
+  box.append(el('p', 'small', 'The change and its work type'), ...typeChangeParts(t))
+  return box
 }
 
 function extraParts(x: PushExtra): HTMLElement[] {
   const parts: HTMLElement[] = []
+  if (x.locked) parts.push(...lockedTests(x.locked))
   if (x.tests.length) parts.push(section('Tests, suppressions and files run later:', list(x.tests.map(n => item('warn', code(n.path), `: ${text(n.what)}`)))))
   if (x.dependencies.length) {
     const rows = x.dependencies.map(d => dependency(d, x.lookup))
@@ -104,14 +172,14 @@ function extraParts(x: PushExtra): HTMLElement[] {
   return parts
 }
 
-export function changeFacts(p: SessionPush, all: AgentCheck[]): HTMLElement | null {
+export function changeFacts(p: SessionPush, all: AgentCheck[], typed: TypeChange | null = null): HTMLElement | null {
   if (!p.commit || !p.result) return null
   const x = p.extra && p.extra.commit === p.commit ? p.extra : null
   const parts: HTMLElement[] = []
+  if (typed) parts.push(typeChangePart(typed))
   if (x) parts.push(...extraParts(x))
   else parts.push(el('p', 'small muted', 'Reading the change for tests, dependencies, file kinds and workflows…'))
-  const ran = checks(p, all)
-  if (ran) parts.push(ran)
+  parts.push(checks(p, all))
   const box = el('div', 'push-facts')
   box.append(el('p', 'small', 'About this change'), el('p', 'small muted', 'Facts the engine read from the commit, for you to check. None of them holds or allows the push.'), ...parts)
   return box

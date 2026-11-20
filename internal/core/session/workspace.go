@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"slices"
 	"sync"
@@ -15,6 +16,7 @@ const (
 	LowSpaceBytes   = 2 << 30
 	LowSpacePercent = 5
 	MaxTreeEntries  = 200_000
+	MaxBoxEntries   = MaxTreeEntries * 5
 	TreeSizeFor     = 5 * time.Second
 	treeSizeKept    = 2 * time.Minute
 	maxTreeSizes    = 500
@@ -42,6 +44,7 @@ type TreeSize struct {
 
 type TreeSizes interface {
 	Size(ctx context.Context, workspace, box, tree string, maxEntries int) (TreeSize, error)
+	BoxSize(ctx context.Context, workspace, box string, maxEntries int) (TreeSize, error)
 }
 
 type WorkspaceSession struct {
@@ -253,6 +256,9 @@ func (w *Workspace) size(ctx context.Context, box, tree string) (TreeSize, bool)
 	}
 	w.walk.Lock()
 	defer w.walk.Unlock()
+	if ctx.Err() != nil {
+		return TreeSize{}, false
+	}
 	one, cancel := context.WithTimeout(ctx, TreeSizeFor)
 	defer cancel()
 	size, err := w.cfg.Sizes.Size(one, w.cfg.Dir, box, tree, MaxTreeEntries)
@@ -266,6 +272,20 @@ func (w *Workspace) size(ctx context.Context, box, tree string) (TreeSize, bool)
 	w.sizes[key] = keptSize{size: size, at: now}
 	w.mu.Unlock()
 	return size, true
+}
+
+var errNoBoxSize = errors.New("the engine can't measure this session's folder")
+
+func (w *Workspace) BoxSize(ctx context.Context, box string) (TreeSize, error) {
+	if w.cfg.Sizes == nil || w.cfg.Dir == "" || !ValidBox(box) {
+		return TreeSize{}, errNoBoxSize
+	}
+	w.walk.Lock()
+	defer w.walk.Unlock()
+	if err := ctx.Err(); err != nil {
+		return TreeSize{}, err
+	}
+	return w.cfg.Sizes.BoxSize(ctx, w.cfg.Dir, box, MaxBoxEntries)
 }
 
 func (w *Workspace) DeleteSession(ctx context.Context, sid string, offer *Offer) (*Offer, error) {

@@ -104,7 +104,7 @@ export function controllable(s: Session) {
 
 export function sleeping(s: Session | null) {
   const i = s?.info
-  return !!i && i.kind === 'background' && i.verified === true && !i.running && !i.live && /^[0-9a-f]{8}$/.test(i.id || '')
+  return !!i && i.kind === 'background' && i.verified === true && !i.doubled && !i.running && !i.live && /^[0-9a-f]{8}$/.test(i.id || '')
 }
 
 export function current(): Session | null {

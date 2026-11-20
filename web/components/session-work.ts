@@ -1,18 +1,13 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { shortSha } from '../lib/format.ts'
 import { isRecord } from '../lib/json.ts'
+import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
+import { typeChangeOf, typeChangeParts } from './push-facts.ts'
 
 export interface AgentModel {
   id: string
   name: string
-  efforts: string[]
-  defaultEffort: string
-  default: boolean
-}
-
-export interface AgentModels {
-  models: AgentModel[]
-  known: boolean
   efforts: string[]
 }
 
@@ -37,7 +32,7 @@ interface Queued {
 
 interface WorkView {
   agent: string
-  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[]; known: boolean }
+  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[] }
   queue: { items: Queued[]; stopped: string; waiting: string; sending: boolean; max: number }
   check: CommandRun | null
   setup: CommandRun | null
@@ -49,25 +44,17 @@ interface WorkView {
 export interface SessionWorkTarget {
   sid: string
   disabled: boolean
+  reason?: string
 }
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-const FALLBACK_EFFORTS = ['low', 'medium', 'high']
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
 function modelsOf(v: unknown): AgentModel[] {
-  return Array.isArray(v) ? v.filter(isRecord).filter(m => typeof m.id === 'string' && typeof m.name === 'string').map(m => ({ id: m.id as string, name: m.name as string, efforts: strings(m.efforts), defaultEffort: typeof m.defaultEffort === 'string' ? m.defaultEffort : '', default: m.default === true })) : []
-}
-
-export async function agentModels(agent: string): Promise<AgentModels | null> {
-  const res = await api('/api/agent-models', { op: 'read', agent }).catch(() => null)
-  if (!res || !res.ok) return null
-  const body = await res.json().catch(() => null) as unknown
-  if (!isRecord(body)) return null
-  return { models: modelsOf(body.models), known: body.known === true, efforts: strings(body.efforts) }
+  return Array.isArray(v) ? v.filter(isRecord).filter(m => typeof m.id === 'string' && typeof m.name === 'string').map(m => ({ id: m.id as string, name: m.name as string, efforts: strings(m.efforts) })) : []
 }
 
 export function modelOptions(select: HTMLSelectElement, models: AgentModel[], first: string) {
@@ -82,19 +69,10 @@ export function modelOptions(select: HTMLSelectElement, models: AgentModel[], fi
   if (models.some(m => m.id === keep)) select.value = keep
 }
 
-export function effortsOf(offered: AgentModels | AgentModel[] | null, model: string): string[] {
-  if (!offered) return CLAUDE_EFFORTS
-  const list = Array.isArray(offered) ? offered : offered.models
-  const known = Array.isArray(offered) ? list.length > 0 : offered.known
-  if (!known) return FALLBACK_EFFORTS
-  const m = list.find(x => (model ? x.id === model : x.default))
-  return m?.efforts.length ? m.efforts : FALLBACK_EFFORTS
-}
-
-export function effortOptions(select: HTMLSelectElement, offered: AgentModels | AgentModel[] | null, model: string, first: string) {
+export function effortOptions(select: HTMLSelectElement, first: string) {
   const blank = el('option', '', first)
   blank.value = ''
-  select.replaceChildren(blank, ...effortsOf(offered, model).map(e => {
+  select.replaceChildren(blank, ...CLAUDE_EFFORTS.map(e => {
     const o = el('option', '', `Effort: ${visible(e)}`)
     o.value = e
     return o
@@ -115,7 +93,7 @@ function readView(v: unknown): WorkView | null {
   const ports = isRecord(v.ports) && typeof v.ports.first === 'number' && typeof v.ports.last === 'number' ? { first: v.ports.first, last: v.ports.last, env: v.ports.env === true } : null
   return {
     agent: text(v.agent),
-    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered), known: m.known === true },
+    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered) },
     queue: { items, stopped: text(q.stopped), waiting: text(q.waiting), sending: q.sending === true, max: Number(q.max) || 10 },
     check: readRun(v.check),
     setup: readRun(v.setup),
@@ -123,6 +101,32 @@ function readView(v: unknown): WorkView | null {
     hasCheck: v.hasCheck === true,
     hasSetup: v.hasSetup === true,
   }
+}
+
+interface LockRead {
+  head: string
+  lock: TestLockView
+  typeChange: TypeChange | null
+}
+
+function lockedOf(v: unknown): LockedTests | null {
+  if (!isRecord(v) || typeof v.commit !== 'string') return null
+  return { commit: v.commit, count: Number(v.count) || 0, paths: strings(v.paths), problem: typeof v.problem === 'string' ? v.problem : '' }
+}
+
+function readLock(v: unknown): LockRead | null {
+  if (!isRecord(v) || !isRecord(v.gate) || !isRecord(v.gate.testLock)) return null
+  const l = v.gate.testLock
+  const text = (x: unknown) => (typeof x === 'string' ? x : '')
+  return {
+    head: text(v.gate.head),
+    typeChange: typeChangeOf(v.gate.typeChange),
+    lock: { offered: l.offered === true, why: text(l.why), commit: text(l.commit), at: Number(l.at) || 0, files: Number(l.files) || 0, paths: strings(l.paths), cut: l.cut === true, branchLeft: Number(l.branchLeft) || 0, changed: lockedOf(l.changed) },
+  }
+}
+
+function shown(value: string): string {
+  return visible(unspoofed(value))
 }
 
 async function problemOf(res: Response | null): Promise<string> {
@@ -154,6 +158,8 @@ class SfSessionWork extends HTMLElement {
   #summary = el('summary', 'small')
   #opened: boolean | null = null
   #shown = false
+  #lock: LockRead | null = null
+  #lockLoading = 0
 
   constructor() {
     super()
@@ -175,6 +181,7 @@ class SfSessionWork extends HTMLElement {
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open !== this.#shown) this.#opened = this.#details.open
       this.#shown = this.#details.open
+      if (this.#details.open && this.#target?.sid) void this.#readLock(this.#target.sid)
     })
   }
 
@@ -192,6 +199,7 @@ class SfSessionWork extends HTMLElement {
     }
     if (changed) {
       this.#view = null
+      this.#lock = null
       this.#editing = ''
       this.#opened = null
       this.#status.textContent = ''
@@ -202,12 +210,97 @@ class SfSessionWork extends HTMLElement {
   async refresh(sid: string) {
     if (sid !== this.#target?.sid) return
     const n = ++this.#loading
+    void this.#readLock(sid)
     const res = await api('/api/session-work', { op: 'read', sid }).catch(() => null)
     if (n !== this.#loading || sid !== this.#target?.sid || !res || !res.ok) return
     const v = readView(await res.json().catch(() => null))
     if (!v) return
     this.#view = v
     this.#paint()
+  }
+
+  async #readLock(sid: string) {
+    const n = ++this.#lockLoading
+    const res = await api('/api/gate', { sid }).catch(() => null)
+    if (n !== this.#lockLoading || sid !== this.#target?.sid || !res || !res.ok) return
+    const v = readLock(await res.json().catch(() => null))
+    if (!v) return
+    this.#lock = v
+    this.#paint()
+  }
+
+  async #lockCall(op: 'lock' | 'unlock', key: string) {
+    const sid = this.#target?.sid
+    const head = this.#lock?.head ?? ''
+    if (!sid) return
+    this.#busy = true
+    this.#busyKey = key
+    this.#opened ??= this.#details.open
+    this.#paint()
+    const res = await api('/api/lock-tests', op === 'lock' ? { sid, op, head } : { sid, op }).catch(() => null)
+    this.#busy = false
+    if (sid !== this.#target?.sid) return
+    if (!res || !res.ok) {
+      say(this.#status, await problemOf(res), 'warn')
+      this.#paint()
+      void this.#readLock(sid)
+      return
+    }
+    say(this.#status, op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', 'muted')
+    await this.#readLock(sid)
+    this.#paint()
+  }
+
+  #lockPart(off: boolean): HTMLElement[] {
+    const r = this.#lock
+    if (!r) return []
+    const l = r.lock
+    const parts: HTMLElement[] = [el('h3', 'label', 'Locked tests')]
+    if (!l.commit) {
+      parts.push(el('p', 'small muted', 'Lock the tests once the ones you want kept are written and committed. Claude Code\'s file tools (Edit, Write and the like) then ask you before each write to one of them; a shell command or another agent doesn\'t ask. The push card shows any locked file that changed since, however it was changed. Neither holds a push. Approving the requirements or the plan again unlocks them.'))
+      if (!l.offered) {
+        if (l.why) parts.push(el('p', 'small muted', shown(l.why)))
+        return parts
+      }
+      const lock = button('Lock tests', 'small', () => void this.#lockCall('lock', 'work-lock'), 'button', 'work-lock')
+      lock.disabled = !this.#held(lock) && off
+      lock.setAttribute('aria-label', `Lock the test files of commit ${shortSha(r.head)}`)
+      const row = el('div', 'row')
+      row.append(lock)
+      parts.push(row)
+      return parts
+    }
+    const files = `${l.files} test ${l.files === 1 ? 'file' : 'files'}`
+    parts.push(el('p', 'small', `${files} locked at commit ${shortSha(l.commit)}${l.at ? ` at ${when(l.at)}` : ''}. Claude Code's file tools (Edit, Write and the like) ask you before each write to one of them; a shell command or another agent doesn't ask. The push card shows any locked file that changed, however it was changed. Neither holds a push.`))
+    if (l.cut) {
+      parts.push(el('p', 'small warn', `Only these ${files} are locked: the engine locks at most 2,000 test files and 256 KiB of their paths, and this commit has more.`))
+      if (l.branchLeft) parts.push(el('p', 'small warn', `${l.branchLeft} test ${l.branchLeft === 1 ? 'file' : 'files'} this branch adds or changes ${l.branchLeft === 1 ? "isn't" : "aren't"} among them.`))
+      else parts.push(el('p', 'small muted', 'Every test file this branch adds or changes is among them.'))
+    }
+    const c = l.changed
+    if (c?.problem) parts.push(el('p', 'small warn', `${shown(c.problem.charAt(0).toUpperCase() + c.problem.slice(1))}.`))
+    else if (c && c.count) {
+      parts.push(el('p', 'small warn', `Locked tests changed since ${shortSha(l.commit)}: ${c.count}`))
+      const list = el('ul', 'small list')
+      list.append(...c.paths.map(p => el('li', '', shown(p))))
+      if (c.count > c.paths.length) list.append(el('li', 'muted', `and ${c.count - c.paths.length} more`))
+      parts.push(list)
+    } else if (c) parts.push(el('p', 'small muted', `None of the locked files changed since commit ${shortSha(l.commit)}. A new test file or test configuration can still stop them running, and isn't counted here.`))
+    if (l.paths.length) {
+      const box = el('details', 'small')
+      box.append(el('summary', 'small', `The locked files (${l.files})`))
+      const list = el('ul', 'small list')
+      list.append(...l.paths.map(p => el('li', '', shown(p))))
+      if (l.files > l.paths.length) list.append(el('li', 'muted', `and ${l.files - l.paths.length} more`))
+      box.append(list)
+      parts.push(box)
+    }
+    const unlock = button('Unlock tests', 'ghost small', () => void this.#lockCall('unlock', 'work-unlock'), 'button', 'work-unlock')
+    unlock.disabled = !this.#held(unlock) && off
+    const row = el('div', 'row')
+    row.append(unlock)
+    parts.push(row)
+    return parts
   }
 
   focusModel() {
@@ -220,11 +313,12 @@ class SfSessionWork extends HTMLElement {
 
   #summaryText(v: WorkView): string {
     const parts: string[] = []
-    if (v.agent === 'claude' || v.agent === 'codex') parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
+    if (v.agent === 'claude') parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
     parts.push(v.queue.items.length ? `Queue: ${v.queue.items.length}${v.queue.stopped ? ', stopped' : ''}` : 'Queue: empty')
     if (v.setup) parts.push(`Setup ${STATE_WORDS[v.setup.state] ?? visible(v.setup.state)}`)
     if (v.check) parts.push(`Check ${STATE_WORDS[v.check.state] ?? visible(v.check.state)}`)
     if (v.ports) parts.push(`Ports ${v.ports.first}–${v.ports.last}`)
+    if (this.#lock?.lock.commit) parts.push(this.#lock.lock.changed?.count ? `Locked tests changed: ${this.#lock.lock.changed.count}` : 'Tests locked')
     return parts.join(' · ')
   }
 
@@ -264,21 +358,20 @@ class SfSessionWork extends HTMLElement {
     const v = this.#view
     if (!v) return
     const keep = this.#effort.value
-    effortOptions(this.#effort, v.agent === 'codex' ? v.model.offered : null, this.#model.value || v.model.start, 'Effort: as it is')
+    effortOptions(this.#effort, 'Effort: as it is')
     if ([...this.#effort.options].some(o => o.value === keep)) this.#effort.value = keep
   }
 
   #modelPart(v: WorkView, off: boolean): HTMLElement[] {
-    if (v.agent !== 'claude' && v.agent !== 'codex') return []
+    if (v.agent !== 'claude') return []
     const name = (id: string) => v.model.offered.find(m => m.id === id)?.name ?? id
     const now = v.model.now ? visible(name(v.model.now)) : 'the agent\'s default'
     const effort = v.model.nowEffort ? `, effort ${visible(v.model.nowEffort)}` : ''
     const said = v.model.model || v.model.effort ? `Model: ${now}${effort}, set from this page; it applies from ${v.model.from || 'the next turn'}.` : `Model: ${now}${effort}, as the session started.`
     const parts: HTMLElement[] = [el('h3', 'label', 'Model'), el('p', 'small', said)]
     if (v.agent === 'claude') parts.push(el('p', 'small muted', 'Claude Code\'s own status line keeps naming the model the session started with; the switch rewrites only this session\'s main-loop requests, and never Claude Code\'s saved defaults.'))
-    if (v.agent === 'codex' && !v.model.known) parts.push(el('p', 'small muted', 'Codex\'s model list couldn\'t be read, so no other model is offered.'))
     if (!this.contains(document.activeElement) || document.activeElement === document.body) {
-      modelOptions(this.#model, v.model.offered, v.agent === 'claude' ? `The start model (${v.model.start || 'default'})` : v.model.start ? `The start model (${visible(v.model.start)})` : 'Pick a model')
+      modelOptions(this.#model, v.model.offered, `The start model (${v.model.start || 'default'})`)
       this.#model.value = v.model.offered.some(m => m.id === v.model.model) ? v.model.model : ''
       this.#fillEfforts()
       this.#effort.value = [...this.#effort.options].some(o => o.value === v.model.effort) ? v.model.effort : ''
@@ -388,15 +481,17 @@ class SfSessionWork extends HTMLElement {
     if (!t?.sid || !v) return this.replaceChildren()
     const focused = focusedKey(this)
     const off = t.disabled || this.#busy
-    const parts: HTMLElement[] = [...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
+    const parts: HTMLElement[] = [...(t.reason ? [el('p', 'small muted', t.reason)] : []), ...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
     if (v.ports) parts.push(el('h3', 'label', 'Ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
+    parts.push(...this.#lockPart(off))
+    if (this.#lock?.typeChange) parts.push(el('h3', 'label', 'The change and its work type'), ...typeChangeParts(this.#lock.typeChange))
     parts.push(this.#status)
     this.#summary.textContent = this.#summaryText(v)
     this.#shown = this.#opened ?? this.#notable(v)
     this.#details.open = this.#shown
     replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
-    refocus(this, focused, () => ['work-add', 'work-queue-add', 'work-model'])
+    refocus(this, focused, key => [...(key === 'work-lock' ? ['work-unlock'] : key === 'work-unlock' ? ['work-lock'] : []), 'work-add', 'work-queue-add', 'work-model'])
   }
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"regexp"
-	"slices"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
@@ -16,7 +15,6 @@ const (
 	sessionWorkRoute     = "/api/session-work"
 	projectCommandsRoute = "/api/project-commands"
 	reviewModelsRoute    = "/api/review-models"
-	agentModelsRoute     = "/api/agent-models"
 	turnCheckRoute       = "/turn-check"
 	sessionModelRoute    = "/session-model"
 	sessionWorkFor       = 40 * time.Second
@@ -24,7 +22,7 @@ const (
 )
 
 var (
-	runRoutes = map[string]bool{sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true, agentModelsRoute: true}
+	runRoutes = map[string]bool{sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true}
 	queueID   = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	modelText = regexp.MustCompile(`^[A-Za-z0-9._:/-]{0,100}$`)
 )
@@ -61,11 +59,9 @@ type queueViewJSON struct {
 }
 
 type agentModelJSON struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Efforts       []string `json:"efforts"`
-	DefaultEffort string   `json:"defaultEffort"`
-	Default       bool     `json:"default"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Efforts []string `json:"efforts"`
 }
 
 type sessionModelJSON struct {
@@ -77,7 +73,6 @@ type sessionModelJSON struct {
 	NowEffort   string           `json:"nowEffort"`
 	From        string           `json:"from"`
 	Offered     []agentModelJSON `json:"offered"`
-	Known       bool             `json:"known"`
 }
 
 type portsJSON struct {
@@ -107,7 +102,7 @@ func runJSONOf(r *session.CommandRun) *commandRunJSON {
 func modelsJSONOf(list []session.AgentModel) []agentModelJSON {
 	out := make([]agentModelJSON, 0, len(list))
 	for _, m := range list {
-		out = append(out, agentModelJSON{ID: m.ID, Name: m.Name, Efforts: nonNil(m.Efforts), DefaultEffort: m.DefaultEffort, Default: m.Default})
+		out = append(out, agentModelJSON{ID: m.ID, Name: m.Name, Efforts: nonNil(m.Efforts)})
 	}
 	return out
 }
@@ -116,7 +111,7 @@ func workJSONOf(v session.SessionWorkView) sessionWorkJSON {
 	now := v.Model.Now()
 	out := sessionWorkJSON{Agent: v.Agent,
 		Model: sessionModelJSON{Start: v.Model.StartModel, StartEffort: v.Model.StartEffort, Model: v.Model.Model, Effort: v.Model.Effort,
-			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered), Known: v.Known},
+			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered)},
 		Queue:    queueViewJSON{Items: []queuedJSON{}, Stopped: v.Queue.Stopped, Waiting: v.Queue.Waiting, Sending: v.Queue.Sending, Max: session.MaxQueue},
 		Check:    runJSONOf(v.Check),
 		Setup:    runJSONOf(v.Setup),
@@ -152,8 +147,6 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request, body map[string]an
 		s.projectCommands(w, op, body)
 	case reviewModelsRoute:
 		s.reviewModels(w, op, body)
-	case agentModelsRoute:
-		s.agentModels(ctx, w, op, body)
 	default:
 		refuse(w, http.StatusNotFound, "route")
 	}
@@ -223,7 +216,7 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 		send(w, code, p)
 		return
 	}
-	v, err := s.work.View(ctx, sid)
+	v, err := s.work.View(sid)
 	if err != nil {
 		code, p := status(err)
 		send(w, code, p)
@@ -251,11 +244,20 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 	case "set":
 		check, okCheck := body["check"].(string)
 		setup, okSetup := body["setup"].(string)
-		if !keysWithin(body, "op", "name", "check", "setup") || !okCheck || !okSetup || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 {
+		was := s.work.Commands(name)
+		image, okImage := was.Image, true
+		if raw, given := body["image"]; given {
+			image, okImage = raw.(string)
+		}
+		browser, okBrowser := was.Browser, true
+		if raw, given := body["browser"]; given {
+			browser, okBrowser = raw.(string)
+		}
+		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 || len(image) > session.MaxVerifyImage+64 || len(browser) > session.MaxProjectCommand+64 {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup})
+		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser})
 		s.logger.Info("project commands", "op", op, "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
@@ -267,7 +269,7 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 		return
 	}
 	c := s.work.Commands(name)
-	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "max": session.MaxProjectCommand})
+	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "browser": c.Browser, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage})
 }
 
 type roleModelJSON struct {
@@ -316,23 +318,6 @@ func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]
 		out[string(role)] = roleModelJSON{Name: role.Name(), Model: c.Model, Effort: c.Effort}
 	}
 	send(w, http.StatusOK, map[string]any{"roles": out, "models": modelsJSONOf(session.ClaudeOffered()), "efforts": session.ClaudeEfforts})
-}
-
-func (s *Server) agentModels(ctx context.Context, w http.ResponseWriter, op string, body map[string]any) {
-	agent, okAgent := body["agent"].(string)
-	if op != "read" || !keysWithin(body, "op", "agent") || !okAgent || !slices.Contains([]string{"claude", "codex", "dev-acp"}, agent) {
-		refuse(w, http.StatusBadRequest, "fields")
-		return
-	}
-	list, known := s.work.AgentModels(ctx, agent)
-	efforts := []string{}
-	switch {
-	case agent == "claude":
-		efforts = session.ClaudeEfforts
-	case agent == "codex" && !known:
-		efforts = session.CodexFallbackEfforts
-	}
-	send(w, http.StatusOK, map[string]any{"models": modelsJSONOf(list), "known": known, "efforts": efforts})
 }
 
 func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {

@@ -30,12 +30,18 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		return err
 	}
 	r.mu.Unlock()
+	launched := false
 	release := func() {
 		r.mu.Lock()
 		delete(r.running, t.SID)
+		delete(r.heads, t.SID)
+		fn := r.refused
 		r.mu.Unlock()
+		if !launched && fn != nil {
+			fn(t.SID)
+		}
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
@@ -45,6 +51,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
+	r.mu.Lock()
+	r.heads[t.SID] = head
+	r.mu.Unlock()
 	main, err := r.cfg.Mains.Fresh(ctx, t.Name)
 	if err != nil {
 		release()
@@ -81,6 +90,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if !slices.ContainsFunc(required, func(q workflow.Requirement) bool { return !q.Advisory }) {
 		release()
+		if t.Pushes {
+			return explained(conflict("no reviewer"), NoReviewerText)
+		}
 		return explained(conflict("no reviews"), "This session's work type needs no review, and it can't push. Pick another work type to review and push it.")
 	}
 	entries, err := r.Entries()
@@ -111,7 +123,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	var capped []string
 	var missing []string
 	var finished []RoleReview
-	var checking []string
 	for _, q := range required {
 		if q.Missing {
 			missing = append(missing, q.Agent)
@@ -124,9 +135,6 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 				f := finishedRole(q, r.withReply(t.SID, e), rd.Count, limit)
 				f.Run, f.Runs, f.Advisory = key.Number(), q.RunCount(), q.Advisory
 				finished = append(finished, f)
-				if e.Record.Channel == review.Checking {
-					checking = append(checking, ReviewerName(q))
-				}
 				continue
 			}
 			open = append(open, key)
@@ -175,7 +183,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if len(plans) == 0 && len(capped) == 0 {
 		release()
-		return explained(conflict("reviewed"), reviewedMessage(head, checking))
+		return explained(conflict("reviewed"), reviewedMessage(head))
 	}
 	if len(plans) == 0 && len(finished) > 0 {
 		release()
@@ -226,8 +234,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	r.show(t.SID, view)
 	shared.For(ctx, r.cfg.Logger).Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.began()
+	launched = true
 	r.wg.Go(func() {
-		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, view, held, given)
+		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, pack, view, held, given)
 		r.ended()
 		release()
 		if r.cfg.Base.Err() == nil {
@@ -237,12 +246,10 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	return nil
 }
 
-func reviewedMessage(head string, checking []string) string {
-	out := "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."
-	if len(checking) > 0 {
-		out = "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again; the engine is checking the " + strings.Join(checking, " and ") + " after an update, and " + plural(len(checking), "its pass counts", "their passes count") + " once the check ends. Press Run all again for fresh verdicts."
-	}
-	return out
+const NoReviewerText = "No reviewer is configured for this project, so nothing reviews this branch: every push needs your Allow with a reason."
+
+func reviewedMessage(head string) string {
+	return "Every reviewer this commit needs already has a verdict on commit " + shortSHA(head) + ", so Review runs none of them again. Press Run all again for fresh verdicts."
 }
 
 type plannedRole struct {

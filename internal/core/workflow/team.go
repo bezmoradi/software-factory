@@ -28,7 +28,10 @@ type Team struct {
 	FileRules   []FileRule
 	Rounds      int
 	Protect     []string
+	Verify      []string
 }
+
+var VerifyKinds = []string{"check", "browser"}
 
 var (
 	typeID      = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -76,16 +79,16 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	var out []string
 	say := func(s string) { out = append(out, s) }
-	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "checks", "rounds", "protect"}, "the file", &out)
+	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "verify", "rounds", "protect"}, "the file", &out)
 	if v, ok := root.values["version"].(float64); !ok || v != 1 {
 		say("\"version\" must be 1")
 	}
 	team := &Team{Roles: map[review.Role]string{}}
 	if v, ok := root.values["adapter"]; ok {
-		if s, _ := asString(v); s == string(Knackpack) || s == string(SpecKit) {
-			team.Adapter = AdapterID(s)
+		if s, _ := asString(v); s == string(Knackpack) {
+			team.Adapter = Knackpack
 		} else {
-			say("\"adapter\" must be \"knackpack\" or \"spec-kit\"")
+			say("\"adapter\" must be \"knackpack\", the only workflow the software factory has")
 		}
 	}
 	parseWorkTypes(root, team, &out)
@@ -114,9 +117,7 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	parseFileRules(root, team, &out)
 	parseProtect(root, team, &out)
-	if _, ok := root.values["checks"]; ok {
-		say("\"checks\" isn't supported: the engine has no trusted place to run the repository's commands, since a result from the agent container can be forged and reviewers only read")
-	}
+	parseVerify(root, team, &out)
 	if v, ok := root.values["rounds"]; ok {
 		if n, isNum := v.(float64); isNum && n == math.Trunc(n) && n >= 1 && n <= 20 {
 			team.Rounds = int(n)
@@ -208,7 +209,7 @@ func parseWorkTypes(root *object, team *Team, out *[]string) {
 			}
 		}
 		w := WorkType{ID: id, Name: name, Steps: steps, Edits: Edits(edits), Push: push, Roles: roles}
-		*out = append(*out, TypeProblems(w, team.Adapter)...)
+		*out = append(*out, TypeProblems(w)...)
 		team.WorkTypes = append(team.WorkTypes, w)
 	}
 }
@@ -300,4 +301,29 @@ func parseFileRules(root *object, team *Team, out *[]string) {
 			team.FileRules = append(team.FileRules, FileRule{Pattern: pattern, Agent: agent, Instruction: instruction})
 		}
 	}
+}
+
+func parseVerify(root *object, team *Team, out *[]string) {
+	v, ok := root.values["verify"]
+	if !ok {
+		return
+	}
+	list, isList := v.([]any)
+	kinds := []string{}
+	valid := isList && len(list) <= 4
+	for _, k := range list {
+		s, isStr := asString(k)
+		if !isStr || !slices.Contains(VerifyKinds, s) {
+			valid = false
+			break
+		}
+		if !slices.Contains(kinds, s) {
+			kinds = append(kinds, s)
+		}
+	}
+	if !valid {
+		*out = append(*out, "\"verify\" must list the kinds of verification run a push needs a pass of, and the software factory has two: \"check\" and \"browser\"")
+		return
+	}
+	team.Verify = kinds
 }

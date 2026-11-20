@@ -1,0 +1,72 @@
+version: 2
+suite: sign-in
+scenarios:
+  - id: SGN-001
+    name: "A sign-in with a body is refused and issues no key, so the signed-in page's key keeps working"
+    steps:
+      - id: sign-in-with-a-code
+        do: http.request
+        identity: anonymous
+        with:
+          method: POST
+          path: "/api/session"
+          headers: { Origin: "${page.origin}" }
+          body: { code: "proctor-${run.id}" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: body }
+          absent: ["$.body.token"]
+      - id: key-still-works
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.repos": true
+
+  - id: SGN-002
+    name: "A sign-in from another site, or with a body that isn't JSON, issues no key, and the page's key keeps working"
+    steps:
+      - id: sign-in-other-origin
+        do: http.request
+        identity: anonymous
+        with:
+          method: POST
+          path: "/api/session"
+          headers: { Origin: "https://proctor.invalid" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 403
+            "$.body": { error: origin }
+      - id: sign-in-not-json
+        do: http.request
+        identity: anonymous
+        with:
+          method: POST
+          path: "/api/session"
+          headers: { Origin: "${page.origin}", Content-Type: text/plain }
+          body_text: "{}"
+        expect:
+          equal:
+            "$.status": 415
+            "$.body": { error: type }
+      - id: key-still-works
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.repos": true

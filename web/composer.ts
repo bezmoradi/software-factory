@@ -15,7 +15,7 @@ interface Composer {
   grow: () => void
   paintJump: () => void
   jump: (to: 'start' | 'latest') => void
-  paint: (s: Session | null, blocked: boolean) => void
+  paint: (s: Session | null, blocked: boolean, readOnly?: string) => void
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -113,6 +113,13 @@ export function startComposer({ send }: ComposerDeps): Composer {
       box.append(figure)
     })
     box.hidden = attached.length === 0 && files.length === 0
+    paintWarning()
+  }
+
+  function paintWarning() {
+    const d = drafts.get(current.key)
+    const warn = current()?.gate?.effective === 'incident' && !!(d?.images.length || d?.files.length)
+    if (byId('upload-warning').hidden === warn) byId('upload-warning').hidden = !warn
   }
 
   function mention(key: string, path: string) {
@@ -334,11 +341,13 @@ export function startComposer({ send }: ComposerDeps): Composer {
     if (key === current.key) text.focus()
   })
 
-  function paint(s: Session | null, blocked: boolean) {
-    byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').view = s?.info.project && s.info.verified ? { repo: s.info.project, disabled: !state.connected } : null
-    if (text.disabled !== blocked) text.disabled = blocked
-    const placeholder = blocked ? 'Answer the card above to keep going' : 'Type a message and press Enter'
+  function paint(s: Session | null, blocked: boolean, readOnly = '') {
+    byId<HTMLElementTagNameMap['sf-saved-prompts']>('saved-prompts').view = s?.info.project && s.info.verified && !readOnly ? { repo: s.info.project, disabled: !state.connected } : null
+    const off = blocked || !!readOnly
+    if (text.disabled !== off) text.disabled = off
+    const placeholder = readOnly || (blocked ? 'Answer the card above to keep going' : 'Type a message and press Enter')
     if (text.placeholder !== placeholder) text.placeholder = placeholder
+    paintWarning()
   }
 
   return { swapDraft, dropDraft, grow, paintJump, jump, paint }

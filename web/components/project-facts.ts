@@ -1,5 +1,6 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { shortSha } from '../lib/format.ts'
 import type { WorkflowRun } from '../types.ts'
 
 interface Protection {
@@ -16,6 +17,11 @@ interface ReadinessLine {
   state: string
   found: string[]
   note: string
+  commit: string
+  at: number
+  result: string
+  code: number
+  tail: string
 }
 
 const READINESS: Record<string, string> = {
@@ -24,6 +30,7 @@ const READINESS: Record<string, string> = {
   ci: 'CI workflows',
   lint: 'Lint configuration',
   check: 'Check command',
+  verified: 'Check passes on main',
   team: 'Team file (software-factory.json)',
   protection: 'Branch protection on main',
 }
@@ -58,7 +65,9 @@ function readReadiness(x: unknown): ReadinessLine[] {
   const r = x as Record<string, unknown>
   if (typeof r.kind !== 'string' || !Object.hasOwn(READINESS, r.kind)) return []
   const state = r.state === 'found' || r.state === 'missing' ? r.state : 'unknown'
-  return [{ kind: r.kind, state, found: strings(r.found), note: text(r.note) }]
+  const commit = typeof r.commit === 'string' && /^[0-9a-f]{40}$/.test(r.commit) ? r.commit : ''
+  const result = r.result === 'passed' || r.result === 'failed' || r.result === 'running' ? r.result : ''
+  return [{ kind: r.kind, state, found: strings(r.found), note: text(r.note), commit, at: Number.isSafeInteger(r.at) ? Number(r.at) : 0, result, code: Number.isSafeInteger(r.code) ? Number(r.code) : 0, tail: typeof r.tail === 'string' ? r.tail : '' }]
 }
 
 function readView(body: unknown): FactsView | null {
@@ -80,6 +89,10 @@ class SfProjectFacts extends HTMLElement {
   #op = ''
   #gen = 0
   #status = statusLine()
+
+  get repo(): string {
+    return this.#repo
+  }
 
   set repo(value: string) {
     if (value === this.#repo) return
@@ -118,7 +131,7 @@ class SfProjectFacts extends HTMLElement {
   #readiness(v: FactsView): HTMLElement {
     const box = el('div')
     box.append(el('p', 'small', 'What the repository gives the agents, read from the main branch\'s commit'))
-    box.append(el('p', 'small muted', 'Agents work much better with an instruction file, tests, CI, a linter and a check command. The engine reads these files from main with its own reader and runs nothing. Display only: nothing here holds or allows anything.'))
+    box.append(el('p', 'small muted', 'Agents work much better with an instruction file, tests, CI, a linter and a check command. The engine reads these files from main with its own reader and runs nothing, except the check command on main\'s latest commit when you press Run on main, in a verification container with no network. Display only: nothing here holds or allows anything, and a run on main counts for no session\'s push.'))
     if (!v.readiness.length) {
       box.append(el('p', 'small muted', 'The engine sent no readiness report.'))
       return box
@@ -130,10 +143,56 @@ class SfProjectFacts extends HTMLElement {
       li.append(el('span', tone, r.state), ` ${READINESS[r.kind] ?? r.kind}`)
       if (r.found.length) li.append(el('span', 'muted', `: ${r.found.join(', ')}`))
       if (r.note) li.append(el('p', 'small muted', r.note))
+      if (r.kind === 'verified') li.append(...this.#verified(r, v))
       ul.append(li)
     }
     box.append(ul)
     return box
+  }
+
+  #verified(r: ReadinessLine, v: FactsView): HTMLElement[] {
+    const out: HTMLElement[] = []
+    const at = r.at ? new Date(r.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
+    if (r.commit) out.push(el('p', 'small muted', `This line's commit: ${shortSha(r.commit)}${at ? `, ${r.result === 'running' ? 'started' : 'ended'} ${at}` : ''}${v.commit && v.commit !== r.commit ? `; the rest of the report read main at ${shortSha(v.commit)}` : ''}.`))
+    if (r.result === 'failed' && r.tail) {
+      const pre = el('pre', 'small command-tail', visibleCommand(r.tail))
+      pre.tabIndex = 0
+      pre.setAttribute('role', 'region')
+      pre.setAttribute('aria-label', `End of the output of the run on main's commit ${shortSha(r.commit)}`)
+      out.push(pre)
+    }
+    const why = r.result === 'running' ? 'A run on main is running.' : ''
+    const go = button('Run on main', 'small', () => {
+      if (!why && !this.#busy) void this.#runMain()
+    }, 'button', 'verify-main')
+    go.setAttribute('aria-disabled', String(!!why || this.#busy))
+    if (this.#busy && this.#op === 'run-main') busy(go, true)
+    out.push(go)
+    return out
+  }
+
+  async #runMain(): Promise<void> {
+    const gen = ++this.#gen
+    const repo = this.#repo
+    this.#busy = true
+    this.#op = 'run-main'
+    this.#status.textContent = ''
+    this.#paint()
+    const res = await api('/api/verify', { op: 'start', repo, kind: 'check' }).catch(() => null)
+    if (gen !== this.#gen) return
+    if (!res || !res.ok) {
+      const problem = await res?.json().catch(() => null) as { message?: unknown } | null
+      if (gen !== this.#gen) return
+      this.#busy = false
+      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+      this.#paint()
+      return
+    }
+    if (await this.#call({ op: 'read', repo })) say(this.#status, 'The run on main started.')
+  }
+
+  refresh() {
+    if (this.#repo && !this.#busy) void this.#call({ op: 'read', repo: this.#repo })
   }
 
   #workflows(v: FactsView): HTMLElement {

@@ -1,5 +1,6 @@
 import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { saveFile } from '../lib/download.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -11,17 +12,6 @@ function fileName(): string {
   return `software-factory-diagnostics-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.txt`
 }
 
-function save(text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
-  const a = el('a')
-  a.href = url
-  a.download = fileName()
-  document.body.append(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
 export function openDiagnostics(post: Post): void {
   let generation = 0
   const say = statusLine()
@@ -31,7 +21,7 @@ export function openDiagnostics(post: Post): void {
   let text = ''
   const saveButton = button('Save as a file', 'primary small', () => {
     if (!text) return
-    save(text)
+    saveFile(new Blob([text], { type: 'text/plain;charset=utf-8' }), fileName())
     say.textContent = `Saved ${fileName()}. Nothing was sent anywhere.`
   })
   saveButton.disabled = true

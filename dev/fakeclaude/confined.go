@@ -8,7 +8,12 @@ import (
 	"strings"
 )
 
-const homeDeny = "Read(~/**)"
+const (
+	homeDeny      = "Read(~/**)"
+	exploreDeny   = "Agent(Explore)"
+	subagentModel = "CLAUDE_CODE_SUBAGENT_MODEL"
+	subagentForce = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
+)
 
 var (
 	reviewerTools   = []string{"Agent", "Glob", "Grep", "Read", "ToolSearch"}
@@ -46,8 +51,10 @@ func onlyReviewerFlags(args []string) error {
 }
 
 type reviewSettings struct {
-	DisableAllHooks bool `json:"disableAllHooks"`
-	Permissions     struct {
+	DisableAllHooks    bool              `json:"disableAllHooks"`
+	DisableSkillShells bool              `json:"disableSkillShellExecution"`
+	Env                map[string]string `json:"env"`
+	Permissions        struct {
 		BlockReadsOutside bool     `json:"blockReadsOutsideWorkingDirectories"`
 		Deny              []string `json:"deny"`
 	} `json:"permissions"`
@@ -68,10 +75,18 @@ func confined(args []string) error {
 	switch {
 	case !s.DisableAllHooks:
 		return errors.New("--settings doesn't turn hooks off")
+	case !s.DisableSkillShells:
+		return errors.New("--settings doesn't turn skills' inline shell off")
 	case !s.Permissions.BlockReadsOutside:
 		return errors.New("--settings doesn't block reads outside the working folder")
 	case !slices.Contains(s.Permissions.Deny, homeDeny):
 		return fmt.Errorf("--settings doesn't deny %s", homeDeny)
+	case !slices.Contains(s.Permissions.Deny, exploreDeny):
+		return fmt.Errorf("--settings doesn't deny %s", exploreDeny)
+	case s.Env[subagentForce] != "1":
+		return fmt.Errorf("--settings doesn't set %s to 1", subagentForce)
+	case s.Env[subagentModel] != "inherit":
+		return fmt.Errorf("--settings doesn't set %s to inherit", subagentModel)
 	}
 	for flag, want := range reviewerFlags {
 		v, err := once(args, flag)

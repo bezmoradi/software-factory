@@ -20,15 +20,19 @@ var (
 
 func (p *Plugins) Catalog(id, rel string, limit int64) session.CatalogFile {
 	pl, ok := p.find(id)
-	if !ok || !p.Installed(id) {
+	if !ok {
 		return session.CatalogFile{Pending: true}
 	}
-	data, err := readInside(filepath.Join(p.folder(pl), pl.Commit), rel, limit)
+	commit, ok := p.installedCommit(pl)
+	if !ok {
+		return session.CatalogFile{Pending: true}
+	}
+	data, err := readInside(filepath.Join(p.folder(pl), commit), rel, limit)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return session.CatalogFile{Missing: true}
 	case err != nil:
-		return session.CatalogFile{Unread: rel + " in " + pl.Name + " " + pl.Version + " " + err.Error()}
+		return session.CatalogFile{Unread: rel + " in " + pl.Name + " at commit " + commit[:7] + " " + err.Error()}
 	}
 	return session.CatalogFile{Data: data}
 }

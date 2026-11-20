@@ -1,0 +1,37 @@
+version: 2
+suite: health
+scenarios:
+  - id: HLT-001
+    name: "The liveness probe answers ok without the page key, with the page's security headers and no request id"
+    transcript: true
+    steps:
+      - id: liveness
+        do: http.request
+        identity: anonymous
+        with: { method: GET, path: "/healthz" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json"]
+            "$.headers.x-content-type-options": ["nosniff"]
+            "$.headers.x-frame-options": ["DENY"]
+            "$.headers.referrer-policy": ["no-referrer"]
+            "$.headers.cache-control": ["no-store"]
+            "$.headers.cross-origin-opener-policy": ["same-origin"]
+            "$.headers.cross-origin-resource-policy": ["same-origin"]
+            "$.headers.content-security-policy": ["default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"]
+            "$.body": { status: ok }
+          absent: ["$.headers.x-sf-request", "$.headers.access-control-allow-origin"]
+
+  - id: HLT-002
+    name: "The liveness probe ignores Host, because the container's own healthcheck calls it on 127.0.0.1:8080"
+    steps:
+      - id: liveness-other-host
+        do: http_misdirected.request
+        identity: anonymous
+        with: { method: GET, path: "/healthz" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json"]
+            "$.body": { status: ok }

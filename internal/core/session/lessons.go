@@ -467,7 +467,7 @@ func (l *Lessons) Lessons(project string) (LessonsView, error) {
 	}
 	l.mu.Unlock()
 	for _, i := range l.cfg.Sessions() {
-		if i.Project == project && len(v.Sessions) < 50 {
+		if i.Project == project && !i.Doubled && len(v.Sessions) < 50 {
 			v.Sessions = append(v.Sessions, LessonSession{SID: i.SID, Name: i.Name, Running: i.Running})
 		}
 	}
@@ -548,7 +548,7 @@ func (l *Lessons) Suggest(ctx context.Context, project string, costOK bool) erro
 	}
 	key := "lessons:" + project
 	r := l.cfg.Reviews
-	plugin, err := r.startProjectRun(ctx, key, costOK, "the suggested instruction lines")
+	plugin, err := r.startProjectRun(ctx, key, project, costOK, "the suggested instruction lines")
 	if err != nil {
 		return err
 	}
@@ -749,7 +749,7 @@ func (r *Reviews) release(key string) {
 	r.mu.Unlock()
 }
 
-func (r *Reviews) startProjectRun(ctx context.Context, key string, costOK bool, what string) (string, error) {
+func (r *Reviews) startProjectRun(ctx context.Context, key, project string, costOK bool, what string) (string, error) {
 	r.mu.Lock()
 	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
@@ -769,12 +769,12 @@ func (r *Reviews) startProjectRun(ctx context.Context, key string, costOK bool, 
 		r.release(key)
 		return "", err
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	pack, err := r.cfg.Plugins.ReviewerPack(project)
 	if err != nil {
 		r.release(key)
 		return "", explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
-	return plugin, nil
+	return pack.Path, nil
 }
 
 func (r *Reviews) projectRun(ctx context.Context, plugin string, files []SnapshotFile, prompt string) (string, float64, string) {

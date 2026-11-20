@@ -7,7 +7,10 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
-const reviewReplyRoute = "/api/review-reply"
+const (
+	reviewReplyRoute = "/api/review-reply"
+	maxAgentName     = 200
+)
 
 type wholeReplyJSON struct {
 	Text    string `json:"text"`
@@ -32,7 +35,7 @@ func (s *Server) wholeReply(w http.ResponseWriter, body map[string]any) {
 	agent, okAgent := body["agent"].(string)
 	commit, okCommit := body["commit"].(string)
 	run, okRun := wholeNumber(body["run"], 1, review.MaxRuns)
-	if !keysWithin(body, "sid", "agent", "commit", "run") || !okSID || sid == "" || len(sid) > 80 || !okAgent || len(agent) > maxCheckAgent || !agentName.MatchString(agent) ||
+	if !keysWithin(body, "sid", "agent", "commit", "run") || !okSID || sid == "" || len(sid) > 80 || !okAgent || len(agent) > maxAgentName || !agentName.MatchString(agent) ||
 		!okCommit || !commitHex.MatchString(commit) || !okRun {
 		refuse(w, http.StatusBadRequest, "fields")
 		return

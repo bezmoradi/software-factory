@@ -13,14 +13,20 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) *session.ProjectFacts {
 	if parts.dispatcher == nil || parts.repos == nil {
-		return
+		return nil
 	}
 	reg.WatchWorktrees(session.WorktreeWatch{Targets: parts.dispatcher.PushTarget, Heads: files.Reviews{}, Reader: files.Worktrees{Workspace: cfg.Workspace},
 		Commits: files.Reader{}, History: files.Reader{}, Main: parts.repos.Main})
+	var locks session.TestLocks
+	var specs session.SpecProjects
+	var types session.TypeChanges
+	if parts.work != nil {
+		locks, specs, types = parts.work, parts.work, parts.work
+	}
 	if parts.reviews != nil {
-		parts.reviews.UseChangeFacts(files.Reader{})
+		parts.reviews.UseChangeFacts(files.Reader{}, locks, specs, types)
 	}
 	var reader session.ProtectionReader
 	if client, err := (remote.Remote{CAFile: cfg.DevGitCA}).HTTPClient(); err == nil {
@@ -34,6 +40,10 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 	srv.UseProjectFacts(facts)
 	if parts.pushes != nil {
 		parts.pushes.UseExtras(session.PushExtras{Files: files.Reader{}, Workflows: files.Reader{}, Registry: &registry.Registry{Client: registry.NewClient()},
-			LookupsOn: facts.LookupsOn, Base: base})
+			LookupsOn: facts.LookupsOn, Locks: locks, Specs: specs, Base: base})
+		if parts.work != nil {
+			parts.work.OnLockMoved(parts.pushes.LockMoved)
+		}
 	}
+	return facts
 }

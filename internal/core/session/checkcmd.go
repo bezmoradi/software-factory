@@ -34,8 +34,10 @@ const (
 )
 
 type ProjectCommands struct {
-	Check string
-	Setup string
+	Check   string
+	Setup   string
+	Image   string
+	Browser string
 }
 
 type ProjectID struct {

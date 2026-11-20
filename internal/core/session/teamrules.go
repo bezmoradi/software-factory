@@ -36,9 +36,9 @@ func instructionProblems(team *workflow.Team) []string {
 func (w *Work) sessionSetup(sid, name string) workflow.Setup {
 	ws, ok := w.session(sid)
 	if !ok {
-		ws = workSession{repo: name, claude: true}
+		ws = workSession{repo: name}
 	}
-	return w.setupFor(ws.repo, ws.claude).setup
+	return w.setupFor(ws.repo).setup
 }
 
 func (w *Work) TeamRulesFor(ctx context.Context, sid string, t PushTarget, base, head string) (TeamRules, error) {
@@ -93,7 +93,8 @@ func (w *Work) Guarded(sid, top string, paths []string) string {
 	if top == "" || len(paths) == 0 {
 		return ""
 	}
-	if _, ok := w.session(sid); !ok {
+	ws, ok := w.session(sid)
+	if !ok {
 		return ""
 	}
 	t, ok := w.cfg.Targets(sid)
@@ -106,7 +107,10 @@ func (w *Work) Guarded(sid, top string, paths []string) string {
 			return why
 		}
 	}
-	return ""
+	if why := w.specWrite(t, top, paths); why != "" {
+		return why
+	}
+	return w.lockedWrite(ws, top, paths)
 }
 
 func teamRulesAsk(t TeamRules) string {

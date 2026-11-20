@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 )
@@ -20,6 +21,7 @@ const (
 	ReadyCI           = "ci"
 	ReadyLint         = "lint"
 	ReadyCheck        = "check"
+	ReadyVerified     = "verified"
 	ReadyTeam         = "team"
 	ReadyProtection   = "protection"
 
@@ -45,6 +47,12 @@ type ReadinessLine struct {
 	State string
 	Found []string
 	Note  string
+
+	Commit string
+	At     time.Time
+	Result string
+	Code   int
+	Tail   string
 }
 
 var (
@@ -58,7 +66,7 @@ var (
 )
 
 var readySuggestion = map[string]string{
-	ReadyInstructions: "Add a CLAUDE.md or AGENTS.md at the repository's root that says how to build, test and lint the project and what its rules are. Claude Code and Codex read it at the start of every session.",
+	ReadyInstructions: "Add a CLAUDE.md or AGENTS.md at the repository's root that says how to build, test and lint the project and what its rules are. Claude Code reads it at the start of every session.",
 	ReadyTests:        "Add a test command the agents can run: a test script in package.json, a test target in the Makefile, or the language's own runner (go test, pytest, cargo test) with its project file.",
 	ReadyCI:           "Add a workflow in .github/workflows/ that runs the tests and linters on pull requests, so every change is checked before it merges.",
 	ReadyLint:         "Add a linter's configuration at the root (.golangci.yml, eslint.config.js, ruff.toml or [tool.ruff] in pyproject.toml, .rubocop.yml, biome.json), so the agents and CI check the code the same way.",
@@ -238,8 +246,24 @@ func (f *ProjectFacts) readiness(r Repository, main string, workflows []Workflow
 	if main == "" && ci == "" {
 		ci = unknown
 	}
-	out = append(out, ciLine(workflows, ci), checkLine(check), protectionLine(p))
-	order := []string{ReadyInstructions, ReadyTests, ReadyCI, ReadyLint, ReadyCheck, ReadyTeam, ReadyProtection}
+	out = append(out, ciLine(workflows, ci), checkLine(check), protectionLine(p), f.verifiedLine(r.Name, main))
+	order := []string{ReadyInstructions, ReadyTests, ReadyCI, ReadyLint, ReadyCheck, ReadyVerified, ReadyTeam, ReadyProtection}
 	slices.SortStableFunc(out, func(a, b ReadinessLine) int { return slices.Index(order, a.Kind) - slices.Index(order, b.Kind) })
 	return out
+}
+
+func (f *ProjectFacts) UseVerified(line func(project, main string) ReadinessLine) {
+	f.mu.Lock()
+	f.verified = line
+	f.mu.Unlock()
+}
+
+func (f *ProjectFacts) verifiedLine(project, main string) ReadinessLine {
+	f.mu.Lock()
+	line := f.verified
+	f.mu.Unlock()
+	if line == nil {
+		return ReadinessLine{Kind: ReadyVerified, State: ReadyUnknown, Commit: main, Note: "This engine runs no verification, so nothing ran the check on main."}
+	}
+	return line(project, main)
 }

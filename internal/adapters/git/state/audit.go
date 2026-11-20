@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	auditFile = "audit.jsonl"
-	maxAudit  = 32 << 20
+	auditFile      = "audit.jsonl"
+	maxAudit       = 32 << 20
+	maxPassedRoles = 50
 )
 
 type Audit struct {
@@ -76,6 +78,8 @@ type auditJSON struct {
 	PluginCommit string    `json:"pluginCommit,omitempty"`
 	ClaudeCode   string    `json:"claudeCode,omitempty"`
 	Models       []string  `json:"models,omitempty"`
+	Passed       []string  `json:"passed,omitempty"`
+	AllPassed    bool      `json:"allPassed,omitempty"`
 }
 
 func (a Audit) Append(e session.AuditEntry) error {
@@ -98,7 +102,7 @@ func (a Audit) Append(e session.AuditEntry) error {
 		Remote: e.Remote, By: e.By, Result: e.Result, Reason: e.Reason, Missing: missing, PersonReason: e.PersonReason,
 		Kind: kind, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Blobs: e.Blobs, Request: e.Request, Hash: e.Hash, Agent: e.Agent,
 		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, Req: e.Req, Person: personOf(a.Dir, e.Person), FormerPerson: matching(e.FormerPerson, personID),
-		Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source})
+		Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Passed: e.Passed, AllPassed: e.AllPassed})
 	if err != nil {
 		return err
 	}
@@ -189,7 +193,21 @@ func entryOf(j auditJSON, kind string) session.AuditEntry {
 		Verdict: j.Verdict, Path: j.Path, Blobs: j.Blobs, Request: matching(j.Request, requestID), Hash: matching(j.Hash, teamSHA),
 		Agent: matching(j.Agent, agentID), PluginCommit: matching(j.PluginCommit, commitID), ClaudeCode: matching(j.ClaudeCode, versionText),
 		Models: matchingAll(j.Models, modelName, maxModels), Req: matching(j.Req, requestTag), Person: matching(j.Person, personID),
-		Box: matching(j.Box, boxID), From: matching(j.From, startKind), FromRef: matching(j.FromRef, startRef), Source: matching(j.Source, sessionID)}
+		Box: matching(j.Box, boxID), From: matching(j.From, startKind), FromRef: matching(j.FromRef, startRef), Source: matching(j.Source, sessionID),
+		Passed: passedRoles(j.Passed), AllPassed: j.AllPassed}
+}
+
+func passedRoles(list []string) []string {
+	var out []string
+	for _, s := range list {
+		if len(out) >= maxPassedRoles {
+			break
+		}
+		if session.ValidRole(s) && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 var (

@@ -63,12 +63,12 @@ var stores = map[string]storeRow{
 	sessionsFile:        {class: classKept, version: 1, label: "sessions, which come back stopped and as history only"},
 	workFile:            {class: classKept, version: 1, label: "project settings and work types; approvals come back for display only and automatic sends off"},
 	reviewsFile:         {class: classDisplay, version: reviewsVersion, label: "review records and overrides"},
-	checksFile:          {class: classDisplay, version: 1, label: "reviewer checks after an update"},
 	approvalsFile:       {class: classDisplay, version: 1, label: "start-up approvals"},
 	egressFile:          {class: classOff, version: 1, place: placeKeepOwn, label: "added hosts and the gateway"},
 	keyRoutesFile:       {class: classOff, version: 1, label: "whether a pasted key may be saved"},
 	projectCommandsFile: {class: classOff, version: 1, label: "check and setup commands"},
 	reviewerAgentsFile:  {class: classOff, version: 1, label: "reviewer agent files and the roles they fill"},
+	packsFile:           {class: classOff, version: 1, label: "packs from git and the pack each project uses"},
 	prFollowFile:        {class: classOff, version: 1, label: "pull request follows, send on its own and assign"},
 	lookupsFile:         {class: classOff, version: 1, label: "public-registry lookups"},
 	signInFile:          {class: classOff, version: 1, label: "the expected sign-in methods, reset to the default"},
@@ -80,6 +80,7 @@ var stores = map[string]storeRow{
 	queuesFile:          {class: classDropped, version: 1, label: "queued messages"},
 	notesFile:           {class: classDropped, version: 1, label: "notes waiting for agents"},
 	homeSettingsFile:    {class: classDropped, version: 2, label: "the baseline of the agents' user settings"},
+	verifyRunsFile:      {class: classDropped, version: 1, label: "verification runs, whose results count only on the engine that ran them"},
 	capsFile:            {class: classKept, version: 1, label: "caps"},
 	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
 	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},
@@ -103,6 +104,7 @@ var stores = map[string]storeRow{
 	stampFile:           {class: classOut, label: "which engine last ran here"},
 	importReportFile:    {class: classOut, label: "this engine's own last import"},
 	KeepFolder:          {class: classOut, label: "the engine's copies of session commits are never exported"},
+	VerifyFilesFolder:   {class: classOut, label: "browser runs' screenshots and traces stay with the engine that ran them"},
 	repliesFolder:       {class: classOut, label: "reviewers' whole replies stay with the engine that ran them; each review record keeps its 4,000-character summary"},
 	backupFolder:        {class: classOut, label: "this engine's copies from before a format change"},
 	stagingFolder:       {class: classOut, label: "an import this engine hasn't applied"},
@@ -164,8 +166,6 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewWork(d).Load)
 	case reviewsFile:
 		err = loaded(Reviews{Dir: d}.Load)
-	case checksFile:
-		err = loaded(Checks{Dir: d}.Load)
 	case approvalsFile:
 		err = loaded(NewApprovals(d).Load)
 	case egressFile:
@@ -176,6 +176,8 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewProjectCommands(d).Load)
 	case reviewerAgentsFile:
 		err = loaded(NewReviewerAgents(d).Load)
+	case packsFile:
+		err = loaded(NewPacks(d).Load)
 	case prFollowFile:
 		err = loaded(NewPRFollows(d).Load)
 	case lookupsFile:

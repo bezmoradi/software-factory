@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/npm"
 	"github.com/bezmoradi/software-factory/internal/adapters/install/osv"
-	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
@@ -30,42 +30,49 @@ const (
 	mcpListFor     = 60 * time.Second
 )
 
-func pinnedProvenance(dev bool) (string, string) {
-	plugin, claude := "", ""
-	for _, p := range npm.PinnedPlugins {
-		if p.ID == "knackpack" {
-			plugin = p.Commit
-		}
+func pinnedClaudeCode(dev bool) string {
+	if dev {
+		return fakeReviewer
 	}
 	for _, a := range npm.Pinned {
 		if a.ID == "claude" {
-			claude = a.Version
+			return a.Version
 		}
 	}
-	if dev {
-		claude = fakeReviewer
+	return ""
+}
+
+var advisoryPackages = map[string]string{"claude": "@anthropic-ai/claude-code"}
+
+func knackpackQuery(version, commit string) osv.Query {
+	label := npm.Knackpack.Name
+	if version != "" {
+		label += " " + version
 	}
-	return plugin, claude
+	return osv.Query{Label: label + " (commit " + commit[:7] + ")", Commit: commit}
 }
 
-func reviewerMinimum(plugin string) review.Minimum {
-	return review.Minimum{ClaudeCode: npm.MinimumReviewerClaudeCode, Plugin: npm.MinimumReviewerKnackpack, Pinned: plugin}
+func installedKnackpack(pins *npm.Plugins) func() []osv.Query {
+	return func() []osv.Query {
+		if pins == nil {
+			return nil
+		}
+		cur, ok := pins.Current(npm.Knackpack.ID)
+		if !ok {
+			return nil
+		}
+		return []osv.Query{knackpackQuery(cur.Version, cur.Commit)}
+	}
 }
 
-var advisoryPackages = map[string]string{"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex"}
-
-func advisoryQueries(getenv func(string) string, logger shared.Logger) []osv.Query {
+func advisoryQueries(getenv func(string) string, logger shared.Logger, plugins []osv.Query) []osv.Query {
 	var qs []osv.Query
 	for _, a := range npm.Pinned {
 		if name, ok := advisoryPackages[a.ID]; ok {
 			qs = append(qs, osv.Query{Label: a.Name + " " + a.Version, Ecosystem: "npm", Name: name, Version: a.Version})
 		}
 	}
-	for _, p := range npm.PinnedPlugins {
-		if p.ID == "knackpack" {
-			qs = append(qs, osv.Query{Label: p.Name + " " + p.Version + " (commit " + p.Commit[:7] + ")", Commit: p.Commit})
-		}
-	}
+	qs = append(qs, plugins...)
 	if pin := getenv("SF_DEV_ADVISORY_PIN"); pin != "" {
 		at := strings.LastIndex(pin, "@")
 		if at > 0 {
@@ -89,15 +96,22 @@ type advisories struct {
 	view   session.AdvisoryView
 	client *http.Client
 	api    string
-	qs     []osv.Query
+	qs     func() []osv.Query
 	logger shared.Logger
 }
 
-func watchAdvisories(ctx context.Context, getenv func(string) string, logger shared.Logger) *advisories {
-	a := &advisories{client: osvClient(), api: osv.DefaultAPI, qs: advisoryQueries(getenv, logger), logger: logger}
-	for _, q := range a.qs {
-		a.view.Sent = append(a.view.Sent, q.Sent())
+func sentOf(qs []osv.Query) []string {
+	out := make([]string, 0, len(qs))
+	for _, q := range qs {
+		out = append(out, q.Sent())
 	}
+	return out
+}
+
+func watchAdvisories(ctx context.Context, getenv func(string) string, plugins func() []osv.Query, logger shared.Logger) *advisories {
+	qs := func() []osv.Query { return advisoryQueries(getenv, nil, plugins()) }
+	a := &advisories{client: osvClient(), api: osv.DefaultAPI, qs: qs, logger: logger}
+	a.view.Sent = sentOf(advisoryQueries(getenv, logger, plugins()))
 	if getenv("SF_OSV") == "off" {
 		a.view.Off = true
 		return a
@@ -120,10 +134,12 @@ func watchAdvisories(ctx context.Context, getenv func(string) string, logger sha
 func (a *advisories) check(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	found, more, err := osv.Lookup(ctx, a.client, a.api, a.qs)
+	qs := a.qs()
+	found, more, err := osv.Lookup(ctx, a.client, a.api, qs)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.view.Checked = time.Now().UTC()
+	a.view.Sent = sentOf(qs)
 	if err != nil {
 		a.view.Problem = "The lookup at OSV didn't finish: " + err.Error() + ". The engine tries again in 24 hours."
 		a.logger.Warn("advisory lookup", "event", "failed")
@@ -152,6 +168,8 @@ func (a *advisories) View() session.AdvisoryView {
 type agentReport struct {
 	home       *session.HomeSettings
 	installer  *npm.Installer
+	plugins    *npm.Plugins
+	atStart    bool
 	advisories *advisories
 }
 
@@ -167,12 +185,30 @@ func (r agentReport) AgentReport() session.AgentReport {
 				Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: p.LoggedAt, Note: p.Note})
 		}
 	}
-	for _, p := range npm.PinnedPlugins {
-		if p.ID == "knackpack" {
-			out.Plugins = append(out.Plugins, session.PinnedPlugin{ID: p.ID, Name: p.Name, Version: p.Version, Commit: p.Commit})
+	if r.plugins != nil {
+		for _, p := range r.plugins.List() {
+			out.Plugins = append(out.Plugins, trackedPlugin(r.plugins, p, r.atStart))
 		}
 	}
 	return out
+}
+
+func trackedPlugin(pins *npm.Plugins, p npm.Tracked, atStart bool) session.TrackedPlugin {
+	t := session.TrackedPlugin{ID: p.ID, Name: p.Name, Source: p.URL, Branch: p.Branch}
+	if cur, ok := pins.Current(p.ID); ok {
+		t.Version, t.Commit, t.InstalledAt, t.Refused = cur.Version, cur.Commit, cur.At, cur.Refused
+		t.RefusedWhy = cur.Failing
+	}
+	check, running := pins.LastCheck(p.ID)
+	switch {
+	case running:
+		t.CheckResult = session.PluginChecking
+	case check.Result != "":
+		t.CheckedAt, t.CheckResult, t.CheckHead, t.CheckFrom, t.Problem = check.At, check.Result, check.Head, check.From, check.Problem
+	case !atStart:
+		t.CheckResult = session.PluginCheckOff
+	}
+	return t
 }
 
 func mcpList(cfg PageConfig) func() *session.Command {
@@ -187,7 +223,7 @@ func mcpList(cfg PageConfig) func() *session.Command {
 }
 
 func useAgentReports(base context.Context, srv *page.Server, parts engineParts, cfg PageConfig, logger shared.Logger) {
-	report := agentReport{installer: parts.installer, advisories: watchAdvisories(base, os.Getenv, logger)}
+	report := agentReport{installer: parts.installer, plugins: parts.plugins, atStart: cfg.Install.AtStart, advisories: watchAdvisories(base, os.Getenv, installedKnackpack(parts.plugins), logger)}
 	var rules session.AllowRulesPage
 	if parts.routes != nil && parts.dispatcher != nil && parts.repos != nil {
 		report.home = &session.HomeSettings{Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}
@@ -252,15 +288,20 @@ func CheckPins(ctx context.Context, args []string, out io.Writer) error {
 			}
 		}
 	}
-	for _, p := range npm.PinnedPlugins {
-		say("%s %s: pinned by git commit %s; npm provenance doesn't apply to it, the commit is the pin.", p.Name, p.Version, p.Commit)
+	var plugins []osv.Query
+	k := npm.Knackpack
+	hctx, cancel := context.WithTimeout(ctx, time.Minute)
+	head, err := remote.Remote{}.BranchHead(hctx, k.URL, k.Branch)
+	cancel()
+	if err != nil {
+		say("%s: the head of its %s branch couldn't be read from %s: %s", k.Name, k.Branch, k.URL, err)
+		problems = append(problems, err)
+	} else {
+		say("%s follows the %s branch of %s, whose head is now commit %s; each engine start installs that head, so npm provenance doesn't apply to it, and OSV is asked about that commit.", k.Name, k.Branch, k.URL, head)
+		plugins = append(plugins, knackpackQuery("", head))
 	}
-	qs := advisoryQueries(os.Getenv, nil)
-	sent := make([]string, 0, len(qs))
-	for _, q := range qs {
-		sent = append(sent, q.Sent())
-	}
-	say("Asking OSV (%s) about: %s.", osv.DefaultAPI, strings.Join(sent, ", "))
+	qs := advisoryQueries(os.Getenv, nil, plugins)
+	say("Asking OSV (%s) about: %s.", osv.DefaultAPI, strings.Join(sentOf(qs), ", "))
 	found, more, err := osv.Lookup(ctx, osvClient(), osv.DefaultAPI, qs)
 	switch {
 	case err != nil:

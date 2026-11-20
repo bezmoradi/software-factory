@@ -108,25 +108,6 @@ func baseURLHost(text string) string {
 	return ""
 }
 
-func CodexSignIn(out string) session.SignIn {
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "Not logged in"):
-			return session.SignIn{Method: session.SignInNone}
-		case strings.HasPrefix(line, "Logged in using ChatGPT"):
-			return session.SignIn{Method: session.SignInSubscription}
-		case strings.HasPrefix(line, "API key configured"), strings.HasPrefix(line, "Logged in using an API key"):
-			return session.SignIn{Method: session.SignInAPIKey}
-		case strings.HasPrefix(line, "Logged in using Amazon Bedrock"):
-			return session.SignIn{Method: session.SignInBedrock}
-		case strings.HasPrefix(line, "Logged in using"):
-			return session.SignIn{Method: session.SignInUnknown}
-		}
-	}
-	return session.SignIn{Method: session.SignInUnknown}
-}
-
 func (s *Server) signIn(ctx context.Context, q signInJSON) (signInReply, *problem) {
 	var res session.SignIn
 	switch q.Kind {
@@ -144,12 +125,6 @@ func (s *Server) signIn(ctx context.Context, q signInJSON) (signInReply, *proble
 			return signInReply{}, p
 		}
 		res = ClaudeSignIn(a.Stdout, b.Stdout)
-	case "codex":
-		a, p := s.run(ctx, q.commandJSON)
-		if p != nil {
-			return signInReply{}, p
-		}
-		res = CodexSignIn(a.Stderr + "\n" + a.Stdout)
 	default:
 		return signInReply{}, fail(http.StatusBadRequest, "kind", "")
 	}

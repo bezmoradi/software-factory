@@ -27,7 +27,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           OWNER: bezmoradi
-          GUARDED: '^(\.github/|scripts/|Makefile$|\.golangci\.yml$|\.go-arch-lint\.yml$|\.gitleaks\.toml$|\.typos\.toml$|\.markdownlint-cli2\.jsonc$)'
+          GUARDED: '^(\.github/|scripts/|proctor/|Makefile$|\.golangci\.yml$|\.go-arch-lint\.yml$|\.gitleaks\.toml$|\.typos\.toml$|\.markdownlint-cli2\.jsonc$)'
         run: |
           set -euo pipefail
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" > "$RUNNER_TEMP/files.json"

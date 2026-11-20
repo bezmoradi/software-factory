@@ -1,8 +1,7 @@
 import { busy, button, el, emit, field, focusedKey, pageCrumb, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
-import { agentModels, effortOptions, modelOptions } from './session-work.ts'
-import type { AgentModels } from './session-work.ts'
+import { effortOptions } from './session-work.ts'
 import './allow-rules.ts'
 import './project-facts.ts'
 import './team-rules.ts'
@@ -134,7 +133,7 @@ function nearby(key: string): string[] {
   return []
 }
 
-const COMMANDS: Record<string, string> = { plugin: 'claude --bg', codex: 'codex app-server', acp: 'its ACP server' }
+const COMMANDS: Record<string, string> = { plugin: 'claude --bg', acp: 'its ACP server' }
 
 class DispatchForm {
   form = el('form', 'dispatch')
@@ -143,7 +142,6 @@ class DispatchForm {
   name = el('input', 'textbox')
   model = el('select', 'textbox')
   effort = el('select', 'textbox')
-  offered: AgentModels | null = null
   method = ''
   kind = el('select', 'textbox')
   expect = el('select', 'textbox')
@@ -170,7 +168,7 @@ class DispatchForm {
     this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
     this.kind.name = 'type'
     this.kind.setAttribute('aria-label', 'Work type')
-    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['docs', 'Docs only'], ['explore', 'Exploring']])
+    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['incident', 'Incident'], ['docs', 'Docs only'], ['explore', 'Exploring']])
     this.agent.name = 'agent'
     this.agent.setAttribute('aria-label', 'Agent')
     const list = starters.length ? starters : [{ id: 'claude', name: 'Claude Code', method: 'plugin', enabled: true }]
@@ -183,6 +181,7 @@ class DispatchForm {
     }
     const first = list.find(a => a.enabled)
     if (first) this.agent.value = first.id
+    this.agent.hidden = list.length < 2
     this.expect.setAttribute('aria-label', 'The sign-in you expect of this agent')
     this.expect.title = 'The engine checks the agent\'s own sign-in before it starts, and refuses a start that differs from what you expect'
     options(this.expect, [['any', 'Expect any sign-in'], ['subscription', 'Expect a subscription'], ['api-key', 'Expect an API key']])
@@ -211,19 +210,26 @@ class DispatchForm {
       const plugin = chosen?.method === 'plugin'
       this.model.hidden = !plugin
       if (!plugin) this.model.value = ''
-      this.choices(chosen?.method ?? '', chosen?.id ?? '')
+      this.choices(chosen?.method ?? '')
       this.start.disabled = !chosen?.enabled
       this.expect.value = chosen?.expect ?? 'any'
       this.expect.hidden = plugin
+      this.pair.follow(this.agent.value)
     }
     this.agent.addEventListener('change', sync)
-    sync()
     this.caps.project = p.name
     this.from = new StartFromField(path, p.branch ?? '', sessions, fork, forkAt)
     this.issue.path = path
     this.pair = new PairField(list, MODELS)
+    sync()
     this.bench = new BenchmarkField(path)
-    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, this.from.box, this.caps, note)
+    const deployed = el('p', 'small warn', "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause.")
+    deployed.hidden = true
+    this.kind.addEventListener('change', () => {
+      deployed.hidden = this.kind.value !== 'incident'
+      if (!deployed.hidden) this.advanced.open = true
+    })
+    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, deployed, this.from.box, this.caps, note)
     this.advanced.open = !!this.from.value()
     this.form.append(row, this.why, this.advanced)
     this.form.append(this.issue)
@@ -247,7 +253,7 @@ class DispatchForm {
         if (from) this.advanced.open = true
         if (from || issue) return void this.pair.say('Start with both and a benchmark start from main, or from the merged pull request’s base, without an issue. Set Start from back to main and clear the issue first.')
         const first: PairAgent = { agent: this.agent.value, ...(this.model.value ? { model: this.model.value } : {}), ...(this.effort.value ? { effort: this.effort.value } : {}) }
-        const agents: PairAgent[] = pair ? [first, { agent: pair.agent, ...(pair.model ? { model: pair.model } : {}) }] : [first]
+        const agents: PairAgent[] = pair ? [first, { agent: first.agent, ...(pair.model ? { model: pair.model } : {}) }] : [first]
         return void emit(this.form, 'sf-pair', { path, name: this.name.value, type: this.kind.value, agents, ...(pair?.message ? { message: pair.message } : {}), ...(bench ? { benchmark: bench } : {}), ...(caps ? { caps } : {}) })
       }
       emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}), ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
@@ -255,34 +261,22 @@ class DispatchForm {
     this.model.addEventListener('change', () => this.efforts())
   }
 
-  choices(method: string, id: string) {
+  choices(method: string) {
     this.method = method
-    this.effort.hidden = method !== 'plugin' && method !== 'codex'
+    this.effort.hidden = method !== 'plugin'
     if (method === 'plugin') {
       const keep = this.model.value
-      this.offered = null
       this.model.replaceChildren()
       options(this.model, MODELS)
       if (MODELS.some(([v]) => v === keep)) this.model.value = keep
-      return this.efforts()
     }
-    if (method !== 'codex') return this.efforts()
-    this.model.hidden = false
-    this.offered = null
-    modelOptions(this.model, [], 'Default model')
     this.efforts()
-    void agentModels(id).then(list => {
-      if (this.agent.value !== id) return
-      this.offered = list
-      modelOptions(this.model, list?.models ?? [], 'Default model')
-      this.efforts()
-    })
   }
 
   efforts() {
-    if (this.method !== 'plugin' && this.method !== 'codex') return this.effort.replaceChildren()
+    if (this.method !== 'plugin') return this.effort.replaceChildren()
     const keep = this.effort.value
-    effortOptions(this.effort, this.method === 'codex' ? this.offered : null, this.model.value, 'Default effort')
+    effortOptions(this.effort, 'Default effort')
     if ([...this.effort.options].some(o => o.value === keep)) this.effort.value = keep
   }
 
@@ -532,6 +526,10 @@ class SfProjects extends HTMLElement {
     clearTimeout(this.#startTimer)
     this.#starting = null
     this.#setBusy(false)
+  }
+
+  verifiedOnMain(repo: string) {
+    for (const panel of this.#facts.values()) if (panel.repo === repo) panel.refresh()
   }
 
   say(path: string, text: string, bad = false) {

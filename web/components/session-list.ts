@@ -9,8 +9,10 @@ const LEVELS = new Map([['locked', { word: 'Locked', tone: '' }], ['held', { wor
 export function sessionState(s: SessionInfo): { dot: string; word: string } {
   if (s.disputed) return { dot: 'dot off', word: 'two connections claim this session' }
   if (!s.verified) return { dot: 'dot', word: 'not started by this engine' }
+  if (s.doubled) return { dot: 'dot off', word: 'read-only: another session holds its branch' }
   if (loginNeeded(s)) return { dot: 'dot off', word: 'needs you to sign in again' }
   if (s.signInWait) return { dot: 'dot need', word: 'Waiting for sign-in' }
+  if (s.homeHeld) return { dot: 'dot need', word: 'settings changed: Wake to review them' }
   if (!s.running && s.queued) return { dot: 'dot busy', word: `waking, ${s.queued} ${plural(s.queued, 'message')} waiting` }
   if (!s.running && s.levelLost) return { dot: 'dot off', word: 'stopped: process lost' }
   if (!s.running && s.stopReason) return { dot: 'dot off', word: `stopped: ${shown(s.stopReason)}` }

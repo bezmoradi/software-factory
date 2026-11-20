@@ -64,15 +64,11 @@ type runJSON struct {
 	AgentVersion   string    `json:"agentVersion,omitempty"`
 	EngineVersion  string    `json:"engineVersion,omitempty"`
 	WorkflowCommit string    `json:"workflowCommit,omitempty"`
+	Pack           string    `json:"pack,omitempty"`
 	ReviewerClaude string    `json:"reviewerClaudeCode,omitempty"`
 	ReviewerPlugin string    `json:"reviewerPlugin,omitempty"`
 
-	CodexThread string `json:"codexThread,omitempty"`
-
-	Origin     string      `json:"origin,omitempty"`
-	Earlier    []stintJSON `json:"earlier,omitempty"`
-	HandedTo   string      `json:"handedTo,omitempty"`
-	HandedHead string      `json:"handedHead,omitempty"`
+	Origin string `json:"origin,omitempty"`
 
 	Group       string `json:"group,omitempty"`
 	GroupKind   string `json:"groupKind,omitempty"`
@@ -113,7 +109,7 @@ func runOf(r runJSON) (session.SavedRun, bool) {
 	return session.SavedRun{SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 		Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt, Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt,
 		AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
-		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)}, true
+		ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID), Pack: savedPack(r.Pack)}, true
 }
 
 func (s Sessions) Load() ([]session.SavedRun, error) {
@@ -130,7 +126,6 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 	seen := map[string]bool{}
 	for _, r := range f.Sessions {
 		v, ok := runOf(r)
-		v.CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		if !ok || seen[v.SID] || len(out) >= maxSessions {
 			continue
 		}
@@ -158,9 +153,8 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		f.Sessions = append(f.Sessions, runJSON{Owner: owner, SID: r.SID, ID: r.ID, Agent: r.Agent, Repo: r.Repo, RepoPath: r.RepoPath, Base: r.Base, Name: r.Name,
 			Branch: r.Branch, Cwd: r.Cwd, Display: r.Display, StartedAt: r.StartedAt.UTC(), Sandboxed: r.Sandboxed, InterruptedAt: r.InterruptedAt.UTC(),
 			AgentVersion: matching(r.AgentVersion, versionText), EngineVersion: matching(r.EngineVersion, versionText), WorkflowCommit: matching(r.WorkflowCommit, commitID),
-			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID)})
+			ReviewerClaude: matching(r.ReviewerClaude, versionText), ReviewerPlugin: matching(r.ReviewerPlugin, commitID), Pack: savedPack(r.Pack)})
 		f.Sessions[len(f.Sessions)-1].InTurnSince = r.InTurnSince.UTC()
-		f.Sessions[len(f.Sessions)-1].CodexThread = matching(r.CodexThread, session.ThreadPattern)
 		lineageJSONInto(&f.Sessions[len(f.Sessions)-1], r)
 		f.Sessions[len(f.Sessions)-1].HistoryOnly = r.HistoryOnly
 		f.Sessions[len(f.Sessions)-1].RmDone = r.RmDone
@@ -209,7 +203,7 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 	if !ok1 || !ok2 {
 		return session.SavedWork{}, false
 	}
-	v := session.SavedWork{Repo: w.Repo, Claude: w.Claude, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan}
+	v := session.SavedWork{Repo: w.Repo, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock)}
 	for p, blobs := range w.Allowed {
 		if !relPath(p) || len(blobs) == 0 || len(blobs) > maxVersions || slices.ContainsFunc(blobs, func(b string) bool { return !commitID.MatchString(b) }) {
 			continue
@@ -220,4 +214,32 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 		v.Allowed[p] = append([]string(nil), blobs...)
 	}
 	return v, true
+}
+
+func testLockOf(l *testLockJSON) *session.TestLock {
+	if l == nil || !commitID.MatchString(l.Commit) || len(l.Files) == 0 || len(l.Files) > session.MaxLockedTests || l.BranchLeft < 0 || l.BranchLeft > 0 && !l.Cut {
+		return nil
+	}
+	files := make(map[string]string, len(l.Files))
+	for p, blob := range l.Files {
+		if !relPath(p) || !commitID.MatchString(blob) {
+			return nil
+		}
+		files[p] = blob
+	}
+	return &session.TestLock{Commit: l.Commit, At: l.At, Files: files, Cut: l.Cut, BranchLeft: l.BranchLeft}
+}
+
+func testLockJSONOf(l *session.TestLock) *testLockJSON {
+	if l == nil {
+		return nil
+	}
+	return &testLockJSON{Commit: l.Commit, At: l.At.UTC(), Files: l.Files, Cut: l.Cut, BranchLeft: l.BranchLeft}
+}
+
+func savedPack(p string) string {
+	if p == session.PackKnackpack || p == session.PackNone || session.PackDigest.MatchString(p) {
+		return p
+	}
+	return ""
 }

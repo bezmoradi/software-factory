@@ -112,7 +112,7 @@ func (p *Pushes) reconcile(ctx context.Context, e AuditEntry) bool {
 		shared.For(ctx, p.cfg.Logger).Warn("push reconcile", "event", "audit-not-written")
 		return false
 	}
-	if t, ok := p.cfg.Targets(e.Session); ok && t.Branch == e.Branch {
+	if t, ok := targetOrHeld(p.cfg.Targets, p.cfg.Held, e.Session); ok && t.Branch == e.Branch {
 		p.show(e.Session, PushView{Result: out.Result, Reason: out.Reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: out.Missing, At: out.Time, Audit: &out})
 		if said != "" {
 			p.cfg.Note(e.Session, said)

@@ -13,10 +13,10 @@ type Facts struct {
 	Profile       Profile
 	Head          string
 	PlanFile      string
-	PlanCommand   string
 	ReqHash       string
 	ReqBaseline   string
 	PlanHash      string
+	CauseStatus   string
 	ReqOk         bool
 	PlanOk        bool
 	UsesArtifacts bool
@@ -29,7 +29,6 @@ type ActionKind string
 const (
 	StartDefine         ActionKind = "define"
 	StartPlan           ActionKind = "plan"
-	StartTasks          ActionKind = "tasks"
 	StartImplement      ActionKind = "implement"
 	ApproveRequirements ActionKind = "approve-requirements"
 	ApprovePlan         ActionKind = "approve-plan"
@@ -67,20 +66,6 @@ func Decide(f Facts, a Action) string {
 			return "Plan can't start until the developer approves the requirements on the software factory page. " + order
 		}
 		return ""
-	case StartTasks:
-		switch {
-		case feature && !f.ReqOk:
-			return "Tasks can't start until the developer approves the requirements on the software factory page, and Plan has written the plan. " + order
-		case feature && f.PlanFile == "":
-			with := ""
-			if f.PlanCommand != "" {
-				with = " with " + f.PlanCommand
-			}
-			return "Tasks can't start before Plan has written the plan" + with + ". " + order
-		case feature && f.PlanOk:
-			return "Tasks can't run again: the developer approved the plan and its tasks together, and writing the tasks again would cancel that approval. " + order
-		}
-		return ""
 	case StartImplement:
 		if feature && !f.PlanOk {
 			return "Implement can't start until the developer approves the plan on the software factory page. " + order
@@ -95,6 +80,9 @@ func Decide(f Facts, a Action) string {
 }
 
 func approvePlan(f Facts, a Action) string {
+	if f.Profile == Incident {
+		return approveCause(f, a)
+	}
 	if f.Profile != Feature {
 		return ""
 	}
@@ -114,6 +102,22 @@ func approvePlan(f Facts, a Action) string {
 	return ""
 }
 
+func approveCause(f Facts, a Action) string {
+	switch {
+	case a.Hash != f.PlanHash:
+		return "The root cause changed before your approval arrived, so it wasn't approved. Read the new version and approve it again."
+	case f.CauseStatus != Confirmed:
+		status := clip(f.CauseStatus, 40)
+		if status == "" {
+			status = "missing"
+		}
+		return "The root cause wasn't approved: the Status in " + RootCauseFile + " is " + status + ", and only a " + Confirmed + " diagnosis can be approved. Press Continue on the Root cause step, or give the evidence the file asks for."
+	case f.Head == "":
+		return "The root cause wasn't approved: the current commit couldn't be read."
+	}
+	return ""
+}
+
 func editHold(f Facts, path string) string {
 	switch {
 	case f.Profile == CodeReview:
@@ -128,11 +132,8 @@ func editHold(f Facts, path string) string {
 		needs = "the requirements and then the plan need"
 	}
 	until := "Write notes, the requirements brief and the plan in your scratchpad, not in the repository."
-	switch {
-	case f.UsesArtifacts && len(f.Artifacts) > 0:
+	if f.UsesArtifacts && len(f.Artifacts) > 0 {
 		until = "Until then only this step's own files can change: " + strings.Join(f.Artifacts[:min(len(f.Artifacts), 8)], ", ") + "."
-	case f.UsesArtifacts:
-		until = "Until then only this step's own files can change, once Spec Kit has named the feature's folder."
 	}
 	return path + " can't change yet: " + needs + " the developer's approval on the software factory page first. " + order + " " + until + " " + noDetour
 }
@@ -153,6 +154,10 @@ func ImplementWait(w Build) string {
 		return ""
 	case !w.Head:
 		return "the gate couldn't read the current commit"
+	case w.Profile == Incident && !w.PlanOk:
+		return "approve the root cause first"
+	case w.Profile == Incident && !w.Built:
+		return "commit the fix made since the root cause was approved"
 	case w.Profile == Feature && !w.PlanOk:
 		return "approve the plan first"
 	case w.Profile == Feature:

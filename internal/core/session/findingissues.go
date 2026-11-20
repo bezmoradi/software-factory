@@ -21,7 +21,7 @@ const (
 
 var (
 	findingHeading  = regexp.MustCompile(`(?i)^\s{0,3}#{2,4}\s*\[(medium|low)\]\s*(.*)$`)
-	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings?)/`)
+	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings?|coverage)/`)
 	findingLocation = regexp.MustCompile(`(?i)^[\s*_>-]*(location|where|file|files|path)[\s*_]*:[\s*_]*(.+?)[\s*_]*$`)
 	findingPath     = regexp.MustCompile("`([^`\\s]+:\\d+(?:-\\d+)?)`")
 )
@@ -93,9 +93,9 @@ func NonBlockingFindings(message string) []FindingItem {
 }
 
 func (fl *Follows) findingsAt(sid string) (PushTarget, string, []FindingItem, error) {
-	t, ok := fl.cfg.Forges.cfg.Targets(sid)
+	t, ok := targetOrHeld(fl.cfg.Forges.cfg.Targets, fl.cfg.Forges.cfg.Held, sid)
 	if !ok {
-		return PushTarget{}, "", nil, explained(conflict("not started here"), "Only a session this engine started can open issues from its findings.")
+		return PushTarget{}, "", nil, notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started can open issues from its findings.")
 	}
 	if fl.cfg.Reviews == nil {
 		return t, "", nil, explained(conflict("no reviews"), "This engine runs no reviews.")
@@ -179,6 +179,9 @@ func (fl *Follows) Findings(sid string) (FindingOffer, error) {
 }
 
 func (fl *Follows) OpenFindings(ctx context.Context, sid, commit string) (int, error) {
+	if err := heldBranch(fl.cfg.Forges.cfg.Doubled, sid); err != nil {
+		return 0, err
+	}
 	t, at, items, err := fl.findingsAt(sid)
 	if err != nil {
 		return 0, err

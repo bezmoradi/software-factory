@@ -1,0 +1,100 @@
+version: 2
+suite: navigation
+tables:
+  - id: NAV-T01
+    name: "Loading the page from the address bar, from the page itself, or from a client without Sec-Fetch headers answers the page"
+    do: http.request
+    identity: anonymous
+    with:
+      method: GET
+      path: "/"
+      headers: "${row.headers}"
+    expect:
+      equal:
+        "$.status": 200
+        "$.headers.content-type": ["text/html; charset=utf-8"]
+        "$.headers.clear-site-data": ["\"storage\""]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.x-frame-options": ["DENY"]
+        "$.headers.cache-control": ["no-store"]
+        "$.headers.content-security-policy": ["default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"]
+      present: ["$.body_text", "$.headers.x-sf-request"]
+      matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+      absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
+    columns: ["case", "headers"]
+    rows:
+      - ["typed_address", { Sec-Fetch-Site: none, Sec-Fetch-Mode: navigate, Sec-Fetch-Dest: document }]
+      - ["same_origin_navigation", { Sec-Fetch-Site: same-origin, Sec-Fetch-Mode: navigate, Sec-Fetch-Dest: document }]
+      - ["no_fetch_metadata", {}]
+
+  - id: NAV-T02
+    name: "A link from another site or port doesn't load the page, since loading it signs in again and ends the open tab's key"
+    do: http.request
+    identity: anonymous
+    with:
+      method: GET
+      path: "/"
+      headers: "${row.headers}"
+    expect:
+      equal:
+        "$.status": 403
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.headers.x-content-type-options": ["nosniff"]
+        "$.headers.cache-control": ["no-store"]
+        "$.body": { error: site }
+      absent: ["$.headers.clear-site-data", "$.headers.access-control-allow-origin"]
+    columns: ["case", "headers"]
+    rows:
+      - ["cross_site_navigation", { Sec-Fetch-Site: cross-site, Sec-Fetch-Mode: navigate, Sec-Fetch-Dest: document }]
+      - ["same_site_navigation", { Sec-Fetch-Site: same-site, Sec-Fetch-Mode: navigate, Sec-Fetch-Dest: document }]
+      - ["none_outside_a_navigation", { Sec-Fetch-Site: none, Sec-Fetch-Mode: cors, Sec-Fetch-Dest: empty }]
+
+scenarios:
+  - id: NAV-001
+    name: "Loading the page under another Host name, as DNS rebinding would, is refused as misdirected"
+    steps:
+      - id: other-host
+        do: http_misdirected.request
+        identity: anonymous
+        with:
+          method: GET
+          path: "/"
+          headers: { Sec-Fetch-Site: none, Sec-Fetch-Mode: navigate, Sec-Fetch-Dest: document }
+        expect:
+          equal:
+            "$.status": 421
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: host }
+          absent: ["$.headers.clear-site-data"]
+
+  - id: NAV-002
+    name: "Loading the page with another site's Origin is refused"
+    steps:
+      - id: other-origin
+        do: http.request
+        identity: anonymous
+        with:
+          method: GET
+          path: "/"
+          headers: { Origin: "https://proctor.invalid" }
+        expect:
+          equal:
+            "$.status": 403
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: origin }
+          absent: ["$.headers.clear-site-data"]
+
+  - id: NAV-003
+    name: "A HEAD request to the page's address is refused, since only GET loads it"
+    steps:
+      - id: head-page
+        do: http.request
+        identity: anonymous
+        with:
+          method: HEAD
+          path: "/"
+        expect:
+          equal:
+            "$.status": 405
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+          absent: ["$.headers.clear-site-data"]

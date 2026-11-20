@@ -21,9 +21,10 @@ func NewHomeSettings(dir string) HomeSettings { return HomeSettings{Dir: dir, mu
 var _ session.HomeStore = HomeSettings{}
 
 type homeEntryJSON struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Hash string `json:"hash,omitempty"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Hash  string `json:"hash,omitempty"`
+	Class int    `json:"class,omitempty"`
 }
 
 type homeBoxJSON struct {
@@ -63,18 +64,20 @@ func homeRecordOf(b homeBoxJSON) (session.HomeRecord, error) {
 	}
 	entries := make([]session.HomeEntry, 0, len(b.Entries))
 	for _, e := range b.Entries {
-		entries = append(entries, session.HomeEntry{Name: e.Name, Kind: e.Kind, Hash: e.Hash})
+		entries = append(entries, session.HomeEntry{Name: e.Name, Kind: e.Kind, Hash: e.Hash, Class: e.Class})
 	}
 	entries, ok := session.CheckHomeEntries(entries)
 	if !ok {
 		return session.HomeRecord{}, errors.New(homeSettingsFile + " holds an entry this engine refuses")
 	}
+	changed := make([]string, 0, len(b.Changed))
 	for _, c := range b.Changed {
 		if len(c) > session.MaxHomeName+16 {
 			return session.HomeRecord{}, errors.New(homeSettingsFile + " holds an entry this engine refuses")
 		}
+		changed = append(changed, session.MaskHomeLine(c))
 	}
-	return session.HomeRecord{Box: b.Box, Entries: entries, At: b.At, Since: b.Since, Changed: b.Changed, More: b.More, Dropped: b.Dropped}, nil
+	return session.HomeRecord{Box: b.Box, Entries: entries, At: b.At, Since: b.Since, Changed: changed, More: b.More, Dropped: b.Dropped}, nil
 }
 
 func (s HomeSettings) Load() ([]session.HomeRecord, error) {
@@ -125,13 +128,17 @@ func (s HomeSettings) Save(records []session.HomeRecord) ([]string, error) {
 	f := homeBoxesJSON{Version: writesVersion(homeSettingsFile), Boxes: make([]homeBoxJSON, 0, len(records))}
 	sizes := make([]int, 0, len(records))
 	for _, r := range records[:min(len(records), session.MaxHomeBoxes)] {
-		b := homeBoxJSON{Box: r.Box, At: r.At, Since: r.Since, Entries: make([]homeEntryJSON, 0, len(r.Entries)), Changed: r.Changed, More: r.More}
+		changed := make([]string, 0, len(r.Changed))
+		for _, c := range r.Changed {
+			changed = append(changed, session.MaskHomeLine(c))
+		}
+		b := homeBoxJSON{Box: r.Box, At: r.At, Since: r.Since, Entries: make([]homeEntryJSON, 0, len(r.Entries)), Changed: changed, More: r.More}
 		if b.Changed == nil {
 			b.Changed = []string{}
 		}
 		size := 0
 		for _, e := range r.Entries {
-			b.Entries = append(b.Entries, homeEntryJSON{Name: e.Name, Kind: e.Kind, Hash: e.Hash})
+			b.Entries = append(b.Entries, homeEntryJSON{Name: e.Name, Kind: e.Kind, Hash: e.Hash, Class: e.Class})
 			size += len(e.Name) + len(e.Kind) + len(e.Hash) + 64
 		}
 		for _, c := range b.Changed {

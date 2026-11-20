@@ -137,14 +137,14 @@ class SfReviewerAgents extends HTMLElement {
     const done = await this.#call({ op: 'remove', name })
     this.#removing = ''
     if (done) {
-      say(this.#status, `Removed ${visible(name)}. Its roles fall back to knackpack's agents.`, 'ok')
+      say(this.#status, `Removed ${visible(name)}. Its roles fall back to the project's pack.`, 'ok')
       this.#paint()
     }
   }
 
   async #pick(role: string, name: string) {
     if (await this.#call({ op: 'role', role, name })) {
-      say(this.#status, name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses knackpack's agent again.`, 'ok')
+      say(this.#status, name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses the project's pack again.`, 'ok')
       this.#paint()
     }
   }
@@ -159,7 +159,7 @@ class SfReviewerAgents extends HTMLElement {
     const help = el('div', 'small muted')
     help.id = 'reviewer-agent-help'
     help.append(
-      el('p', '', `A Claude Code agent file (.md) of your own can fill the bug hunter or simplicity checker role in place of knackpack's agent. Its front matter may hold only name, description, model and tools, with tools any of ${tools}. The engine refuses mcpServers, hooks, permissionMode, skills and every other key, and says why.`),
+      el('p', '', `A Claude Code agent file (.md) of your own can fill the bug hunter or simplicity checker role in place of the agent of the project's pack. Its front matter may hold only name, description, model and tools, with tools any of ${tools}. The engine refuses mcpServers, hooks, permissionMode, skills and every other key, and says why.`),
       el('p', '', 'The body is your own instructions. They run in a trusted reviewer container, with read-only tools, on the code under review, so write them as you would a reviewer you trust. The engine writes the file into that container for each review, never from the repository.'),
       el('p', '', 'Its reply must end with a line of its own, Verdict: pass or Verdict: block. A last line knackpack-verdict/1: pass or knackpack-verdict/1: block counts too. Anything else counts as no verdict, and a push still needs every required role passing.'),
     )
@@ -193,7 +193,7 @@ class SfReviewerAgents extends HTMLElement {
         const select = el('select', 'textbox')
         select.id = `reviewer-role-${role}`
         select.dataset.key = `role:${role}`
-        const knack = el('option', '', `knackpack's agent (${visible(v.defaults[role] ?? '')})`)
+        const knack = el('option', '', v.defaults[role] ? `the pack's agent (${visible(v.defaults[role])})` : 'no agent: the project has no pack that fills it')
         knack.value = ''
         select.append(knack)
         for (const f of v.files) {

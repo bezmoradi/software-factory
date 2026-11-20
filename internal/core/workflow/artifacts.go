@@ -8,46 +8,20 @@ import (
 	"strings"
 )
 
-const KnackpackFeature = ".knackpack/feature.json"
-
-var (
-	knackpackDir = regexp.MustCompile(`^\.knackpack/[a-z0-9][a-z0-9-]{0,63}$`)
-	specDir      = regexp.MustCompile(`^specs/[\w.-]{1,100}$`)
-	specInDiff   = regexp.MustCompile(`^(specs/[\w.-]{1,100})/spec\.md$`)
-	featureKeys  = []string{"feature_directory", "featureDirectory", "feature_dir", "directory", "path"}
+const (
+	KnackpackFeature = ".knackpack/feature.json"
+	RootCauseFile    = "ROOT-CAUSE.md"
+	Confirmed        = "CONFIRMED"
 )
 
-func SpecFeatureDir(featureJSON []byte, changed []string) string {
-	if len(featureJSON) > 0 && len(featureJSON) <= 65536 {
-		var v map[string]any
-		if json.Unmarshal(featureJSON, &v) == nil {
-			for _, k := range featureKeys {
-				s, ok := v[k].(string)
-				if !ok {
-					continue
-				}
-				s = strings.TrimSuffix(strings.TrimPrefix(s, "./"), "/")
-				if specDir.MatchString(s) {
-					return s
-				}
-				break
-			}
-		}
-	}
-	var found []string
-	for _, p := range changed {
-		if m := specInDiff.FindStringSubmatch(p); m != nil && !slices.Contains(found, m[1]) {
-			found = append(found, m[1])
-		}
-	}
-	if len(found) == 1 {
-		return found[0]
-	}
-	return ""
-}
+var featureName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 func KnackpackFeatureDir(featureJSON []byte) string {
-	if len(featureJSON) == 0 || len(featureJSON) > 65536 {
+	return FeatureDir(featureJSON, ".knackpack")
+}
+
+func FeatureDir(featureJSON []byte, folder string) string {
+	if folder == "" || len(featureJSON) == 0 || len(featureJSON) > 65536 {
 		return ""
 	}
 	var v map[string]any
@@ -55,7 +29,8 @@ func KnackpackFeatureDir(featureJSON []byte) string {
 		return ""
 	}
 	s, ok := v["feature_directory"].(string)
-	if !ok || !knackpackDir.MatchString(s) {
+	name, inside := strings.CutPrefix(s, folder+"/")
+	if !ok || !inside || !featureName.MatchString(name) {
 		return ""
 	}
 	return s
@@ -63,6 +38,14 @@ func KnackpackFeatureDir(featureJSON []byte) string {
 
 func StepArtifacts(adapter AdapterID, steps []Step, dir string) []string {
 	a, ok := Adapters[adapter]
+	if !ok {
+		return nil
+	}
+	return StepArtifactsOf(a, steps, dir)
+}
+
+func StepArtifactsOf(a Adapter, steps []Step, dir string) []string {
+	ok := a.AnyFolder != ""
 	if ok && dir == "" {
 		dir = a.AnyFolder
 	}
@@ -110,4 +93,22 @@ func AgentProblems(t *Team, installed []string) []string {
 		check("agents", a)
 	}
 	return out
+}
+
+func RootCauseStatus(text string) string {
+	under := false
+	blank := func(r rune) bool { return r == ' ' || r == '\t' }
+	for l := range strings.SplitSeq(text, "\n") {
+		switch {
+		case !under:
+			under = strings.TrimRight(l, " \t") == "## Status"
+		case strings.HasPrefix(l, "#"):
+			return ""
+		default:
+			if f := strings.FieldsFunc(l, blank); len(f) > 0 {
+				return f[0]
+			}
+		}
+	}
+	return ""
 }

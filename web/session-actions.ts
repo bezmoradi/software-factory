@@ -3,8 +3,7 @@ import { armed, controllable, current, paint, say, schedulePaint, sleeping, stat
 import { byId, pressed, visible, whileBusy } from './lib/dom.ts'
 import { agentWord, label } from './lib/format.ts'
 import { boxSignIn } from './components/login.ts'
-import { approveTrustFiles, askTrust, consentFor } from './components/consent.ts'
-import { agentName } from './components/lineage.ts'
+import { approveHomeSettings, approveTrustFiles, askTrust, consentFor } from './components/consent.ts'
 import type { Toast } from './components/toasts.ts'
 import type { Consent, Needs } from './types.ts'
 
@@ -13,7 +12,6 @@ type Reply = { ok: boolean; body: Record<string, unknown> }
 interface SessionActionsDeps {
   reply: (res: Response | null) => Promise<Reply>
   loadGate: (s: Session, force?: boolean) => Promise<void>
-  loadProjects: (force?: boolean) => Promise<void>
   starterNames: () => ReadonlyMap<string, string>
   identityAction: (body: Record<string, unknown>) => Toast['action']
   markCheckpoint: (sid: string, level: string) => void
@@ -34,8 +32,7 @@ export interface SessionActions {
   checkStep: (s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) => Promise<void>
   approve: (kind: 'requirements' | 'plan', hash: string) => Promise<void>
   wakeSession: (s: Session) => Promise<void>
-  withConsent: (name: string, what: string, send: (c: Consent) => Promise<Response>, resumable?: boolean) => Promise<Reply>
-  handOver: (s: Session, agent: string) => Promise<void>
+  withConsent: (name: string, what: string, send: (c: Consent) => Promise<Response>, resumable?: boolean, sid?: string) => Promise<Reply>
   bringMain: (s: Session) => Promise<void>
 }
 
@@ -146,7 +143,7 @@ export async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): P
   }
 }
 
-export function startSessionActions({ reply, loadGate, loadProjects, starterNames, identityAction, markCheckpoint, copy, forgetSession }: SessionActionsDeps): SessionActions {
+export function startSessionActions({ reply, loadGate, starterNames, identityAction, markCheckpoint, copy, forgetSession }: SessionActionsDeps): SessionActions {
   async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
     busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
     schedulePaint()
@@ -295,7 +292,7 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     if (files.length) body.files = files
     if (bypass) body.confirm = true
     const name = starterNames().get(s.info.agent ?? '') ?? 'The agent'
-    const answer = asleep ? await withConsent(name, 'the session', consent => api('/api/message', { ...body, ...consent })) : await reply(await api('/api/message', body).catch(() => null))
+    const answer = asleep ? await withConsent(name, 'the session', consent => api('/api/message', { ...body, ...consent }), false, s.sid) : await reply(await api('/api/message', body).catch(() => null))
     if (!answer.ok) {
       const why = answer.body.message
       say(typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.')
@@ -337,7 +334,8 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
 
   async function wakeSession(s: Session) {
     const name = starterNames().get(s.info.agent ?? '') ?? 'The agent'
-    const { ok, body } = await withConsent(name, 'the session', consent => api('/api/wake', { sid: s.sid, ...consent }))
+    const { ok, body } = await withConsent(name, 'the session', consent => api('/api/wake', { sid: s.sid, ...consent }), false, s.sid)
+    if (body.refused === true) return
     toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: body.needs || identityAction(body) ? 0 : undefined, action: identityAction(body) })
   }
 
@@ -364,11 +362,23 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     return null
   }
 
-  async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false): Promise<{ ok: boolean; body: Record<string, unknown> }> {
+  async function refuseWake(sid: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
+    const refused = await reply(await api('/api/wake', { sid, refuse: true }).catch(() => null))
+    toast(refused.ok ? { id: `wake:${sid}`, title: 'The session stays stopped.', description: 'Its container was stopped. Wake it again to see the same list, or delete it.', tone: 'info' } : { id: `wake:${sid}`, title: 'The session’s container wasn’t stopped.', description: typeof refused.body.message === 'string' ? visible(refused.body.message) : 'It stops by itself within 30 minutes.', tone: 'warn', timeout: 0 })
+    return { ok: false, body: { refused: true, message: 'The session stays stopped, so nothing was sent.' } }
+  }
+
+  async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false, sid?: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
     let consent: Consent = {}
     let answer = await reply(await send(consent).catch(() => null))
     for (let round = 0; !answer.ok && round < 5; round++) {
       const needs = answer.body.needs as Needs | undefined
+      if (needs?.home) {
+        if (!(await approveHomeSettings(needs.home, name))) return sid ? refuseWake(sid) : answer
+        consent = { ...consent, home: needs.home.digest }
+        answer = await reply(await send(consent).catch(() => null))
+        continue
+      }
       if (resumable && needs?.box) consent = { ...consent, box: needs.box }
       if (needs?.signIn && needs.box && !needs.cost) {
         if (!(await boxSignIn(api, needs, name, title => toast({ title, tone: 'ok' })))) break
@@ -395,15 +405,6 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     return answer
   }
 
-  async function handOver(s: Session, agent: string) {
-    const name = agentName(agent)
-    if (!confirmed(`${s.sid}:handover:${agent}`, `Choose Continue with ${name} again to stop this session and go on with ${name} on the same branch, with the approvals you gave.`)) return
-    toast({ id: `handover:${s.sid}`, title: `Handing ${visible(label(s.info))} over to ${name}…`, description: 'The engine starts the other agent on the same branch in a container of its own, then stops this session and its container.', tone: 'info', timeout: 150000 })
-    const { ok, body } = await withConsent(name, 'the session', consent => api('/api/handover', { sid: s.sid, agent, ...consent }))
-    toast(ok ? { id: `handover:${s.sid}`, title: `${name} continues the branch.`, description: "It shows in the project's list when it connects; open it there to write its first message. The engine tells it where the branch stands.", tone: 'ok', timeout: 8000 } : { id: `handover:${s.sid}`, title: 'The branch wasn’t handed over.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0, action: identityAction(body) })
-    if (ok) void loadProjects(true)
-  }
-
   async function bringMain(s: Session) {
     toast({ id: `main:${s.sid}`, title: 'Fetching the latest main…', tone: 'info', timeout: 60000 })
     const { ok, body } = await reply(await api('/api/bring-main', { sid: s.sid }).catch(() => null))
@@ -411,5 +412,5 @@ export function startSessionActions({ reply, loadGate, loadProjects, starterName
     toast(ok ? { id: `main:${s.sid}`, title: `Main is now at ${commit} as origin/main in the clone.`, description: 'The engine asked the agent to merge it into its branch and resolve any conflicts.', tone: 'ok' } : { id: `main:${s.sid}`, title: 'The latest main wasn’t brought in.', description: typeof body.message === 'string' ? visible(body.message) : 'Try again in a moment.', tone: 'bad', timeout: 0 })
   }
 
-  return { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, handOver, bringMain }
+  return { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain }
 }

@@ -104,7 +104,9 @@ func callTool(tool string, args map[string]any) string {
 		cmd := exec.Command(s.Command, s.Args...)
 		cmd.Env = os.Environ()
 		for _, e := range s.Env {
-			cmd.Env = append(cmd.Env, e.Name+"="+e.Value)
+			if e.Name != checkKeyVariable {
+				cmd.Env = append(cmd.Env, e.Name+"="+e.Value)
+			}
 		}
 		in, _ := cmd.StdinPipe()
 		outPipe, _ := cmd.StdoutPipe()
@@ -386,10 +388,16 @@ func scripted(id json.RawMessage, text string) bool {
 				status = "failed"
 			}
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "grow-for":
+			growFor(callID, value)
 		case "say":
 			chunk(value + "\n")
 		case "done":
 			done = true
+		default:
+			if !tryLine(callID, key, value) {
+				placeLine(callID, key, value)
+			}
 		}
 	}
 	reply(id, map[string]any{"stopReason": "end_turn"})
@@ -402,6 +410,11 @@ func scripted(id json.RawMessage, text string) bool {
 
 func answer(id json.RawMessage, text string) bool {
 	if scripted(id, text) {
+		return true
+	}
+	if said, ok := incidentLine(text); ok {
+		chunk(said)
+		reply(id, map[string]any{"stopReason": "end_turn"})
 		return true
 	}
 	if tool := toolNamed(text); tool != "" {
@@ -465,4 +478,32 @@ func hello(id json.RawMessage) {
 			map[string]any{"optionId": "reject", "name": "Reject", "kind": "reject_once"},
 		},
 	}})
+}
+
+func growFor(callID, value string) {
+	fields := strings.Fields(value)
+	status := "failed"
+	file := ""
+	if len(fields) == 3 {
+		seconds, errSeconds := strconv.Atoi(fields[0])
+		mib, errMiB := strconv.Atoi(fields[1])
+		file = filepath.Join(cwd, filepath.Clean("/"+fields[2]))
+		if errSeconds == nil && errMiB == nil && seconds > 0 && seconds <= 120 && mib > 0 && mib <= 8192 && growFile(file, int64(mib)<<20) {
+			status = "completed"
+			go func() {
+				time.Sleep(time.Duration(seconds) * time.Second)
+				_ = os.Remove(file)
+			}()
+		}
+	}
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Grow " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+}
+
+func growFile(file string, size int64) bool {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false
+	}
+	grown := f.Truncate(size) == nil
+	return f.Close() == nil && grown
 }

@@ -369,7 +369,7 @@ func (a Archive) transform(in, out string, report *session.ImportReport) error {
 			report.Off = append(report.Off, offLines(name, in)...)
 			err = copyRaw(in, shown, name, row.limit)
 			if err == nil && name == egressFile {
-				err = egressAgents(in, out)
+				err = egressBare(in, out)
 			}
 		default:
 			if name == reposFile {
@@ -397,7 +397,6 @@ func historyOnly(in, out string, report *session.ImportReport) error {
 	}
 	for i := range runs {
 		runs[i].Sandboxed = false
-		runs[i].CodexThread = ""
 		runs[i].InterruptedAt = time.Time{}
 		runs[i].InTurnSince = time.Time{}
 		runs[i].HistoryOnly = true
@@ -434,14 +433,14 @@ func workOff(in, out string, report *session.ImportReport) error {
 	}
 	approvals := 0
 	for sid, w := range st.Sessions {
-		if w.Requirements != nil || w.Plan != nil || len(w.Allowed) > 0 {
+		if w.Requirements != nil || w.Plan != nil || len(w.Allowed) > 0 || w.Lock != nil {
 			approvals++
 		}
-		w.Requirements, w.Plan, w.Allowed = nil, nil, nil
+		w.Requirements, w.Plan, w.Allowed, w.Lock = nil, nil, nil, nil
 		st.Sessions[sid] = w
 	}
 	if approvals > 0 {
-		report.Off = append(report.Off, plural(approvals, "session")+" had requirement, plan or flagged-file approvals, kept for display only")
+		report.Off = append(report.Off, plural(approvals, "session")+" had requirement, plan or flagged-file approvals or locked tests, kept for display only")
 	}
 	return NewWork(out).Save(st)
 }
@@ -485,12 +484,12 @@ func lessonsShown(in, out string, report *session.ImportReport) error {
 	return err
 }
 
-func egressAgents(in, out string) error {
-	e, ok, err := NewEgress(in).Load()
+func egressBare(in, out string) error {
+	_, ok, err := NewEgress(in).Load()
 	if err != nil || !ok {
 		return err
 	}
-	return NewEgress(out).Save(session.EgressSettings{Agents: e.Agents})
+	return NewEgress(out).Save(session.EgressSettings{})
 }
 
 func plural(n int, what string) string {
@@ -547,6 +546,17 @@ func offLines(name, in string) []string {
 		}
 		for _, r := range st.Roles {
 			out = append(out, r.Project+": "+r.Name+" no longer fills the "+string(r.Role)+" role")
+		}
+	case packsFile:
+		st, err := NewPacks(in).Load()
+		if err != nil {
+			return nil
+		}
+		for _, p := range st.Packs {
+			out = append(out, "the pack "+p.Name+" "+p.Version+" isn't kept; add it again from git to use it")
+		}
+		for _, c := range st.Choices {
+			out = append(out, c.Project+": reviewed by knackpack again, not by the pack it used; pick its pack again")
 		}
 	case prFollowFile:
 		rec, err := NewPRFollows(in).Load()
