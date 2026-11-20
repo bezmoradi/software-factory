@@ -146,6 +146,7 @@ type Work struct {
 	mu       sync.Mutex
 	sessions map[string]*workSession
 	store    sync.Mutex
+	pending  pendingSteps
 	scanMu   sync.Mutex
 	scans    map[string]scanned
 	scanKeys []string
@@ -289,27 +290,57 @@ var (
 	_ ProjectData = (*Work)(nil)
 )
 
-func (w *Work) projectData(event, name string, fn func(st *WorkState) bool) {
+func (w *Work) loadLocked() (WorkState, error) {
+	st, err := w.cfg.Store.Load()
+	filled(&st)
+	if err != nil {
+		return st, err
+	}
+	steps := w.pending.list()
+	if len(steps) == 0 {
+		return st, nil
+	}
+	next := st
+	next.Projects, next.Teams = maps.Clone(st.Projects), maps.Clone(st.Teams)
+	next.Removed, _ = replaySteps(steps, next.Projects, slices.Clone(st.Removed))
+	next.RemovedTeams, _ = replaySteps(steps, next.Teams, slices.Clone(st.RemovedTeams))
+	if err := w.cfg.Store.Save(next); err != nil {
+		projectDataNotSaved(w.cfg.Logger, "work", "", err)
+		return st, nil
+	}
+	w.pending.done(len(steps))
+	w.cfg.Logger.Info("work", "event", "pending-project-data-applied", "steps", len(steps))
+	return next, nil
+}
+
+func (w *Work) projectData(event string, step *projectStep, fn func(st *WorkState) bool) {
 	w.store.Lock()
 	defer w.store.Unlock()
-	st, err := w.cfg.Store.Load()
-	if err != nil {
+	failed := func(err error) {
+		name := ""
+		if step != nil {
+			name = step.id.Name
+			w.pending.remember(step.id, step.restore, step.at)
+		}
 		projectDataNotSaved(w.cfg.Logger, "work", name, err)
+	}
+	st, err := w.loadLocked()
+	if err != nil {
+		failed(err)
 		return
 	}
-	filled(&st)
 	if !fn(&st) {
 		return
 	}
 	if err := w.cfg.Store.Save(st); err != nil {
-		projectDataNotSaved(w.cfg.Logger, "work", name, err)
+		failed(err)
 		return
 	}
 	w.cfg.Logger.Info("work", "event", event)
 }
 
 func (w *Work) ParkProject(id ProjectID) {
-	w.projectData("settings-parked", id.Name, func(st *WorkState) bool {
+	w.projectData("settings-parked", &projectStep{id: id, at: w.cfg.Now()}, func(st *WorkState) bool {
 		var settings, team bool
 		st.Removed, _, settings = parkProject(st.Projects, st.Removed, id)
 		st.RemovedTeams, _, team = parkProject(st.Teams, st.RemovedTeams, id)
@@ -318,7 +349,7 @@ func (w *Work) ParkProject(id ProjectID) {
 }
 
 func (w *Work) RestoreProject(id ProjectID) {
-	w.projectData("settings-restored", id.Name, func(st *WorkState) bool {
+	w.projectData("settings-restored", &projectStep{id: id, restore: true, at: w.cfg.Now()}, func(st *WorkState) bool {
 		var settings, team bool
 		st.Removed, settings = restoreProject(st.Projects, st.Removed, id)
 		st.RemovedTeams, team = restoreProject(st.Teams, st.RemovedTeams, id)
@@ -327,7 +358,7 @@ func (w *Work) RestoreProject(id ProjectID) {
 }
 
 func (w *Work) KeepProjects(names []string) {
-	w.projectData("unlisted-settings-set-aside", "", func(st *WorkState) bool {
+	w.projectData("unlisted-settings-set-aside", nil, func(st *WorkState) bool {
 		var settings, team int
 		st.Removed, settings = keepProjects(st.Projects, st.Removed, names)
 		st.RemovedTeams, team = keepProjects(st.Teams, st.RemovedTeams, names)
@@ -375,11 +406,10 @@ func (w *Work) load() WorkState {
 func (w *Work) read() (WorkState, error) {
 	w.store.Lock()
 	defer w.store.Unlock()
-	st, err := w.cfg.Store.Load()
+	st, err := w.loadLocked()
 	if err != nil {
 		w.cfg.Logger.Warn("work", "event", "state-unreadable")
 	}
-	filled(&st)
 	return st, err
 }
 
@@ -398,11 +428,10 @@ func filled(st *WorkState) {
 func (w *Work) change(fn func(*WorkState) error) error {
 	w.store.Lock()
 	defer w.store.Unlock()
-	st, err := w.cfg.Store.Load()
+	st, err := w.loadLocked()
 	if err != nil {
 		return explained(conflict("state"), "The engine couldn't read its project settings.")
 	}
-	filled(&st)
 	if err := fn(&st); err != nil {
 		return err
 	}

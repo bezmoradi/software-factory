@@ -83,6 +83,7 @@ type ProjectFacts struct {
 	loaded  bool
 	on      map[string]bool
 	removed []RemovedProject[bool]
+	pending pendingSteps
 
 	verified func(project, main string) ReadinessLine
 }
@@ -115,25 +116,51 @@ func (f *ProjectFacts) loadLocked() error {
 		}
 	}
 	f.removed = slices.Clone(st.Removed)
+	f.settleLocked()
 	return nil
 }
 
-func (f *ProjectFacts) projectData(event, name string, fn func(st *LookupState) bool) {
+func (f *ProjectFacts) settleLocked() {
+	steps := f.pending.list()
+	if len(steps) == 0 {
+		return
+	}
+	st := LookupState{Projects: maps.Clone(f.on), Removed: slices.Clone(f.removed)}
+	st.Removed, _ = replaySteps(steps, st.Projects, st.Removed)
+	if err := f.cfg.Lookups.Save(st); err != nil {
+		projectDataNotSaved(f.cfg.Logger, "project facts", "", err)
+		return
+	}
+	f.on, f.removed = st.Projects, st.Removed
+	f.pending.done(len(steps))
+	f.cfg.Logger.Info("project facts", "event", "pending-project-data-applied", "steps", len(steps))
+}
+
+func (f *ProjectFacts) projectData(event string, step *projectStep, fn func(st *LookupState) bool) {
 	if f.cfg.Lookups == nil {
 		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.loadLocked(); err != nil {
+	failed := func(err error) {
+		name := ""
+		if step != nil {
+			name = step.id.Name
+			f.pending.remember(step.id, step.restore, step.at)
+		}
 		projectDataNotSaved(f.cfg.Logger, "project facts", name, err)
+	}
+	if err := f.loadLocked(); err != nil {
+		failed(err)
 		return
 	}
+	f.settleLocked()
 	st := LookupState{Projects: maps.Clone(f.on), Removed: slices.Clone(f.removed)}
 	if !fn(&st) {
 		return
 	}
 	if err := f.cfg.Lookups.Save(st); err != nil {
-		projectDataNotSaved(f.cfg.Logger, "project facts", name, err)
+		failed(err)
 		return
 	}
 	f.on, f.removed = st.Projects, st.Removed
@@ -141,7 +168,7 @@ func (f *ProjectFacts) projectData(event, name string, fn func(st *LookupState) 
 }
 
 func (f *ProjectFacts) ParkProject(id ProjectID) {
-	f.projectData("lookups-parked", id.Name, func(st *LookupState) bool {
+	f.projectData("lookups-parked", &projectStep{id: id, at: f.cfg.Now()}, func(st *LookupState) bool {
 		var parked bool
 		st.Removed, _, parked = parkProject(st.Projects, st.Removed, id)
 		return parked
@@ -149,7 +176,7 @@ func (f *ProjectFacts) ParkProject(id ProjectID) {
 }
 
 func (f *ProjectFacts) RestoreProject(id ProjectID) {
-	f.projectData("lookups-restored", id.Name, func(st *LookupState) bool {
+	f.projectData("lookups-restored", &projectStep{id: id, restore: true, at: f.cfg.Now()}, func(st *LookupState) bool {
 		var changed bool
 		st.Removed, changed = restoreProject(st.Projects, st.Removed, id)
 		return changed
@@ -157,7 +184,7 @@ func (f *ProjectFacts) RestoreProject(id ProjectID) {
 }
 
 func (f *ProjectFacts) KeepProjects(names []string) {
-	f.projectData("lookups-unlisted-set-aside", "", func(st *LookupState) bool {
+	f.projectData("lookups-unlisted-set-aside", nil, func(st *LookupState) bool {
 		var n int
 		st.Removed, n = keepProjects(st.Projects, st.Removed, names)
 		return n > 0
@@ -183,6 +210,7 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 	if f.loadLocked() != nil {
 		return explained(conflict("records"), "The engine couldn't read its package lookup setting.")
 	}
+	f.settleLocked()
 	next := map[string]bool{}
 	maps.Copy(next, f.on)
 	if on {

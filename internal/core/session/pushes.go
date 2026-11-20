@@ -65,6 +65,7 @@ type AuditEntry struct {
 	Time         time.Time
 	Session      string
 	Repository   string
+	ProjectURL   string
 	Branch       string
 	Commit       string
 	Remote       string

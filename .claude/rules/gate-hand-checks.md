@@ -429,15 +429,15 @@ start w; commit w SLOW-REVIEW slow; sleep 61
 n=$(logs engine 'msg="reviewer container" event=started .*snapshot=true' | wc -l)
 sf /api/message "{\"sid\":\"$(sid w)\",\"text\":\"factory_push\"}"
 until [ "$(logs engine 'msg="reviewer container" event=started .*snapshot=true' | wc -l)" -ge $((n + 2)) ]; do sleep 1; done; sleep 5; restart
-events | grep -o 'Not rechecked since the engine restarted' | wc -l
-sf /api/size "{\"sid\":\"$(sid h)\",\"size\":\"fix\"}"; events | grep -o 'Not rechecked since the engine restarted' | wc -l
+events | grep -o '"unchecked":true' | wc -l
+sf /api/size "{\"sid\":\"$(sid h)\",\"size\":\"fix\"}"; events | grep -o '"unchecked":true' | wc -l
 until logs engine 'event=pushed by="agent, after reviews"' > /dev/null; do sleep 1; done
 logs engine 'msg="push resume"|by="agent, after reviews"|why=engine-stopped|msg="reviewer container" event=(stopped|not-started|sandbox-failed)|msg="update check"'; remote | grep "$(branch w)"
 docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserver release-seen
 ```
 
 - The waiting push: the stopping engine waits up to about 5 seconds for the running reviews and logs `review event=finished role=bug-hunter state=failed why=engine-stopped` (and `simplicity`). A stop that lands while a reviewer container is starting or in its sandbox probe logs `reviewer container event=stopped` at INFO, not `not-started` or `sandbox-failed`. The new engine logs `push resume event=queued count=1 dropped=0`, then `push resume event=review-started`, and after the 45-second reviews `push event=pushed by="agent, after reviews"`. The git host then has `$(branch w)` at `w`'s commit.
-- The Reviews panel: each session's latest review is back, and every passing role carries `Not rechecked since the engine restarted against the current approved texts and team rules, which can set this pass aside; the next approval recheck does.` `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
+- The Reviews panel: each session's latest review is back, and every passing role that isn't advisory carries `"unchecked":true` in the event stream, which the page shows as the role's "not rechecked" tag, with the panel's line at its top saying how many passes haven't been rechecked since the restart. `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
 - The update check: `update check event=newer`, from the engine before the restart or from the new one at start. If the restart logs `event=reused`, the stopping engine's line is the `newer` one, and the new engine logs another a minute after the stored check. Every `release-seen` line, for `/release-api/repos/bezmoradi/software-factory/tags` and `/release-api/repos/bezmoradi/software-factory/releases/tags/v9.9.9`, has `authorization=absent cookie=absent user-agent="software-factory-update-check"`, although the engine holds a token for this host (`gitserver.test:8443`, saved in Setup).
 
 **A verification run counts only for its commit, command and image, and only its exit code counts** (ARCHITECTURE.md "Verification runs"). Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running.

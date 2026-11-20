@@ -135,6 +135,7 @@ type Limits struct {
 	cfg            LimitsConfig
 	started        bool
 	loaded         bool
+	pending        pendingSteps
 	projects       map[string]Caps
 	removed        []RemovedProject[Caps]
 	sessions       map[string]*capSession

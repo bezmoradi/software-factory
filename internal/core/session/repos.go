@@ -151,6 +151,7 @@ type Repos struct {
 	cfg      ReposConfig
 	mu       sync.Mutex
 	cloning  map[string]Cloning
+	settling map[string]string
 	wg       sync.WaitGroup
 	sessions func(name string) int
 	hosts    func()
@@ -232,7 +233,7 @@ func NewRepos(cfg ReposConfig) *Repos {
 	if cfg.Notify == nil {
 		cfg.Notify = func(Fields) {}
 	}
-	return &Repos{cfg: cfg, cloning: map[string]Cloning{}}
+	return &Repos{cfg: cfg, cloning: map[string]Cloning{}, settling: map[string]string{}}
 }
 
 func NormalizeURL(raw string) (string, error) {
@@ -488,6 +489,12 @@ func (c *Repos) Add(raw string) (Cloning, error) {
 			return Cloning{}, explained(conflict("cloning"), "That repository is being cloned already.")
 		}
 	}
+	for _, was := range c.settling {
+		if sameRepository(was, u) {
+			c.mu.Unlock()
+			return Cloning{}, explained(conflict("removing"), "That repository is still being removed. Try again in a moment.")
+		}
+	}
 	if len(c.cloning) >= MaxClones {
 		c.mu.Unlock()
 		return Cloning{}, explained(limited("clones"), "Wait for a clone to finish before adding another repository.")
@@ -507,6 +514,14 @@ func (c *Repos) Wait() {
 }
 
 func (c *Repos) taken(name string) bool {
+	c.mu.Lock()
+	for n := range c.settling {
+		if strings.EqualFold(n, name) {
+			c.mu.Unlock()
+			return true
+		}
+	}
+	c.mu.Unlock()
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
 		return true
@@ -551,18 +566,20 @@ func (c *Repos) clone(k Cloning) {
 		err = c.cfg.Records.Save(recs)
 	}
 	delete(c.cloning, k.URL)
+	if err == nil {
+		c.settling[done.Name] = k.URL
+	}
+	hooks := slices.Clone(c.added)
 	c.mu.Unlock()
 	if err != nil {
 		c.cfg.Logger.Warn("repository", "event", "record-failed")
 		c.frame("failed", k.URL, done.Name, "The clone finished, but the engine couldn't record it, so it isn't in the list.")
 		return
 	}
-	c.mu.Lock()
-	hooks := slices.Clone(c.added)
-	c.mu.Unlock()
 	for _, restore := range hooks {
 		restore(ProjectID{Name: done.Name, URL: k.URL})
 	}
+	c.settled(done.Name)
 	c.cfg.Logger.Info("repository", "event", "added")
 	c.frame("added", k.URL, done.Name, "")
 	c.hostsChanged()
@@ -571,11 +588,15 @@ func (c *Repos) clone(k Cloning) {
 func (c *Repos) Remove(name string) error {
 	c.mu.Lock()
 	id, err := c.removeLocked(name)
+	if err == nil {
+		c.settling[id.Name] = id.URL
+	}
 	hooks := slices.Clone(c.removed)
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	defer c.settled(id.Name)
 	if err := c.cfg.Remote.Delete(name); err != nil {
 		c.cfg.Logger.Warn("repository", "event", "folder-not-removed", "name", name, "err", err.Error())
 	}
@@ -583,6 +604,12 @@ func (c *Repos) Remove(name string) error {
 		forget(id)
 	}
 	return nil
+}
+
+func (c *Repos) settled(name string) {
+	c.mu.Lock()
+	delete(c.settling, name)
+	c.mu.Unlock()
 }
 
 func (c *Repos) removeLocked(name string) (ProjectID, error) {
@@ -599,6 +626,9 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 		if k.Name == name || sameRepository(k.URL, recs[at].URL) {
 			return ProjectID{}, explained(conflict("cloning"), "This repository is being cloned again. Wait for the clone to finish, then remove it.")
 		}
+	}
+	if _, busy := c.settling[name]; busy {
+		return ProjectID{}, explained(conflict("cloning"), "This repository is still being added. Wait a moment, then remove it.")
 	}
 	if c.sessions != nil {
 		if n := c.sessions(name); n > 0 {

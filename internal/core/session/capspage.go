@@ -160,15 +160,34 @@ func (l *Limits) Frame() Fields {
 
 var _ ProjectData = (*Limits)(nil)
 
-func (l *Limits) projectData(event, name string, fn func() bool) {
+func (l *Limits) projectData(event string, step *projectStep, fn func() bool) {
 	l.mu.Lock()
-	logger := l.cfg.Logger
-	if l.cfg.Store != nil && !l.loaded {
+	logger, store := l.cfg.Logger, l.cfg.Store
+	if store == nil {
 		l.mu.Unlock()
-		projectDataNotSaved(logger, "limits", name, errors.New("caps.json wasn't read"))
 		return
 	}
-	if l.cfg.Store == nil || !fn() {
+	late := !l.loaded
+	if late {
+		st, err := store.Load()
+		if err != nil {
+			name := ""
+			if step != nil {
+				name = step.id.Name
+				l.pending.remember(step.id, step.restore, step.at)
+			}
+			l.mu.Unlock()
+			projectDataNotSaved(logger, "limits", name, errors.New("caps.json wasn't read"))
+			return
+		}
+		l.loadLocked(st)
+		l.loaded = true
+		logger.Info("limits", "event", "state-read-late")
+	}
+	steps := l.pending.list()
+	l.removed, _ = replaySteps(steps, l.projects, l.removed)
+	l.pending.done(len(steps))
+	if !fn() && len(steps) == 0 && !late {
 		l.mu.Unlock()
 		return
 	}
@@ -180,7 +199,7 @@ func (l *Limits) projectData(event, name string, fn func() bool) {
 }
 
 func (l *Limits) ParkProject(id ProjectID) {
-	l.projectData("caps-parked", id.Name, func() bool {
+	l.projectData("caps-parked", &projectStep{id: id, at: l.now()}, func() bool {
 		var parked bool
 		l.removed, _, parked = parkProject(l.projects, l.removed, id)
 		return parked
@@ -188,7 +207,7 @@ func (l *Limits) ParkProject(id ProjectID) {
 }
 
 func (l *Limits) RestoreProject(id ProjectID) {
-	l.projectData("caps-restored", id.Name, func() bool {
+	l.projectData("caps-restored", &projectStep{id: id, restore: true, at: l.now()}, func() bool {
 		var changed bool
 		l.removed, changed = restoreProject(l.projects, l.removed, id)
 		return changed
@@ -196,7 +215,7 @@ func (l *Limits) RestoreProject(id ProjectID) {
 }
 
 func (l *Limits) KeepProjects(names []string) {
-	l.projectData("caps-unlisted-set-aside", "", func() bool {
+	l.projectData("caps-unlisted-set-aside", nil, func() bool {
 		var n int
 		l.removed, n = keepProjects(l.projects, l.removed, names)
 		return n > 0
