@@ -1066,6 +1066,7 @@ dialog.flow-dialog .flow-dialog-head { position: sticky; top: -.9rem; z-index: 1
 dialog.flow-dialog .flow-dialog-title { flex: 1; min-width: 0; margin: 0; font-size: .9375rem; font-weight: 600; line-height: 1.4; color: var(--ink); }
 dialog.flow-dialog .flow-dialog-x { flex: none; margin: -.1rem -.35rem 0 0; }
 dialog.flow-dialog .push-flow { margin: 0; }
+@media (max-width: 40rem) { :is(sf-push-panel .push-checked-diagram, sf-reviews .reviews-diagram) { display: none; } }
 sf-forge-panel { display: block; margin-bottom: 1.6rem; }
 body.side-full #side > sf-forge-panel { padding-top: 1.25rem; border-top: 1px solid var(--line); }
 sf-forge-panel .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
