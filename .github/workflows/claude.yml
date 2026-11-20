@@ -41,5 +41,6 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           include_comments_by_actor: bezmoradi
+          claude_args: --permission-mode acceptEdits
           additional_permissions: |
             actions: read
