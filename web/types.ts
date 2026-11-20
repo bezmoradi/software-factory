@@ -383,6 +383,37 @@ export interface SessionPush {
   findingsSent?: number
   extra?: PushExtra
   checks?: AgentCheck[]
+  checkedBy?: PushCheckedBy
+}
+
+export interface PushCheckedReviewer {
+  agent: string
+  name: string
+  required: boolean
+  advisory: boolean
+  state: string
+  overridden: boolean
+  counted: boolean
+  setAside: string
+  unchecked: boolean
+  runs: number
+  blocking: number
+  requirements: number
+  verified: number
+  violated: number
+  notVerified: number
+}
+
+export interface PushCheckedRun {
+  kind: string
+  state: string
+  code: number
+}
+
+export interface PushCheckedBy {
+  reviewers: PushCheckedReviewer[]
+  runs: PushCheckedRun[]
+  unreadable: boolean
 }
 
 export interface SessionForge {

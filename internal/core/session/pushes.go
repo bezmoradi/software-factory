@@ -121,12 +121,14 @@ type PushView struct {
 	FindingsSent time.Time
 	Extra        *PushExtra
 	Checks       []AgentCheck
+	CheckedBy    *PushChecked
 }
 
 func (v PushView) clone() PushView {
 	v.Missing = slices.Clone(v.Missing)
 	v.Unmet = slices.Clone(v.Unmet)
 	v.Checks = slices.Clone(v.Checks)
+	v.CheckedBy = v.CheckedBy.clone()
 	if v.Audit != nil {
 		a := *v.Audit
 		a.Missing = slices.Clone(a.Missing)
@@ -204,6 +206,7 @@ func (p *Pushes) verifier() PushVerify {
 type PushVerify interface {
 	Items(ctx context.Context, sid string, t PushTarget, head string, kinds []string, ask VerifyAsk) []string
 	Running(sid, head string) bool
+	CommitRuns(sid, commit string, at time.Time) []VerifyRun
 }
 
 type PushWork interface {
@@ -873,7 +876,7 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 		e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 			Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: clean, Req: shared.RequestOf(ctx)}
 		p.record(e)
-		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
+		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e, CheckedBy: p.checkedKept(sid, h.commit)})
 		said := "The person denied the push of commit " + shortSHA7(h.commit) + " to " + h.branch + " on Software Factory's page"
 		if clean != "" {
 			said += ": " + clip(clean, maxNoteReason)
@@ -939,7 +942,7 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 		Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: "Hand off", Req: shared.RequestOf(ctx)}
 	p.record(e)
-	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
+	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e, CheckedBy: p.checkedKept(sid, h.commit)})
 	shared.For(ctx, p.cfg.Logger).Info("push", "event", "handoff")
 	return nil
 }
@@ -996,6 +999,7 @@ type pushing struct {
 	unmet      []string
 	refresh    bool
 	quiet      bool
+	checked    *PushChecked
 }
 
 func (x *pushing) clean(s string) string {
@@ -1050,7 +1054,7 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent}
 	p.held[x.sid] = h
 	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
-		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
+		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit, CheckedBy: x.checked.clone()}
 	p.mu.Unlock()
 	v.Checks = p.checksAt(x.sid, e.Time)
 	p.show(x.sid, v)
@@ -1068,7 +1072,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
 	e = e.masked()
 	reason = e.Reason
-	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time)}
+	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time), CheckedBy: x.checked.clone()}
 	if result == gate.Held {
 		v.Unmet = slices.Clone(x.unmet)
 	}
@@ -1262,6 +1266,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	}
 	request := gate.Request{Commit: head, Branch: t.Branch, Remote: url}
 	d := gate.Push(request, facts)
+	x.checked = p.checkedOf(sid, t, head, facts.Required, facts.Reviews, false)
 	if d.Result == gate.Allowed {
 		for _, q := range facts.Required {
 			recorded, passed, overridden := review.Outcome(facts.Reviews, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}, q.RunCount())

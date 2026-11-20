@@ -5,6 +5,7 @@ import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
 import { coverageFacts } from './push-coverage.ts'
+import { checkedFacts } from './push-checked.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 
 const RESULTS: Record<string, [string, string, string, string]> = {
@@ -89,6 +90,17 @@ function how(p: SessionPush): string {
   return [who, after].filter(Boolean).join(' · ')
 }
 
+function outcomeOf(p: SessionPush): string {
+  const ok = p.result === 'pushed' || p.result === 'up-to-date'
+  return p.result === 'up-to-date' ? 'The remote already had this commit, so nothing was sent' : ok ? how(p) : text(reasonOf(p))
+}
+
+function decisionOf(p: SessionPush): string {
+  const alone = (RESULTS[p.result] ?? ['', '', 'Push'])[2]
+  const said = outcomeOf(p)
+  return said ? `${alone}. ${said}` : `${alone}.`
+}
+
 class SfPushPanel extends HTMLElement {
   #key = ''
   #expiry = 0
@@ -160,6 +172,8 @@ class SfPushPanel extends HTMLElement {
     if (facts) parts.push(facts)
     const coverage = p.running ? null : coverageFacts(value.coverage ?? [])
     if (coverage) parts.push(coverage)
+    const checked = checkedFacts(p, decisionOf(p))
+    if (checked) parts.push(checked)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''
@@ -284,7 +298,7 @@ class SfPushPanel extends HTMLElement {
     }
     if (refs.childNodes.length) box.append(refs)
     const ok = p.result === 'pushed' || p.result === 'up-to-date'
-    const third = p.result === 'up-to-date' ? 'The remote already had this commit, so nothing was sent' : ok ? how(p) : text(reasonOf(p))
+    const third = outcomeOf(p)
     if (third) box.append(el('p', `push-line small${ok ? ' muted' : ''}`, third))
     const person = p.audit?.personReason ?? ''
     if (person && ok) box.append(el('p', 'push-line small muted', `Your reason: ${text(person)}`))
@@ -376,8 +390,8 @@ class SfPushPanel extends HTMLElement {
       this.#answered = allow ? 'allow' : 'deny'
       emit(this, 'sf-push-answer', { card: p.card, commit: p.commit, allow, reason })
     }
-    const allow = button('Allow', 'primary small', answer(true), 'button', 'allow')
-    const deny = button('Deny', 'small', answer(false), 'button', 'deny')
+    const allow = button('Allow', 'primary small', answer(true), 'button', `push-allow:${p.card}`)
+    const deny = button('Deny', 'small', answer(false), 'button', `push-deny:${p.card}`)
     const actions = el('div', 'actions')
     actions.append(allow, deny)
     if (p.handoff) {

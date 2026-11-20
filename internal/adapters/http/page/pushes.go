@@ -59,6 +59,53 @@ type pushJSON struct {
 
 	Extra  *pushExtraJSON   `json:"extra,omitempty"`
 	Checks []agentCheckJSON `json:"checks,omitempty"`
+
+	CheckedBy *pushCheckedJSON `json:"checkedBy,omitempty"`
+}
+
+type pushReviewerJSON struct {
+	Agent        string `json:"agent"`
+	Name         string `json:"name"`
+	Required     bool   `json:"required"`
+	Advisory     bool   `json:"advisory"`
+	State        string `json:"state"`
+	Overridden   bool   `json:"overridden"`
+	Counted      bool   `json:"counted"`
+	SetAside     string `json:"setAside"`
+	Unchecked    bool   `json:"unchecked"`
+	Runs         int    `json:"runs"`
+	Blocking     int    `json:"blocking"`
+	Requirements int    `json:"requirements"`
+	Verified     int    `json:"verified"`
+	Violated     int    `json:"violated"`
+	NotVerified  int    `json:"notVerified"`
+}
+
+type pushRunJSON struct {
+	Kind  string `json:"kind"`
+	State string `json:"state"`
+	Code  int    `json:"code"`
+}
+
+type pushCheckedJSON struct {
+	Reviewers  []pushReviewerJSON `json:"reviewers"`
+	Runs       []pushRunJSON      `json:"runs"`
+	Unreadable bool               `json:"unreadable"`
+}
+
+func checkedOf(c *session.PushChecked) *pushCheckedJSON {
+	if c == nil {
+		return nil
+	}
+	out := &pushCheckedJSON{Reviewers: make([]pushReviewerJSON, 0, len(c.Reviewers)), Runs: make([]pushRunJSON, 0, len(c.Runs)), Unreadable: c.Unreadable}
+	for _, r := range c.Reviewers {
+		out.Reviewers = append(out.Reviewers, pushReviewerJSON{Agent: r.Agent, Name: r.Name, Required: r.Required, Advisory: r.Advisory, State: r.State, Overridden: r.Overridden, Counted: r.Counted,
+			SetAside: r.SetAside, Unchecked: r.Unchecked, Runs: r.Runs, Blocking: r.Blocking, Requirements: r.Requirements, Verified: r.Verified, Violated: r.Violated, NotVerified: r.NotVerified})
+	}
+	for _, r := range c.Runs {
+		out.Runs = append(out.Runs, pushRunJSON{Kind: r.Kind, State: r.State, Code: r.Code})
+	}
+	return out
 }
 
 func pushOf(v *session.PushView) *pushJSON {
@@ -70,6 +117,7 @@ func pushOf(v *session.PushView) *pushJSON {
 		Findings: v.Findings, FindingsSent: millis(v.FindingsSent)}
 	out.Extra = extraOf(v.Extra)
 	out.Checks = checksOf(v.Checks)
+	out.CheckedBy = checkedOf(v.CheckedBy)
 	if a := v.Audit; a != nil {
 		out.Audit = &pushAuditJSON{Time: millis(a.Time), By: a.By, Result: a.Result, Reason: a.Reason, Commit: a.Commit, Branch: a.Branch,
 			Remote: a.Remote, Missing: nonNil(a.Missing), PersonReason: a.PersonReason}

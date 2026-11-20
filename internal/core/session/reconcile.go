@@ -113,7 +113,8 @@ func (p *Pushes) reconcile(ctx context.Context, e AuditEntry) bool {
 		return false
 	}
 	if t, ok := targetOrHeld(p.cfg.Targets, p.cfg.Held, e.Session); ok && t.Branch == e.Branch {
-		p.show(e.Session, PushView{Result: out.Result, Reason: out.Reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: out.Missing, At: out.Time, Audit: &out})
+		checked := p.checkedOf(e.Session, t, e.Commit, p.requiredOf(ctx, e.Session, t, e.Commit), nil, true)
+		p.show(e.Session, PushView{Result: out.Result, Reason: out.Reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: out.Missing, At: out.Time, Audit: &out, CheckedBy: checked})
 		if said != "" {
 			p.cfg.Note(e.Session, said)
 		}
