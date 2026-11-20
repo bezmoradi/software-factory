@@ -1,4 +1,6 @@
-import { busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { api } from '../api.ts'
+import { actionButton, busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { saveFile } from '../lib/download.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
@@ -14,6 +16,12 @@ const RESULTS: Record<string, [string, string, string, string]> = {
 }
 
 const FULL_SHA = /^[0-9a-f]{40}$/
+const RECORD_ROUTE = '/api/push-record'
+const RECORD_NAME = /filename="(software-factory-push-[0-9a-f]{7,12}\.json)"/
+
+function recordName(res: Response, commit: string): string {
+  return RECORD_NAME.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `software-factory-push-${commit.slice(0, 12)}.json`
+}
 
 function text(value: string): string {
   return visible(unspoofed(value))
@@ -93,6 +101,8 @@ class SfPushPanel extends HTMLElement {
   #answered = ''
   #heldCard = el('div', 'push-card')
   #passedSaid = statusLine('small muted status-slot')
+  #recordFor = ''
+  #recordBox = el('div', 'row push-line')
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -144,6 +154,7 @@ class SfPushPanel extends HTMLElement {
     }
     if (p.running) parts.push(el('p', 'small muted', 'The engine is checking the gate and the remote…'))
     else if (p.result) parts.push(this.#result(p))
+    if (!p.running && p.result === 'pushed' && FULL_SHA.test(p.commit) && value.sid) parts.push(this.#record(value.sid, p.commit))
     const facts = p.running ? null : changeFacts(p, value.checks ?? [], value.typeChange ?? null)
     if (facts) parts.push(facts)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
@@ -275,6 +286,36 @@ class SfPushPanel extends HTMLElement {
     const person = p.audit?.personReason ?? ''
     if (person && ok) box.append(el('p', 'push-line small muted', `Your reason: ${text(person)}`))
     return box
+  }
+
+  #record(sid: string, commit: string): HTMLElement {
+    const key = `${sid}\u0000${commit}`
+    if (this.#recordFor === key) return this.#recordBox
+    this.#recordFor = key
+    const said = statusLine('small muted')
+    const download = actionButton('Download this push\'s record', 'ghost small', async () => {
+      said.textContent = 'Building the record…'
+      const res = await api(RECORD_ROUTE, { sid, commit }).catch(() => null)
+      if (this.#recordFor !== key) return
+      if (!res || !res.ok) {
+        const parsed: unknown = res ? await res.json().catch(() => null) : null
+        const message = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>).message : undefined
+        said.textContent = typeof message === 'string' && message ? visible(message) : 'The engine didn’t build the record.'
+        return
+      }
+      const blob = await res.blob().catch(() => null)
+      if (!blob || this.#recordFor !== key) {
+        if (!blob) said.textContent = 'The record was cut off. Try again.'
+        return
+      }
+      const name = recordName(res, commit)
+      saveFile(blob, name)
+      said.textContent = `Saved ${name}. Nothing was sent anywhere.`
+    }, 'button', 'push-record')
+    download.setAttribute('aria-label', `Download the record of the push of commit ${shortSha(commit)}`)
+    download.title = 'One JSON file built from the engine’s own records: the commit, each review with its versions, the approvals, overrides and Allows with your reasons, the verification run, and the checks the agent reported, labelled as such'
+    this.#recordBox.replaceChildren(download, said)
+    return this.#recordBox
   }
 
   #heldInPlace(p: SessionPush, value: PushPanelView): HTMLElement {

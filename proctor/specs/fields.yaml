@@ -114,6 +114,11 @@ tables:
       - ["fld_verify_main_no_kind", "/api/verify", { op: start, repo: demo }, "fields"]
       - ["fld_verify_main_read_extra", "/api/verify", { op: read, repo: demo, kind: check }, "fields"]
       - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields"]
+      - ["fld_push_record", "/api/push-record", { proctorUnknownField: true }, "fields"]
+      - ["fld_push_record_extra", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567", proctorUnknownField: true }, "fields"]
+      - ["fld_push_record_short", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456" }, "fields"]
+      - ["fld_push_record_upper", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789ABCDEF0123456789ABCDEF01234567" }, "fields"]
+      - ["fld_push_record_no_sid", "/api/push-record", { commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
@@ -217,6 +222,7 @@ tables:
       - ["unk_stop", "/api/stop-session", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be stopped, woken or deleted from here."]
       - ["unk_verify_read", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has verification runs here."]
       - ["unk_verify_start", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: check }, "Only a session this engine started can be verified here."]
+      - ["unk_push_record", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has push records here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"

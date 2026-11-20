@@ -11,11 +11,11 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useVerify(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, work *session.SessionWork, facts *session.ProjectFacts, cfg PageConfig, logger shared.Logger) {
+func useVerify(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, work *session.SessionWork, facts *session.ProjectFacts, cfg PageConfig, logger shared.Logger) *session.Verifier {
 	host, ok := parts.boxes.(session.VerifierHost)
 	if !ok || work == nil || parts.dispatcher == nil || cfg.Verify == "" {
 		logger.Info("verify", "event", "off")
-		return
+		return nil
 	}
 	vc := session.VerifyConfig{
 		Host: host, Trees: files.Verify{Dir: cfg.Verify, Volume: workspace.Disk{}.Volume}, Store: state.NewVerifyRuns(cfg.StateDir), Heads: files.Reviews{},
@@ -43,4 +43,5 @@ func useVerify(base context.Context, srv *page.Server, reg *session.Registry, pa
 	}
 	go v.Watch(base)
 	srv.UseVerify(v)
+	return v
 }

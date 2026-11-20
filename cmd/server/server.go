@@ -588,7 +588,8 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		reg.DropStrayNotes()
 	}
 	work := useSessionWork(sends, srv, reg, parts, cfg, logger)
-	useVerify(sends, srv, reg, parts, work, facts, cfg, logger)
+	verifier := useVerify(sends, srv, reg, parts, work, facts, cfg, logger)
+	usePushRecords(srv, reg, parts, cfg, verifier)
 	parts.useHalt(reg, cfg, logger)
 	ws := newWorkspace(parts, cfg, logger)
 	parts.useLimits(reg, cfg, ws, logger)

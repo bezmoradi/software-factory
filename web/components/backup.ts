@@ -1,5 +1,6 @@
 import { actionButton, button, el, sayWhenShown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { saveFile } from '../lib/download.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 type Send = (file: Blob) => Promise<Response>
@@ -129,17 +130,6 @@ function reportNodes(r: Report): Node[] {
   return parts
 }
 
-function save(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob)
-  const a = el('a')
-  a.href = url
-  a.download = name
-  document.body.append(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
 function fileName(res: Response): string {
   const m = /filename="(software-factory-state-[0-9-]+\.tar\.gz)"/.exec(res.headers.get('Content-Disposition') ?? '')
   return m?.[1] ?? 'software-factory-state.tar.gz'
@@ -211,7 +201,7 @@ export function openBackup(post: Post, send: Send): void {
         return
       }
       const blob = await res.blob()
-      save(blob, fileName(res))
+      saveFile(blob, fileName(res))
       say.textContent = `Saved ${fileName(res)} (${Math.ceil(blob.size / 1024).toLocaleString()} KiB).`
     }).catch(() => {
       say.textContent = 'The export was cut off. Try again.'

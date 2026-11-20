@@ -74,6 +74,7 @@ tables:
       - ["t01_pull_request", "/api/pull-request"]
       - ["t01_push", "/api/push"]
       - ["t01_push_answer", "/api/push-answer"]
+      - ["t01_push_record", "/api/push-record"]
       - ["t01_recap", "/api/recap"]
       - ["t01_release", "/api/release"]
       - ["t01_remove_repo", "/api/remove-repo"]
@@ -214,6 +215,7 @@ tables:
       - ["t02_pull_request", "/api/pull-request"]
       - ["t02_push", "/api/push"]
       - ["t02_push_answer", "/api/push-answer"]
+      - ["t02_push_record", "/api/push-record"]
       - ["t02_recap", "/api/recap"]
       - ["t02_release", "/api/release"]
       - ["t02_remove_repo", "/api/remove-repo"]
@@ -355,6 +357,7 @@ tables:
       - ["t03_pull_request", "/api/pull-request"]
       - ["t03_push", "/api/push"]
       - ["t03_push_answer", "/api/push-answer"]
+      - ["t03_push_record", "/api/push-record"]
       - ["t03_recap", "/api/recap"]
       - ["t03_release", "/api/release"]
       - ["t03_remove_repo", "/api/remove-repo"]
@@ -496,6 +499,7 @@ tables:
       - ["t04_pull_request", "/api/pull-request"]
       - ["t04_push", "/api/push"]
       - ["t04_push_answer", "/api/push-answer"]
+      - ["t04_push_record", "/api/push-record"]
       - ["t04_recap", "/api/recap"]
       - ["t04_release", "/api/release"]
       - ["t04_remove_repo", "/api/remove-repo"]
@@ -636,6 +640,7 @@ tables:
       - ["t05_pull_request", "/api/pull-request"]
       - ["t05_push", "/api/push"]
       - ["t05_push_answer", "/api/push-answer"]
+      - ["t05_push_record", "/api/push-record"]
       - ["t05_recap", "/api/recap"]
       - ["t05_release", "/api/release"]
       - ["t05_remove_repo", "/api/remove-repo"]
@@ -776,6 +781,7 @@ tables:
       - ["t06_pull_request", "/api/pull-request"]
       - ["t06_push", "/api/push"]
       - ["t06_push_answer", "/api/push-answer"]
+      - ["t06_push_record", "/api/push-record"]
       - ["t06_recap", "/api/recap"]
       - ["t06_release", "/api/release"]
       - ["t06_remove_repo", "/api/remove-repo"]
@@ -913,6 +919,7 @@ tables:
       - ["t07_pull_request", "/api/pull-request"]
       - ["t07_push", "/api/push"]
       - ["t07_push_answer", "/api/push-answer"]
+      - ["t07_push_record", "/api/push-record"]
       - ["t07_recap", "/api/recap"]
       - ["t07_release", "/api/release"]
       - ["t07_remove_repo", "/api/remove-repo"]
@@ -1082,6 +1089,7 @@ tables:
       - ["t09_pull_request", "/api/pull-request"]
       - ["t09_push", "/api/push"]
       - ["t09_push_answer", "/api/push-answer"]
+      - ["t09_push_record", "/api/push-record"]
       - ["t09_recap", "/api/recap"]
       - ["t09_release", "/api/release"]
       - ["t09_remove_repo", "/api/remove-repo"]
@@ -1231,6 +1239,7 @@ tables:
       - ["t10_pull_request", "/api/pull-request"]
       - ["t10_push", "/api/push"]
       - ["t10_push_answer", "/api/push-answer"]
+      - ["t10_push_record", "/api/push-record"]
       - ["t10_recap", "/api/recap"]
       - ["t10_release", "/api/release"]
       - ["t10_remove_repo", "/api/remove-repo"]
@@ -1348,6 +1357,7 @@ tables:
           - t11_put_pull_request
           - t11_put_push
           - t11_put_push_answer
+          - t11_put_push_record
           - t11_put_recap
           - t11_put_release
           - t11_put_remove_repo
@@ -1437,6 +1447,7 @@ tables:
           - t11_delete_pull_request
           - t11_delete_push
           - t11_delete_push_answer
+          - t11_delete_push_record
           - t11_delete_recap
           - t11_delete_release
           - t11_delete_remove_repo
@@ -1526,6 +1537,7 @@ tables:
           - t11_patch_pull_request
           - t11_patch_push
           - t11_patch_push_answer
+          - t11_patch_push_record
           - t11_patch_recap
           - t11_patch_release
           - t11_patch_remove_repo
@@ -1618,6 +1630,7 @@ tables:
       - ["t11_put_pull_request", "/api/pull-request", "PUT"]
       - ["t11_put_push", "/api/push", "PUT"]
       - ["t11_put_push_answer", "/api/push-answer", "PUT"]
+      - ["t11_put_push_record", "/api/push-record", "PUT"]
       - ["t11_put_recap", "/api/recap", "PUT"]
       - ["t11_put_release", "/api/release", "PUT"]
       - ["t11_put_remove_repo", "/api/remove-repo", "PUT"]
@@ -1707,6 +1720,7 @@ tables:
       - ["t11_delete_pull_request", "/api/pull-request", "DELETE"]
       - ["t11_delete_push", "/api/push", "DELETE"]
       - ["t11_delete_push_answer", "/api/push-answer", "DELETE"]
+      - ["t11_delete_push_record", "/api/push-record", "DELETE"]
       - ["t11_delete_recap", "/api/recap", "DELETE"]
       - ["t11_delete_release", "/api/release", "DELETE"]
       - ["t11_delete_remove_repo", "/api/remove-repo", "DELETE"]
@@ -1796,6 +1810,7 @@ tables:
       - ["t11_patch_pull_request", "/api/pull-request", "PATCH"]
       - ["t11_patch_push", "/api/push", "PATCH"]
       - ["t11_patch_push_answer", "/api/push-answer", "PATCH"]
+      - ["t11_patch_push_record", "/api/push-record", "PATCH"]
       - ["t11_patch_recap", "/api/recap", "PATCH"]
       - ["t11_patch_release", "/api/release", "PATCH"]
       - ["t11_patch_remove_repo", "/api/remove-repo", "PATCH"]
@@ -1911,6 +1926,7 @@ tables:
           - t12_put_pull_request
           - t12_put_push
           - t12_put_push_answer
+          - t12_put_push_record
           - t12_put_recap
           - t12_put_release
           - t12_put_remove_repo
@@ -2000,6 +2016,7 @@ tables:
           - t12_delete_pull_request
           - t12_delete_push
           - t12_delete_push_answer
+          - t12_delete_push_record
           - t12_delete_recap
           - t12_delete_release
           - t12_delete_remove_repo
@@ -2089,6 +2106,7 @@ tables:
           - t12_patch_pull_request
           - t12_patch_push
           - t12_patch_push_answer
+          - t12_patch_push_record
           - t12_patch_recap
           - t12_patch_release
           - t12_patch_remove_repo
@@ -2181,6 +2199,7 @@ tables:
       - ["t12_put_pull_request", "/api/pull-request", "PUT"]
       - ["t12_put_push", "/api/push", "PUT"]
       - ["t12_put_push_answer", "/api/push-answer", "PUT"]
+      - ["t12_put_push_record", "/api/push-record", "PUT"]
       - ["t12_put_recap", "/api/recap", "PUT"]
       - ["t12_put_release", "/api/release", "PUT"]
       - ["t12_put_remove_repo", "/api/remove-repo", "PUT"]
@@ -2270,6 +2289,7 @@ tables:
       - ["t12_delete_pull_request", "/api/pull-request", "DELETE"]
       - ["t12_delete_push", "/api/push", "DELETE"]
       - ["t12_delete_push_answer", "/api/push-answer", "DELETE"]
+      - ["t12_delete_push_record", "/api/push-record", "DELETE"]
       - ["t12_delete_recap", "/api/recap", "DELETE"]
       - ["t12_delete_release", "/api/release", "DELETE"]
       - ["t12_delete_remove_repo", "/api/remove-repo", "DELETE"]
@@ -2359,6 +2379,7 @@ tables:
       - ["t12_patch_pull_request", "/api/pull-request", "PATCH"]
       - ["t12_patch_push", "/api/push", "PATCH"]
       - ["t12_patch_push_answer", "/api/push-answer", "PATCH"]
+      - ["t12_patch_push_record", "/api/push-record", "PATCH"]
       - ["t12_patch_recap", "/api/recap", "PATCH"]
       - ["t12_patch_release", "/api/release", "PATCH"]
       - ["t12_patch_remove_repo", "/api/remove-repo", "PATCH"]
@@ -2465,6 +2486,7 @@ tables:
       - ["t13_pull_request", "/api/pull-request"]
       - ["t13_push", "/api/push"]
       - ["t13_push_answer", "/api/push-answer"]
+      - ["t13_push_record", "/api/push-record"]
       - ["t13_recap", "/api/recap"]
       - ["t13_release", "/api/release"]
       - ["t13_remove_repo", "/api/remove-repo"]

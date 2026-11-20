@@ -18,6 +18,8 @@ The page server answers the health probe outside its middleware chain, so probes
 
 The page's own routes (`/api/…`, including `/api/review`, `/api/test-list`, `/api/walkthrough-check`, `/api/push`, `/api/push-answer`, `/api/send-findings`, `/api/changes`, `/api/sign-in-expect`, `/api/recap`, `/api/workspace`, `/api/exceptions`, `/api/limits`, `/api/pull-request`, `/api/issues`, `/api/finding-issues`, `/api/review-depth`, `/api/lessons`, `/api/metrics`, `/api/decision-log`, `/api/screenshots`, `/api/screenshot`, `/api/pair`, `/api/split`, `/api/diagnostics`, `/api/viewed`, `/api/lock-tests`, `/api/update` and `/api/packs`) need the page key, the page's `Host` and `Origin`, and JSON; other paths are `404`. The handlers live in `internal/adapters/http/page`.
 
+`/api/push-record` (`{sid, commit}`, ARCHITECTURE.md "A push's record") takes the same checks and answers its record as a JSON attachment rather than through `send`.
+
 `/api/keep`, the engine's copy of a session's commits and Restore branch, and `/api/verify`, a session's verification runs (`op` `read`, `start` with `kind` `check`, or `stop` with a run's `id`), take the same checks. `/api/packs` (ARCHITECTURE.md "Packs") takes them too and sets its own write deadline for `fetch` and `add`, which fetch a commit for up to 2 minutes (`session.PackFetchFor`). On the agent listener, `/split-request` (an agent's proposal to split its goal into tasks) is authenticated by the session's push token like `/push-request`.
 The export and import routes are `/api/export` (answers a gzip tar stream), `/api/import` (takes `application/gzip`, at most 256 MiB, instead of JSON), `/api/backup` and `/api/clone-again`; `ARCHITECTURE.md` "Export, import and store formats" has them.
 

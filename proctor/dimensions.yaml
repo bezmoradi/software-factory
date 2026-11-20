@@ -58,6 +58,7 @@ dimensions:
     - "/api/pull-request"
     - "/api/push"
     - "/api/push-answer"
+    - "/api/push-record"
     - "/api/recap"
     - "/api/release"
     - "/api/remove-repo"
