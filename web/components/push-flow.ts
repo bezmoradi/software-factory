@@ -123,8 +123,8 @@ function node(cls: string, look: Look, name: string, ...extras: Node[]): HTMLEle
   return box
 }
 
-function branch(content: HTMLElement, aside: boolean, live: boolean): HTMLElement {
-  const li = el('li', `push-flow-branch${aside ? ' push-flow-aside' : ''}${live ? ' push-flow-live' : ''}`)
+function branch(content: HTMLElement, aside: boolean, state: string): HTMLElement {
+  const li = el('li', `push-flow-branch${aside ? ' push-flow-aside' : ''}${state === 'running' ? ' push-flow-live' : state === 'pending' ? ' push-flow-wait' : ''}`)
   li.append(hidden('push-flow-arm push-flow-arm-in'), content, hidden('push-flow-arm push-flow-arm-out'))
   return li
 }
@@ -137,11 +137,11 @@ function reviewer(r: FlowReviewer): HTMLElement {
   if (blocking && DONE.has(r.state)) extras.push(el('span', `tag ${!aside && r.state === 'block' ? 'bad' : 'warn'}`, `${blocking} blocking`))
   if (aside) extras.push(el('span', 'tag', r.advisory ? 'advisory' : 'not required'))
   for (const t of r.tags ?? []) extras.push(el('span', 'tag warn', text(t)))
-  return branch(node(phase(r.state), look, text(r.name), ...extras), aside, r.state === 'running')
+  return branch(node(phase(r.state), look, text(r.name), ...extras), aside, r.state)
 }
 
 function run(r: FlowRun): HTMLElement {
-  return branch(node(phase(r.state), runLook(r), `Verification run (${text(r.kind)})`), false, r.state === 'running')
+  return branch(node(phase(r.state), runLook(r), `Verification run (${text(r.kind)})`), false, r.state)
 }
 
 function taken(m: FlowModel): string {
@@ -188,26 +188,90 @@ function summary(m: FlowModel): string {
   return said.join(' ')
 }
 
+type ZoneKind = 'session' | 'review' | 'verify' | 'engine' | 'git'
+
+const ZONES: Record<ZoneKind, [name: string, note: string, untrusted: boolean]> = {
+  session: ["Session's container", "untrusted: the agent's branch", true],
+  review: ['Reviewer containers', 'one per run, on a read-only snapshot', false],
+  verify: ['Verification containers', 'untrusted: no network; only the exit code counts', true],
+  engine: ['Engine', "decides; never takes the agent's word", false],
+  git: ['Git host', 'only the engine pushes; held or denied, nothing is pushed', false],
+}
+
+const KEY: [swatch: string, words: string][] = [
+  ['solid', 'Solid: done or taken'],
+  ['dashed', 'Dashed: waiting, not taken or not counted'],
+  ['moving', 'Moving dashes: running'],
+  ['untrusted', "Dashed zone: untrusted, where the agent's code runs"],
+]
+
+function zone(kind: ZoneKind, ...body: HTMLElement[]): HTMLElement {
+  const [name, note, untrusted] = ZONES[kind]
+  const box = el('div', `push-flow-zone push-flow-zone-${kind}${untrusted ? ' push-flow-untrusted' : ''}`)
+  const head = el('p', 'push-flow-head')
+  head.append(el('span', 'push-flow-zone-name', name), el('span', 'push-flow-zone-note', note))
+  box.append(head, ...body)
+  return box
+}
+
+function wire(label: string, live = false): HTMLElement {
+  const line = hidden(`push-flow-wire${live ? ' push-flow-wire-live' : ''}`)
+  if (label) line.append(el('span', 'push-flow-wire-label', label))
+  return line
+}
+
+function list(cls: string, label: string, items: HTMLElement[]): HTMLElement {
+  const ul = el('ul', `push-flow-list ${cls}`)
+  ul.setAttribute('role', 'list')
+  ul.setAttribute('aria-label', label)
+  ul.append(...items)
+  return ul
+}
+
+function key(): HTMLElement {
+  const ul = list('push-flow-key', 'Key to the diagram', [])
+  for (const [swatch, words] of KEY) {
+    const li = el('li', 'push-flow-key-item')
+    li.append(hidden(`push-flow-swatch push-flow-swatch-${swatch}`), el('span', '', words))
+    ul.append(li)
+  }
+  return ul
+}
+
+function outLabel(m: FlowModel): string {
+  const said: string[] = []
+  const reviewers = m.reviewers?.length ?? 0
+  if (reviewers) said.push(reviewers === 1 ? 'verdict' : 'verdicts')
+  if (m.runs.length) said.push(m.runs.length === 1 ? 'exit code' : 'exit codes')
+  return said.join(', ')
+}
+
 export function flowDiagram(m: FlowModel): HTMLElement {
   const figure = el('figure', 'push-flow')
   const chart = el('div', 'push-flow-chart')
   const sha = m.commit ? [el('code', 'push-flow-sha', shortSha(text(m.commit)))] : []
   const commit = node('push-flow-commit', ['code', '', ''], 'Commit', ...sha)
-  const fan = el('ul', 'push-flow-fan')
-  fan.setAttribute('role', 'list')
-  fan.setAttribute('aria-label', 'Checks of this commit')
-  if (!m.reviewers) fan.append(branch(node('', ['info', '', 'not looked at'], 'Reviews'), true, false))
-  else for (const r of m.reviewers) fan.append(reviewer(r))
-  for (const r of m.runs) fan.append(run(r))
-  if (!fan.childElementCount) fan.append(branch(node('', ['info', '', 'none required'], 'No reviewer'), true, false))
+  const reviews: HTMLElement[] = []
+  if (!m.reviewers) reviews.push(branch(node('', ['info', '', 'not looked at'], 'Reviews'), true, ''))
+  else for (const r of m.reviewers) reviews.push(reviewer(r))
+  if (!reviews.length) reviews.push(branch(node('', ['info', '', 'none required'], 'No reviewer'), true, ''))
+  const checks = el('div', 'push-flow-checks')
+  checks.append(zone('review', list('push-flow-fan', 'Reviews of this commit', reviews)))
+  if (m.runs.length) checks.append(zone('verify', list('push-flow-fan', 'Verification runs of this commit', m.runs.map(run))))
   const gate = node(`push-flow-gate ${phase(m.gate.state === 'waiting' ? 'pending' : m.gate.state === 'deciding' ? 'running' : '')}`, gateLook(m.gate), 'Gate')
-  const routes = el('ul', 'push-flow-routes')
-  routes.setAttribute('role', 'list')
-  routes.setAttribute('aria-label', m.outcome ? "The gate's routes" : "The gate's routes, none taken yet")
   const keys = !m.outcome || ROUTES.includes(taken(m)) ? ROUTES : [...ROUTES, taken(m)]
-  for (const key of keys) routes.append(route(key, m))
-  chart.append(commit, hidden('push-flow-wire'), fan, hidden(`push-flow-wire${m.gate.state === 'deciding' ? ' push-flow-wire-live' : ''}`), gate, hidden('push-flow-wire'), routes)
-  figure.append(chart, el('figcaption', 'small muted push-flow-caption', summary(m)))
+  const routes = list('push-flow-routes', m.outcome ? "The gate's routes" : "The gate's routes, none taken yet", keys.map(k => route(k, m)))
+  const fed = (m.reviewers?.length ?? 0) + m.runs.length > 0
+  chart.append(
+    zone('session', commit),
+    wire(fed ? 'snapshot' : ''),
+    checks,
+    wire(outLabel(m), m.gate.state === 'deciding'),
+    zone('engine', gate),
+    wire('decision'),
+    zone('git', routes),
+  )
+  figure.append(chart, key(), el('figcaption', 'small muted push-flow-caption', summary(m)))
   return figure
 }
 
