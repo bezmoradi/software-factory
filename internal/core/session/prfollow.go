@@ -104,6 +104,8 @@ type SavedFollow struct {
 	Rounds    int
 	AutoStop  string
 	IssueSent bool
+	Reviewed  []ReviewedPush
+	Counted   []string
 }
 
 type FollowRecord struct {
@@ -475,6 +477,9 @@ func (fl *Follows) pushed(p PushedFacts) {
 		}
 		x.saved.Watch, x.saved.Pushed = true, fl.cfg.Now()
 		x.polled = time.Time{}
+		if r, ok := reviewedOf(p, fl.cfg.Now()); ok {
+			x.saved.Reviewed = addReviewed(x.saved.Reviewed, r)
+		}
 	}
 	fl.mu.Unlock()
 	fl.save()
@@ -702,6 +707,7 @@ func (fl *Follows) poll(ctx context.Context, sid string) {
 		x.saved.URL = ps.URL
 	}
 	fl.mu.Unlock()
+	fl.countAfterReview(sid, x, ft, ps.Head, report, read, comments)
 	fl.show(sid)
 	shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "polled", "checks", len(report.Runs)+len(report.Statuses), "comments", len(comments))
 	fl.auto(sid)
@@ -873,7 +879,11 @@ func (fl *Follows) save() {
 	rec := FollowRecord{Projects: map[ProjectID]FollowSettings{}}
 	for _, sid := range fl.sidsLocked() {
 		s := fl.list[sid].saved
-		s.SeenURLs = slices.Clone(s.SeenURLs)
+		s.SeenURLs, s.Counted = slices.Clone(s.SeenURLs), slices.Clone(s.Counted)
+		s.Reviewed = slices.Clone(s.Reviewed)
+		for i := range s.Reviewed {
+			s.Reviewed[i].Passed = slices.Clone(s.Reviewed[i].Passed)
+		}
 		rec.Follows = append(rec.Follows, s)
 	}
 	for id, s := range fl.projects {

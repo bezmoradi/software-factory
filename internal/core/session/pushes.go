@@ -90,6 +90,8 @@ type AuditEntry struct {
 	PluginCommit string
 	ClaudeCode   string
 	Models       []string
+	Passed       []string
+	AllPassed    bool
 }
 
 type Audit interface {

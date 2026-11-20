@@ -265,3 +265,23 @@ scenarios:
             "$.body.projects": { name: "refused-${run.id}" }
           any:
             "$.body.projects": { name: demo }
+
+  - id: REP-006
+    name: "A project's numbers carry its \"after review\" counts, CI failures and pull request review comments after its reviews passed, which are 0 while the engine follows no pull request with a reviewed push"
+    steps:
+      - id: read-numbers
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/metrics"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, repo: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.repo": demo
+            "$.body.afterCi": 0
+            "$.body.afterComments": 0
+            "$.body.pullsOpened": 0

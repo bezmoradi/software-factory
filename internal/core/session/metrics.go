@@ -32,13 +32,15 @@ type MetricsConfig struct {
 }
 
 type RoleMetrics struct {
-	Role       string
-	Reviews    int
-	Passed     int
-	Blocked    int
-	NoVerdict  int
-	Failed     int
-	Overridden int
+	Role          string
+	Reviews       int
+	Passed        int
+	Blocked       int
+	NoVerdict     int
+	Failed        int
+	Overridden    int
+	AfterCI       int
+	AfterComments int
 }
 
 type MetricPull struct {
@@ -63,6 +65,8 @@ type MetricsView struct {
 	Allows            int
 	Denied            int
 	Overrides         int
+	AfterCI           int
+	AfterComments     int
 	ReviewsSince      time.Time
 	ReviewRuns        int
 	ReviewCost        float64
@@ -185,6 +189,7 @@ func (m *Metrics) fromAudit(v *MetricsView, entries []AuditEntry) map[string]tim
 	}
 	firstPush := map[string]time.Time{}
 	reviewed := map[string]map[string]bool{}
+	counted := map[string]bool{}
 	for _, e := range entries {
 		switch e.Kind {
 		case "", AuditPush:
@@ -232,6 +237,20 @@ func (m *Metrics) fromAudit(v *MetricsView, entries []AuditEntry) map[string]tim
 			if r := role(e.Reviewer); r != nil {
 				r.Overridden++
 			}
+		case AuditAfterReview:
+			if e.Hash == "" || counted[e.Hash] || e.Result != ResultCIFailure && e.Result != ResultLateComment {
+				continue
+			}
+			counted[e.Hash] = true
+			ci := e.Result == ResultCIFailure
+			if e.AllPassed {
+				afterCount(&v.AfterCI, &v.AfterComments, ci)
+			}
+			for _, name := range e.Passed {
+				if r := role(name); r != nil {
+					afterCount(&r.AfterCI, &r.AfterComments, ci)
+				}
+			}
 		}
 	}
 	for _, r := range roles {
@@ -247,6 +266,14 @@ func (m *Metrics) fromAudit(v *MetricsView, entries []AuditEntry) map[string]tim
 		return 1
 	})
 	return firstPush
+}
+
+func afterCount(ciCount, comments *int, ci bool) {
+	if ci {
+		*ciCount++
+	} else {
+		*comments++
+	}
 }
 
 func startToPush(v *MetricsView, runs []SavedRun, firstPush map[string]time.Time) {

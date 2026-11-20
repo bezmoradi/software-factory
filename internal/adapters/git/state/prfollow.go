@@ -34,23 +34,32 @@ func NewPRFollows(dir string) PRFollows { return PRFollows{Dir: dir, mu: &sync.M
 var _ session.FollowStore = PRFollows{}
 
 type followJSON struct {
-	SID       string    `json:"sid"`
-	Project   string    `json:"project"`
-	Branch    string    `json:"branch"`
-	Issue     int       `json:"issue,omitempty"`
-	IssueSent bool      `json:"issueSent,omitempty"`
-	Watch     bool      `json:"watch,omitempty"`
-	Pushed    time.Time `json:"pushed"`
-	Number    int       `json:"number,omitempty"`
-	URL       string    `json:"url,omitempty"`
-	Opened    bool      `json:"opened,omitempty"`
-	Done      string    `json:"done,omitempty"`
-	DoneAt    time.Time `json:"doneAt"`
-	CheckSent string    `json:"checkSent,omitempty"`
-	SeenAt    time.Time `json:"seenAt"`
-	SeenURLs  []string  `json:"seenUrls,omitempty"`
-	Rounds    int       `json:"rounds,omitempty"`
-	AutoStop  string    `json:"autoStop,omitempty"`
+	SID       string         `json:"sid"`
+	Project   string         `json:"project"`
+	Branch    string         `json:"branch"`
+	Issue     int            `json:"issue,omitempty"`
+	IssueSent bool           `json:"issueSent,omitempty"`
+	Watch     bool           `json:"watch,omitempty"`
+	Pushed    time.Time      `json:"pushed"`
+	Number    int            `json:"number,omitempty"`
+	URL       string         `json:"url,omitempty"`
+	Opened    bool           `json:"opened,omitempty"`
+	Done      string         `json:"done,omitempty"`
+	DoneAt    time.Time      `json:"doneAt"`
+	CheckSent string         `json:"checkSent,omitempty"`
+	SeenAt    time.Time      `json:"seenAt"`
+	SeenURLs  []string       `json:"seenUrls,omitempty"`
+	Rounds    int            `json:"rounds,omitempty"`
+	AutoStop  string         `json:"autoStop,omitempty"`
+	Reviewed  []reviewedJSON `json:"reviewed,omitempty"`
+	Counted   []string       `json:"counted,omitempty"`
+}
+
+type reviewedJSON struct {
+	Commit string    `json:"commit"`
+	At     time.Time `json:"at"`
+	Passed []string  `json:"passed"`
+	All    bool      `json:"all,omitempty"`
 }
 
 type followSettingsJSON struct {
@@ -93,7 +102,53 @@ func followOf(j followJSON) (session.SavedFollow, bool) {
 	}
 	return session.SavedFollow{SID: j.SID, Project: j.Project, Branch: j.Branch, Issue: j.Issue, IssueSent: j.IssueSent, Watch: j.Watch, Pushed: j.Pushed, Number: j.Number,
 		URL: j.URL, Opened: j.Opened, Done: j.Done, DoneAt: j.DoneAt, CheckSent: j.CheckSent, SeenAt: j.SeenAt, SeenURLs: append([]string(nil), j.SeenURLs...),
-		Rounds: j.Rounds, AutoStop: j.AutoStop}, true
+		Rounds: j.Rounds, AutoStop: j.AutoStop, Reviewed: reviewedOf(j.Reviewed), Counted: countedOf(j.Counted)}, true
+}
+
+func validReviewed(r reviewedJSON) bool {
+	if !commitID.MatchString(r.Commit) || r.At.IsZero() || len(r.Passed) == 0 || len(r.Passed) > maxPassedRoles {
+		return false
+	}
+	for i, a := range r.Passed {
+		if !session.ValidRole(a) || slices.Contains(r.Passed[:i], a) {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewedOf(list []reviewedJSON) []session.ReviewedPush {
+	var out []session.ReviewedPush
+	for _, r := range list {
+		if validReviewed(r) && !slices.ContainsFunc(out, func(x session.ReviewedPush) bool { return x.Commit == r.Commit }) {
+			out = append(out, session.ReviewedPush{Commit: r.Commit, At: r.At, Passed: append([]string(nil), r.Passed...), All: r.All})
+		}
+	}
+	if len(out) > session.MaxFollowReviewed {
+		out = out[len(out)-session.MaxFollowReviewed:]
+	}
+	return out
+}
+
+func countedOf(list []string) []string {
+	var out []string
+	for _, k := range list {
+		if followKey.MatchString(k) && !slices.Contains(out, k) {
+			out = append(out, k)
+		}
+	}
+	if len(out) > session.MaxFollowCounted {
+		out = out[len(out)-session.MaxFollowCounted:]
+	}
+	return out
+}
+
+func reviewedJSONOf(list []session.ReviewedPush) []reviewedJSON {
+	var out []reviewedJSON
+	for _, r := range list {
+		out = append(out, reviewedJSON{Commit: r.Commit, At: r.At.UTC(), Passed: r.Passed, All: r.All})
+	}
+	return out
 }
 
 func settingsOf(j followSettingsJSON) (session.FollowSettings, bool) {
@@ -148,8 +203,10 @@ func (s PRFollows) Save(rec session.FollowRecord) error {
 	capped := 0
 	for _, v := range rec.Follows {
 		j := followJSON{SID: v.SID, Project: v.Project, Branch: v.Branch, Issue: v.Issue, IssueSent: v.IssueSent, Watch: v.Watch, Pushed: v.Pushed.UTC(), Number: v.Number,
-			URL: v.URL, Opened: v.Opened, Done: v.Done, DoneAt: v.DoneAt.UTC(), CheckSent: v.CheckSent, SeenAt: v.SeenAt.UTC(), SeenURLs: v.SeenURLs, Rounds: v.Rounds, AutoStop: v.AutoStop}
-		_, ok := followOf(j)
+			URL: v.URL, Opened: v.Opened, Done: v.Done, DoneAt: v.DoneAt.UTC(), CheckSent: v.CheckSent, SeenAt: v.SeenAt.UTC(), SeenURLs: v.SeenURLs, Rounds: v.Rounds, AutoStop: v.AutoStop,
+			Reviewed: reviewedJSONOf(v.Reviewed), Counted: v.Counted}
+		clean, ok := followOf(j)
+		j.Reviewed, j.Counted = reviewedJSONOf(clean.Reviewed), clean.Counted
 		if ok && len(f.Follows) >= session.MaxFollowed {
 			capped++
 		}
