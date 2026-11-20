@@ -47,7 +47,8 @@
           { "context": "Secrets", "integration_id": 15368 },
           { "context": "Linked issue", "integration_id": 15368 },
           { "context": "Workflow guard", "integration_id": 15368 },
-          { "context": "Claude approval", "integration_id": 15368 }
+          { "context": "Claude approval", "integration_id": 15368 },
+          { "context": "Claude review", "integration_id": 15368 }
         ]
       }
     }
