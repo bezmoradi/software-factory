@@ -1,10 +1,11 @@
-import { el, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
-import { cardFlow, flowDiagram } from './push-flow.ts'
+import { cardFlow, openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { PushCheckedBy, PushCheckedReviewer, PushCheckedRun, SessionPush } from '../types.ts'
 
 const FINISHED = new Set(['pass', 'block', 'unknown'])
+let made = 0
 
 function text(value: string): string {
   return visible(unspoofed(value))
@@ -89,37 +90,95 @@ function checkedOf(v: unknown): PushCheckedBy | null {
   return { reviewers, runs, unreadable: c.unreadable === true }
 }
 
-export function checkedFacts(p: SessionPush, decision: string): HTMLElement | null {
-  if (p.running || !p.result) return null
-  const box = el('section', 'push-facts push-checked')
-  const title = el('h3', 'small push-checked-title', 'How this change was checked')
-  title.id = 'push-checked-title'
-  box.setAttribute('aria-labelledby', title.id)
-  box.append(title)
-  const commit = p.commit ? ` of commit ${shortSha(p.commit)}` : ''
-  box.append(el('p', 'small muted', `From the engine's own records${commit}: the reviews, the verification runs and the gate's decision. Nothing the agent reported about itself is here.`))
-  const checked = checkedOf(p.checkedBy)
-  box.append(flowDiagram(cardFlow(p, checked)))
-  if (!checked) box.append(el('p', 'small muted', 'The engine decided this card before it looked at the reviews, so no reviewer is listed.'))
-  else {
-    if (checked.unreadable) box.append(el('p', 'small warn', "The engine couldn't read its review records, so this list may be incomplete."))
-    if (checked.reviewers.length) {
-      const list = el('ul', 'small push-checked-list')
-      list.setAttribute('role', 'list')
-      list.setAttribute('aria-label', 'Reviewers')
-      for (const r of checked.reviewers) list.append(reviewer(r))
-      box.append(list)
-    } else box.append(el('p', 'small muted', 'No reviewer was required, and none reviewed this commit.'))
-    if (checked.runs.length) {
-      const list = el('ul', 'small push-checked-list')
-      list.setAttribute('role', 'list')
-      list.setAttribute('aria-label', 'Verification runs')
-      for (const r of checked.runs) list.append(run(r))
-      box.append(list)
-    }
+function list(label: string, items: HTMLElement[]): HTMLElement {
+  const ul = el('ul', 'small push-checked-list')
+  ul.setAttribute('role', 'list')
+  ul.setAttribute('aria-label', label)
+  ul.append(...items)
+  return ul
+}
+
+export interface PushCheckedView {
+  push: SessionPush
+  decision: string
+}
+
+class SfPushChecked extends HTMLElement {
+  #view: PushCheckedView | null = null
+  #key = ''
+  #box = el('section', 'push-facts push-checked')
+  #title = el('h3', 'small push-checked-title', 'How this change was checked')
+  #model: FlowModel | null = null
+  #shown: FlowDialog | null = null
+  #open = button('Open diagram', 'small', () => this.#show(), 'button', 'push-checked-diagram')
+  #diagram = el('div', 'push-checked-diagram')
+
+  constructor() {
+    super()
+    this.#title.id = `push-checked-title-${++made}`
+    this.#box.setAttribute('aria-labelledby', this.#title.id)
+    this.#open.title = "Opens the reviews, verification runs and gate's decision of this commit as a diagram"
+    this.#diagram.append(this.#open)
   }
-  const gate = el('p', 'small push-checked-gate')
-  gate.append(el('strong', '', 'Gate: '), text(decision))
-  box.append(gate)
-  return box
+
+  connectedCallback() {
+    this.paint()
+  }
+
+  set view(value: PushCheckedView | null) {
+    this.#view = value
+    this.paint()
+  }
+
+  paint() {
+    const v = this.#view
+    const p = v && !v.push.running && v.push.result ? v.push : null
+    this.hidden = !p
+    const checked = p ? checkedOf(p.checkedBy) : null
+    this.#model = p ? cardFlow(p, checked) : null
+    if (this.#shown && this.#model) this.#shown.diagram.model = this.#model
+    else this.#shown?.modal.close()
+    const key = JSON.stringify(p ? [p, v?.decision ?? ''] : null)
+    if (key === this.#key) return
+    this.#key = key
+    if (!p) {
+      replaceKeeping(this, [])
+      return
+    }
+    replaceKeeping(this.#box, this.#facts(p, checked, v?.decision ?? ''))
+    replaceKeeping(this, [this.#box])
+  }
+
+  #show() {
+    if (!this.#model || this.#shown) return
+    const shown = openFlow('How this change was checked', this.#model)
+    this.#shown = shown
+    shown.modal.onClose(() => {
+      if (this.#shown === shown) this.#shown = null
+    })
+  }
+
+  #facts(p: SessionPush, checked: PushCheckedBy | null, decision: string): Node[] {
+    const commit = p.commit ? ` of commit ${shortSha(p.commit)}` : ''
+    const parts: Node[] = [this.#title, el('p', 'small muted', `From the engine's own records${commit}: the reviews, the verification runs and the gate's decision. Nothing the agent reported about itself is here.`), this.#diagram]
+    if (!checked) parts.push(el('p', 'small muted', 'The engine decided this card before it looked at the reviews, so no reviewer is listed.'))
+    else {
+      if (checked.unreadable) parts.push(el('p', 'small warn', "The engine couldn't read its review records, so this list may be incomplete."))
+      if (checked.reviewers.length) parts.push(list('Reviewers', checked.reviewers.map(reviewer)))
+      else parts.push(el('p', 'small muted', 'No reviewer was required, and none reviewed this commit.'))
+      if (checked.runs.length) parts.push(list('Verification runs', checked.runs.map(run)))
+    }
+    const gate = el('p', 'small push-checked-gate')
+    gate.append(el('strong', '', 'Gate: '), text(decision))
+    parts.push(gate)
+    return parts
+  }
+}
+
+customElements.define('sf-push-checked', SfPushChecked)
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'sf-push-checked': SfPushChecked
+  }
 }

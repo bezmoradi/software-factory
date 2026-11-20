@@ -5,7 +5,7 @@ import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
 import { coverageFacts } from './push-coverage.ts'
-import { checkedFacts } from './push-checked.ts'
+import './push-checked.ts'
 import { RESULTS } from './push-flow.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 
@@ -95,6 +95,7 @@ function decisionOf(p: SessionPush): string {
 
 class SfPushPanel extends HTMLElement {
   #key = ''
+  #checked = el('sf-push-checked')
   #expiry = 0
   #ends = 0
   #last: PushPanelView | null = null
@@ -140,6 +141,7 @@ class SfPushPanel extends HTMLElement {
     this.#ends = ends > Date.now() ? ends : 0
     if (this.#ends) this.#arm()
     const p = value?.push ?? null
+    this.#checked.view = p ? { push: p, decision: decisionOf(p) } : null
     const flagged = (value?.flagged ?? []).filter(f => !f.allowed)
     this.hidden = !p && !flagged.length && value?.flagsRead !== false
     if (!value || this.hidden) {
@@ -164,8 +166,7 @@ class SfPushPanel extends HTMLElement {
     if (facts) parts.push(facts)
     const coverage = p.running ? null : coverageFacts(value.coverage ?? [])
     if (coverage) parts.push(coverage)
-    const checked = checkedFacts(p, decisionOf(p))
-    if (checked) parts.push(checked)
+    if (!this.#checked.hidden) parts.push(this.#checked)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''

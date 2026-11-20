@@ -4,7 +4,7 @@ import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
-import { flowDiagram, liveFlow } from './push-flow.ts'
+import { liveFlow, openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
@@ -98,12 +98,24 @@ class SfReviews extends HTMLElement {
   #again: HTMLButtonElement | null = null
   #said = statusLine('sr-only', 'span')
   #head = el('div', 'row reviews-head')
+  #flow: FlowModel | null = null
+  #flowSid = ''
+  #flowShown: FlowDialog | null = null
+  #flowShownSid = ''
+  #flowOpen = button('Open diagram', 'small', () => this.#showFlow(), 'button', 'reviews-diagram')
+  #flowRow = el('div', 'reviews-diagram')
   #pushSaid = statusLine('small push-said status-slot', 'span')
   #reasons = new Map<string, string>()
   #opened = new Set<string>()
   #wholes = new Map<string, Promise<WholeReport | string>>()
   #timer = 0
   #all = false
+
+  constructor() {
+    super()
+    this.#flowOpen.title = "Opens the latest commit's reviewers, the gate and its routes as a diagram that follows them live"
+    this.#flowRow.append(this.#flowOpen)
+  }
 
   connectedCallback() {
     if (!this.#button) this.hidden = true
@@ -131,11 +143,31 @@ class SfReviews extends HTMLElement {
     }
   }
 
+  #follow(value: ReviewsView | null) {
+    this.#flow = value ? liveFlow(value) : null
+    this.#flowSid = value?.sid ?? ''
+    const shown = this.#flowShown
+    if (!shown) return
+    if (this.#flow && this.#flowShownSid === this.#flowSid) shown.diagram.model = this.#flow
+    else shown.modal.close()
+  }
+
+  #showFlow() {
+    if (!this.#flow || this.#flowShown) return
+    const shown = openFlow('How the latest commit is being checked', this.#flow)
+    this.#flowShown = shown
+    this.#flowShownSid = this.#flowSid
+    shown.modal.onClose(() => {
+      if (this.#flowShown === shown) this.#flowShown = null
+    })
+  }
+
   set view(value: ReviewsView | null) {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
     this.hidden = !value
+    this.#follow(value)
     if (!value) {
       this.replaceChildren()
       return
@@ -186,8 +218,7 @@ class SfReviews extends HTMLElement {
     if (!value.pushed) heading.push(p)
     replaceKeeping(this.#head, heading)
     const parts: Node[] = [this.#head]
-    const flow = liveFlow(value)
-    if (flow) parts.push(flowDiagram(flow))
+    if (this.#flow) parts.push(this.#flowRow)
     const note = value.disabled || r?.note || ''
     const described: string[] = []
     if (note) {

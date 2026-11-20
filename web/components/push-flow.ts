@@ -1,4 +1,5 @@
-import { el, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
+import { modal, type Modal } from '../lib/dialog.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import type { PushCheckedBy, PushCheckedReviewer, Reviewer, ReviewRole, ReviewsView, SessionPush } from '../types.ts'
@@ -246,7 +247,7 @@ function outLabel(m: FlowModel): string {
   return said.join(', ')
 }
 
-export function flowDiagram(m: FlowModel): HTMLElement {
+function diagram(m: FlowModel): HTMLElement {
   const figure = el('figure', 'push-flow')
   const chart = el('div', 'push-flow-chart')
   const sha = m.commit ? [el('code', 'push-flow-sha', shortSha(text(m.commit)))] : []
@@ -273,6 +274,64 @@ export function flowDiagram(m: FlowModel): HTMLElement {
   )
   figure.append(chart, key(), el('figcaption', 'small muted push-flow-caption', summary(m)))
   return figure
+}
+
+class SfFlowDiagram extends HTMLElement {
+  #model: FlowModel | null = null
+  #key = ''
+
+  connectedCallback() {
+    this.paint()
+  }
+
+  get model(): FlowModel | null {
+    return this.#model
+  }
+
+  set model(value: FlowModel | null) {
+    this.#model = value
+    this.paint()
+  }
+
+  paint() {
+    const m = this.#model
+    const key = JSON.stringify(m)
+    if (key === this.#key) return
+    this.#key = key
+    this.hidden = !m
+    replaceKeeping(this, m ? [diagram(m)] : [])
+  }
+}
+
+customElements.define('sf-flow-diagram', SfFlowDiagram)
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'sf-flow-diagram': SfFlowDiagram
+  }
+}
+
+export interface FlowDialog {
+  modal: Modal
+  diagram: SfFlowDiagram
+}
+
+export function openFlow(title: string, model: FlowModel): FlowDialog {
+  const diagram = el('sf-flow-diagram')
+  diagram.model = model
+  const cross = button('', 'ghost icon-button flow-dialog-x', () => m.close())
+  cross.setAttribute('aria-label', 'Close')
+  cross.title = 'Close'
+  cross.append(icon('close'))
+  const m = modal({
+    kind: 'flow-dialog',
+    title,
+    headingClass: 'flow-dialog-title',
+    header: { cls: 'flow-dialog-head', after: [cross] },
+    body: [diagram],
+    focus: 'heading',
+  })
+  return { modal: m, diagram }
 }
 
 function checkedReviewer(r: PushCheckedReviewer): FlowReviewer {
