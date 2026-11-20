@@ -233,8 +233,14 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	d.mu.Lock()
 	byBox := map[string]map[string]*run{}
 	dirs := map[string]string{}
+	skipped := map[string]bool{}
+	for _, r := range d.runs {
+		if r.homeAsk != "" || r.homeGated || r.busy && !r.running {
+			skipped[r.box] = true
+		}
+	}
 	for sid, r := range d.runs {
-		if r.spec.Method == MethodPlugin && r.cwd != "" && r.box != "" && !r.doubled {
+		if r.spec.Method == MethodPlugin && r.cwd != "" && r.box != "" && !r.doubled && !skipped[r.box] {
 			if byBox[r.box] == nil {
 				byBox[r.box] = map[string]*run{}
 			}
@@ -253,10 +259,14 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	states := map[string]AgentState{}
 	supervisor, answered := "", false
 	for box, mine := range byBox {
-		if !d.liveBox(box) {
+		m := d.boxLock(box)
+		m.Lock()
+		if !d.liveBox(box) || d.boxHeld(box) {
+			m.Unlock()
 			continue
 		}
 		got, ok := d.refreshBox(ctx, box, dirs[box], mine, live, states)
+		m.Unlock()
 		answered = answered || ok
 		if got != "" && supervisor != "running" {
 			supervisor = got

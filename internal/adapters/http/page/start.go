@@ -183,8 +183,18 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		shared.For(r.Context(), s.logger).Info("stop-session", "ok", err == nil)
 		reply(w, err, http.StatusAccepted)
 	case "/api/wake":
+		if _, refusing := body["refuse"]; refusing {
+			if !keysWithin(body, "sid", "refuse") || body["refuse"] != true {
+				refuse(w, http.StatusBadRequest, "fields")
+				return
+			}
+			err := s.cfg.Starter.RefuseWake(ctx, sid)
+			shared.For(r.Context(), s.logger).Info("wake", "refused", true, "ok", err == nil)
+			reply(w, err, http.StatusOK)
+			return
+		}
 		consent, ok := consentOf(body)
-		if !keysWithin(body, "sid", "approve", "costOk") || !ok {
+		if !keysWithin(body, "sid", "approve", "home", "costOk") || !ok {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}

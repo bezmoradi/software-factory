@@ -26,6 +26,7 @@ type auditEntryJSON struct {
 	Source       string   `json:"source,omitempty"`
 	Person       string   `json:"person,omitempty"`
 	Req          string   `json:"req,omitempty"`
+	Hash         string   `json:"hash,omitempty"`
 }
 
 func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
@@ -48,7 +49,7 @@ func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
 	for _, e := range v.Entries {
 		entries = append(entries, auditEntryJSON{Time: millis(e.Time), Kind: e.Kind, By: e.By, Result: e.Result, Reason: e.Reason, PersonReason: e.PersonReason,
 			Commit: e.Commit, Branch: e.Branch, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Missing: nonNil(e.Missing),
-			Session: e.Session, Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Person: e.Person, Req: e.Req})
+			Session: e.Session, Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Person: e.Person, Req: e.Req, Hash: e.Hash})
 	}
 	refusals := v.Refusals
 	if refusals == nil {

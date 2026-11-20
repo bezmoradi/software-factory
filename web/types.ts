@@ -44,6 +44,7 @@ export interface SessionInfo {
   splits?: SplitCard[]
   box?: string
   signInWait?: boolean
+  homeHeld?: boolean
   branch?: string
   doubled?: boolean
 }
@@ -314,8 +315,18 @@ export interface StartupApproval {
   skipped?: string[]
 }
 
+export interface HomeApproval {
+  box: string
+  digest: string
+  changed: string[]
+  more: number
+  first: boolean
+  problem?: string
+}
+
 export interface Needs {
   approval?: StartupApproval
+  home?: HomeApproval
   signIn?: SignIn
   expected?: Expect
   step?: string
@@ -328,6 +339,7 @@ export interface Needs {
 
 export interface Consent {
   approve?: string
+  home?: string
   costOk?: boolean
   box?: string
 }

@@ -13,6 +13,7 @@ export function warnings(s: SessionInfo, all: SessionInfo[]): string[] {
   if (s.verified && s.level === 'held') out.push(`Held: every push from this session is held and no new session starts, because ${s.levelReason || 'the sandbox check hasn\'t passed'}.${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
   if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the session's container (${signInStep(s.box)}); this page never signs in for you.`)
   if (s.signInWait) out.push(`Waiting for sign-in: ${agentWord(s.agent)} in this session's container isn't signed in. Press Wake to open the session's sign-in panel, sign in there, then continue.`)
+  if (s.homeHeld) out.push(`Its settings changed since its last start: ${agentWord(s.agent)}'s user settings in this session's container changed, so it didn't wake. Press Wake to review them.`)
   const others = sharing(s, all)
   if (others.length) out.push(`${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} also in ${s.checkout}, with no worktree between them, and at least one of these sessions is working, so their edits can collide.`)
   return out
@@ -22,7 +23,7 @@ export type SessionFilter = 'running' | 'waiting' | 'held' | 'stopped' | 'done'
 
 export const SESSION_FILTERS: { id: SessionFilter; label: string; test: (s: OverviewSession) => boolean }[] = [
   { id: 'running', label: 'Running', test: s => isRunning(s) },
-  { id: 'waiting', label: 'Waiting for you', test: s => (s.waiting?.length ?? 0) > 0 || !!s.needs || !!s.signInWait },
+  { id: 'waiting', label: 'Waiting for you', test: s => (s.waiting?.length ?? 0) > 0 || !!s.needs || !!s.signInWait || !!s.homeHeld },
   { id: 'held', label: 'Held push', test: s => s.push?.result === 'held' && !s.push.running },
   { id: 'stopped', label: 'Stopped', test: s => !isRunning(s) && s.state !== 'done' },
   { id: 'done', label: 'Done', test: s => !isRunning(s) && s.state === 'done' },
@@ -152,7 +153,7 @@ class SfOverview extends HTMLElement {
     const key = JSON.stringify([
       this.#supervisor,
       sessionKey(this.#sessions, now),
-      this.#sessions.map(s => [s.project, s.branch, s.lineage?.branch, s.push?.result, s.push?.running, s.signInWait, (s.waiting || []).map(c => [c.id, c.type, c.agentId, c.readOnly, c.ts, c.type === 'permission' ? c.tool : c.type === 'ask' ? c.questions?.[0]?.question : ''])]),
+      this.#sessions.map(s => [s.project, s.branch, s.lineage?.branch, s.push?.result, s.push?.running, s.signInWait, s.homeHeld, (s.waiting || []).map(c => [c.id, c.type, c.agentId, c.readOnly, c.ts, c.type === 'permission' ? c.tool : c.type === 'ask' ? c.questions?.[0]?.question : ''])]),
     ])
     if (key === this.#key) return
     this.#key = key

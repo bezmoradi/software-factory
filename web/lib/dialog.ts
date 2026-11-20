@@ -104,7 +104,7 @@ export function modal(o: ModalOptions): Modal {
   return handle
 }
 
-export function confirmDialog(title: string, parts: Node[], yes: string, tone: 'primary' | 'danger', cleanup?: () => void): Promise<boolean> {
+export function confirmDialog(title: string, parts: Node[], yes: string, tone: 'primary' | 'danger', cleanup?: () => void, no = 'Cancel'): Promise<boolean> {
   return new Promise(resolve => {
     let answer = false
     const m = modal({
@@ -112,7 +112,7 @@ export function confirmDialog(title: string, parts: Node[], yes: string, tone: '
       title,
       body: parts,
       actions: [
-        button('Cancel', 'ghost small', () => m.close()),
+        button(no, 'ghost small', () => m.close()),
         button(yes, `${tone} small`, () => {
           answer = true
           m.close()

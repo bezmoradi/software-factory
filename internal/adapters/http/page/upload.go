@@ -314,7 +314,7 @@ func stopped(err error) bool {
 }
 
 func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string]any) {
-	if !keysWithin(body, "sid", "text", "images", "files", "confirm", "approve", "costOk") {
+	if !keysWithin(body, "sid", "text", "images", "files", "confirm", "approve", "home", "costOk") {
 		refuse(w, http.StatusBadRequest, "text")
 		return
 	}

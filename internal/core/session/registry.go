@@ -152,6 +152,7 @@ type Info struct {
 	Splits       []SplitView
 	Box          string
 	SignInWait   bool
+	HomeHeld     bool
 	Branch       string
 	Doubled      bool
 }
@@ -187,6 +188,7 @@ type admitted struct {
 	Admission
 	running      bool
 	waitSignIn   bool
+	homeHeld     bool
 	observations []level.Observation
 	review       *ReviewView
 	push         *PushView
@@ -847,6 +849,15 @@ func (r *Registry) WaitSignIn(sid string, on bool) {
 	}
 }
 
+func (r *Registry) HoldHome(sid string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a := r.admitted[sid]; a != nil && a.homeHeld != on {
+		a.homeHeld = on
+		r.announce(r.now())
+	}
+}
+
 func (r *Registry) CheckPassed() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1231,6 +1242,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.StopReason = a.stopReason
 		info.Lineage = a.Lineage
 		info.Box, info.SignInWait, info.Branch, info.Doubled = a.Box, a.waitSignIn && !a.running, a.Branch, a.Doubled
+		info.HomeHeld = a.homeHeld && !a.running
 		if a.SignIn != nil {
 			v := *a.SignIn
 			info.SignIn = &v

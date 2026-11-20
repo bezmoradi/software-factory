@@ -935,12 +935,19 @@ func (d *Dispatcher) waitInWake(r *run, err error) bool {
 func (d *Dispatcher) stopWaiting(r *run) {
 	d.mu.Lock()
 	stale := !r.running && !r.busy && !r.waitAt.IsZero() && d.reg.now().Sub(r.waitAt) >= PendingBoxFor
+	if stale {
+		r.homeAsk, r.homeClear = "", false
+	}
 	d.mu.Unlock()
 	if !stale {
 		return
 	}
+	d.dropOnce(r.box)
 	d.reg.WaitSignIn(r.sid, false)
 	d.idleBox(r)
+	if !d.liveBox(r.box) {
+		d.ungateBox(r)
+	}
 }
 
 func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {

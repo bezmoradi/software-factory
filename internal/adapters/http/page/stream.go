@@ -59,6 +59,7 @@ type sessionJSON struct {
 	Box         string           `json:"box,omitempty"`
 	SignInWait  bool             `json:"signInWait,omitempty"`
 	Doubled     bool             `json:"doubled"`
+	HomeHeld    bool             `json:"homeHeld,omitempty"`
 	Branch      string           `json:"branch,omitempty"`
 }
 
@@ -222,6 +223,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Box:         s.Box,
 			Doubled:     s.Doubled,
 			SignInWait:  s.SignInWait,
+			HomeHeld:    s.HomeHeld,
 			Branch:      s.Branch,
 		})
 	}

@@ -2,7 +2,7 @@ import { el, unspoofed, visible } from '../lib/dom.ts'
 import { confirmDialog } from '../lib/dialog.ts'
 import { scrolledText } from './cards.ts'
 import { shortSha } from '../lib/format.ts'
-import type { Needs, SignIn, StartupApproval, StartupFile, StartupMark } from '../types.ts'
+import type { HomeApproval, Needs, SignIn, StartupApproval, StartupFile, StartupMark } from '../types.ts'
 
 function size(n: number): string {
   return n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KiB`
@@ -103,6 +103,28 @@ export function approveTrustFiles(a: StartupApproval, name: string): Promise<boo
     list,
     el('p', 'small muted', 'Approving answers the trust question for this exact set. Cancel leaves the folder untrusted.'),
   ], 'Approve and trust', 'primary', unwatch(watch))
+}
+
+export function approveHomeSettings(h: HomeApproval, name: string): Promise<boolean> {
+  const list = el('ul', 'list consent-files')
+  for (const item of h.changed) {
+    const li = el('li', 'consent-file')
+    li.append(el('code', '', visible(unspoofed(item))))
+    list.append(li)
+  }
+  const parts: Node[] = [
+    el('p', 'small', `${visible(name)}'s user-level settings in this session's container changed since its last start, and waking loads them. They can change what it may do without asking you: permissions, hooks, instructions, agents, skills, commands and endpoints. They are in the agent's own home in this session's container, which the agent itself can write. The engine keeps only a hash of each item, not a copy, so it can't show what an item held before or restore it.`),
+  ]
+  if (h.problem) parts.push(el('p', 'small warn', visible(h.problem)))
+  const total = h.changed.length + Math.max(h.more, 0)
+  if (total) parts.push(el('p', 'small', `${total} ${total === 1 ? 'item' : 'items'} ${h.first ? 'with no earlier list to compare' : 'changed or can’t be compared'}, one line for each plugin with changes first, then other items that can run programs, then items that give the agent instructions, then the rest:`))
+  if (h.changed.length) parts.push(list)
+  if (h.more > 0) parts.push(el('p', 'small warn', `And ${h.more} more ${h.more === 1 ? 'item' : 'items'} not shown, which approving also approves.`))
+  parts.push(
+    el('p', 'small muted', "Not compared: user MCP servers (kept in ~/.claude.json, which also holds account details), files these settings name outside the listed folders (a hook's script, a CLAUDE.md import), and Claude Code's auto-memory, which the Agents section lists. A “don't ask again” saved in the agent's user settings changes ~/.claude/settings.json too. To read an item first, open it in the session's container with docker exec."),
+    el('p', 'small muted', "Approving wakes the session with these settings now, and later wakes compare with them. Any further change asks again. Don't wake stops the container: the session stays stopped and can be deleted, and its next wake asks again."),
+  )
+  return confirmDialog('The agent’s user settings changed', parts, 'Approve and wake', 'primary', undefined, 'Don’t wake')
 }
 
 export function confirmCost(s: SignIn, what: string): Promise<boolean> {

@@ -305,6 +305,11 @@ func recapText(e AuditEntry) (string, string) {
 		return "approval", "You approved the requirements."
 	case AuditApprovePlan:
 		return "approval", "You approved the plan."
+	case AuditHomeSettings:
+		if e.Result == ResultRefused {
+			return "approval", "You didn't wake the session after the agent's user settings changed."
+		}
+		return "approval", "You approved the agent's changed user settings before a wake."
 	case AuditCapReached:
 		if k := capKind(e); k != "" {
 			return "cap", "The session reached its " + capNames[k] + " cap."

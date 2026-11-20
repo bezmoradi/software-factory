@@ -71,16 +71,26 @@ func shownFilesOf(files []session.ShownFile) []shownFileJSON {
 	return out
 }
 
+type homeApprovalJSON struct {
+	Box     string   `json:"box"`
+	Digest  string   `json:"digest"`
+	Changed []string `json:"changed"`
+	More    int      `json:"more"`
+	First   bool     `json:"first"`
+	Problem string   `json:"problem,omitempty"`
+}
+
 type needsJSON struct {
-	Approval *approvalJSON `json:"approval,omitempty"`
-	SignIn   *signInJSON   `json:"signIn,omitempty"`
-	Expected string        `json:"expected,omitempty"`
-	Step     string        `json:"step,omitempty"`
-	Cost     bool          `json:"cost,omitempty"`
-	Trust    string        `json:"trust,omitempty"`
-	Box      string        `json:"box,omitempty"`
-	Agent    string        `json:"agent,omitempty"`
-	Code     bool          `json:"code,omitempty"`
+	Approval *approvalJSON     `json:"approval,omitempty"`
+	Home     *homeApprovalJSON `json:"home,omitempty"`
+	SignIn   *signInJSON       `json:"signIn,omitempty"`
+	Expected string            `json:"expected,omitempty"`
+	Step     string            `json:"step,omitempty"`
+	Cost     bool              `json:"cost,omitempty"`
+	Trust    string            `json:"trust,omitempty"`
+	Box      string            `json:"box,omitempty"`
+	Agent    string            `json:"agent,omitempty"`
+	Code     bool              `json:"code,omitempty"`
 }
 
 func needsOf(n *session.Needs) *needsJSON {
@@ -90,6 +100,13 @@ func needsOf(n *session.Needs) *needsJSON {
 	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust, Box: n.Box, Agent: n.Agent, Code: n.Code}
 	if n.Expected != "" {
 		out.Expected = string(n.Expected)
+	}
+	if h := n.Home; h != nil {
+		changed := h.Changed
+		if changed == nil {
+			changed = []string{}
+		}
+		out.Home = &homeApprovalJSON{Box: h.Box, Digest: h.Digest, Changed: changed, More: h.More, First: h.First, Problem: h.Problem}
 	}
 	if a := n.Approval; a != nil {
 		out.Approval = &approvalJSON{Agent: a.Agent, Repo: a.Repo, Commit: a.Commit, Hash: a.Hash, Files: shownFilesOf(a.Files),
@@ -118,6 +135,13 @@ func consentOf(body map[string]any) (session.Consent, bool) {
 			return c, false
 		}
 		c.Approve = s
+	}
+	if v, ok := body["home"]; ok {
+		s, isText := v.(string)
+		if !isText || !session.ValidHomeDigest(s) {
+			return c, false
+		}
+		c.Home = s
 	}
 	if v, ok := body["costOk"]; ok {
 		b, isBool := v.(bool)

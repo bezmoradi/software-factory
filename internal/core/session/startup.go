@@ -121,8 +121,18 @@ type ApprovalView struct {
 	Skipped      []string
 }
 
+type HomeApproval struct {
+	Box     string
+	Digest  string
+	Changed []string
+	More    int
+	First   bool
+	Problem string
+}
+
 type Needs struct {
 	Approval *ApprovalView
+	Home     *HomeApproval
 	SignIn   *SignIn
 	Expected Expect
 	Step     string
@@ -135,6 +145,7 @@ type Needs struct {
 
 type Consent struct {
 	Approve string
+	Home    string
 	CostOK  bool
 }
 
@@ -151,6 +162,8 @@ func hexHash(s string) bool {
 }
 
 func ValidApproval(s string) bool { return s == "" || hexHash(s) }
+
+func ValidHomeDigest(s string) bool { return hexHash(s) }
 
 func fileHash(f StartupFile) string {
 	h := sha256.New()

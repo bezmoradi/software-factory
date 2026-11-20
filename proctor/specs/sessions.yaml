@@ -917,3 +917,486 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+
+  - id: SES-002
+    name: "A wake asks before it loads the agent settings its agent changed in the container's home: a new plugin file asks and is listed on its plugin's own line, before the settings file, which can run programs, and the agent file, which gives instructions, an approve answer or an earlier digest doesn't answer it, Don't wake stops the container and leaves the question as it was, the digest wakes it, a message to the stopped session asks the same, and a wake with nothing changed asks nothing; its fourth registration of the session waits out the minute that allows three (registerOne in registry.go)"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor home ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: plant
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: plant ${run.id}\nlink: h-${run.id} -> /home/agent\nmkdir: h-${run.id}/.claude/agents\nmkdir: h-${run.id}/.claude/plugins/p\nwrite: h-${run.id}/.claude/plugins/p/plugin.json\nwrite: h-${run.id}/.claude/settings.json\nwrite: h-${run.id}/.claude/agents/proctor-${run.id}.md\nwrite: planted-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: planted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["planted-${run.id}.txt"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["planted-${run.id}.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: asks
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.message": "The agent's user settings in this session's container changed since its last start, and a wake loads them. Read the list, then approve to wake."
+            "$.body.needs.home.box": "${box}"
+            "$.body.needs.home.changed": ["~/.claude/plugins/p/: plugin.json (new)", "~/.claude/settings.json (new)", "~/.claude/agents/proctor-${run.id}.md (new)"]
+            "$.body.needs.home.more": 0
+            "$.body.needs.home.first": false
+            "$.body.needs.box": "${box}"
+            "$.body.needs.agent": dev-acp
+          matches: { "$.body.needs.home.digest": "[0-9a-f]{64}" }
+          absent: ["$.body.needs.home.problem", "$.body.needs.approval", "$.body.needs.signIn"]
+        save: { digest: "$.body.needs.home.digest" }
+      - id: waits
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: approve-is-not-the-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", approve: "${digest}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.message": "The agent's user settings in this session's container changed since its last start, and a wake loads them. Read the list, then approve to wake."
+            "$.body.needs.home.digest": "${digest}"
+            "$.body.needs.home.changed": ["~/.claude/plugins/p/: plugin.json (new)", "~/.claude/settings.json (new)", "~/.claude/agents/proctor-${run.id}.md (new)"]
+      - id: still-waits
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: refuse
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", refuse: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: refused-box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: refused-audit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: home-settings, by: page, result: refused, session: "${sid}", hash: "${digest}" }
+          none:
+            "$.body.entries": { kind: home-settings, result: approved, session: "${sid}" }
+      - id: refuse-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", refuse: true }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not asking", message: "This session's wake isn't waiting for an answer about the agent's settings." }
+      - id: not-woken
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: asks-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.needs.home.digest": "${digest}"
+            "$.body.needs.home.changed": ["~/.claude/plugins/p/: plugin.json (new)", "~/.claude/settings.json (new)", "~/.claude/agents/proctor-${run.id}.md (new)"]
+      - id: waits-again
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", home: "${digest}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: woken
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: approved-audit
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": [{ kind: home-settings, by: page, result: approved, session: "${sid}", hash: "${digest}" }, { kind: session-wake, by: page, result: woken, session: "${sid}" }]
+      - id: change-more
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: more ${run.id}\nwrite: h-${run.id}/.claude/agents/second-${run.id}.md\nwrite: more-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: more-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["more-${run.id}.txt"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["more-${run.id}.txt"] }
+      - id: stop-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped-past-wake-gap
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        consistently: { for: 6s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: asks-about-the-new-file
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.needs.home.changed": ["~/.claude/agents/second-${run.id}.md (new)"]
+          matches: { "$.body.needs.home.digest": "[0-9a-f]{64}" }
+          differs: { "$.body.needs.home.digest": "${digest}" }
+        save: { digest2: "$.body.needs.home.digest" }
+      - id: waits-for-the-new-file
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: earlier-digest
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", home: "${digest}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.message": "The agent's user settings changed again since you looked at them. Read the list again, then approve to wake."
+            "$.body.needs.home.digest": "${digest2}"
+      - id: message-asks
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: asked ${run.id}\nwrite: asked-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": "needs approval"
+            "$.body.needs.home.digest": "${digest2}"
+            "$.body.needs.home.changed": ["~/.claude/agents/second-${run.id}.md (new)"]
+      - id: message-not-delivered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["asked-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: [] }
+      - id: message-approves
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: woke ${run.id}\nwrite: woke-${run.id}.txt", home: "${digest2}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true, woke: true }
+      - id: woke-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["woke-${run.id}.txt", "asked-${run.id}.txt"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["woke-${run.id}.txt"] }
+      - id: stop-third
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped-past-registration-limit
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        consistently: { for: 61s, every: 2s }
+        expect:
+          equal: { "$.found": false }
+      - id: wakes-unasked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: running-unasked
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: stop-last
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped-last
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: home-settings }, is: 3 }
+          any:
+            "$.body.entries": [{ kind: home-settings, by: page, result: refused, session: "${sid}", hash: "${digest}" }, { kind: home-settings, by: page, result: approved, session: "${sid}", hash: "${digest}" }, { kind: home-settings, by: page, result: approved, session: "${sid}", hash: "${digest2}" }, { kind: session-stop, result: stopped, session: "${sid}" }]
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
