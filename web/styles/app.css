@@ -44,6 +44,13 @@ body.wide .frame > aside, body.wide[data-view="docs"] #docs-side, body.wide[data
 .scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--soft) 80%, transparent) transparent; }
 :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea):hover { scrollbar-color: var(--soft) transparent; }
 .card .sum { scrollbar-width: thin; scrollbar-color: var(--soft) transparent; }
+@supports selector(::-webkit-scrollbar) {
+  :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum) { scrollbar-width: auto; scrollbar-color: auto; }
+  :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum)::-webkit-scrollbar { width: 6px; height: 6px; }
+  :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum)::-webkit-scrollbar-track, :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum)::-webkit-scrollbar-corner { background: transparent; }
+  :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum)::-webkit-scrollbar-thumb { border-radius: 3px; background: color-mix(in srgb, var(--soft) 80%, transparent); }
+  :is(.scroller, .frame > aside, .page-side, .complete, .prefs, ul.changes, pre, :is(.reply, .docs-section, .file-doc) sf-markdown .table, .composer textarea, .card .sum):hover::-webkit-scrollbar-thumb { background: var(--soft); }
+}
 body.out { padding: 0; }
 body.out > :not(.gone) { display: none !important; }
 body.out > .gone { display: grid !important; grid-template-columns: minmax(0, 1fr); place-items: center; flex: 1; padding: 1.25rem; }
