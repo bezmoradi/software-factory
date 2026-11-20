@@ -4,6 +4,7 @@ import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
+import { flowDiagram, liveFlow } from './push-flow.ts'
 import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 
 
@@ -185,6 +186,8 @@ class SfReviews extends HTMLElement {
     if (!value.pushed) heading.push(p)
     replaceKeeping(this.#head, heading)
     const parts: Node[] = [this.#head]
+    const flow = liveFlow(value)
+    if (flow) parts.push(flowDiagram(flow))
     const note = value.disabled || r?.note || ''
     const described: string[] = []
     if (note) {

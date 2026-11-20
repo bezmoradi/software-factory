@@ -1,6 +1,7 @@
 import { el, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
+import { cardFlow, flowDiagram } from './push-flow.ts'
 import type { PushCheckedBy, PushCheckedReviewer, PushCheckedRun, SessionPush } from '../types.ts'
 
 const FINISHED = new Set(['pass', 'block', 'unknown'])
@@ -98,6 +99,7 @@ export function checkedFacts(p: SessionPush, decision: string): HTMLElement | nu
   const commit = p.commit ? ` of commit ${shortSha(p.commit)}` : ''
   box.append(el('p', 'small muted', `From the engine's own records${commit}: the reviews, the verification runs and the gate's decision. Nothing the agent reported about itself is here.`))
   const checked = checkedOf(p.checkedBy)
+  box.append(flowDiagram(cardFlow(p, checked)))
   if (!checked) box.append(el('p', 'small muted', 'The engine decided this card before it looked at the reviews, so no reviewer is listed.'))
   else {
     if (checked.unreadable) box.append(el('p', 'small warn', "The engine couldn't read its review records, so this list may be incomplete."))

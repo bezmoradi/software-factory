@@ -6,16 +6,8 @@ import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
 import { coverageFacts } from './push-coverage.ts'
 import { checkedFacts } from './push-checked.ts'
+import { RESULTS } from './push-flow.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
-
-const RESULTS: Record<string, [string, string, string, string]> = {
-  pushed: ['check', 'ok', 'Pushed', 'Pushed to'],
-  'up-to-date': ['check', 'ok', 'Pushed', 'Pushed to'],
-  held: ['warning', 'warn', 'Push held', 'Push held for'],
-  denied: ['error', 'bad', 'Push denied', 'Push denied for'],
-  refused: ['error', 'bad', 'Not pushed', 'Not pushed to'],
-  unclear: ['warning', 'warn', 'Push outcome unclear', 'Push outcome unclear for'],
-}
 
 const FULL_SHA = /^[0-9a-f]{40}$/
 const RECORD_ROUTE = '/api/push-record'

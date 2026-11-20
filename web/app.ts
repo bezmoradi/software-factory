@@ -584,7 +584,7 @@ function reviewsOf(s: Session): ReviewsView | null {
     : i.doubled ? DOUBLED_NOTE
     : unpicked ? 'Pick a work type first: it decides which reviews run.'
     : startedOf(s) === false ? 'Nothing to review or push yet: this session has no commits.' : ''
-  return { sid: s.sid, review, disabled, readOnly: i.doubled ? DOUBLED_NOTE : '', asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
+  return { sid: s.sid, review, disabled, readOnly: i.doubled ? DOUBLED_NOTE : '', asking: reviewAsking.has(s.sid), pushing: pushAsking.has(s.sid) || !!i.push?.running, pushed: pushedHead(s), pushSaid: pushSaid.get(s.sid) ?? null, reviewer, planned: unpicked ? [] : planned, gate: gate?.reviewers ?? [], allowed: gate?.allowed, missing: gate?.missing ?? [], head: gate?.head ?? '', testList: i.review?.testList ?? null, testAsking: testAsking.has(s.sid),
     linked: findingLinks(s.sid, review), catalog: gate?.catalog ? { state: gate.catalog, why: typeof gate.catalogWhy === 'string' ? gate.catalogWhy : '' } : undefined }
 }
 

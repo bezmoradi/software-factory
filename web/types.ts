@@ -623,6 +623,8 @@ export interface ReviewsView {
   pushSaid?: { text: string; tone: string } | null
   planned?: { name: string; agent: string; why: string; summary: string }[]
   gate?: Reviewer[]
+  allowed?: boolean
+  missing?: string[]
   linked?: { commit: string; paths: string[] }
   catalog?: { state: string; why: string }
   head?: string
