@@ -211,7 +211,7 @@ function onEvent(ev: StreamEvent) {
   }
   if (ev.type === 'versions') {
     const known = sessions.get(ev.sid)
-    toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with new versions.`, description: visible(ev.text), tone: 'info', timeout: 0 })
+    toast({ id: `versions:${ev.sid}`, title: `${known ? visible(label(known.info)) : 'A session'} woke with a note on what it runs.`, description: visible(ev.text), tone: 'info', timeout: 0 })
     return
   }
   if (ev.type === 'worktree-aside') {

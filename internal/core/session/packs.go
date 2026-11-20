@@ -134,6 +134,7 @@ type SessionPacks interface {
 	SessionPack(project string) (SessionPack, error)
 	SessionPackFor(choice string) (SessionPack, error)
 	SessionCode(sp SessionPack) ([]StartupFile, error)
+	WakeNote(project, choice string) string
 }
 
 type ProjectPacks interface {
@@ -371,6 +372,34 @@ func (p *Packs) SessionCode(sp SessionPack) ([]StartupFile, error) {
 		return nil, nil
 	}
 	return p.cfg.Files.SessionCode(sp.Digest, sp.Name)
+}
+
+func (p *Packs) WakeNote(project, choice string) string {
+	if choice == "" {
+		return ""
+	}
+	now, _, err := p.chosen(project)
+	if err != nil || now == choice {
+		return ""
+	}
+	st, err := p.load()
+	if err != nil {
+		st = PackState{}
+	}
+	return "This session keeps the pack it started with, " + packLabel(st, choice) + "; the project now uses " + packLabel(st, now) + ", which new sessions get."
+}
+
+func packLabel(st PackState, choice string) string {
+	switch choice {
+	case PackKnackpack:
+		return "knackpack"
+	case PackNone:
+		return "No pack"
+	}
+	if sp, ok := packOf(st, choice); ok {
+		return sp.Name + " " + sp.Version + " (" + shortSHA(choice) + ")"
+	}
+	return "the pack " + shortSHA(choice)
 }
 
 func (p *Packs) UseSessions(fn func() []string) {

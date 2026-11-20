@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -43,9 +44,12 @@ func (d *Dispatcher) woke(r *run) {
 	}
 	changed := versionsChanged(r.spec.Name, r.stamp, now, installed, d.refusedWorkflow(now.workflow))
 	r.stamp = now
-	sid := r.sid
+	sid, repo, pack := r.sid, r.repo, r.pack.Choice
 	d.mu.Unlock()
 	d.saveRuns()
+	if d.cfg.Packs != nil {
+		changed = strings.TrimSpace(changed + " " + d.cfg.Packs.WakeNote(repo, pack))
+	}
 	d.showVersions(sid, changed)
 }
 

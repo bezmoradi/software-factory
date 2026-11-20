@@ -311,6 +311,93 @@ team '{"version":1,"protect":["secret/**"]}'; start g; commit g secret/a.txt one
 - `g`, the protect list: a line `Files that match the protect list of the team file on main, …` with `{"path":"secret/a.txt","what":"matches secret/**"}`.
 - The push card shows the same section while the gate's `head` is the card's `commit`; none of it changes the push's result.
 
+**Packs: a git pack, an upload, No pack, a reviewer without a verdict, the refusals, and a session that keeps its pack** (ARCHITECTURE.md "Packs"). The dev git host's test pack `acme` is at `$URL`, one branch per case ([Hand checks with Compose](compose-hand-checks.md)); `ph <branch>` prints a branch's commit. `pk <op> [fields]` calls `/api/packs` for `demo`, `fetch <branch>` fetches that branch's commit, `pdig` prints the digest of the answer it reads, `up <folder> <name>` uploads a folder's files, `rpack <name>` prints each role of the session's latest review with its state, reason, pack, version and digest, `pallow <name> <reason>` answers the session's held card with Allow, and `ev <seconds>` records the event stream in the background. The upload folder `/tmp/sf-beta` holds the same four files as `make proctor`'s PCK-003. Leave the project on knackpack after these checks, since the ones below expect knackpack's reviewers.
+
+```bash
+URL=https://gitserver.test:8443/public/acme-pack.git
+ph() { docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserver pack-heads | sed -n "s| refs/heads/$1\$||p"; }
+pk() { sf /api/packs "{\"op\":\"$1\",\"path\":\"/workspace/base/demo\"$2}"; }
+fetch() { pk fetch ",\"url\":\"$URL\",\"commit\":\"$(ph $1)\""; }
+pdig() { sed -nE 's/.*"digest":"([0-9a-f]{64})".*/\1/p' | head -n 1; }
+up() { python3 -I -c 'import sys,json,os; d=sys.argv[1]; fs=[{"path":os.path.relpath(os.path.join(r,f),d),"text":open(os.path.join(r,f)).read()} for r,_,n in os.walk(d) for f in n]; print(json.dumps({"op":"upload","path":"/workspace/base/demo","name":sys.argv[2],"files":fs}))' "$1" "$2" > /tmp/sf-up.json; sf /api/packs "$(cat /tmp/sf-up.json)"; }
+rpack() { events | python3 -I -c 'import sys,json; j=json.loads(sys.stdin.readline()); r=next(s for s in j["sessions"] if s["sid"]==sys.argv[1]).get("review") or {}; [print(x["agent"], x["state"], x.get("reason",""), x.get("pack",""), x.get("packVersion",""), x.get("packDigest","")) for x in r.get("roles",[])]' "$(sid $1)"; }
+pallow() { events | python3 -I -c 'import sys,json; j=json.loads(sys.stdin.readline()); p=next(s for s in j["sessions"] if s["sid"]==sys.argv[1])["push"]; print(json.dumps({"sid":sys.argv[1],"card":p["card"],"commit":p["commit"],"allow":True,"reason":sys.argv[2]}))' "$(sid $1)" "$2" > /tmp/sf-allow.json; sf /api/push-answer "$(cat /tmp/sf-allow.json)"; }
+ev() { curl -sS -N -m "$1" -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P/api/events" > /tmp/sf-events 2>/dev/null & }
+mkdir -p /tmp/sf-beta/agents /tmp/sf-beta/commands
+printf '%s\n' '{"format": "software-factory-pack/1", "name": "beta", "version": "1.0.0", "roles": {"bug-hunter": "hunter", "simplicity": "trimmer"}, "steps": {"review": "/beta:handoff"}}' > /tmp/sf-beta/software-factory-pack.json
+printf -- '---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n' > /tmp/sf-beta/agents/hunter.md
+printf -- '---\nname: trimmer\ndescription: Finds what the change could drop\n---\nRead change.diff. Name what could be simpler.\n' > /tmp/sf-beta/agents/trimmer.md
+printf -- '---\ndescription: Hand the work over\n---\nSay what changed and why.\n' > /tmp/sf-beta/commands/handoff.md
+```
+
+A git pack, a digest change between fetch and add, and the in-use refusal:
+
+```bash
+A=$(fetch main | tee /dev/stderr | pdig)
+pk add ",\"url\":\"$URL\",\"commit\":\"$(ph v2)\",\"digest\":\"$A\""
+pk add ",\"url\":\"$URL\",\"commit\":\"$(ph main)\",\"digest\":\"$A\""; pk use ",\"pack\":\"$A\""
+start pg; commit pg notes.txt one; review pg
+rpack pg; push pg; sleep 3; remote | grep "$(branch pg)"
+docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -oE '"provider": ?"[^"]*"' /var/lib/software-factory/reviews.json | sort | uniq -c
+start pn; commit pn NO-VERDICT x; review pn
+rpack pn; push pn; sleep 3; audit
+pk remove ",\"digest\":\"$A\""
+```
+
+- The fetch: `200` with `pack.name` `acme`, `version` `1.0.0`, `roles` `bug-hunter` `bug-finder` and `simplicity` `simplicity-checker`, `steps` `/acme:requirements`, `/acme:plan` and `/acme:handoff`, `codeFiles` `["hooks/hooks.json","hooks/start.sh"]`, a `digest` and a `sessionDigest`, and no `addedAt`: a fetch keeps nothing, and logs `pack event=fetched`.
+- The add at `v2` with `main`'s digest: `{"error":"digest","message":"The pack at that commit isn't the one the page showed: its reviewers' digest is now <12 hex>, not <the first 12 of $A>. Fetch it again and read what it holds before you add it."} 409`, logged `pack event=digest-changed`, and no `pack` `added` audit line. The add at `main`: `200` with the pack and its `addedAt`; the use: `"using":"<$A>"` with `usedBy` `["demo"]`. Each is a `pack` audit line, `added` with the commit and `used`, with the digest as `hash` and no file's content.
+- `pg`'s review: both roles pass as `acme:bug-finder` and `acme:simplicity-checker`, each with `acme 1.0.0 <$A>`, the push goes out (`push event=pushed by=page`) and the git host has `$(branch pg)`; `reviews.json` counts `acme@pack` for these runs and `knackpack@knackpack` for the earlier checks'.
+- `pn`, with `NO-VERDICT` in its change: `review event=finished role=bug-hunter state=unknown why=no-verdict` and the same for `simplicity`, each role's reason `its reply ended without a Verdict: pass or Verdict: block line, which every pack's reviewer must write, so it counts as no verdict`, and the push is held with both roles in `missing`.
+- The removal while `demo` uses it: `{"error":"in use","message":"The pack acme reviews demo. Pick another pack for that project first."} 409`.
+
+No pack, with Allow without and with a reason:
+
+```bash
+pk use ',"pack":"none"'
+start pz; commit pz notes.txt one; review pz; gate pz
+push pz; sleep 3; pallow pz ''; pallow pz 'Read the one-line change myself.'; sleep 3
+logs engine 'msg=push event='; audit; remote | grep "$(branch pz)"
+```
+
+- The use: `"using":"none"`, and its audit reason `the developer picked no pack for demo on the page: nothing reviews its pushes, so each needs the developer's Allow with a reason`.
+- Review: `{"error":"no reviewer","message":"No reviewer is configured for this project, so nothing reviews this branch: every push needs your Allow with a reason."} 409`; `gate pz` has `"catalog":"off"` and `"reviewers":[]`.
+- The push is held with `the bug hunter role filled by an agent: none is set for this work type` and the same for the simplicity checker, and the card has `needsReason: true`. Allow with an empty reason: `{"error":"reason","message":"Type your reason for allowing this push with items missing. The audit file keeps it."} 400`, and the card stays. With the reason: `{"ok":true} 202`, `push event=pushed by=page`, the audit line `pushed` with that reason as `personReason` and both items in `missing`, and the git host has `$(branch pz)`.
+
+The refusals:
+
+```bash
+for b in refused-key bad-step missing-agent name-knackpack agent-hooks agent-skills mcp-file plugin-hooks-key skill-shell; do fetch $b; done
+pk fetch ",\"url\":\"http://gitserver.test:8443/public/acme-pack.git\",\"commit\":\"$(ph main)\""; pk fetch ",\"url\":\"$URL\",\"commit\":\"main\""
+rm -rf /tmp/sf-beta-hooks; cp -R /tmp/sf-beta /tmp/sf-beta-hooks; mkdir /tmp/sf-beta-hooks/hooks; echo '{}' > /tmp/sf-beta-hooks/hooks/hooks.json; up /tmp/sf-beta-hooks beta
+up /tmp/sf-beta knackpack
+python3 -I -c 'import json; print(json.dumps({"op":"list","path":"/workspace/base/demo","pad":"x"*2097152}))' > /tmp/sf-big.json
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P/api/packs" --data-binary @/tmp/sf-big.json
+docker exec "$(ctr pg)" curl -sS --noproxy '*' -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' http://engine-agents:8081/api/packs -d '{}'
+pk list; logs engine 'msg=pack event=(refused|upload-refused)'
+```
+
+- Each branch: `400` `pack` with the message `make proctor`'s PCK-T04 lists for it, such as `The engine refused this pack: its software-factory-pack.json: the key "tools" isn't a pack's to set: the engine sets the reviewers' tools: read-only, the same for every pack.` for `refused-key`, logged `pack event=refused`.
+- The `http` address: `400` `url`; a branch name for the commit: `400` `commit`, `A pack is pinned by a full 40-character commit hash, never a branch or tag.`
+- The upload with `hooks/hooks.json`: `{"error":"refused upload","message":"The engine refused this upload: The upload's hooks/hooks.json isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."} 400`; under the name `knackpack`: `400` `refused upload`, `… the name knackpack belongs to the engine's own plugins, so a pack can't take it.`; both log `pack event=upload-refused`.
+- A body over 2 MiB: `413`. The agent listener: `{"error":"route"} 404`, since `/api/packs` is on the page listener only.
+- `pk list` still lists only `acme`: nothing refused was kept.
+
+An uploaded pack, and a session that keeps it across Stop and Wake after the project switches:
+
+```bash
+B=$(up /tmp/sf-beta beta | tee /dev/stderr | pdig); pk use ",\"pack\":\"$B\""
+start pb; gate pb
+sf /api/dispatch '{"path":"/workspace/base/demo","agent":"dev-acp","name":"bf","type":"feature"}'
+pk use ',"pack":"knackpack"'; gate pb; pk remove ",\"digest\":\"$B\""
+sf /api/stop-session "{\"sid\":\"$(sid pb)\"}"; sleep 6; ev 30; sleep 1; sf /api/wake "{\"sid\":\"$(sid pb)\"}"; sleep 10
+grep '"type":"versions"' /tmp/sf-events; gate pb
+```
+
+- The upload: `200` with `beta` `1.0.0`, `source` `{"kind":"upload","url":"","commit":""}`, `agents` `["hunter","trimmer"]`, `codeFiles` `[]` and the digest `fc23c1888199af4b90323527b01b07d277290129951e50494ad8eb1842f556db`; the agents volume holds an engine-written `.claude-plugin/plugin.json` beside the uploaded files under `packs/<digest>/session/`, and only that `plugin.json` and `agents/` under `packs/<digest>/reviewers/`. Its audit reason is `the developer uploaded the pack beta 1.0.0 (4 files), on the page`.
+- `gate pb` on beta: `"adapter":"beta"`, `"commands":{"review":"/beta:handoff"}`, the reviewers `beta:hunter` and `beta:trimmer`, and no `feature` in `types`; the Feature start answers `400` `type`.
+- After the project picks knackpack: `gate pb` still has `"adapter":"beta"` and `/beta:handoff`, with knackpack's two reviewers, since reviews follow the project's pack and the session keeps its own; the removal answers `{"error":"in use","message":"A saved session runs the pack beta, and keeps it across Stop and Wake. Delete that session first."} 409`.
+- The wake: `{"ok":true} 202`, and the stream's `versions` frame for `pb` has the text `This session keeps the pack it started with, beta 1.0.0 (fc23c1888199); the project now uses knackpack, which new sessions get.`, which the page shows in a toast titled `<name> woke with a note on what it runs.` `gate pb` after the wake still has `"adapter":"beta"`. Once `pb` is stopped and deleted, `pk remove ",\"digest\":\"$B\""` answers `200`.
+
 **Reviewer containers: at most 8 at once, each with only its own snapshot.** Five reviews of two runs each; the fifth would make 10.
 
 ```bash

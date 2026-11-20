@@ -48,7 +48,7 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", message: "${row.message}" }
     no_state_check: "refused with 400 before the handler fetches anything or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
-    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_fetch_http, pck_fetch_branch, pck_add_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
+    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_fetch_http, pck_fetch_branch, pck_add_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul, pck_upload_twice, pck_upload_bad_name], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body", "error", "message"]
     rows:
       - ["pck_unknown_op", { op: delete, path: /workspace/base/demo }, "op", "The engine lists, fetches, adds, uploads, removes and uses packs only."]
@@ -61,6 +61,8 @@ tables:
       - ["pck_upload_dotdot", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/../bin/x, text: x }] }, "refused upload", "The engine refused this upload: The upload's agents/../bin/x isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."]
       - ["pck_upload_knackpack", { op: upload, path: /workspace/base/demo, name: knackpack, files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: the name knackpack belongs to the engine's own plugins, so a pack can't take it."]
       - ["pck_upload_nul", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: "a\u0000b" }] }, "refused upload", "The engine refused this upload: The upload's agents/a.md isn't UTF-8 text with no NUL byte."]
+      - ["pck_upload_twice", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: x }, { path: agents/A.md, text: x }] }, "refused upload", "The engine refused this upload: The upload names agents/A.md twice, in some letter case."]
+      - ["pck_upload_bad_name", { op: upload, path: /workspace/base/demo, name: Beta, files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: a pack's name is lowercase letters, digits and hyphens, at most 64, starting with a letter or digit."]
   - id: PCK-T03
     name: "/api/packs answers 404 for a project it doesn't list and a pack it doesn't keep"
     do: http.request
@@ -109,6 +111,31 @@ tables:
       - ["pck_mcp_file", "26907803f6f1a53a8f872a68af4c30c1f3e9b6bd", "The engine refused this pack: the commit has .mcp.json in its top folder, which can start programs; the engine doesn't take a pack that brings MCP or LSP servers, monitors, workflows or settings."]
       - ["pck_plugin_hooks_key", "173b6602cbdb0498228f8e4804b09c13b08b4e1c", "The engine refused this pack: its .claude-plugin/plugin.json has the key \"hooks\", which this engine doesn't know as one that starts no programs; a pack's plugin.json holds only keys that start none."]
       - ["pck_skill_shell", "bd510fee59820c5fb172033cc965c55194b444ba", "The engine refused this pack: the commit's skills/notes/SKILL.md holds ! before a backtick; the engine doesn't install a pack using argument placeholders or inline shell in its skills or commands, which Claude Code runs as it loads them, in the trusted reviewer container too when an agent preloads one."]
+
+  - id: PCK-T05
+    name: "An uploaded folder that has no manifest, names another pack, gives a role to an agent it lacks, sets a key the engine owns, or holds an agent with a refused or mismatched front matter is refused, naming the reason, and nothing is kept"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/packs"
+      headers: { Origin: "${page.origin}" }
+      body: { op: upload, path: /workspace/base/demo, name: beta, files: "${row.files}" }
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: pack, message: "${row.message}" }
+    no_state_check: "a refused upload keeps nothing: the engine writes the files in a temporary folder under the packs folder, which it removes, and writes neither packs.json nor an audit line, so no read shows a change; a row can't name a read of its own"
+    waive: { EXE-09: { rows: [pck_up_no_manifest, pck_up_other_name, pck_up_missing_agent, pck_up_refused_key, pck_up_agent_hooks, pck_up_agent_misnamed], reason: "every row is an upload, which only adds a pack and changes no project's choice, and each is refused with 400 for what its files hold before anything is kept, so nothing can be removed or overwritten" } }
+    columns: ["case", "files", "message"]
+    rows:
+      - ["pck_up_no_manifest", [{ path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n" }], "The engine refused this pack: the folder has no software-factory-pack.json at its top, the manifest naming the pack's roles and steps."]
+      - ["pck_up_other_name", [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"gamma\", \"version\": \"1.0.0\"}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n" }], "The engine refused this pack: its software-factory-pack.json names the pack \"gamma\", not \"beta\", the name given for the upload."]
+      - ["pck_up_missing_agent", [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.0.0\", \"roles\": {\"bug-hunter\": \"ghost\"}}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n" }], "The engine refused this pack: its manifest gives the bug hunter role to \"ghost\", which isn't an agent in its agents folder."]
+      - ["pck_up_refused_key", [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.0.0\", \"model\": \"opus\"}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n" }], "The engine refused this pack: its software-factory-pack.json: the key \"model\" isn't a pack's to set: the person picks each role's model on the page."]
+      - ["pck_up_agent_hooks", [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.0.0\"}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs\nhooks:\n  PreToolUse: []\n---\nRead change.diff.\n" }], "The engine refused this pack: its agent agents/hunter.md has the front matter key hooks, which a reviewer pack can't hold: hooks would run commands in the trusted reviewer container."]
+      - ["pck_up_agent_misnamed", [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.0.0\"}\n" }, { path: agents/hunter.md, text: "---\nname: trimmer\ndescription: Finds bugs\n---\nRead change.diff.\n" }], "The engine refused this pack: its agent agents/hunter.md names itself \"trimmer\" in its front matter, not \"hunter\", its file's name."]
 
 scenarios:
   - id: PCK-002
@@ -542,3 +569,358 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: PCK-003
+    name: "An uploaded folder is kept as a pack of its own, with an engine-written plugin.json, and a second one with its name is refused; a session started on it records it, runs its steps and offers no Feature, keeps it after the project picks knackpack and across Stop and Wake, whose note names both packs, and holds the pack's removal until the session is deleted"
+    steps:
+      - id: upload
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: upload, path: /workspace/base/demo, name: beta, files: [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.0.0\", \"roles\": {\"bug-hunter\": \"hunter\", \"simplicity\": \"trimmer\"}, \"steps\": {\"review\": \"/beta:handoff\"}}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the files it touches. Report each bug with its location.\n" }, { path: agents/trimmer.md, text: "---\nname: trimmer\ndescription: Finds what the change could drop\n---\nRead change.diff. Name what could be simpler.\n" }, { path: commands/handoff.md, text: "---\ndescription: Hand the work over\n---\nSay what changed and why.\n" }] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.using": knackpack
+            "$.body.packs[0].name": beta
+            "$.body.packs[0].version": "1.0.0"
+            "$.body.packs[0].digest": fc23c1888199af4b90323527b01b07d277290129951e50494ad8eb1842f556db
+            "$.body.packs[0].sessionDigest": a98b266c5f250fb9c6a85cd3702c4ec92e2fc4369a1ba1a9401c54daddc77729
+            "$.body.packs[0].source": { kind: upload, url: "", commit: "" }
+            "$.body.packs[0].roles": { bug-hunter: hunter, simplicity: trimmer }
+            "$.body.packs[0].steps": { review: "/beta:handoff" }
+            "$.body.packs[0].documents": false
+            "$.body.packs[0].agents": [hunter, trimmer]
+            "$.body.packs[0].codeFiles": []
+            "$.body.packs[0].usedBy": []
+          matches: { "$.body.packs[0].addedAt": "[0-9]{13}" }
+          absent: ["$.body.packs[1]"]
+        save: { digest: "$.body.packs[0].digest" }
+        waive: { EXE-09: "an upload only adds a pack: one with a name the engine keeps is refused with 409 name, one with the same digest is left as it is, and it changes no project's choice, so nothing can be removed or overwritten" }
+      - id: upload-same-name
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: upload, path: /workspace/base/demo, name: beta, files: [{ path: software-factory-pack.json, text: "{\"format\": \"software-factory-pack/1\", \"name\": \"beta\", \"version\": \"1.1.0\", \"roles\": {\"bug-hunter\": \"hunter\"}}\n" }, { path: agents/hunter.md, text: "---\nname: hunter\ndescription: Finds bugs in the change\n---\nRead change.diff and the tests.\n" }] }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: name, message: "The engine already keeps a pack named beta. Remove it first, or use the one it keeps." }
+        waive: { EXE-09: "an upload only adds a pack, and this one is refused with 409 name because the engine keeps a pack named beta, so nothing can be removed or overwritten" }
+      - id: use-beta
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: use, path: /workspace/base/demo, pack: "${digest}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.using": "${digest}"
+            "$.body.packs[0].usedBy": [demo]
+          absent: ["$.body.packs[1]"]
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "packs beta ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+          any:
+            "$.body.entries": [{ kind: pack, by: page, result: added, hash: "${digest}", commit: "", reason: "the developer uploaded the pack beta 1.0.0 (4 files), on the page" }, { kind: pack, by: page, result: used, hash: "${digest}", reason: "the developer picked the pack beta 1.0.0 to review demo on the page" }]
+          none:
+            "$.body.entries": { kind: pack, result: added, reason: "the developer uploaded the pack beta 1.1.0 (2 files), on the page" }
+        save: { box: "$.body.entries[0].box" }
+      - id: on-beta
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.adapter": beta
+            "$.body.gate.commands": { review: "/beta:handoff" }
+            "$.body.gate.catalog": "off"
+            "$.body.gate.reviewers[0].type": "beta:hunter"
+            "$.body.gate.reviewers[0].role": bug-hunter
+            "$.body.gate.reviewers[1].type": "beta:trimmer"
+            "$.body.gate.reviewers[1].role": simplicity
+          absent: ["$.body.gate.reviewers[2]"]
+          none:
+            "$.body.gate.types": { id: feature }
+      - id: use-knackpack
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: use, path: /workspace/base/demo, pack: knackpack }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.using": knackpack
+            "$.body.packs[0].usedBy": []
+      - id: keeps-beta
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.adapter": beta
+            "$.body.gate.commands": { review: "/beta:handoff" }
+            "$.body.gate.reviewers[0].type": "knackpack:adversarial-reviewer"
+            "$.body.gate.reviewers[1].type": "knackpack:slop-reviewer"
+      - id: remove-while-running
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: remove, path: /workspace/base/demo, digest: "${digest}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "in use", message: "A saved session runs the pack beta, and keeps it across Stop and Wake. Delete that session first." }
+      - id: still-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": pack
+            "$.body.entries[0].result": used
+            "$.body.entries[0].reason": "the developer picked knackpack, the built-in pack, to review demo on the page"
+          none:
+            "$.body.entries": { kind: pack, result: removed, hash: "${digest}" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: stopped-on-beta
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.adapter": beta
+            "$.body.gate.commands": { review: "/beta:handoff" }
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: wake
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/wake"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: woken
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.state.running": true
+      - id: wake-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-wake, by: page, result: woken, session: "${sid}" }
+      - id: woke-on-beta
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.adapter": beta
+            "$.body.gate.commands": { review: "/beta:handoff" }
+            "$.body.gate.reviewers[0].type": "knackpack:adversarial-reviewer"
+          none:
+            "$.body.gate.types": { id: feature }
+      - id: stop-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone-again
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: session-stop, session: "${sid}" }, is: 2 }
+      - id: remove-session
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: wake-note
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: versions, json.sid: "${sid}", json.text: "This session keeps the pack it started with, beta 1.0.0 (fc23c1888199); the project now uses knackpack, which new sessions get." }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/packs"
+          headers: { Origin: "${page.origin}" }
+          body: { op: remove, path: /workspace/base/demo, digest: "${digest}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.using": knackpack
+            "$.body.packs": []
+        no_state_check: "the session is deleted by now, and the declared reads that show /api/packs, /api/audit and /api/gate, answer only for a session this engine started; this answer's packs list, which removePack builds from the packs.json it saved, shows the pack gone"
