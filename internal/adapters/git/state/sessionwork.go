@@ -73,6 +73,7 @@ type projectCommandJSON struct {
 	Check   string `json:"check,omitempty"`
 	Setup   string `json:"setup,omitempty"`
 	Image   string `json:"image,omitempty"`
+	Browser string `json:"browser,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 }
 
@@ -96,11 +97,12 @@ func (s ProjectCommands) Load() (map[session.ProjectID]session.ProjectCommands, 
 		check, okCheck := session.CheckProjectCommand(p.Check)
 		setup, okSetup := session.CheckProjectCommand(p.Setup)
 		image, okImage := session.CheckVerifyImage(p.Image)
+		browser, okBrowser := session.CheckProjectCommand(p.Browser)
 		id := session.ProjectID{Name: p.Project, URL: p.URL}
-		if len(p.Project) > 400 || !validProject(id) || !okCheck || !okSetup || !okImage || len(out) >= maxStoredProjects {
+		if len(p.Project) > 400 || !validProject(id) || !okCheck || !okSetup || !okImage || !okBrowser || len(out) >= maxStoredProjects {
 			continue
 		}
-		out[id] = session.ProjectCommands{Check: check, Setup: setup, Image: image}
+		out[id] = session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser}
 	}
 	return out, nil
 }
@@ -111,7 +113,7 @@ func (s ProjectCommands) Save(all map[session.ProjectID]session.ProjectCommands)
 	f := projectCommandsJSON{Version: 1, Projects: []projectCommandJSON{}}
 	for id, c := range all {
 		if len(f.Projects) < maxStoredProjects {
-			f.Projects = append(f.Projects, projectCommandJSON{Owner: owner, Project: id.Name, URL: id.URL, Check: c.Check, Setup: c.Setup, Image: c.Image})
+			f.Projects = append(f.Projects, projectCommandJSON{Owner: owner, Project: id.Name, URL: id.URL, Check: c.Check, Setup: c.Setup, Image: c.Image, Browser: c.Browser})
 		}
 	}
 	sort.Slice(f.Projects, func(i, j int) bool {

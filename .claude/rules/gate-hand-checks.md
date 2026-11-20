@@ -476,6 +476,14 @@ check 'true'; push v; vwait v; push v; logs helper 'msg=verifier'
 - A queued run whose branch moved, or whose push no longer needs it, logs `verify event=queued-dropped` and starts nothing; the push is decided again.
 - Two sessions at one commit (the second started from the first, `from: {sid}`): with the push slot taken, the second's agent push queues its run, the first's person presses Verify, and when the slot frees the second still runs its own copy (or is decided again when the first's run ends) and pushes.
 - `GOTOOLCHAIN=local` and `NODE_VERSION=26.13.0` are kept; a 64-hex `NODE_VERSION`, a 7-digit version group, a `PATH` with an empty part, `PYTHONUNBUFFERED=yes`, `TZ` and `NODE_ENV` are emptied.
+
+Browser checks (ARCHITECTURE.md "Verification runs", Browser checks) need the stack with the browser image (`COMPOSE_FILE=compose.yaml:compose.dev.yaml:compose.browser.yaml`, `SF_BROWSER_STAGE=dev-browser`) and that image, by its ID, as the project's image; set the command with `{"op":"set",…,"browser":"…"}` on `/api/project-commands` and start with `"kind":"browser"`:
+
+- `index.html` holding `<h1>ok</h1>` and `chromium --headless --dump-dom file://$PWD/index.html | grep -q '<h1>ok</h1>' && chromium --headless --window-size=800,600 --screenshot=$SF_OUT/home.png file://$PWD/index.html` is `passed` with one image, which `{"op":"attachment",…,"name":"home.png"}` answers as a PNG; `ok` changed to `no` in the grep is `failed` with exit 1, whatever images exist.
+- `ln -s /etc/passwd $SF_OUT/a.png; mkdir $SF_OUT/d; head -c 20000000 /dev/zero > $SF_OUT/big.png; echo x > $SF_OUT/n.png` keeps nothing and names `a.png (a link)`, `d (a folder)`, `big.png` (over 10 MiB) and `n.png` (not an image) in `fileNote`, and the run's state is the command's own.
+- `printf 'PK\005\006%018d' 0 | tr 0 '\000' > $SF_OUT/t.zip` is kept as a trace, and `attachment` answers it as `application/octet-stream` with `Content-Disposition: attachment; filename="t.zip"` and `nosniff`.
+- The same start with the standard image as the project's: the run is `error` with "has no browser at /usr/bin/chromium, …", and no container ran.
+- `docker volume ls --filter label=dev.software-factory.verifier` is empty after each run and after a helper restart.
 - Without the push slot taken, the first session's person presses Verify, and the second session (at the same commit) pushes while that run goes: its push waits and goes out when the run passes.
 - An image's variables other than tooling names are empty in the run (`check 'test -z "$PLAIN" && test -n "$PATH"'` with `PLAIN=keepme` in the image), and `LANGUAGE=en_US:en` is kept.
 - With less than about 1 GiB free on the `verify` volume, a run ends `error` with "not enough space on the verify volume" and writes nothing.

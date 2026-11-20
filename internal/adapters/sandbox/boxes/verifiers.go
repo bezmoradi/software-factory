@@ -3,6 +3,7 @@ package boxes
 import (
 	"context"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"net/netip"
@@ -23,6 +24,12 @@ const (
 	LabelVerifyImage    = "dev.software-factory.verify-image"
 	labelOurs           = "dev.software-factory."
 	verifierPrefix      = "-verify-"
+	verifierOutPrefix   = "-verify-out-"
+	verifierOut         = "/out"
+	verifierOutVariable = "SF_OUT"
+	maxVerifierOut      = 128 << 20
+	ReasonNoBrowser     = "no-browser"
+	ReasonRunning       = "running"
 	verifierUser        = "10006:10006"
 	verifierIn          = "/in"
 	verifierWork        = "/work"
@@ -59,7 +66,8 @@ var (
 	localeValue   = regexp.MustCompile(`^[A-Za-z]{1,8}([_-][A-Za-z0-9]{1,8})?(\.[A-Za-z0-9-]{1,16})?(@[A-Za-z0-9]{1,16})?(:[A-Za-z]{1,8}([_-][A-Za-z0-9]{1,8})?(\.[A-Za-z0-9-]{1,16})?)*$`)
 
 	volumePath      = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
-	verifierReserve = []string{"/", verifierIn, verifierWork, "/tmp", "/proc", "/sys", "/dev", "/etc"}
+	verifierReserve = []string{"/", verifierIn, verifierWork, verifierOut, "/tmp", "/proc", "/sys", "/dev", "/etc"}
+	browserPaths    = []string{"/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/ms-playwright"}
 )
 
 var _ session.VerifierHost = (*Helper)(nil)
@@ -72,8 +80,9 @@ type verifyImage struct {
 	volumes    []string
 }
 
-func verifierName(project, run string) string { return project + verifierPrefix + run }
-func verifierLock(run string) string          { return "verifier:" + run }
+func verifierName(project, run string) string    { return project + verifierPrefix + run }
+func verifierOutName(project, run string) string { return project + verifierOutPrefix + run }
+func verifierLock(run string) string             { return "verifier:" + run }
 
 func badVerifier(run, digest string) error {
 	if !session.ValidBox(run) {
@@ -89,9 +98,13 @@ func (r *recipe) verifierLabels(run, digest string) map[string]string {
 	return map[string]string{LabelStack: r.project, LabelVerifier: run, LabelVerifyImage: digest}
 }
 
-func verifierEnv(image []string) []string {
+func verifierEnv(image []string, browser bool) []string {
 	out := []string{"HOME=" + verifierHome, "LANG=C.UTF-8", "TERM=dumb", "CI=1"}
 	ours := map[string]bool{"HOME": true, "LANG": true, "TERM": true, "CI": true}
+	if browser {
+		out = append(out, verifierOutVariable+"="+verifierOut)
+		ours[verifierOutVariable] = true
+	}
 	for _, e := range image {
 		k, v, _ := strings.Cut(e, "=")
 		if ours[k] {
@@ -135,7 +148,7 @@ func (r *recipe) verifierTmpfs(img verifyImage) map[string]string {
 	return out
 }
 
-func (r *recipe) verifierCreate(run, digest, volume string, img verifyImage) containerCreateJSON {
+func (r *recipe) verifierCreate(run, digest, volume, out string, img verifyImage) containerCreateJSON {
 	labels := r.verifierLabels(run, digest)
 	for k := range img.labels {
 		if strings.HasPrefix(k, composeLabels) {
@@ -147,7 +160,7 @@ func (r *recipe) verifierCreate(run, digest, volume string, img verifyImage) con
 		User:        verifierUser,
 		Entrypoint:  []string{"/bin/sh", "-c"},
 		Cmd:         []string{verifierScript},
-		Env:         verifierEnv(img.env),
+		Env:         verifierEnv(img.env, out != ""),
 		Labels:      labels,
 		Healthcheck: healthJSON{Test: []string{"NONE"}},
 		HostConfig: hostCreateJSON{
@@ -170,6 +183,9 @@ func (r *recipe) verifierCreate(run, digest, volume string, img verifyImage) con
 			ShmSize:        boxShm,
 		},
 	}
+	if out != "" {
+		c.HostConfig.Mounts = append(c.HostConfig.Mounts, mountJSON{Type: "volume", Source: out, Target: verifierOut})
+	}
 	if r.cfg.Runtime != "" {
 		c.HostConfig.Runtime = r.cfg.Runtime
 	}
@@ -177,7 +193,7 @@ func (r *recipe) verifierCreate(run, digest, volume string, img verifyImage) con
 }
 
 func (r *recipe) verifierGeneric(run, digest string) generic {
-	return genericOf(netip.Prefix{}, verifierName(r.project, run), "{name}", run, "{run}", digest, "{digest}")
+	return genericOf(netip.Prefix{}, verifierOutName(r.project, run), "{out}", verifierName(r.project, run), "{name}", run, "{run}", digest, "{digest}")
 }
 
 func (r *recipe) verifierView(c containerCreateJSON, img verifyImage, g generic) recipeView {
@@ -233,7 +249,7 @@ func (h *Helper) logVerifier(ctx context.Context, action, run, digest, recipe st
 	shared.For(ctx, h.logger).Warn("verifier", append(fields, "outcome", "refused", "reason", reason, "message", message)...)
 }
 
-func (h *Helper) StartVerifier(ctx context.Context, run, digest string) (session.VerifierInfo, error) {
+func (h *Helper) StartVerifier(ctx context.Context, run, digest string, browser bool) (session.VerifierInfo, error) {
 	if err := badVerifier(run, digest); err != nil {
 		return session.VerifierInfo{}, err
 	}
@@ -242,12 +258,12 @@ func (h *Helper) StartVerifier(ctx context.Context, run, digest string) (session
 	}
 	unlock := h.locks.lock(verifierLock(run))
 	defer unlock()
-	info, err := h.startVerifier(ctx, run, digest)
+	info, err := h.startVerifier(ctx, run, digest, browser)
 	h.logVerifier(ctx, "start", run, digest, info.Recipe, err)
 	return info, err
 }
 
-func (h *Helper) startVerifier(ctx context.Context, run, digest string) (session.VerifierInfo, error) {
+func (h *Helper) startVerifier(ctx context.Context, run, digest string, browser bool) (session.VerifierInfo, error) {
 	volume, err := h.stackVolume(ctx, volumeVerify)
 	if err != nil {
 		return session.VerifierInfo{}, err
@@ -270,9 +286,15 @@ func (h *Helper) startVerifier(ctx context.Context, run, digest string) (session
 		return session.VerifierInfo{}, err
 	}
 	defer release()
+	out := ""
+	if browser {
+		if out, err = h.verifierOutVolume(ctx, run, digest); err != nil {
+			return session.VerifierInfo{}, err
+		}
+	}
 	name := verifierName(h.rec.project, run)
 	g := h.rec.verifierGeneric(run, digest)
-	body := h.rec.verifierCreate(run, digest, volume, img)
+	body := h.rec.verifierCreate(run, digest, volume, out, img)
 	want := h.rec.verifierView(body, img, g)
 	recipe := hashOf(want)
 	body.Labels[LabelRecipe] = recipe
@@ -302,7 +324,7 @@ func (h *Helper) startVerifier(ctx context.Context, run, digest string) (session
 		if len(got.HostConfig.Ulimits) > 0 {
 			diffs = append(diffs, "Ulimits")
 		}
-		if len(got.Mounts) != 1 {
+		if len(got.Mounts) != len(body.HostConfig.Mounts) {
 			diffs = append(diffs, "MountCount")
 		}
 		if len(diffs) > 0 || got.Config.Labels[LabelRecipe] != recipe || got.Image != img.id {
@@ -312,6 +334,11 @@ func (h *Helper) startVerifier(ctx context.Context, run, digest string) (session
 	}
 	if r := check("before it started"); r != nil {
 		return fail(r)
+	}
+	if browser {
+		if r := h.browserIn(ctx, created.ID, img.id); r != nil {
+			return fail(r)
+		}
 	}
 	if err := h.docker.post(ctx, "/containers/"+pathPart(created.ID)+"/start", nil, nil, nil); err != nil {
 		return fail(verifyFolderOr(dockerFailed("start the verification container", err), err, run))
@@ -529,7 +556,7 @@ func (h *Helper) teardownVerifier(ctx context.Context, run string) error {
 			}
 		}
 	}
-	return nil
+	return h.dropVerifierOut(ctx, run)
 }
 
 func dockerTime(s string) time.Time {
@@ -596,6 +623,15 @@ func (h *Helper) ListVerifiers(ctx context.Context) ([]session.BoxInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	outs, err := h.verifierOuts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range outs {
+		if _, seen := runs[run]; !seen {
+			runs[run] = "volume"
+		}
+	}
 	out := make([]session.BoxInfo, 0, len(runs))
 	for run, state := range runs {
 		out = append(out, session.BoxInfo{Box: run, State: oneLine(state)})
@@ -660,4 +696,110 @@ func (h *Helper) watchVerifiers(ctx context.Context) {
 			h.killOverdue(ctx)
 		}
 	}
+}
+
+func (h *Helper) verifierOutLabels(run, digest string) map[string]string {
+	return map[string]string{LabelStack: h.rec.project, LabelVerifier: run, LabelVerifyImage: digest}
+}
+
+func ownedVerifierOut(project, run string, v volumeJSON) bool {
+	return v.Name == verifierOutName(project, run) && v.Labels[LabelStack] == project && v.Labels[LabelVerifier] == run && v.Driver == volumeDriver && len(v.Options) == 0
+}
+
+func (h *Helper) verifierOutVolume(ctx context.Context, run, digest string) (string, error) {
+	name := verifierOutName(h.rec.project, run)
+	var v volumeJSON
+	if err := h.docker.post(ctx, "/volumes/create", nil, volumeCreateJSON{Name: name, Driver: volumeDriver, Labels: h.verifierOutLabels(run, digest)}, &v); err != nil {
+		return "", dockerFailed("make the volume "+name, err)
+	}
+	if !ownedVerifierOut(h.rec.project, run, v) || v.Labels[LabelVerifyImage] != digest {
+		return "", refuse(http.StatusConflict, ReasonNamed, "a volume named %s exists without the box helper's labels or with another driver or options, so the helper leaves it alone and starts no browser run with that name", name)
+	}
+	return name, nil
+}
+
+func (h *Helper) dropVerifierOut(ctx context.Context, run string) error {
+	name := verifierOutName(h.rec.project, run)
+	var v volumeJSON
+	if err := h.docker.get(ctx, "/volumes/"+pathPart(name), nil, &v); err != nil {
+		if IsNotFound(err) {
+			return nil
+		}
+		return dockerFailed("inspect the volume "+name, err)
+	}
+	if v.Labels[LabelStack] != h.rec.project || v.Labels[LabelVerifier] != run {
+		return refuse(http.StatusConflict, ReasonNamed, "a volume named %s exists without the box helper's labels, so the helper leaves it alone", name)
+	}
+	if err := h.docker.delete(ctx, "/volumes/"+pathPart(name), nil); err != nil && !IsNotFound(err) {
+		return dockerFailed("remove the volume "+name, err)
+	}
+	return nil
+}
+
+func (h *Helper) verifierOuts(ctx context.Context) ([]string, error) {
+	var list volumeListJSON
+	if err := h.docker.get(ctx, "/volumes", h.stackFilter(), &list); err != nil {
+		return nil, dockerFailed("list the stack's volumes", err)
+	}
+	var out []string
+	for _, v := range list.Volumes {
+		run := v.Labels[LabelVerifier]
+		if session.ValidBox(run) && v.Labels[LabelStack] == h.rec.project && v.Name == verifierOutName(h.rec.project, run) {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
+func (h *Helper) browserIn(ctx context.Context, id, image string) *Refusal {
+	for _, p := range browserPaths {
+		resp, err := h.docker.send(ctx, h.docker.client, http.MethodHead, "/containers/"+pathPart(id)+"/archive", url.Values{"path": {p}}, nil, true)
+		if err != nil {
+			return dockerFailed("look for a browser in the verification container", err)
+		}
+		_ = resp.Body.Close()
+		switch resp.StatusCode {
+		case http.StatusOK:
+			return nil
+		case http.StatusNotFound:
+		default:
+			return refuse(http.StatusBadGateway, ReasonDocker, "Docker answered HTTP %d when the helper looked for a browser in the verification container", resp.StatusCode)
+		}
+	}
+	return refuse(http.StatusConflict, ReasonNoBrowser, "the image %s has no browser at %s, so a browser run has nothing to drive; name an image that holds one, such as the stack's browser stage or Playwright's image", image, strings.Join(browserPaths, ", "))
+}
+
+type limitedBody struct {
+	io.Reader
+	io.Closer
+}
+
+func (h *Helper) VerifierOut(ctx context.Context, run string) (io.ReadCloser, error) {
+	if err := badVerifier(run, ""); err != nil {
+		return nil, err
+	}
+	ci, err := h.verifierContainer(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if ci == nil {
+		return nil, refuse(http.StatusNotFound, ReasonUnknown, "the box helper has no verification container for the run %s", run)
+	}
+	if ci.State.Running || ci.State.Status != "exited" {
+		return nil, refuse(http.StatusConflict, ReasonRunning, "the verification container of the run %s hasn't exited, so the helper reads none of its files", run)
+	}
+	if !slices.ContainsFunc(ci.Mounts, func(m mountPointJSON) bool {
+		return m.Destination == verifierOut && m.Type == "volume" && m.Name == verifierOutName(h.rec.project, run)
+	}) {
+		return nil, refuse(http.StatusConflict, ReasonRecipe, "the verification container of the run %s has no %s volume, so it isn't a browser run", run, verifierOut)
+	}
+	resp, err := h.docker.send(ctx, h.docker.stream, http.MethodGet, "/containers/"+pathPart(ci.ID)+"/archive", url.Values{"path": {verifierOut}}, nil, true)
+	if err != nil {
+		return nil, dockerFailed("read the verification container's "+verifierOut, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer func() { _ = resp.Body.Close() }()
+		return nil, dockerFailed("read the verification container's "+verifierOut, readDockerError(resp))
+	}
+	return limitedBody{Reader: io.LimitReader(resp.Body, maxVerifierOut), Closer: resp.Body}, nil
 }

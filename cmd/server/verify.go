@@ -18,7 +18,7 @@ func useVerify(base context.Context, srv *page.Server, reg *session.Registry, pa
 		return nil
 	}
 	vc := session.VerifyConfig{
-		Host: host, Trees: files.Verify{Dir: cfg.Verify, Volume: workspace.Disk{}.Volume}, Store: state.NewVerifyRuns(cfg.StateDir), Heads: files.Reviews{},
+		Host: host, Trees: files.Verify{Dir: cfg.Verify, Volume: workspace.Disk{}.Volume}, Files: state.VerifyFiles{Dir: cfg.StateDir}, Store: state.NewVerifyRuns(cfg.StateDir), Heads: files.Reviews{},
 		Targets: parts.dispatcher.PushTarget, Project: work.ProjectOf, Audit: state.NewAudit(cfg.StateDir), Base: base, Logger: logger,
 	}
 	if parts.work != nil {
@@ -31,6 +31,7 @@ func useVerify(base context.Context, srv *page.Server, reg *session.Registry, pa
 	parts.dispatcher.OnRemoved(v.Forget)
 	if parts.repos != nil {
 		parts.repos.OnRemoved(v.ForgetMain)
+		parts.repos.OnRemoved(v.ForgetProject)
 	}
 	if facts != nil {
 		facts.UseVerified(v.MainLine)

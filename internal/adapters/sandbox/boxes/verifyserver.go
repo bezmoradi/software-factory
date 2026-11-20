@@ -2,11 +2,14 @@ package boxes
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
+
+const tarType = "application/x-tar"
 
 type verifierJSON struct {
 	Run          string `json:"run"`
@@ -51,7 +54,7 @@ func (s *server) verifiers(base context.Context, w http.ResponseWriter, r *http.
 	}
 	if rt.name != routeVerifiers {
 		digest := rt.snapshot
-		if rt.name == routeVerify && digest == "" {
+		if (rt.name == routeVerify || rt.name == routeBrowser) && digest == "" {
 			digest = "-"
 		}
 		if err := badVerifier(rt.id, digest); err != nil {
@@ -77,8 +80,8 @@ func (s *server) verifiers(base context.Context, w http.ResponseWriter, r *http.
 			out.Verifiers = append(out.Verifiers, boxOf(b))
 		}
 		writeJSON(w, http.StatusOK, out)
-	case rt.name == routeVerify:
-		info, err := s.cfg.Verifiers.StartVerifier(ctx, rt.id, rt.snapshot)
+	case rt.name == routeVerify || rt.name == routeBrowser:
+		info, err := s.cfg.Verifiers.StartVerifier(ctx, rt.id, rt.snapshot, rt.name == routeBrowser)
 		if err != nil {
 			s.failed(w, r, err)
 			return
@@ -92,6 +95,16 @@ func (s *server) verifiers(base context.Context, w http.ResponseWriter, r *http.
 			return
 		}
 		writeJSON(w, http.StatusOK, verifierLogJSON{Version: WireVersion, Log: text})
+	case rt.name == routeVerifyOut:
+		body, err := s.cfg.Verifiers.VerifierOut(ctx, rt.id)
+		if err != nil {
+			s.failed(w, r, err)
+			return
+		}
+		defer func() { _ = body.Close() }()
+		w.Header().Set("Content-Type", tarType)
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, io.LimitReader(body, maxVerifierOut))
 	case r.Method == http.MethodDelete:
 		if err := s.cfg.Verifiers.RemoveVerifier(ctx, rt.id); err != nil {
 			s.failed(w, r, err)

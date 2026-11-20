@@ -394,7 +394,7 @@ func (p *Pushes) verifyWait(ctx context.Context, sid string) (string, bool) {
 	return head, true
 }
 
-func (p *Pushes) VerifyReady(ctx context.Context, sid, head string) bool {
+func (p *Pushes) VerifyReady(ctx context.Context, sid, head string, kind VerifyKind) bool {
 	if p.cfg.Work == nil {
 		return false
 	}
@@ -413,7 +413,7 @@ func (p *Pushes) VerifyReady(ctx context.Context, sid, head string) bool {
 	}
 	main, _ := p.cfg.Repos.Main(t.Name)
 	wf, ok := p.cfg.Work.PushFacts(ctx, sid, t, head, main)
-	return ok && wf.Type.Push && !wf.NeedsApproval && wf.Refusal == "" && slices.Contains(wf.Verify, string(VerifyCheck))
+	return ok && wf.Type.Push && !wf.NeedsApproval && wf.Refusal == "" && slices.Contains(wf.Verify, string(kind))
 }
 
 func (p *Pushes) verifyPending(ctx context.Context, v PushVerify, sid string, t PushTarget, head string) bool {
@@ -422,7 +422,7 @@ func (p *Pushes) verifyPending(ctx context.Context, v PushVerify, sid string, t 
 	}
 	main, _ := p.cfg.Repos.Main(t.Name)
 	wf, ok := p.cfg.Work.PushFacts(ctx, sid, t, head, main)
-	if !ok || !slices.Contains(wf.Verify, string(VerifyCheck)) {
+	if !ok || len(wf.Verify) == 0 {
 		return false
 	}
 	if p.cfg.Reviews == nil {
@@ -1381,7 +1381,7 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 			f.Items = append(f.Items, v.Items(ctx, sid, t, head, wf.Verify, VerifyAsk{Start: couldPush && wf.Type.Push && !wf.NeedsApproval && wf.Refusal == "", Agent: by != ByPage})...)
 		}
 	}
-	return f, wf.Refusal, worked && slices.Contains(wf.Verify, string(VerifyCheck)), nil
+	return f, wf.Refusal, worked && len(wf.Verify) > 0, nil
 }
 
 func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (ChangeView, error) {

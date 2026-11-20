@@ -2,17 +2,32 @@ import { api } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
+import { pngBlob, saveBlob } from '../lib/files.ts'
 
 const ROUTE = '/api/verify'
 const SHA = /^[0-9a-f]{40}$/
 const RUN = /^[0-9a-f]{16}$/
 const STATES = ['running', 'passed', 'failed', 'timed-out', 'oom', 'error', 'interrupted', 'stopped'] as const
+const FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.(png|jpe?g|gif|zip)$/
+const MAX_TRACE = 50 << 20
 
 type RunState = typeof STATES[number]
+type Kind = 'check' | 'browser'
+
+interface VerifyFile {
+  name: string
+  kind: 'image' | 'trace'
+  bytes: number
+  width: number
+  height: number
+}
 
 interface VerifyRun {
   id: string
   commit: string
+  kind: Kind
+  files: VerifyFile[]
+  fileNote: string
   state: RunState
   code: number
   tail: string
@@ -39,6 +54,24 @@ interface VerifyView {
   current: VerifyRun | null
   why: string
   runs: VerifyRun[]
+  browser: BrowserView
+}
+
+interface BrowserView {
+  command: string
+  hasCommand: boolean
+  required: boolean
+  queued: boolean
+  current: VerifyRun | null
+  why: string
+}
+
+interface Opened {
+  run: string
+  name: string
+  url: string
+  width: number
+  height: number
 }
 
 export interface VerifyTarget {
@@ -51,14 +84,25 @@ const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0
 const sha = (v: unknown) => (typeof v === 'string' && SHA.test(v) ? v : '')
 const state = (v: unknown): RunState | null => STATES.find(x => x === v) ?? null
 
+function readFile(v: unknown): VerifyFile | null {
+  if (!isRecord(v) || typeof v.name !== 'string' || !FILE.test(v.name) || (v.kind !== 'image' && v.kind !== 'trace')) return null
+  return { name: v.name, kind: v.kind, bytes: num(v.bytes), width: num(v.width), height: num(v.height) }
+}
+
 function readRun(v: unknown): VerifyRun | null {
   if (!isRecord(v) || typeof v.id !== 'string' || !RUN.test(v.id) || !sha(v.commit)) return null
   const s = state(v.state)
   if (!s) return null
+  const files = Array.isArray(v.files) ? v.files.map(readFile).filter(f => f !== null).slice(0, 20) : []
   return {
-    id: v.id, commit: sha(v.commit), state: s, code: num(v.code), tail: text(v.tail), cut: v.cut === true, withheld: v.withheld === true, reason: text(v.reason),
+    id: v.id, commit: sha(v.commit), kind: v.kind === 'browser' ? 'browser' : 'check', files, fileNote: text(v.fileNote), state: s, code: num(v.code), tail: text(v.tail), cut: v.cut === true, withheld: v.withheld === true, reason: text(v.reason),
     by: text(v.by), image: text(v.image), imageId: text(v.imageId), limit: num(v.limitSeconds), started: num(v.started), ended: num(v.ended),
   }
+}
+
+function readBrowser(v: unknown): BrowserView {
+  const b = isRecord(v) ? v : {}
+  return { command: text(b.command), hasCommand: b.hasCommand === true, required: b.required === true, queued: b.queued === true, current: readRun(b.current), why: text(b.why) }
 }
 
 function readView(v: unknown): VerifyView | null {
@@ -66,8 +110,14 @@ function readView(v: unknown): VerifyView | null {
   const runs = Array.isArray(v.runs) ? v.runs.map(readRun).filter(r => r !== null) : []
   return {
     head: sha(v.head), branch: text(v.branch), command: text(v.command), hasCheck: v.hasCheck === true, image: text(v.image), required: v.required === true,
-    busy: v.busy === true, queued: v.queued === true, current: readRun(v.current), why: text(v.why), runs,
+    busy: v.busy === true, queued: v.queued === true, current: readRun(v.current), why: text(v.why), runs, browser: readBrowser(v.browser),
   }
+}
+
+function size(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1 << 20) return `${(n / 1024).toFixed(0)} KiB`
+  return `${(n / (1 << 20)).toFixed(1)} MiB`
 }
 
 const WORDS: Record<RunState, string> = {
@@ -88,7 +138,7 @@ function when(ms: number): string {
 function outcome(r: VerifyRun): string {
   const what = r.state === 'failed' ? `failed with exit code ${r.code}` : WORDS[r.state]
   const at = r.ended ? `, ended ${when(r.ended)}` : r.started ? `, started ${when(r.started)}` : ''
-  return `Commit ${shortSha(r.commit)}: ${what}${at}.`
+  return `${r.kind === 'browser' ? 'Browser check of commit' : 'Commit'} ${shortSha(r.commit)}: ${what}${at}.`
 }
 
 async function problemOf(res: Response | null): Promise<string> {
@@ -108,6 +158,8 @@ class SfVerify extends HTMLElement {
   #summary = el('summary', 'small')
   #opened: boolean | null = null
   #shown = false
+  #file: Opened | null = null
+  #fetching = ''
 
   constructor() {
     super()
@@ -123,6 +175,7 @@ class SfVerify extends HTMLElement {
     this.#key = key
     const changed = value?.sid !== this.#target?.sid
     this.#target = value
+    if (changed) this.#close()
     if (!value?.sid) {
       this.#view = null
       this.hidden = true
@@ -176,11 +229,95 @@ class SfVerify extends HTMLElement {
     this.#paint()
   }
 
+  disconnectedCallback() {
+    this.#close()
+  }
+
+  #close() {
+    if (this.#file) URL.revokeObjectURL(this.#file.url)
+    this.#file = null
+  }
+
+  async #openImage(run: VerifyRun, f: VerifyFile) {
+    const sid = this.#target?.sid
+    if (!sid || this.#fetching) return
+    if (this.#file?.run === run.id && this.#file.name === f.name) {
+      this.#close()
+      this.#paint()
+      return
+    }
+    this.#fetching = `${run.id}/${f.name}`
+    this.#paint()
+    const res = await api(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name }).catch(() => null)
+    const body = res?.ok ? await res.json().catch(() => null) as unknown : null
+    this.#fetching = ''
+    if (sid !== this.#target?.sid) return
+    const blob = isRecord(body) && body.type === 'image/png' && typeof body.data === 'string' ? pngBlob(body.data) : null
+    if (!blob) {
+      say(this.#status, res && !res.ok ? await problemOf(res) : 'The engine’s answer wasn’t a PNG image.', 'warn')
+      this.#paint()
+      return
+    }
+    this.#close()
+    this.#file = { run: run.id, name: f.name, url: URL.createObjectURL(blob), width: f.width, height: f.height }
+    this.#paint()
+  }
+
+  async #download(run: VerifyRun, f: VerifyFile) {
+    const sid = this.#target?.sid
+    if (!sid || this.#fetching) return
+    this.#fetching = `${run.id}/${f.name}`
+    this.#paint()
+    const res = await api(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name }).catch(() => null)
+    const blob = res?.ok && res.headers.get('Content-Type') === 'application/octet-stream' ? await res.blob().catch(() => null) : null
+    this.#fetching = ''
+    if (!blob || blob.size > MAX_TRACE) {
+      say(this.#status, res && !res.ok ? await problemOf(res) : 'The engine didn’t send that file.', 'warn')
+      this.#paint()
+      return
+    }
+    saveBlob(new Blob([blob], { type: 'application/octet-stream' }), f.name)
+    say(this.#status, `Saved ${f.name}. The page doesn’t open it; open it with Playwright’s trace viewer, which runs it as the test’s own data.`, 'muted')
+    this.#paint()
+  }
+
+  #files(r: VerifyRun): HTMLElement[] {
+    const out: HTMLElement[] = []
+    if (r.files.length) {
+      out.push(el('p', 'small muted', 'Files the test code wrote to $SF_OUT. The agent wrote that code, so what an image shows is the test’s claim, not a finding of the engine, and it never changes the result.'))
+      const list = el('ul', 'small list')
+      for (const f of r.files) {
+        const li = el('li', 'small')
+        const key = `${r.id}/${f.name}`
+        const open = this.#file?.run === r.id && this.#file.name === f.name
+        const label = f.kind === 'image' ? `${open ? 'Hide' : 'Show'} ${f.name} (${f.width} × ${f.height}, ${size(f.bytes)})` : `Download ${f.name} (trace, ${size(f.bytes)})`
+        const b = button(label, 'link small', () => void (f.kind === 'image' ? this.#openImage(r, f) : this.#download(r, f)), 'button', `verify-file-${key}`)
+        if (f.kind === 'image') b.setAttribute('aria-pressed', String(open))
+        if (this.#fetching === key) busy(b, true)
+        li.append(b)
+        if (open && this.#file) {
+          const figure = el('figure', 'screenshot-view')
+          const img = el('img')
+          img.src = this.#file.url
+          img.alt = `Image ${f.name} written by run ${shortSha(r.commit)}’s test code`
+          figure.append(img, el('figcaption', 'small muted', `${f.name} · ${this.#file.width} × ${this.#file.height} · written by the test code`))
+          li.append(figure)
+        }
+        list.append(li)
+      }
+      out.push(list)
+    }
+    if (r.fileNote) out.push(el('p', 'small muted', shown(r.fileNote)))
+    return out
+  }
+
   #summaryText(v: VerifyView): string {
     const c = v.current
-    if (c) return `Verification run: ${WORDS[c.state]} on ${shortSha(c.commit)}`
-    if (v.queued) return 'Verification run: queued for a free slot'
-    return v.required ? 'Verification run: none for this commit, and a push needs one' : 'Verification run: none for this commit'
+    const b = v.browser.current
+    const browser = b ? `; browser check: ${WORDS[b.state]}` : v.browser.queued ? '; browser check: queued' : ''
+    if (c) return `Verification run: ${WORDS[c.state]} on ${shortSha(c.commit)}${browser}`
+    if (v.queued) return `Verification run: queued for a free slot${browser}`
+    return (v.required ? 'Verification run: none for this commit, and a push needs one' : 'Verification run: none for this commit') + browser
   }
 
   #run(r: VerifyRun, current: boolean): HTMLElement[] {
@@ -202,7 +339,45 @@ class SfVerify extends HTMLElement {
       if (r.cut) out.push(el('p', 'small muted', 'The end of its output:'))
       out.push(pre)
     }
+    out.push(...this.#files(r))
     return out
+  }
+
+  #browserPart(t: VerifyTarget, v: VerifyView): HTMLElement[] {
+    const b = v.browser
+    const ran = v.runs.some(r => r.kind === 'browser')
+    if (!b.hasCommand && !b.required && !ran) return []
+    const parts: HTMLElement[] = [el('h4', 'small', 'Browser check')]
+    parts.push(el('p', 'small muted', 'A browser check runs the project’s browser command the same way, in its own container of the same image, with $SF_OUT set to a folder whose files the engine keeps: up to 20 .png, .jpg, .jpeg or .gif images of at most 10 MiB, which it re-encodes, and .zip traces of at most 50 MiB, which it never opens, 100 MiB a run, for the latest 3 runs per project. The test’s own exit code is the result. The image must hold the browser and a folder /out owned by user 10006; the run has no network, so the app under test starts inside the run, and its test user comes from the repository’s seed data, never a real login.'))
+    if (b.required) parts.push(el('p', 'small', 'The approved team file requires a passing browser check of the pushed commit.'))
+    if (!b.hasCommand) parts.push(el('p', 'small warn', 'This project has no browser command. Set one under Check and setup commands on the project’s card.'))
+    else parts.push(el('p', 'small', `Browser command: ${b.command ? visibleCommand(b.command) : 'set, but not shown, since it holds a token-shaped string'}`))
+    if (b.current) parts.push(...this.#run(b.current, true))
+    else if (b.queued) parts.push(el('p', 'small', `A browser check of commit ${shortSha(v.head)} that a push needs is queued for a free verification slot.`))
+    else if (v.head && b.hasCommand) parts.push(el('p', 'small muted', `No browser check of commit ${shortSha(v.head)} with the current command and image yet.`))
+    if (b.why) parts.push(el('p', 'small muted', shown(b.why)))
+    const running = v.runs.find(r => r.state === 'running' && r.kind === 'browser')
+    const row = el('div', 'row')
+    const why = t.disabled || (!b.hasCommand ? 'Set a browser command first.' : !v.image ? 'Set an image first.' : !v.head ? 'The branch has no commit to verify.' : running ? 'A browser check of this session is running.' : v.busy ? 'The engine runs at most 2 verification runs at once.' : '')
+    const go = button('Run the browser check', 'small', () => {
+      if (!why && !this.#busy) void whileBusy(go, () => this.#ask({ op: 'start', kind: 'browser' }, 'The browser check started.'))
+    }, 'button', 'verify-browser-start')
+    go.setAttribute('aria-disabled', String(!!why || this.#busy))
+    if (this.#busy) busy(go, true)
+    row.append(go)
+    if (running) {
+      row.append(button('Stop the browser check', 'ghost small', () => {
+        if (!this.#busy) void this.#ask({ op: 'stop', id: running.id }, 'The browser check is stopping.')
+      }, 'button', 'verify-browser-stop'))
+    }
+    if (why) {
+      const said = el('span', 'small muted', why)
+      said.id = 'verify-browser-why'
+      go.setAttribute('aria-describedby', 'verify-browser-why')
+      row.append(said)
+    }
+    parts.push(row)
+    return parts
   }
 
   #paint() {
@@ -221,7 +396,7 @@ class SfVerify extends HTMLElement {
     else if (v.queued) parts.push(el('p', 'small', `A run of commit ${shortSha(v.head)} that a push needs is queued for a free verification slot; the engine starts it when one frees up, in the order pushes queued theirs.`))
     else if (v.head) parts.push(el('p', 'small muted', `No run of commit ${shortSha(v.head)} with the current command and image yet.`))
     if (v.why) parts.push(el('p', 'small muted', shown(v.why)))
-    const running = v.runs.find(r => r.state === 'running')
+    const running = v.runs.find(r => r.state === 'running' && r.kind === 'check')
     const row = el('div', 'row')
     const why = t.disabled || (!v.hasCheck ? 'Set a check command first.' : !v.image ? 'Set an image first.' : !v.head ? 'The branch has no commit to verify.' : running ? 'A run of this session is running.' : v.busy ? 'The engine runs at most 2 verification runs at once.' : '')
     const go = button('Verify this commit', 'small', () => {
@@ -242,7 +417,8 @@ class SfVerify extends HTMLElement {
       row.append(said)
     }
     parts.push(row)
-    const earlier = v.runs.filter(r => r.id !== v.current?.id)
+    parts.push(...this.#browserPart(t, v))
+    const earlier = v.runs.filter(r => r.id !== v.current?.id && r.id !== v.browser.current?.id)
     if (earlier.length) {
       const list = el('ul', 'list')
       for (const r of earlier) {
@@ -254,7 +430,7 @@ class SfVerify extends HTMLElement {
     }
     parts.push(this.#status)
     this.#summary.textContent = this.#summaryText(v)
-    this.#shown = this.#opened ?? (v.required || v.queued || !!v.current)
+    this.#shown = this.#opened ?? (v.required || v.queued || !!v.current || v.browser.required || v.browser.queued || !!v.browser.current)
     this.#details.open = this.#shown
     replaceKeeping(this.#details, [this.#summary, ...parts])
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)

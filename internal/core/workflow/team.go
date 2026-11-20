@@ -31,7 +31,7 @@ type Team struct {
 	Verify      []string
 }
 
-var VerifyKinds = []string{"check"}
+var VerifyKinds = []string{"check", "browser"}
 
 var (
 	typeID      = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -322,7 +322,7 @@ func parseVerify(root *object, team *Team, out *[]string) {
 		}
 	}
 	if !valid {
-		*out = append(*out, "\"verify\" must list the kinds of verification run a push needs a pass of, and the software factory has one: \"check\"")
+		*out = append(*out, "\"verify\" must list the kinds of verification run a push needs a pass of, and the software factory has two: \"check\" and \"browser\"")
 		return
 	}
 	team.Verify = kinds

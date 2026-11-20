@@ -113,7 +113,8 @@ RUN sed -i \
  && rm -rf /var/lib/apt/lists/* \
  && install -d -m 0755 /etc/chromium.d \
  && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/software-factory \
- && chmod 0644 /etc/chromium.d/software-factory
+ && chmod 0644 /etc/chromium.d/software-factory \
+ && install -d -o 10006 -g 10006 -m 0700 /out
 USER engine
 
 FROM browser AS dev-browser

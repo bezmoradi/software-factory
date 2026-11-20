@@ -14,6 +14,7 @@ const (
 	maxCommandProjects = 1000
 	workFrame          = "session-work"
 	commandImage       = "image"
+	commandBrowser     = "browser"
 )
 
 type SessionWorkConfig struct {
@@ -193,6 +194,10 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	if !okCheck || !okSetup {
 		return explained(invalid("command"), "A check or setup command is one line of at most 300 bytes, with no control characters.")
 	}
+	browser, okBrowser := CheckProjectCommand(c.Browser)
+	if !okBrowser {
+		return explained(invalid("browser"), "A browser command is one line of at most 300 bytes, with no control characters.")
+	}
 	image, okImage := CheckVerifyImage(c.Image)
 	if !okImage {
 		return explained(invalid("image"), "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes.")
@@ -204,7 +209,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	w.saveMu.Lock()
 	w.mu.Lock()
 	before := w.projects[id]
-	next := ProjectCommands{Check: check, Setup: setup, Image: image}
+	next := ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser}
 	if next == (ProjectCommands{}) {
 		delete(w.projects, id)
 	} else {
@@ -231,7 +236,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 		}
 	}
 	w.saveMu.Unlock()
-	for kind, pair := range map[string][2]string{CommandCheck: {before.Check, check}, CommandSetup: {before.Setup, setup}, commandImage: {before.Image, image}} {
+	for kind, pair := range map[string][2]string{CommandCheck: {before.Check, check}, CommandSetup: {before.Setup, setup}, commandImage: {before.Image, image}, commandBrowser: {before.Browser, browser}} {
 		if pair[0] == pair[1] {
 			continue
 		}

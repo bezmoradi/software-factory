@@ -121,7 +121,7 @@ func mainStaleWhy(last VerifyRun, main string) string {
 
 func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, by string) (VerifyRun, error) {
 	if kind != VerifyCheck {
-		return VerifyRun{}, explained(invalid("kind"), "The engine runs one kind of verification: check.")
+		return VerifyRun{}, explained(invalid("kind"), "The engine runs verification runs of one kind on main: check.")
 	}
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
 		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")

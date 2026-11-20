@@ -119,6 +119,10 @@ tables:
       - ["fld_push_record_short", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456" }, "fields"]
       - ["fld_push_record_upper", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789ABCDEF0123456789ABCDEF01234567" }, "fields"]
       - ["fld_push_record_no_sid", "/api/push-record", { commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
+      - ["fld_project_commands_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: 1 }, "fields"]
+      - ["fld_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: 1 }, "fields"]
+      - ["fld_verify_attachment_id", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: xyz, name: home.png }, "fields"]
+      - ["fld_verify_attachment_extra", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png, proctorUnknownField: true }, "fields"]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
@@ -174,10 +178,12 @@ tables:
     rows:
       - ["msg_dispatch_mode", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, mode: bypassPermissions }, "mode", "The page starts every session in the agent's asking mode, never auto mode."]
       - ["msg_keep_op", "/api/keep", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads its copy of a session's commits and restores the branch from it only."]
-      - ["msg_verify_op", "/api/verify", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, starts and stops a session's verification runs only."]
-      - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "kind", "The engine runs one kind of verification: check."]
+      - ["msg_verify_op", "/api/verify", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, starts and stops a session's verification runs and reads a browser run's files only."]
+      - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: video }, "kind", "The engine runs two kinds of verification: check and browser."]
       - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
-      - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs one kind of verification: check."]
+      - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
+      - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
+      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "A browser command is one line of at most 300 bytes, with no control characters."]
       - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
 
   - id: FLD-T02R
@@ -223,6 +229,8 @@ tables:
       - ["unk_verify_read", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has verification runs here."]
       - ["unk_verify_start", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: check }, "Only a session this engine started can be verified here."]
       - ["unk_push_record", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has push records here."]
+      - ["unk_verify_start_browser", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "Only a session this engine started can be verified here."]
+      - ["unk_verify_attachment", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png }, "Only a session this engine started has verification runs here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"

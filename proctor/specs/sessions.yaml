@@ -287,7 +287,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { head: "${head}", branch: "sf/${id}", command: "", hasCheck: false, image: "", required: false, busy: false, queued: false, current: null, why: "", runs: [] }
+            "$.body": { head: "${head}", branch: "sf/${id}", command: "", hasCheck: false, image: "", required: false, busy: false, queued: false, current: null, why: "", runs: [], browser: { command: "", hasCommand: false, required: false, queued: false, current: null, why: "" } }
       - id: verify-without-check
         do: http.request
         identity: page
@@ -1486,7 +1486,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", max: 300, maxImage: 300 }
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300 }
       - id: image-read-back
         do: http.request
         identity: page
@@ -1687,6 +1687,80 @@ scenarios:
         with: { name: "sf-proctor-verify-${failing}" }
         expect:
           equal: { "$.found": false }
+      - id: browser-command
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${helper_image}", browser: "chromium --version && echo ${run.id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.browser": "chromium --version && echo ${run.id}"
+            "$.body.check": "echo ${run.id} && exit 3"
+      - id: browser-start
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", kind: browser }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.browser.hasCommand": true
+            "$.body.browser.command": "chromium --version && echo ${run.id}"
+            "$.body.runs[0].kind": browser
+            "$.body.runs[0].state": running
+            "$.body.runs[0].by": page
+            "$.body.current.id": "${failing}"
+          length: { "$.body.runs": 3 }
+        save: { browser_run: "$.body.runs[0].id" }
+      - id: browser-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 90s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: verify, result: ended, session: "${sid}", commit: "${head}", reason: "kind browser, state error, exit 0" }
+      - id: no-browser
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.browser.current.id": "${browser_run}"
+            "$.body.browser.current.kind": browser
+            "$.body.browser.current.state": error
+            "$.body.browser.current.files": []
+            "$.body.browser.current.fileNote": ""
+            "$.body.current.id": "${failing}"
+          matches: { "$.body.browser.current.reason": ".*has no browser at /usr/bin/chromium, .*" }
+      - id: browser-container-gone
+        do: docker.container
+        with: { name: "sf-proctor-verify-${browser_run}" }
+        expect:
+          equal: { "$.found": false }
+      - id: browser-volume-gone
+        do: docker.volume
+        with: { name: "sf-proctor-verify-out-${browser_run}" }
+        expect:
+          equal: { "$.found": false }
       - id: clear-commands
         do: http.request
         identity: page
@@ -1694,11 +1768,11 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "", setup: "", image: "" }
+          body: { op: set, name: demo, check: "", setup: "", image: "", browser: "" }
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
       - id: cleared
         do: http.request
         identity: page
@@ -1879,7 +1953,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
       - id: main-cleared
         do: http.request
         identity: page

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
+	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 var _ session.VerifierHost = (*Client)(nil)
@@ -51,13 +53,16 @@ func timeOf(ms int64) time.Time {
 	return time.UnixMilli(ms)
 }
 
-func (c *Client) StartVerifier(ctx context.Context, run, digest string) (session.VerifierInfo, error) {
+func (c *Client) StartVerifier(ctx context.Context, run, digest string, browser bool) (session.VerifierInfo, error) {
 	if digest == "" {
 		return session.VerifierInfo{}, fmt.Errorf("%w: a verification run needs its image's digest", session.ErrBoxRefused)
 	}
 	p, err := verifierPath(run, digest)
 	if err != nil {
 		return session.VerifierInfo{}, err
+	}
+	if browser {
+		p += "/" + browserSeg
 	}
 	data, err := c.do(ctx, http.MethodPut, p, maxBoxAnswer, startFor+30*time.Second)
 	if err != nil {
@@ -133,4 +138,49 @@ func (c *Client) ListVerifiers(ctx context.Context) ([]session.BoxInfo, error) {
 		out = append(out, info)
 	}
 	return out, nil
+}
+
+type cancelBody struct {
+	io.Reader
+	body   io.Closer
+	cancel context.CancelFunc
+}
+
+func (b cancelBody) Close() error {
+	err := b.body.Close()
+	b.cancel()
+	return err
+}
+
+func (c *Client) VerifierOut(ctx context.Context, run string) (io.ReadCloser, error) {
+	p, err := verifierPath(run, "")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, otherFor+30*time.Second)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+c.addr+p+"/"+outSeg, nil)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("%w: %w", session.ErrBoxUnavailable, err)
+	}
+	req.Header.Set(KeyHeader, c.key)
+	if id := shared.RequestOf(ctx); id != "" {
+		req.Header.Set(shared.RequestHeader, id)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("%w at %s", session.ErrBoxUnavailable, c.addr)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != tarType {
+		defer cancel()
+		defer func() { _ = resp.Body.Close() }()
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBoxAnswer))
+		var e errorJSON
+		if json.Unmarshal(data, &e) != nil || e.Version != WireVersion {
+			return nil, fmt.Errorf("%w with HTTP %d", session.ErrBoxRefused, resp.StatusCode)
+		}
+		return nil, fmt.Errorf("%w (%s): %s", session.ErrBoxRefused, clipMessage(e.Reason), clipMessage(e.Message))
+	}
+	return cancelBody{Reader: io.LimitReader(resp.Body, maxVerifierOut), body: resp.Body, cancel: cancel}, nil
 }

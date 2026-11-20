@@ -1187,6 +1187,8 @@ sf-screenshots .screenshot-list button.link { text-align: start; overflow-wrap: 
 sf-screenshots .screenshot-list button[aria-pressed="true"] { font-weight: 600; }
 sf-screenshots .screenshot-view { margin: .5rem 0 0; }
 sf-screenshots .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
+sf-verify .screenshot-view { margin: .5rem 0 0; }
+sf-verify .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
 form.dispatch .benchmark-picker, form.dispatch .pair-field { display: block; }
 form.dispatch .benchmark-picker .issue-items { margin: .3rem 0; }
 form.dispatch .benchmark-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }

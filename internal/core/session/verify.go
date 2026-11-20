@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"regexp"
 	"slices"
 	"strconv"
@@ -19,6 +20,7 @@ type VerifyKind string
 
 const (
 	VerifyCheck         VerifyKind = "check"
+	VerifyBrowser       VerifyKind = "browser"
 	VerifyOOM                      = "oom"
 	VerifyInterrupted              = "interrupted"
 	VerifyStopped                  = "stopped"
@@ -45,7 +47,14 @@ const (
 
 var verifyImage = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9.-]{0,252}[a-z0-9])?(?::[0-9]{1,5})?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}$`)
 
-var VerifyKinds = []VerifyKind{VerifyCheck}
+var VerifyKinds = []VerifyKind{VerifyCheck, VerifyBrowser}
+
+func verifyCommand(kind VerifyKind, cmds ProjectCommands) string {
+	if kind == VerifyBrowser {
+		return cmds.Browser
+	}
+	return cmds.Check
+}
 
 var (
 	urlUserinfo   = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/\s@]+@`)
@@ -99,9 +108,10 @@ type VerifierState struct {
 }
 
 type VerifierHost interface {
-	StartVerifier(ctx context.Context, run, digest string) (VerifierInfo, error)
+	StartVerifier(ctx context.Context, run, digest string, browser bool) (VerifierInfo, error)
 	VerifierState(ctx context.Context, run string) (VerifierState, error)
 	VerifierLog(ctx context.Context, run string) (string, error)
+	VerifierOut(ctx context.Context, run string) (io.ReadCloser, error)
 	RemoveVerifier(ctx context.Context, run string) error
 	ListVerifiers(ctx context.Context) ([]BoxInfo, error)
 }
@@ -137,6 +147,8 @@ type VerifyRun struct {
 	Limit       time.Duration
 	Started     time.Time
 	Ended       time.Time
+	Attached    []VerifyAttachment
+	AttachNote  string
 }
 
 func (r VerifyRun) Ran() bool {
@@ -155,6 +167,16 @@ type VerifyView struct {
 	Current  *VerifyRun
 	Why      string
 	Runs     []VerifyRun
+	Browser  VerifyKindView
+}
+
+type VerifyKindView struct {
+	Command  string
+	Has      bool
+	Required bool
+	Queued   bool
+	Current  *VerifyRun
+	Why      string
 }
 
 type VerifyPage interface {
@@ -162,11 +184,13 @@ type VerifyPage interface {
 	Start(ctx context.Context, sid string, kind VerifyKind, by string) (VerifyRun, error)
 	Stop(ctx context.Context, sid, id string) error
 	MainVerifyPage
+	Attachment(ctx context.Context, sid, id, name string) (VerifyAttachment, io.ReadCloser, error)
 }
 
 type VerifyConfig struct {
 	Host    VerifierHost
 	Trees   VerifyTrees
+	Files   VerifyFiles
 	Store   VerifyStore
 	Heads   Heads
 	Targets func(sid string) (PushTarget, bool)
@@ -201,7 +225,7 @@ type Verifier struct {
 	noted      map[string]bool
 	starting   map[string]string
 	mains      map[string]bool
-	ready      func(ctx context.Context, sid, head string) bool
+	ready      func(ctx context.Context, sid, head string, kind VerifyKind) bool
 	commitDone func(commit string)
 	done       func(sid, head string)
 	wg         sync.WaitGroup
@@ -348,35 +372,52 @@ func (v *Verifier) View(_ context.Context, sid string) (VerifyView, error) {
 	id, cmds, known := v.project(t.Name)
 	if known {
 		out.Command, out.HasCheck, out.Image = shownCommand(cmds.Check), cmds.Check != "", cmds.Image
+		out.Browser.Command, out.Browser.Has = shownCommand(cmds.Browser), cmds.Browser != ""
 	}
 	if v.cfg.Kinds != nil {
-		out.Required = slices.Contains(v.cfg.Kinds(t.Name), string(VerifyCheck))
+		kinds := v.cfg.Kinds(t.Name)
+		out.Required = slices.Contains(kinds, string(VerifyCheck))
+		out.Browser.Required = slices.Contains(kinds, string(VerifyBrowser))
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out.Busy = len(v.live) >= MaxVerifyRuns
-	out.Queued = out.Head != "" && v.queuedLocked(sid, out.Head)
+	out.Queued = out.Head != "" && v.queuedKindLocked(sid, out.Head, VerifyCheck)
+	out.Browser.Queued = out.Head != "" && v.queuedKindLocked(sid, out.Head, VerifyBrowser)
 	for _, r := range slices.Backward(v.runs) {
 		if r.SID == sid && len(out.Runs) < verifyShown {
 			out.Runs = append(out.Runs, r)
 		}
 	}
 	if out.Head != "" && known {
-		if r, ok := v.currentLocked(id, out.Head, VerifyCheck, cmds); ok {
-			out.Current = &r
-		} else if last, ok := v.latestLocked(id, out.Head, VerifyCheck); ok {
-			out.Why = staleWhy(last, cmds)
-		} else if len(out.Runs) > 0 && out.Runs[0].Commit != out.Head {
-			out.Why = "The last run was of commit " + shortSHA(out.Runs[0].Commit) + ", and the branch is at " + shortSHA(out.Head) + " now, so it doesn't count for this commit."
-		}
+		out.Current, out.Why = v.kindLocked(id, out.Head, VerifyCheck, cmds, sid)
+		out.Browser.Current, out.Browser.Why = v.kindLocked(id, out.Head, VerifyBrowser, cmds, sid)
 	}
 	return out, nil
 }
 
-func staleWhy(r VerifyRun, cmds ProjectCommands) string {
+func (v *Verifier) kindLocked(id ProjectID, head string, kind VerifyKind, cmds ProjectCommands, sid string) (*VerifyRun, string) {
+	if r, ok := v.currentLocked(id, head, kind, cmds); ok {
+		return &r, ""
+	}
+	if last, ok := v.latestLocked(id, head, kind); ok {
+		return nil, staleWhy(last, kind, cmds)
+	}
+	for _, r := range slices.Backward(v.runs) {
+		if r.SID == sid && r.Kind == kind {
+			if r.Commit != head {
+				return nil, "The last run was of commit " + shortSHA(r.Commit) + ", and the branch is at " + shortSHA(head) + " now, so it doesn't count for this commit."
+			}
+			break
+		}
+	}
+	return nil, ""
+}
+
+func staleWhy(r VerifyRun, kind VerifyKind, cmds ProjectCommands) string {
 	switch {
-	case r.CommandHash != commandHash(cmds.Check):
-		return "The last run of this commit ran another check command than the one set now, so it doesn't count."
+	case r.CommandHash != commandHash(verifyCommand(kind, cmds)):
+		return "The last run of this commit ran another " + string(kind) + " command than the one set now, so it doesn't count."
 	case VerifyDigest(r.Image) != VerifyDigest(cmds.Image):
 		return "The last run of this commit ran in another image than the one set now, so it doesn't count."
 	}
@@ -407,7 +448,7 @@ func (v *Verifier) latestLocked(id ProjectID, commit string, kind VerifyKind) (V
 }
 
 func (v *Verifier) currentLocked(id ProjectID, commit string, kind VerifyKind, cmds ProjectCommands) (VerifyRun, bool) {
-	hash, digest := commandHash(cmds.Check), VerifyDigest(cmds.Image)
+	hash, digest := commandHash(verifyCommand(kind, cmds)), VerifyDigest(cmds.Image)
 	for _, r := range slices.Backward(v.runs) {
 		if r.SID != "" && r.Project == id && r.Commit == commit && r.Kind == kind && r.CommandHash == hash && digest != "" && VerifyDigest(r.Image) == digest {
 			return r, true
@@ -423,8 +464,8 @@ func (v *Verifier) Start(ctx context.Context, sid string, kind VerifyKind, by st
 var errVerifyQueued = explained(conflict("queued"), "The run waits for a free verification slot.")
 
 func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by string, front bool, want string) (VerifyRun, error) {
-	if kind != VerifyCheck {
-		return VerifyRun{}, explained(invalid("kind"), "The engine runs one kind of verification: check.")
+	if !slices.Contains(VerifyKinds, kind) {
+		return VerifyRun{}, explained(invalid("kind"), "The engine runs two kinds of verification: check and browser.")
 	}
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
 		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")
@@ -447,8 +488,12 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	switch {
 	case !known:
 		return VerifyRun{}, explained(notFound("project"), "The engine has no record of this session's project.")
-	case cmds.Check == "":
+	case kind == VerifyCheck && cmds.Check == "":
 		return VerifyRun{}, explained(conflict("no-check"), "This project has no check command, so there is nothing to verify. Set one under Check and setup commands on the project's card.")
+	case kind == VerifyBrowser && cmds.Browser == "":
+		return VerifyRun{}, explained(conflict("no-browser-command"), "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card.")
+	case kind == VerifyBrowser && v.cfg.Files == nil:
+		return VerifyRun{}, explained(conflict("no-files"), "This engine has no folder for a browser run's files, so it runs no browser check.")
 	case VerifyDigest(cmds.Image) == "":
 		return VerifyRun{}, explained(conflict("no-image"), "This project names no image for verification runs, so it can't run one. Set an image pinned by digest under Check and setup commands on the project's card.")
 	}
@@ -456,11 +501,12 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	if err != nil {
 		return VerifyRun{}, explained(conflict("random"), "The engine couldn't make an id for the run.")
 	}
-	rec := VerifyRun{ID: run, Project: id, SID: sid, Branch: t.Branch, Commit: head, Kind: kind, CommandHash: commandHash(cmds.Check), Image: cmds.Image,
+	command := verifyCommand(kind, cmds)
+	rec := VerifyRun{ID: run, Project: id, SID: sid, Branch: t.Branch, Commit: head, Kind: kind, CommandHash: commandHash(command), Image: cmds.Image,
 		State: RunRunning, By: by, Started: v.cfg.Now()}
 	live := &verifyLive{stop: make(chan struct{})}
 	v.mu.Lock()
-	if !front && v.starting[sid] == head {
+	if !front && v.starting[sid] == startingKey(head, kind) {
 		v.mu.Unlock()
 		if by == VerifyByEngine {
 			return VerifyRun{}, errVerifyQueued
@@ -506,7 +552,7 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	}
 	v.live[run] = live
 	if by == VerifyByPage {
-		v.queue = slices.DeleteFunc(v.queue, func(x queuedVerify) bool { return x.sid == sid && x.head == head })
+		v.queue = slices.DeleteFunc(v.queue, func(x queuedVerify) bool { return x.sid == sid && x.head == head && x.kind == kind })
 	}
 	v.runs = append(v.runs, rec)
 	if over := len(v.runs) - MaxVerifyRecords; over > 0 {
@@ -518,16 +564,24 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	shared.For(ctx, v.cfg.Logger).Info("verify", "event", "started", "run", run, "kind", string(kind), "by", by)
 	v.notify(sid)
 	req := shared.RequestOf(ctx)
-	v.wg.Go(func() { v.execute(shared.WithRequest(v.cfg.Base, req), rec, t, cmds.Check, live) })
+	v.wg.Go(func() { v.execute(shared.WithRequest(v.cfg.Base, req), rec, t, command, live) })
 	return rec, nil
 }
 
+func startingKey(head string, kind VerifyKind) string {
+	if head == "" {
+		return ""
+	}
+	return head + " " + string(kind)
+}
+
 func (v *Verifier) queueLocked(q queuedVerify, front bool) {
-	if i := slices.IndexFunc(v.queue, func(x queuedVerify) bool { return x.sid == q.sid }); i >= 0 && !front {
+	same := func(x queuedVerify) bool { return x.sid == q.sid && x.kind == q.kind }
+	if i := slices.IndexFunc(v.queue, same); i >= 0 && !front {
 		v.queue[i] = q
 		return
 	}
-	v.queue = slices.DeleteFunc(v.queue, func(x queuedVerify) bool { return x.sid == q.sid })
+	v.queue = slices.DeleteFunc(v.queue, same)
 	if front {
 		v.queue = append([]queuedVerify{q}, v.queue...)
 		return
@@ -536,10 +590,14 @@ func (v *Verifier) queueLocked(q queuedVerify, front bool) {
 }
 
 func (v *Verifier) queuedLocked(sid, head string) bool {
-	if v.starting[sid] == head && head != "" {
+	return slices.ContainsFunc(VerifyKinds, func(k VerifyKind) bool { return v.queuedKindLocked(sid, head, k) })
+}
+
+func (v *Verifier) queuedKindLocked(sid, head string, kind VerifyKind) bool {
+	if head != "" && v.starting[sid] == startingKey(head, kind) {
 		return true
 	}
-	return slices.ContainsFunc(v.queue, func(x queuedVerify) bool { return x.sid == sid && x.head == head })
+	return slices.ContainsFunc(v.queue, func(x queuedVerify) bool { return x.sid == sid && x.head == head && x.kind == kind })
 }
 
 func (v *Verifier) liveSessionLocked(sid string) bool {
@@ -551,7 +609,7 @@ func (v *Verifier) liveSessionLocked(sid string) bool {
 	return false
 }
 
-func (v *Verifier) UseReady(fn func(ctx context.Context, sid, head string) bool) {
+func (v *Verifier) UseReady(fn func(ctx context.Context, sid, head string, kind VerifyKind) bool) {
 	v.mu.Lock()
 	v.ready = fn
 	v.mu.Unlock()
@@ -573,12 +631,12 @@ func (v *Verifier) serveQueue(ctx context.Context) {
 		if v.starting == nil {
 			v.starting = map[string]string{}
 		}
-		v.starting[next.sid] = next.head
+		v.starting[next.sid] = startingKey(next.head, next.kind)
 		fn, ready := v.done, v.ready
 		v.mu.Unlock()
 		unmark := func() {
 			v.mu.Lock()
-			if v.starting[next.sid] == next.head {
+			if v.starting[next.sid] == startingKey(next.head, next.kind) {
 				delete(v.starting, next.sid)
 			}
 			v.mu.Unlock()
@@ -589,7 +647,7 @@ func (v *Verifier) serveQueue(ctx context.Context) {
 				fn(next.sid, next.head)
 			}
 		}
-		if v.ranAlready(next) || ready != nil && !ready(ctx, next.sid, next.head) {
+		if v.ranAlready(next) || ready != nil && !ready(ctx, next.sid, next.head, next.kind) {
 			shared.For(ctx, v.cfg.Logger).Info("verify", "event", "queued-dropped", "why", "the push no longer needs it")
 			unmark()
 			settle()
@@ -671,6 +729,8 @@ type verifyEnd struct {
 	tail     string
 	cut      bool
 	withheld bool
+	attached []VerifyAttachment
+	note     string
 }
 
 func (v *Verifier) execute(ctx context.Context, rec VerifyRun, t PushTarget, command string, live *verifyLive) {
@@ -695,7 +755,7 @@ func (v *Verifier) attempt(ctx context.Context, rec VerifyRun, t PushTarget, com
 		return end
 	}
 	sctx, cancel := context.WithTimeout(ctx, verifyStartFor)
-	info, err := v.cfg.Host.StartVerifier(sctx, rec.ID, VerifyDigest(rec.Image))
+	info, err := v.cfg.Host.StartVerifier(sctx, rec.ID, VerifyDigest(rec.Image), rec.Kind == VerifyBrowser)
 	cancel()
 	if err != nil {
 		return verifyEnd{state: RunError, reason: "The box helper didn't start the run's container: " + cleanReason(errText(err))}
@@ -752,6 +812,9 @@ func (v *Verifier) attempt(ctx context.Context, rec VerifyRun, t PushTarget, com
 	end.imageID, end.limit = info.Image, info.Limit
 	if st.State != "exited" {
 		return end
+	}
+	if rec.Kind == VerifyBrowser {
+		end.attached, end.note = v.collect(ctx, rec.ID)
 	}
 	lctx, cancel := context.WithTimeout(ctx, verifyCallFor)
 	text, err := v.cfg.Host.VerifierLog(lctx, rec.ID)
@@ -862,6 +925,7 @@ func (v *Verifier) finish(ctx context.Context, run string, end verifyEnd) {
 	}
 	r := &v.runs[i]
 	r.State, r.Code, r.Reason, r.Tail, r.Cut, r.Withheld, r.Ended = end.state, end.code, end.reason, end.tail, end.cut, end.withheld, v.cfg.Now()
+	r.Attached, r.AttachNote = end.attached, end.note
 	if end.imageID != "" {
 		r.ImageID = end.imageID
 	}
@@ -871,6 +935,7 @@ func (v *Verifier) finish(ctx context.Context, run string, end verifyEnd) {
 	done := *r
 	fn := v.done
 	v.mu.Unlock()
+	v.retain()
 	v.save()
 	v.audit(ctx, done, "ended")
 	shared.For(ctx, v.cfg.Logger).Info("verify", "event", "ended", "run", run, "state", done.State, "code", done.Code)
@@ -921,9 +986,11 @@ func (v *Verifier) Running(sid, head string) bool {
 		}
 	}
 	if known {
-		if cur, found := v.currentLocked(id, head, VerifyCheck, cmds); found {
-			if _, live := v.live[cur.ID]; live {
-				return true
+		for _, k := range VerifyKinds {
+			if cur, found := v.currentLocked(id, head, k, cmds); found {
+				if _, live := v.live[cur.ID]; live {
+					return true
+				}
 			}
 		}
 	}
@@ -938,26 +1005,43 @@ func (v *Verifier) Forget(sid string) {
 			l.cancel()
 		}
 	}
+	v.forgetLocked(func(r VerifyRun) bool { return r.SID == sid })
+}
+
+func (v *Verifier) ForgetProject(id ProjectID) {
+	v.mu.Lock()
+	v.forgetLocked(func(r VerifyRun) bool { return r.Project == id })
+}
+
+func (v *Verifier) forgetLocked(match func(VerifyRun) bool) {
+	var gone []string
 	before := len(v.runs)
 	v.runs = slices.DeleteFunc(v.runs, func(r VerifyRun) bool {
 		_, live := v.live[r.ID]
-		return r.SID == sid && !live
+		if match(r) && !live {
+			if len(r.Attached) > 0 {
+				gone = append(gone, r.ID)
+			}
+			return true
+		}
+		return false
 	})
 	changed := len(v.runs) != before
 	v.mu.Unlock()
 	if changed {
 		v.save()
 	}
+	v.dropFiles(gone)
 }
 
 func (v *Verifier) Items(ctx context.Context, sid string, t PushTarget, head string, kinds []string, ask VerifyAsk) []string {
 	var out []string
 	for _, k := range kinds {
-		if k != string(VerifyCheck) {
+		if !slices.Contains(VerifyKinds, VerifyKind(k)) {
 			out = append(out, "a verification run of a kind this engine doesn't run ("+clip(oneWord(k), 20)+"), which the approved team file requires")
 			continue
 		}
-		if item := v.item(ctx, sid, t, head, VerifyCheck, ask); item != "" {
+		if item := v.item(ctx, sid, t, head, VerifyKind(k), ask); item != "" {
 			out = append(out, item)
 		}
 	}
@@ -971,8 +1055,10 @@ func (v *Verifier) item(ctx context.Context, sid string, t PushTarget, head stri
 	switch {
 	case !known:
 		return of + ": the engine has no record of this project"
-	case cmds.Check == "":
+	case kind == VerifyCheck && cmds.Check == "":
 		return "a check command for this project, which the approved team file requires a verification run of: set it under Check and setup commands"
+	case kind == VerifyBrowser && cmds.Browser == "":
+		return "a browser command for this project, which the approved team file requires a verification run of: set it under Check and setup commands"
 	case VerifyDigest(cmds.Image) == "":
 		return "an image for this project's verification runs, which the approved team file requires: set one pinned by digest under Check and setup commands"
 	}
@@ -980,7 +1066,7 @@ func (v *Verifier) item(ctx context.Context, sid string, t PushTarget, head stri
 	cur, found := v.currentLocked(id, head, kind, cmds)
 	_, ranAny := v.latestLocked(id, head, kind)
 	_, running := v.live[cur.ID]
-	queued := v.queuedLocked(sid, head)
+	queued := v.queuedKindLocked(sid, head, kind)
 	v.mu.Unlock()
 	switch {
 	case found && cur.State == RunPassed:
@@ -1058,7 +1144,7 @@ func (v *Verifier) noteNotRestarted(ctx context.Context, r VerifyRun) {
 }
 
 func verifyItem(s string) bool {
-	for _, p := range []string{"a passing verification run (", "the verification run (", "a verification run of a kind", "a check command for this project, which the approved team file requires", "an image for this project's verification runs"} {
+	for _, p := range []string{"a passing verification run (", "the verification run (", "a verification run of a kind", "a check command for this project, which the approved team file requires", "a browser command for this project, which the approved team file requires", "an image for this project's verification runs"} {
 		if strings.HasPrefix(s, p) {
 			return true
 		}
@@ -1111,6 +1197,7 @@ func (v *Verifier) Sweep(ctx context.Context) error {
 			v.cfg.Logger.Warn("verify", "event", "files-not-pruned")
 		}
 	}
+	v.pruneFiles()
 	return failed
 }
 

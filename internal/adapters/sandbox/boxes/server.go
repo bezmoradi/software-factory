@@ -37,7 +37,11 @@ const (
 	routeVerifier  = "verifier"
 	routeVerify    = "verify"
 	routeVerifyLog = "verifier-log"
+	routeVerifyOut = "verifier-out"
+	routeBrowser   = "verify-browser"
 	logSeg         = "log"
+	outSeg         = "out"
+	browserSeg     = "browser"
 	actionStartSeg = "start"
 	actionStopSeg  = "stop"
 )
@@ -146,21 +150,25 @@ func verifierRoute(rest []string) (routed, bool) {
 		return routed{name: routeVerifier, id: rest[0]}, true
 	case len(rest) == 2 && rest[1] == logSeg:
 		return routed{name: routeVerifyLog, id: rest[0]}, true
+	case len(rest) == 2 && rest[1] == outSeg:
+		return routed{name: routeVerifyOut, id: rest[0]}, true
 	case len(rest) == 2:
 		return routed{name: routeVerify, id: rest[0], snapshot: rest[1]}, true
+	case len(rest) == 3 && rest[2] == browserSeg:
+		return routed{name: routeBrowser, id: rest[0], snapshot: rest[1]}, true
 	}
 	return routed{}, false
 }
 
 func allowed(r string) []string {
 	switch r {
-	case routeHealth, routeList, routeReviewers, routeVerifiers, routeVerifyLog:
+	case routeHealth, routeList, routeReviewers, routeVerifiers, routeVerifyLog, routeVerifyOut:
 		return []string{http.MethodGet}
 	case routeBox, routeReviewer:
 		return []string{http.MethodPut, http.MethodDelete}
 	case routeVerifier:
 		return []string{http.MethodGet, http.MethodDelete}
-	case routeReview, routeVerify:
+	case routeReview, routeVerify, routeBrowser:
 		return []string{http.MethodPut}
 	}
 	return []string{http.MethodPost}
@@ -218,7 +226,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case routeReviewers, routeReviewer, routeReview:
 		s.reviewers(base, w, r, rt)
 		return
-	case routeVerifiers, routeVerifier, routeVerify, routeVerifyLog:
+	case routeVerifiers, routeVerifier, routeVerify, routeVerifyLog, routeVerifyOut, routeBrowser:
 		s.verifiers(base, w, r, rt)
 		return
 	}
