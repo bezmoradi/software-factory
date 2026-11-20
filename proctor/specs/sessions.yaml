@@ -189,6 +189,7 @@ scenarios:
             "$.body.restorable": false
             "$.body.heads": []
             "$.body.refusal": "Nothing is copied yet: the engine copies the branch's commits that main lacks when a turn ends."
+        no_state_check: "op read changes nothing; /api/keep can't be declared a read since op restore rewrites a branch, and no read shows the kept heads"
       - id: nothing-to-lock
         do: http.request
         identity: page
