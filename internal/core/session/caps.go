@@ -16,14 +16,17 @@ const (
 	CapMoney         = "money"
 	CapTime          = "time"
 	CapTurns         = "turns"
+	CapDisk          = "disk"
 	AuditCapReached  = "cap-reached"
 	AuditCapAnswer   = "cap-answer"
 	AuditUsageAnswer = "usage-answer"
 	CapRaised        = "raised"
 	CapStopped       = "stopped"
+	CapFreed         = "freed"
 	MaxCapUSD        = 100000.0
 	MaxCapMinutes    = 30 * 24 * 60
 	MaxCapTurns      = 10000
+	MaxCapDiskGiB    = 4096
 	MaxCapSessions   = 1000
 	MaxCapProjects   = 1000
 	maxTurnCredits   = 20
@@ -39,27 +42,33 @@ type Caps struct {
 	MoneyUSD float64
 	Minutes  int
 	Turns    int
+	DiskGiB  int
 }
 
-func (c Caps) Any() bool { return c.MoneyUSD > 0 || c.Minutes > 0 || c.Turns > 0 }
+func (c Caps) Any() bool { return c.MoneyUSD > 0 || c.Minutes > 0 || c.Turns > 0 || c.DiskGiB > 0 }
 
 func CheckCaps(c Caps) (Caps, bool) {
 	if math.IsNaN(c.MoneyUSD) || math.IsInf(c.MoneyUSD, 0) || c.MoneyUSD < 0 || c.MoneyUSD > MaxCapUSD {
 		return Caps{}, false
 	}
-	if c.Minutes < 0 || c.Minutes > MaxCapMinutes || c.Turns < 0 || c.Turns > MaxCapTurns {
+	if c.Minutes < 0 || c.Minutes > MaxCapMinutes || c.Turns < 0 || c.Turns > MaxCapTurns || c.DiskGiB < 0 || c.DiskGiB > MaxCapDiskGiB {
 		return Caps{}, false
 	}
 	c.MoneyUSD = math.Round(c.MoneyUSD*100) / 100
 	return c, true
 }
 
-func ValidCapKind(k string) bool { return k == CapMoney || k == CapTime || k == CapTurns }
+func ValidCapKind(k string) bool { return slices.Contains(capKinds, k) }
+
+var capKinds = []string{CapMoney, CapTime, CapTurns, CapDisk}
 
 type CapsUsed struct {
-	CostUSD float64
-	Time    time.Duration
-	Turns   int
+	CostUSD   float64
+	Time      time.Duration
+	Turns     int
+	DiskBytes int64
+	DiskMore  bool
+	DiskAt    time.Time
 }
 
 type CapsSession struct {
@@ -92,6 +101,7 @@ type LimitsConfig struct {
 	Wake      func(ctx context.Context, sid string) error
 	Reviewer  func() (SignIn, bool)
 	Continued func(ctx context.Context, sid string, findings bool)
+	Disk      func(ctx context.Context, box string) (TreeSize, error)
 	Logger    shared.Logger
 }
 
@@ -104,6 +114,8 @@ type capSession struct {
 	credits   int
 	costEpoch string
 	costLast  float64
+	diskTried time.Time
+	diskSoon  bool
 }
 
 type limitsSession struct {
@@ -138,6 +150,8 @@ type Limits struct {
 	lastSave       time.Time
 	unsaved        bool
 	shown          Fields
+	diskRound      bool
+	diskTurn       chan struct{}
 }
 
 func newLimits(r *Registry) *Limits {
@@ -145,7 +159,7 @@ func newLimits(r *Registry) *Limits {
 		reg: r, now: r.now, cfg: LimitsConfig{Logger: quiet{}},
 		projects: map[string]Caps{}, sessions: map[string]*capSession{}, known: map[string]limitsSession{},
 		meter: map[meterKey]*meterSide{}, acks: map[usageAck]time.Time{}, loops: map[string]*loopTrack{},
-		tokens: map[string]time.Time{}, wakes: map[string]time.Time{},
+		tokens: map[string]time.Time{}, wakes: map[string]time.Time{}, diskTurn: make(chan struct{}, 1),
 	}
 }
 
@@ -221,6 +235,7 @@ func cleanUsed(u CapsUsed) CapsUsed {
 	u.CostUSD = min(u.CostUSD, 1e7)
 	u.Time = max(u.Time, 0)
 	u.Turns = max(u.Turns, 0)
+	u.DiskBytes, u.DiskMore, u.DiskAt = 0, false, time.Time{}
 	return u
 }
 
@@ -319,14 +334,22 @@ func money(v float64) string {
 	return "$" + strconv.FormatFloat(v, 'f', 2, 64)
 }
 
+func gib(n int64) string {
+	return strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64) + " GiB"
+}
+
 func capWords(kind string, c Caps) string {
 	switch kind {
 	case CapMoney:
 		return "spending cap of " + money(c.MoneyUSD)
 	case CapTime:
 		return "time cap of " + formatMinutes(time.Duration(c.Minutes)*time.Minute)
+	case CapTurns:
+		return "turn cap of " + formatTurns(c.Turns)
+	case CapDisk:
+		return "disk cap of " + strconv.Itoa(c.DiskGiB) + " GiB"
 	}
-	return "turn cap of " + formatTurns(c.Turns)
+	return "cap"
 }
 
 func capValue(kind string, c Caps) float64 {
@@ -335,8 +358,12 @@ func capValue(kind string, c Caps) float64 {
 		return c.MoneyUSD
 	case CapTime:
 		return float64(c.Minutes)
+	case CapTurns:
+		return float64(c.Turns)
+	case CapDisk:
+		return float64(c.DiskGiB)
 	}
-	return float64(c.Turns)
+	return 0
 }
 
 func usedValue(kind string, u CapsUsed) float64 {
@@ -345,8 +372,12 @@ func usedValue(kind string, u CapsUsed) float64 {
 		return u.CostUSD
 	case CapTime:
 		return u.Time.Minutes()
+	case CapTurns:
+		return float64(u.Turns)
+	case CapDisk:
+		return float64(u.DiskBytes) / (1 << 30)
 	}
-	return float64(u.Turns)
+	return 0
 }
 
 func overCap(kind string, c Caps, u CapsUsed) bool {
@@ -355,6 +386,10 @@ func overCap(kind string, c Caps, u CapsUsed) bool {
 		return c.MoneyUSD > 0 && u.CostUSD >= c.MoneyUSD
 	case CapTime:
 		return c.Minutes > 0 && u.Time >= time.Duration(c.Minutes)*time.Minute
+	case CapTurns:
+		return c.Turns > 0 && u.Turns > c.Turns
+	case CapDisk:
+		return c.DiskGiB > 0 && u.DiskBytes >= int64(c.DiskGiB)<<30
 	}
-	return c.Turns > 0 && u.Turns > c.Turns
+	return false
 }

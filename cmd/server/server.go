@@ -567,10 +567,11 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		reg.DropStrayNotes()
 	}
 	parts.useHalt(reg, cfg, logger)
-	parts.useLimits(reg, cfg, logger)
+	ws := newWorkspace(parts, cfg, logger)
+	parts.useLimits(reg, cfg, ws, logger)
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 	useAgentReports(sends, srv, parts, cfg, logger)
-	useViews(srv, parts, cfg, reg, logger)
+	useViews(srv, parts, cfg, reg, ws, logger)
 	useSavedPrompts(srv, parts, cfg, logger)
 	usePulls(sends, srv, reg, parts, cfg, logger)
 	useSessionWork(sends, srv, reg, parts, cfg, logger)

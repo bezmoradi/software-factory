@@ -221,7 +221,8 @@ class SfRules extends HTMLElement {
     for (const i of mine.slice(0, 10)) {
       const li = el('li', 'small')
       const at = Number(i.time) || 0
-      li.append(el('strong', '', KIND[text(i.kind)] ?? visible(text(i.kind))), ' ', el('span', 'muted', at ? new Date(at).toLocaleString() : ''), text(i.reason) ? el('span', '', ` · “${visible(text(i.reason))}”`) : '')
+      const freed = text(i.kind) === 'cap-answer' && text(i.verdict) === 'freed'
+      li.append(el('strong', '', freed ? 'Disk cap cleared by the engine’s measurement' : KIND[text(i.kind)] ?? visible(text(i.kind))), ' ', el('span', 'muted', at ? new Date(at).toLocaleString() : ''), text(i.reason) ? el('span', '', ` · “${visible(text(i.reason))}”`) : '')
       ul.append(li)
     }
     if (mine.length > 10) ul.append(el('li', 'small muted', `And ${mine.length - 10} more in the register.`))

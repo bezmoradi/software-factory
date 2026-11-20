@@ -26,6 +26,7 @@ type capsJSON struct {
 	MoneyUSD float64 `json:"money"`
 	Minutes  int     `json:"minutes"`
 	Turns    int     `json:"turns"`
+	DiskGiB  int     `json:"disk,omitempty"`
 	Owner    string  `json:"owner,omitempty"`
 }
 
@@ -67,7 +68,7 @@ func (s Caps) lock() func() {
 }
 
 func capsOf(c capsJSON) session.Caps {
-	return session.Caps{MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns}
+	return session.Caps{MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns, DiskGiB: c.DiskGiB}
 }
 
 func (s Caps) Load() (session.CapsState, error) {
@@ -114,12 +115,12 @@ func (s Caps) Save(st session.CapsState) error {
 	f := capsFileJSON{Version: 1, Projects: map[string]capsJSON{}, Sessions: []capsSessionJSON{}, Tokens: map[string]time.Time{}}
 	for name, c := range st.Projects {
 		if len(f.Projects) < session.MaxCapProjects {
-			f.Projects[name] = capsJSON{Owner: owner, MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns}
+			f.Projects[name] = capsJSON{Owner: owner, MoneyUSD: c.MoneyUSD, Minutes: c.Minutes, Turns: c.Turns, DiskGiB: c.DiskGiB}
 		}
 	}
 	for _, r := range st.Removed {
 		if removedID(r.ID) {
-			f.Removed = append(f.Removed, removedCapsJSON{Project: r.ID.Name, URL: r.ID.URL, Owner: owner, MoneyUSD: r.Data.MoneyUSD, Minutes: r.Data.Minutes, Turns: r.Data.Turns})
+			f.Removed = append(f.Removed, removedCapsJSON{Project: r.ID.Name, URL: r.ID.URL, Owner: owner, MoneyUSD: r.Data.MoneyUSD, Minutes: r.Data.Minutes, Turns: r.Data.Turns, DiskGiB: r.Data.DiskGiB})
 		}
 	}
 	for _, x := range st.Sessions {
@@ -132,7 +133,7 @@ func (s Caps) Save(st session.CapsState) error {
 			cs.ReachedAt = time.Time{}
 		}
 		if x.Own != nil {
-			cs.Own = &capsJSON{Owner: owner, MoneyUSD: x.Own.MoneyUSD, Minutes: x.Own.Minutes, Turns: x.Own.Turns}
+			cs.Own = &capsJSON{Owner: owner, MoneyUSD: x.Own.MoneyUSD, Minutes: x.Own.Minutes, Turns: x.Own.Turns, DiskGiB: x.Own.DiskGiB}
 		}
 		f.Sessions = append(f.Sessions, cs)
 	}

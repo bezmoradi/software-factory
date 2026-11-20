@@ -652,7 +652,7 @@ export interface Dispatch extends Consent {
   model: string
   mode: string
   type?: string
-  caps?: { money: number; minutes: number; turns: number }
+  caps?: { money: number; minutes: number; turns: number; disk: number }
   from?: StartFrom
   issue?: number
   issueHash?: string
@@ -672,7 +672,7 @@ export interface PairDispatch {
   agents: PairAgent[]
   message?: string
   benchmark?: { number: number; hash: string; base: string }
-  caps?: { money: number; minutes: number; turns: number }
+  caps?: { money: number; minutes: number; turns: number; disk: number }
 }
 
 export interface HelloEvent {

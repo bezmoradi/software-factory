@@ -309,7 +309,11 @@ func (l *Limits) held(sid, what string) string {
 		return capsUnreadHeld
 	}
 	if s := l.sessions[sid]; s != nil && s.reached != "" {
-		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until the person raises the cap on the page; the person can still press Review"
+		until := "the person raises the cap on the page"
+		if s.reached == CapDisk {
+			until = "the engine measures the session's folder under the cap again or the person raises the cap on the page"
+		}
+		return "this session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine starts no automatic review and no automatic Send findings for it until " + until + "; the person can still press Review"
 	}
 	places := []meterKey{{side: SideReviewers}}
 	if side, box := meterOf(l.known[sid]); side != "" {

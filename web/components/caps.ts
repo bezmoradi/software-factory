@@ -3,45 +3,111 @@ import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine,
 import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
-const KINDS: { kind: 'money' | 'time' | 'turns'; key: keyof CapsValues; label: string; unit: string; step: string; max: number }[] = [
+type CapKind = 'money' | 'time' | 'turns' | 'disk'
+
+const KINDS: { kind: CapKind; key: keyof CapsValues; label: string; unit: string; step: string; max: number }[] = [
   { kind: 'money', key: 'money', label: 'Spending cap (USD)', unit: '$', step: '0.01', max: 100000 },
   { kind: 'time', key: 'minutes', label: 'Time cap (minutes)', unit: 'min', step: '1', max: 43200 },
   { kind: 'turns', key: 'turns', label: 'Turn cap', unit: 'turns', step: '1', max: 10000 },
+  { kind: 'disk', key: 'disk', label: 'Disk cap (GiB)', unit: 'GiB', step: '1', max: 4096 },
 ]
+
+const CAPS_INVALID = 'Each cap is a number from 0 up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB; minutes, turns and GiB are whole numbers.'
+
+const NO_CAPS: CapsValues = { money: 0, minutes: 0, turns: 0, disk: 0 }
+
+function kindOf(kind: string): CapKind | null {
+  return KINDS.find(k => k.kind === kind)?.kind ?? null
+}
 
 let fieldSerial = 0
 
 const LIMIT_NEXT: Record<string, string[]> = { wake: ['wake-cancel'], 'wake-cancel': ['wake'] }
 
-function amount(kind: string, v: number): string {
-  if (kind === 'money') return `$${v.toFixed(2)}`
-  if (kind === 'time') return `${Math.floor(v * 10) / 10} min`
-  return `${v} turn${v === 1 ? '' : 's'}`
-}
-
-function usedAmount(kind: string, v: number): string {
-  if (kind !== 'time') return amount(kind, v)
-  if (v < 1) return 'less than a minute'
-  let min = Math.floor(v)
-  let sec = Math.round((v - min) * 60)
-  if (sec >= 60) {
-    min += 1
-    sec = 0
+function amount(kind: CapKind, v: number): string {
+  switch (kind) {
+    case 'money':
+      return `$${v.toFixed(2)}`
+    case 'time':
+      return `${Math.floor(v * 10) / 10} min`
+    case 'turns':
+      return `${v} turn${v === 1 ? '' : 's'}`
+    case 'disk':
+      return `${v} GiB`
   }
-  return `${min} min${sec ? ` ${sec} s` : ''}`
 }
 
-function usedOf(kind: string, s: SessionLimits): number {
+function usedAmount(kind: CapKind, v: number): string {
+  switch (kind) {
+    case 'money':
+    case 'turns':
+      return amount(kind, v)
+    case 'disk':
+      return `${Math.floor(v * 10) / 10} GiB`
+    case 'time': {
+      if (v < 1) return 'less than a minute'
+      let min = Math.floor(v)
+      let sec = Math.round((v - min) * 60)
+      if (sec >= 60) {
+        min += 1
+        sec = 0
+      }
+      return `${min} min${sec ? ` ${sec} s` : ''}`
+    }
+  }
+}
+
+function usedOf(kind: CapKind, s: SessionLimits): number {
   if (!s.used) return 0
-  return kind === 'money' ? s.used.costUsd : kind === 'time' ? s.used.minutes : s.used.turns
+  switch (kind) {
+    case 'money':
+      return s.used.costUsd
+    case 'time':
+      return s.used.minutes
+    case 'turns':
+      return s.used.turns
+    case 'disk':
+      return s.used.diskBytes / 2 ** 30
+  }
 }
 
-function capOf(kind: string, c: CapsValues): number {
-  return kind === 'money' ? c.money : kind === 'time' ? c.minutes : c.turns
+function capOf(kind: CapKind, c: CapsValues): number {
+  switch (kind) {
+    case 'money':
+      return c.money
+    case 'time':
+      return c.minutes
+    case 'turns':
+      return c.turns
+    case 'disk':
+      return c.disk
+  }
 }
 
-function capName(kind: string): string {
-  return kind === 'money' ? 'spending cap' : kind === 'time' ? 'time cap' : 'turn cap'
+function raiseMin(kind: CapKind, cap: number, used: number): number {
+  switch (kind) {
+    case 'money':
+      return Math.max(cap, used)
+    case 'time':
+      return Math.max(cap + 1, Math.ceil(used) + 1)
+    case 'turns':
+      return Math.max(cap + 1, used)
+    case 'disk':
+      return Math.max(cap + 1, Math.floor(used) + 1)
+  }
+}
+
+function capName(kind: CapKind): string {
+  switch (kind) {
+    case 'money':
+      return 'spending cap'
+    case 'time':
+      return 'time cap'
+    case 'turns':
+      return 'turn cap'
+    case 'disk':
+      return 'disk cap'
+  }
 }
 
 function savedCaps(project: string): CapsValues | null {
@@ -50,7 +116,7 @@ function savedCaps(project: string): CapsValues | null {
 
 function fillKey(project: string): string {
   const c = savedCaps(project)
-  return JSON.stringify([project, c ? [c.money, c.minutes, c.turns] : null])
+  return JSON.stringify([project, c ? [c.money, c.minutes, c.turns, c.disk] : null])
 }
 
 class CapsInputs {
@@ -101,7 +167,7 @@ class CapsInputs {
   }
 
   value(): CapsValues | null {
-    const out: CapsValues = { money: 0, minutes: 0, turns: 0 }
+    const out: CapsValues = { ...NO_CAPS }
     for (const k of KINDS) {
       const raw = this.inputs.get(k.key)!.value.trim()
       if (!raw) continue
@@ -114,7 +180,7 @@ class CapsInputs {
 }
 
 export function capsSet(c: CapsValues | null): boolean {
-  return !!c && (c.money > 0 || c.minutes > 0 || c.turns > 0)
+  return !!c && (c.money > 0 || c.minutes > 0 || c.turns > 0 || c.disk > 0)
 }
 
 export function saveSessionCaps(sid: string, caps: CapsValues): Promise<string> {
@@ -140,8 +206,8 @@ class SfCapsFields extends HTMLElement {
   #invalid(on: boolean) {
     this.#note.className = on ? 'small warn' : 'small muted'
     this.#note.textContent = on
-      ? 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.'
-      : 'Caps for this session: money from the agent’s own reported cost, time by the engine’s clock while it runs, and turns. At a cap the engine interrupts the turn and asks you. Empty is off; the project’s caps fill these in.'
+      ? CAPS_INVALID
+      : 'Caps for this session: money from the agent’s own reported cost, time by the engine’s clock while it runs, turns, and disk, the size of the session’s folder, which the engine measures every 2 minutes. At a cap the engine interrupts the turn and asks you. Empty is off; the project’s caps fill these in.'
   }
 
   checked(): CapsValues | null | 'invalid' {
@@ -162,8 +228,8 @@ class SfCapsFields extends HTMLElement {
   get value(): CapsValues | null | 'invalid' {
     const v = this.#inputs.value()
     if (v === null) return 'invalid'
-    const p = limitsNow().projects.get(this.#project) ?? { money: 0, minutes: 0, turns: 0 }
-    return v.money === p.money && v.minutes === p.minutes && v.turns === p.turns ? null : v
+    const p = limitsNow().projects.get(this.#project) ?? NO_CAPS
+    return v.money === p.money && v.minutes === p.minutes && v.turns === p.turns && v.disk === p.disk ? null : v
   }
 }
 
@@ -179,7 +245,7 @@ class SfProjectCaps extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs.')
+      const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs; disk is the size of the session’s folder, measured every 2 minutes, which an agent can pass between measurements.')
       this.#inputs.box.append(this.#save)
       this.replaceChildren(el('h3', 'label', 'Caps'), note, this.#inputs.box, this.#said)
     }
@@ -204,7 +270,7 @@ class SfProjectCaps extends HTMLElement {
   async #store() {
     const v = this.#inputs.value()
     if (!v) {
-      say(this.#said, 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.', 'warn')
+      say(this.#said, CAPS_INVALID, 'warn')
       return
     }
     this.#saving = true
@@ -314,22 +380,39 @@ class SfSessionLimits extends HTMLElement {
 
   #reached(s: SessionLimits): HTMLElement {
     const box = el('div', 'notice alert caps-reached')
-    const cap = s.caps ? capOf(s.reached, s.caps) : 0
-    box.append(el('p', '', `This session reached its ${capName(s.reached)} of ${amount(s.reached, cap)}${s.reachedAt ? ` at ${when(s.reachedAt)}` : ''}: ${usedAmount(s.reached, usedOf(s.reached, s))} used. The engine interrupted its turn, holds its automatic reviews and Send findings, and passes on no message until you answer.`))
-    const k = KINDS.find(x => x.kind === s.reached)!
+    const stop = button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid }, 'stop'), 'button', 'stop')
+    const kind = kindOf(s.reached)
+    const k = KINDS.find(x => x.kind === kind)
+    if (!kind || !k) {
+      box.append(el('p', '', 'This session reached a cap. The engine interrupted its turn, holds its automatic reviews and Send findings, and passes on no message until you answer.'), stop)
+      return box
+    }
+    const cap = s.caps ? capOf(kind, s.caps) : 0
+    const used = usedOf(kind, s)
+    const at = s.reachedAt ? ` at ${when(s.reachedAt)}` : ''
+    if (kind === 'disk') {
+      const least = s.used?.diskMore ? 'at least ' : ''
+      const measured = s.used?.diskAt ? `the engine measured ${least}${usedAmount(kind, used)} in the session’s folder at ${when(s.used.diskAt)}` : 'the engine hasn’t measured the session’s folder since it started'
+      box.append(el('p', '', `This session reached its disk cap of ${amount(kind, cap)}${at}: ${measured}. The engine interrupted its turn, holds its automatic reviews and Send findings, and passes on no message. Delete files from the session’s folder, for example with docker exec, then press Check again, or press Raise the cap.`))
+      if (s.used?.diskMore) box.append(el('p', 'small', 'Part of the folder couldn’t be counted, so Check again lets the session go on only once the whole folder can be counted and is under the cap.'))
+    } else {
+      box.append(el('p', '', `This session reached its ${capName(kind)} of ${amount(kind, cap)}${at}: ${usedAmount(kind, used)} used. The engine interrupted its turn, holds its automatic reviews and Send findings, and passes on no message until you answer.`))
+    }
     let input = this.#raise.get(s.sid + s.reached)
     if (!input) {
       input = el('input', 'textbox')
       input.type = 'number'
       input.step = k.step
       input.max = String(k.max)
-      input.setAttribute('aria-label', `New ${capName(s.reached)}`)
-      input.value = String(k.kind === 'money' ? Math.round((cap * 2 || 1) * 100) / 100 : Math.max(cap * 2, Math.ceil(usedOf(s.reached, s)) + 1))
+      input.setAttribute('aria-label', `New ${capName(kind)}`)
+      input.value = String(kind === 'money' ? Math.round((cap * 2 || 1) * 100) / 100 : Math.max(cap * 2, raiseMin(kind, cap, used)))
       this.#raise.set(s.sid + s.reached, input)
     }
-    input.min = String(usedOf(s.reached, s))
+    input.min = String(kind === 'money' ? used : raiseMin(kind, cap, used))
     const row = el('div', 'field-row')
-    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind: s.reached, value: Number(input!.value) }, 'raise'), 'button', 'raise'), button('Stop', 'small danger', () => void this.#call({ op: 'stop', sid: s.sid }, 'stop'), 'button', 'stop'))
+    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind, value: Number(input!.value) }, 'raise'), 'button', 'raise'))
+    if (kind === 'disk') row.append(button('Check again', 'small', () => void this.#call({ op: 'measure', sid: s.sid }, 'measure'), 'button', 'measure'))
+    row.append(stop)
     box.append(row)
     return box
   }
@@ -357,7 +440,11 @@ class SfSessionLimits extends HTMLElement {
       const used = usedOf(k.kind, s)
       const level = s.levels[k.kind] ?? ''
       if (level) tone = 'warn'
-      bits.push(`${usedAmount(k.kind, used)} of ${amount(k.kind, cap)}${level === 'warn90' ? ' (over 90%)' : level === 'warn75' ? ' (over 75%)' : ''}`)
+      const warn = level === 'warn90' ? ' (over 90%)' : level === 'warn75' ? ' (over 75%)' : ''
+      if (k.kind === 'disk') {
+        if (!s.used?.diskAt) bits.push(`disk not measured yet, cap ${amount(k.kind, cap)}`)
+        else bits.push(`${s.used.diskMore ? 'at least ' : ''}${usedAmount(k.kind, used)} of ${amount(k.kind, cap)} on disk, measured ${when(s.used.diskAt)}${warn}`)
+      } else bits.push(`${usedAmount(k.kind, used)} of ${amount(k.kind, cap)}${warn}`)
     }
     box.className = `small caps-line ${tone}`
     box.textContent = `Caps${s.own ? '' : ' from the project'}: ${bits.join(' · ')}`
@@ -382,7 +469,7 @@ class SfSessionLimits extends HTMLElement {
     const sid = limitsSession()
     const v = this.#edit.value()
     if (!sid || !v) {
-      this.#said.textContent = 'Each cap is a number from 0 up to $100,000, 43,200 minutes or 10,000 turns; minutes and turns are whole numbers.'
+      this.#said.textContent = CAPS_INVALID
       return this.paint()
     }
     this.#editing = false

@@ -71,9 +71,16 @@ func (l *Limits) beforeTurn(sid, project string) string {
 		l.reachLocked(sid, s, CapTurns, c)
 	}
 	if s.reached != "" {
-		return "This session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine doesn't pass on new messages. Press Raise the cap on the session to go on, or Stop."
+		return "This session reached its " + capWords(s.reached, l.capsOfLocked(s)) + ", so the engine doesn't pass on new messages. " + goOnWords(s.reached)
 	}
 	return ""
+}
+
+func goOnWords(kind string) string {
+	if kind == CapDisk {
+		return "Delete files from the session's folder and press Check again, or press Raise the cap on the session to go on, or Stop."
+	}
+	return "Press Raise the cap on the session to go on, or Stop."
 }
 
 func (l *Limits) personTurn(sid, project string, fresh bool) {
@@ -141,7 +148,7 @@ func (l *Limits) checkLocked(sid string, s *capSession) bool {
 		return false
 	}
 	c := l.capsOfLocked(s)
-	for _, kind := range []string{CapMoney, CapTime, CapTurns} {
+	for _, kind := range capKinds {
 		if overCap(kind, c, s.used) {
 			l.reachLocked(sid, s, kind, c)
 			return true
@@ -153,7 +160,11 @@ func (l *Limits) checkLocked(sid string, s *capSession) bool {
 func (l *Limits) reachLocked(sid string, s *capSession, kind string, c Caps) {
 	s.reached, s.reachedAt = kind, l.now()
 	l.unsaved = true
-	reason := "the session reached its " + capWords(kind, c) + " (" + usedWords(kind, s.used) + " used), so the engine interrupted its turn, holds its automatic reviews and automatic Send findings, and passes on no message until the person raises the cap or stops the session"
+	until := "the person raises the cap or stops the session"
+	if kind == CapDisk {
+		until = "the engine measures the session's folder under the cap again, the person raises the cap, or the person stops the session"
+	}
+	reason := "the session reached its " + capWords(kind, c) + " (" + usedWords(kind, s.used) + " used), so the engine interrupted its turn, holds its automatic reviews and automatic Send findings, and passes on no message until " + until
 	go l.reached(sid, kind, reason)
 }
 
@@ -163,8 +174,19 @@ func usedWords(kind string, u CapsUsed) string {
 		return money(u.CostUSD) + " reported by the agent"
 	case CapTime:
 		return formatElapsed(u.Time) + " of running time by the engine's clock"
+	case CapTurns:
+		return formatTurns(u.Turns)
+	case CapDisk:
+		if u.DiskAt.IsZero() {
+			return "the session's folder not measured since the engine started"
+		}
+		least := ""
+		if u.DiskMore {
+			least = "at least "
+		}
+		return least + gib(u.DiskBytes) + " in the session's folder by the engine's count"
 	}
-	return formatTurns(u.Turns)
+	return ""
 }
 
 func (l *Limits) reached(sid, kind, reason string) {
@@ -248,7 +270,11 @@ func (l *Limits) tick() {
 	l.dropStaleLocked(now)
 	due := l.dueWakesLocked(now)
 	save := l.unsaved && now.Sub(l.lastSave) >= limitsSaveEvery
+	disk := l.diskRoundLocked(now)
 	l.mu.Unlock()
+	if disk != nil {
+		go l.diskRoundRun(disk)
+	}
 	for _, sid := range due {
 		go l.wakeNow(sid, known[sid].running)
 	}

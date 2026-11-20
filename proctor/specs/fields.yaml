@@ -69,6 +69,30 @@ tables:
       - ["fld_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
       - ["fld_files", "/api/files", { proctorUnknownField: true }, "fields"]
       - ["fld_file_match", "/api/file-match", { proctorUnknownField: true }, "fields"]
+      - ["fld_limits_op", "/api/limits", { op: proctor }, "op"]
+      - ["fld_limits_disk_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
+      - ["fld_limits_disk_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "fields"]
+      - ["fld_limits_disk_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
+      - ["fld_limits_disk_text", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "fields"]
+      - ["fld_limits_disk_null", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "fields"]
+      - ["fld_limits_project_disk_negative", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
+      - ["fld_limits_project_disk_fraction", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "fields"]
+      - ["fld_limits_project_disk_over", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
+      - ["fld_limits_session_extra", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_project_extra", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_session_no_money", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "fields"]
+      - ["fld_limits_money_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "fields"]
+      - ["fld_limits_money_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "fields"]
+      - ["fld_limits_minutes_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "fields"]
+      - ["fld_limits_minutes_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "fields"]
+      - ["fld_limits_turns_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "fields"]
+      - ["fld_limits_turns_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "fields"]
+      - ["fld_limits_raise_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: 2 }, "fields"]
+      - ["fld_limits_raise_extra", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_measure_extra", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields"]
+      - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields"]
+      - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields"]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
@@ -165,6 +189,32 @@ tables:
       - ["unk_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be pushed from here."]
       - ["unk_viewed", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "Only a session this engine started has a changes view here."]
       - ["unk_stop", "/api/stop-session", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be stopped, woken or deleted from here."]
+
+  - id: FLD-T05
+    name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/limits"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 409 before the route acts: no session has this id, so none is at a cap, and Limits.SetSession, Raise, StopAtCap and MeasureNow change nothing; /api/limits isn't declared a read, since its op decides read or write, and no other read shows caps"
+    columns: ["case", "body", "error", "message"]
+    rows:
+      - ["lim_measure_unknown", { op: measure, sid: "00000000-0000-4000-8000-000000000000" }, "not reached", "This session isn't at its disk cap, so there is nothing to check again."]
+      - ["lim_raise_disk_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_money_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: money, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_time_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: time, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_raise_turns_unknown", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: turns, value: 2 }, "not reached", "This session isn't at that cap, so there is nothing to raise."]
+      - ["lim_stop_unknown", { op: stop, sid: "00000000-0000-4000-8000-000000000000" }, "not reached", "This session isn't at a cap."]
+      - ["lim_session_unknown", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 1, minutes: 1, turns: 1 }, "not started here", "Only a session this engine started can have caps."]
+      - ["lim_session_disk_unknown", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1 }, "not started here", "Only a session this engine started can have caps."]
 
   - id: FLD-T03R
     name: "A route that reads a session refuses an id the engine didn't start"

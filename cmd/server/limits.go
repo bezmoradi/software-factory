@@ -6,7 +6,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, logger shared.Logger) {
+func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, ws *session.Workspace, logger shared.Logger) {
 	limits := reg.Limits()
 	lc := session.LimitsConfig{Store: state.NewCaps(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger}
 	if d := p.dispatcher; d != nil {
@@ -20,6 +20,9 @@ func (p engineParts) useLimits(reg *session.Registry, cfg PageConfig, logger sha
 	if p.pushes != nil {
 		p.pushes.UseLimits(limits)
 		lc.Continued = p.pushes.Continued
+	}
+	if ws != nil {
+		lc.Disk = ws.BoxSize
 	}
 	limits.Use(lc)
 	if p.repos != nil {

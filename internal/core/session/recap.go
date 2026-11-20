@@ -23,7 +23,7 @@ const (
 var (
 	recapReviewer = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:._-]{0,99}$`)
 	recapBranch   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9/._-]{0,99}$`)
-	capNames      = map[string]string{CapMoney: "spending", CapTime: "time", CapTurns: "turn"}
+	capNames      = map[string]string{CapMoney: "spending", CapTime: "time", CapTurns: "turn", CapDisk: "disk"}
 	recapCommit   = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 )
 
@@ -249,7 +249,7 @@ func capKind(e AuditEntry) string {
 }
 
 func capAnswer(e AuditEntry) string {
-	if e.Verdict == CapRaised || e.Verdict == CapStopped {
+	if e.Verdict == CapRaised || e.Verdict == CapStopped || e.Verdict == CapFreed {
 		return e.Verdict
 	}
 	return ""
@@ -320,6 +320,8 @@ func recapText(e AuditEntry) (string, string) {
 			return "cap", "You raised " + which + "."
 		case CapStopped:
 			return "cap", "You stopped the session at " + which + "."
+		case CapFreed:
+			return "cap", "The engine measured the session's folder under " + which + " again, so the session can go on."
 		}
 		return "cap", "You answered the card for " + which + "."
 	case AuditUsageAnswer:

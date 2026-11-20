@@ -20,7 +20,16 @@ func waitingIn(reg *session.Registry) func(sid string) int {
 	}
 }
 
-func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.Registry, logger shared.Logger) {
+func newWorkspace(parts engineParts, cfg PageConfig, logger shared.Logger) *session.Workspace {
+	d := parts.dispatcher
+	if d == nil || parts.repos == nil || cfg.Workspace == "" {
+		return nil
+	}
+	return session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{OpenTree: files.OpenTree}, Sessions: d.WorkspaceSessions,
+		Heads: files.Reviews{}, History: files.Reader{}, Main: parts.repos.Main, Audit: state.NewAudit(cfg.StateDir), Remove: d.Remove, Logger: logger})
+}
+
+func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.Registry, w *session.Workspace, logger shared.Logger) {
 	d := parts.dispatcher
 	if d == nil {
 		return
@@ -28,9 +37,7 @@ func useViews(srv *page.Server, parts engineParts, cfg PageConfig, reg *session.
 	audit := state.NewAudit(cfg.StateDir)
 	recaps := session.NewRecaps(session.RecapsConfig{Audit: audit, Store: state.NewRecapSeen(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Held: d.HeldTarget, Waiting: waitingIn(reg), Logger: logger})
 	var ws session.WorkspacePage
-	if parts.repos != nil && cfg.Workspace != "" {
-		w := session.NewWorkspace(session.WorkspaceConfig{Dir: cfg.Workspace, Disk: workspace.Disk{}, Sizes: workspace.Sizes{OpenTree: files.OpenTree}, Sessions: d.WorkspaceSessions,
-			Heads: files.Reviews{}, History: files.Reader{}, Main: parts.repos.Main, Audit: audit, Remove: d.Remove, Logger: logger})
+	if w != nil {
 		d.UseBranchState(w.BranchState)
 		ws = w
 	}

@@ -39,7 +39,7 @@ const KIND: Record<string, string> = {
   'usage-answer': 'Automatic work kept running near a usage limit',
 }
 
-const CAP: Record<string, string> = { money: 'spending cap', time: 'time cap', turns: 'turn cap' }
+const CAP: Record<string, string> = { money: 'spending cap', time: 'time cap', turns: 'turn cap', disk: 'disk cap' }
 const CAP_ANSWER: Record<string, string> = { raised: 'raised', stopped: 'stopped' }
 
 const PLACE: Record<string, string> = { worktree: 'a session worktree', clone: 'the clone folder', user: 'the agents’ user settings' }
@@ -83,8 +83,10 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     for (const e of items) {
       const li = el('li', 'exception-row')
       const head = el('div', 'row')
-      const what = KIND[e.kind] ?? visible(e.kind)
-      const detail = e.kind === 'override' ? (e.reviewer ? ` (${visible(e.reviewer)})` : '')
+      const freed = e.kind === 'cap-answer' && e.verdict === 'freed'
+      const what = freed ? 'Disk cap cleared by the engine’s measurement' : KIND[e.kind] ?? visible(e.kind)
+      const detail = freed ? ''
+        : e.kind === 'override' ? (e.reviewer ? ` (${visible(e.reviewer)})` : '')
         : e.kind === 'allow-file' && e.path ? ` (${visible(e.path)})`
         : e.kind === 'allow-push' ? ` (${e.missing} missing)`
         : e.kind.startsWith('cap-') && (CAP[e.result] || CAP_ANSWER[e.verdict]) ? ` (${[CAP[e.result] ?? '', CAP_ANSWER[e.verdict] ?? ''].filter(Boolean).join(', ')})` : ''
@@ -93,7 +95,8 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
       const where = [session && visible(session), e.repo && visible(e.repo), e.branch && visible(e.branch), e.commit && `commit ${shortSha(e.commit)}`].filter(Boolean).join(' · ')
       li.append(head)
       if (where) li.append(el('p', 'small muted', where))
-      li.append(el('p', 'small', e.reason ? `Your reason: “${visible(e.reason)}”` : 'No reason recorded.'))
+      if (freed) li.append(el('p', 'small', 'The engine counted the whole session folder under its disk cap, so the session went on. Nobody answered the card.'))
+      else li.append(el('p', 'small', e.reason ? `Your reason: “${visible(e.reason)}”` : 'No reason recorded.'))
       list.append(li)
     }
     parts.push(list)

@@ -5,6 +5,7 @@ export interface CapsValues {
   money: number
   minutes: number
   turns: number
+  disk: number
 }
 
 export interface RateWindowView {
@@ -38,7 +39,7 @@ export interface SessionLimits {
   sid: string
   caps: CapsValues | null
   own: boolean
-  used: { costUsd: number; minutes: number; turns: number } | null
+  used: { costUsd: number; minutes: number; turns: number; diskBytes: number; diskMore: boolean; diskAt: number } | null
   levels: Record<string, string>
   reached: string
   reachedAt: number
@@ -92,7 +93,7 @@ const list = (x: unknown, max = 1000): unknown[] => (Array.isArray(x) ? x.slice(
 
 function capsOf(x: unknown): CapsValues {
   const c = rec(x)
-  return { money: num(c.money, 1e5), minutes: num(c.minutes, 43200), turns: num(c.turns, 10000) }
+  return { money: num(c.money, 1e5), minutes: num(c.minutes, 43200), turns: num(c.turns, 10000), disk: num(c.disk, 4096) }
 }
 
 export function limitsOf(raw: unknown): LimitsView | null {
@@ -119,9 +120,9 @@ export function limitsOf(raw: unknown): LimitsView | null {
     const levels = rec(s.levels)
     sessions.set(sid, {
       sid, caps: s.caps ? capsOf(s.caps) : null, own: s.own === true,
-      used: used ? { costUsd: num(used.costUsd), minutes: num(used.minutes), turns: num(used.turns) } : null,
-      levels: { money: text(levels.money, 20), time: text(levels.time, 20), turns: text(levels.turns, 20) },
-      reached: ['money', 'time', 'turns'].includes(text(s.reached, 20)) ? text(s.reached, 20) : '', reachedAt: num(s.reachedAt, 1e15),
+      used: used ? { costUsd: num(used.costUsd), minutes: num(used.minutes), turns: num(used.turns), diskBytes: num(used.diskBytes, 2 ** 53), diskMore: used.diskMore === true, diskAt: num(used.diskAt, 1e15) } : null,
+      levels: { money: text(levels.money, 20), time: text(levels.time, 20), turns: text(levels.turns, 20), disk: text(levels.disk, 20) },
+      reached: ['money', 'time', 'turns', 'disk'].includes(text(s.reached, 20)) ? text(s.reached, 20) : '', reachedAt: num(s.reachedAt, 1e15),
       stuck: stuck ? { tool: text(stuck.tool, 80), detail: text(stuck.detail, 200), count: num(stuck.count, 100), failing: stuck.failing === true, at: num(stuck.at, 1e15) } : null,
       wakeAt: num(s.wakeAt, 1e15), wakeOffer: num(s.wakeOffer, 1e15), signInFrom: num(s.signInFrom, 1e15), signInUntil: num(s.signInUntil, 1e15),
     })

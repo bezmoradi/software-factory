@@ -505,3 +505,415 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+
+  - id: SES-003
+    name: "A session's disk cap: caps without disk answer as before and never measure, a folder past the cap is measured at once, interrupts the session and refuses its messages with the reason and a Raise of a cap it isn't at, Check again keeps it while it's over and clears it once the files are gone, and Raise the cap clears it too"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "disk ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: caps-without-disk
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: session, sid: "${sid}", money: 5, minutes: 600, turns: 50 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.type": limits
+            "$.body.unread": false
+          any:
+            "$.body.sessions": { sid: "${sid}", own: true, reached: "", reachedAt: 0, caps: { money: 5, minutes: 600, turns: 50, disk: 0 }, levels: { money: "", time: "", turns: "", disk: "" }, used.costUsd: 0, used.diskBytes: 0, used.diskMore: false, used.diskAt: 0 }
+      - id: grow
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: disk ${run.id}\ngrow-for: 25 1100 proctor-${run.id}.bin" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: grown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.bin"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["proctor-${run.id}.bin"] }
+      - id: never-measured
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", reached: "", caps.disk: 0, used.diskBytes: 0, used.diskAt: 0 }
+      - id: disk-cap
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: session, sid: "${sid}", money: 5, minutes: 600, turns: 50, disk: 1 }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", own: true, caps: { money: 5, minutes: 600, turns: 50, disk: 1 } }
+      - id: reached
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 20s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: cap-reached, by: engine, result: disk, session: "${sid}" }
+      - id: message-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: refused ${run.id}\nwrite: proctor-${run.id}-refused.txt" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: cap, message: "This session reached its disk cap of 1 GiB, so the engine doesn't pass on new messages. Delete files from the session's folder and press Check again, or press Raise the cap on the session to go on, or Stop." }
+      - id: refused-not-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.bin", "proctor-${run.id}-refused.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["proctor-${run.id}.bin"] }
+      - id: at-cap
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", reached: disk, caps.disk: 1, levels.disk: reached, used.diskMore: false }
+      - id: raise-other-kind
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: raise, sid: "${sid}", kind: money, value: 10 }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not reached", message: "This session isn't at that cap, so there is nothing to raise." }
+      - id: raise-not-above-used
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: raise, sid: "${sid}", kind: disk, value: 1 }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: value, message: "The new cap must be more than this session has used (1.1 GiB in the session's folder by the engine's count) and more than the cap now, and at most 4,096 GiB, a whole number." }
+        waive: { FIX-05: "kind is one of the fixed cap kinds (money, time, turns, disk) and can't carry ${run.id}; every later frame entry that expects it is matched by the session id saved from this run's dispatch" }
+      - id: check-while-over
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: measure, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", reached: disk, caps.disk: 1, used.diskMore: false }
+      - id: files-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.bin"] }
+        eventually: { within: 45s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: [] }
+      - id: check-after-freeing
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: measure, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", reached: "", reachedAt: 0, caps.disk: 1, levels.disk: "", used.diskMore: false }
+      - id: freed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: cap-answer, by: engine, result: disk, verdict: freed, session: "${sid}" }
+      - id: check-not-at-cap
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: measure, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not reached", message: "This session isn't at its disk cap, so there is nothing to check again." }
+      - id: grow-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: disk again ${run.id}\ngrow-for: 20 1100 proctor-${run.id}-again.bin" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: grown-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}-again.bin"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["proctor-${run.id}-again.bin"] }
+      - id: disk-cap-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: session, sid: "${sid}", money: 5, minutes: 600, turns: 50, disk: 1 }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", caps.disk: 1 }
+      - id: reached-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 20s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: cap-reached, result: disk, session: "${sid}" }, is: 2 }
+      - id: raise
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: raise, sid: "${sid}", kind: disk, value: 2 }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.sessions": { sid: "${sid}", reached: "", reachedAt: 0, own: true, caps: { money: 5, minutes: 600, turns: 50, disk: 2 } }
+        waive: { FIX-05: "a cap is a number in a fixed range and can't carry ${run.id}; the frame's entry is matched by the session id saved from this run's dispatch" }
+      - id: raised
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: cap-answer, by: page, result: disk, verdict: raised, session: "${sid}" }
+      - id: message-through
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: through ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: files-gone-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["proctor-${run.id}.bin", "proctor-${run.id}-again.bin", "proctor-${run.id}-refused.txt"] }
+        eventually: { within: 45s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: [] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: network-removed
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }

@@ -26,7 +26,14 @@ func capsBody(body map[string]any) (session.Caps, bool) {
 	if minutes < 0 || minutes > session.MaxCapMinutes || turns < 0 || turns > session.MaxCapTurns {
 		return session.Caps{}, false
 	}
-	return session.CheckCaps(session.Caps{MoneyUSD: m, Minutes: int(minutes), Turns: int(turns)})
+	var disk int64
+	if raw, has := body["disk"]; has {
+		var okDisk bool
+		if disk, okDisk = integer(raw); !okDisk || disk < 0 || disk > session.MaxCapDiskGiB {
+			return session.Caps{}, false
+		}
+	}
+	return session.CheckCaps(session.Caps{MoneyUSD: m, Minutes: int(minutes), Turns: int(turns), DiskGiB: int(disk)})
 }
 
 func (s *Server) knownProject(name string) bool {
@@ -59,7 +66,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 	case "project":
 		name, okName := body["name"].(string)
 		c, okCaps := capsBody(body)
-		if !keysWithin(body, "op", "name", "money", "minutes", "turns") || !okName || !okCaps || len(name) > 400 {
+		if !keysWithin(body, "op", "name", "money", "minutes", "turns", "disk") || !okName || !okCaps || len(name) > 400 {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -70,7 +77,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		err = l.SetProject(name, c)
 	case "session":
 		c, okCaps := capsBody(body)
-		if !keysWithin(body, "op", "sid", "money", "minutes", "turns") || !okSid || !okCaps {
+		if !keysWithin(body, "op", "sid", "money", "minutes", "turns", "disk") || !okSid || !okCaps {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -92,6 +99,16 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		_ = rc.SetWriteDeadline(time.Now().Add(limitsFor + writeFor))
 		ctx, cancel := context.WithTimeout(r.Context(), limitsFor)
 		err = l.StopAtCap(ctx, sid)
+		cancel()
+	case "measure":
+		if !keysWithin(body, "op", "sid") || !okSid {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Now().Add(session.DiskMeasureFor + writeFor))
+		ctx, cancel := context.WithTimeout(r.Context(), session.DiskMeasureFor)
+		err = l.MeasureNow(ctx, sid)
 		cancel()
 	case "continue":
 		side, okSide := body["side"].(string)
