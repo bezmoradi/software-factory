@@ -23,6 +23,7 @@ type Progress struct {
 	PlanWasApproved bool
 	PlanBase        string
 	Built           bool
+	ChangesCode     bool
 }
 
 func Items(p Progress) ([]string, bool) {
@@ -34,6 +35,7 @@ func Items(p Progress) ([]string, bool) {
 		unapproved = true
 	}
 	feature := p.Effective.Profile() == Feature
+	incident := p.Effective.Profile() == Incident && !p.PlanOk && p.ChangesCode
 	if !p.FilesListed {
 		note := ""
 		if p.FilesNote != "" {
@@ -71,6 +73,12 @@ func Items(p Progress) ([]string, bool) {
 		commands = p.Commands
 	}
 	switch {
+	case incident && p.PlanFile == "":
+		say("the developer's approval of the root cause, since this branch changes code: the root cause isn't approved, and no " + RootCauseFile + " from the Triage, Reproduce and Root cause steps is committed on the branch yet")
+	case incident && p.PlanWasApproved:
+		ask("the developer's approval of the root cause again, since this branch changes code: the root cause isn't approved, because " + RootCauseFile + " changed after they approved it")
+	case incident:
+		ask("the developer's approval of the root cause, on the page, since this branch changes code: the root cause isn't approved")
 	case feature && p.PlanFile == "":
 		from := commands[Plan]
 		if from == "" {

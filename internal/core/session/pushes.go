@@ -503,7 +503,7 @@ func (p *Pushes) stillRunning(sid, head string) bool {
 	return p.verifyPending(ctx, v, sid, t, head)
 }
 
-const awaitingApproval = "the engine doesn't start reviews while the person's approval of the requirements or the plan is missing: it starts them when you push after the person approves on the page, and the person can press Review there any time; until then: "
+const awaitingApproval = "the engine doesn't start reviews while the person's approval of the requirements, the plan or the root cause is missing: it starts them when you push after the person approves on the page, and the person can press Review there any time; until then: "
 
 func (p *Pushes) stillDenied(sid string, now time.Time) (push.Reply, bool) {
 	t, ok := p.cfg.Targets(sid)

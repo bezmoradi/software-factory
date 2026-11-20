@@ -25,6 +25,35 @@ export function uncommittedIn(gate: GateEvent | null): boolean {
   return !!pending && (!pending.complete || pending.count > 0)
 }
 
+export function causeStatus(text: string): string {
+  const lines = text.split('\n')
+  const at = lines.findIndex(l => l.replace(/[ \t]+$/, '') === '## Status')
+  if (at < 0) return ''
+  for (const l of lines.slice(at + 1)) {
+    if (l.startsWith('#')) return ''
+    const word = l.split(/[ \t]+/).find(Boolean)
+    if (word) return word
+  }
+  return ''
+}
+
+const INCIDENT_STAGES = ['triage', 'reproduce', 'cause']
+
+function incidentStages(gate: GateEvent, turn: Turn): Record<string, [Mark, string]> {
+  const doc = gate.planDoc
+  const status = doc ? causeStatus(doc.text) : ''
+  const shown = visible(status).slice(0, 40)
+  const reproduced = ['REPRODUCED', 'CONFIRMED', 'UNCONFIRMED'].includes(status)
+  const triage: [Mark, string] = status ? [true, `Triaged · ${visible(doc?.path.split('/').pop() ?? '')} says ${shown}`] : [false, 'No triage yet: give the evidence and the deployed commit or tag in a message, then press Start']
+  const reproduce: [Mark, string] = reproduced ? [true, 'Reproduced at the deployed commit'] : status === 'BLOCKED' ? [false, 'Blocked: the file names the evidence or environment it needs. Give it in a message, then press Continue'] : status === 'TRIAGED' ? [false, 'Next: a reproduction at the deployed commit, run and shown to fail: press Continue'] : status ? [false, `The file's Status is ${shown}, which knackpack doesn't use`] : [false, '']
+  const cause: [Mark, string] = status === 'CONFIRMED'
+    ? doc?.approved ? [true, 'Cause confirmed · approved'] : turn.busy ? [false, 'The agent is still working on the diagnosis'] : doc?.changed ? [false, 'Cause confirmed, but the file changed after you approved it: read it and approve again'] : [false, 'Cause confirmed · waiting for your approval']
+    : status === 'UNCONFIRMED' ? [false, 'No cause confirmed yet: the file says what would decide. Give it in a message, then press Continue']
+    : status === 'REPRODUCED' ? [false, 'Next: ranked hypotheses, and a cause confirmed by a test that tells them apart: press Continue']
+    : [false, '']
+  return { triage, reproduce, cause }
+}
+
 function press(off: boolean, ran: boolean): string {
   return off ? '' : `: press ${ran ? 'Continue' : 'Start'}`
 }
@@ -49,7 +78,7 @@ function stages(gate: GateEvent | null, started: Started, active: Active, off: b
   const planned = !feature || (!!gate.plan && gate.approved !== false)
   const verified = reviewers.length > 0 && reviewers.every(r => OK.includes(r.state))
   const name = (path: string) => path.split('/').pop()
-  const sized = gate.effective === 'fix' ? 'a Fix' : gate.effective === 'explore' ? 'Exploring' : 'Docs only'
+  const sized = gate.effective === 'fix' ? 'a Fix' : gate.effective === 'incident' ? 'an Incident' : gate.effective === 'explore' ? 'Exploring' : 'Docs only'
   if (gate.effective === 'explore') return {
     define,
     plan: [SKIPPED, 'Not needed while Exploring'],
@@ -64,10 +93,13 @@ function stages(gate: GateEvent | null, started: Started, active: Active, off: b
   const wait = gate?.waiting ?? ''
   const passed = reviewers.some(r => r.state === 'overridden') ? 'Reviews done on this commit, with an override' : 'Every review passes on this commit'
   const running = reviewers.some(r => r.state === 'running')
+  const incident = gate.effective === 'incident'
+  const fixed = !incident || !!gate.planDoc?.approved
   return {
+    ...(incident ? incidentStages(gate, turn) : {}),
     define,
     plan: [!feature ? SKIPPED : planned, !feature ? `Not needed for ${sized}` : !gate.plan ? (active === 'plan' || turn.running === 'plan' ? 'The agent is making the plan' : strict && gate.holds?.plan ? 'Starts once you approve the requirements' : `Needs a plan${press(off, turn.ran.has('plan'))}`) : gate.approved === false ? (turn.busy ? 'The agent is still working on the plan' : `${name(gate.plan)} · waiting for your approval`) : `${name(gate.plan)} · approved · research ${gate.research ? 'done' : 'skipped'}`],
-    implement: [!wait, `${at}${dirty ? local : wait && gate.head ? ` · ${wait}` : started === 'nobase' ? " · no base branch, so the page can't tell this branch's commits" : ''}`],
+    implement: !fixed ? [false, `${at} · Fix starts once you approve the root cause`] : [!wait, `${at}${dirty ? local : wait && gate.head ? ` · ${wait}` : started === 'nobase' ? " · no base branch, so the page can't tell this branch's commits" : ''}`],
     verify: [verified ? (dirty ? OUTDATED : !wait) : false, !verified ? `${count(reviewers.filter(r => OK.includes(r.state)).length, reviewers.length, 'passes', 'pass')}${!wait ? '' : running ? `. Reviews are running before Implement is done: ${wait}${dirty ? ", so they won't count" : ''}` : `. Reviews start once Implement is done: ${wait}`}` : dirty ? `${passed}, but ${pending?.complete ? "uncommitted files aren't reviewed" : "the gate couldn't check for uncommitted files"}` : wait ? `${passed}, but Implement isn't done: ${wait}` : passed],
     deliver: pushed ? [true, `Pushed ${shortSha(gate.head)}${gate.branch ? ` to ${gate.branch}` : ''}`] : [!!gate.allowed, gate.allowed ? 'The gate has what it needs for this commit: Push sends it, once the sandbox check holds' : 'Push held until it has:'],
   }
@@ -94,7 +126,18 @@ export function paintPath(root: HTMLElement, gate: GateEvent | null, started: St
       if (!wants.some(k => typed.steps.includes(k)) || got?.[0] === SKIPPED) all[stage] = [SKIPPED, `Not part of ${visible(typed.name)}`]
     }
   }
-  const steps = [...root.children] as HTMLElement[]
+  const incident = gate?.effective === 'incident'
+  const status = incident && gate?.planDoc ? causeStatus(gate.planDoc.text) : ''
+  for (const li of root.children as HTMLCollectionOf<HTMLElement>) {
+    const stage = li.dataset.stage ?? ''
+    li.hidden = incident ? stage === 'define' || stage === 'plan' : INCIDENT_STAGES.includes(stage)
+    if (stage === 'implement') {
+      const name = li.querySelector('strong')!
+      const want = incident ? 'Fix' : 'Implement'
+      if (name.textContent !== want) name.textContent = want
+    }
+  }
+  const steps = ([...root.children] as HTMLElement[]).filter(li => !li.hidden)
   let current = false
   let finished = 0
   let at: { index: number; name: string; detail: string } | null = null
@@ -115,13 +158,19 @@ export function paintPath(root: HTMLElement, gate: GateEvent | null, started: St
     li.querySelector('.stage-detail')!.textContent = detail
     const complete = !!done && done !== OUTDATED
     const running = turn.running === stage
-    if (stage === 'define' || stage === 'plan') {
+    if (INCIDENT_STAGES.includes(stage)) {
+      const word = status ? 'Continue' : 'Start'
+      for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) {
+        b.hidden = !now || status === 'CONFIRMED' || running
+        if (b.textContent !== word) b.textContent = word
+      }
+    } else if (stage === 'define' || stage === 'plan') {
       const word = turn.ran.has(stage) ? 'Continue' : 'Start'
       for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) {
         b.hidden = complete || running || produced(stage, gate)
         if (b.textContent !== word) b.textContent = word
       }
-    } else if (stage !== 'deliver') for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) b.hidden = complete || (b.dataset.command === 'commit' && !gate?.uncommitted?.count)
+    } else if (stage !== 'deliver') for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) b.hidden = complete || (b.dataset.command === 'commit' && !gate?.uncommitted?.count) || ('fix' in b.dataset && (!b.dataset.command || !incident))
   }
   const pending = gate?.uncommitted?.complete ? gate.uncommitted : null
   const files = (pending?.files ?? []).slice(0, 5).map(p => el('li', '', `${p.path} (${p.status})`))

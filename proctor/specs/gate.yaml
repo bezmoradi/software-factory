@@ -3684,3 +3684,249 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-006
+    name: "An Incident session: the gate offers and reports the Incident type with no root cause, refuses an approval with none committed, reads ROOT-CAUSE.md from the fake's commits as the session's plan document, refuses to approve it until its Status is CONFIRMED, and then approves it"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: incident }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: incident-gate
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.workType": incident
+            "$.body.gate.size": incident
+            "$.body.gate.effective": incident
+            "$.body.gate.planDoc": null
+            "$.body.gate.waiting": "approve the root cause first"
+          any:
+            "$.body.gate.types": { id: incident, name: Incident, builtin: true, push: true, roles: [bug-hunter, simplicity] }
+      - id: approve-none
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-plan"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881", text: "x" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not committed", message: "The engine counts only the root cause text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve." }
+      - id: triage
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:debug-incident" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: triaged
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": ".knackpack/fake-incident/ROOT-CAUSE.md"
+            "$.body.gate.planDoc.hash": "e9bc2ee3f29d14b8a753896fe507d0a9f80649c4e01554690135fb306fbcddb0"
+      - id: triaged-hold
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.approved": false
+            "$.body.gate.holds.approvePlan": "The root cause wasn't approved: the Status in ROOT-CAUSE.md is TRIAGED, and only a CONFIRMED diagnosis can be approved. Press Continue on the Root cause step, or give the evidence the file asks for."
+      - id: approve-triaged
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-plan"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "e9bc2ee3f29d14b8a753896fe507d0a9f80649c4e01554690135fb306fbcddb0", text: "# Root cause: the fake export fails\n\n## Status\n\nTRIAGED\n\n## Incident\n\n- Task: fake-incident\n- Symptom: the fake export answers 500\n\n## Evidence\n\n## Missing evidence\n\n## Reproduction\n\n## Hypotheses\n\n## Cause\n\n## Remaining uncertainty\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "The root cause wasn't approved: the Status in ROOT-CAUSE.md is TRIAGED, and only a CONFIRMED diagnosis can be approved. Press Continue on the Root cause step, or give the evidence the file asks for." }
+      - id: reproduce
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:debug-incident" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: reproduced
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": ".knackpack/fake-incident/ROOT-CAUSE.md"
+            "$.body.gate.planDoc.hash": "2ceea2f497514f47eb8398a7fcb6ffd1b5e0f44e51b54cc7687e60e897d5241b"
+      - id: confirm
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:debug-incident" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: confirmed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": ".knackpack/fake-incident/ROOT-CAUSE.md"
+            "$.body.gate.planDoc.hash": "1f969cd992d5e428372645d2d30554ffb6ac689ab7a36e400d08a49599a1e568"
+      - id: approve-confirmed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-plan"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "1f969cd992d5e428372645d2d30554ffb6ac689ab7a36e400d08a49599a1e568", text: "# Root cause: the fake export fails\n\n## Status\n\nCONFIRMED\n\n## Incident\n\n- Task: fake-incident\n- Symptom: the fake export answers 500\n\n## Evidence\n\n## Missing evidence\n\n## Reproduction\n\n## Hypotheses\n\n## Cause\n\nThe fake cause, confirmed by the fake reproduction.\n\n## Remaining uncertainty\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.approved": true
+            "$.body.gate.waiting": "commit the fix made since the root cause was approved"
+      - id: approval-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: approve-plan, hash: "1f969cd992d5e428372645d2d30554ffb6ac689ab7a36e400d08a49599a1e568", session: "${sid}" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }

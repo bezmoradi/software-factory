@@ -993,7 +993,7 @@ export interface TeamView {
   remote: { branch: string; present: boolean; same: boolean }[]
 }
 
-export type Size = 'feature' | 'fix' | 'docs' | 'explore' | 'review'
+export type Size = 'feature' | 'fix' | 'incident' | 'docs' | 'explore' | 'review'
 
 export interface PlanFileEvent extends Stamped {
   type: 'planfile'
@@ -1003,7 +1003,7 @@ export interface PlanFileEvent extends Stamped {
 }
 
 export interface PlanApproval {
-  kind?: 'plan' | 'requirements'
+  kind?: 'plan' | 'requirements' | 'root-cause'
   path: string
   text: string
   hash: string

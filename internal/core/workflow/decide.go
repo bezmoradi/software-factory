@@ -16,6 +16,7 @@ type Facts struct {
 	ReqHash       string
 	ReqBaseline   string
 	PlanHash      string
+	CauseStatus   string
 	ReqOk         bool
 	PlanOk        bool
 	UsesArtifacts bool
@@ -79,6 +80,9 @@ func Decide(f Facts, a Action) string {
 }
 
 func approvePlan(f Facts, a Action) string {
+	if f.Profile == Incident {
+		return approveCause(f, a)
+	}
 	if f.Profile != Feature {
 		return ""
 	}
@@ -94,6 +98,22 @@ func approvePlan(f Facts, a Action) string {
 			more = ", and they change more than the plan's own files"
 		}
 		return "The plan wasn't approved: there are commits since the requirements were approved, at " + f.ReqBaseline[:min(len(f.ReqBaseline), 7)] + more + ". Nothing is built before the plan is approved, so remove those commits or approve the requirements again from here."
+	}
+	return ""
+}
+
+func approveCause(f Facts, a Action) string {
+	switch {
+	case a.Hash != f.PlanHash:
+		return "The root cause changed before your approval arrived, so it wasn't approved. Read the new version and approve it again."
+	case f.CauseStatus != Confirmed:
+		status := clip(f.CauseStatus, 40)
+		if status == "" {
+			status = "missing"
+		}
+		return "The root cause wasn't approved: the Status in " + RootCauseFile + " is " + status + ", and only a " + Confirmed + " diagnosis can be approved. Press Continue on the Root cause step, or give the evidence the file asks for."
+	case f.Head == "":
+		return "The root cause wasn't approved: the current commit couldn't be read."
 	}
 	return ""
 }
@@ -134,6 +154,10 @@ func ImplementWait(w Build) string {
 		return ""
 	case !w.Head:
 		return "the gate couldn't read the current commit"
+	case w.Profile == Incident && !w.PlanOk:
+		return "approve the root cause first"
+	case w.Profile == Incident && !w.Built:
+		return "commit the fix made since the root cause was approved"
 	case w.Profile == Feature && !w.PlanOk:
 		return "approve the plan first"
 	case w.Profile == Feature:

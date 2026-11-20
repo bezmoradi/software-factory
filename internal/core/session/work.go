@@ -682,10 +682,13 @@ func shownDoc(path, text string) *WorkDoc {
 	return d
 }
 
-func (w *Work) committedDocs(sid, repo, head string, def workflow.Adapter) workDocs {
+func (w *Work) committedDocs(sid, repo, head string, def workflow.Adapter, incident bool) workDocs {
 	out := workDocs{held: true}
 	if rep, ok := w.cfg.Reported(sid); ok {
 		out.shownReq, out.shownPlan = docFrom(rep.Requirements), docFrom(rep.Plan)
+		if incident {
+			out.shownPlan = nil
+		}
 		if rep.Research != nil {
 			out.research = rep.Research.Path
 		}
@@ -703,25 +706,32 @@ func (w *Work) committedDocs(sid, repo, head string, def workflow.Adapter) workD
 		out.req = shownDoc(out.dir+"/"+names.Requirements, t)
 		out.req.Commit = head
 	}
-	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Plan); ok {
-		out.plan = shownDoc(out.dir+"/"+names.Plan, t)
+	plan := names.Plan
+	if incident {
+		plan = names.RootCause
+	}
+	if t, ok := w.readDoc(repo, head, out.dir+"/"+plan); ok && plan != "" {
+		out.plan = shownDoc(out.dir+"/"+plan, t)
 		out.plan.Commit = head
 	}
 	return out
 }
 
-func (w *Work) docs(sid, repo, head string, def workflow.Adapter) workDocs {
+func (w *Work) docs(sid, repo, head string, def workflow.Adapter, incident bool) workDocs {
 	if w.cfg.DocsInRepo && !def.HasDocuments() {
 		return workDocs{}
 	}
 	if w.cfg.DocsInRepo {
-		return w.committedDocs(sid, repo, head, def)
+		return w.committedDocs(sid, repo, head, def, incident)
 	}
 	rep, ok := w.cfg.Reported(sid)
 	if !ok {
 		return workDocs{}
 	}
 	out := workDocs{req: docFrom(rep.Requirements), plan: docFrom(rep.Plan), reported: true}
+	if incident {
+		out.plan = nil
+	}
 	if rep.Research != nil {
 		out.research = rep.Research.Path
 	}
@@ -801,7 +811,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	if note != "" {
 		g.effNote = strings.TrimSpace(g.effNote + " " + note)
 	}
-	g.docs = w.docs(sid, t.Repo, head, g.setup.setup.Workflow)
+	g.docs = w.docs(sid, t.Repo, head, g.setup.setup.Workflow, g.chosen.Profile() == workflow.Incident)
 	if g.docs.held {
 		g.docs.onBranch(g.files, g.listed)
 	}
@@ -819,11 +829,14 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	g.reqWas = ws.req != nil && !g.reqOk
 	g.planOk = counts(ws.plan, g.docs.plan) && (!feature || g.reqOk)
 	g.planWas = ws.plan != nil && !g.planOk
-	if g.eff.Profile() == workflow.Feature && g.planOk {
-		g.planBase = ws.plan.Commit
-		if head != "" && head != g.planBase {
-			in, err := w.cfg.History.IsAncestor(ctx, t.Repo, g.planBase, head)
+	if p := g.eff.Profile(); (p == workflow.Feature || p == workflow.Incident) && g.planOk {
+		base := ws.plan.Commit
+		if head != "" && head != base {
+			in, err := w.cfg.History.IsAncestor(ctx, t.Repo, base, head)
 			g.built = err == nil && in
+		}
+		if p == workflow.Feature {
+			g.planBase = base
 		}
 	}
 	g.required = w.deepened(ctx, t, workflow.Required(g.setup.setup, g.eff, g.files), g.base, head, g.listed)
@@ -854,6 +867,7 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 		FilesListed: g.listed || head == "", FilesNote: g.note, FlagsRead: flagsRead, Flagged: flagged,
 		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanFile: planFile,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, PlanBase: g.planBase, Built: g.built,
+		ChangesCode: head != "" && (!g.listed || changesCode(g.files, g.setup.setup.Workflow.Documents.Feature)),
 	})
 	if item := specOverItem(g); item != "" {
 		g.items = append([]string{item}, g.items...)
@@ -871,6 +885,10 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 		g.items = append(g.items, "a setup the gate can read: "+p)
 	}
 	return g
+}
+
+func changesCode(files []string, feature string) bool {
+	return slices.ContainsFunc(workflow.NotDocs(files), func(f string) bool { return f != feature })
 }
 
 func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool) {
@@ -972,6 +990,7 @@ func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	}
 	if g.docs.plan != nil {
 		f.PlanFile, f.PlanHash = g.docs.plan.Path, g.docs.plan.Hash
+		f.CauseStatus = workflow.RootCauseStatus(g.docs.plan.Text)
 	}
 	if g.reqOk && g.ws.req != nil {
 		f.ReqBaseline = g.ws.req.Commit
@@ -1006,7 +1025,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	}
 	doc, what := g.docs.req, "requirements"
 	if plan {
-		doc, what = g.docs.plan, "plan"
+		doc, what = g.docs.plan, planWord(g)
 	}
 	onBase := g.docs.baseReq
 	if plan {
@@ -1051,7 +1070,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	}
 	w.mu.Unlock()
 	w.persist(sid)
-	w.approved(sid, g.t, g.head, plan, hash)
+	w.approved(sid, g.t, g.head, plan, hash, what)
 	if unlocked != nil {
 		w.unlocked(sid, g.t, unlocked, "the developer approved the "+what+" again, which clears the tests locked at commit "+shortSHA(unlocked.Commit))
 	}
@@ -1111,7 +1130,17 @@ func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) st
 
 const implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push. Each commit message says what changed and why."
 
+func planWord(g gathered) string {
+	if g.chosen.Profile() == workflow.Incident {
+		return "root cause"
+	}
+	return "plan"
+}
+
 func nextStep(g gathered, plan bool) string {
+	if g.chosen.Profile() == workflow.Incident {
+		return ""
+	}
 	steps := g.eff.Steps
 	has := func(s workflow.Step) bool { return slices.Contains(steps, s) }
 	cmds := g.setup.setup.Workflow.Commands
@@ -1355,10 +1384,10 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	if v.Plan != nil && !g.planOk {
 		v.Holds["approvePlan"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApprovePlan, Hash: v.Plan.Hash})
 		if v.Plan.Reported {
-			v.Holds["approvePlan"] = notCommitted("plan")
+			v.Holds["approvePlan"] = notCommitted(planWord(g))
 		}
 		if v.Plan.OnBase {
-			v.Holds["approvePlan"] = fromBase("plan")
+			v.Holds["approvePlan"] = fromBase(planWord(g))
 		}
 	}
 	return v, nil

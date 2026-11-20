@@ -113,6 +113,13 @@ export function startComposer({ send }: ComposerDeps): Composer {
       box.append(figure)
     })
     box.hidden = attached.length === 0 && files.length === 0
+    paintWarning()
+  }
+
+  function paintWarning() {
+    const d = drafts.get(current.key)
+    const warn = current()?.gate?.effective === 'incident' && !!(d?.images.length || d?.files.length)
+    if (byId('upload-warning').hidden === warn) byId('upload-warning').hidden = !warn
   }
 
   function mention(key: string, path: string) {
@@ -340,6 +347,7 @@ export function startComposer({ send }: ComposerDeps): Composer {
     if (text.disabled !== off) text.disabled = off
     const placeholder = readOnly || (blocked ? 'Answer the card above to keep going' : 'Type a message and press Enter')
     if (text.placeholder !== placeholder) text.placeholder = placeholder
+    paintWarning()
   }
 
   return { swapDraft, dropDraft, grow, paintJump, jump, paint }

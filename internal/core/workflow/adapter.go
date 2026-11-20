@@ -26,6 +26,7 @@ type Documents struct {
 	Feature      string
 	Requirements string
 	Plan         string
+	RootCause    string
 }
 
 var defaultAgents = map[review.Role]string{review.BugHunter: "knackpack:adversarial-reviewer", review.Simplicity: "knackpack:slop-reviewer"}
@@ -42,7 +43,7 @@ var Adapters = map[AdapterID]Adapter{
 		RootArtifacts: map[Step][]string{Define: {KnackpackFeature}, Plan: {KnackpackFeature}},
 		AnyFolder:     ".knackpack/*",
 		Folder:        ".knackpack",
-		Documents:     Documents{Feature: KnackpackFeature, Requirements: "REQUIREMENTS.md", Plan: "PLAN.md"},
+		Documents:     Documents{Feature: KnackpackFeature, Requirements: "REQUIREMENTS.md", Plan: "PLAN.md", RootCause: RootCauseFile},
 	},
 }
 
@@ -73,12 +74,11 @@ func NoAdapter() Adapter {
 }
 
 func Offered(types []WorkType, a Adapter) []WorkType {
-	if a.HasDocuments() {
-		return types
-	}
 	out := make([]WorkType, 0, len(types))
 	for _, t := range types {
-		if !slices.Contains(t.Steps, Define) && !slices.Contains(t.Steps, Plan) {
+		switch {
+		case t.Profile() == Incident && a.Documents.RootCause == "":
+		case a.HasDocuments() || (!slices.Contains(t.Steps, Define) && !slices.Contains(t.Steps, Plan)):
 			out = append(out, t)
 		}
 	}

@@ -659,9 +659,10 @@ function paintChecks(s: Session) {
     node.status = { gate: r, sid: s.sid }
   }
   const turn = turnOf(s)
+  paintFix(gate)
   paintPath(byId('path'), gate, started, byId('path-card'), reviewsActive(s) ? 'verify' : state.connected && working(s) && !waitingOf(s).length ? turn.running || s.step || 'work' : '', !!stageOff(s), turn, pushedHead(s))
   byId('path-section').hidden = !s.gate || pickingSize(s)
-  for (const b of byId('path').querySelectorAll<HTMLButtonElement>('li[data-stage="deliver"] button.stage')) b.hidden = gate?.adapter !== 'knackpack'
+  for (const b of byId('path').querySelectorAll<HTMLButtonElement>('li[data-stage="deliver"] button.stage')) b.hidden = gate?.adapter !== 'knackpack' || ('incident' in b.dataset && gate.effective !== 'incident')
   const size = byId<HTMLSelectElement>('size')
   const types = gate?.types ?? []
   const typesKey = JSON.stringify(types.map(t => [t.id, t.name]))
@@ -686,6 +687,8 @@ function paintChecks(s: Session) {
   const from = (d: WorkflowDoc) => gate?.committed && !d.reported ? ` Read from commit ${shortSha(d.commit || gate.head)} by the engine.` : ''
   const plan = doc && gate?.effective === 'feature' ? doc : null
   byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: `${plan.clipped ? 'The plan is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(plan)}`.trim(), path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '', commit: plan.commit ?? '', approvedAt: plan.approvedAt ?? '', reported: !!plan.reported, onBase: !!plan.onBase }
+  const cause = doc && gate?.effective === 'incident' ? doc : null
+  byId<HTMLElementTagNameMap['sf-approval']>('cause-approval').view = cause && { kind: 'root-cause', note: `${cause.clipped ? 'The root cause is longer than the page shows, so it can\'t be approved as a whole.' : ''}${from(cause)}`.trim(), path: cause.path, text: cause.text, hash: cause.hash, approved: !!cause.approved, changed: !!cause.changed, draft: turn.busy && !cause.approved, disabled: disabled || waiting(s.asked.plan, cause.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === cause.hash ? s.refused.plan.text : '', commit: cause.commit ?? '', approvedAt: cause.approvedAt ?? '', reported: !!cause.reported, onBase: !!cause.onBase }
   byId<HTMLElementTagNameMap['sf-approval']>('approval').planReview = plan ? { run: s.info.review?.planReview ?? null, asking: planAsking.has(s.sid) } : null
   const reqs = gate?.size === 'feature' && gate.requirements?.hash ? gate.requirements : null
   byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: from(reqs).trim(), path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase }
@@ -735,6 +738,19 @@ function paintAdapter(gate: GateEvent | null) {
     b.dataset.command = command
     b.title = `Sends ${command} to this session`
   }
+}
+
+function paintFix(gate: GateEvent | null) {
+  const b = document.querySelector<HTMLButtonElement>('#path li[data-stage="implement"] button[data-fix]')
+  if (!b) return
+  const doc = gate?.effective === 'incident' && gate.planDoc?.approved ? gate.planDoc : null
+  if (!doc) {
+    delete b.dataset.command
+    b.removeAttribute('title')
+    return
+  }
+  b.dataset.command = `/knackpack:fix-incident The developer approved ${doc.path} on the Software Factory page: its committed text has the SHA-256 ${doc.hash}. Run incident-check.sh with KNACKPACK_INCIDENT_APPROVED_SHA256=${doc.hash} in its environment, as in KNACKPACK_INCIDENT_APPROVED_SHA256=${doc.hash} sh "\${CLAUDE_PLUGIN_ROOT}/scripts/incident-check.sh" followed by that file's absolute path.`
+  b.title = 'Sends /knackpack:fix-incident to this session, with the SHA-256 of the root cause you approved'
 }
 
 function setupLines(v: TeamView): HTMLElement[] {
@@ -1073,11 +1089,13 @@ byId('path').addEventListener('click', e => {
 let teamPicks = ''
 
 function paintTeamPicks(s: Session) {
-  const own = (s.gate?.types ?? []).filter(t => !t.builtin)
-  const key = JSON.stringify(own.map(t => [t.id, t.name, t.steps]))
+  const types = s.gate?.types ?? []
+  const own = types.filter(t => !t.builtin)
+  const key = JSON.stringify(types.map(t => [t.id, t.name, t.steps]))
   if (key === teamPicks) return
   teamPicks = key
   const box = byId('size-pick').querySelector('.size-options')!
+  for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-size]:not([data-team])')) b.hidden = !!types.length && !types.some(t => t.id === b.dataset.size)
   for (const b of box.querySelectorAll('button[data-team]')) b.remove()
   for (const t of own) {
     const b = el('button', 'size-option')
@@ -1126,6 +1144,17 @@ byId('req-approval').addEventListener('sf-revise', e => {
   })))
 })
 byId('approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
+byId('cause-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
+byId('cause-approval').addEventListener('sf-revise', e => {
+  const s = current()
+  const path = s?.gate?.planDoc?.path
+  if (!s || !path) return void toast({ title: "This page doesn't know the root cause's file.", description: 'Ask for the change in the conversation instead.', tone: 'warn' })
+  const note = e.detail.note
+  once(s, `revise-cause:${note}`, () => whilePressed(() => send(`/knackpack:debug-incident Correct the diagnosis in ${path}: ${note}`, [], s).then(ok => {
+    if (ok) byId<HTMLElementTagNameMap['sf-approval']>('cause-approval').sent(note)
+    return ok
+  })))
+})
 byId('approval').addEventListener('sf-revise', e => {
   const s = current()
   const path = s?.gate?.planDoc?.path

@@ -247,7 +247,7 @@ func verdict(agent, prompt string, st *stream) reply {
 	if has("READ-OUTSIDE") {
 		r.denials = []denial{{ToolName: "Read", ToolUseID: "fake", ToolInput: map[string]any{"file_path": "/home/reviewer/.claude/.credentials.json"}}}
 	}
-	report := "/tmp/review-report-" + strings.ReplaceAll(strings.TrimPrefix(agent, "knackpack:"), ":", "-") + "/report.md\n" + seen(prompt) + earlier(prompt) + longReport()
+	report := "/tmp/review-report-" + strings.ReplaceAll(strings.TrimPrefix(agent, "knackpack:"), ":", "-") + "/report.md\n" + seen(prompt) + earlier(prompt) + approvedSeen(prompt) + longReport()
 	if has("SLOW-REVIEW") {
 		st.slow(slowness())
 	}
@@ -309,6 +309,18 @@ func earlier(prompt string) string {
 			state = "present"
 		}
 		out.WriteString("\n" + name + ": " + state)
+	}
+	return out.String()
+}
+
+func approvedSeen(prompt string) string {
+	var out strings.Builder
+	if strings.Contains(prompt, "fixes a production incident") {
+		out.WriteString("\nIncident fix: the prompt says so")
+	}
+	entries, _ := os.ReadDir("approved")
+	for _, e := range entries {
+		out.WriteString("\napproved/" + e.Name() + ": present")
 	}
 	return out.String()
 }

@@ -412,6 +412,11 @@ func answer(id json.RawMessage, text string) bool {
 	if scripted(id, text) {
 		return true
 	}
+	if said, ok := incidentLine(text); ok {
+		chunk(said)
+		reply(id, map[string]any{"stopReason": "end_turn"})
+		return true
+	}
 	if tool := toolNamed(text); tool != "" {
 		args := toolArgs(tool, text)
 		go func() {

@@ -35,7 +35,10 @@ const (
 	Docs       Profile = "docs"
 	Exploring  Profile = "explore"
 	CodeReview Profile = "review"
+	Incident   Profile = "incident"
 )
+
+const IncidentType = "incident"
 
 type WorkType struct {
 	ID      string
@@ -50,6 +53,7 @@ type WorkType struct {
 var Builtin = []WorkType{
 	{ID: "feature", Name: "Feature", Steps: []Step{Define, Plan, Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
 	{ID: "fix", Name: "Fix", Steps: []Step{Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
+	{ID: IncidentType, Name: "Incident", Steps: []Step{Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
 	{ID: "docs", Name: "Docs only", Steps: []Step{Implement, Review, Deliver}, Edits: DocsEdits, Push: true, Roles: []review.Role{review.Simplicity}, Builtin: true},
 	{ID: "explore", Name: "Exploring", Steps: []Step{Implement}, Edits: AnyEdits, Roles: []review.Role{}, Builtin: true},
 }
@@ -76,6 +80,8 @@ func (t WorkType) Profile() Profile {
 		return CodeReview
 	case !t.Push:
 		return Exploring
+	case t.Builtin && t.ID == IncidentType:
+		return Incident
 	case slices.Contains(t.Steps, Plan):
 		return Feature
 	case t.Edits == DocsEdits:

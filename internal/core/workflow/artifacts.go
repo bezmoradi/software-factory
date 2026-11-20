@@ -8,7 +8,11 @@ import (
 	"strings"
 )
 
-const KnackpackFeature = ".knackpack/feature.json"
+const (
+	KnackpackFeature = ".knackpack/feature.json"
+	RootCauseFile    = "ROOT-CAUSE.md"
+	Confirmed        = "CONFIRMED"
+)
 
 var featureName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
@@ -89,4 +93,22 @@ func AgentProblems(t *Team, installed []string) []string {
 		check("agents", a)
 	}
 	return out
+}
+
+func RootCauseStatus(text string) string {
+	under := false
+	blank := func(r rune) bool { return r == ' ' || r == '\t' }
+	for l := range strings.SplitSeq(text, "\n") {
+		switch {
+		case !under:
+			under = strings.TrimRight(l, " \t") == "## Status"
+		case strings.HasPrefix(l, "#"):
+			return ""
+		default:
+			if f := strings.FieldsFunc(l, blank); len(f) > 0 {
+				return f[0]
+			}
+		}
+	}
+	return ""
 }

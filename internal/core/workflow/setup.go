@@ -190,8 +190,11 @@ func Required(s Setup, t WorkType, files []string) []Requirement {
 		}
 	}
 	article := "a "
-	if t.ID == "docs" {
+	switch t.ID {
+	case "docs":
 		article = ""
+	case IncidentType:
+		article = "an "
 	}
 	for _, r := range t.Roles {
 		add(Requirement{Agent: s.Roles[r], Role: r, Why: "Needed for " + article + t.Name + ", as its " + r.Name()})

@@ -55,6 +55,9 @@ func fixName(kind workflow.WorkType) string {
 	if kind.ID == "fix" {
 		return "A Fix"
 	}
+	if kind.Profile() == workflow.Incident {
+		return "An Incident's fix"
+	}
 	return "Work of type " + clip(kind.Name, 60) + ", which gets a Fix's checks,"
 }
 
@@ -118,7 +121,7 @@ func (w *Work) typeChange(repo string, kind workflow.WorkType, protect []string,
 			out.Lines = append(out.Lines, typeLine("Files that match the protect list of the team file on main, which Claude Code's file tools ask the person about before each write; a shell command or another agent doesn't ask", files))
 		}
 	}
-	if specs && listed && kind.Profile() == workflow.Fix {
+	if p := kind.Profile(); specs && listed && (p == workflow.Fix || p == workflow.Incident) {
 		l := w.loosenings(repo, base, head, changes)
 		what := fixName(kind) + " that loosens the specifications: in each file listed, the engine's line counts found new waivers, fewer scenarios or table rows, new declared reads or shows, or new expect_logs entries, which a fix rarely needs; the counts read lines, not YAML, so one can be wrong"
 		if l.unread > 0 {

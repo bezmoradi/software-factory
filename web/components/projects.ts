@@ -168,7 +168,7 @@ class DispatchForm {
     this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
     this.kind.name = 'type'
     this.kind.setAttribute('aria-label', 'Work type')
-    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['docs', 'Docs only'], ['explore', 'Exploring']])
+    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['incident', 'Incident'], ['docs', 'Docs only'], ['explore', 'Exploring']])
     this.agent.name = 'agent'
     this.agent.setAttribute('aria-label', 'Agent')
     const list = starters.length ? starters : [{ id: 'claude', name: 'Claude Code', method: 'plugin', enabled: true }]
@@ -223,7 +223,13 @@ class DispatchForm {
     this.pair = new PairField(list, MODELS)
     sync()
     this.bench = new BenchmarkField(path)
-    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, this.from.box, this.caps, note)
+    const deployed = el('p', 'small warn', "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause.")
+    deployed.hidden = true
+    this.kind.addEventListener('change', () => {
+      deployed.hidden = this.kind.value !== 'incident'
+      if (!deployed.hidden) this.advanced.open = true
+    })
+    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, deployed, this.from.box, this.caps, note)
     this.advanced.open = !!this.from.value()
     this.form.append(row, this.why, this.advanced)
     this.form.append(this.issue)

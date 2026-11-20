@@ -24,6 +24,7 @@ const (
 
 type ApprovedText struct {
 	Steps    bool
+	Incident bool
 	Files    []SnapshotFile
 	Unkept   []string
 	Withheld []string
@@ -80,7 +81,7 @@ func (a ApprovalGiven) hold(entries map[review.Key]ReviewEntry, branch, head str
 }
 
 const (
-	approvalHeldWhy = "it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+	approvalHeldWhy = "it reviewed before the current approval of the requirements, the plan or the root cause, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 	teamHeldWhy     = "the team rules changed since it reviewed: the per-path rules of the approved " + TeamFile + " that apply to this change aren't the ones it was given, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 )
 
@@ -106,10 +107,11 @@ func (w *Work) ApprovedFor(ctx context.Context, sid string, t PushTarget, head, 
 
 func (w *Work) approvedOf(g gathered) ApprovedText {
 	ws := g.ws
-	if !slices.Contains(g.eff.Steps, workflow.Define) && !slices.Contains(g.eff.Steps, workflow.Plan) {
+	incident := g.eff.Profile() == workflow.Incident
+	if !incident && !slices.Contains(g.eff.Steps, workflow.Define) && !slices.Contains(g.eff.Steps, workflow.Plan) {
 		return ApprovedText{}
 	}
-	out := ApprovedText{Steps: true}
+	out := ApprovedText{Steps: true, Incident: incident}
 	names := g.setup.setup.Workflow.Documents
 	add := func(what, name, from, text string) {
 		if secretText(text) {
@@ -131,6 +133,16 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 			hash = a.Hash
 		}
 		out.given = append(out.given, what+" unkept "+hash)
+	}
+	if incident {
+		switch {
+		case !g.planOk:
+		case g.docs.held && g.docs.plan != nil && !g.docs.plan.Clipped:
+			add("root cause", approvedName(names.RootCause, "root-cause.md"), "as the engine read it from commit "+g.docs.plan.Commit, g.docs.plan.Text)
+		default:
+			unkept("root cause", ws.plan)
+		}
+		return out
 	}
 	if g.reqOk {
 		name := approvedName(names.Requirements, "requirements.md")
