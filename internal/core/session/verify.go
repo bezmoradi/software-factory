@@ -161,6 +161,7 @@ type VerifyPage interface {
 	View(ctx context.Context, sid string) (VerifyView, error)
 	Start(ctx context.Context, sid string, kind VerifyKind, by string) (VerifyRun, error)
 	Stop(ctx context.Context, sid, id string) error
+	MainVerifyPage
 }
 
 type VerifyConfig struct {
@@ -171,6 +172,7 @@ type VerifyConfig struct {
 	Targets func(sid string) (PushTarget, bool)
 	Project func(name string) (ProjectID, ProjectCommands, bool)
 	Kinds   func(project string) []string
+	Mains   MainRepos
 	Audit   Audit
 	Base    context.Context
 	Now     func() time.Time
@@ -198,6 +200,7 @@ type Verifier struct {
 	dropped    []queuedVerify
 	noted      map[string]bool
 	starting   map[string]string
+	mains      map[string]bool
 	ready      func(ctx context.Context, sid, head string) bool
 	commitDone func(commit string)
 	done       func(sid, head string)
@@ -396,7 +399,7 @@ func (v *Verifier) project(name string) (ProjectID, ProjectCommands, bool) {
 
 func (v *Verifier) latestLocked(id ProjectID, commit string, kind VerifyKind) (VerifyRun, bool) {
 	for _, r := range slices.Backward(v.runs) {
-		if r.Project == id && r.Commit == commit && r.Kind == kind {
+		if r.SID != "" && r.Project == id && r.Commit == commit && r.Kind == kind {
 			return r, true
 		}
 	}
@@ -406,7 +409,7 @@ func (v *Verifier) latestLocked(id ProjectID, commit string, kind VerifyKind) (V
 func (v *Verifier) currentLocked(id ProjectID, commit string, kind VerifyKind, cmds ProjectCommands) (VerifyRun, bool) {
 	hash, digest := commandHash(cmds.Check), VerifyDigest(cmds.Image)
 	for _, r := range slices.Backward(v.runs) {
-		if r.Project == id && r.Commit == commit && r.Kind == kind && r.CommandHash == hash && digest != "" && VerifyDigest(r.Image) == digest {
+		if r.SID != "" && r.Project == id && r.Commit == commit && r.Kind == kind && r.CommandHash == hash && digest != "" && VerifyDigest(r.Image) == digest {
 			return r, true
 		}
 	}
@@ -707,7 +710,7 @@ func (v *Verifier) attempt(ctx context.Context, rec VerifyRun, t PushTarget, com
 		}
 	}
 	v.mu.Unlock()
-	v.notify(rec.SID)
+	v.notifyRun(rec)
 	deadline := v.cfg.Now().Add(info.Limit + verifySlack)
 	var st VerifierState
 	fails := 0
@@ -871,14 +874,14 @@ func (v *Verifier) finish(ctx context.Context, run string, end verifyEnd) {
 	v.save()
 	v.audit(ctx, done, "ended")
 	shared.For(ctx, v.cfg.Logger).Info("verify", "event", "ended", "run", run, "state", done.State, "code", done.Code)
-	v.notify(done.SID)
-	if fn != nil && v.cfg.Base.Err() == nil {
+	v.notifyRun(done)
+	if fn != nil && v.cfg.Base.Err() == nil && done.SID != "" {
 		fn(done.SID, done.Commit)
 	}
 	v.mu.Lock()
 	others := v.commitDone
 	v.mu.Unlock()
-	if others != nil && v.cfg.Base.Err() == nil {
+	if others != nil && v.cfg.Base.Err() == nil && done.SID != "" {
 		others(done.Commit)
 	}
 	v.serveQueue(shared.WithRequest(v.cfg.Base, shared.RequestOf(ctx)))

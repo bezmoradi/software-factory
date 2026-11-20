@@ -1,6 +1,7 @@
 package page
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"time"
@@ -74,6 +75,11 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 		return
 	}
 	op, okOp := body["op"].(string)
+	_, hasRepo := body["repo"]
+	if okOp && hasRepo {
+		s.verifyMain(w, r, body, op)
+		return
+	}
 	sid, okSID := viewSession(body)
 	if !okOp || !okSID {
 		refuse(w, http.StatusBadRequest, "fields")
@@ -116,6 +122,49 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 		return
 	}
 	v, err := s.verify.View(r.Context(), sid)
+	if err != nil {
+		code, p := status(err)
+		send(w, code, p)
+		return
+	}
+	send(w, http.StatusOK, verifyViewJSONOf(v))
+}
+
+func (s *Server) verifyMain(w http.ResponseWriter, r *http.Request, body map[string]any, op string) {
+	repo, okRepo := body["repo"].(string)
+	if _, hasSID := body["sid"]; hasSID || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
+		refuse(w, http.StatusBadRequest, "fields")
+		return
+	}
+	switch op {
+	case "read":
+		if !keysWithin(body, "op", "repo") {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+	case "start":
+		kind, okKind := body["kind"].(string)
+		if !keysWithin(body, "op", "repo", "kind") || !okKind || len(kind) > 20 {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
+		ctx, cancel := context.WithTimeout(r.Context(), manageFor)
+		defer cancel()
+		run, err := s.verify.StartMain(ctx, repo, session.VerifyKind(kind), session.VerifyByPage)
+		shared.For(r.Context(), s.logger).Info("verify", "op", op, "on", "main", "ok", err == nil)
+		if err != nil {
+			code, p := status(err)
+			send(w, code, p)
+			return
+		}
+		send(w, http.StatusAccepted, map[string]string{"id": run.ID, "commit": run.Commit})
+		return
+	default:
+		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads and starts a project's verification runs on main only."})
+		return
+	}
+	v, err := s.verify.ViewMain(r.Context(), repo)
 	if err != nil {
 		code, p := status(err)
 		send(w, code, p)

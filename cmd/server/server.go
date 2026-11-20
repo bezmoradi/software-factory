@@ -574,7 +574,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.reviewing() != nil {
 		srv.UseWholeReplies(parts.dispatcher)
 	}
-	useChangeFacts(sends, srv, reg, parts, cfg, logger)
+	facts := useChangeFacts(sends, srv, reg, parts, cfg, logger)
 	if parts.dispatcher != nil {
 		kctx, cancelKeys := context.WithTimeout(ctx, keysAtStart)
 		parts.dispatcher.ReconcileKeys(kctx)
@@ -588,7 +588,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		reg.DropStrayNotes()
 	}
 	work := useSessionWork(sends, srv, reg, parts, cfg, logger)
-	useVerify(sends, srv, reg, parts, work, cfg, logger)
+	useVerify(sends, srv, reg, parts, work, facts, cfg, logger)
 	parts.useHalt(reg, cfg, logger)
 	ws := newWorkspace(parts, cfg, logger)
 	parts.useLimits(reg, cfg, ws, logger)

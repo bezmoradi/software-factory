@@ -11,7 +11,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useVerify(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, work *session.SessionWork, cfg PageConfig, logger shared.Logger) {
+func useVerify(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, work *session.SessionWork, facts *session.ProjectFacts, cfg PageConfig, logger shared.Logger) {
 	host, ok := parts.boxes.(session.VerifierHost)
 	if !ok || work == nil || parts.dispatcher == nil || cfg.Verify == "" {
 		logger.Info("verify", "event", "off")
@@ -24,8 +24,17 @@ func useVerify(base context.Context, srv *page.Server, reg *session.Registry, pa
 	if parts.work != nil {
 		vc.Kinds = parts.work.VerifyKinds
 	}
+	if parts.repos != nil {
+		vc.Mains = parts.repos
+	}
 	v := session.NewVerifier(reg, vc)
 	parts.dispatcher.OnRemoved(v.Forget)
+	if parts.repos != nil {
+		parts.repos.OnRemoved(v.ForgetMain)
+	}
+	if facts != nil {
+		facts.UseVerified(v.MainLine)
+	}
 	if parts.pushes != nil {
 		parts.pushes.UseVerify(v)
 		v.OnDone(parts.pushes.ReviewDone)

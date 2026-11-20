@@ -13,9 +13,9 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) *session.ProjectFacts {
 	if parts.dispatcher == nil || parts.repos == nil {
-		return
+		return nil
 	}
 	reg.WatchWorktrees(session.WorktreeWatch{Targets: parts.dispatcher.PushTarget, Heads: files.Reviews{}, Reader: files.Worktrees{Workspace: cfg.Workspace},
 		Commits: files.Reader{}, History: files.Reader{}, Main: parts.repos.Main})
@@ -45,4 +45,5 @@ func useChangeFacts(base context.Context, srv *page.Server, reg *session.Registr
 			parts.work.OnLockMoved(parts.pushes.LockMoved)
 		}
 	}
+	return facts
 }

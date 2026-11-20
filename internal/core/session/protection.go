@@ -83,6 +83,8 @@ type ProjectFacts struct {
 	loaded  bool
 	on      map[string]bool
 	removed []RemovedProject[bool]
+
+	verified func(project, main string) ReadinessLine
 }
 
 var _ ProjectData = (*ProjectFacts)(nil)

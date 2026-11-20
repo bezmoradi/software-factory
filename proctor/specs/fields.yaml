@@ -107,6 +107,12 @@ tables:
       - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
       - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
       - ["fld_verify_stop_id", "/api/verify", { op: stop, sid: "00000000-0000-4000-8000-000000000000", id: xyz }, "fields"]
+      - ["fld_verify_main_both", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", repo: demo, kind: check }, "fields"]
+      - ["fld_verify_main_repo", "/api/verify", { op: start, repo: 5, kind: check }, "fields"]
+      - ["fld_verify_main_name", "/api/verify", { op: read, repo: "../demo" }, "fields"]
+      - ["fld_verify_main_extra", "/api/verify", { op: start, repo: demo, kind: check, proctorUnknownField: true }, "fields"]
+      - ["fld_verify_main_no_kind", "/api/verify", { op: start, repo: demo }, "fields"]
+      - ["fld_verify_main_read_extra", "/api/verify", { op: read, repo: demo, kind: check }, "fields"]
       - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields"]
 
   - id: FLD-T01R
@@ -165,6 +171,8 @@ tables:
       - ["msg_keep_op", "/api/keep", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads its copy of a session's commits and restores the branch from it only."]
       - ["msg_verify_op", "/api/verify", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, starts and stops a session's verification runs only."]
       - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "kind", "The engine runs one kind of verification: check."]
+      - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
+      - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs one kind of verification: check."]
       - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
 
   - id: FLD-T02R

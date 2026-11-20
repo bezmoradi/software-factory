@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
 )
@@ -20,6 +21,7 @@ const (
 	ReadyCI           = "ci"
 	ReadyLint         = "lint"
 	ReadyCheck        = "check"
+	ReadyVerified     = "verified"
 	ReadyTeam         = "team"
 	ReadyProtection   = "protection"
 
@@ -45,6 +47,12 @@ type ReadinessLine struct {
 	State string
 	Found []string
 	Note  string
+
+	Commit string
+	At     time.Time
+	Result string
+	Code   int
+	Tail   string
 }
 
 var (
@@ -238,8 +246,24 @@ func (f *ProjectFacts) readiness(r Repository, main string, workflows []Workflow
 	if main == "" && ci == "" {
 		ci = unknown
 	}
-	out = append(out, ciLine(workflows, ci), checkLine(check), protectionLine(p))
-	order := []string{ReadyInstructions, ReadyTests, ReadyCI, ReadyLint, ReadyCheck, ReadyTeam, ReadyProtection}
+	out = append(out, ciLine(workflows, ci), checkLine(check), protectionLine(p), f.verifiedLine(r.Name, main))
+	order := []string{ReadyInstructions, ReadyTests, ReadyCI, ReadyLint, ReadyCheck, ReadyVerified, ReadyTeam, ReadyProtection}
 	slices.SortStableFunc(out, func(a, b ReadinessLine) int { return slices.Index(order, a.Kind) - slices.Index(order, b.Kind) })
 	return out
+}
+
+func (f *ProjectFacts) UseVerified(line func(project, main string) ReadinessLine) {
+	f.mu.Lock()
+	f.verified = line
+	f.mu.Unlock()
+}
+
+func (f *ProjectFacts) verifiedLine(project, main string) ReadinessLine {
+	f.mu.Lock()
+	line := f.verified
+	f.mu.Unlock()
+	if line == nil {
+		return ReadinessLine{Kind: ReadyVerified, State: ReadyUnknown, Commit: main, Note: "This engine runs no verification, so nothing ran the check on main."}
+	}
+	return line(project, main)
 }

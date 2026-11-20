@@ -165,6 +165,7 @@ function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'keep') return void keepPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
+  if ((ev as { type?: unknown }).type === 'verify' && typeof (ev as { repo?: unknown }).repo === 'string') return void byId<HTMLElementTagNameMap['sf-projects']>('projects').verifiedOnMain(String((ev as { repo?: unknown }).repo))
   if ((ev as { type?: unknown }).type === 'verify') return void verifyPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {

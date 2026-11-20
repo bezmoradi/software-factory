@@ -64,7 +64,7 @@ type verifyRunsJSON struct {
 
 func validVerifyRun(r verifyRunJSON) bool {
 	image, okImage := session.CheckVerifyImage(r.Image)
-	return verifyRunID.MatchString(r.ID) && validProject(session.ProjectID{Name: r.Project, URL: r.URL}) && sessionID.MatchString(r.SID) &&
+	return verifyRunID.MatchString(r.ID) && validProject(session.ProjectID{Name: r.Project, URL: r.URL}) && (r.SID == "" || sessionID.MatchString(r.SID)) &&
 		commitID.MatchString(r.Commit) && r.Kind == string(session.VerifyCheck) && verifyHash.MatchString(r.CommandHash) &&
 		okImage && image != "" && verifyImageID.MatchString(r.ImageID) && verifyStates[r.State] &&
 		(r.By == session.VerifyByPage || r.By == session.VerifyByEngine) && cleanText(r.Branch, 400) &&

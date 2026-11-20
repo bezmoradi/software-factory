@@ -522,6 +522,10 @@ class SfProjects extends HTMLElement {
     this.#setBusy(false)
   }
 
+  verifiedOnMain(repo: string) {
+    for (const panel of this.#facts.values()) if (panel.repo === repo) panel.refresh()
+  }
+
   say(path: string, text: string, bad = false) {
     this.#message = { path, text, bad }
     this.#render()

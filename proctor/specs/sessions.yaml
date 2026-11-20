@@ -1760,3 +1760,153 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: SES-005
+    name: "A run of the check on main fetches main and runs in the same verification container as a session's run, with no session, one at a time per project, and is refused with no check command"
+    steps:
+      - id: main-without-check
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, repo: demo, kind: check }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: no-check, message: "Set a check command first: this project has none, so there is nothing to run on main. Set one under Check and setup commands on the project's card." }
+      - id: main-unverified
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, repo: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.command": ""
+            "$.body.hasCheck": false
+            "$.body.image": ""
+            "$.body.required": false
+            "$.body.queued": false
+            "$.body.current": null
+          matches: { "$.body.head": "[0-9a-f]{40}" }
+      - id: helper-image
+        do: docker.container
+        with: { name: sf-proctor-helper-1 }
+        expect:
+          equal: { "$.found": true }
+        save: { helper_image: "$.container.image" }
+      - id: set-main-check
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+      - id: main-check-read-back
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, name: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.image": "proctor@${helper_image}"
+      - id: main-start
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, repo: demo, kind: check }
+        expect:
+          equal:
+            "$.status": 202
+          matches: { "$.body.id": "[0-9a-f]{16}", "$.body.commit": "[0-9a-f]{40}" }
+        save: { run: "$.body.id", commit: "$.body.commit" }
+      - id: main-second
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, repo: demo, kind: check }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: running, message: "A run of the check on main is running for this project. Wait for it." }
+      - id: main-container
+        do: docker.container
+        with: { name: "sf-proctor-verify-${run}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image": "${helper_image}"
+            "$.container.user": "10006:10006"
+            "$.container.readonly_rootfs": true
+            "$.container.network_mode": none
+            "$.container.docker_socket": false
+            "$.container.mounts":
+              - { type: volume, destination: /in, read_only: true, volume: sf-proctor_verify, subpath: "${run}", source: null }
+      - id: main-container-gone
+        do: docker.container
+        with: { name: "sf-proctor-verify-${run}" }
+        eventually: { within: 90s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: clear-main-commands
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "", setup: "", image: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "", setup: "", image: "", max: 300, maxImage: 300 }
+      - id: main-cleared
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, name: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.check": ""
+      - id: main-recorded
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, repo: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.head": "${commit}"
+            "$.body.current": null
+            "$.body.runs[0].id": "${run}"
+            "$.body.runs[0].commit": "${commit}"
+            "$.body.runs[0].by": page
+            "$.body.runs[0].image": "proctor@${helper_image}"
+            "$.body.why": "The check command or the project's verification image changed since the last run, so it doesn't count."
