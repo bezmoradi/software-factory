@@ -46,6 +46,8 @@ func main() {
 		err = errUsage
 	case len(os.Args) > 1 && os.Args[1] == "token-expiry":
 		err = expiryCommand(root, os.Args[1:])
+	case len(os.Args) > 1 && os.Args[1] == "knackpack":
+		err = knackpackCommand(root, os.Args[1:])
 	case len(os.Args) > 1 && (os.Args[1] == "release" || os.Args[1] == "release-answer" || os.Args[1] == "release-seen"):
 		err = releaseCommand(root, os.Args[1:])
 	default:
@@ -145,6 +147,9 @@ func serve(root string) error {
 		}
 		log.Print("seeded demo.git")
 	}
+	if err := seedKnackpack(root); err != nil {
+		return err
+	}
 	cert, err := certificates(env("GITSERVER_CA_DIR", "/srv/ca"), strings.Split(env("GITSERVER_NAMES", "gitserver.test,gitserver,localhost"), ","))
 	if err != nil {
 		return err
@@ -161,6 +166,7 @@ func serve(root string) error {
 	mux.Handle("/api/graphql", graphql{root: root, token: token})
 	mux.Handle("/osv/", osvFake{root: root})
 	mux.Handle("/release-api/", releaseFake{root: root})
+	mux.Handle(knackpackPublic+"/", knackpackHandler(backend))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, pass, ok := r.BasicAuth(); !ok || pass != token {
 			log.Printf("%s %s refused: no or wrong token", r.Method, r.URL.Path)

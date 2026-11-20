@@ -36,7 +36,7 @@ var (
 		{devReviewMinutes, numberWithin(1, 19)},
 	}
 	namedSettings = []string{"SF_PAGE_HOST", "SF_PAGE_NAME", "SF_COMPOSE_PROJECT", "SF_REVIEWS", "SF_REVIEWER_PROXY", "SF_HELPER", "SF_BOX_SUBNETS", "SF_EGRESS_PROXY", "SF_EGRESS_STATUS",
-		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_AGENTS_INSTALL", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER", devUpdateAPI}
+		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_AGENTS_INSTALL", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER", devUpdateAPI, devKnackpackURL}
 	digits     = regexp.MustCompile(`^[0-9]{1,9}$`)
 	umaskDigit = regexp.MustCompile(`^0?[0-7]{3}$`)
 )
@@ -103,7 +103,40 @@ func kernelRelease() string {
 	return strings.TrimSpace(string(data))
 }
 
-func versionsShown(helper session.Boxes) func(ctx context.Context) []session.DiagFact {
+func pluginFacts(pins *npm.Plugins) []session.DiagFact {
+	if pins == nil {
+		return nil
+	}
+	var out []session.DiagFact
+	for _, p := range pins.List() {
+		name := strings.ToLower(p.ID)
+		installed := "not installed"
+		if cur, ok := pins.Current(p.ID); ok {
+			installed = strings.TrimSpace(cur.Version + " " + cur.Commit)
+			switch {
+			case cur.Failing != "":
+				installed += " fails-install-checks"
+			case cur.Refused:
+				installed += " refused"
+			}
+		}
+		check, running := pins.LastCheck(p.ID)
+		result := check.Result
+		switch {
+		case running:
+			result = session.PluginChecking
+		case result == "":
+			result = "none"
+		}
+		out = append(out,
+			session.DiagFact{Name: name, Value: installed},
+			session.DiagFact{Name: name + " follows", Value: p.Branch},
+			session.DiagFact{Name: name + " last check", Value: result})
+	}
+	return out
+}
+
+func versionsShown(helper session.Boxes, pins *npm.Plugins) func(ctx context.Context) []session.DiagFact {
 	return func(ctx context.Context) []session.DiagFact {
 		out := []session.DiagFact{
 			{Name: "go", Value: runtime.Version()},
@@ -113,9 +146,7 @@ func versionsShown(helper session.Boxes) func(ctx context.Context) []session.Dia
 		for _, a := range npm.Pinned {
 			out = append(out, session.DiagFact{Name: "pinned " + strings.ToLower(a.ID), Value: a.Version})
 		}
-		for _, p := range npm.PinnedPlugins {
-			out = append(out, session.DiagFact{Name: "pinned " + strings.ToLower(p.ID), Value: p.Version + " " + p.Commit})
-		}
+		out = append(out, pluginFacts(pins)...)
 		if helper == nil {
 			return append(out, session.DiagFact{Name: "box helper", Value: "off"})
 		}
@@ -144,7 +175,7 @@ func versionsShown(helper session.Boxes) func(ctx context.Context) []session.Dia
 func diagnosticsPage(parts engineParts, reg *session.Registry, updates session.UpdatesPage, logger shared.Logger) session.DiagnosticsPage {
 	shown := settingsShown(os.Getenv)
 	settings := func() []session.DiagFact { return append(shown(), updateFacts(updates)...) }
-	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes), Settings: settings, Sessions: reg.Sessions}
+	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes, parts.plugins), Settings: settings, Sessions: reg.Sessions}
 	if parts.repos != nil {
 		cfg.Projects = parts.repos.List
 	}

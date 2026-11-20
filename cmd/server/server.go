@@ -344,11 +344,10 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		logger.Warn("development ACP agent switched on", "variable", "SF_DEV_ACP_AGENT")
 	}
 	devChecks := devCheckKeys(cfg.DevACPAgent, developmentImage(boxes.DevMarker), logger)
-	docs := docsInRepo()
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, docs, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, reg, repos, reviews, pins, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -374,13 +373,14 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Expected:     expected,
 		Work:         work,
 		Workflow:     knackpackDir(pins),
+		Refused:      knackpackRefused(pins),
 		Workspace:    cfg.Workspace,
 		Runs:         state.NewSessions(cfg.StateDir),
 		Versions:     agentVersions,
 		Note:         reg.NoteFor("restart"),
 		Audit:        state.NewAudit(cfg.StateDir),
 		Identity:     identity,
-		DocsInRepo:   docs,
+		DocsInRepo:   true,
 		KeyRoutes:    state.NewKeyRoutes(cfg.StateDir),
 		DevChecks:    devChecks,
 		Logger:       logger,
@@ -569,6 +569,9 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	parts.useHalt(reg, cfg, logger)
 	ws := newWorkspace(parts, cfg, logger)
 	parts.useLimits(reg, cfg, ws, logger)
+	if parts.plugins != nil {
+		_ = parts.plugins.VerifyInstalled(npm.Knackpack.ID)
+	}
 	go parts.settle(sends, state.NewAudit(cfg.StateDir))
 	useAgentReports(sends, srv, parts, cfg, logger)
 	useViews(srv, parts, cfg, reg, ws, logger)
@@ -666,15 +669,28 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 			}
 		}()
 	}
+	switch {
+	case parts.plugins == nil:
+	case parts.dispatcher != nil && parts.dispatcher.RunsUnread():
+		logger.Warn("plugin install", "event", "prune-skipped", "plugin", npm.Knackpack.ID, "why", "the saved sessions couldn't be read, so the engine can't tell which old commit folders they still run")
+	default:
+		var keep []string
+		if parts.dispatcher != nil {
+			keep = parts.dispatcher.WorkflowCommits()
+		}
+		pctx, cancelPrune := context.WithTimeout(ctx, time.Minute)
+		if err := parts.plugins.Prune(pctx, npm.Knackpack.ID, keep); err != nil {
+			logger.Warn("plugin install", "event", "prune-failed", "plugin", npm.Knackpack.ID)
+		}
+		cancelPrune()
+	}
 	if parts.installer != nil && cfg.Install.AtStart {
 		go func() {
 			if err := parts.installer.InstallMissing(ctx, nil); err != nil {
 				logger.Warn("agent install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
 			}
 			if parts.plugins != nil {
-				if err := parts.plugins.InstallMissing(ctx, nil); err != nil {
-					logger.Warn("plugin install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
-				}
+				_, _ = parts.plugins.Update(ctx, npm.Knackpack.ID, nil)
 				parts.catalogs.Load()
 			}
 		}()

@@ -11,6 +11,7 @@ base=http://127.0.0.1:$port
 origin=$base
 demo_url=https://gitserver.test:8443/dev/demo.git
 demo_path=/workspace/base/demo
+knackpack_url=https://gitserver.test:8443/public/knackpack.git
 box_subnets=10.213.15.240/28
 gid=""
 
@@ -49,7 +50,7 @@ run_compose() {
 		${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} ${DOCKER_CERT_PATH:+DOCKER_CERT_PATH="$DOCKER_CERT_PATH"} \
 		${DOCKER_TLS_VERIFY:+DOCKER_TLS_VERIFY="$DOCKER_TLS_VERIFY"} \
 		COMPOSE_PROJECT_NAME="$project" SF_PORT="$port" SF_DOCKER_GID="$gid" SF_NO_UPDATE_CHECK=1 SF_OSV=off \
-		SF_BOX_SUBNETS="$box_subnets" \
+		SF_BOX_SUBNETS="$box_subnets" SF_DEV_KNACKPACK_URL="$knackpack_url" \
 		${SF_BOX_SWEEP_DRY:+SF_BOX_SWEEP_DRY="$SF_BOX_SWEEP_DRY"} \
 		docker compose -p "$project" --project-directory "$repo" \
 		-f "$repo/compose.yaml" -f "$repo/compose.dev.yaml" -f "$here/compose.proctor.yaml" "$@"

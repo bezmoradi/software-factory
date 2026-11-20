@@ -23,18 +23,12 @@ func Rerunnable(e ReviewEntry) bool {
 	return e.Record.State == review.Unknown && (e.Record.Channel == review.BelowMinimum || e.Record.Channel == review.Unchecked || e.Record.Channel == review.ApprovalChanged)
 }
 
-func versionsOf(e ReviewEntry) review.Versions {
-	plugin := e.PluginCommit
-	if e.Record.Provider == UploadedProvider {
-		plugin = e.Key.Agent
-	}
-	return review.Versions{ClaudeCode: e.ClaudeCode, Plugin: plugin}
-}
-
 func (r *Reviews) Current() (string, string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.claude, r.cfg.PluginCommit
+	claude := r.claude
+	r.mu.Unlock()
+	_, commit, _ := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
+	return claude, commit
 }
 
 func (r *Reviews) reviewerVersion(ctx context.Context) string {
@@ -76,8 +70,11 @@ func (r *Reviews) readVersion(ctx context.Context) string {
 }
 
 func (r *Reviews) passHeld(e ReviewEntry) (review.Channel, string) {
-	if why := r.cfg.Minimum.Below(versionsOf(e), e.Record.Provider != UploadedProvider); why != "" {
+	if why := r.cfg.Minimum.Below(review.Versions{ClaudeCode: e.ClaudeCode}); why != "" {
 		return review.BelowMinimum, "the reviewer that made it is older than the minimum this engine accepts (" + why + "), so the pass doesn't count; it runs again when the agent next asks to push or the person presses Review"
+	}
+	if e.Record.Provider != UploadedProvider && r.cfg.Minimum.RefusedPlugin(e.PluginCommit) {
+		return review.BelowMinimum, "it was made with knackpack commit " + shortSHA7(e.PluginCommit) + ", which this engine refuses, so the pass doesn't count; it runs again when the agent next asks to push or the person presses Review"
 	}
 	return "", ""
 }

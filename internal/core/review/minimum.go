@@ -1,6 +1,7 @@
 package review
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -14,24 +15,22 @@ const (
 
 type Versions struct {
 	ClaudeCode string
-	Plugin     string
 }
 
 type Minimum struct {
-	ClaudeCode string
-	Plugin     string
-	Pinned     string
+	ClaudeCode     string
+	RefusedPlugins []string
 }
 
-func (m Minimum) Below(v Versions, plugin bool) string {
-	var parts []string
+func (m Minimum) RefusedPlugin(commit string) bool {
+	return commit != "" && slices.Contains(m.RefusedPlugins, commit)
+}
+
+func (m Minimum) Below(v Versions) string {
 	if m.ClaudeCode != "" && Older(v.ClaudeCode, m.ClaudeCode) {
-		parts = append(parts, "its Claude Code "+orUnknown(v.ClaudeCode)+" is older than the minimum "+m.ClaudeCode)
+		return "its Claude Code " + orUnknown(v.ClaudeCode) + " is older than the minimum " + m.ClaudeCode
 	}
-	if plugin && m.Plugin != "" && v.Plugin != m.Plugin && v.Plugin != m.Pinned {
-		parts = append(parts, "its plugin commit "+orUnknown(short(v.Plugin))+" is neither the minimum "+short(m.Plugin)+" nor the pinned "+short(m.Pinned))
-	}
-	return strings.Join(parts, ", and ")
+	return ""
 }
 
 func Older(version, minimum string) bool {

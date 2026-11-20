@@ -1,8 +1,7 @@
 package server
 
 import (
-	"strconv"
-	"strings"
+	"slices"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/state"
@@ -12,14 +11,14 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-func workflowParts(cfg PageConfig, docs bool, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
+func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
 	if repos == nil {
 		return nil, nil
 	}
 	wc := session.WorkConfig{
 		Targets: targets, Doubled: doubled, Held: held, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
-		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), DocsInRepo: docs,
+		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), DocsInRepo: true,
 		Changes: files.Reader{}, Level: reg.PushLevel,
 	}
 	if reviews != nil {
@@ -54,11 +53,17 @@ func knackpackCatalog(pins *npm.Plugins, logger shared.Logger) *session.Catalogs
 	return c
 }
 
-func knackpackDir(pins *npm.Plugins) func() (string, error) {
+func knackpackDir(pins *npm.Plugins) func() (string, string, error) {
 	if pins == nil {
 		return nil
 	}
-	return func() (string, error) { return pins.PluginPath("knackpack") }
+	return func() (string, string, error) { return pins.PluginAt(npm.Knackpack.ID) }
+}
+
+func knackpackRefused(pins *npm.Plugins) func(string) bool {
+	return func(commit string) bool {
+		return slices.Contains(npm.Knackpack.Refused, commit) || pins != nil && pins.Unusable(npm.Knackpack.ID, commit)
+	}
 }
 
 func tellSession(reg *session.Registry) func(sid, text string) error {
@@ -77,51 +82,6 @@ func (p engineParts) workPage() session.WorkPage {
 		return nil
 	}
 	return p.work
-}
-
-const docsFrom = "0.26.0"
-
-func versionParts(v string) ([3]int, bool) {
-	var out [3]int
-	parts := strings.Split(v, ".")
-	if len(parts) != 3 {
-		return out, false
-	}
-	for i, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 || strconv.Itoa(n) != p {
-			return out, false
-		}
-		out[i] = n
-	}
-	return out, true
-}
-
-func atLeast(v, floor string) bool {
-	a, okA := versionParts(v)
-	b, okB := versionParts(floor)
-	if !okA || !okB {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] > b[i]
-		}
-	}
-	return true
-}
-
-func pinnedKnackpack() string {
-	for _, p := range npm.PinnedPlugins {
-		if p.ID == "knackpack" {
-			return p.Version
-		}
-	}
-	return ""
-}
-
-func docsInRepo() bool {
-	return atLeast(pinnedKnackpack(), docsFrom)
 }
 
 func (p engineParts) identities() session.IdentityPage {

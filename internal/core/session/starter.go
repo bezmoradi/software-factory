@@ -105,10 +105,11 @@ type DispatcherConfig struct {
 	Approvals    Approvals
 	Expected     *Expected
 	Work         *Work
-	Workflow     func() (string, error)
+	Workflow     func() (dir, commit string, err error)
+	Refused      func(workflowCommit string) bool
 	Workspace    string
 	Runs         RunStore
-	Versions     func(agent string) (version, workflowCommit string)
+	Versions     func(agent string) string
 	Note         func(sid, text string)
 	Audit        Audit
 	Identity     *Identities
@@ -472,8 +473,9 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 		argv = append(argv, "--plugin-dir="+d.cfg.PluginDir)
 	}
 	if d.cfg.Workflow != nil {
-		if dir, err := d.cfg.Workflow(); err == nil {
+		if dir, commit, err := d.cfg.Workflow(); err == nil {
 			argv = append(argv, "--plugin-dir="+dir)
+			r.stamp.workflow = commit
 		} else {
 			shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "workflow-plugin-missing")
 		}

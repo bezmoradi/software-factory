@@ -769,7 +769,7 @@ func (r *Reviews) startProjectRun(ctx context.Context, key string, costOK bool, 
 		r.release(key)
 		return "", err
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	plugin, _, err := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
 	if err != nil {
 		r.release(key)
 		return "", explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))

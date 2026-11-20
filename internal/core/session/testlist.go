@@ -117,7 +117,7 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 		release()
 		return err
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	plugin, _, err := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
 	if err != nil {
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))

@@ -103,7 +103,7 @@ type Snapshots interface {
 }
 
 type PluginSource interface {
-	PluginPath(id string) (string, error)
+	PluginAt(id string) (path, commit string, err error)
 }
 
 type RoleReview struct {
@@ -225,8 +225,7 @@ type ReviewsConfig struct {
 
 	Walkthroughs Walkthroughs
 
-	PluginCommit string
-	ClaudeCode   string
+	ClaudeCode string
 }
 
 type Reviews struct {
@@ -535,7 +534,7 @@ func (r *Reviews) ApprovalMoved(sid string, at func(commit string) (ApprovalGive
 	r.cfg.Show(sid, shown)
 }
 
-func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin string, view ReviewView, held string, given reviewGiven) {
+func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, plugin, pluginCommit string, view ReviewView, held string, given reviewGiven) {
 	ctx := shared.WithRequest(r.cfg.Base, t.Req)
 	main := given.rules.main
 	if why := r.check(ctx); why != "" {
@@ -557,7 +556,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 	entries := make([]ReviewEntry, len(plans))
 	for i, p := range plans {
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
-			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: r.cfg.PluginCommit, ClaudeCode: claude,
+			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: pluginCommit, ClaudeCode: claude,
 			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest()}
 	}
 	r.put(entries...)

@@ -51,9 +51,10 @@ func onlyReviewerFlags(args []string) error {
 }
 
 type reviewSettings struct {
-	DisableAllHooks bool              `json:"disableAllHooks"`
-	Env             map[string]string `json:"env"`
-	Permissions     struct {
+	DisableAllHooks    bool              `json:"disableAllHooks"`
+	DisableSkillShells bool              `json:"disableSkillShellExecution"`
+	Env                map[string]string `json:"env"`
+	Permissions        struct {
 		BlockReadsOutside bool     `json:"blockReadsOutsideWorkingDirectories"`
 		Deny              []string `json:"deny"`
 	} `json:"permissions"`
@@ -74,6 +75,8 @@ func confined(args []string) error {
 	switch {
 	case !s.DisableAllHooks:
 		return errors.New("--settings doesn't turn hooks off")
+	case !s.DisableSkillShells:
+		return errors.New("--settings doesn't turn skills' inline shell off")
 	case !s.Permissions.BlockReadsOutside:
 		return errors.New("--settings doesn't block reads outside the working folder")
 	case !slices.Contains(s.Permissions.Deny, homeDeny):

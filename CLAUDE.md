@@ -32,7 +32,7 @@ internal/
     engines/acp/  # the ACP client, for the development agent (Claude Code runs through the plugin and agent-host)
     sandbox/docker/  # the sandbox check and its probe
     sandbox/boxes/   # the box helper: Docker's Engine API over its socket, the sessions' and reviewer containers' recipes, its HTTPS API and the engine's client
-    install/npm/  # agent installs from npm and plugins (knackpack) from git, pinned versions and commits
+    install/npm/  # agent installs from npm at pinned versions, and knackpack from git at the head of its main
     install/releases/  # the update check's anonymous calls to GitHub's REST API for the newest release
     git/{files,push,remote,state,workspace}/  # reading .git files and writing review snapshots; pushing; cloning and fetching; the repository record, host tokens and review records; the workspace volume's free space and worktree sizes
     git/keep/  # the engine's copy of each session's commits, and Restore branch

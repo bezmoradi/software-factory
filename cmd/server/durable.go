@@ -72,18 +72,11 @@ func (p engineParts) settle(ctx context.Context, open session.AuditOpen) {
 	}
 }
 
-func agentVersions(agent string) (string, string) {
-	version := ""
+func agentVersions(agent string) string {
 	for _, a := range npm.Pinned {
 		if a.ID == agent {
-			version = a.Version
+			return a.Version
 		}
 	}
-	commit := ""
-	for _, pl := range npm.PinnedPlugins {
-		if pl.ID == "knackpack" {
-			commit = pl.Commit
-		}
-	}
-	return version, commit
+	return ""
 }

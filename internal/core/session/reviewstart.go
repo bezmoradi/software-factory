@@ -35,7 +35,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		delete(r.running, t.SID)
 		r.mu.Unlock()
 	}
-	plugin, err := r.cfg.Plugins.PluginPath(r.cfg.Plugin)
+	plugin, pluginCommit, err := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
 	if err != nil {
 		release()
 		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
@@ -223,7 +223,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	shared.For(ctx, r.cfg.Logger).Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.began()
 	r.wg.Go(func() {
-		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, view, held, given)
+		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, pluginCommit, view, held, given)
 		r.ended()
 		release()
 		if r.cfg.Base.Err() == nil {

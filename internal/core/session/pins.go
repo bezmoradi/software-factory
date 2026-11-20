@@ -16,11 +16,30 @@ type PinProvenance struct {
 	Note       string
 }
 
-type PinnedPlugin struct {
-	ID      string
-	Name    string
-	Version string
-	Commit  string
+const (
+	PluginUpToDate = "up-to-date"
+	PluginUpdated  = "updated"
+	PluginKept     = "kept"
+	PluginMissing  = "not-installed"
+	PluginChecking = "checking"
+	PluginCheckOff = "off"
+)
+
+type TrackedPlugin struct {
+	ID          string
+	Name        string
+	Source      string
+	Branch      string
+	Version     string
+	Commit      string
+	Refused     bool
+	RefusedWhy  string
+	InstalledAt time.Time
+	CheckedAt   time.Time
+	CheckResult string
+	CheckHead   string
+	CheckFrom   string
+	Problem     string
 }
 
 type Advisory struct {
@@ -43,7 +62,7 @@ type AdvisoryView struct {
 type AgentReport struct {
 	Home       HomeReport
 	Pins       []PinProvenance
-	Plugins    []PinnedPlugin
+	Plugins    []TrackedPlugin
 	Advisories AdvisoryView
 }
 

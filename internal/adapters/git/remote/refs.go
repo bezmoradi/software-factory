@@ -80,3 +80,19 @@ func (r Remote) FetchHead(ctx context.Context, q session.HeadFetch) (string, err
 	}
 	return want, nil
 }
+
+func (r Remote) BranchHead(ctx context.Context, raw, branch string) (string, error) {
+	if !push.ValidBranch(branch) {
+		return "", errors.New("the branch name isn't one the engine reads")
+	}
+	k, err := r.open(ctx, raw, "")
+	if err != nil {
+		return "", err
+	}
+	defer k.close()
+	h, ok := k.adv.References["refs/heads/"+branch]
+	if !ok {
+		return "", errors.New("the remote has no branch " + branch)
+	}
+	return h.String(), nil
+}

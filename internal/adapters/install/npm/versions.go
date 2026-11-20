@@ -42,19 +42,17 @@ var Pinned = []Agent{
 	},
 }
 
-const (
-	MinimumReviewerClaudeCode = ""
-	MinimumReviewerKnackpack  = ""
-)
+const MinimumReviewerClaudeCode = ""
 
-type Plugin struct {
+type Tracked struct {
 	ID      string
 	Name    string
-	Version string
 	URL     string
-	Commit  string
+	Branch  string
+	Floor   string
+	Refused []string
 }
 
-var PinnedPlugins = []Plugin{
-	{ID: "knackpack", Name: "knackpack", Version: "0.26.0", URL: "https://github.com/bezmoradi/knackpack.git", Commit: "7a501d3f1296f632b4cbd7ab825174c1e48daf93"},
-}
+var RefusedKnackpack = []string{}
+
+var Knackpack = Tracked{ID: "knackpack", Name: "knackpack", URL: "https://github.com/bezmoradi/knackpack.git", Branch: "main", Floor: "0.26.0", Refused: RefusedKnackpack}

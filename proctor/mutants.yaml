@@ -2816,17 +2816,17 @@
       find: "\t\tmode = 0o755\n"
       replace: "\t\tmode = 0o777\n"
 - id: INST-010
-  title: "A plugin counts as installed whatever commit its current link names"
+  title: "A plugin counts as installed when its current link names anything, not only a commit folder"
   edits:
     - file: "internal/adapters/install/npm/plugins.go"
-      find: "\tif err != nil || link != pl.Commit {"
+      find: "\tif err != nil || !commitHash.MatchString(link) {"
       replace: "\tif err != nil || link == \"\" {"
 - id: INST-011
-  title: "A plugin commit's manifest isn't checked for the pinned version"
+  title: "A head of the tracked branch older than the engine's floor version is installed"
   edits:
     - file: "internal/adapters/install/npm/plugins.go"
-      find: "if json.Unmarshal(f.Data, &m) != nil || m.Name != pl.Name || m.Version != pl.Version {"
-      replace: "if json.Unmarshal(f.Data, &m) != nil || m.Name != pl.Name {"
+      find: "\tcase review.Older(version, pl.Floor):\n"
+      replace: "\tcase false:\n"
 - id: INST-012
   title: "A plugin's agents are listed without the plugin's prefix"
   edits:

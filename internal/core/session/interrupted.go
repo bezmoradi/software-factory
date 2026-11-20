@@ -28,7 +28,7 @@ type runStamp struct {
 func (d *Dispatcher) stampOf(agent string, interrupted time.Time) runStamp {
 	s := runStamp{interruptedAt: interrupted, engine: d.cfg.Version}
 	if d.cfg.Versions != nil {
-		s.agent, s.workflow = d.cfg.Versions(agent)
+		s.agent = d.cfg.Versions(agent)
 	}
 	s.reviewer, s.reviewerPlugin = d.reviewerStamp()
 	return s
@@ -36,8 +36,12 @@ func (d *Dispatcher) stampOf(agent string, interrupted time.Time) runStamp {
 
 func (d *Dispatcher) woke(r *run) {
 	now := d.stampOf(r.spec.ID, time.Time{})
+	installed := d.installedWorkflow()
 	d.mu.Lock()
-	changed := versionsChanged(r.spec.Name, r.stamp, now)
+	if r.spec.Method == MethodPlugin {
+		now.workflow = r.stamp.workflow
+	}
+	changed := versionsChanged(r.spec.Name, r.stamp, now, installed, d.refusedWorkflow(now.workflow))
 	r.stamp = now
 	sid := r.sid
 	d.mu.Unlock()
