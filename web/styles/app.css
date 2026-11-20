@@ -1032,6 +1032,9 @@ code.file-ref:focus-visible { outline: 2px solid var(--focus, var(--accent)); ou
 dialog.consent { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100dvh - 3rem); padding: .9rem 1rem; overflow-y: auto; }
 dialog.consent::backdrop { background: rgb(0 0 0 / .45); }
 dialog.consent h2 { margin: 0 0 .5rem; }
+.dialog-head { position: sticky; top: -.9rem; z-index: 1; display: flex; align-items: flex-start; gap: .5rem; margin: -.9rem -1rem .5rem; padding: .9rem 1rem .4rem; background: var(--card); }
+.dialog-head .dialog-title { flex: 1; min-width: 0; margin: 0; font-size: .9375rem; font-weight: 600; line-height: 1.4; color: var(--ink); }
+.dialog-head .dialog-x { flex: none; margin: -.1rem -.35rem 0 0; }
 dialog > h2.label { display: flex; align-items: center; min-height: 24px; margin: 0; line-height: 1; }
 dialog > h2.label + p { margin-top: 0; }
 dialog.diagnostics .diagnostics-text { max-height: 50dvh; margin: .5rem 0; padding: .5rem; overflow: auto; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; white-space: pre; }
@@ -1062,9 +1065,6 @@ dialog.identity .identity-form { display: grid; gap: .6rem; margin-top: .6rem; }
 dialog.identity .identity-form .field { display: grid; gap: .2rem; }
 dialog.identity .identity-form .textbox { box-sizing: border-box; min-width: 0; min-height: var(--compact-height); padding: 0 .6rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
 dialog.flow-dialog { width: min(64rem, calc(100vw - 2rem)); }
-dialog.flow-dialog .flow-dialog-head { position: sticky; top: -.9rem; z-index: 1; display: flex; align-items: flex-start; gap: .5rem; margin: -.9rem -1rem .5rem; padding: .9rem 1rem .4rem; background: var(--card); }
-dialog.flow-dialog .flow-dialog-title { flex: 1; min-width: 0; margin: 0; font-size: .9375rem; font-weight: 600; line-height: 1.4; color: var(--ink); }
-dialog.flow-dialog .flow-dialog-x { flex: none; margin: -.1rem -.35rem 0 0; }
 dialog.flow-dialog .push-flow { margin: 0; }
 @media (max-width: 40rem) { :is(sf-push-panel .push-checked-diagram, sf-reviews .reviews-diagram) { display: none; } }
 sf-forge-panel { display: block; margin-bottom: 1.6rem; }
@@ -1146,9 +1146,6 @@ sf-update .update-badge { display: none; }
 .bar.fit-compact sf-update .update-open-text { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .bar.fit-compact sf-update button.small { padding-inline: .3rem; }
 .bar.fit-compact sf-update .update-badge { display: block; position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--button-ink); }
-dialog.update .update-head { position: sticky; top: -.9rem; z-index: 1; display: flex; align-items: flex-start; gap: .5rem; margin: -.9rem -1rem .5rem; padding: .9rem 1rem .4rem; background: var(--card); }
-dialog.update .update-title { flex: 1; min-width: 0; margin: 0; font-size: .9375rem; font-weight: 600; line-height: 1.4; color: var(--ink); }
-dialog.update .update-x { flex: none; margin: -.1rem -.35rem 0 0; }
 dialog.update .update-subhead { margin: .9rem 0 .35rem; font-size: .8125rem; font-weight: 600; color: var(--ink); }
 dialog.update .update-list { margin: .25rem 0; padding-left: 1.25rem; }
 dialog.update .update-list li + li { margin-top: .4rem; }

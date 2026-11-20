@@ -189,10 +189,6 @@ export function openUpdate(): void {
   const running = view.running
   const development = view.development
   const title = `Update to Software Factory ${r.version}`
-  const cross = button('', 'ghost icon-button update-x', () => m.close())
-  cross.setAttribute('aria-label', 'Close')
-  cross.title = 'Close'
-  cross.append(icon('close'))
   const said = statusLine('small warn')
   const later = actionButton('Remind me later', 'ghost small', async () => {
     const a = await call({ later: r.version })
@@ -205,8 +201,7 @@ export function openUpdate(): void {
   const m = modal({
     kind: 'update',
     title,
-    headingClass: 'update-title',
-    header: { cls: 'update-head', after: [cross] },
+    closeButton: true,
     body: [
       para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
       para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),

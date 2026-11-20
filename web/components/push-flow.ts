@@ -1,4 +1,4 @@
-import { button, el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
+import { el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
 import { modal, type Modal } from '../lib/dialog.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
@@ -319,15 +319,10 @@ export interface FlowDialog {
 export function openFlow(title: string, model: FlowModel): FlowDialog {
   const diagram = el('sf-flow-diagram')
   diagram.model = model
-  const cross = button('', 'ghost icon-button flow-dialog-x', () => m.close())
-  cross.setAttribute('aria-label', 'Close')
-  cross.title = 'Close'
-  cross.append(icon('close'))
   const m = modal({
     kind: 'flow-dialog',
     title,
-    headingClass: 'flow-dialog-title',
-    header: { cls: 'flow-dialog-head', after: [cross] },
+    closeButton: true,
     body: [diagram],
     focus: 'heading',
   })
