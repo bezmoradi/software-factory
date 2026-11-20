@@ -339,15 +339,15 @@ pk add ",\"url\":\"$URL\",\"commit\":\"$(ph main)\",\"digest\":\"$A\""; pk use "
 start pg; commit pg notes.txt one; review pg
 rpack pg; push pg; sleep 3; remote | grep "$(branch pg)"
 docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -oE '"provider": ?"[^"]*"' /var/lib/software-factory/reviews.json | sort | uniq -c
-start pn; commit pn NO-VERDICT x; review pn
-rpack pn; push pn; sleep 3; audit
+start pnv; commit pnv NO-VERDICT x; review pnv
+rpack pnv; push pnv; sleep 3; audit
 pk remove ",\"digest\":\"$A\""
 ```
 
 - The fetch: `200` with `pack.name` `acme`, `version` `1.0.0`, `roles` `bug-hunter` `bug-finder` and `simplicity` `simplicity-checker`, `steps` `/acme:requirements`, `/acme:plan` and `/acme:handoff`, `codeFiles` `["hooks/hooks.json","hooks/start.sh"]`, a `digest` and a `sessionDigest`, and no `addedAt`: a fetch keeps nothing, and logs `pack event=fetched`.
 - The add at `v2` with `main`'s digest: `{"error":"digest","message":"The pack at that commit isn't the one the page showed: its reviewers' digest is now <12 hex>, not <the first 12 of $A>. Fetch it again and read what it holds before you add it."} 409`, logged `pack event=digest-changed`, and no `pack` `added` audit line. The add at `main`: `200` with the pack and its `addedAt`; the use: `"using":"<$A>"` with `usedBy` `["demo"]`. Each is a `pack` audit line, `added` with the commit and `used`, with the digest as `hash` and no file's content.
 - `pg`'s review: both roles pass as `acme:bug-finder` and `acme:simplicity-checker`, each with `acme 1.0.0 <$A>`, the push goes out (`push event=pushed by=page`) and the git host has `$(branch pg)`; `reviews.json` counts `acme@pack` for these runs and `knackpack@knackpack` for the earlier checks'.
-- `pn`, with `NO-VERDICT` in its change: `review event=finished role=bug-hunter state=unknown why=no-verdict` and the same for `simplicity`, each role's reason `its reply ended without a Verdict: pass or Verdict: block line, which every pack's reviewer must write, so it counts as no verdict`, and the push is held with both roles in `missing`.
+- `pnv`, with `NO-VERDICT` in its change: `review event=finished role=bug-hunter state=unknown why=no-verdict` and the same for `simplicity`, each role's reason `its reply ended without a Verdict: pass or Verdict: block line, which every pack's reviewer must write, so it counts as no verdict`, and the push is held with both roles in `missing`.
 - The removal while `demo` uses it: `{"error":"in use","message":"The pack acme reviews demo. Pick another pack for that project first."} 409`.
 
 No pack, with Allow without and with a reason:
