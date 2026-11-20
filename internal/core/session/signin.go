@@ -117,7 +117,7 @@ type Expectations interface {
 const ReviewerAgent = "reviewer"
 
 func ReviewerSignInStep() string {
-	return "open Reviewers' sign-in under Start on the Welcome page"
+	return "open Reviewers' sign-in in the command palette"
 }
 
 const signInFor = 30 * time.Second

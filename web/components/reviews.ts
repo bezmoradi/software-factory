@@ -256,7 +256,7 @@ class SfReviews extends HTMLElement {
       const si = who.signIn && (!run || (who.signIn.checkedAt ?? 0) >= (run.checkedAt ?? 0)) ? who.signIn : run ?? who.signIn
       const said = !si ? "The reviewers' sign-in hasn't been checked yet."
         : si.stale ? 'The reviewers’ sign-in changed after it was last checked; the engine checks it again before the next review.'
-        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in under Start on the Welcome page.'
+        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in in the command palette.'
         : `The reviewers are signed in with ${text(si.words)}${si.costs ? '. Reviews cost money; the page asks first, and the engine starts none by itself' : ''}.`
       parts.push(el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said))
     }

@@ -22,11 +22,12 @@ interface PaletteDeps {
   labelOfSid: (sid: string) => string
   forgetSession: (sid: string) => void
   openIdentity: () => void
+  openSignIn: () => void
   navigation: Pick<Navigation, 'go' | 'openChanges' | 'openDocs'>
   actions: Pick<SessionActions, 'wakeSession' | 'startReview' | 'startPush'>
 }
 
-export function startPalette({ reviewsOf, projectList, projects, labelOfSid, forgetSession, openIdentity, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } }: PaletteDeps) {
+export function startPalette({ reviewsOf, projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } }: PaletteDeps) {
   function openSessionPanel(which: 'changes' | 'rules') {
     const s = current()
     if (which === 'changes' && s) return openChanges(s)
@@ -98,6 +99,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     panel('v:backup', 'Export and import', () => openBackup(api, sendState), needsEngine)
     panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(api), needsEngine)
     panel('v:identity', 'Name and email for commits', () => openIdentity(), needsEngine)
+    panel('v:signin', 'Reviewers’ sign-in', () => openSignIn(), needsEngine)
     panel('v:away', 'Away mode', () => openAway(), needsEngine)
     panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
     panel('v:keys', 'Keyboard shortcuts', () => showShortcuts())

@@ -1005,6 +1005,10 @@ async function markSignIn() {
   schedulePaint()
 }
 
+function openSignIn() {
+  void claudeLogin(api, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
+}
+
 function openIdentity() {
   editIdentity(api, commitIdentity ?? null, id => {
     commitIdentity = id
@@ -1453,7 +1457,7 @@ byId('welcome').addEventListener('click', e => {
   if (walk) return openDocs(walk.dataset.doc!, { view: 'overview', label: 'Welcome' })
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
-  if (start === 'login') void claudeLogin(api, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
+  if (start === 'login') openSignIn()
   if (start === 'identity') openIdentity()
   if (start === 'egress') openEgress(api)
   if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
@@ -1623,7 +1627,7 @@ byId('rules').addEventListener('sf-rules-open', e => {
   projects.showPanel(p.path, 'rules')
 })
 
-startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
+startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
 restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
 onNotifyOpen(sid => {
