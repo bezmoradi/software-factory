@@ -103,6 +103,11 @@ tables:
       - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields"]
       - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields"]
       - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields"]
+      - ["fld_verify", "/api/verify", { proctorUnknownField: true }, "fields"]
+      - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
+      - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
+      - ["fld_verify_stop_id", "/api/verify", { op: stop, sid: "00000000-0000-4000-8000-000000000000", id: xyz }, "fields"]
+      - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields"]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
@@ -158,6 +163,9 @@ tables:
     rows:
       - ["msg_dispatch_mode", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, mode: bypassPermissions }, "mode", "The page starts every session in the agent's asking mode, never auto mode."]
       - ["msg_keep_op", "/api/keep", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads its copy of a session's commits and restores the branch from it only."]
+      - ["msg_verify_op", "/api/verify", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, starts and stops a session's verification runs only."]
+      - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "kind", "The engine runs one kind of verification: check."]
+      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
 
   - id: FLD-T02R
     name: "A route that only reads refuses an operation other than read, with a message saying so"
@@ -199,6 +207,8 @@ tables:
       - ["unk_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be pushed from here."]
       - ["unk_viewed", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "Only a session this engine started has a changes view here."]
       - ["unk_stop", "/api/stop-session", { sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started can be stopped, woken or deleted from here."]
+      - ["unk_verify_read", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has verification runs here."]
+      - ["unk_verify_start", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: check }, "Only a session this engine started can be verified here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"

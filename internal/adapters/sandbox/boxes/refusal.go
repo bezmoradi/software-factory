@@ -24,6 +24,7 @@ const (
 	ReasonRoute     = "route"
 	ReasonMethod    = "method"
 	ReasonTooLarge  = "too_large"
+	ReasonImage     = "image"
 )
 
 type Refusal struct {

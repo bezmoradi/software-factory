@@ -28,7 +28,10 @@ type Team struct {
 	FileRules   []FileRule
 	Rounds      int
 	Protect     []string
+	Verify      []string
 }
+
+var VerifyKinds = []string{"check"}
 
 var (
 	typeID      = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -76,7 +79,7 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	var out []string
 	say := func(s string) { out = append(out, s) }
-	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "checks", "rounds", "protect"}, "the file", &out)
+	known(root, []string{"version", "adapter", "defaultType", "workTypes", "roles", "agents", "fileRules", "verify", "rounds", "protect"}, "the file", &out)
 	if v, ok := root.values["version"].(float64); !ok || v != 1 {
 		say("\"version\" must be 1")
 	}
@@ -114,9 +117,7 @@ func ParseTeam(text string) (*Team, []string) {
 	}
 	parseFileRules(root, team, &out)
 	parseProtect(root, team, &out)
-	if _, ok := root.values["checks"]; ok {
-		say("\"checks\" isn't supported: the engine has no trusted place to run the repository's commands, since a result from the agent container can be forged and reviewers only read")
-	}
+	parseVerify(root, team, &out)
 	if v, ok := root.values["rounds"]; ok {
 		if n, isNum := v.(float64); isNum && n == math.Trunc(n) && n >= 1 && n <= 20 {
 			team.Rounds = int(n)
@@ -300,4 +301,29 @@ func parseFileRules(root *object, team *Team, out *[]string) {
 			team.FileRules = append(team.FileRules, FileRule{Pattern: pattern, Agent: agent, Instruction: instruction})
 		}
 	}
+}
+
+func parseVerify(root *object, team *Team, out *[]string) {
+	v, ok := root.values["verify"]
+	if !ok {
+		return
+	}
+	list, isList := v.([]any)
+	kinds := []string{}
+	valid := isList && len(list) <= 4
+	for _, k := range list {
+		s, isStr := asString(k)
+		if !isStr || !slices.Contains(VerifyKinds, s) {
+			valid = false
+			break
+		}
+		if !slices.Contains(kinds, s) {
+			kinds = append(kinds, s)
+		}
+	}
+	if !valid {
+		*out = append(*out, "\"verify\" must list the kinds of verification run a push needs a pass of, and the software factory has one: \"check\"")
+		return
+	}
+	team.Verify = kinds
 }

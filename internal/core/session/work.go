@@ -255,6 +255,7 @@ type WorkFacts struct {
 	Refusal       string
 	Hold          HoldSettings
 	Approval      ApprovalGiven
+	Verify        []string
 }
 
 type WorkPage interface {
@@ -869,7 +870,11 @@ func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, ma
 		refusal = linkRefusal(g)
 	}
 	return WorkFacts{Type: g.eff, Required: g.required, Items: items, NeedsApproval: g.toApprove, Rounds: g.setup.rounds, Refusal: refusal, Hold: hold,
-		Approval: w.givenOf(g)}, true
+		Approval: w.givenOf(g), Verify: slices.Clone(g.setup.setup.Verify)}, true
+}
+
+func (w *Work) VerifyKinds(project string) []string {
+	return slices.Clone(w.setupFor(project).setup.Verify)
 }
 
 const workUnreadItem = "project settings the engine can read: it couldn't read them (work.json), so it can't tell this project's push hold, review rounds or work type"

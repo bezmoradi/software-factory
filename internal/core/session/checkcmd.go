@@ -36,6 +36,7 @@ const (
 type ProjectCommands struct {
 	Check string
 	Setup string
+	Image string
 }
 
 type ProjectID struct {

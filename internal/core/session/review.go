@@ -232,6 +232,8 @@ type Reviews struct {
 	cfg        ReviewsConfig
 	mu         sync.Mutex
 	running    map[string]int
+	heads      map[string]string
+	refused    func(sid string)
 	views      map[string]ReviewView
 	rebuilt    map[string]string
 	approvals  map[string]viewApproval
@@ -313,7 +315,7 @@ func NewReviews(cfg ReviewsConfig) (*Reviews, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	r := &Reviews{cfg: cfg, running: map[string]int{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, claude: cfg.ClaudeCode}
+	r := &Reviews{cfg: cfg, running: map[string]int{}, heads: map[string]string{}, views: map[string]ReviewView{}, rebuilt: map[string]string{}, approvals: map[string]viewApproval{}, claude: cfg.ClaudeCode}
 	if err := r.settle(); err != nil {
 		return nil, err
 	}
@@ -741,6 +743,20 @@ func (r *Reviews) holdRunsLocked(key string, runs int) error {
 	}
 	r.running[key] = runs
 	return nil
+}
+
+func (r *Reviews) OnRefused(fn func(sid string)) {
+	r.mu.Lock()
+	r.refused = fn
+	r.mu.Unlock()
+}
+
+func (r *Reviews) Busy(sid, head string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, busy := r.running[sid]
+	at := r.heads[sid]
+	return busy && (at == "" || at == head)
 }
 
 func (r *Reviews) growRuns(key string, runs int) bool {

@@ -30,10 +30,16 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		return err
 	}
 	r.mu.Unlock()
+	launched := false
 	release := func() {
 		r.mu.Lock()
 		delete(r.running, t.SID)
+		delete(r.heads, t.SID)
+		fn := r.refused
 		r.mu.Unlock()
+		if !launched && fn != nil {
+			fn(t.SID)
+		}
 	}
 	plugin, pluginCommit, err := r.cfg.Plugins.PluginAt(r.cfg.Plugin)
 	if err != nil {
@@ -45,6 +51,9 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		release()
 		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
+	r.mu.Lock()
+	r.heads[t.SID] = head
+	r.mu.Unlock()
 	main, err := r.cfg.Mains.Fresh(ctx, t.Name)
 	if err != nil {
 		release()
@@ -222,6 +231,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	r.show(t.SID, view)
 	shared.For(ctx, r.cfg.Logger).Info("review", "event", "started", "roles", len(plans), "capped", len(capped))
 	r.began()
+	launched = true
 	r.wg.Go(func() {
 		r.run(t, head, r.reviewerVersion(shared.WithRequest(r.cfg.Base, t.Req)), plans, plugin, pluginCommit, view, held, given)
 		r.ended()

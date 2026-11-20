@@ -68,3 +68,12 @@ func replacedChild(parent *os.File, name string, err error) (int64, bool) {
 	}
 	return statSize(&st, true), false
 }
+
+func (Disk) Volume(dir string) (uint64, uint64, uint64, uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, 0, 0, 0, err
+	}
+	block := uint64(st.Bsize)
+	return st.Bavail * block, block, st.Ffree, st.Files, nil
+}

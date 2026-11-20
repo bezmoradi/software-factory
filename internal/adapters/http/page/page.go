@@ -83,6 +83,7 @@ type Server struct {
 	decisions session.DecisionLogPage
 
 	branchCopy session.KeepPage
+	verify     session.VerifyPage
 
 	pairs  session.PairsPage
 	splits *session.Splits
@@ -191,7 +192,7 @@ var pageRoutes = map[string]bool{
 	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true,
 	screenshotsRoute: true, screenshotRoute: true,
 	metricsRoute: true, decisionLogRoute: true,
-	keepRoute: true,
+	keepRoute: true, verifyRoute: true,
 	pairRoute: true, splitPageRoute: true,
 	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
@@ -457,6 +458,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == keepRoute {
 		s.keepAPI(w, r, body)
+		return
+	}
+	if r.URL.Path == verifyRoute {
+		s.verifyAPI(w, r, body)
 		return
 	}
 	if r.URL.Path == pairRoute {

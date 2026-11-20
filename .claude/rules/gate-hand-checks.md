@@ -5,6 +5,7 @@ paths:
   - "internal/core/push/*.go"
   - "internal/core/session/review*.go"
   - "internal/core/session/push*.go"
+  - "internal/core/session/verify.go"
   - "internal/core/session/teamrules.go"
   - "internal/core/session/specs.go"
   - "internal/core/session/flag.go"
@@ -23,6 +24,7 @@ paths:
   - "internal/adapters/http/page/listener.go"
   - "internal/adapters/http/page/push.go"
   - "internal/adapters/http/page/pushes.go"
+  - "internal/adapters/http/page/verify.go"
   - "internal/adapters/http/page/page.go"
   - "internal/adapters/http/page/middleware.go"
   - "internal/adapters/http/page/start.go"
@@ -169,11 +171,11 @@ wk h ',"refuse":true'; docker compose -f compose.yaml -f compose.dev.yaml exec -
 
 ```bash
 start h; commit h notes.txt one; push h; sleep 2; review h
-logs engine 'msg=push event='; events | grep -o 'every review of commit [^"]*'; remote | grep "$(branch h)"
+logs engine 'msg=push event='; events | grep -o 'commit [0-9a-f]\{12\} now has everything [^"]*'; remote | grep "$(branch h)"
 push h; sleep 3; remote | grep "$(branch h)"
 ```
 
-Expect `push event=held by=page`, then, after the reviews, `push event=card-refreshed missing=0` and `push event=held-reviewed then=held`, with the card's reason `every review of commit <12 hex> now passes and the push needs nothing more; the engine doesn't push a held card when its reviews finish, so press Push to push it`. The git host has no `$(branch h)` until the second push, which logs `push event=pushed by=page`.
+Expect `push event=held by=page`, then, after the reviews, `push event=card-refreshed missing=0` and `push event=held-reviewed then=held`, with the card's reason `commit <12 hex> now has everything the push needs; the engine doesn't push a held card on its own when its reviews or verification run finish, so press Push to push it`. The git host has no `$(branch h)` until the second push, which logs `push event=pushed by=page`.
 
 **A pass covers its own commit only.**
 
@@ -346,6 +348,50 @@ docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserve
 - The waiting push: the stopping engine waits up to about 5 seconds for the running reviews and logs `review event=finished role=bug-hunter state=failed why=engine-stopped` (and `simplicity`). A stop that lands while a reviewer container is starting or in its sandbox probe logs `reviewer container event=stopped` at INFO, not `not-started` or `sandbox-failed`. The new engine logs `push resume event=queued count=1 dropped=0`, then `push resume event=review-started`, and after the 45-second reviews `push event=pushed by="agent, after reviews"`. The git host then has `$(branch w)` at `w`'s commit.
 - The Reviews panel: each session's latest review is back, and every passing role carries `Not rechecked since the engine restarted against the current approved texts and team rules, which can set this pass aside; the next approval recheck does.` `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
 - The update check: `update check event=newer`, from the engine before the restart or from the new one at start. If the restart logs `event=reused`, the stopping engine's line is the `newer` one, and the new engine logs another a minute after the stored check. Every `release-seen` line, for `/release-api/repos/bezmoradi/software-factory/tags` and `/release-api/repos/bezmoradi/software-factory/releases/tags/v9.9.9`, has `authorization=absent cookie=absent user-agent="software-factory-update-check"`, although the engine holds a token for this host (`gitserver.test:8443`, saved in Setup).
+
+**A verification run counts only for its commit, command and image, and only its exit code counts** (ARCHITECTURE.md "Verification runs"). Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running.
+
+```bash
+check() { python3 -c 'import json,sys; print(json.dumps({"op":"set","name":"demo","check":sys.argv[1],"setup":"","image":sys.argv[2]}))' "$1" "${2-$IMG}" > /tmp/sf-cmd.json; sf /api/project-commands "$(cat /tmp/sf-cmd.json)"; }
+vread() { sf /api/verify "{\"op\":\"read\",\"sid\":\"$(sid $1)\"}"; }
+vstart() { sf /api/verify "{\"op\":\"start\",\"sid\":\"$(sid $1)\",\"kind\":\"check\"}"; }
+vwait() { for i in $(seq 200); do o=$(vread $1); echo "$o" | grep -q '"state":"running"' || break; sleep 2; done; echo "$o"; }
+start v; check 'test -f ok.txt'; commit v ok.txt yes; vstart v; vwait v
+commit v other.txt x; vread v
+commit v iso.sh "$(cat iso.sh)"; check 'sh iso.sh'; vstart v; sleep 4; docker inspect "$(docker ps -q --filter label=dev.software-factory.verifier)"; vwait v
+for c in 'sleep 120' 'dd if=/dev/zero of=/dev/null bs=700M count=1' 'exit 3' 'kill -9 $$' "printf 'ghp_%s\n' 0123456789abcdef0123456789abcdef0123"; do check "$c"; vstart v; vwait v; done; docker ps -a --filter label=dev.software-factory.verifier
+check 'sleep 60; exit 0'; vstart v; sleep 10; restart; vread v; logs engine 'msg=verify'
+team '{"version":1,"verify":["check"]}'; check 'exit 1'; review v; push v; vwait v; push v
+check 'true'; push v; vwait v; push v; logs helper 'msg=verifier'
+```
+
+- The first run is `passed`; after `commit v other.txt x` the panel has no current run and says the last run was of another commit. Changing the check command or the image makes `why` say the last run ran another one.
+- `sh iso.sh` is `passed` and prints `isolated`: only `lo` in `/proc/net/dev`, no git host, `engine-agents`, `helper:8099`, session network or dev git host, no Docker socket, no `/reviews`, `/workspace`, engine state, uploads, keys or homes, no token, key or proxy variable, `/in` and the root read-only, the user `10006:10006`, and `/in` holding only `command` and `files`. `docker inspect` shows `NetworkMode` `none`, `ReadonlyRootfs`, `CapDrop` `[ALL]`, `User` `10006:10006`, one mount (`/in`, read-only) and the tmpfs `/work`, `/tmp` and one at each volume the image declares.
+- `sleep 120` is `timed-out`, the `dd` is `oom`, `exit 3` is `failed` with code 3, `kill -9 $$` `failed` with 137, and the token-shaped output is withheld; none is a pass, and no verification container is left afterwards.
+- The restart leaves the run `interrupted` with "the engine restarted while it ran", the engine logs `verify event=leftover-removed`, and no pass appears.
+- With the team rule, the push is held with `a passing verification run (check) of commit …: …`, first "to finish, which the engine started for this push", then "the last one didn't pass; the session's verification panel on the page shows why", with no exit code (the panel shows 1); after `check 'true'` the push starts a new run itself, the refreshed card says `commit … now has everything the push needs; …press Push to push it`, and the push after it pushes.
+- An agent's push waits for both its reviews and its run, whichever ends last, also while its reviews are queued: fill the reviewer slots (two sessions with `SLOW-REVIEW 120` reviewing), then `check 'true'`, commit and send `factory_push`; the run ends first and logs `push event=wait-kept`, the queued reviews start when a slot frees (`push resume event=review-started`), and the push goes out `by="agent, after reviews"`.
+- An image whose environment sets `GH_PAT=x` and `DATABASE_URL=postgres://u:p@h/db` (`printf 'FROM %s\nENV GH_PAT=x DATABASE_URL=postgres://u:p@h/db\n' "$IMG" | docker build -q -t sf-env -`, used by its image ID) runs with both empty (`check 'test -z "$GH_PAT" && test -z "$DATABASE_URL"'` passes).
+- Stop during the file writing (a large commit, or `Stop` right after `vstart`) and Stop everything both record `stopped`, and `docker ps -a --filter label=dev.software-factory.verifier` never lists a container for that run.
+- Three sessions' agent pushes with the push slot taken (`check 'sleep 30'`, `factory_push` from each): one run starts, the other two log `verify event=queued`, their pushes wait (`push event=wait-kept`), and each run starts in order as the one before it ends; every push goes out `by="agent, after reviews"`. **Verify this commit** on a fourth session still starts while only one push's run runs.
+- The agent's held reason says "…, which the engine doesn't have yet; the session's verification panel on the page shows the run's state, …" whether its run is queued, running or failed: no exit code and no "to finish".
+- Allow with a reason and Deny on a held card start no run (no `verify started` audit line), and nor does a push the team file's rules refuse, such as one carrying a file `.gitattributes` gives to Git LFS.
+- The agent's held reason is byte-identical while its run (`sleep 20; exit 1`) runs and after it failed, and a newer commit pushed while the older one's run runs is queued (`verify event=queued`), not refused.
+- In a project whose team file doesn't require `verify`, a run you start with **Verify this commit** doesn't delay the agent's push: it goes out as soon as its reviews pass.
+- With the push slot taken, the panel says a run is queued; after Stop everything and Release, a page push's card no longer says queued.
+- An engine restart during a push's run leaves the run `interrupted`; the waiting push is decided as held, its card asks to press Verify this commit, and the audit has `verify` `not-restarted`.
+- A push from an Exploring session starts no run.
+- **Verify this commit** pressed while the session's push run is queued runs the commit once: the queued item is gone (`queued` false), and the waiting push goes out after that one run.
+- A queued run whose branch moved, or whose push no longer needs it, logs `verify event=queued-dropped` and starts nothing; the push is decided again.
+- Two sessions at one commit (the second started from the first, `from: {sid}`): with the push slot taken, the second's agent push queues its run, the first's person presses Verify, and when the slot frees the second still runs its own copy (or is decided again when the first's run ends) and pushes.
+- `GOTOOLCHAIN=local` and `NODE_VERSION=26.13.0` are kept; a 64-hex `NODE_VERSION`, a 7-digit version group, a `PATH` with an empty part, `PYTHONUNBUFFERED=yes`, `TZ` and `NODE_ENV` are emptied.
+- Without the push slot taken, the first session's person presses Verify, and the second session (at the same commit) pushes while that run goes: its push waits and goes out when the run passes.
+- An image's variables other than tooling names are empty in the run (`check 'test -z "$PLAIN" && test -n "$PATH"'` with `PLAIN=keepme` in the image), and `LANGUAGE=en_US:en` is kept.
+- With less than about 1 GiB free on the `verify` volume, a run ends `error` with "not enough space on the verify volume" and writes nothing.
+- An image setting `STRIPE=sk_live_…`, `AZURE=…;AccountKey=…`, `BUNDLE_GEMS__EXAMPLE__COM=u:p`, `REG_CREDS=u:p` and `MAVEN_OPTS=-Dpassword=x` runs with all five empty.
+- A Review press that refuses after taking the session's reviewer slot (every reviewer already has a verdict) while a waiting agent push's run ends still has the push decided: the refusal settles it (`Reviews.OnRefused`), and the push goes out.
+- The helper logs `verifier action=start` and `action=remove` with the run, the digest and the recipe hash, never the command.
+- A tree the hash-checked reader refuses, such as a commit with `Clash.txt` and `clash.txt`, or a symbolic link to `/etc/passwd`, is `error` with the reader's reason.
 
 **The check-only key goes only to the bundled fake.** The engine mints it only when `SF_DEV_ACP_AGENT` is exactly `/usr/local/bin/sf-fake-acp` (ARCHITECTURE.md "Trust boundary"). `/proc/self/root/usr/local/bin/sf-fake-acp` is a symbolic link to that same file under another path, so the fake runs and shows what it was given; `/usr/local/bin/sf-fake-claude` is another binary, and a value with arguments is one file name the agent-host can't find. Recreating the engine stops every session, so run this last.
 

@@ -36,6 +36,7 @@ services:
       SF_PAGE_NAME: engine-page
       SF_AGENT_ADDRESS: 0.0.0.0:8081
       SF_REVIEWS: /reviews
+      SF_VERIFY: /verify
       SF_REVIEWER_PROXY: egress-review:3128
       SF_EGRESS_PROXY: egress:3130
       SF_EGRESS_STATUS: egress-control:3129
@@ -62,6 +63,7 @@ services:
       - workspace:/workspace
       - agents:/opt/software-factory/agents
       - reviews:/reviews
+      - verify:/verify
       - uploads:/uploads
       - egress-key:/run/sf-egress
       - helper-key:/run/sf-helper
@@ -100,6 +102,10 @@ services:
       SF_BOX_RUNTIME: ${SF_BOX_RUNTIME:-}
       SF_BOX_SUBNETS: ${SF_BOX_SUBNETS:-}
       SF_BOX_SWEEP_DRY: ${SF_BOX_SWEEP_DRY:-}
+      SF_VERIFY_MEMORY: ${SF_VERIFY_MEMORY:-}
+      SF_VERIFY_CPUS: ${SF_VERIFY_CPUS:-}
+      SF_VERIFY_DISK: ${SF_VERIFY_DISK:-}
+      SF_VERIFY_MINUTES: ${SF_VERIFY_MINUTES:-}
     volumes:
       - ${SF_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - helper-key:/run/sf-helper:ro
@@ -154,6 +160,7 @@ volumes:
   workspace:
   agents:
   reviews:
+  verify:
   uploads:
     driver: local
     driver_opts:

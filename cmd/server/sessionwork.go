@@ -9,10 +9,10 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useSessionWork(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+func useSessionWork(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) *session.SessionWork {
 	d := parts.dispatcher
 	if d == nil || cfg.Helper == "" {
-		return
+		return nil
 	}
 	wc := session.SessionWorkConfig{
 		Commands: state.NewProjectCommands(cfg.StateDir), Queues: state.NewQueues(cfg.StateDir),
@@ -36,4 +36,5 @@ func useSessionWork(base context.Context, srv *page.Server, reg *session.Registr
 		parts.reviews.UseRoleModels(w.RoleModel)
 	}
 	srv.UseSessionWork(w)
+	return w
 }

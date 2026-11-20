@@ -96,6 +96,7 @@ tables:
       - ["t01_test_list", "/api/test-list"]
       - ["t01_update", "/api/update"]
       - ["t01_upload", "/api/upload"]
+      - ["t01_verify", "/api/verify"]
       - ["t01_viewed", "/api/viewed"]
       - ["t01_wake", "/api/wake"]
       - ["t01_walkthrough_check", "/api/walkthrough-check"]
@@ -235,6 +236,7 @@ tables:
       - ["t02_test_list", "/api/test-list"]
       - ["t02_update", "/api/update"]
       - ["t02_upload", "/api/upload"]
+      - ["t02_verify", "/api/verify"]
       - ["t02_viewed", "/api/viewed"]
       - ["t02_wake", "/api/wake"]
       - ["t02_walkthrough_check", "/api/walkthrough-check"]
@@ -374,6 +376,7 @@ tables:
       - ["t03_test_list", "/api/test-list"]
       - ["t03_update", "/api/update"]
       - ["t03_upload", "/api/upload"]
+      - ["t03_verify", "/api/verify"]
       - ["t03_viewed", "/api/viewed"]
       - ["t03_wake", "/api/wake"]
       - ["t03_walkthrough_check", "/api/walkthrough-check"]
@@ -513,6 +516,7 @@ tables:
       - ["t04_test_list", "/api/test-list"]
       - ["t04_update", "/api/update"]
       - ["t04_upload", "/api/upload"]
+      - ["t04_verify", "/api/verify"]
       - ["t04_viewed", "/api/viewed"]
       - ["t04_wake", "/api/wake"]
       - ["t04_walkthrough_check", "/api/walkthrough-check"]
@@ -651,6 +655,7 @@ tables:
       - ["t05_test_list", "/api/test-list"]
       - ["t05_update", "/api/update"]
       - ["t05_upload", "/api/upload"]
+      - ["t05_verify", "/api/verify"]
       - ["t05_viewed", "/api/viewed"]
       - ["t05_wake", "/api/wake"]
       - ["t05_walkthrough_check", "/api/walkthrough-check"]
@@ -789,6 +794,7 @@ tables:
       - ["t06_test_list", "/api/test-list"]
       - ["t06_update", "/api/update"]
       - ["t06_upload", "/api/upload"]
+      - ["t06_verify", "/api/verify"]
       - ["t06_viewed", "/api/viewed"]
       - ["t06_wake", "/api/wake"]
       - ["t06_walkthrough_check", "/api/walkthrough-check"]
@@ -923,6 +929,7 @@ tables:
       - ["t07_team", "/api/team"]
       - ["t07_test_list", "/api/test-list"]
       - ["t07_update", "/api/update"]
+      - ["t07_verify", "/api/verify"]
       - ["t07_viewed", "/api/viewed"]
       - ["t07_wake", "/api/wake"]
       - ["t07_walkthrough_check", "/api/walkthrough-check"]
@@ -1092,6 +1099,7 @@ tables:
       - ["t09_test_list", "/api/test-list"]
       - ["t09_update", "/api/update"]
       - ["t09_upload", "/api/upload"]
+      - ["t09_verify", "/api/verify"]
       - ["t09_viewed", "/api/viewed"]
       - ["t09_wake", "/api/wake"]
       - ["t09_walkthrough_check", "/api/walkthrough-check"]
@@ -1242,6 +1250,7 @@ tables:
       - ["t10_test_list", "/api/test-list"]
       - ["t10_update", "/api/update"]
       - ["t10_upload", "/api/upload"]
+      - ["t10_verify", "/api/verify"]
       - ["t10_viewed", "/api/viewed"]
       - ["t10_wake", "/api/wake"]
       - ["t10_walkthrough_check", "/api/walkthrough-check"]
@@ -1357,6 +1366,7 @@ tables:
           - t11_put_test_list
           - t11_put_update
           - t11_put_upload
+          - t11_put_verify
           - t11_put_viewed
           - t11_put_wake
           - t11_put_walkthrough_check
@@ -1444,6 +1454,7 @@ tables:
           - t11_delete_test_list
           - t11_delete_update
           - t11_delete_upload
+          - t11_delete_verify
           - t11_delete_viewed
           - t11_delete_wake
           - t11_delete_walkthrough_check
@@ -1531,6 +1542,7 @@ tables:
           - t11_patch_test_list
           - t11_patch_update
           - t11_patch_upload
+          - t11_patch_verify
           - t11_patch_viewed
           - t11_patch_wake
           - t11_patch_walkthrough_check
@@ -1621,6 +1633,7 @@ tables:
       - ["t11_put_test_list", "/api/test-list", "PUT"]
       - ["t11_put_update", "/api/update", "PUT"]
       - ["t11_put_upload", "/api/upload", "PUT"]
+      - ["t11_put_verify", "/api/verify", "PUT"]
       - ["t11_put_viewed", "/api/viewed", "PUT"]
       - ["t11_put_wake", "/api/wake", "PUT"]
       - ["t11_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
@@ -1708,6 +1721,7 @@ tables:
       - ["t11_delete_test_list", "/api/test-list", "DELETE"]
       - ["t11_delete_update", "/api/update", "DELETE"]
       - ["t11_delete_upload", "/api/upload", "DELETE"]
+      - ["t11_delete_verify", "/api/verify", "DELETE"]
       - ["t11_delete_viewed", "/api/viewed", "DELETE"]
       - ["t11_delete_wake", "/api/wake", "DELETE"]
       - ["t11_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
@@ -1795,6 +1809,7 @@ tables:
       - ["t11_patch_test_list", "/api/test-list", "PATCH"]
       - ["t11_patch_update", "/api/update", "PATCH"]
       - ["t11_patch_upload", "/api/upload", "PATCH"]
+      - ["t11_patch_verify", "/api/verify", "PATCH"]
       - ["t11_patch_viewed", "/api/viewed", "PATCH"]
       - ["t11_patch_wake", "/api/wake", "PATCH"]
       - ["t11_patch_walkthrough_check", "/api/walkthrough-check", "PATCH"]
@@ -1908,6 +1923,7 @@ tables:
           - t12_put_test_list
           - t12_put_update
           - t12_put_upload
+          - t12_put_verify
           - t12_put_viewed
           - t12_put_wake
           - t12_put_walkthrough_check
@@ -1995,6 +2011,7 @@ tables:
           - t12_delete_test_list
           - t12_delete_update
           - t12_delete_upload
+          - t12_delete_verify
           - t12_delete_viewed
           - t12_delete_wake
           - t12_delete_walkthrough_check
@@ -2082,6 +2099,7 @@ tables:
           - t12_patch_test_list
           - t12_patch_update
           - t12_patch_upload
+          - t12_patch_verify
           - t12_patch_viewed
           - t12_patch_wake
           - t12_patch_walkthrough_check
@@ -2172,6 +2190,7 @@ tables:
       - ["t12_put_test_list", "/api/test-list", "PUT"]
       - ["t12_put_update", "/api/update", "PUT"]
       - ["t12_put_upload", "/api/upload", "PUT"]
+      - ["t12_put_verify", "/api/verify", "PUT"]
       - ["t12_put_viewed", "/api/viewed", "PUT"]
       - ["t12_put_wake", "/api/wake", "PUT"]
       - ["t12_put_walkthrough_check", "/api/walkthrough-check", "PUT"]
@@ -2259,6 +2278,7 @@ tables:
       - ["t12_delete_test_list", "/api/test-list", "DELETE"]
       - ["t12_delete_update", "/api/update", "DELETE"]
       - ["t12_delete_upload", "/api/upload", "DELETE"]
+      - ["t12_delete_verify", "/api/verify", "DELETE"]
       - ["t12_delete_viewed", "/api/viewed", "DELETE"]
       - ["t12_delete_wake", "/api/wake", "DELETE"]
       - ["t12_delete_walkthrough_check", "/api/walkthrough-check", "DELETE"]
@@ -2346,6 +2366,7 @@ tables:
       - ["t12_patch_test_list", "/api/test-list", "PATCH"]
       - ["t12_patch_update", "/api/update", "PATCH"]
       - ["t12_patch_upload", "/api/upload", "PATCH"]
+      - ["t12_patch_verify", "/api/verify", "PATCH"]
       - ["t12_patch_viewed", "/api/viewed", "PATCH"]
       - ["t12_patch_wake", "/api/wake", "PATCH"]
       - ["t12_patch_walkthrough_check", "/api/walkthrough-check", "PATCH"]
@@ -2447,6 +2468,7 @@ tables:
       - ["t13_test_list", "/api/test-list"]
       - ["t13_update", "/api/update"]
       - ["t13_upload", "/api/upload"]
+      - ["t13_verify", "/api/verify"]
       - ["t13_viewed", "/api/viewed"]
       - ["t13_wake", "/api/wake"]
       - ["t13_walkthrough_check", "/api/walkthrough-check"]

@@ -33,6 +33,11 @@ const (
 	routeReviewers = "reviewers"
 	routeReviewer  = "reviewer"
 	routeReview    = "review"
+	routeVerifiers = "verifiers"
+	routeVerifier  = "verifier"
+	routeVerify    = "verify"
+	routeVerifyLog = "verifier-log"
+	logSeg         = "log"
 	actionStartSeg = "start"
 	actionStopSeg  = "stop"
 )
@@ -40,6 +45,7 @@ const (
 type ServerConfig struct {
 	Boxes     session.Boxes
 	Reviewers ReviewerMaker
+	Verifiers session.VerifierHost
 	KeyFile   string
 	Base      context.Context
 	Logger    shared.Logger
@@ -104,6 +110,8 @@ func route(path string) (routed, bool) {
 		return routed{}, false
 	case parts[1] == "reviewers":
 		return reviewerRoute(parts[2:])
+	case parts[1] == "verifiers":
+		return verifierRoute(parts[2:])
 	case parts[1] != "boxes":
 		return routed{}, false
 	case len(parts) == 2:
@@ -130,13 +138,29 @@ func reviewerRoute(rest []string) (routed, bool) {
 	return routed{}, false
 }
 
+func verifierRoute(rest []string) (routed, bool) {
+	switch {
+	case len(rest) == 0:
+		return routed{name: routeVerifiers}, true
+	case len(rest) == 1:
+		return routed{name: routeVerifier, id: rest[0]}, true
+	case len(rest) == 2 && rest[1] == logSeg:
+		return routed{name: routeVerifyLog, id: rest[0]}, true
+	case len(rest) == 2:
+		return routed{name: routeVerify, id: rest[0], snapshot: rest[1]}, true
+	}
+	return routed{}, false
+}
+
 func allowed(r string) []string {
 	switch r {
-	case routeHealth, routeList, routeReviewers:
+	case routeHealth, routeList, routeReviewers, routeVerifiers, routeVerifyLog:
 		return []string{http.MethodGet}
 	case routeBox, routeReviewer:
 		return []string{http.MethodPut, http.MethodDelete}
-	case routeReview:
+	case routeVerifier:
+		return []string{http.MethodGet, http.MethodDelete}
+	case routeReview, routeVerify:
 		return []string{http.MethodPut}
 	}
 	return []string{http.MethodPost}
@@ -193,6 +217,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case routeReviewers, routeReviewer, routeReview:
 		s.reviewers(base, w, r, rt)
+		return
+	case routeVerifiers, routeVerifier, routeVerify, routeVerifyLog:
+		s.verifiers(base, w, r, rt)
 		return
 	}
 	if name != routeList && !session.ValidBox(box) {

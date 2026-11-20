@@ -60,6 +60,7 @@ RUN apt-get update \
  && install -d -o agent -g sf -m 0700 /home/agent /run/sf \
  && install -d -o reviewer -g reviewer -m 0700 /home/reviewer \
  && install -d -o engine -g sf -m 0755 /reviews \
+ && install -d -o engine -g sf -m 0755 /verify \
  && install -d -m 0755 /usr/share/doc/software-factory/node
 COPY --from=go /out/software-factory /usr/local/bin/software-factory
 COPY --chown=root:root --chmod=a=rX,u+w plugin/.claude-plugin/plugin.json /opt/software-factory/plugin/.claude-plugin/plugin.json

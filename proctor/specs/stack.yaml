@@ -38,6 +38,7 @@ scenarios:
               - { type: volume, destination: /run/sf-helper, read_only: false, volume: sf-proctor_helper-key, subpath: null, source: null }
               - { type: volume, destination: /uploads, read_only: false, volume: sf-proctor_uploads, subpath: null, source: null }
               - { type: volume, destination: /var/lib/software-factory, read_only: false, volume: sf-proctor_engine-state, subpath: null, source: null }
+              - { type: volume, destination: /verify, read_only: false, volume: sf-proctor_verify, subpath: null, source: null }
               - { type: volume, destination: /workspace, read_only: false, volume: sf-proctor_workspace, subpath: null, source: null }
           length: { "$.container.networks": 4 }
           any:
@@ -200,7 +201,7 @@ scenarios:
             "$.network.members": { in_scope: false }
 
   - id: STK-003
-    name: "The stack's key and upload volumes are tmpfs, so their contents never reach disk, and the workspace and engine state are plain local volumes"
+    name: "The stack's key and upload volumes are tmpfs, so their contents never reach disk, and the workspace, engine state and verification volumes are plain local volumes"
     steps:
       - id: uploads
         do: docker.volume
@@ -253,9 +254,20 @@ scenarios:
             "$.volume.driver": local
             "$.volume.type_option": ""
             "$.volume.option_keys": []
+      - id: verify
+        do: docker.volume
+        with: { name: sf-proctor_verify }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": ""
+            "$.volume.option_keys": []
+          any:
+            "$.volume.labels": { key: com.docker.compose.volume, value: verify }
 
   - id: STK-004
-    name: "No session or reviewer container is left over"
+    name: "No session, reviewer or verification container is left over"
     steps:
       - id: no-boxes
         do: docker.containers
@@ -265,6 +277,12 @@ scenarios:
       - id: no-reviewers
         do: docker.containers
         with: { labels: { dev.software-factory.stack: sf-proctor }, has_labels: [dev.software-factory.reviewer] }
+        eventually: { within: 60s, every: 1s }
+        expect:
+          equal: { "$.count": 0 }
+      - id: no-verifiers
+        do: docker.containers
+        with: { labels: { dev.software-factory.stack: sf-proctor }, has_labels: [dev.software-factory.verifier] }
         eventually: { within: 60s, every: 1s }
         expect:
           equal: { "$.count": 0 }

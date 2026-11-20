@@ -276,6 +276,43 @@ scenarios:
           equal:
             "$.status": 404
             "$.body": { error: reply, message: "The engine keeps no whole report for that review." }
+      - id: nothing-verified
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { head: "${head}", branch: "sf/${id}", command: "", hasCheck: false, image: "", required: false, busy: false, queued: false, current: null, why: "", runs: [] }
+      - id: verify-without-check
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", kind: check }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: no-check, message: "This project has no check command, so there is nothing to verify. Set one under Check and setup commands on the project's card." }
+      - id: still-unverified
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.current": null
+            "$.body.runs": []
       - id: remove-while-running
         do: http.request
         identity: page
@@ -1378,6 +1415,329 @@ scenarios:
           path: "/api/remove-session"
           headers: { Origin: "${page.origin}" }
           body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: SES-004
+    name: "A verification run copies the session's commit into a container of the project's image pinned by digest, with no network, a read-only root and only its run's folder mounted read-only, and records a pass from Docker's exit; another command makes the pass not count"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor verify ${run.id}", type: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: helper-image
+        do: docker.container
+        with: { name: sf-proctor-helper-1 }
+        expect:
+          equal: { "$.found": true }
+        save: { helper_image: "$.container.image" }
+      - id: set-image
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", max: 300, maxImage: 300 }
+      - id: image-read-back
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, name: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.image": "proctor@${helper_image}"
+            "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+      - id: verify-start
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", kind: check }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.hasCheck": true
+            "$.body.image": "proctor@${helper_image}"
+            "$.body.command": "sleep 8 && test -f README.md && echo ${run.id}"
+            "$.body.runs[0].state": running
+            "$.body.runs[0].by": page
+            "$.body.runs[0].image": "proctor@${helper_image}"
+          length: { "$.body.runs": 1 }
+          matches: { "$.body.runs[0].id": "[0-9a-f]{16}" }
+        save: { run: "$.body.runs[0].id", head: "$.body.head" }
+      - id: run-container
+        do: docker.container
+        with: { name: "sf-proctor-verify-${run}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal:
+            "$.found": true
+            "$.container.image": "${helper_image}"
+            "$.container.state.running": true
+            "$.container.user": "10006:10006"
+            "$.container.init": true
+            "$.container.readonly_rootfs": true
+            "$.container.privileged": false
+            "$.container.cap_add": []
+            "$.container.cap_drop": [ALL]
+            "$.container.security_opt": ["no-new-privileges:true"]
+            "$.container.oom_score_adj": 800
+            "$.container.pids_limit": 2048
+            "$.container.memory": 4294967296
+            "$.container.memory_swap": 4294967296
+            "$.container.nano_cpus": 2000000000
+            "$.container.restart_policy": { name: "no", maximum_retry_count: 0 }
+            "$.container.log_driver": json-file
+            "$.container.network_mode": none
+            "$.container.extra_hosts": []
+            "$.container.ipc_mode": private
+            "$.container.cgroupns_mode": private
+            "$.container.shm_size": 67108864
+            "$.container.ports": []
+            "$.container.publish_all_ports": false
+            "$.container.devices": 0
+            "$.container.device_requests": 0
+            "$.container.group_add": []
+            "$.container.docker_socket": false
+            "$.container.tmpfs": ["/tmp", "/work"]
+            "$.container.mounts":
+              - { type: volume, destination: /in, read_only: true, volume: sf-proctor_verify, subpath: "${run}", source: null }
+          any:
+            "$.container.labels": [{ key: dev.software-factory.stack, value: sf-proctor }, { key: dev.software-factory.verifier, value: "${run}" }, { key: com.docker.compose.project, value: "" }]
+          count:
+            "$.container.labels": { where: { key: dev.software-factory.recipe }, is: 1 }
+          none:
+            "$.container.labels": { key: dev.software-factory.box }
+      - id: run-ended
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 90s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: verify, result: ended, session: "${sid}", commit: "${head}", reason: "kind check, state passed, exit 0" }
+      - id: run-container-gone
+        do: docker.container
+        with: { name: "sf-proctor-verify-${run}" }
+        expect:
+          equal: { "$.found": false }
+      - id: passed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.current.id": "${run}"
+            "$.body.current.commit": "${head}"
+            "$.body.current.state": passed
+            "$.body.current.code": 0
+            "$.body.current.imageId": "${helper_image}"
+            "$.body.current.limitSeconds": 900
+            "$.body.current.withheld": false
+            "$.body.why": ""
+      - id: other-command
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.check": "test -f README.md && echo ${run.id}"
+      - id: pass-not-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.current": null
+            "$.body.runs[0].state": passed
+            "$.body.why": "The last run of this commit ran another check command than the one set now, so it doesn't count."
+      - id: failing-command
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.check": "echo ${run.id} && exit 3"
+      - id: verify-failing
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", kind: check }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.runs[0].state": running
+          length: { "$.body.runs": 2 }
+        save: { failing: "$.body.runs[0].id" }
+      - id: failing-ended
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 90s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: verify, result: ended, session: "${sid}", commit: "${head}", reason: "kind check, state failed, exit 3" }
+      - id: failed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/verify"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.current.id": "${failing}"
+            "$.body.current.state": failed
+            "$.body.current.code": 3
+            "$.body.current.tail": "${run.id}"
+      - id: failing-container-gone
+        do: docker.container
+        with: { name: "sf-proctor-verify-${failing}" }
+        expect:
+          equal: { "$.found": false }
+      - id: clear-commands
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "", setup: "", image: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "", setup: "", image: "", max: 300, maxImage: 300 }
+      - id: cleared
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, name: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.image": ""
+            "$.body.check": ""
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
         expect:
           equal:
             "$.status": 200

@@ -244,11 +244,15 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 	case "set":
 		check, okCheck := body["check"].(string)
 		setup, okSetup := body["setup"].(string)
-		if !keysWithin(body, "op", "name", "check", "setup") || !okCheck || !okSetup || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 {
+		image, okImage := s.work.Commands(name).Image, true
+		if raw, given := body["image"]; given {
+			image, okImage = raw.(string)
+		}
+		if !keysWithin(body, "op", "name", "check", "setup", "image") || !okCheck || !okSetup || !okImage || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 || len(image) > session.MaxVerifyImage+64 {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup})
+		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image})
 		s.logger.Info("project commands", "op", op, "ok", err == nil)
 		if err != nil {
 			code, p := status(err)
@@ -260,7 +264,7 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 		return
 	}
 	c := s.work.Commands(name)
-	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "max": session.MaxProjectCommand})
+	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage})
 }
 
 type roleModelJSON struct {

@@ -29,3 +29,7 @@ func openChild(root *os.Root, _ *os.File, at, _ string) (*os.File, error) {
 func replacedChild(*os.File, string, error) (int64, bool) {
 	return 0, true
 }
+
+func (Disk) Volume(string) (uint64, uint64, uint64, uint64, error) {
+	return 0, 0, 0, 0, errors.New("free space isn't read on this platform")
+}

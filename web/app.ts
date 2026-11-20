@@ -31,6 +31,7 @@ import './components/session-facts.ts'
 import './components/session-work.ts'
 import './components/screenshots.ts'
 import './components/keep.ts'
+import './components/verify.ts'
 import './components/review-models.ts'
 import './components/forge-panel.ts'
 import { pullFollowOf } from './components/pull-follow.ts'
@@ -94,6 +95,7 @@ const RESET_NOTE = 'The session restarted, so what came before this point is sho
 
 const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
 const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
+const verifyPanel = byId<HTMLElementTagNameMap['sf-verify']>('verify')
 const reviewModels = el('sf-review-models')
 reviewModels.hidden = true
 byId('reviewer-agents').after(reviewModels)
@@ -162,6 +164,7 @@ function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'keep') return void keepPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
+  if ((ev as { type?: unknown }).type === 'verify') return void verifyPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
     state.supervisor = typeof ev.state === 'string' ? ev.state : ''
@@ -361,6 +364,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = reviewsOf(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').explain = { run: s.info.review?.explain ?? null, asking: explainAsking.has(s.sid) }
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
+    verifyPanel.view = state.connected && s.info.verified ? { sid: s.sid, disabled: '' } : null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
     sessionWork.view = state.connected ? { sid: s.sid, disabled: !controllable(s), reason: s.info.doubled ? DOUBLED_NOTE : '' } : null
@@ -381,6 +385,7 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-rules']>('rules').view = null
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = null
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = null
+    verifyPanel.view = null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = null
     sessionWork.view = null

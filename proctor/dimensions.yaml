@@ -84,6 +84,7 @@ dimensions:
     - "/api/test-list"
     - "/api/update"
     - "/api/upload"
+    - "/api/verify"
     - "/api/viewed"
     - "/api/wake"
     - "/api/walkthrough-check"

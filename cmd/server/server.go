@@ -45,6 +45,7 @@ type PageConfig struct {
 	HelperKey    string
 	BoxRanges    []netip.Prefix
 	Workspace    string
+	Verify       string
 	PluginDir    string
 	PluginSocket string
 	AgentBinary  string
@@ -115,6 +116,12 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 	cfg.AgentBinary = "/usr/local/bin/software-factory"
 	if getenv("SF_AGENT_HOST") != "" {
 		return errors.New("SF_AGENT_HOST is gone: each session runs in its own container, which the box helper makes; set SF_HELPER to the helper's host:port instead")
+	}
+	if v := getenv("SF_VERIFY"); v != "" {
+		if !filepath.IsAbs(v) || strings.ContainsAny(v, "\x00\n") {
+			return errors.New("SF_VERIFY must be an absolute path")
+		}
+		cfg.Verify = filepath.Clean(v)
 	}
 	if v := getenv("SF_HELPER"); v != "" && v != "off" {
 		if _, _, err := net.SplitHostPort(v); err != nil {
@@ -458,6 +465,7 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 		return nil, err
 	}
 	reviews.OnDone(p.ReviewDone)
+	reviews.OnRefused(p.Settled)
 	return p, nil
 }
 
@@ -566,6 +574,8 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.dispatcher == nil || !parts.dispatcher.RunsUnread() {
 		reg.DropStrayNotes()
 	}
+	work := useSessionWork(sends, srv, reg, parts, cfg, logger)
+	useVerify(sends, srv, reg, parts, work, cfg, logger)
 	parts.useHalt(reg, cfg, logger)
 	ws := newWorkspace(parts, cfg, logger)
 	parts.useLimits(reg, cfg, ws, logger)
@@ -577,7 +587,6 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	useViews(srv, parts, cfg, reg, ws, logger)
 	useSavedPrompts(srv, parts, cfg, logger)
 	usePulls(sends, srv, reg, parts, cfg, logger)
-	useSessionWork(sends, srv, reg, parts, cfg, logger)
 	useProjectViews(srv, parts, cfg, reg, logger)
 	useKeep(srv, reg, parts, cfg, logger)
 	useStarts(sends, srv, reg, parts, cfg, logger)

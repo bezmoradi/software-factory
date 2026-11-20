@@ -13,6 +13,7 @@ import (
 const (
 	maxCommandProjects = 1000
 	workFrame          = "session-work"
+	commandImage       = "image"
 )
 
 type SessionWorkConfig struct {
@@ -103,8 +104,9 @@ func (w *SessionWork) load() {
 			for id, c := range saved {
 				check, okCheck := CheckProjectCommand(c.Check)
 				setup, okSetup := CheckProjectCommand(c.Setup)
-				if okCheck && okSetup && id.Name != "" && id.URL != "" && len(w.projects) < maxCommandProjects {
-					w.projects[id] = ProjectCommands{Check: check, Setup: setup}
+				image, okImage := CheckVerifyImage(c.Image)
+				if okCheck && okSetup && okImage && id.Name != "" && id.URL != "" && len(w.projects) < maxCommandProjects {
+					w.projects[id] = ProjectCommands{Check: check, Setup: setup, Image: image}
 				}
 			}
 		} else {
@@ -141,6 +143,16 @@ func (w *SessionWork) Commands(project string) ProjectCommands {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.projects[id]
+}
+
+func (w *SessionWork) ProjectOf(project string) (ProjectID, ProjectCommands, bool) {
+	id, ok := w.projectID(project)
+	if !ok {
+		return ProjectID{}, ProjectCommands{}, false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return id, w.projects[id], true
 }
 
 func (w *SessionWork) projectID(project string) (ProjectID, bool) {
@@ -181,6 +193,10 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	if !okCheck || !okSetup {
 		return explained(invalid("command"), "A check or setup command is one line of at most 300 bytes, with no control characters.")
 	}
+	image, okImage := CheckVerifyImage(c.Image)
+	if !okImage {
+		return explained(invalid("image"), "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes.")
+	}
 	id, known := w.projectID(project)
 	if !known {
 		return explained(notFound("project"), "The engine has no project of that name.")
@@ -188,7 +204,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	w.saveMu.Lock()
 	w.mu.Lock()
 	before := w.projects[id]
-	next := ProjectCommands{Check: check, Setup: setup}
+	next := ProjectCommands{Check: check, Setup: setup, Image: image}
 	if next == (ProjectCommands{}) {
 		delete(w.projects, id)
 	} else {
@@ -215,7 +231,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 		}
 	}
 	w.saveMu.Unlock()
-	for kind, pair := range map[string][2]string{CommandCheck: {before.Check, check}, CommandSetup: {before.Setup, setup}} {
+	for kind, pair := range map[string][2]string{CommandCheck: {before.Check, check}, CommandSetup: {before.Setup, setup}, commandImage: {before.Image, image}} {
 		if pair[0] == pair[1] {
 			continue
 		}
