@@ -194,6 +194,7 @@ func review(args []string, st *stream) (reply, error) {
 	}
 	r := verdict(agent, prompt, st)
 	r.text = findingLines(r.text)
+	r.text = coverageLines(agent, r.text)
 	r.text = strings.Replace(r.text, "\n", given(args)+"\n", 1)
 	if userAgent != "" {
 		r.text = strings.Replace(r.text, "knackpack-verdict/1: ", "User agent file: "+userAgent+"\nVerdict: ", 1)

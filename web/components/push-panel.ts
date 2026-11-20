@@ -4,6 +4,7 @@ import { saveFile } from '../lib/download.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
+import { coverageFacts } from './push-coverage.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 
 const RESULTS: Record<string, [string, string, string, string]> = {
@@ -157,6 +158,8 @@ class SfPushPanel extends HTMLElement {
     if (!p.running && p.result === 'pushed' && FULL_SHA.test(p.commit) && value.sid) parts.push(this.#record(value.sid, p.commit))
     const facts = p.running ? null : changeFacts(p, value.checks ?? [], value.typeChange ?? null)
     if (facts) parts.push(facts)
+    const coverage = p.running ? null : coverageFacts(value.coverage ?? [])
+    if (coverage) parts.push(coverage)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''

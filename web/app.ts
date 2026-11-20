@@ -28,6 +28,7 @@ import './components/packs.ts'
 import './components/agent-report.ts'
 import { when } from './components/push-panel.ts'
 import { typeChangeOf } from './components/push-facts.ts'
+import { reviewCoverage } from './components/push-coverage.ts'
 import './components/session-facts.ts'
 import './components/session-work.ts'
 import './components/screenshots.ts'
@@ -365,7 +366,7 @@ function paint() {
     paintSide(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').view = reviewsOf(s)
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').explain = { run: s.info.review?.explain ?? null, asking: explainAsking.has(s.sid) }
-    byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = pushPanelOf(s)
+    byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = withCoverage(pushPanelOf(s), s)
     verifyPanel.view = state.connected && s.info.verified ? { sid: s.sid, disabled: '' } : null
     byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
@@ -619,6 +620,13 @@ function pushPanelOf(s: Session): PushPanelView | null {
   const ran = push && push.result === 'held' && review && !review.running && review.commit === push.commit ? review.roles : []
   const since = (verdict: string) => push ? push.missing.filter(m => ran.some(r => r.state === verdict && m.startsWith(`a review by ${r.agent} `))) : []
   return { sid: s.sid, passedSince: since('pass'), blockedSince: since('block'), push, disabled: i.doubled ? DOUBLED_NOTE : state.connected ? '' : 'Answers go through once the page is connected again.', answering: answerAsking.has(s.sid), flagged: gate?.flagged ?? [], flagsRead: gate ? gate.flagsRead !== false : true, checks: i.checks ?? [], typeChange: gate && push && gate.head === push.commit ? typeChangeOf(gate.typeChange) : null }
+}
+
+function withCoverage(view: PushPanelView | null, s: Session): PushPanelView | null {
+  const commit = view?.push?.commit ?? ''
+  if (!view || !commit) return view
+  const coverage = reviewCoverage(s.info.review, commit)
+  return coverage.length ? { ...view, coverage } : view
 }
 
 function forgePanelOf(s: Session): ForgePanelView | null {

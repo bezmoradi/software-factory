@@ -73,6 +73,7 @@ type reviewJSON struct {
 	CitedFailed  string    `json:"citedFailed,omitempty"`
 	Approved     string    `json:"approved,omitempty"`
 	Team         string    `json:"team,omitempty"`
+	ReqIDs       []string  `json:"reqIds,omitempty"`
 }
 
 type reviewsJSON struct {
@@ -112,6 +113,7 @@ func (s Reviews) Load() ([]session.ReviewEntry, error) {
 			Failure: matching(r.Failure, failureKind), Attempt: max(inRange(r.Attempt, 1, maxAttempt), 1), AutoAttempts: inRange(r.AutoAttempts, 0, maxAttempt),
 			Approved: matching(r.Approved, approvalDigest), Team: matching(r.Team, approvalDigest),
 			Pack: matching(r.Pack, packName), PackVersion: matching(r.PackVersion, packVersion), PackDigest: matching(r.PackDigest, approvalDigest),
+			ReqIDs: requirementIDs(r.ReqIDs),
 		})
 	}
 	return out, nil
@@ -137,7 +139,7 @@ func (s Reviews) Save(list []session.ReviewEntry) error {
 			Base: e.Base, Since: e.Since, Covers: e.Covers, Message: e.Message, Reason: e.Reason, CostUSD: e.CostUSD, StartedAt: e.StartedAt.UTC(), EndedAt: e.EndedAt.UTC(),
 			Clipped: e.Clipped, Auto: e.Auto, PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, RunModel: e.RunModel, RunEffort: e.RunEffort, Turns: e.Turns, Denied: e.Denied,
 			Failure: e.Failure, Attempt: laterAttempt(e.Attempt), AutoAttempts: e.AutoAttempts, Approved: e.Approved, Team: e.Team,
-			Pack: e.Pack, PackVersion: e.PackVersion, PackDigest: e.PackDigest,
+			Pack: e.Pack, PackVersion: e.PackVersion, PackDigest: e.PackDigest, ReqIDs: e.ReqIDs,
 		})
 	}
 	gone := reviewsGone(s.Dir, list)
@@ -167,6 +169,19 @@ func citedOf(r reviewJSON) session.CitedIDs {
 	}
 	if len(out.Looked) == 0 {
 		return session.CitedIDs{}
+	}
+	return out
+}
+
+func requirementIDs(list []string) []string {
+	var out []string
+	for _, id := range list {
+		if len(out) >= session.MaxRequirementIDs {
+			break
+		}
+		if session.RequirementID(id) && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
 	}
 	return out
 }

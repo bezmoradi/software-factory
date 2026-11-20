@@ -21,7 +21,7 @@ const (
 
 var (
 	findingHeading  = regexp.MustCompile(`(?i)^\s{0,3}#{2,4}\s*\[(medium|low)\]\s*(.*)$`)
-	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings?)/`)
+	findingEnd      = regexp.MustCompile(`(?i)^\s{0,3}#{1,4}\s|^\s*knackpack-(verdict|findings?|coverage)/`)
 	findingLocation = regexp.MustCompile(`(?i)^[\s*_>-]*(location|where|file|files|path)[\s*_]*:[\s*_]*(.+?)[\s*_]*$`)
 	findingPath     = regexp.MustCompile("`([^`\\s]+:\\d+(?:-\\d+)?)`")
 )

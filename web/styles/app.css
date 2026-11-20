@@ -368,6 +368,9 @@ sf-push-panel .push-card .field-row { flex-wrap: wrap; gap: .35rem; }
 sf-push-panel .push-facts { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
 sf-push-panel .push-facts-part { margin-top: .5rem; }
 sf-push-panel .push-facts code, sf-session-facts code { overflow-wrap: anywhere; }
+sf-push-panel .coverage-table { width: 100%; margin-top: .35rem; table-layout: fixed; border-collapse: collapse; }
+sf-push-panel .coverage-table :is(th, td) { padding: .25rem .35rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+sf-push-panel .coverage-table thead th { font-weight: 600; color: var(--soft); }
 sf-push-panel .push-reason { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-push-panel .push-missing { margin: .2rem 0 .4rem; padding-left: 1.1rem; }
 sf-push-panel .flagged { margin: .2rem 0 .4rem; padding-left: 1.1rem; overflow-wrap: anywhere; }

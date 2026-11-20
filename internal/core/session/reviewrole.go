@@ -144,13 +144,30 @@ func keptReply(text string, limit int) (string, bool) {
 	}
 	lines := strings.Split(text, "\n")
 	var ending []string
-	closing, size := 0, 0
+	closing, coverage, size := 0, 0, 0
+	inCoverage := false
 	for _, line := range slices.Backward(lines) {
 		l := strings.TrimSpace(line)
 		if l == "" {
 			continue
 		}
 		bare := strings.ToLower(strings.TrimLeft(l, "*_`#> "))
+		if strings.HasPrefix(l, CoverageLinePrefix) {
+			inCoverage = true
+			if len(l) > MaxCoverageLine {
+				continue
+			}
+			if coverage >= MaxCoverageLines || size+len(l)+1 > limit/2 {
+				break
+			}
+			ending = append([]string{l}, ending...)
+			coverage++
+			size += len(l) + 1
+			continue
+		}
+		if inCoverage {
+			break
+		}
 		if strings.HasPrefix(l, FindingLinePrefix) && len(l) <= MaxFindingLine && len(ending)-closing < MaxFindingLines && size+len(l)+1 <= limit/2 {
 			ending = append([]string{l}, ending...)
 			size += len(l) + 1

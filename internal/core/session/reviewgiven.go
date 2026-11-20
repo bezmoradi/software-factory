@@ -28,6 +28,7 @@ type ApprovedText struct {
 	Unkept   []string
 	Withheld []string
 	given    []string
+	reqIDs   []string
 }
 
 type ApprovalGiven struct {
@@ -116,8 +117,12 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 			out.given = append(out.given, what+" withheld "+textHash(text))
 			return
 		}
-		out.Files = append(out.Files, approvedFile(what, name, from, text))
+		f := approvedFile(what, name, from, text)
+		out.Files = append(out.Files, f)
 		out.given = append(out.given, what+" given "+textHash(text))
+		if what == "requirements" {
+			out.reqIDs = RequirementIDs(f.Text)
+		}
 	}
 	unkept := func(what string, a *workApproval) {
 		out.Unkept = append(out.Unkept, what)

@@ -68,6 +68,7 @@ type ReviewEntry struct {
 	Team         string
 	Reply        string
 	ReplyClipped bool
+	ReqIDs       []string
 }
 
 type ReviewRecords interface {
@@ -131,6 +132,8 @@ type RoleReview struct {
 	Advisory bool
 	Cited    CitedIDs
 	Findings []FindingRef
+	ReqIDs   []string
+	Coverage Coverage
 
 	PluginCommit string
 	Pack         string
@@ -569,7 +572,7 @@ func (r *Reviews) run(t ReviewTarget, head, claude string, plans []plannedRole, 
 		entries[i] = ReviewEntry{Key: review.Key{Commit: head, Branch: t.Branch, Agent: p.q.Agent}.AtRun(p.run), Role: p.q.Role, Base: p.base, Since: p.since, Covers: p.covers, StartedAt: started,
 			Record: review.Record{Provider: providerFor(r.cfg.AgentFiles, pack, p.q.Agent), State: review.Running, Advisory: p.q.Advisory}, Auto: t.Auto || p.auto, PluginCommit: pluginCommit, ClaudeCode: claude,
 			Pack: pack.Name, PackVersion: pack.Version, PackDigest: pack.Digest,
-			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest()}
+			Attempt: p.attempt, AutoAttempts: p.autoAttempts + autoAttempt(t.Auto), Approved: given.approved.Given().Digest, Team: given.team.Digest(), ReqIDs: slices.Clone(given.approved.reqIDs)}
 	}
 	r.put(entries...)
 	r.mu.Lock()
@@ -821,12 +824,16 @@ func roleOf(v RoleReview, e ReviewEntry) RoleReview {
 	v.Pack, v.PackVersion, v.PackDigest = e.Pack, e.PackVersion, e.PackDigest
 	v.Cited = e.Cited.clone()
 	v.Findings = nil
+	v.ReqIDs, v.Coverage = slices.Clone(e.ReqIDs), Coverage{}
 	if e.Record.State == review.Pass || e.Record.State == review.Block || e.Record.State == review.Unknown {
 		text := e.Message
 		if e.Reply != "" {
 			text = e.Reply
 		}
 		v.Findings = FindingRefs(text)
+		if len(e.ReqIDs) > 0 {
+			v.Coverage = CoverageLines(text, e.ReqIDs)
+		}
 	}
 	v.started = e.StartedAt
 	v.approved, v.team = e.Approved, e.Team

@@ -448,6 +448,15 @@ export interface PushPanelView {
   typeChange?: TypeChange | null
   passedSince?: string[]
   blockedSince?: string[]
+  coverage?: CoverageRole[]
+}
+
+export interface CoverageRole {
+  name: string
+  reqIds: string[]
+  lines: CoverageRow[]
+  dropped: number
+  cut: boolean
 }
 
 export type ReviewRoleState = 'running' | 'pass' | 'block' | 'unknown' | 'failed'
@@ -483,6 +492,20 @@ export interface ReviewRole {
   advisory?: boolean
   cited?: CitedIDs
   findings?: FindingRef[]
+  reqIds?: string[]
+  coverage?: CoverageRow[]
+  coverageDropped?: number
+  coverageCut?: boolean
+}
+
+export interface CoverageRow {
+  id: string
+  status: string
+  evidence?: string
+  path?: string
+  line?: number
+  endLine?: number
+  note?: string
 }
 
 export interface FindingRef {
