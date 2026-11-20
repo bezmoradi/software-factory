@@ -1489,12 +1489,13 @@ async function changeToken(detail: { op: 'save'; host: string; token: string } |
 }
 async function changeTokenNow(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
   const { ok, body } = detail.op === 'save' ? await reply(await api('/api/save-token', { host: detail.host, token: detail.token }).catch(() => null)) : await reply(await api('/api/remove-token', { host: detail.host }).catch(() => null))
+  const where = visible(detail.host.replace(/^https:\/\//, ''))
   if (!ok) {
-    const where = visible(detail.host.replace(/^https:\/\//, ''))
     return void toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? `The token for ${where} wasn't saved` : `The token for ${where} wasn't removed`, description: typeof body.message === 'string' ? visible(body.message) : "That didn't work. Try again.", tone: 'bad', timeout: 0 })
   }
   const saved = isRecord(body.host) && typeof body.host.host === 'string' ? body.host.host : detail.host
   if (typeof body.warning === 'string' && body.warning) toast({ id: `token:${saved}`, title: `Token saved for ${visible(saved)}, with a warning`, description: visible(body.warning), tone: 'warn', timeout: 0 })
+  else toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? 'Token saved.' : 'Token removed.', description: `For ${where}.`, tone: 'ok' })
   projects.tokenDone()
   await loadProjects(true)
 }

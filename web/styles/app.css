@@ -949,6 +949,7 @@ dialog.login p.bad { color: var(--bad-ink); }
 dialog.login .login-kinds { margin: .6rem 0 .35rem; }
 dialog.login .login-panel p { margin: 0; }
 dialog.login .login-panel > :is(a, button).button { justify-self: center; }
+dialog.login .login-panel > .login-link-said { justify-self: center; text-align: center; }
 dialog.login .login-panel > form { justify-self: stretch; }
 dialog.identity { width: min(32rem, calc(100vw - 2rem)); margin-block: 8vh auto; }
 dialog.identity p { margin: .35rem 0; }

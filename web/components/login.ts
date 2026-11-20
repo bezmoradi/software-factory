@@ -88,7 +88,7 @@ class Row {
   private readonly codeGo = button('Complete sign-in', 'primary small', undefined, 'submit')
   private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
-  private readonly linkSaid = statusLine('small muted status-slot')
+  private readonly linkSaid = statusLine('small muted status-slot login-link-said')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly subscription = el('div', 'login-panel')
@@ -168,8 +168,8 @@ class Row {
     if (focused) this.code.focus({ preventScroll: true })
   }
 
-  private ready(href: string) {
-    sayIfChanged(this.linkSaid, '')
+  private ready(href: string, quiet: boolean) {
+    sayIfChanged(this.linkSaid, quiet ? '' : 'Sign-in link ready.')
     this.link.href = href
     if (!this.link.parentNode) this.linkSaid.after(this.link)
   }
@@ -180,7 +180,7 @@ class Row {
 
   private async begin(keepNote = false) {
     const mine = ++this.starting
-    this.unready('Getting the sign-in link…')
+    this.unready(keepNote ? '' : 'Getting the sign-in link…')
     if (!keepNote) this.note(this.subscriptionSaid, '')
     const a = await call(this.post, { step: 'start', target: this.target })
     if (mine !== this.starting) return
@@ -190,7 +190,7 @@ class Row {
       return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
     }
     this.waiting = true
-    this.ready(link)
+    this.ready(link, keepNote)
     if (!keepNote) this.note(this.subscriptionSaid, '')
   }
 

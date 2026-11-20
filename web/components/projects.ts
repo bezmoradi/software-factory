@@ -66,6 +66,10 @@ const TOKEN_HOSTS: Record<string, TokenHelp> = {
   },
 }
 
+function tokenHostHelp(host: string): TokenHelp | undefined {
+  return Object.hasOwn(TOKEN_HOSTS, host) ? TOKEN_HOSTS[host] : undefined
+}
+
 function tokenShape(host: string, value: string): string {
   const v = value.trim()
   if (!v) return ''
@@ -935,7 +939,7 @@ class SfProjects extends HTMLElement {
   }
 
   #tokenHelp(host: string): HTMLElement[] {
-    const help = TOKEN_HOSTS[host]
+    const help = tokenHostHelp(host)
     if (!help) return []
     const link = el('a', 'small token-help', help.linkText)
     link.href = help.link
@@ -979,7 +983,7 @@ class SfProjects extends HTMLElement {
     none.value = ''
     none.disabled = true
     this.#tokenHost.replaceChildren(none, ...offered.map(h => {
-      const o = el('option', '', TOKEN_HOSTS[h]?.label ?? 'Development git server')
+      const o = el('option', '', tokenHostHelp(h)?.label ?? 'Development git server')
       o.value = h
       return o
     }))

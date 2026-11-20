@@ -282,6 +282,31 @@ function busyStarted(b: HTMLButtonElement): void {
   busyChecks ??= setInterval(checkBusy, BUSY_CHECKED_EVERY_MS)
 }
 
+const unplaced = new Set<WeakRef<HTMLButtonElement>>()
+let placing: MutationObserver | undefined
+
+function placeBusy(): void {
+  for (const ref of unplaced) {
+    const b = ref.deref()
+    if (!b || !resting.has(b)) unplaced.delete(ref)
+    else if (b.isConnected) {
+      unplaced.delete(ref)
+      busyStarted(b)
+    }
+  }
+  if (unplaced.size) return
+  placing?.disconnect()
+  placing = undefined
+}
+
+function awaitPlace(b: HTMLButtonElement): void {
+  for (const ref of unplaced) if (ref.deref() === b) return
+  unplaced.add(new WeakRef(b))
+  if (placing || typeof MutationObserver === 'undefined') return
+  placing = new MutationObserver(placeBusy)
+  placing.observe(document, { childList: true, subtree: true })
+}
+
 if (typeof document !== 'undefined' && document.body) busyLines.set(document.body, document.body.appendChild(statusLine('sr-only', 'span')))
 
 export function busy(b: HTMLButtonElement, on: boolean): void {
@@ -293,12 +318,13 @@ export function busy(b: HTMLButtonElement, on: boolean): void {
     b.setAttribute('aria-busy', 'true')
     b.setAttribute('aria-disabled', 'true')
     if (b.isConnected) busyStarted(b)
-    else queueMicrotask(() => busyStarted(b))
+    else awaitPlace(b)
     return
   }
   if (!resting.has(b)) return
   const before = resting.get(b) ?? null
   resting.delete(b)
+  if (unplaced.size) placeBusy()
   busySince.delete(b)
   delete b.dataset.busyShown
   b.removeAttribute('aria-busy')
