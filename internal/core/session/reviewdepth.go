@@ -147,24 +147,22 @@ func (w *Work) ReviewDepth(path string) (DepthView, error) {
 }
 
 func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
-	if why := d.Problem(); why != "" {
-		return explained(invalid("depth"), "The engine didn't save it: "+why+".")
+	if field, why := d.Problem(); why != "" {
+		return onField(field, explained(invalid("depth"), "The engine didn't save it: "+why+"."))
 	}
 	r, err := w.repoByPath(path)
 	if err != nil {
 		return err
 	}
 	installed, known := w.installed(r.Name), w.packKnown(r.Name)
-	for _, a := range append(slices.Clone(d.Advisory), d.Extra...) {
-		offer := offerFor(w.cfg.RoleAgents, a)
-		if why := review.RoleProblem(a, &offer); why != "" {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+why+".", maxOutput))
-		}
-		if strings.HasPrefix(a, "knackpack:") && !known && len(installed) > 0 && !slices.Contains(installed, a) {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent the knackpack installed in the reviewer image provides.", maxOutput))
-		}
-		if strings.Contains(a, ":") && known && !slices.Contains(installed, a) {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent of the pack this project uses.", maxOutput))
+	for _, list := range []struct {
+		field  string
+		agents []string
+	}{{"advisory", d.Advisory}, {"extra", d.Extra}} {
+		for _, a := range list.agents {
+			if why := w.roleRefusal(a, installed, known); why != "" {
+				return onField(list.field, explained(invalid("agent"), clip("The engine didn't save it: "+why, maxOutput)))
+			}
 		}
 	}
 	clean := workflow.Depth{Advisory: unique(d.Advisory), Extra: unique(d.Extra), MaxFiles: d.MaxFiles, MaxLines: d.MaxLines, ExtraRuns: d.ExtraRuns}
@@ -189,6 +187,20 @@ func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
 	}
 	w.cfg.Logger.Info("project setting", "op", "review-depth", "advisory", len(clean.Advisory), "repeated", len(clean.Runs), "sized", clean.Sized())
 	return nil
+}
+
+func (w *Work) roleRefusal(a string, installed []string, known bool) string {
+	offer := offerFor(w.cfg.RoleAgents, a)
+	if why := review.RoleProblem(a, &offer); why != "" {
+		return why + "."
+	}
+	if strings.HasPrefix(a, "knackpack:") && !known && len(installed) > 0 && !slices.Contains(installed, a) {
+		return a + " isn't an agent the knackpack installed in the reviewer image provides."
+	}
+	if strings.Contains(a, ":") && known && !slices.Contains(installed, a) {
+		return a + " isn't an agent of the pack this project uses."
+	}
+	return ""
 }
 
 func unique(list []string) []string {

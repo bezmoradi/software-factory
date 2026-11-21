@@ -124,6 +124,8 @@ func ValidLoginTarget(target string) bool {
 	return ok || target == LoginReviewers
 }
 
+const loginCodeShape = "Paste the code exactly as claude.com shows it."
+
 func ValidLoginCode(code string) bool {
 	if code == "" || len(code) > maxLoginCode {
 		return false
@@ -157,7 +159,7 @@ func loginStep(ctx context.Context, host LoginHost, cmd Command, step, code stri
 	case "start", "cancel":
 	case "code":
 		if !ValidLoginCode(code) {
-			return "", explained(invalid("code"), "Paste the code exactly as claude.com shows it.")
+			return "", explained(invalid("code"), loginCodeShape)
 		}
 	default:
 		return "", explained(invalid("step"), "")
@@ -231,6 +233,9 @@ func (d *Dispatcher) boxKeyLogin(ctx context.Context, target string) (boxLogin, 
 }
 
 func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (string, *SignIn, error) {
+	if step == "code" && !ValidLoginCode(code) {
+		return "", nil, explained(invalid("code"), loginCodeShape)
+	}
 	var cmd Command
 	var host LoginHost
 	switch target {

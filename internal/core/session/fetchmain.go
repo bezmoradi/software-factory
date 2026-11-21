@@ -29,9 +29,6 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 	if !running {
 		return "", explained(conflict("not running"), "The session isn't running. Wake it, then bring in the latest main.")
 	}
-	if why := d.reg.halt.turns(); why != "" {
-		return "", explained(conflict("halted"), why)
-	}
 	if !d.reg.TurnSince(sid).IsZero() {
 		return "", explained(conflict("in turn"), "The session is in its turn. Wait for it to end, then bring in the latest main.")
 	}

@@ -31,7 +31,7 @@ type auditEntryJSON struct {
 
 func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
 	if s.cfg.Audit == nil {
-		send(w, http.StatusOK, map[string]any{"entries": []any{}, "refusals": map[string]any{}})
+		send(w, http.StatusOK, map[string]any{"entries": []any{}, "refusals": map[string]any{}, "history": []any{}, "friction": []any{}})
 		return
 	}
 	sid, ok := body["sid"].(string)
@@ -45,17 +45,36 @@ func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
 		send(w, code, p)
 		return
 	}
-	entries := make([]auditEntryJSON, 0, len(v.Entries))
-	for _, e := range v.Entries {
-		entries = append(entries, auditEntryJSON{Time: millis(e.Time), Kind: e.Kind, By: e.By, Result: e.Result, Reason: e.Reason, PersonReason: e.PersonReason,
-			Commit: e.Commit, Branch: e.Branch, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Missing: nonNil(e.Missing),
-			Session: e.Session, Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Person: e.Person, Req: e.Req, Hash: e.Hash})
-	}
 	refusals := v.Refusals
 	if refusals == nil {
 		refusals = map[string]int{}
 	}
-	send(w, http.StatusOK, map[string]any{"entries": entries, "refusals": refusals})
+	send(w, http.StatusOK, map[string]any{"entries": auditEntriesJSON(v.Entries), "refusals": refusals,
+		"history": historyLinesJSON(session.HistoryLines(v.Entries)), "friction": session.FrictionTips(refusals)})
+}
+
+type historyLineJSON struct {
+	Time int64  `json:"time"`
+	Text string `json:"text"`
+	Tone string `json:"tone"`
+}
+
+func historyLinesJSON(list []session.HistoryLine) []historyLineJSON {
+	out := make([]historyLineJSON, 0, len(list))
+	for _, l := range list {
+		out = append(out, historyLineJSON{Time: millis(l.Time), Text: l.Text, Tone: l.Tone})
+	}
+	return out
+}
+
+func auditEntriesJSON(list []session.AuditEntry) []auditEntryJSON {
+	entries := make([]auditEntryJSON, 0, len(list))
+	for _, e := range list {
+		entries = append(entries, auditEntryJSON{Time: millis(e.Time), Kind: e.Kind, By: e.By, Result: e.Result, Reason: e.Reason, PersonReason: e.PersonReason,
+			Commit: e.Commit, Branch: e.Branch, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Missing: nonNil(e.Missing),
+			Session: e.Session, Box: e.Box, From: e.From, FromRef: e.FromRef, Source: e.Source, Person: e.Person, Req: e.Req, Hash: e.Hash})
+	}
+	return entries
 }
 
 func (s *Server) refused(sid string, advice adviceKinds) {

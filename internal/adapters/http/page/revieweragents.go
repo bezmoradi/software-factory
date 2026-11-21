@@ -29,11 +29,14 @@ type reviewerAgentsJSON struct {
 	Limit     int                 `json:"limit"`
 	MaxBytes  int                 `json:"maxBytes"`
 	Tools     []string            `json:"tools"`
+	CanAdd    bool                `json:"canAdd"`
+	Full      string              `json:"full,omitempty"`
 }
 
 func reviewerAgentsOf(v session.ReviewerAgentsView) reviewerAgentsJSON {
 	out := reviewerAgentsJSON{Files: []agentFileViewJSON{}, Roles: map[string]string{}, Defaults: map[string]string{}, RoleNames: map[string]string{},
-		Limit: session.MaxProjectAgents, MaxBytes: session.MaxAgentFile, Tools: session.ReviewTools}
+		Limit: session.MaxProjectAgents, MaxBytes: session.MaxAgentFile, Tools: session.ReviewTools, Full: session.ProjectAgentsFull(len(v.Files))}
+	out.CanAdd = out.Full == ""
 	for _, f := range v.Files {
 		out.Files = append(out.Files, agentFileViewJSON{Name: f.Name, Agent: f.Agent, Description: f.Description, Model: f.Model,
 			Tools: nonNil(f.Tools), Bytes: f.Bytes, SHA: f.SHA, At: millis(f.At)})

@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, focusedKey, refocus, say, sayWhenShown, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { button, el, focusedKey, labelError, refocus, say, sayWhenShown, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -33,7 +33,7 @@ export class StartFromField {
     const name = el('label', 'small', 'Start from')
     name.htmlFor = id
     this.select.append(option('', `main${main ? ` (${main})` : ''}, as fetched now`))
-    const own = sessions.filter(s => s.verified && s.kind === 'background')
+    const own = sessions.filter(s => s.startPoint)
     if (own.length) {
       const group = el('optgroup')
       group.label = 'A session’s latest commit'
@@ -52,7 +52,10 @@ export class StartFromField {
     if (at) this.select.value = SHA.test(forkAt) ? `sid:${fork}:${forkAt}` : `sid:${fork}`
     this.box.append(name, this.select, this.said)
     this.#explain()
-    this.select.addEventListener('change', () => this.#explain())
+    this.select.addEventListener('change', () => {
+      labelError(this.select, '')
+      this.#explain()
+    })
     void this.#load(path)
   }
 
@@ -101,8 +104,6 @@ export class StartFromField {
   }
 }
 
-const HASH = /^[0-9a-f]{64}$/
-
 type MergedPull = { number: number; title: string; body?: string; author: string; url: string; base: string; head: string; merge: string; merged: number }
 
 async function pairCall(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -144,15 +145,15 @@ export class BenchmarkField {
     void this.#load(1)
   }
 
-  chosen(): { number: number; hash: string; base: string } | null | 'refused' {
+  chosen(): { number: number; hash: string; base: string } | null {
     const c = this.#chosen
-    if (!c) return null
-    if (c.refused || !HASH.test(c.hash) || !SHA.test(c.pull.base)) {
-      this.box.open = true
-      say(this.#status, c.refused ? "This pull request's description can't be sent to an agent. Clear it, or pick another." : 'Read the pull request again before starting from it.', 'bad')
-      return 'refused'
-    }
-    return { number: c.pull.number, hash: c.hash, base: c.pull.base }
+    return c ? { number: c.pull.number, hash: c.hash, base: c.pull.base } : null
+  }
+
+  refuse(text: string): boolean {
+    this.box.open = true
+    say(this.#status, text, 'bad')
+    return true
   }
 
   async #load(page: number) {
@@ -265,16 +266,16 @@ export class PairField {
     name.htmlFor = id
     this.message.id = id
     this.message.rows = 4
-    this.message.maxLength = 20000
     this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
+    this.message.addEventListener('input', () => labelError(this.message, ''))
     const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and both sessions' cost estimates; keep one and delete the other.")
     this.box.append(summary, check, row, name, this.message, note, this.said)
   }
 
   follow(agent: string) {
-    const plugin = this.#starters.find(a => a.id === agent)?.method === 'plugin'
-    this.model.hidden = !plugin
-    if (!plugin) this.model.value = ''
+    const model = this.#starters.find(a => a.id === agent)?.fields?.model === true
+    this.model.hidden = !model
+    if (!model) this.model.value = ''
   }
 
   say(text: string) {
@@ -282,15 +283,9 @@ export class PairField {
     this.box.open = true
   }
 
-  value(bench: boolean): { model: string; message: string } | null | 'invalid' {
+  value(bench: boolean): { model: string; message: string } | null {
     if (!this.on.checked) return null
     say(this.said, '', 'bad')
-    const message = this.message.value.trim()
-    if (!bench && !message) {
-      this.say('Write the first message both sessions get, or pick a merged pull request as a benchmark.')
-      this.message.focus()
-      return 'invalid'
-    }
-    return { model: this.model.value, message: bench ? '' : message }
+    return { model: this.model.value, message: bench ? '' : this.message.value.trim() }
   }
 }

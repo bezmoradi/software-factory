@@ -20,6 +20,7 @@ type decisionEntryJSON struct {
 	Hidden   bool   `json:"hidden,omitempty"`
 	Added    bool   `json:"added,omitempty"`
 	Edited   bool   `json:"edited,omitempty"`
+	Label    string `json:"label"`
 }
 
 type decisionLogJSON struct {
@@ -36,7 +37,7 @@ type decisionLogJSON struct {
 func decisionLogOf(v session.DecisionLogView) decisionLogJSON {
 	out := decisionLogJSON{Repo: v.Repo, Entries: make([]decisionEntryJSON, 0, len(v.Entries)), More: v.More, Note: v.Note, Left: v.Left, AuditSince: millis(v.AuditSince), Orphans: v.Orphans, Problems: nonNil(v.Problems)}
 	for _, e := range v.Entries {
-		out.Entries = append(out.Entries, decisionEntryJSON{ID: e.ID, Kind: e.Kind, At: millis(e.Time), Line: e.Line, Reason: e.Reason, Withheld: e.Withheld, Name: e.Name, Text: e.Text, Hidden: e.Hidden, Added: e.Added, Edited: e.Edited})
+		out.Entries = append(out.Entries, decisionEntryJSON{ID: e.ID, Kind: e.Kind, At: millis(e.Time), Line: e.Line, Reason: e.Reason, Withheld: e.Withheld, Name: e.Name, Text: e.Text, Hidden: e.Hidden, Added: e.Added, Edited: e.Edited, Label: session.DecisionLabel(e.Kind)})
 	}
 	return out
 }
@@ -65,8 +66,6 @@ func (s *Server) decisionLog(w http.ResponseWriter, body map[string]any) {
 	okID := session.ValidDecisionID(id)
 	name, okName := body["name"].(string)
 	text, okText := body["text"].(string)
-	okName = okName && len(name) <= 4*session.MaxDecisionName
-	okText = okText && len(text) <= 4*session.MaxDecisionText
 	var v session.DecisionLogView
 	var err error
 	switch op {

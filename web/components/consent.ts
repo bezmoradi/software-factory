@@ -143,9 +143,8 @@ export function askTrust(path: string): Promise<boolean> {
 }
 
 export async function consentFor(needs: Needs | undefined, name: string, what: string): Promise<{ approve?: string; costOk?: boolean } | null> {
-  if (!needs) return null
-  if (needs.approval) return (await approveStartup(needs.approval, name)) ? { approve: needs.approval.hash } : null
-  if (needs.cost && needs.signIn) return (await confirmCost(needs.signIn, what)) ? { costOk: true } : null
+  if (needs?.next === 'approve' && needs.approval) return (await approveStartup(needs.approval, name)) ? { approve: needs.approval.hash } : null
+  if (needs?.next === 'cost' && needs.signIn) return (await confirmCost(needs.signIn, what)) ? { costOk: true } : null
   return null
 }
 

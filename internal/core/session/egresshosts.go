@@ -126,6 +126,23 @@ func UploadHost(entry string) bool {
 	return false
 }
 
+func HostNote(typed string) string {
+	if PyPIHost(HostName(typed)) {
+		return PyPIReadHostsNote
+	}
+	return ""
+}
+
+func (r RefusalView) Note() string {
+	switch {
+	case len(r.Suggest) > 0:
+		return PyPIReadHostsNote
+	case r.Uploads:
+		return r.Host + " also accepts uploads."
+	}
+	return ""
+}
+
 func PyPIHost(entry string) bool {
 	bare, wild := strings.CutPrefix(entry, ".")
 	if bare == "pythonhosted.org" || strings.HasSuffix(bare, ".pythonhosted.org") || bare == "pypi.org" || strings.HasSuffix(bare, ".pypi.org") {

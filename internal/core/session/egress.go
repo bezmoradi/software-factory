@@ -24,6 +24,13 @@ var (
 	expiryWords   = map[string]string{"hour": " for an hour", "day": " for a day", "week": " for a week"}
 )
 
+type ExpiryChoice struct {
+	Value string
+	Label string
+}
+
+var ExpiryChoices = []ExpiryChoice{{Value: "never", Label: "No expiry"}, {Value: "hour", Label: "For an hour"}, {Value: "day", Label: "For a day"}, {Value: "week", Label: "For a week"}}
+
 type EgressList struct {
 	Allow   []string
 	Expires map[string]time.Time
@@ -557,13 +564,13 @@ func (a *Allowlist) SetGateway(ctx context.Context, raw string, agents, reviewer
 	if strings.TrimSpace(raw) != "" {
 		u, host, err := CheckGatewayURL(raw)
 		if err != nil {
-			return err
+			return onField("url", err)
 		}
 		if err := a.refuseHost(host); err != nil {
-			return err
+			return onField("url", err)
 		}
 		if !agents && !reviewers {
-			return explained(invalid("gateway"), "Choose the agents, the reviewers or both for the gateway.")
+			return onField("agents", explained(invalid("gateway"), "Choose the agents, the reviewers or both for the gateway."))
 		}
 		next, words = Gateway{URL: u, Host: host, Agents: agents, Reviewers: reviewers}, "gateway "+host+sides(agents, reviewers)
 	}

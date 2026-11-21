@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -226,7 +227,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := oneHeader(r, "X-SF-Session")
 	name := ""
-	limit := int64(session.MaxImage)
+	limit := int64(session.MaxImageUpload)
 	if kind == "application/octet-stream" {
 		raw := oneHeader(r, "X-SF-Name")
 		decoded, err := url.PathUnescape(raw)
@@ -244,8 +245,12 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusBadRequest, "session")
 		return
 	}
+	tooBig := problem{Error: "body", Message: session.ImageRefused}
+	if name != "" {
+		tooBig.Message = session.DropRefused(name)
+	}
 	if r.ContentLength > limit {
-		refuse(w, http.StatusRequestEntityTooLarge, "body")
+		send(w, http.StatusRequestEntityTooLarge, tooBig)
 		return
 	}
 	rc := http.NewResponseController(w)
@@ -255,7 +260,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			refuse(w, http.StatusRequestEntityTooLarge, "body")
+			send(w, http.StatusRequestEntityTooLarge, tooBig)
 			return
 		}
 		refuse(w, http.StatusBadRequest, "body")
@@ -294,7 +299,7 @@ func idList(v any) ([]string, bool) {
 		return nil, true
 	}
 	list, ok := v.([]any)
-	if !ok || len(list) > session.MaxAttached {
+	if !ok {
 		return nil, false
 	}
 	out := make([]string, 0, len(list))
@@ -314,15 +319,37 @@ func stopped(err error) bool {
 }
 
 func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string]any) {
-	if !keysWithin(body, "sid", "text", "images", "files", "confirm", "approve", "home", "costOk") {
+	if !keysWithin(body, "sid", "text", "revise", "comments", "ask", "images", "files", "confirm", "approve", "home", "costOk") {
 		refuse(w, http.StatusBadRequest, "text")
 		return
 	}
 	sid := str(body["sid"], 80)
 	text, ok := body["text"].(string)
+	_, hasRevise := body["revise"]
+	_, hasComments := body["comments"]
+	_, hasAsk := body["ask"]
+	if hasRevise || hasComments || hasAsk {
+		composed, err := s.composedText(r.Context(), sid, body)
+		if errors.Is(err, errComposedShape) {
+			refuse(w, http.StatusBadRequest, "text")
+			return
+		}
+		if err != nil {
+			code, p := status(err)
+			send(w, code, p)
+			return
+		}
+		text, ok = composed, true
+	}
 	images, okImages := idList(body["images"])
 	files, okFiles := idList(body["files"])
 	consent, okConsent := consentOf(body)
+	for _, key := range []string{"images", "files"} {
+		if list, isList := body[key].([]any); isList && len(list) > session.MaxAttached {
+			send(w, http.StatusBadRequest, problem{Error: "text", Message: "You can attach up to " + strconv.Itoa(session.MaxAttached) + " " + key + " to a message."})
+			return
+		}
+	}
 	if !ok || !okImages || !okFiles || !okConsent {
 		refuse(w, http.StatusBadRequest, "text")
 		return
@@ -332,7 +359,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 	waker, canWake := s.cfg.Starter.(session.MessageWaker)
 	if err != nil && stopped(err) && canWake && waker.Asleep(sid) {
 		if present(body["images"]) || present(body["files"]) {
-			send(w, http.StatusConflict, problem{Error: "asleep", Message: "Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu."})
+			send(w, http.StatusConflict, problem{Error: "asleep", Message: session.NeedsRunning})
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

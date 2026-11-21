@@ -2,6 +2,7 @@ package page
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"regexp"
 	"time"
@@ -35,6 +36,9 @@ type workDocJSON struct {
 	ApprovedAt string `json:"approvedAt,omitempty"`
 	Reported   bool   `json:"reported,omitempty"`
 	OnBase     bool   `json:"onBase,omitempty"`
+	Note       string `json:"note"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
 }
 
 type workTypeJSON struct {
@@ -45,6 +49,7 @@ type workTypeJSON struct {
 	Push    bool     `json:"push"`
 	Roles   []string `json:"roles"`
 	Builtin bool     `json:"builtin"`
+	Warning string   `json:"startWarning,omitempty"`
 }
 
 type gateReviewerJSON struct {
@@ -73,6 +78,7 @@ type gateJSON struct {
 	Chosen       bool               `json:"chosen"`
 	Effective    string             `json:"effective"`
 	SizeNote     string             `json:"sizeNote"`
+	Upload       string             `json:"uploadWarning,omitempty"`
 	Types        []workTypeJSON     `json:"types"`
 	Commands     map[string]string  `json:"commands"`
 	Team         map[string]any     `json:"team"`
@@ -99,6 +105,89 @@ type gateJSON struct {
 	CatalogWhy   string             `json:"catalogWhy,omitempty"`
 	TestLock     testLockJSON       `json:"testLock"`
 	TypeChange   *typeChangeJSON    `json:"typeChange,omitempty"`
+	Started      any                `json:"started"`
+	Review       reviewOfferJSON    `json:"review"`
+	Pushed       bool               `json:"pushed"`
+	Path         pathJSON           `json:"path"`
+	Flow         *flowJSON          `json:"flow"`
+}
+
+type pathActionJSON struct {
+	Ask   string `json:"ask"`
+	Label string `json:"label"`
+	Title string `json:"title"`
+	Hold  string `json:"hold,omitempty"`
+}
+
+type pathStageJSON struct {
+	ID      string           `json:"id"`
+	Name    string           `json:"name"`
+	State   string           `json:"state"`
+	Active  bool             `json:"active"`
+	Detail  string           `json:"detail"`
+	Actions []pathActionJSON `json:"actions"`
+}
+
+type pathCardJSON struct {
+	Step   string  `json:"step"`
+	Count  string  `json:"count"`
+	Detail string  `json:"detail"`
+	Done   float64 `json:"done"`
+}
+
+type pathJSON struct {
+	Stages        []pathStageJSON `json:"stages"`
+	Card          pathCardJSON    `json:"card"`
+	Missing       []string        `json:"missing"`
+	ReviewsActive bool            `json:"reviewsActive"`
+	Required      []string        `json:"required"`
+}
+
+func pathOf(m session.PathModel) pathJSON {
+	out := pathJSON{Stages: make([]pathStageJSON, 0, len(m.Stages)), Card: pathCardJSON{Step: m.Card.Step, Count: m.Card.Count, Detail: m.Card.Detail, Done: m.Card.Done},
+		Missing: nonNil(m.Missing), ReviewsActive: m.ReviewsActive, Required: nonNil(m.Required)}
+	for _, s := range m.Stages {
+		st := pathStageJSON{ID: s.ID, Name: s.Name, State: s.State, Active: s.Active, Detail: s.Detail, Actions: make([]pathActionJSON, 0, len(s.Actions))}
+		for _, a := range s.Actions {
+			st.Actions = append(st.Actions, pathActionJSON{Ask: a.Ask, Label: a.Label, Title: a.Title, Hold: a.Hold})
+		}
+		out.Stages = append(out.Stages, st)
+	}
+	return out
+}
+
+type plannedJSON struct {
+	Name    string `json:"name"`
+	Agent   string `json:"agent"`
+	Why     string `json:"why"`
+	Summary string `json:"summary"`
+}
+
+type reviewOfferJSON struct {
+	Available bool          `json:"available"`
+	Reason    string        `json:"reason"`
+	Planned   []plannedJSON `json:"planned"`
+}
+
+func startedJSON(s session.BranchStart) any {
+	switch s {
+	case session.StartedCommits:
+		return true
+	case session.StartedNone:
+		return false
+	case session.StartedNoBase:
+		return "nobase"
+	}
+	return nil
+}
+
+func offerOf(i session.Info, v session.GateView) reviewOfferJSON {
+	o := session.OfferReview(i, v)
+	out := reviewOfferJSON{Available: o.Reason == "", Reason: o.Reason, Planned: []plannedJSON{}}
+	for _, r := range o.Planned {
+		out.Planned = append(out.Planned, plannedJSON{Name: r.Name, Agent: r.Agent, Why: r.Why, Summary: r.Summary})
+	}
+	return out
 }
 
 type typeFileJSON struct {
@@ -166,12 +255,13 @@ func testLockOf(v session.LockView) testLockJSON {
 	return out
 }
 
-func docJSON(d *session.WorkDoc) *workDocJSON {
+func docJSON(d *session.WorkDoc, clipped string, v session.GateView) *workDocJSON {
 	if d == nil {
 		return nil
 	}
-	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
-		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase}
+	kind := session.DocKind(d == v.Requirements, v.Effective)
+	return &workDocJSON{Kind: kind, Status: session.DocStatus(kind, *d), Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
+		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase, Note: session.DocNote(*d, clipped, v.PlanApprovals, v.Head)}
 }
 
 func typesJSON(list []workflow.WorkType) []workTypeJSON {
@@ -185,22 +275,23 @@ func typesJSON(list []workflow.WorkType) []workTypeJSON {
 		for _, r := range t.Roles {
 			roles = append(roles, string(r))
 		}
-		out = append(out, workTypeJSON{ID: t.ID, Name: t.Name, Steps: steps, Edits: string(t.Edits), Push: t.Push, Roles: roles, Builtin: t.Builtin})
+		out = append(out, workTypeJSON{ID: t.ID, Name: t.Name, Steps: steps, Edits: string(t.Edits), Push: t.Push, Roles: roles, Builtin: t.Builtin, Warning: t.Profile().StartWarning()})
 	}
 	return out
 }
 
 func gateOf(v session.GateView) gateJSON {
 	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(profileSize(v)), WorkType: v.Type, Chosen: v.Chosen,
-		Effective: string(v.Effective), SizeNote: v.Note, Types: typesJSON(v.Types), Commands: map[string]string{},
-		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
+		Effective: string(v.Effective), SizeNote: v.Note, Upload: v.Effective.UploadWarning(), Types: typesJSON(v.Types), Commands: map[string]string{},
+		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements, "", v), Plan: docJSON(v.Plan, session.PlanDocWord(v.Effective), v),
 		Research: v.Research, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
 		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
-		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change)}
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change), Started: startedJSON(v.Started)}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
+	maps.Copy(out.Commands, session.StageCommands(v))
 	if v.Plan != nil {
 		out.PlanPath, out.PlanHash, out.Approved = v.Plan.Path, v.Plan.Hash, v.Plan.Approved
 	}
@@ -282,7 +373,12 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusOK, map[string]any{"gate": gateOf(v)})
+		g := gateOf(v)
+		info, _ := s.reg.Session(sid)
+		g.Review, g.Pushed = offerOf(info, v), session.HeadPushed(info, v.Head)
+		g.Path = pathOf(session.Path(info, v, g.Pushed))
+		g.Flow = flowOf(session.LiveFlow(info, v, g.Pushed))
+		send(w, http.StatusOK, map[string]any{"gate": g})
 	case "/api/size":
 		size, ok := body["size"].(string)
 		if !keysWithin(body, "sid", "size") || sid == "" || !ok || !workTypeID.MatchString(size) {

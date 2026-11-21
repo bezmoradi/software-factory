@@ -40,11 +40,20 @@ func (s *Server) projectHold(w http.ResponseWriter, body map[string]any) {
 		return
 	}
 	after, okAfter := raw["afterBlock"].(bool)
-	files, okFiles := integer(raw["maxFiles"])
-	lines, okLines := integer(raw["maxLines"])
+	files, okFiles := typedCount(raw["maxFiles"])
+	lines, okLines := typedCount(raw["maxLines"])
 	h := session.HoldSettings{AfterBlock: after, MaxFiles: int(files), MaxLines: int(lines)}
-	if !okAfter || !okFiles || !okLines || files < 0 || lines < 0 || !h.Valid() {
-		refuse(w, http.StatusBadRequest, "hold")
+	field := ""
+	switch fault := h.Fault(); {
+	case !okAfter:
+		field = "afterBlock"
+	case !okFiles || fault == "maxFiles":
+		field = "maxFiles"
+	case !okLines || fault != "":
+		field = "maxLines"
+	}
+	if field != "" {
+		send(w, http.StatusBadRequest, problem{Error: "hold", Field: field, Message: session.HoldRule})
 		return
 	}
 	err := s.cfg.Work.SetHold(repo, h)

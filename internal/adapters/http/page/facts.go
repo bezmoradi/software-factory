@@ -36,6 +36,8 @@ type agentCheckJSON struct {
 	At       int64  `json:"at"`
 	EditedAt int64  `json:"editedAt,omitempty"`
 	Hidden   string `json:"hidden,omitempty"`
+	Label    string `json:"label"`
+	Result   string `json:"result"`
 }
 
 type changeNoteJSON struct {
@@ -62,6 +64,7 @@ type dependencyJSON struct {
 	Published int64  `json:"published"`
 	Young     bool   `json:"young"`
 	Note      string `json:"note,omitempty"`
+	Label     string `json:"ecosystemLabel"`
 }
 
 type workflowRunJSON struct {
@@ -96,6 +99,8 @@ type protectionJSON struct {
 	Checks     string   `json:"checks"`
 	CheckNames []string `json:"checkNames"`
 	Notes      []string `json:"notes"`
+
+	Tones map[string]string `json:"tones"`
 }
 
 type projectFactsJSON struct {
@@ -133,7 +138,8 @@ func checksOf(list []session.AgentCheck) []agentCheckJSON {
 	}
 	out := make([]agentCheckJSON, 0, len(list))
 	for _, c := range list {
-		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At), EditedAt: millis(c.EditedAt), Hidden: string(c.Hidden)})
+		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At), EditedAt: millis(c.EditedAt), Hidden: string(c.Hidden),
+			Label: session.CheckKindLabel(string(c.Kind)), Result: session.CheckResult(c.OK, string(c.Hidden))})
 	}
 	return out
 }
@@ -157,7 +163,7 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 	}
 	for _, d := range x.Dependencies {
 		out.Dependencies = append(out.Dependencies, dependencyJSON{Ecosystem: d.Ecosystem, Name: d.Name, From: d.From, To: d.To, Change: d.Change, File: d.File, Lockfile: d.Lockfile,
-			Looked: d.Looked, Found: d.Found, Published: millis(d.Published), Young: d.Young, Note: d.Note})
+			Looked: d.Looked, Found: d.Found, Published: millis(d.Published), Young: d.Young, Note: d.Note, Label: session.EcosystemLabel(d.Ecosystem)})
 	}
 	for _, k := range x.Kinds {
 		out.Kinds = append(out.Kinds, fileKindJSON{Path: k.Path, Kind: k.Kind, Target: k.Target})
@@ -168,7 +174,8 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 func projectFactsOf(v session.ProjectFactsView) projectFactsJSON {
 	p := v.Protection
 	return projectFactsJSON{Repo: v.Repo, Branch: v.Branch, Commit: v.Commit, Workflows: workflowRunsOf(v.Workflows), WorkflowsProblem: v.WorkflowsProblem, Lookups: v.Lookups, Readiness: readinessOf(v.Readiness),
-		Protection: protectionJSON{State: p.State, Reviews: p.Reviews, Approvals: p.Approvals, Checks: p.Checks, CheckNames: nonNil(p.CheckNames), Notes: nonNil(p.Notes)}}
+		Protection: protectionJSON{State: p.State, Reviews: p.Reviews, Approvals: p.Approvals, Checks: p.Checks, CheckNames: nonNil(p.CheckNames), Notes: nonNil(p.Notes),
+			Tones: map[string]string{"state": session.ProtectionTone(p.State, "protected"), "reviews": session.ProtectionTone(p.Reviews, "required"), "checks": session.ProtectionTone(p.Checks, "required")}}}
 }
 
 func (s *Server) UseProjectFacts(facts session.ProjectFactsPage) {

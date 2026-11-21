@@ -40,6 +40,10 @@ type packsJSON struct {
 	Packs     []packJSON        `json:"packs"`
 	Max       int               `json:"max"`
 	RoleNames map[string]string `json:"roleNames"`
+	CanAdd    bool              `json:"canAdd"`
+	Full      string            `json:"full,omitempty"`
+	Kept      string            `json:"kept,omitempty"`
+	Upload    string            `json:"uploadHelp"`
 }
 
 func packOfView(v session.PackView) packJSON {
@@ -59,7 +63,8 @@ func packOfView(v session.PackView) packJSON {
 }
 
 func packsOf(v session.PacksView) packsJSON {
-	out := packsJSON{Using: v.Using, Knackpack: map[string]string{"version": v.KnackpackVersion, "commit": v.KnackpackCommit}, Packs: []packJSON{}, Max: v.Max, RoleNames: map[string]string{}}
+	out := packsJSON{Using: v.Using, Knackpack: map[string]string{"version": v.KnackpackVersion, "commit": v.KnackpackCommit}, Packs: []packJSON{}, Max: v.Max, RoleNames: map[string]string{}, Full: v.Full(), Kept: v.Kept, Upload: session.PackUploadHelp}
+	out.CanAdd = out.Full == ""
 	for _, p := range v.Packs {
 		out.Packs = append(out.Packs, packOfView(p))
 	}
@@ -84,7 +89,11 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		v, ok := body[key].(string)
 		return v, ok && v != "" && len(v) <= limit
 	}
-	if op == "fetch" || op == "add" {
+	typed := func(key string) (string, bool) {
+		v, ok := body[key].(string)
+		return v, ok
+	}
+	if op == "fetch" || op == "add" || op == "add-use" {
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.PackFetchFor + writeFor))
 	}
 	var v session.PacksView
@@ -97,8 +106,8 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		}
 		v, err = s.cfg.Packs.ListPacks(repo)
 	case "fetch":
-		url, okURL := text("url", session.MaxPackURL)
-		commit, okCommit := text("commit", 64)
+		url, okURL := typed("url")
+		commit, okCommit := typed("commit")
 		if !keysWithin(body, "op", "path", "url", "commit") || !okURL || !okCommit {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
@@ -121,6 +130,15 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 			return
 		}
 		v, err = s.cfg.Packs.AddPack(r.Context(), repo, url, commit, digest)
+	case "add-use":
+		url, okURL := text("url", session.MaxPackURL)
+		commit, okCommit := text("commit", 64)
+		digest, okDigest := text("digest", 64)
+		if !keysWithin(body, "op", "path", "url", "commit", "digest") || !okURL || !okCommit || !okDigest {
+			refuse(w, http.StatusBadRequest, "fields")
+			return
+		}
+		v, err = s.cfg.Packs.AddAndUsePack(r.Context(), repo, url, commit, digest)
 	case "remove":
 		digest, ok := text("digest", 64)
 		if !keysWithin(body, "op", "path", "digest") || !ok {
@@ -136,7 +154,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		}
 		v, err = s.cfg.Packs.UsePack(repo, pack)
 	case "upload":
-		name, okName := text("name", 64)
+		name, okName := typed("name")
 		files, okFiles := uploadFiles(body["files"])
 		if !keysWithin(body, "op", "path", "name", "files") || !okName || !okFiles {
 			refuse(w, http.StatusBadRequest, "fields")
@@ -160,7 +178,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 
 func uploadFiles(v any) ([]session.PackUpload, bool) {
 	list, ok := v.([]any)
-	if !ok || len(list) == 0 || len(list) > session.MaxPackUploadFiles {
+	if !ok {
 		return nil, false
 	}
 	out := make([]session.PackUpload, 0, len(list))
@@ -171,7 +189,7 @@ func uploadFiles(v any) ([]session.PackUpload, bool) {
 		}
 		p, okPath := f["path"].(string)
 		t, okText := f["text"].(string)
-		if !okPath || !okText || p == "" || len(p) > session.MaxPackUploadPath {
+		if !okPath || !okText {
 			return nil, false
 		}
 		out = append(out, session.PackUpload{Path: p, Text: t})

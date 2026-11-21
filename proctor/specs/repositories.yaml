@@ -34,8 +34,8 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.starters":
-              - { enabled: true, expect: any, id: claude, method: plugin, name: "Claude Code" }
-              - { enabled: true, expect: any, id: dev-acp, method: acp, name: "Development ACP agent" }
+              - { enabled: true, expect: any, id: claude, method: plugin, name: "Claude Code", default: true, models: [{ id: fable, name: Fable, efforts: [low, medium, high, xhigh, max] }, { id: opus, name: Opus, efforts: [low, medium, high, xhigh, max] }, { id: sonnet, name: Sonnet, efforts: [low, medium, high, xhigh, max] }, { id: haiku, name: Haiku, efforts: [low, medium, high, xhigh, max] }], efforts: [low, medium, high, xhigh, max] }
+              - { enabled: true, expect: any, id: dev-acp, method: acp, name: "Development ACP agent", models: [], efforts: [] }
           count:
             "$.body.hosts": { where: { host: "https://gitserver.test:8443" }, is: 1 }
           any:

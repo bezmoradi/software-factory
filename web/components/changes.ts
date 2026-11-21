@@ -1,18 +1,14 @@
 import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
-import type { ChangeFile, ChangeFrom, Changes } from '../types.ts'
+import type { ChangeFile, ChangeFrom, Changes, LineCommentBody } from '../types.ts'
 
 const MARK: Record<string, string> = { added: 'A', changed: 'M', deleted: 'D' }
-const MAX_COMMENTS = 50
-const MAX_COMMENT = 2000
-const MAX_MESSAGE = 20000
 const MAX_HIGHLIGHT = 20000
 const MAX_HIGHLIGHT_CHARS = 400_000
 const CHUNK_ROWS = 50
 const LAYOUT_KEY = 'sf-diff-layout'
 const SHA = /^[0-9a-f]{40}$/
-const NOT_DIFFED: Record<string, string> = { large: 'over the 1 MiB a file may have to be diffed', budget: 'past the 8 MiB the view reads in all', binary: 'binary, its lines counted', unreadable: 'its stored object couldn’t be read' }
 
 function sizeWords(n: number): string {
   return n < 1024 ? `${n} bytes` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KiB` : `${(n / (1 << 20)).toFixed(1)} MiB`
@@ -223,11 +219,6 @@ function numberOf(n: number): HTMLElement {
   return no
 }
 
-function commentMessage(comments: LineComment[]): string {
-  const lines = comments.map(c => `- ${c.file} line ${c.line}${c.removed ? ' (a removed line, numbered in the old file)' : ''}: ${c.text.replace(/\s*\n\s*/g, ' ').trim()}`)
-  return [`My comments on lines of the change, ${comments.length === 1 ? 'one' : comments.length} in all:`, '', ...lines].join('\n')
-}
-
 function savedLayout(): Layout {
   try {
     const v: unknown = JSON.parse(sessionStorage.getItem(LAYOUT_KEY) || '{}')
@@ -277,7 +268,6 @@ class SfChanges extends HTMLElement {
     })
     this.#lines.addEventListener('keydown', e => this.#keys(e))
     this.#box.rows = 3
-    this.#box.maxLength = MAX_COMMENT
     this.#box.setAttribute('aria-label', 'Comment on the chosen line')
     this.#box.disabled = true
     this.#box.addEventListener('keydown', e => {
@@ -342,13 +332,9 @@ class SfChanges extends HTMLElement {
 
   #addComment() {
     const r = this.#rows[this.#at]
-    const text = this.#box.value.trim()
+    const text = this.#box.value
     if (!r || !this.#commentable(this.#at)) return void (this.#said.textContent = 'Choose a line in the diff first.')
-    if (!text) return void (this.#said.textContent = 'Write the comment first.')
-    const mine = this.#mine
-    if (mine.length >= MAX_COMMENTS) return void (this.#said.textContent = `At most ${MAX_COMMENTS} comments go in one message. Send these first.`)
-    const next = [...mine, { file: r.file, line: r.line, removed: r.kind === 'removed', text: text.slice(0, MAX_COMMENT) }]
-    if (commentMessage(next).length > MAX_MESSAGE) return void (this.#said.textContent = 'That would make the message too long. Send these first.')
+    const next = [...this.#mine, { file: r.file, line: r.line, removed: r.kind === 'removed', text }]
     this.#comments.set(this.#branch, next)
     this.#box.value = ''
     this.#said.textContent = `${next.length} ${plural(next.length, 'comment')} ready to send.`
@@ -381,8 +367,12 @@ class SfChanges extends HTMLElement {
     const branch = this.#branch
     this.#sending = true
     this.#paintList()
+    let refused = ''
     emit(this, 'sf-line-comments', {
-      text: commentMessage(mine),
+      comments: mine.map(c => ({ file: c.file, line: c.line, removed: c.removed, text: c.text })),
+      refused: (why: string) => {
+        refused = why
+      },
       done: (ok: boolean) => {
         this.#sending = false
         if (ok) {
@@ -390,7 +380,7 @@ class SfChanges extends HTMLElement {
           if (kept.length) this.#comments.set(branch, kept)
           else this.#comments.delete(branch)
           this.#said.textContent = kept.length ? `Sent to the agent as one message. ${kept.length} ${plural(kept.length, 'comment')} added since ${kept.length === 1 ? 'is' : 'are'} kept here.` : 'Sent to the agent as one message.'
-        } else this.#said.textContent = 'The comments weren’t sent; they are kept here.'
+        } else this.#said.textContent = refused ? `${refused} The comments are kept here.` : 'The comments weren’t sent; they are kept here.'
         this.#paintList()
       },
     })
@@ -565,7 +555,7 @@ class SfChanges extends HTMLElement {
     what.title = f.status
     li.append(what)
     if (f.stale) li.append(el('span', 'tag warn', 'changed since viewed'))
-    const skip = f.notDiffed ? NOT_DIFFED[f.notDiffed] : ''
+    const skip = f.notDiffed ? f.notDiffedWhy ?? '' : ''
     if (skip) li.append(el('span', 'tag', `not diffed: ${skip}${f.size ? `, ${sizeWords(f.size)}` : ''}`))
     if (f.blob && SHA.test(f.blob)) {
       const label = el('label', 'viewed-mark small')
@@ -678,7 +668,7 @@ declare global {
     'sf-changes': SfChanges
   }
   interface HTMLElementEventMap {
-    'sf-line-comments': CustomEvent<{ text: string; done: (ok: boolean) => void }>
+    'sf-line-comments': CustomEvent<{ comments: LineCommentBody[]; refused: (why: string, error: string) => void; done: (ok: boolean) => void }>
     'sf-fork-commit': CustomEvent<{ sha: string }>
     'sf-compare-point': CustomEvent<{ from: ChangeFrom; commit: string }>
     'sf-viewed': CustomEvent<{ path: string; blob: string; viewed: boolean }>

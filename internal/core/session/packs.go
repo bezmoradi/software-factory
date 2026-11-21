@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"path"
@@ -163,12 +164,21 @@ type PacksView struct {
 	KnackpackCommit  string
 	Packs            []PackView
 	Max              int
+	Kept             string
+}
+
+func (v PacksView) Full() string {
+	if len(v.Packs) < v.Max {
+		return ""
+	}
+	return "The engine keeps " + strconv.Itoa(v.Max) + " packs, its limit. Remove one to add another."
 }
 
 type PacksPage interface {
 	ListPacks(path string) (PacksView, error)
 	FetchPack(ctx context.Context, path, url, commit string) (PackView, error)
 	AddPack(ctx context.Context, path, url, commit, digest string) (PacksView, error)
+	AddAndUsePack(ctx context.Context, path, url, commit, digest string) (PacksView, error)
 	UploadPack(path, name string, files []PackUpload) (PacksView, error)
 	RemovePack(path, digest string) (PacksView, error)
 	UsePack(path, pack string) (PacksView, error)
@@ -471,6 +481,7 @@ func packURLProblem(url string) string {
 }
 
 func (p *Packs) fetch(ctx context.Context, url, commit string) (FetchedPack, error) {
+	url, commit = strings.TrimSpace(url), strings.ToLower(strings.TrimSpace(commit))
 	if why := packURLProblem(url); why != "" {
 		return FetchedPack{}, explained(invalid("url"), why)
 	}
@@ -524,7 +535,25 @@ func (p *Packs) change(r Repository, fn func(*PackState) error) (PacksView, erro
 	return p.viewFor(r, st), nil
 }
 
+var PackUploadHelp = "Or upload a pack: pick a folder holding " + workflow.PackManifestFile + " and the pack's agents/, skills/ and commands/ folders. The page sends those files only, as text, and the engine takes at most " + strconv.Itoa(MaxPackUploadFiles) + " of them, " + strconv.Itoa(MaxPackUploadFile>>10) + " KiB each and " + strconv.Itoa(MaxPackUploadBytes>>20) + " MiB in all; it writes the plugin's manifest itself, keeps the pack by its digest and refuses hooks, servers and programs."
+
+func manifestName(files []PackUpload) string {
+	i := slices.IndexFunc(files, func(f PackUpload) bool { return f.Path == workflow.PackManifestFile })
+	if i < 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(files[i].Text), &m) != nil {
+		return ""
+	}
+	name, _ := m["name"].(string)
+	return name
+}
+
 func uploadProblem(name string, files []PackUpload) string {
+	if name == "" && !slices.ContainsFunc(files, func(f PackUpload) bool { return f.Path == workflow.PackManifestFile }) {
+		return "The folder has no " + workflow.PackManifestFile + " naming the pack at its top."
+	}
 	if why := workflow.PackNameProblem(name); why != "" {
 		return why + "."
 	}
@@ -559,6 +588,9 @@ func (p *Packs) UploadPack(path, name string, files []PackUpload) (PacksView, er
 	r, err := p.byPath(path)
 	if err != nil {
 		return PacksView{}, err
+	}
+	if name == "" {
+		name = manifestName(files)
 	}
 	if why := uploadProblem(name, files); why != "" {
 		p.cfg.Logger.Info("pack", "event", "upload-refused")
@@ -627,11 +659,30 @@ func (p *Packs) keep(r Repository, f FetchedPack, what string) (PacksView, error
 	if err != nil {
 		return PacksView{}, err
 	}
+	v.Kept = sp.Digest
 	if added {
 		p.audit(AuditEntry{Repository: r.Name, Result: ResultAdded, Hash: sp.Digest, Remote: sp.Source.URL, Commit: sp.Source.Commit,
 			Reason: "the developer " + what + ", on the page"})
 		p.cfg.Logger.Info("pack", "event", ResultAdded, "name", sp.Name, "digest", sp.Digest)
 	}
+	return v, nil
+}
+
+func (p *Packs) AddAndUsePack(ctx context.Context, path, url, commit, digest string) (PacksView, error) {
+	v, err := p.ListPacks(path)
+	if err != nil {
+		return PacksView{}, err
+	}
+	if !slices.ContainsFunc(v.Packs, func(k PackView) bool { return k.Digest == digest }) {
+		if v, err = p.AddPack(ctx, path, url, commit, digest); err != nil {
+			return PacksView{}, err
+		}
+		digest = v.Kept
+	}
+	if v, err = p.UsePack(path, digest); err != nil {
+		return PacksView{}, err
+	}
+	v.Kept = digest
 	return v, nil
 }
 

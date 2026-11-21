@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
@@ -17,6 +19,7 @@ const (
 	reviewDepthRoute = "/api/review-depth"
 	maxDepthAgent    = 120
 	maxProjectName   = 400
+	depthListRule    = "each list of roles is agent names, separated by commas"
 )
 
 var (
@@ -161,6 +164,7 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 		return
 	case "approve":
 		sid, okSID := viewSession(body)
+		okSID = okSID || body["sid"] == ""
 		if !keysWithin(body, "op", "name", "id", "sid") || !okID || !okSID {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
@@ -212,20 +216,40 @@ type depthJSON struct {
 	MaxRuns      int            `json:"maxRuns"`
 }
 
-func agentList(v any, limit int) ([]string, bool) {
+func agentList(v any) ([]string, bool) {
+	if typed, ok := v.(string); ok {
+		return workflow.AgentNames(typed), true
+	}
 	raw, ok := v.([]any)
-	if !ok || len(raw) > limit {
+	if !ok {
 		return nil, false
 	}
 	out := make([]string, 0, len(raw))
 	for _, x := range raw {
 		a, ok := x.(string)
-		if !ok || len(a) > maxDepthAgent || !workflow.AgentName(a) {
+		if !ok {
 			return nil, false
 		}
 		out = append(out, a)
 	}
 	return out, true
+}
+
+func typedCount(v any) (int64, bool) {
+	typed, ok := v.(string)
+	if !ok {
+		return integer(v)
+	}
+	typed = strings.TrimSpace(typed)
+	if typed == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(typed, 10, 64)
+	return n, err == nil
+}
+
+func refuseDepth(w http.ResponseWriter, field, why string) {
+	send(w, http.StatusBadRequest, problem{Error: "depth", Field: field, Message: "The engine didn't save it: " + why + "."})
 }
 
 func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, op string, body map[string]any) {
@@ -245,22 +269,37 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		advisory, okAdvisory := agentList(body["advisory"], workflow.MaxAdvisory)
-		extra, okExtra := agentList(body["extra"], workflow.MaxDeeper)
-		files, okFiles := integer(body["maxFiles"])
-		lines, okLines := integer(body["maxLines"])
-		extraRuns, okExtraRuns := integer(body["extraRuns"])
+		advisory, okAdvisory := agentList(body["advisory"])
+		extra, okExtra := agentList(body["extra"])
+		files, okFiles := typedCount(body["maxFiles"])
+		lines, okLines := typedCount(body["maxLines"])
+		extraRuns, okExtraRuns := typedCount(body["extraRuns"])
 		rawRuns, okRuns := body["runs"].(map[string]any)
-		if !okAdvisory || !okExtra || !okFiles || !okLines || !okExtraRuns || !okRuns || len(rawRuns) > 20 ||
-			files < 0 || lines < 0 || files > workflow.MaxDepthSize || lines > workflow.MaxDepthSize || extraRuns < 0 || extraRuns > review.MaxRuns {
-			refuse(w, http.StatusBadRequest, "depth")
+		switch {
+		case !okAdvisory:
+			refuseDepth(w, "advisory", depthListRule)
+			return
+		case !okExtra:
+			refuseDepth(w, "extra", depthListRule)
+			return
+		case !okFiles || files < 0 || files > workflow.MaxDepthSize:
+			refuseDepth(w, "maxFiles", workflow.DepthSizeRule)
+			return
+		case !okLines || lines < 0 || lines > workflow.MaxDepthSize:
+			refuseDepth(w, "maxLines", workflow.DepthSizeRule)
+			return
+		case !okExtraRuns || extraRuns < 0 || extraRuns > review.MaxRuns:
+			refuseDepth(w, "extraRuns", workflow.DepthSizeRule)
+			return
+		case !okRuns || len(rawRuns) > 20:
+			refuseDepth(w, "runs", workflow.DepthRunsRule)
 			return
 		}
 		runs := map[string]int{}
 		for a, v := range rawRuns {
-			n, ok := integer(v)
+			n, ok := typedCount(v)
 			if !ok || n < 1 || n > review.MaxRuns || len(a) > maxDepthAgent || !workflow.AgentName(a) {
-				refuse(w, http.StatusBadRequest, "depth")
+				refuseDepth(w, "runs", workflow.DepthRunRule)
 				return
 			}
 			runs[a] = int(n)

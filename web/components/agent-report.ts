@@ -1,5 +1,6 @@
 import { api, signedIn } from '../api.ts'
 import { el, visible } from '../lib/dom.ts'
+import { saidOf, type Said } from '../lib/json.ts'
 
 interface SettingsReport {
   sid: string
@@ -25,6 +26,7 @@ interface Pin {
   ref: string
   commit: string
   note: string
+  said: Said
 }
 
 interface PluginPin {
@@ -41,6 +43,9 @@ interface PluginPin {
   head: string
   from: string
   problem: string
+  checkLine: string
+  checkTone: string
+  checkStamped: boolean
 }
 
 interface Advisory {
@@ -87,10 +92,10 @@ function readReport(body: unknown): Report | null {
       problem: text(s.problem),
       sessions: list(s.sessions, h => ({ sid: text(h.sid), session: text(h.session), checkedAt: Number(h.checkedAt) || 0, sinceAt: Number(h.sinceAt) || 0, changed: strings(h.changed), more: Number(h.more) || 0, first: h.first === true, dropped: h.dropped === true, running: h.running === true, problem: text(h.problem), watching: Number(h.watching) || 0 })),
     },
-    pins: list(v.pins, p => ({ name: text(p.name), package: text(p.package), version: text(p.version), state: text(p.state), repository: text(p.repository), workflow: text(p.workflow), ref: text(p.ref), commit: text(p.commit), note: text(p.note) })),
+    pins: list(v.pins, p => ({ name: text(p.name), package: text(p.package), version: text(p.version), state: text(p.state), repository: text(p.repository), workflow: text(p.workflow), ref: text(p.ref), commit: text(p.commit), note: text(p.note), said: saidOf(p.said) })),
     plugins: list(v.plugins, p => ({
       name: text(p.name), source: text(p.source), branch: text(p.branch), version: text(p.version), commit: text(p.commit), refused: p.refused === true, refusedWhy: text(p.refusedWhy), installedAt: Number(p.installedAt) || 0,
-      checkedAt: Number(p.checkedAt) || 0, check: text(p.check), head: text(p.head), from: text(p.from), problem: text(p.problem),
+      checkedAt: Number(p.checkedAt) || 0, check: text(p.check), head: text(p.head), from: text(p.from), problem: text(p.problem), checkLine: text(p.checkLine), checkTone: text(p.checkTone), checkStamped: p.checkStamped === true,
     })),
     advisories: {
       checkedAt: Number(a.checkedAt) || 0, off: a.off === true, problem: text(a.problem), sent: strings(a.sent), more: Math.max(0, Math.floor(Number(a.more) || 0)),
@@ -107,13 +112,6 @@ function short(sha: string): string {
   return /^[0-9a-f]{40}$/.test(sha) ? sha.slice(0, 7) : sha
 }
 
-const PIN_STATES: Record<string, [string, string]> = {
-  verified: ['Provenance verified', 'ok'],
-  none: ['No provenance', 'warn'],
-  unpinned: ['Provenance not checked against a source', 'warn'],
-  failed: ['Provenance failed', 'bad'],
-  unchecked: ['Provenance not checked yet', 'muted'],
-}
 
 class SfAgentReport extends HTMLElement {
   #timer = 0
@@ -176,7 +174,7 @@ class SfAgentReport extends HTMLElement {
     const ul = el('ul', 'list')
     for (const p of r.pins) {
       const li = el('li', 'small')
-      const [label, tone] = PIN_STATES[p.state] ?? [visible(p.state), 'muted']
+      const { label, tone } = p.said.label ? p.said : { label: visible(p.state), tone: 'muted' }
       li.append(el('strong', '', `${visible(p.name || p.package)} ${visible(p.version)}`), el('span', 'muted', ` ${visible(p.package)} `), el('span', `tag ${tone}`, label))
       if (p.state === 'verified') li.append(el('p', 'small muted', `Built by ${visible(p.repository)} with ${visible(p.workflow)} at ${visible(p.ref)}${p.commit ? `, commit ${visible(short(p.commit))}` : ''}.`))
       else if (p.note) li.append(el('p', 'small muted', visible(p.note)))
@@ -196,16 +194,8 @@ class SfAgentReport extends HTMLElement {
     const unused = `reviews can't start, so every push needs your Allow with a reason, and new sessions start without ${visible(p.name)}`
     if (p.commit && p.refusedWhy) li.append(el('p', 'small bad', `Commit ${visible(short(p.commit))} doesn't pass this engine's install checks, so it isn't used: ${unused}. ${visible(p.refusedWhy)} At each start the engine installs the head of ${visible(p.branch)} if it passes them; with SF_AGENTS_INSTALL=manual, run install-agents once it does.`))
     else if (p.commit && p.refused) li.append(el('p', 'small bad', `This engine's list of refused ${visible(p.name)} commits names ${visible(short(p.commit))}, so it isn't used: ${unused}. At each start the engine installs the head of ${visible(p.branch)} if it isn't refused; with SF_AGENTS_INSTALL=manual, run install-agents once it isn't.`))
-    const kept = p.commit && !p.refused ? ', so reviews and new sessions use the installed commit' : ''
-    const checks: Record<string, [string, string]> = {
-      'up-to-date': [`Checked at this start (${when(p.checkedAt)}): up to date.`, 'ok'],
-      updated: [p.from ? `Checked at this start (${when(p.checkedAt)}): updated from commit ${visible(short(p.from))}.` : `Checked at this start (${when(p.checkedAt)}): installed.`, 'ok'],
-      kept: [`Checked at this start (${when(p.checkedAt)}): the head of ${visible(p.branch)} wasn't installed${kept}. ${visible(p.problem)}`, 'warn'],
-      'not-installed': [`Checked at this start (${when(p.checkedAt)}): nothing could be installed. ${visible(p.problem)}`, 'bad'],
-      checking: [`Checking the head of ${visible(p.branch)} now.`, 'muted'],
-      off: [`Not checked at this start: SF_AGENTS_INSTALL is manual, so the engine made no network call for it; install-agents checks and updates it.`, 'muted'],
-    }
-    const [line, tone] = checks[p.check] ?? ['Not checked yet at this start.', 'muted']
+    const line = p.checkStamped ? `Checked at this start (${when(p.checkedAt)}): ${visible(p.checkLine)}` : visible(p.checkLine)
+    const tone = p.checkTone || 'muted'
     li.append(el('p', `small ${tone}`, line))
     return li
   }

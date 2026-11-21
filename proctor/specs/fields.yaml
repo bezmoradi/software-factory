@@ -31,6 +31,12 @@ tables:
       - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text"]
       - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields"]
       - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path"]
+      - ["fld_dispatch_caps_extra", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, proctorUnknownField: true } }, "fields"]
+      - ["fld_dispatch_caps_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: 1 }, "fields"]
+      - ["fld_pair_two_agents", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }, { agent: dev-acp }], double: true, message: proctor }, "fields"]
+      - ["fld_pair_no_agent", "/api/pair", { op: start, path: /workspace/base/demo, agents: [], double: true, message: proctor }, "fields"]
+      - ["fld_pair_from_shape", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, from: { branch: proctor } }, "fields"]
+      - ["fld_pair_second_model_type", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, secondModel: 1 }, "secondModel"]
       - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields"]
       - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields"]
       - ["fld_wake_home_short", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: abc }, "fields"]
@@ -41,6 +47,19 @@ tables:
       - ["fld_wake_refuse_text", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: "true" }, "fields"]
       - ["fld_wake_refuse_home", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
       - ["fld_wake_refuse_approve", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, approve: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
+      - ["fld_message_revise_kind", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: proctor, note: proctor } }, "text"]
+      - ["fld_message_revise_extra", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: proctor, proctorUnknownField: true } }, "text"]
+      - ["fld_message_revise_and_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, revise: { kind: requirements, note: proctor } }, "text"]
+      - ["fld_message_revise_and_comments", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: proctor }, comments: [] }, "text"]
+      - ["fld_message_comments_type", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: proctor }, "text"]
+      - ["fld_message_comments_line", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: one, removed: false, text: proctor }] }, "text"]
+      - ["fld_message_comments_no_file", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: "", line: 1, removed: false, text: proctor }] }, "text"]
+      - ["fld_message_comments_images", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: proctor }], images: ["0123456789abcdef01234567"] }, "text"]
+      - ["fld_message_ask_type", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: 1 }, "text"]
+      - ["fld_message_ask_unknown", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: proctor }, "text"]
+      - ["fld_message_ask_and_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, ask: commit }, "text"]
+      - ["fld_message_ask_and_revise", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define, revise: { kind: requirements, note: proctor } }, "text"]
+      - ["fld_message_ask_images", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: checkpoint, images: ["0123456789abcdef01234567"] }, "text"]
       - ["fld_message_home", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, home: abc }, "text"]
       - ["fld_dispatch_home", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
       - ["fld_remove_session", "/api/remove-session", { proctorUnknownField: true }, "fields"]
@@ -64,9 +83,13 @@ tables:
       - ["fld_keep_extra", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
       - ["fld_halt", "/api/halt", {}, "op"]
       - ["fld_halt_extra", "/api/halt", { op: read, proctorUnknownField: true }, "fields"]
+      - ["fld_halt_stop", "/api/halt", { op: stop }, "op"]
+      - ["fld_halt_pause", "/api/halt", { op: pause }, "op"]
+      - ["fld_halt_release", "/api/halt", { op: release }, "op"]
       - ["fld_diagnostics", "/api/diagnostics", { proctorUnknownField: true }, "fields"]
       - ["fld_update_two", "/api/update", { check: true, later: "1.0.0" }, "fields"]
-      - ["fld_update_type", "/api/update", { check: "yes" }, "fields"]
+      - ["fld_update_check", "/api/update", { check: true }, "fields"]
+      - ["fld_update_check_off", "/api/update", { check: false }, "fields"]
       - ["fld_update_empty_later", "/api/update", { later: "" }, "fields"]
       - ["fld_save_token", "/api/save-token", { host: "gitserver.test:8443" }, "token"]
       - ["fld_save_token_extra", "/api/save-token", { proctorUnknownField: true }, "fields"]
@@ -80,29 +103,16 @@ tables:
       - ["fld_files", "/api/files", { proctorUnknownField: true }, "fields"]
       - ["fld_file_match", "/api/file-match", { proctorUnknownField: true }, "fields"]
       - ["fld_limits_op", "/api/limits", { op: proctor }, "op"]
-      - ["fld_limits_disk_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
-      - ["fld_limits_disk_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "fields"]
-      - ["fld_limits_disk_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
-      - ["fld_limits_disk_text", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "fields"]
-      - ["fld_limits_disk_null", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "fields"]
-      - ["fld_limits_project_disk_negative", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
-      - ["fld_limits_project_disk_fraction", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "fields"]
-      - ["fld_limits_project_disk_over", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
       - ["fld_limits_session_extra", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
       - ["fld_limits_project_extra", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
-      - ["fld_limits_session_no_money", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "fields"]
-      - ["fld_limits_money_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "fields"]
-      - ["fld_limits_money_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "fields"]
-      - ["fld_limits_minutes_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "fields"]
-      - ["fld_limits_minutes_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "fields"]
-      - ["fld_limits_turns_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "fields"]
-      - ["fld_limits_turns_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "fields"]
       - ["fld_limits_raise_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: 2 }, "fields"]
       - ["fld_limits_raise_extra", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2, proctorUnknownField: true }, "fields"]
       - ["fld_limits_measure_extra", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
       - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields"]
       - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields"]
       - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_check_extra", "/api/limits", { op: check, money: 0, minutes: 0, turns: 0, proctorUnknownField: true }, "fields"]
+      - ["fld_limits_raise_value_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: null }, "fields"]
       - ["fld_verify", "/api/verify", { proctorUnknownField: true }, "fields"]
       - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
       - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
@@ -123,6 +133,9 @@ tables:
       - ["fld_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: 1 }, "fields"]
       - ["fld_verify_attachment_id", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: xyz, name: home.png }, "fields"]
       - ["fld_verify_attachment_extra", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png, proctorUnknownField: true }, "fields"]
+      - ["fld_lessons_approve_sid_type", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: 1 }, "fields"]
+      - ["fld_lessons_approve_sid_shape", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: "a/b" }, "fields"]
+      - ["fld_lessons_approve_no_sid", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef" }, "fields"]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
@@ -182,9 +195,8 @@ tables:
       - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: video }, "kind", "The engine runs two kinds of verification: check and browser."]
       - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
       - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
+      - ["msg_split_op", "/api/split", { op: queue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "op", "A task card is edited, dismissed, started or taken out of the queue, nothing else."]
       - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
-      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "A browser command is one line of at most 300 bytes, with no control characters."]
-      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
 
   - id: FLD-T02R
     name: "A route that only reads refuses an operation other than read, with a message saying so"
@@ -203,6 +215,195 @@ tables:
     columns: ["case", "route", "body", "error", "message"]
     rows:
       - ["msg_metrics_op", "/api/metrics", { op: write, repo: demo }, "op", "The engine reads a project's numbers, nothing else."]
+
+  - id: FLD-T06
+    name: "A route refuses a value a person typed that its rule doesn't take, with a message saying what it takes, so the page sends what was typed and shows the engine's answer"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the value before it saves, sends or starts anything, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["msg_identity_name_empty", "/api/commit-identity", { op: set, name: "", email: "12345+proctor@users.noreply.github.com" }, "name", "The name agents commit with needs 1 to 100 characters."]
+      - ["msg_identity_name_long", "/api/commit-identity", { op: set, name: "${fill(401)}", email: "12345+proctor@users.noreply.github.com" }, "name", "The name agents commit with needs 1 to 100 characters."]
+      - ["msg_identity_email", "/api/commit-identity", { op: set, name: Proctor Run, email: not-an-email }, "email", "The email needs the shape name@example.com, at most 254 characters with no spaces, such as GitHub's 12345+you@users.noreply.github.com."]
+      - ["msg_decision_add_empty", "/api/decision-log", { op: add, repo: demo, text: "" }, "text", "An entry needs its text."]
+      - ["msg_decision_add_long", "/api/decision-log", { op: add, repo: demo, text: "${fill(2001)}" }, "text", "A text is at most 500 characters, with no control characters but line breaks."]
+      - ["msg_saved_prompt_name", "/api/saved-prompts", { op: save, repo: demo, name: "", text: proctor }, "name", "A prompt's name is one line of 1 to 60 characters."]
+      - ["msg_add_repo_empty", "/api/add-repo", { url: "" }, "url", "Type the repository's https address."]
+      - ["msg_add_repo_long", "/api/add-repo", { url: "${fill(4097)}" }, "url", "That address has characters a repository address doesn't use."]
+      - ["msg_save_token_empty", "/api/save-token", { host: "gitserver.test:8443", token: "" }, "token", "A token is 1 to 4096 printable characters with no spaces."]
+      - ["msg_queue_add_empty", "/api/session-work", { op: queue-add, sid: "00000000-0000-4000-8000-000000000000", text: "" }, "text", "Type the message to queue first."]
+      - ["msg_login_code_empty", "/api/claude-login", { step: code, target: reviewers, code: "" }, "code", "Paste the code exactly as claude.com shows it."]
+      - ["msg_message_revise_empty", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: " \n\t " } }, "note", "Type what should change first."]
+      - ["msg_message_revise_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: "${fill(2001)}" } }, "note", "A note holds at most 2,000 characters."]
+      - ["msg_message_images_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, images: ["000000000000000000000001", "000000000000000000000002", "000000000000000000000003", "000000000000000000000004", "000000000000000000000005"] }, "text", "You can attach up to 4 images to a message."]
+      - ["msg_message_files_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, files: ["000000000000000000000001", "000000000000000000000002", "000000000000000000000003", "000000000000000000000004", "000000000000000000000005"] }, "text", "You can attach up to 4 files to a message."]
+      - ["msg_message_comments_none", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [] }, "comments", "Add a comment first."]
+      - ["msg_message_comments_empty", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: proctor }, { file: b.go, line: 7, removed: true, text: " \n " }] }, "comments", "Comment 2, on b.go line 7, is empty: write it, or remove it."]
+      - ["msg_message_comment_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: "${fill(2001)}" }] }, "comments", "Comment 1, on a.go line 1, is over 2,000 characters: shorten it."]
+      - ["msg_message_comments_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 2, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 3, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 4, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 5, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 6, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 7, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 8, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 9, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 10, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 11, removed: false, text: "${fill(2000)}" }] }, "comments", "These comments would make a message over 20,000 characters. Remove some, send these, then add the rest."]
+      - ["msg_message_comments_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: x }, { file: a.go, line: 2, removed: false, text: x }, { file: a.go, line: 3, removed: false, text: x }, { file: a.go, line: 4, removed: false, text: x }, { file: a.go, line: 5, removed: false, text: x }, { file: a.go, line: 6, removed: false, text: x }, { file: a.go, line: 7, removed: false, text: x }, { file: a.go, line: 8, removed: false, text: x }, { file: a.go, line: 9, removed: false, text: x }, { file: a.go, line: 10, removed: false, text: x }, { file: a.go, line: 11, removed: false, text: x }, { file: a.go, line: 12, removed: false, text: x }, { file: a.go, line: 13, removed: false, text: x }, { file: a.go, line: 14, removed: false, text: x }, { file: a.go, line: 15, removed: false, text: x }, { file: a.go, line: 16, removed: false, text: x }, { file: a.go, line: 17, removed: false, text: x }, { file: a.go, line: 18, removed: false, text: x }, { file: a.go, line: 19, removed: false, text: x }, { file: a.go, line: 20, removed: false, text: x }, { file: a.go, line: 21, removed: false, text: x }, { file: a.go, line: 22, removed: false, text: x }, { file: a.go, line: 23, removed: false, text: x }, { file: a.go, line: 24, removed: false, text: x }, { file: a.go, line: 25, removed: false, text: x }, { file: a.go, line: 26, removed: false, text: x }, { file: a.go, line: 27, removed: false, text: x }, { file: a.go, line: 28, removed: false, text: x }, { file: a.go, line: 29, removed: false, text: x }, { file: a.go, line: 30, removed: false, text: x }, { file: a.go, line: 31, removed: false, text: x }, { file: a.go, line: 32, removed: false, text: x }, { file: a.go, line: 33, removed: false, text: x }, { file: a.go, line: 34, removed: false, text: x }, { file: a.go, line: 35, removed: false, text: x }, { file: a.go, line: 36, removed: false, text: x }, { file: a.go, line: 37, removed: false, text: x }, { file: a.go, line: 38, removed: false, text: x }, { file: a.go, line: 39, removed: false, text: x }, { file: a.go, line: 40, removed: false, text: x }, { file: a.go, line: 41, removed: false, text: x }, { file: a.go, line: 42, removed: false, text: x }, { file: a.go, line: 43, removed: false, text: x }, { file: a.go, line: 44, removed: false, text: x }, { file: a.go, line: 45, removed: false, text: x }, { file: a.go, line: 46, removed: false, text: x }, { file: a.go, line: 47, removed: false, text: x }, { file: a.go, line: 48, removed: false, text: x }, { file: a.go, line: 49, removed: false, text: x }, { file: a.go, line: 50, removed: false, text: x }, { file: a.go, line: 51, removed: false, text: x }] }, "comments", "At most 50 comments go in one message. Remove some, send these, then add the rest."]
+
+  - id: FLD-T07
+    name: "/api/limits refuses a cap a person typed that its range doesn't take, naming the field and its range, so the page sends what was typed and marks that field"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/limits"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: fields, field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the caps before Limits.SetProject or SetSession saves anything, and check saves nothing at all, so the route changed nothing; /api/limits isn't declared a read, since its op decides read or write, and no other read shows caps"
+    columns: ["case", "body", "field", "message"]
+    rows:
+      - ["fld_limits_disk_negative", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_text", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_null", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_negative", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_fraction", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_over", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_session_no_money", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["fld_limits_money_negative", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["fld_limits_money_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["fld_limits_minutes_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "minutes", "The time cap is a whole number of minutes from 0 to 43,200; 0 or empty is off."]
+      - ["fld_limits_minutes_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "minutes", "The time cap is a whole number of minutes from 0 to 43,200; 0 or empty is off."]
+      - ["fld_limits_turns_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "turns", "The turn cap is a whole number of turns from 0 to 10,000; 0 or empty is off."]
+      - ["fld_limits_turns_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "turns", "The turn cap is a whole number of turns from 0 to 10,000; 0 or empty is off."]
+      - ["cap_check_money_over", { op: check, money: 100000.01, minutes: 0, turns: 0 }, "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["cap_check_minutes_text", { op: check, money: 0, minutes: "60", turns: 0 }, "minutes", "The time cap is a whole number of minutes from 0 to 43,200; 0 or empty is off."]
+      - ["cap_check_turns_negative", { op: check, money: 0, minutes: 0, turns: -1 }, "turns", "The turn cap is a whole number of turns from 0 to 10,000; 0 or empty is off."]
+      - ["cap_check_disk_over", { op: check, money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["cap_project_money_null", { op: project, name: demo, money: null, minutes: 0, turns: 0 }, "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["cap_raise_value_null", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: money, value: null }, "value", "Type the new cap as a number."]
+
+  - id: FLD-T08
+    name: "A route refuses a value a person typed that its rule doesn't take, naming the field and saying what it takes, so the page marks that field and shows the engine's answer beside its label"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the value before it saves, sends or starts anything, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    columns: ["case", "route", "body", "error", "field", "message"]
+    rows:
+      - ["msg_project_check_long", "/api/project-commands", { op: set, name: demo, check: "${fill(365)}", setup: "" }, "command", "check", "A check or setup command is one line of at most 300 bytes, with no control characters."]
+      - ["msg_project_setup_long", "/api/project-commands", { op: set, name: demo, check: "", setup: "${fill(365)}" }, "command", "setup", "A check or setup command is one line of at most 300 bytes, with no control characters."]
+      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "browser", "A browser command is one line of at most 300 bytes, with no control characters."]
+      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
+      - ["msg_review_depth_size", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: x, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "maxFiles", "The engine didn't save it: a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times."]
+      - ["msg_review_depth_lines", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: -1, extra: [], extraRuns: 0 }, "depth", "maxLines", "The engine didn't save it: a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times."]
+      - ["msg_review_depth_extra_runs", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 4 }, "depth", "extraRuns", "The engine didn't save it: a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times."]
+      - ["msg_review_depth_advisory_type", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: 1, runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "advisory", "The engine didn't save it: each list of roles is agent names, separated by commas."]
+      - ["msg_review_depth_advisory_typed", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: "a1, a2 a3,a4 a5  a6, a1", runs: {}, maxFiles: " 0 ", maxLines: "", extra: "", extraRuns: "1" }, "depth", "advisory", "The engine didn't save it: a project names at most 5 advisory roles and 5 extra roles above the size."]
+      - ["msg_review_depth_extra_type", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [1], extraRuns: 0 }, "depth", "extra", "The engine didn't save it: each list of roles is agent names, separated by commas."]
+      - ["msg_review_depth_advisory_count", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [a1, a2, a3, a4, a5, a6], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "advisory", "The engine didn't save it: a project names at most 5 advisory roles and 5 extra roles above the size."]
+      - ["msg_review_depth_extra_name", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: ["bad name"], extraRuns: 0 }, "depth", "extra", "The engine didn't save it: each role is an agent name: letters, digits and . _ : @ -, at most 120 characters."]
+      - ["msg_review_depth_runs", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: { a1: 4 }, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "runs", "The engine didn't save it: a role runs 1 to 3 times per commit."]
+      - ["msg_project_hold", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: -1, maxLines: 0 } }, "hold", "maxFiles", "A size limit is a whole number of files or lines, 0 to switch it off."]
+      - ["msg_project_hold_lines", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: 0, maxLines: x } }, "hold", "maxLines", "A size limit is a whole number of files or lines, 0 to switch it off."]
+      - ["msg_project_hold_after", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: "yes", maxFiles: 0, maxLines: 0 } }, "hold", "afterBlock", "A size limit is a whole number of files or lines, 0 to switch it off."]
+      - ["msg_split_title_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: "", message: proctor }, "text", "title", "A task's title is empty."]
+      - ["msg_split_message_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: proctor, message: " " }, "text", "message", "A task's first message is empty."]
+      - ["msg_gateway_url", "/api/egress", { op: gateway, url: "http://llm-gateway.example.com", agents: true, reviewers: true }, "gateway", "url", "The gateway's base URL must start with https:// and name a host, such as https://llm-gateway.example.com."]
+      - ["msg_gateway_sides", "/api/egress", { op: gateway, url: "https://llm-gateway.example.com", agents: false, reviewers: false }, "gateway", "agents", "Choose the agents, the reviewers or both for the gateway."]
+
+  - id: FLD-T10
+    name: "A start refuses an issue or a benchmark the page didn't read, a benchmark beside a start point, an issue or a message, an issue beside a message, and caps out of range, naming the field, so the page marks that field instead of checking it itself"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own field check, or by Pairs.Start's checks of the body, before it reads an issue or a pull request, opens a container or starts a session, so nothing changed; /api/dispatch and /api/pair aren't declared reads, and no single read shows what a refused start would have started"
+    columns: ["case", "route", "body", "error", "field", "message"]
+    rows:
+      - ["start_dispatch_issue_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1, issueHash: abc }, "issue", "issue", "Read the issue again before starting from it."]
+      - ["start_dispatch_issue_no_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1 }, "issue", "issue", "Read the issue again before starting from it."]
+      - ["start_dispatch_issue_number", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 0, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "issue", "issue", "That isn't an issue number."]
+      - ["start_dispatch_caps_money", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: -1, minutes: 0, turns: 0, disk: 0 } }, "fields", "money", "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."]
+      - ["start_dispatch_caps_disk", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, disk: 4097 } }, "fields", "disk", "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."]
+      - ["start_pair_issue_hash", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, issue: 1, issueHash: abc }, "issue", "issue", "Read the issue again before starting from it."]
+      - ["start_pair_caps_turns", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, caps: { money: 0, minutes: 0, turns: 1.5, disk: 0 } }, "fields", "turns", "The turn cap is a whole number of turns from 0 to 10,000; 0 or empty is off."]
+      - ["start_pair_caps_minutes", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, caps: { money: 0, minutes: "60", turns: 0 } }, "fields", "minutes", "The time cap is a whole number of minutes from 0 to 43,200; 0 or empty is off."]
+      - ["start_pair_bench_from", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, from: { branch: proctor, commit: "0123456789abcdef0123456789abcdef01234567" } }, "from", "from", "A benchmark starts from the merged pull request’s base. Set Start from back to main first."]
+      - ["start_pair_bench_issue", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, issue: 1, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "issue", "issue", "A benchmark’s first message is the merged pull request’s description, so it starts without an issue. Clear the issue first."]
+      - ["start_pair_bench_message", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, message: proctor }, "message", "message", "A benchmark's first message is the merged pull request's description."]
+      - ["start_pair_bench_hash", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: abc, base: "0123456789abcdef0123456789abcdef01234567" } }, "benchmark", "benchmark", "Read the pull request again before starting from it."]
+      - ["start_pair_bench_base", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: abc } }, "benchmark", "benchmark", "Read the pull request again before starting from it."]
+      - ["start_pair_issue_message", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, issue: 1, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "message", "message", "Both sessions get the issue as their first message. Clear this message, or clear the issue."]
+      - ["start_pair_message_empty", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: " " }, "message", "message", "Write the first message both sessions get: at most 20,000 characters, not starting with !."]
+
+  - id: FLD-T11
+    name: "A start of two sessions without the usage confirmation, and taking out of the queue or dismissing a task card that isn't there, are refused with 409 and a message"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 409 by Pairs.Start before it starts a session, or by Splits.Unqueue and Splits.Dismiss because no goal session with this id holds that card, so nothing changed; /api/pair and /api/split aren't declared reads, since their op decides read or write"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["pair_second_model_unconfirmed", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], secondModel: proctor, message: proctor }, "double", "Starting both runs two sessions on the same task, which doubles usage, even on a subscription. Confirm it to start them."]
+      - ["split_unqueue_unknown", "/api/split", { op: unqueue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't in the queue any more."]
+      - ["split_dismiss_unknown", "/api/split", { op: dismiss, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't waiting any more."]
+
+  - id: FLD-T09
+    name: "/api/lessons refuses approving a suggested line with no session picked, naming the field, so the page marks the Send to list instead of checking it itself"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/lessons"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: session, field: sid, message: "Pick a session of this project to send the line to." }
+    no_state_check: "refused with 409 by Lessons.Approve before it changes a line, gives a note or writes the audit, since no session of the project has an empty id, so the route changed nothing; /api/lessons isn't declared a read, since its op decides read or write"
+    columns: ["case", "body"]
+    rows:
+      - ["lessons_approve_no_session", { op: approve, name: demo, id: "0123456789abcdef", sid: "" }]
+      - ["lessons_approve_unknown_session", { op: approve, name: demo, id: "0123456789abcdef", sid: "00000000-0000-4000-8000-000000000000" }]
 
   - id: FLD-T03
     name: "A route that acts on a session refuses an id the engine didn't start"
@@ -231,6 +432,10 @@ tables:
       - ["unk_push_record", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has push records here."]
       - ["unk_verify_start_browser", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "Only a session this engine started can be verified here."]
       - ["unk_verify_attachment", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png }, "Only a session this engine started has verification runs here."]
+      - ["unk_message_revise_plan", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: plan, note: proctor } }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_revise_cause", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: root-cause, note: proctor } }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_ask_define", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_ask_fix", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: fix }, "Only a session this engine started has a workflow here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"
@@ -357,7 +562,7 @@ scenarios:
         expect:
           equal:
             "$.status": 422
-            "$.body": { error: outside }
+            "$.body": { error: outside, message: "Only files inside this session's project open here." }
       - id: file-check-unverified
         do: http.request
         identity: page

@@ -28,7 +28,6 @@ type updateLastJSON struct {
 
 type updateFileJSON struct {
 	Version int             `json:"version"`
-	Check   bool            `json:"check"`
 	Later   string          `json:"later,omitempty"`
 	Last    *updateLastJSON `json:"last,omitempty"`
 	Owner   string          `json:"owner,omitempty"`
@@ -49,13 +48,13 @@ func (u UpdatePrefs) Load() (session.UpdateSettings, error) {
 		return session.UpdateSettings{}, err
 	}
 	if data == nil {
-		return session.UpdateSettings{Check: true}, nil
+		return session.UpdateSettings{}, nil
 	}
 	var f updateFileJSON
 	if err := json.Unmarshal(data, &f); err != nil || f.Version != 1 {
 		return session.UpdateSettings{}, errors.New("update.json isn't a record this engine reads")
 	}
-	out := session.UpdateSettings{Check: f.Check}
+	var out session.UpdateSettings
 	if f.Later != "" {
 		later, ok := session.ParseReleaseVersion(f.Later)
 		if !ok {
@@ -75,7 +74,7 @@ func (u UpdatePrefs) Load() (session.UpdateSettings, error) {
 func (u UpdatePrefs) Save(s session.UpdateSettings) error {
 	owner := ownerIn(u.Dir)
 	defer u.lock()()
-	f := updateFileJSON{Version: 1, Check: s.Check, Later: s.Later, Owner: owner}
+	f := updateFileJSON{Version: 1, Later: s.Later, Owner: owner}
 	if !s.Last.At.IsZero() {
 		f.Last = &updateLastJSON{At: s.Last.At.UTC(), Kind: s.Last.Kind, Release: s.Last.Version}
 	}

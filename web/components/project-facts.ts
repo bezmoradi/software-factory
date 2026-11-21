@@ -10,6 +10,7 @@ interface Protection {
   checks: string
   checkNames: string[]
   notes: string[]
+  tones: Record<string, string>
 }
 
 interface ReadinessLine {
@@ -22,18 +23,10 @@ interface ReadinessLine {
   result: string
   code: number
   tail: string
+  label: string
+  tone: string
 }
 
-const READINESS: Record<string, string> = {
-  instructions: 'Instruction file (CLAUDE.md or AGENTS.md)',
-  tests: 'Test command',
-  ci: 'CI workflows',
-  lint: 'Lint configuration',
-  check: 'Check command',
-  verified: 'Check passes on main',
-  team: 'Team file (software-factory.json)',
-  protection: 'Branch protection on main',
-}
 
 interface FactsView {
   readiness: ReadinessLine[]
@@ -63,11 +56,11 @@ function readRun(x: unknown): WorkflowRun[] {
 function readReadiness(x: unknown): ReadinessLine[] {
   if (!x || typeof x !== 'object') return []
   const r = x as Record<string, unknown>
-  if (typeof r.kind !== 'string' || !Object.hasOwn(READINESS, r.kind)) return []
+  if (typeof r.kind !== 'string' || typeof r.label !== 'string') return []
   const state = r.state === 'found' || r.state === 'missing' ? r.state : 'unknown'
   const commit = typeof r.commit === 'string' && /^[0-9a-f]{40}$/.test(r.commit) ? r.commit : ''
   const result = r.result === 'passed' || r.result === 'failed' || r.result === 'running' ? r.result : ''
-  return [{ kind: r.kind, state, found: strings(r.found), note: text(r.note), commit, at: Number.isSafeInteger(r.at) ? Number(r.at) : 0, result, code: Number.isSafeInteger(r.code) ? Number(r.code) : 0, tail: typeof r.tail === 'string' ? r.tail : '' }]
+  return [{ kind: r.kind, state, found: strings(r.found), note: text(r.note), commit, at: Number.isSafeInteger(r.at) ? Number(r.at) : 0, result, code: Number.isSafeInteger(r.code) ? Number(r.code) : 0, tail: typeof r.tail === 'string' ? r.tail : '', label: r.label, tone: typeof r.tone === 'string' ? r.tone : '' }]
 }
 
 function readView(body: unknown): FactsView | null {
@@ -78,7 +71,7 @@ function readView(body: unknown): FactsView | null {
   return {
     readiness: Array.isArray(v.readiness) ? v.readiness.flatMap(readReadiness) : [],
     branch: text(v.branch), commit: text(v.commit), workflows: v.workflows.flatMap(readRun), workflowsProblem: text(v.workflowsProblem), lookups: v.lookups === true,
-    protection: { state: text(p.state) || 'unknown', reviews: text(p.reviews) || 'unknown', approvals: Number(p.approvals) || 0, checks: text(p.checks) || 'unknown', checkNames: strings(p.checkNames), notes: strings(p.notes) },
+    protection: { state: text(p.state) || 'unknown', reviews: text(p.reviews) || 'unknown', approvals: Number(p.approvals) || 0, checks: text(p.checks) || 'unknown', checkNames: strings(p.checkNames), notes: strings(p.notes), tones: p.tones && typeof p.tones === 'object' ? p.tones as Record<string, string> : {} },
   }
 }
 
@@ -138,9 +131,8 @@ class SfProjectFacts extends HTMLElement {
     }
     const ul = el('ul', 'small list')
     for (const r of v.readiness) {
-      const li = el('li', r.state === 'missing' ? 'warn' : '')
-      const tone = r.state === 'found' ? 'tag ok' : r.state === 'missing' ? 'tag warn' : 'tag'
-      li.append(el('span', tone, r.state), ` ${READINESS[r.kind] ?? r.kind}`)
+      const li = el('li', r.tone === 'warn' ? 'warn' : '')
+      li.append(el('span', r.tone ? `tag ${r.tone}` : 'tag', r.state), ` ${r.label}`)
       if (r.found.length) li.append(el('span', 'muted', `: ${r.found.join(', ')}`))
       if (r.note) li.append(el('p', 'small muted', r.note))
       if (r.kind === 'verified') li.append(...this.#verified(r, v))
@@ -230,10 +222,10 @@ class SfProjectFacts extends HTMLElement {
     box.append(el('p', 'small', `Whether ${branch ? `${branch}, ` : ''}the main branch, is protected`))
     box.append(el('p', 'small muted', 'The push gate stops at the session branch; whether a merge into main is safe rests on the git host\'s branch protection. The engine reads it with the saved token, reads only.'))
     const ul = el('ul', 'small list')
-    const tone = (s: string, good: string) => s === good ? 'ok' : s === 'unknown' ? 'muted' : 'warn'
-    ul.append(el('li', tone(p.state, 'protected'), `Protection: ${p.state}`))
-    ul.append(el('li', tone(p.reviews, 'required'), `Reviews: ${p.reviews}${p.reviews === 'required' ? `, ${p.approvals} ${p.approvals === 1 ? 'approval' : 'approvals'}` : ''}`))
-    ul.append(el('li', tone(p.checks, 'required'), `Status checks: ${p.checks}${p.checkNames.length ? ` (${p.checkNames.join(', ')})` : ''}`))
+    const tone = (key: string) => typeof p.tones[key] === 'string' ? p.tones[key] : ''
+    ul.append(el('li', tone('state'), `Protection: ${p.state}`))
+    ul.append(el('li', tone('reviews'), `Reviews: ${p.reviews}${p.reviews === 'required' ? `, ${p.approvals} ${p.approvals === 1 ? 'approval' : 'approvals'}` : ''}`))
+    ul.append(el('li', tone('checks'), `Status checks: ${p.checks}${p.checkNames.length ? ` (${p.checkNames.join(', ')})` : ''}`))
     box.append(ul)
     for (const n of p.notes) box.append(el('p', 'small muted', n))
     return box

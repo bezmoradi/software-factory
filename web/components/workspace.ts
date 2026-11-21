@@ -1,5 +1,6 @@
 import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { saidOf, tagClass, type Said } from '../lib/json.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -17,6 +18,7 @@ interface Row {
   sizeMore: boolean
   sizeKnown: boolean
   state: string
+  said: Said
   head: string
   deletable: boolean
   why: string
@@ -32,13 +34,6 @@ interface View {
 }
 
 type Answer = { ok: boolean; body: Record<string, unknown> }
-
-const STATE: Record<string, { text: string; tone: string }> = {
-  merged: { text: 'on main', tone: 'ok' },
-  pushed: { text: 'pushed', tone: 'ok' },
-  unpushed: { text: 'unpushed commits', tone: 'warn' },
-  unknown: { text: 'not known', tone: '' },
-}
 
 async function call(post: Post, body: unknown): Promise<Answer> {
   const res = await post(ROUTE, body).catch(() => null)
@@ -71,7 +66,7 @@ function viewOf(body: Record<string, unknown>): View {
     lowBelow: num(body.lowBelow),
     sessions: rows.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null && typeof (r as Record<string, unknown>).sid === 'string').map(r => ({
       sid: text(r.sid), name: text(r.name), repo: text(r.repo), branch: text(r.branch), tree: text(r.tree), running: r.running === true,
-      size: num(r.size), entries: num(r.entries), sizeMore: r.sizeMore === true, sizeKnown: r.sizeKnown === true, state: text(r.state), head: text(r.head),
+      size: num(r.size), entries: num(r.entries), sizeMore: r.sizeMore === true, sizeKnown: r.sizeKnown === true, state: text(r.state), said: saidOf(r.said), head: text(r.head),
       deletable: r.deletable === true, why: text(r.why),
     })),
   }
@@ -102,8 +97,7 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       const head = el('div', 'row')
       const name = labelOf(r.sid) || r.name || r.tree
       head.append(el('strong', '', visible(name)), el('span', 'small muted', `${visible(r.repo)} · ${visible(r.branch)}`))
-      const st = STATE[r.state] ?? STATE.unknown!
-      head.append(el('span', `tag ${st.tone}`.trim(), st.text))
+      head.append(el('span', tagClass(r.said), r.said.label))
       if (r.running) head.append(el('span', 'tag', 'running'))
       head.append(el('span', 'spacer'))
       const size = r.sizeKnown ? `${r.sizeMore ? 'more than ' : ''}${bytes(r.size)} in ${r.sizeMore ? 'more than ' : ''}${r.entries.toLocaleString()} ${r.entries === 1 ? 'entry' : 'entries'}` : 'size not counted'

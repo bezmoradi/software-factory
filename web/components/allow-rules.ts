@@ -1,6 +1,5 @@
 import { api } from '../api.ts'
 import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
-import { boxContainer } from '../lib/format.ts'
 
 interface SavedRule {
   box: string
@@ -13,6 +12,7 @@ interface SavedRule {
 
 interface SettingsFile {
   box: string
+  container: string
   place: string
   worktree: string
   path: string
@@ -53,7 +53,7 @@ function readView(body: unknown): RulesView | null {
   const files = v.files.flatMap((x): SettingsFile[] => {
     if (!x || typeof x !== 'object') return []
     const f = x as Record<string, unknown>
-    return [{ box: text(f.box), place: text(f.place), worktree: text(f.worktree), path: text(f.path), count: Number(f.count) || 0, problem: text(f.problem) }]
+    return [{ box: text(f.box), container: text(f.container), place: text(f.place), worktree: text(f.worktree), path: text(f.path), count: Number(f.count) || 0, problem: text(f.problem) }]
   })
   return { idle: v.idle === true, files, rules }
 }
@@ -144,7 +144,7 @@ class SfAllowRules extends HTMLElement {
     else {
       for (const f of v.files) {
         const section = el('div')
-        section.append(el('p', 'small', `${PLACES[f.place] ?? visible(f.place)}, in ${visible(boxContainer(f.box) || 'a session’s container')}: `), el('code', 'small', visible(f.path)))
+        section.append(el('p', 'small', `${PLACES[f.place] ?? visible(f.place)}, in ${visible(f.container || 'a session’s container')}: `), el('code', 'small', visible(f.path)))
         if (f.problem) section.append(el('p', 'small warn', visible(f.problem)))
         const rules = v.rules.filter(r => r.box === f.box && r.place === f.place && r.worktree === f.worktree)
         if (!rules.length && !f.problem) section.append(el('p', 'small muted', 'No allow rules in this file.'))

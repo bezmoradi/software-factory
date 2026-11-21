@@ -9,6 +9,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
+	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 const (
@@ -25,31 +26,51 @@ const (
 var starting = map[string]bool{"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true}
 
 type starterJSON struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Method  string `json:"method"`
-	Enabled bool   `json:"enabled"`
-	Off     string `json:"off,omitempty"`
-	Expect  string `json:"expect"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Method  string            `json:"method"`
+	Enabled bool              `json:"enabled"`
+	Off     string            `json:"off,omitempty"`
+	Install bool              `json:"install,omitempty"`
+	Expect  string            `json:"expect"`
+	Default bool              `json:"default,omitempty"`
+	Models  []agentModelJSON  `json:"models"`
+	Efforts []string          `json:"efforts"`
+	Fields  starterFieldsJSON `json:"fields"`
+	Command string            `json:"command"`
+}
+
+type starterFieldsJSON struct {
+	Model  bool `json:"model"`
+	Effort bool `json:"effort"`
+	Expect bool `json:"expect"`
+}
+
+type noticeJSON struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Action string `json:"action"`
 }
 
 type projectJSON struct {
-	Path         string   `json:"path"`
-	Name         string   `json:"name"`
-	URL          string   `json:"url"`
-	Branch       string   `json:"branch"`
-	AddedAt      int64    `json:"addedAt"`
-	Agents       []string `json:"agents"`
-	Rounds       int      `json:"rounds"`
-	Type         string   `json:"type"`
-	Instructions []string `json:"instructions"`
-	AutoFindings bool     `json:"autoFindings"`
-	PRComment    bool     `json:"prComment"`
-	Hold         holdJSON `json:"hold"`
+	Path         string         `json:"path"`
+	Name         string         `json:"name"`
+	URL          string         `json:"url"`
+	Branch       string         `json:"branch"`
+	Types        []workTypeJSON `json:"types"`
+	AddedAt      int64          `json:"addedAt"`
+	Agents       []string       `json:"agents"`
+	Rounds       int            `json:"rounds"`
+	RoundsMax    int            `json:"roundsMax"`
+	Type         string         `json:"type"`
+	Instructions []string       `json:"instructions"`
+	AutoFindings bool           `json:"autoFindings"`
+	PRComment    bool           `json:"prComment"`
+	Hold         holdJSON       `json:"hold"`
 }
 
 func (s *Server) projects(w http.ResponseWriter) {
-	out := map[string]any{"projects": []any{}, "cloning": []any{}, "hosts": []any{}, "repos": s.cfg.Repos != nil, "starters": []any{}, "reviewer": nil}
+	out := map[string]any{"projects": []any{}, "cloning": []any{}, "hosts": []any{}, "repos": s.cfg.Repos != nil, "starters": []any{}, "reviewer": nil, "readiness": s.readiness()}
 	if s.cfg.HelperDown != nil && s.cfg.HelperDown() {
 		out["helper"] = "unreachable"
 	}
@@ -69,10 +90,13 @@ func (s *Server) projects(w http.ResponseWriter) {
 	}
 	projects := make([]projectJSON, 0, len(list))
 	for _, r := range list {
-		p := projectJSON{Path: r.Path, Name: r.Name, URL: r.URL, Branch: r.Branch, AddedAt: millis(r.AddedAt), Agents: []string{}, Rounds: session.DefaultRounds, Instructions: []string{}}
+		p := projectJSON{Path: r.Path, Name: r.Name, URL: r.URL, Branch: r.Branch, AddedAt: millis(r.AddedAt), Agents: []string{}, Rounds: session.DefaultRounds, RoundsMax: session.RoundsMax, Instructions: []string{}, Types: typesJSON(workflow.Builtin)}
 		if s.cfg.Work != nil {
 			info := s.cfg.Work.Project(r.Name)
 			p.Rounds, p.Type, p.Instructions, p.PRComment = info.Rounds, info.Type, nonNil(info.Instructions), info.PRComment
+			if info.Types != nil {
+				p.Types = typesJSON(info.Types)
+			}
 			p.AutoFindings = info.AutoFindings
 			p.Hold = holdJSONOf(info.Hold)
 		}
@@ -90,14 +114,26 @@ func (s *Server) projects(w http.ResponseWriter) {
 	expect := map[string]session.Expect{}
 	if s.cfg.Starter != nil {
 		expect = s.cfg.Starter.Expectations()
+		chosen := false
 		for _, a := range s.cfg.Starter.Agents() {
 			x := session.ExpectAny
 			if v, ok := expect[a.ID]; ok {
 				x = v
 			}
-			starters = append(starters, starterJSON{ID: a.ID, Name: a.Name, Method: string(a.Method), Enabled: a.Enabled, Off: a.Off, Expect: string(x)})
+			first := a.Enabled && !chosen
+			chosen = chosen || first
+			starters = append(starters, starterJSON{ID: a.ID, Name: a.Name, Method: string(a.Method), Enabled: a.Enabled, Off: a.Off, Install: a.Install, Expect: string(x), Default: first,
+				Models: modelsJSONOf(session.AgentModels(a.ID)), Efforts: session.AgentEfforts(a.ID)})
+			f := session.FieldsOf(a.Method)
+			starters[len(starters)-1].Fields, starters[len(starters)-1].Command = starterFieldsJSON{Model: f.Model, Effort: f.Effort, Expect: f.Expect}, session.StartCommand(a.Method, a.ID)
 		}
 	}
+	development := false
+	if u := s.updatesPage(); u != nil {
+		development = u.View().Development
+	}
+	out["offerHosts"] = session.TokenHostsOffered(view.Hosts, development)
+	out["hostNotes"] = session.TokenHostNotes()
 	out["projects"], out["cloning"], out["hosts"], out["starters"], out["reviewer"] = projects, cloning, hosts, starters, s.reviewer(expect)
 	send(w, http.StatusOK, out)
 }
@@ -122,7 +158,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		rawFrom, hasFrom := body["from"]
 		from, okFrom := startFromOf(rawFrom, hasFrom)
 		box, okBox := boxOf(body)
-		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box") || !okFrom || !okBox {
+		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box", "caps") || !okFrom || !okBox {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -148,16 +184,13 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		if agent == "" {
 			agent = "claude"
 		}
-		issue, issueHash := 0, ""
-		_, hasHash := body["issueHash"]
-		if v, has := body["issue"]; has || hasHash {
-			n, ok := wholeNumber(v, 1, session.MaxIssueNumber)
-			h, isText := body["issueHash"].(string)
-			if !ok || !isText || !session.ValidIssueHash(h) {
-				refuse(w, http.StatusBadRequest, "issue")
-				return
-			}
-			issue, issueHash = n, h
+		issue, issueHash, okIssue := startIssueOf(w, body)
+		if !okIssue {
+			return
+		}
+		caps, okCaps := startCapsOf(w, body)
+		if !okCaps {
+			return
 		}
 		started, err := s.cfg.Starter.Dispatch(ctx, session.Dispatch{
 			Path: str(body["path"], session.MaxCwd+1), Agent: agent, Name: str(body["name"], 400), Model: str(body["model"], 40), Type: str(body["type"], 40), Consent: consent,
@@ -166,6 +199,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			IssueHash: issueHash,
 			Effort:    str(body["effort"], 21),
 			Box:       box,
+			Caps:      caps,
 		})
 		shared.For(r.Context(), s.logger).Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
 		if err != nil {
@@ -173,7 +207,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusAccepted, map[string]any{"ok": true, "id": started.ID, "sid": started.SID})
+		send(w, http.StatusAccepted, startAnswer(started))
 	case "/api/stop-session":
 		if !keysWithin(body, "sid") {
 			refuse(w, http.StatusBadRequest, "fields")
@@ -231,6 +265,50 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	}
 }
 
+func startAnswer(started session.Started) map[string]any {
+	out := map[string]any{"ok": true, "id": started.ID, "sid": started.SID}
+	if started.CapsRefused != "" {
+		out["capsRefused"] = started.CapsRefused
+	}
+	return out
+}
+
+func startIssueOf(w http.ResponseWriter, body map[string]any) (int, string, bool) {
+	_, hasHash := body["issueHash"]
+	v, has := body["issue"]
+	if !has && !hasHash {
+		return 0, "", true
+	}
+	n, ok := wholeNumber(v, 1, session.MaxIssueNumber)
+	if !ok {
+		send(w, http.StatusBadRequest, problem{Error: "issue", Field: "issue", Message: "That isn't an issue number."})
+		return 0, "", false
+	}
+	h, isText := body["issueHash"].(string)
+	if !isText || !session.ValidIssueHash(h) {
+		send(w, http.StatusBadRequest, problem{Error: "issue", Field: "issue", Message: "Read the issue again before starting from it."})
+		return 0, "", false
+	}
+	return n, h, true
+}
+
+func startCapsOf(w http.ResponseWriter, body map[string]any) (*session.Caps, bool) {
+	raw, has := body["caps"]
+	if !has {
+		return nil, true
+	}
+	m, ok := raw.(map[string]any)
+	if !ok || !keysWithin(m, "money", "minutes", "turns", "disk") {
+		refuse(w, http.StatusBadRequest, "fields")
+		return nil, false
+	}
+	c, ok := checkedCaps(w, m)
+	if !ok {
+		return nil, false
+	}
+	return &c, true
+}
+
 func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if s.cfg.Reviews == nil {
 		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine runs no reviewer containers, so it can't run reviews."})
@@ -263,7 +341,7 @@ func (s *Server) override(w http.ResponseWriter, r *http.Request, sid string, ok
 	commit, okCommit := body["commit"].(string)
 	reason, okReason := body["reason"].(string)
 	if !keysWithin(body, "sid", "agent", "commit", "reason") || !ok || sid == "" || len(sid) > 80 || !okAgent || !agentName.MatchString(agent) ||
-		!okCommit || !commitHex.MatchString(commit) || !okReason || len(reason) > 2000 {
+		!okCommit || !commitHex.MatchString(commit) || !okReason {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
@@ -273,4 +351,24 @@ func (s *Server) override(w http.ResponseWriter, r *http.Request, sid string, ok
 	err := s.cfg.Reviews.Override(ctx, sid, agent, commit, reason)
 	shared.For(r.Context(), s.logger).Info("override", "ok", err == nil)
 	reply(w, err, http.StatusOK)
+}
+
+func (s *Server) readiness() []noticeJSON {
+	var identity *session.CommitIdentity
+	if s.cfg.Identity != nil {
+		if id, err := s.cfg.Identity.Identity(); err == nil {
+			identity = &id
+		}
+	}
+	var reviewers *session.SignIn
+	if s.cfg.Reviews != nil && s.cfg.ReviewerSignIn != nil {
+		if si, ok := s.cfg.ReviewerSignIn(); ok {
+			reviewers = &si
+		}
+	}
+	out := []noticeJSON{}
+	for _, n := range session.ReadinessNotices(identity, reviewers) {
+		out = append(out, noticeJSON{ID: n.ID, Text: n.Text, Action: n.Action})
+	}
+	return out
 }

@@ -249,7 +249,6 @@ type Pushes struct {
 	resume  resumeState
 	saveMu  sync.Mutex
 	wg      sync.WaitGroup
-	halt    atomic.Pointer[Halt]
 	extras  atomic.Pointer[pushExtras]
 	limits  atomic.Pointer[Limits]
 	verify  atomic.Pointer[pushVerifyRef]
@@ -588,14 +587,9 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	case recorded && !rerun:
 		return "", false, unfinishedReviews(head, ended)
 	default:
-		if p.halted(ByReviews) != "" {
-			return p.holdForRelease(sid, head, shared.RequestOf(ctx))
-		}
 		if err := start(ctx, sid); err != nil {
 			e, ok := errors.AsType[*Error](err)
 			switch {
-			case ok && e.Reason == "halted":
-				return p.holdForRelease(sid, head, shared.RequestOf(ctx))
 			case ok && e.Reason == "cost":
 				shared.For(ctx, p.cfg.Logger).Info("push", "event", "review-not-started", "why", "cost")
 				return "", false, "the reviewers run on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
@@ -689,10 +683,6 @@ func (p *Pushes) requiredNow(ctx context.Context, sid string, t PushTarget, head
 }
 
 func (p *Pushes) ReviewDone(sid, head string) {
-	if p.halted(ByReviews) != "" {
-		p.cfg.Logger.Info("push", "event", "held-by-halt")
-		return
-	}
 	if p.stillRunning(sid, head) {
 		p.cfg.Logger.Info("push", "event", "wait-kept", "why", "a review or verification run of the commit still runs")
 		return
@@ -762,9 +752,6 @@ func (p *Pushes) ReviewDone(sid, head string) {
 func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
 		return notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started can be pushed from here.")
-	}
-	if err := p.pageHalted(); err != nil {
-		return err
 	}
 	if err := p.claim(sid); err != nil {
 		return err
@@ -846,10 +833,6 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 	if p.busy[sid] {
 		p.mu.Unlock()
 		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
-	}
-	if err := p.pageHalted(); allow && err != nil {
-		p.mu.Unlock()
-		return err
 	}
 	given := strings.TrimSpace(reason)
 	clean := gate.Reason(reason)
@@ -1186,9 +1169,6 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return refuse("only a session this engine started can push")
 	}
 	x.entry.Repository, x.entry.Branch = t.Name, t.Branch
-	if why := p.halted(by); why != "" {
-		return refuse(why)
-	}
 	url, token, err := p.cfg.Repos.PushTarget(t.Name)
 	if err != nil {
 		return refuse("the session's repository isn't in the engine's list any more")

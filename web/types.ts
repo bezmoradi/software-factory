@@ -18,11 +18,14 @@ export interface SessionInfo {
   outdated?: boolean
   controlled?: boolean
   mode?: string
+  modeLabel?: string
+  levelSaid?: { label: string; tone: string }
+  checkpointSaved?: boolean
+  step?: string
   busy?: boolean
   needs?: number
   epoch?: string
   lastSeq?: number
-  checkout?: string
   login?: boolean
   claims?: string[]
   level?: string
@@ -42,11 +45,34 @@ export interface SessionInfo {
   lineage?: Lineage
   follow?: PullFollow
   splits?: SplitCard[]
+  splitGoal?: SplitGoal
   box?: string
+  commands?: { container?: string; attach?: string; logs?: string; signIn: string }
+  filters?: string[]
+  startPoint?: boolean
   signInWait?: boolean
   homeHeld?: boolean
   branch?: string
   doubled?: boolean
+  summary?: { word: string; tone: string }
+  warnings?: string[]
+  control?: SessionControl
+  actions?: Partial<Record<SessionAction, string>>
+  readOnly?: string
+  stalled?: boolean
+  stalledSince?: number
+}
+
+export type SessionAction = 'control' | 'steps' | 'stop' | 'wake' | 'manage' | 'model' | 'bringMain' | 'fork' | 'copy' | 'restore' | 'checkpoint' | 'review' | 'rules'
+
+export interface SessionControl {
+  text: string
+  action: '' | 'release' | 'wake' | 'control' | 'read-only'
+  label?: string
+  confirm?: string
+  confirmText?: string
+  tone?: string
+  alert?: boolean
 }
 
 export interface SplitCard {
@@ -59,6 +85,19 @@ export interface SplitCard {
   asked: number
   at: number
   secretAt?: string
+  said?: { label: string; tone: string }
+  place?: number
+  note?: string
+  needs?: Needs
+  actions?: Partial<Record<SplitAction, string>>
+}
+
+export type SplitAction = 'start' | 'unqueue' | 'edit' | 'dismiss'
+
+export interface SplitGoal {
+  running: number
+  limit: number
+  queue: string[]
 }
 
 export interface Lineage {
@@ -161,6 +200,8 @@ export interface AgentCheck {
   at: number
   editedAt?: number
   hidden?: string
+  label?: string
+  result?: string
 }
 
 export interface ChangeNote {
@@ -176,6 +217,7 @@ export interface FileKind {
 
 export interface DependencyChange {
   ecosystem: string
+  ecosystemLabel?: string
   name: string
   from: string
   to: string
@@ -335,6 +377,8 @@ export interface Needs {
   box?: string
   agent?: string
   code?: boolean
+  next?: '' | 'home' | 'sign-in' | 'trust' | 'approve' | 'cost'
+  tries?: number
 }
 
 export interface Consent {
@@ -383,7 +427,14 @@ export interface SessionPush {
   findingsSent?: number
   extra?: PushExtra
   checks?: AgentCheck[]
+  notReported?: string
   checkedBy?: PushCheckedBy
+  resultSaid?: { label: string; tone: string }
+  missingItems?: { text: string; agent?: string; since?: string }[]
+  look?: { icon: string; tone: string; label: string; lead: string }
+  decision?: string
+  outcome?: string
+  flow?: FlowModel
 }
 
 export interface PushCheckedReviewer {
@@ -402,12 +453,14 @@ export interface PushCheckedReviewer {
   verified: number
   violated: number
   notVerified: number
+  line?: CheckedLine
 }
 
 export interface PushCheckedRun {
   kind: string
   state: string
   code: number
+  line?: CheckedLine
 }
 
 export interface PushCheckedBy {
@@ -436,6 +489,9 @@ export interface SessionForge {
   secretAt?: string
   secretLine?: string
   from?: string
+  said?: { label: string; tone: string }
+  kindLabel?: string
+  note?: string
 }
 
 export interface ForgeMatch {
@@ -477,8 +533,6 @@ export interface PushPanelView {
   flagsRead?: boolean
   checks?: AgentCheck[]
   typeChange?: TypeChange | null
-  passedSince?: string[]
-  blockedSince?: string[]
   coverage?: CoverageRole[]
 }
 
@@ -518,6 +572,8 @@ export interface ReviewRole {
   models?: string[]
   progress?: ReviewProgress
   given?: ReviewGiven
+  said?: { label: string; tone: string }
+  stateLabel?: string
   run?: number
   runs?: number
   advisory?: boolean
@@ -537,6 +593,7 @@ export interface CoverageRow {
   line?: number
   endLine?: number
   note?: string
+  said?: { label: string; tone: string }
 }
 
 export interface FindingRef {
@@ -632,6 +689,7 @@ export interface ReviewsView {
   testList?: TestList | null
   testAsking?: boolean
   readOnly?: string
+  flow?: FlowModel | null
 }
 
 export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
@@ -644,6 +702,7 @@ export interface ChangeFile {
   stale?: boolean
   size?: number
   notDiffed?: 'large' | 'budget' | 'binary' | 'unreadable'
+  notDiffedWhy?: string
 }
 
 export interface Changes {
@@ -668,11 +727,13 @@ export type OverviewSession = SessionInfo & { waiting: CardEvent[] }
 export interface Project {
   path: string
   name: string
+  types: { id: string; name: string; startWarning?: string }[]
   url?: string
   branch?: string
   addedAt?: number
   agents: string[]
   rounds?: number
+  roundsMax?: number
   type?: string
   instructions?: string[]
   autoFindings?: boolean
@@ -686,13 +747,25 @@ export interface HoldSetting {
   maxLines: number
 }
 
+export interface HoldTyped {
+  afterBlock: boolean
+  maxFiles: string
+  maxLines: string
+}
+
 export interface Starter {
   id: string
   name: string
   method: string
   enabled: boolean
   off?: string
+  install?: boolean
   expect?: Expect
+  default?: boolean
+  models: { id: string; name: string }[]
+  efforts: string[]
+  fields?: { model: boolean; effort: boolean; expect: boolean }
+  command?: string
 }
 
 export interface Cloning {
@@ -714,6 +787,15 @@ export interface ProjectsView {
   starters?: Starter[]
   reviewer?: ReviewerView | null
   helper?: string
+  offerHosts?: string[]
+  hostNotes?: Record<string, string>
+  readiness?: ReadinessNotice[]
+}
+
+export interface ReadinessNotice {
+  id: string
+  text: string
+  action: string
 }
 
 export interface Dispatch extends Consent {
@@ -740,9 +822,14 @@ export interface PairDispatch {
   path: string
   name: string
   type: string
-  agents: PairAgent[]
+  agents: [PairAgent]
+  secondModel?: string
+  double?: boolean
   message?: string
   benchmark?: { number: number; hash: string; base: string }
+  from?: StartFrom
+  issue?: number
+  issueHash?: string
   caps?: { money: number; minutes: number; turns: number; disk: number }
 }
 
@@ -752,6 +839,7 @@ export interface HelloEvent {
   sessions: SessionInfo[]
   supervisor?: string
   compose?: string
+  imageTypes?: unknown[]
 }
 
 export interface SessionsEvent {
@@ -956,6 +1044,7 @@ export interface GateEvent {
   size?: Size
   chosen?: boolean
   effective?: Size
+  uploadWarning?: string
   sizeNote?: string
   approved?: boolean
   uncommitted?: { complete: boolean; count: number; note: string; files: { status: string; path: string; flag?: string; allowed?: boolean }[] } | null
@@ -977,6 +1066,74 @@ export interface GateEvent {
   commands?: { define?: string; plan?: string }
   rounds?: number
   committed?: boolean
+  started?: boolean | 'nobase' | null
+  review?: { available: boolean; reason: string; planned: { name: string; agent: string; why: string; summary: string }[] }
+  pushed?: boolean
+  path?: GatePath
+  flow?: FlowModel | null
+}
+
+export interface FlowLook {
+  icon: string
+  tone: string
+  word: string
+}
+
+export interface FlowNode {
+  name: string
+  phase: string
+  look: FlowLook
+  aside: boolean
+  tags: { label: string; tone: string }[]
+}
+
+export interface FlowRoute {
+  label: string
+  look: FlowLook
+  taken: boolean
+  decided: boolean
+  note: string
+}
+
+export interface FlowZone {
+  kind: string
+  name: string
+  note: string
+  untrusted: boolean
+}
+
+export interface FlowModel {
+  commit: string
+  reviews: FlowNode[]
+  runs: FlowNode[]
+  gate: FlowNode
+  routes: FlowRoute[]
+  routesLabel: string
+  wires: string[]
+  outLive: boolean
+  zones: FlowZone[]
+  key: { swatch: string; words: string }[]
+  caption: string
+  expires?: number
+  expiredNote?: string
+  expiredCaption?: string
+}
+
+export interface CheckedLine {
+  icon: string
+  tone: string
+  name: string
+  said: string
+  details?: string
+  tags: { label: string; tone: string }[]
+}
+
+export interface GatePath {
+  stages: { id: string; name: string; state: string; active: boolean; detail: string; actions: { ask: string; label: string; title: string; hold?: string }[] }[]
+  card: { step: string; count: string; detail: string; done: number }
+  missing: string[]
+  reviewsActive: boolean
+  required: string[]
 }
 
 export interface WorkflowDoc {
@@ -991,6 +1148,9 @@ export interface WorkflowDoc {
   approvedAt?: string
   reported?: boolean
   onBase?: boolean
+  note?: string
+  kind?: string
+  status?: string
 }
 
 export interface WorkflowEvent extends Stamped {
@@ -1035,6 +1195,13 @@ export interface PlanFileEvent extends Stamped {
   text: string
 }
 
+export interface LineCommentBody {
+  file: string
+  line: number
+  removed: boolean
+  text: string
+}
+
 export interface PlanApproval {
   kind?: 'plan' | 'requirements' | 'root-cause'
   path: string
@@ -1052,12 +1219,14 @@ export interface PlanApproval {
   approvedAt?: string
   reported?: boolean
   onBase?: boolean
+  status: string
 }
 
 export interface ProjectAgents {
   project: string
   disabled: boolean
   rounds: number
+  roundsMax: number
   prComment: boolean
   type: string
   types: [string, string][]
@@ -1116,12 +1285,14 @@ export interface ControlEvent extends Stamped {
 export interface ModeEvent extends Stamped {
   type: 'mode'
   mode: string
+  label?: string
 }
 
 export interface ContextEvent extends Stamped {
   type: 'context'
   tokens: number
   level: '' | 'warn' | 'stop'
+  checkpoint?: { level: string; text: string; said: string; stop: boolean }
 }
 
 export interface CompactEvent extends Stamped {
@@ -1192,7 +1363,7 @@ export interface SessionGrant {
   token: string
 }
 
-export type AskAnswer = Record<string, string>
+export type AskAnswer = Record<string, string | string[]>
 export type PermissionAnswer = { choice: 'yes' | 'always' | 'auto' } | { choice: 'no'; note?: string }
 export type PlanAnswer = { choice: 'revise'; note: string } | { choice: 'terminal' }
 export type Answer = AskAnswer | PermissionAnswer | PlanAnswer
@@ -1259,12 +1430,13 @@ declare global {
     'sf-move': CustomEvent<{ id: string; index: number }>
     'sf-approve': CustomEvent<{ hash: string }>
     'sf-revise': CustomEvent<{ note: string }>
-    'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldSetting }>
+    'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldTyped }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
     'sf-counts': CustomEvent<{ waiting: number; working: number; stopped: number }>
     'sf-markdown-painted': Event
     'sf-tool-path': Event
     'sf-repo': CustomEvent<{ op: 'add'; url: string } | { op: 'remove'; name: string }>
+    'sf-setup-step': CustomEvent<'identity' | 'login'>
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-pair': CustomEvent<PairDispatch>

@@ -39,6 +39,8 @@ type verifyRunJSON struct {
 	Ended    int64            `json:"ended"`
 	Files    []verifyFileJSON `json:"files"`
 	FileNote string           `json:"fileNote"`
+	Said     saidJSON         `json:"said"`
+	Outcome  string           `json:"outcome"`
 }
 
 type verifyFileJSON struct {
@@ -77,7 +79,11 @@ type verifyViewJSON struct {
 func verifyRunJSONOf(r session.VerifyRun) verifyRunJSON {
 	out := verifyRunJSON{ID: r.ID, Commit: r.Commit, Branch: r.Branch, Kind: string(r.Kind), State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld,
 		Reason: r.Reason, By: r.By, Image: r.Image, ImageID: r.ImageID, Limit: int64(r.Limit / time.Second), Started: millis(r.Started), Ended: millis(r.Ended),
-		Files: make([]verifyFileJSON, 0, len(r.Attached)), FileNote: r.AttachNote}
+		Files: make([]verifyFileJSON, 0, len(r.Attached)), FileNote: r.AttachNote, Said: saidJSONOf(session.VerifySaid(r.State))}
+	out.Outcome = out.Said.Label
+	if r.State == "failed" {
+		out.Outcome = "failed with exit code " + strconv.Itoa(r.Code)
+	}
 	for _, a := range r.Attached {
 		out.Files = append(out.Files, verifyFileJSON{Name: a.Name, Kind: a.Kind, Bytes: a.Bytes, SHA256: a.SHA256, Width: a.Width, Height: a.Height})
 	}

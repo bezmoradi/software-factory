@@ -26,15 +26,17 @@ type ruleJSON struct {
 	Worktree string   `json:"worktree,omitempty"`
 	Path     string   `json:"path"`
 	Wide     []string `json:"wide"`
+	Where    string   `json:"placeLabel"`
 }
 
 type ruleFileJSON struct {
-	Box      string `json:"box"`
-	Place    string `json:"place"`
-	Worktree string `json:"worktree,omitempty"`
-	Path     string `json:"path"`
-	Count    int    `json:"count"`
-	Problem  string `json:"problem,omitempty"`
+	Box       string `json:"box"`
+	Container string `json:"container,omitempty"`
+	Place     string `json:"place"`
+	Worktree  string `json:"worktree,omitempty"`
+	Path      string `json:"path"`
+	Count     int    `json:"count"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 type allowRulesJSON struct {
@@ -53,10 +55,10 @@ func (s *Server) UseAgentReports(reports session.AgentReportPage, rules session.
 func allowRulesOf(v session.AllowRulesView) allowRulesJSON {
 	out := allowRulesJSON{Repo: v.Repo, Idle: v.Idle, Files: []ruleFileJSON{}, Rules: []ruleJSON{}}
 	for _, f := range v.Files {
-		out.Files = append(out.Files, ruleFileJSON{Box: f.Box, Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
+		out.Files = append(out.Files, ruleFileJSON{Box: f.Box, Container: session.CommandsFor("", "", f.Box).Container, Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
 	}
 	for _, r := range v.Rules {
-		out.Rules = append(out.Rules, ruleJSON{Box: r.Box, Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide)})
+		out.Rules = append(out.Rules, ruleJSON{Box: r.Box, Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide), Where: session.SessionPlaceLabel(string(r.Place))})
 	}
 	return out
 }
@@ -147,17 +149,18 @@ type homeViewJSON struct {
 }
 
 type pinJSON struct {
-	Agent      string `json:"agent"`
-	Name       string `json:"name"`
-	Package    string `json:"package"`
-	Version    string `json:"version"`
-	State      string `json:"state"`
-	Repository string `json:"repository,omitempty"`
-	Workflow   string `json:"workflow,omitempty"`
-	Ref        string `json:"ref,omitempty"`
-	Commit     string `json:"commit,omitempty"`
-	LoggedAt   int64  `json:"loggedAt"`
-	Note       string `json:"note,omitempty"`
+	Agent      string   `json:"agent"`
+	Name       string   `json:"name"`
+	Package    string   `json:"package"`
+	Version    string   `json:"version"`
+	State      string   `json:"state"`
+	Repository string   `json:"repository,omitempty"`
+	Workflow   string   `json:"workflow,omitempty"`
+	Ref        string   `json:"ref,omitempty"`
+	Commit     string   `json:"commit,omitempty"`
+	LoggedAt   int64    `json:"loggedAt"`
+	Note       string   `json:"note,omitempty"`
+	Said       saidJSON `json:"said"`
 }
 
 type pluginPinJSON struct {
@@ -175,6 +178,9 @@ type pluginPinJSON struct {
 	Head        string `json:"head,omitempty"`
 	From        string `json:"from,omitempty"`
 	Problem     string `json:"problem,omitempty"`
+	CheckLine   string `json:"checkLine"`
+	CheckTone   string `json:"checkTone"`
+	Stamped     bool   `json:"checkStamped"`
 }
 
 type advisoryJSON struct {
@@ -211,11 +217,13 @@ func agentReportOf(v session.AgentReport) agentReportJSON {
 		out.Settings.Sessions = append(out.Settings.Sessions, homeViewJSON{SID: h.SID, Session: h.Session, Checked: millis(h.Checked), Since: millis(h.Since), Changed: nonNil(h.Changed), More: h.More, First: h.First, Dropped: h.Dropped, Running: h.Running, Problem: h.Problem, Watching: h.Watching})
 	}
 	for _, p := range v.Pins {
-		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note})
+		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note, Said: saidJSONOf(session.PinSaid(p.State))})
 	}
 	for _, p := range v.Plugins {
+		line, tone, stamped := session.PluginCheckLine(p.CheckResult, p.Branch, p.CheckFrom, p.Problem, p.Commit != "" && !p.Refused)
 		out.Plugins = append(out.Plugins, pluginPinJSON{ID: p.ID, Name: p.Name, Source: p.Source, Branch: p.Branch, Version: p.Version, Commit: p.Commit, Refused: p.Refused, RefusedWhy: p.RefusedWhy,
-			InstalledAt: millis(p.InstalledAt), CheckedAt: millis(p.CheckedAt), Check: p.CheckResult, Head: p.CheckHead, From: p.CheckFrom, Problem: p.Problem})
+			InstalledAt: millis(p.InstalledAt), CheckedAt: millis(p.CheckedAt), Check: p.CheckResult, Head: p.CheckHead, From: p.CheckFrom, Problem: p.Problem,
+			CheckLine: line, CheckTone: tone, Stamped: stamped})
 	}
 	for _, a := range v.Advisories.Found {
 		out.Advisories.Found = append(out.Advisories.Found, advisoryJSON{Label: a.Label, ID: a.ID, Summary: a.Summary, Aliases: nonNil(a.Aliases), Link: a.Link})

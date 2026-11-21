@@ -1,7 +1,7 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
-import { isRecord } from '../lib/json.ts'
+import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
 import { typeChangeOf, typeChangeParts } from './push-facts.ts'
 
@@ -22,23 +22,28 @@ interface CommandRun {
   retry: boolean
   started: number
   ended: number
+  said: Said
 }
 
 interface Queued {
   id: string
   text: string
   at: number
+  up: boolean
+  down: boolean
+  editable: boolean
 }
 
 interface WorkView {
   agent: string
-  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[] }
-  queue: { items: Queued[]; stopped: string; waiting: string; sending: boolean; max: number }
+  model: { start: string; startEffort: string; model: string; effort: string; now: string; nowEffort: string; from: string; offered: AgentModel[]; efforts: string[] }
+  queue: { items: Queued[]; stopped: string; waiting: string; sending: boolean; max: number; canAdd: boolean; full: string }
   check: CommandRun | null
   setup: CommandRun | null
   ports: { first: number; last: number; env: boolean } | null
   hasCheck: boolean
   hasSetup: boolean
+  canSwitchModel: boolean
 }
 
 export interface SessionWorkTarget {
@@ -47,7 +52,6 @@ export interface SessionWorkTarget {
   reason?: string
 }
 
-const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
@@ -69,10 +73,10 @@ export function modelOptions(select: HTMLSelectElement, models: AgentModel[], fi
   if (models.some(m => m.id === keep)) select.value = keep
 }
 
-export function effortOptions(select: HTMLSelectElement, first: string) {
+export function effortOptions(select: HTMLSelectElement, first: string, efforts: string[]) {
   const blank = el('option', '', first)
   blank.value = ''
-  select.replaceChildren(blank, ...CLAUDE_EFFORTS.map(e => {
+  select.replaceChildren(blank, ...efforts.map(e => {
     const o = el('option', '', `Effort: ${visible(e)}`)
     o.value = e
     return o
@@ -81,7 +85,7 @@ export function effortOptions(select: HTMLSelectElement, first: string) {
 
 function readRun(v: unknown): CommandRun | null {
   if (!isRecord(v) || typeof v.state !== 'string') return null
-  return { kind: String(v.kind ?? ''), state: v.state, code: Number(v.code) || 0, tail: typeof v.tail === 'string' ? v.tail : '', cut: v.cut === true, withheld: v.withheld === true, reason: typeof v.reason === 'string' ? v.reason : '', retry: v.retry === true, started: Number(v.started) || 0, ended: Number(v.ended) || 0 }
+  return { kind: String(v.kind ?? ''), state: v.state, code: Number(v.code) || 0, tail: typeof v.tail === 'string' ? v.tail : '', cut: v.cut === true, withheld: v.withheld === true, reason: typeof v.reason === 'string' ? v.reason : '', retry: v.retry === true, started: Number(v.started) || 0, ended: Number(v.ended) || 0, said: saidOf(v.said, v.state) }
 }
 
 function readView(v: unknown): WorkView | null {
@@ -89,17 +93,18 @@ function readView(v: unknown): WorkView | null {
   const m = v.model
   const q = v.queue
   const text = (x: unknown) => (typeof x === 'string' ? x : '')
-  const items = Array.isArray(q.items) ? q.items.filter(isRecord).filter(i => typeof i.id === 'string' && typeof i.text === 'string').map(i => ({ id: i.id as string, text: i.text as string, at: Number(i.at) || 0 })) : []
+  const items = Array.isArray(q.items) ? q.items.filter(isRecord).filter(i => typeof i.id === 'string' && typeof i.text === 'string').map(i => ({ id: i.id as string, text: i.text as string, at: Number(i.at) || 0, up: i.up === true, down: i.down === true, editable: i.editable === true })) : []
   const ports = isRecord(v.ports) && typeof v.ports.first === 'number' && typeof v.ports.last === 'number' ? { first: v.ports.first, last: v.ports.last, env: v.ports.env === true } : null
   return {
     agent: text(v.agent),
-    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered) },
-    queue: { items, stopped: text(q.stopped), waiting: text(q.waiting), sending: q.sending === true, max: Number(q.max) || 10 },
+    model: { start: text(m.start), startEffort: text(m.startEffort), model: text(m.model), effort: text(m.effort), now: text(m.now), nowEffort: text(m.nowEffort), from: text(m.from), offered: modelsOf(m.offered), efforts: strings(m.efforts) },
+    queue: { items, stopped: text(q.stopped), waiting: text(q.waiting), sending: q.sending === true, max: Number(q.max) || 0, canAdd: q.canAdd === true, full: text(q.full) },
     check: readRun(v.check),
     setup: readRun(v.setup),
     ports,
     hasCheck: v.hasCheck === true,
     hasSetup: v.hasSetup === true,
+    canSwitchModel: v.canSwitchModel === true,
   }
 }
 
@@ -129,13 +134,12 @@ function shown(value: string): string {
   return visible(unspoofed(value))
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
+async function problemOf(res: Response | null): Promise<{ text: string; error: string }> {
+  if (!res) return { text: 'The engine didn\'t answer. Try again.', error: '' }
+  const body = await res.json().catch(() => null) as { error?: unknown; message?: unknown } | null
+  const error = typeof body?.error === 'string' ? body.error : ''
+  return typeof body?.message === 'string' && body.message ? { text: body.message, error } : { text: 'The engine refused the change. Try again.', error: '' }
 }
-
-const STATE_WORDS: Record<string, string> = { running: 'is running', passed: 'passed', failed: 'failed', 'timed-out': 'didn\'t finish in time', error: 'couldn\'t run' }
 
 function when(ms: number): string {
   return ms ? new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''
@@ -152,6 +156,7 @@ class SfSessionWork extends HTMLElement {
   #add = el('textarea', 'textbox')
   #editing = ''
   #edit = el('textarea', 'textbox')
+  #bad: { input: HTMLTextAreaElement; text: string } | null = null
   #loading = 0
   #key = ''
   #details = el('details', 'session-work')
@@ -172,12 +177,15 @@ class SfSessionWork extends HTMLElement {
     this.#add.id = 'work-queue-add'
     this.#add.dataset.key = 'work-queue-add'
     this.#add.rows = 2
-    this.#add.maxLength = 20000
     this.#add.placeholder = 'A message for after the current turn'
     this.#edit.rows = 3
-    this.#edit.maxLength = 20000
     this.#edit.dataset.key = 'work-queue-edit'
-    this.#edit.setAttribute('aria-label', 'Edit the queued message')
+    this.#edit.id = 'work-queue-edit'
+    for (const input of [this.#add, this.#edit]) input.addEventListener('input', () => {
+      if (this.#bad?.input !== input) return
+      this.#bad = null
+      labelError(input, '')
+    })
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open !== this.#shown) this.#opened = this.#details.open
       this.#shown = this.#details.open
@@ -241,7 +249,7 @@ class SfSessionWork extends HTMLElement {
     this.#busy = false
     if (sid !== this.#target?.sid) return
     if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+      say(this.#status, (await problemOf(res)).text, 'warn')
       this.#paint()
       void this.#readLock(sid)
       return
@@ -313,10 +321,10 @@ class SfSessionWork extends HTMLElement {
 
   #summaryText(v: WorkView): string {
     const parts: string[] = []
-    if (v.agent === 'claude') parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
+    if (v.canSwitchModel) parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
     parts.push(v.queue.items.length ? `Queue: ${v.queue.items.length}${v.queue.stopped ? ', stopped' : ''}` : 'Queue: empty')
-    if (v.setup) parts.push(`Setup ${STATE_WORDS[v.setup.state] ?? visible(v.setup.state)}`)
-    if (v.check) parts.push(`Check ${STATE_WORDS[v.check.state] ?? visible(v.check.state)}`)
+    if (v.setup) parts.push(`Setup ${visible(v.setup.said.label)}`)
+    if (v.check) parts.push(`Check ${visible(v.check.said.label)}`)
     if (v.ports) parts.push(`Ports ${v.ports.first}–${v.ports.last}`)
     if (this.#lock?.lock.commit) parts.push(this.#lock.lock.changed?.count ? `Locked tests changed: ${this.#lock.lock.changed.count}` : 'Tests locked')
     return parts.join(' · ')
@@ -337,14 +345,19 @@ class SfSessionWork extends HTMLElement {
     if (!sid) return false
     this.#busy = true
     this.#busyKey = key
+    this.#bad = null
     this.#opened ??= this.#details.open
     this.#paint()
     const res = await api('/api/session-work', { ...body, sid }).catch(() => null)
     this.#busy = false
     if (sid !== this.#target?.sid) return false
     if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+      const { text, error } = await problemOf(res)
+      const input = error !== 'text' ? null : body.op === 'queue-add' ? this.#add : body.op === 'queue-edit' ? this.#edit : null
+      this.#bad = input && { input, text: visible(text) }
+      say(this.#status, input ? '' : text, 'warn')
       this.#paint()
+      input?.focus()
       return false
     }
     const v = readView(await res.json().catch(() => null))
@@ -358,18 +371,18 @@ class SfSessionWork extends HTMLElement {
     const v = this.#view
     if (!v) return
     const keep = this.#effort.value
-    effortOptions(this.#effort, 'Effort: as it is')
+    effortOptions(this.#effort, 'Effort: as it is', v.model.efforts)
     if ([...this.#effort.options].some(o => o.value === keep)) this.#effort.value = keep
   }
 
   #modelPart(v: WorkView, off: boolean): HTMLElement[] {
-    if (v.agent !== 'claude') return []
+    if (!v.canSwitchModel) return []
     const name = (id: string) => v.model.offered.find(m => m.id === id)?.name ?? id
     const now = v.model.now ? visible(name(v.model.now)) : 'the agent\'s default'
     const effort = v.model.nowEffort ? `, effort ${visible(v.model.nowEffort)}` : ''
     const said = v.model.model || v.model.effort ? `Model: ${now}${effort}, set from this page; it applies from ${v.model.from || 'the next turn'}.` : `Model: ${now}${effort}, as the session started.`
     const parts: HTMLElement[] = [el('h3', 'label', 'Model'), el('p', 'small', said)]
-    if (v.agent === 'claude') parts.push(el('p', 'small muted', 'Claude Code\'s own status line keeps naming the model the session started with; the switch rewrites only this session\'s main-loop requests, and never Claude Code\'s saved defaults.'))
+    parts.push(el('p', 'small muted', 'Claude Code\'s own status line keeps naming the model the session started with; the switch rewrites only this session\'s main-loop requests, and never Claude Code\'s saved defaults.'))
     if (!this.contains(document.activeElement) || document.activeElement === document.body) {
       modelOptions(this.#model, v.model.offered, `The start model (${v.model.start || 'default'})`)
       this.#model.value = v.model.offered.some(m => m.id === v.model.model) ? v.model.model : ''
@@ -390,7 +403,7 @@ class SfSessionWork extends HTMLElement {
 
   #queuePart(v: WorkView, off: boolean): HTMLElement[] {
     const q = v.queue
-    const parts: HTMLElement[] = [el('h3', 'label', `Queue (${q.items.length} of ${q.max})`), el('p', 'small muted', 'The engine sends the next message when a turn ends. It stops at a card, a held push, a failed or stopped turn, a sign-in problem, Stop everything or Pause all, and says why here.')]
+    const parts: HTMLElement[] = [el('h3', 'label', `Queue (${q.items.length} of ${q.max})`), el('p', 'small muted', 'The engine sends the next message when a turn ends. It stops at a card, a held push, a failed or stopped turn, or a sign-in problem, and says why here.')]
     if (q.waiting) parts.push(el('p', 'small', q.waiting))
     if (q.stopped) {
       const row = el('div', 'row')
@@ -416,7 +429,7 @@ class SfSessionWork extends HTMLElement {
             this.#paint()
           }, 'button', `work-cancel:${m.id}`)
           save.disabled = !this.#held(save) && off
-          row.append(this.#edit, cancel, save)
+          row.append(field('Queued message', this.#edit), cancel, save)
         } else {
           const text = el('p', 'small queued-text', visible(m.text.length > 400 ? `${m.text.slice(0, 400)}…` : m.text))
           const up = button('Up', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i - 1 }, 'Moved.', `work-up:${m.id}`), 'button', `work-up:${m.id}`)
@@ -428,9 +441,9 @@ class SfSessionWork extends HTMLElement {
             this.#edit.focus()
           }, 'button', `work-edit:${m.id}`)
           const remove = button('Remove', 'ghost small', () => void this.#call({ op: 'queue-remove', id: m.id }, 'Removed.', `work-remove:${m.id}`), 'button', `work-remove:${m.id}`)
-          up.disabled = !this.#held(up) && (off || i === 0 || (q.sending && i <= 1))
-          down.disabled = !this.#held(down) && (off || i === q.items.length - 1 || (q.sending && i === 0))
-          edit.disabled = off || (q.sending && i === 0)
+          up.disabled = !this.#held(up) && (off || !m.up)
+          down.disabled = !this.#held(down) && (off || !m.down)
+          edit.disabled = off || !m.editable
           remove.disabled = !this.#held(remove) && edit.disabled
           for (const [b, what] of [[up, 'Move up'], [down, 'Move down'], [edit, 'Edit'], [remove, 'Remove']] as const) b.setAttribute('aria-label', `${what} queued message ${i + 1}`)
           row.append(text, up, down, edit, remove)
@@ -442,26 +455,27 @@ class SfSessionWork extends HTMLElement {
     }
     const label = el('label', 'small', 'Add to the queue')
     label.htmlFor = this.#add.id
-    this.#add.disabled = off || q.items.length >= q.max
+    this.#add.disabled = off || !q.canAdd
     const add = button('Add to queue', 'small', () => {
       const text = this.#add.value.trim()
-      if (!text) return
       void this.#call({ op: 'queue-add', text }, 'Queued.', 'work-add').then(ok => {
         if (ok) this.#add.value = ''
+        else this.#add.focus()
       })
     }, 'button', 'work-add')
     add.disabled = !this.#held(add) && this.#add.disabled
     const box = el('div', 'field')
     box.append(label, this.#add, add)
     parts.push(box)
+    if (q.full) parts.push(el('p', 'small muted', visible(q.full)))
     return parts
   }
 
   #runPart(run: CommandRun | null, title: string, set: boolean): HTMLElement[] {
     if (!run) return set ? [el('h3', 'label', title), el('p', 'small muted', title === 'Check' ? 'No check has run in this session yet.' : 'The setup command hasn\'t run in this session.')] : []
-    const word = STATE_WORDS[run.state] ?? visible(run.state)
+    const word = visible(run.said.label)
     const head = `${title === 'Check' ? 'The project\'s check' : 'The setup command'} ${word}${run.state === 'failed' ? ` (exit code ${run.code})` : ''}${run.ended ? ` at ${when(run.ended)}` : run.started ? `, started ${when(run.started)}` : ''}.${run.retry ? ' That was its run after the agent\'s retry.' : ''}`
-    const parts: HTMLElement[] = [el('h3', 'label', title), el('p', `small ${run.state === 'passed' ? 'ok' : run.state === 'running' ? 'muted' : 'warn'}`, head)]
+    const parts: HTMLElement[] = [el('h3', 'label', title), el('p', `small ${run.said.tone}`, head)]
     if (title === 'Check') parts.push(el('p', 'small muted', 'Advisory only: it never counts for a review or a push.'))
     if (run.reason) parts.push(el('p', 'small muted', visible(run.reason)))
     if (run.withheld) parts.push(el('p', 'small muted', 'The output held a token-shaped string, so the engine didn\'t keep it.'))
@@ -490,6 +504,7 @@ class SfSessionWork extends HTMLElement {
     this.#shown = this.#opened ?? this.#notable(v)
     this.#details.open = this.#shown
     replaceKeeping(this.#details, [this.#summary, ...parts])
+    for (const input of [this.#add, this.#edit]) labelError(input, this.#bad?.input === input ? this.#bad.text : '')
     if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
     refocus(this, focused, key => [...(key === 'work-lock' ? ['work-unlock'] : key === 'work-unlock' ? ['work-lock'] : []), 'work-add', 'work-queue-add', 'work-model'])
   }

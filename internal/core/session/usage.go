@@ -443,11 +443,10 @@ func (p *Pushes) Continued(ctx context.Context, sid string, findings bool) {
 	if err != nil {
 		return
 	}
-	halted := p.halted(ByReviews) != ""
 	p.mu.Lock()
 	h := p.held[sid]
 	ready := !p.closing && h != nil && h.commit == head && h.branch == t.Branch && !p.refusedLocked(sid, head)
-	send := ready && findings && !halted
+	send := ready && findings
 	if send {
 		p.wg.Add(1)
 	}
@@ -459,11 +458,6 @@ func (p *Pushes) Continued(ctx context.Context, sid string, findings bool) {
 		defer p.wg.Done()
 		log.Info("push", "event", "continued", "then", "findings")
 		p.autoFindings(ctx, sid)
-	case findings:
-		log.Info("push", "event", "continued", "then", "held-by-halt")
-	case halted:
-		p.waitAs(sid, head, shared.RequestOf(ctx))
-		log.Info("push", "event", "continued", "then", "held-by-halt")
 	default:
 		log.Info("push", "event", "continued", "then", "review")
 		p.queueReview(sid, head)

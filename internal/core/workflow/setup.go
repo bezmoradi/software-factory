@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/bezmoradi/software-factory/internal/core/review"
 )
@@ -100,31 +102,59 @@ func (d Depth) Sized() bool {
 	return (d.MaxFiles > 0 || d.MaxLines > 0) && (len(d.Extra) > 0 || d.ExtraRuns > 1)
 }
 
-func (d Depth) Problem() string {
-	if len(d.Advisory) > MaxAdvisory || len(d.Extra) > MaxDeeper {
-		return "a project names at most 5 advisory roles and 5 extra roles above the size"
+const (
+	DepthRunsRule  = "a project sets repeated runs for at most 20 roles"
+	DepthRunRule   = "a role runs 1 to 3 times per commit"
+	DepthSizeRule  = "a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times"
+	DepthCountRule = "a project names at most 5 advisory roles and 5 extra roles above the size"
+	DepthNameRule  = "each role is an agent name: letters, digits and . _ : @ -, at most 120 characters"
+)
+
+func (d Depth) Problem() (string, string) {
+	if len(d.Advisory) > MaxAdvisory {
+		return "advisory", DepthCountRule
 	}
-	for _, a := range append(slices.Clone(d.Advisory), d.Extra...) {
-		if !agentName.MatchString(a) {
-			return "each role is an agent name: letters, digits and . _ : @ -, at most 120 characters"
-		}
+	if len(d.Extra) > MaxDeeper {
+		return "extra", DepthCountRule
+	}
+	badName := func(a string) bool { return !agentName.MatchString(a) }
+	if slices.ContainsFunc(d.Advisory, badName) {
+		return "advisory", DepthNameRule
+	}
+	if slices.ContainsFunc(d.Extra, badName) {
+		return "extra", DepthNameRule
 	}
 	if len(d.Runs) > 20 {
-		return "a project sets repeated runs for at most 20 roles"
+		return "runs", DepthRunsRule
 	}
 	for a, n := range d.Runs {
 		if !agentName.MatchString(a) || n < 1 || n > review.MaxRuns {
-			return "a role runs 1 to 3 times per commit"
+			return "runs", DepthRunRule
 		}
 	}
-	if d.ExtraRuns < 0 || d.ExtraRuns > review.MaxRuns || d.MaxFiles < 0 || d.MaxLines < 0 || d.MaxFiles > MaxDepthSize || d.MaxLines > MaxDepthSize {
-		return "a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times"
+	switch {
+	case d.MaxFiles < 0 || d.MaxFiles > MaxDepthSize:
+		return "maxFiles", DepthSizeRule
+	case d.MaxLines < 0 || d.MaxLines > MaxDepthSize:
+		return "maxLines", DepthSizeRule
+	case d.ExtraRuns < 0 || d.ExtraRuns > review.MaxRuns:
+		return "extraRuns", DepthSizeRule
 	}
-	return ""
+	return "", ""
 }
 
 func AgentName(s string) bool {
 	return agentName.MatchString(s)
+}
+
+func AgentNames(typed string) []string {
+	out := []string{}
+	for _, name := range strings.FieldsFunc(typed, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func Deepen(required []Requirement, d Depth, above bool, why string) []Requirement {

@@ -28,8 +28,6 @@ const FIXED: { what: string; why: string; claude?: boolean }[] = [
 
 const NOT_CLAUDE = 'This session’s agent isn’t Claude Code, so the gate’s command and write checks (push-shaped commands, cloud hand-off commands, protected paths) don’t apply to it: only its pushes go through the gate.'
 
-const PLACES: Record<string, string> = { clone: 'the clone folder, shared by the project’s sessions', worktree: 'this session’s worktree', user: 'the agent’s user settings in this session’s container' }
-
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
 const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
 const records = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)) : [])
@@ -145,7 +143,7 @@ class SfRules extends HTMLElement {
     if (!mine.length) ul.append(el('li', 'small muted', a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.'))
     for (const r of mine) {
       const li = el('li', 'small')
-      li.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${PLACES[text(r.place)] ?? visible(text(r.place))}`))
+      li.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${visible(text(r.placeLabel) || text(r.place))}`))
       const wide = strings(r.wide)
       if (wide.length) li.append(' ', el('span', 'tag warn', 'wide'), el('span', 'small warn', ` ${wide.map(visible).join('; ')}`))
       ul.append(li)
@@ -205,8 +203,6 @@ class SfRules extends HTMLElement {
     const h = haltView()
     const on = h.awayAll || h.away.includes(v.sid)
     const parts: Node[] = [el('p', `small ${on ? 'warn' : ''}`, on ? `Away mode is on${h.awayAll ? ' for every session' : ' for this session'}: each new permission card is denied with a note to the agent.` : 'Away mode is off: permission cards wait for you.')]
-    if (h.mode === 'stopped') parts.push(el('p', 'small bad', 'Stop everything is on: this session can’t start, wake or take messages until Release.'))
-    else if (h.mode === 'paused') parts.push(el('p', 'small warn', 'Pause all is on: no new turn starts and no automatic review or push runs until Release.'))
     parts.push(this.#link('Change with Away in the header', 'away', 'away mode'))
     return this.#section('Away mode', ...parts)
   }

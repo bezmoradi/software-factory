@@ -103,9 +103,6 @@ func (d *Dispatcher) Retry(ctx context.Context, sid string) error {
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't run reviews.")
 	}
-	if why := d.reg.halt.automatic(); why != "" {
-		return explained(conflict("halted"), why)
-	}
 	if why := d.automaticHeld(sid); why != "" {
 		return explained(conflict("limits"), why)
 	}

@@ -1,40 +1,9 @@
 import { button, el, emit, say, shown, statusLine, visible } from '../lib/dom.ts'
 import { placeMenu } from '../lib/menu.ts'
 import { icon } from './icon.ts'
-import { age, label, modeLabel, plural } from '../lib/format.ts'
+import { age, label, plural } from '../lib/format.ts'
 import type { SessionInfo } from '../types.ts'
 
-const LEVELS = new Map([['locked', { word: 'Locked', tone: '' }], ['held', { word: 'Held', tone: 'warn' }], ['stopped', { word: 'Stopped', tone: 'bad' }]])
-
-export function sessionState(s: SessionInfo): { dot: string; word: string } {
-  if (s.disputed) return { dot: 'dot off', word: 'two connections claim this session' }
-  if (!s.verified) return { dot: 'dot', word: 'not started by this engine' }
-  if (s.doubled) return { dot: 'dot off', word: 'read-only: another session holds its branch' }
-  if (loginNeeded(s)) return { dot: 'dot off', word: 'needs you to sign in again' }
-  if (s.signInWait) return { dot: 'dot need', word: 'Waiting for sign-in' }
-  if (s.homeHeld) return { dot: 'dot need', word: 'settings changed: Wake to review them' }
-  if (!s.running && s.queued) return { dot: 'dot busy', word: `waking, ${s.queued} ${plural(s.queued, 'message')} waiting` }
-  if (!s.running && s.levelLost) return { dot: 'dot off', word: 'stopped: process lost' }
-  if (!s.running && s.stopReason) return { dot: 'dot off', word: `stopped: ${shown(s.stopReason)}` }
-  if (!s.running && s.state === 'done') return { dot: 'dot done', word: 'done' }
-  if (!s.running) return { dot: 'dot', word: !s.state || s.state === 'stopped' ? 'stopped' : s.state === 'blocked' ? 'stopped, waiting for your answer' : `stopped, was ${shown(s.state)}` }
-  if (!s.live) return { dot: 'dot', word: shown(s.waitingFor ? `waiting for ${s.waitingFor}` : s.status || s.state || 'running') }
-  if (s.outdated) return { dot: 'dot off', word: 'older plugin version' }
-  if (s.needs) return { dot: 'dot need', word: 'needs you' }
-  if (s.busy) return { dot: 'dot busy', word: 'working' }
-  return { dot: 'dot', word: 'idle' }
-}
-
-export const loginNeeded = (s: SessionInfo) => !!s.running && s.live && !!s.login
-const active = (s: SessionInfo) => !!s.running || s.live
-
-const inTurn = (s: SessionInfo) => !!s.busy || !!s.needs || s.status === 'busy' || s.state === 'working' || s.state === 'blocked'
-
-export function sharing(s: SessionInfo, all: SessionInfo[]): string[] {
-  if (!s.checkout || !active(s)) return []
-  const others = all.filter(o => o.sid !== s.sid && active(o) && o.checkout === s.checkout)
-  return inTurn(s) || others.some(inTurn) ? others.map(o => label(o)) : []
-}
 
 export function titled(text: string) {
   const name = el('span', 'name')
@@ -49,7 +18,7 @@ export function bySessionOrder(a: SessionInfo, b: SessionInfo): number {
 }
 
 export function sessionKey(list: SessionInfo[], now = Date.now()): string {
-  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.checkout, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.sandboxed, s.lineage?.group, s.lineage?.groupKind, age(s.startedAt, now)]))
+  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.sandboxed, s.lineage?.group, s.lineage?.groupKind, s.summary?.word, s.summary?.tone, s.modeLabel, s.levelSaid?.label, s.levelSaid?.tone, s.actions?.manage, age(s.startedAt, now)]))
 }
 
 function groupOf(s: SessionInfo, all: SessionInfo[]): string {
@@ -109,7 +78,7 @@ export function sessionLink(sid: string, key: string, parts: (Node | string)[]) 
 }
 
 function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
-  if (s.kind !== 'background' || !s.verified || !/^[0-9a-f]{8}$/.test(s.id || '')) return [el('span')]
+  if (s.actions?.manage !== '') return [el('span')]
   const action = s.running ? 'stop' : 'remove'
   const words = action === 'stop' ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
   const armedSaid = action === 'stop' ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.'
@@ -168,12 +137,10 @@ export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDi
 }
 
 export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu = false): HTMLLIElement {
-  const st = sessionState(s)
   const name = titled(visible(label(s)))
-  const done = !s.running && s.state === 'done'
-  const level = done ? { word: 'Done', tone: '' } : s.level === 'locked' && s.sandboxed === false ? { word: 'Locked, not sandboxed', tone: 'warn' } : LEVELS.get(s.level ?? '')
+  const level = s.levelSaid
   if (level) {
-    const tag = el('span', level.tone ? `tag ${level.tone}` : 'tag', level.word)
+    const tag = el('span', level.tone ? `tag ${level.tone}` : 'tag', level.label)
     tag.title = visible(`${s.levelReason ?? ''}${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
     name.append(tag)
   }
@@ -185,18 +152,12 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   const usage = el('sf-usage-line', 'usage-line')
   usage.sid = s.sid
   name.append(usage)
-  const shared = sharing(s, all)
-  if (shared.length) {
-    const tag = el('span', 'tag warn', 'same checkout')
-    tag.title = shown(`Also in ${s.checkout}, with a session working: ${shared.join(', ')}`)
-    name.append(tag)
-  }
   const open = el('span', 'open-cta', 'Open')
   open.setAttribute('aria-hidden', 'true')
-  const tone = st.dot.split(' ')[1] ?? ''
-  const mode = el('span', 'mode secondary', s.mode ? `${modeLabel(s.mode)} mode` : '')
+  const tone = s.summary?.tone ?? ''
+  const mode = el('span', 'mode secondary', s.mode ? `${s.modeLabel || s.mode} mode` : '')
   mode.title = mode.textContent ?? ''
-  const row = sessionLink(s.sid, key, [name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, st.word), mode, el('span', 'when secondary', age(s.startedAt)), open])
+  const row = sessionLink(s.sid, key, [name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open])
   ;(row.firstChild as HTMLAnchorElement).title = s.cwd || ''
   if (menu) {
     row.classList.add('with-menu')

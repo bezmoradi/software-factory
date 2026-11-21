@@ -1,4 +1,4 @@
-import { busy, button, el, field, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, field, labelError, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
@@ -68,8 +68,8 @@ function secretField(name: string, words: string, what: string, autocomplete: Au
   input.name = name
   input.autocomplete = autocomplete
   input.spellcheck = false
-  input.required = true
-  input.maxLength = 512
+  input.setAttribute('aria-required', 'true')
+  input.addEventListener('input', () => labelError(input, ''))
   return [field(words, secret(input, what), undefined, 'login-field'), input]
 }
 
@@ -134,6 +134,7 @@ class Row {
 
   private form(label: HTMLElement, go: HTMLButtonElement, done: () => void): HTMLFormElement {
     const form = el('form', 'row login-code')
+    form.noValidate = true
     form.append(label, go)
     form.addEventListener('submit', e => {
       e.preventDefault()
@@ -196,11 +197,18 @@ class Row {
 
   private async finishCode() {
     const code = this.code.value.trim()
-    if (!code || !this.waiting || this.code.readOnly) return
+    if (!this.waiting || this.code.readOnly) return
     sending(this.code, true)
     busy(this.codeGo, true)
     this.note(this.subscriptionSaid, '')
+    labelError(this.code, '')
     const a = await call(this.post, { step: 'code', target: this.target, code })
+    if (!a.ok && a.body.error === 'code') {
+      sending(this.code, false)
+      busy(this.codeGo, false)
+      labelError(this.code, typeof a.body.message === 'string' ? visible(a.body.message) : 'That didn’t work.')
+      return this.code.focus()
+    }
     this.code.value = ''
     this.code.type = 'password'
     sending(this.code, false)
@@ -218,16 +226,22 @@ class Row {
 
   private async finishKey() {
     const key = this.key.value.trim()
-    if (!key || this.key.readOnly) return
+    if (this.key.readOnly) return
     sending(this.key, true)
     busy(this.keyGo, true)
     this.note(this.keySaid, '')
+    labelError(this.key, '')
     const a = await call(this.post, { step: 'key', target: this.target, key })
     this.key.value = ''
     this.key.type = 'password'
     sending(this.key, false)
     busy(this.keyGo, false)
-    if (!a.ok) return this.note(this.keySaid, typeof a.body.message === 'string' ? a.body.message : 'The key wasn’t saved. Try again.', true)
+    if (!a.ok) {
+      const said = typeof a.body.message === 'string' ? visible(a.body.message) : 'The key wasn’t saved. Try again.'
+      if (a.body.error === 'key') labelError(this.key, said)
+      else this.note(this.keySaid, said, true)
+      return this.key.focus()
+    }
     this.show(signInOf(a.body.signIn))
     this.signedIn('your API key')
   }

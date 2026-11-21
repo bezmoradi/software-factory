@@ -132,6 +132,7 @@ func ValidLabel(label string) bool {
 }
 
 func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (IssueList, error) {
+	label = strings.TrimSpace(label)
 	if !ValidLabel(label) {
 		return IssueList{}, explained(invalid("label"), "A label is one line of at most 50 characters.")
 	}
@@ -260,30 +261,38 @@ var _ Starter = IssueDispatcher{}
 func (d IssueDispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) {
 	if q.Issue == 0 || d.Issues == nil {
 		if q.Issue != 0 {
-			return Started{}, explained(conflict("no issues"), "This engine can't start a session from an issue.")
+			return Started{}, onField("issue", explained(conflict("no issues"), "This engine can't start a session from an issue."))
 		}
 		return d.Dispatcher.Dispatch(ctx, q)
 	}
-	if !ValidIssueHash(q.IssueHash) {
-		return Started{}, explained(invalid("issue"), "Read the issue on the page before starting from it.")
-	}
-	v, text, err := d.Issues.read(ctx, q.Path, q.Issue)
+	text, err := d.Issues.startText(ctx, q.Path, q.Issue, q.IssueHash)
 	if err != nil {
 		return Started{}, err
-	}
-	if v.Refused != "" {
-		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused")
-		return Started{}, explained(conflict("issue"), v.Refused+" No session started.")
-	}
-	if v.Hash != q.IssueHash {
-		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused-changed")
-		return Started{}, explained(conflict("issue changed"), "The issue changed since you read it; read it again. No session started.")
 	}
 	started, err := d.Dispatcher.Dispatch(ctx, q)
 	if err == nil && started.SID != "" {
 		d.Issues.begin(started.SID, q.Issue, text)
 	}
 	return started, err
+}
+
+func (s *IssueStarts) startText(ctx context.Context, path string, number int, hash string) (string, error) {
+	if !ValidIssueHash(hash) {
+		return "", onField("issue", explained(invalid("issue"), "Read the issue again before starting from it."))
+	}
+	v, text, err := s.read(ctx, path, number)
+	if err != nil {
+		return "", onField("issue", err)
+	}
+	if v.Refused != "" {
+		shared.For(ctx, s.cfg.Logger).Info("issues", "event", "start-refused")
+		return "", onField("issue", explained(conflict("issue"), "This issue can't be sent to an agent. Clear it, or pick another."))
+	}
+	if v.Hash != hash {
+		shared.For(ctx, s.cfg.Logger).Info("issues", "event", "start-refused-changed")
+		return "", onField("issue", explained(conflict("issue changed"), "The issue changed since you read it; read it again. No session started."))
+	}
+	return text, nil
 }
 
 func (s *IssueStarts) begin(sid string, number int, text string) {

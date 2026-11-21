@@ -34,7 +34,7 @@ func (s *Server) commitIdentity(w http.ResponseWriter, body map[string]any) {
 	case "set":
 		name, okName := body["name"].(string)
 		email, okEmail := body["email"].(string)
-		if !keysWithin(body, "op", "name", "email") || !okName || !okEmail || len(name) > 4*session.MaxIdentityName || len(email) > session.MaxIdentityEmail+64 {
+		if !keysWithin(body, "op", "name", "email") || !okName || !okEmail {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}

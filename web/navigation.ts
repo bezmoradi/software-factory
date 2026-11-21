@@ -80,15 +80,6 @@ export function moveTab(id: string, index: number) {
 }
 
 export const files = new Map<string, FileView>()
-const FILE_ERRORS: Record<string, string> = {
-  outside: "Only files inside this session's project open here.",
-  secret: "This file can hold secrets, so the page doesn't show it.",
-  large: 'This file is over 512 KB, too large to show here.',
-  binary: "This isn't a text file.",
-  missing: "This file isn't there anymore.",
-  link: "This path goes through a symbolic link, which the page doesn't follow.",
-  commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
-}
 
 export function fileLabel(key: string): string {
   const path = files.get(key)?.path ?? key
@@ -123,7 +114,7 @@ function loadFile(key: string) {
     const old = files.get(key)
     if (text !== undefined && old?.text === text && old.path === shown) return
     const at = { ...(commit ? { commit } : {}), ...(old?.line ? { line: old.line } : {}) }
-    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
+    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: res?.status === 422 && typeof body?.message === 'string' && body.message ? body.message : "The file couldn't be read." })
     const file = byId<HTMLElementTagNameMap['sf-file']>('file')
     const refocus = current.key === key && (focusFile === key || file.contains(document.activeElement) || document.activeElement === document.body)
     paint()

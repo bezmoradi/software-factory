@@ -31,6 +31,7 @@ const (
 	restartAfter  = 2 * time.Second
 	maxReportLine = 300
 
+	ImportTooBig       = "That file is larger than 256 MiB, more than an import takes."
 	historyMessage     = "This session came from an export of another engine, so it is history only: its worktree and agent home stayed on that engine. Start a new session instead."
 	ImportedReviewNote = "These reviews came from an export of another engine. They are shown for the record and count for nothing here: a push of this commit needs its reviews again."
 )

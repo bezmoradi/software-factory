@@ -19,30 +19,18 @@ interface Item {
   result: string
   verdict: string
   reason: string
+  label: string
+  note: string
 }
 
 interface Rule {
   rule: string
   place: string
+  placeLabel: string
   worktree: string
   path: string
   wide: string[]
 }
-
-const KIND: Record<string, string> = {
-  'allow-push': 'Push allowed with items missing',
-  override: 'Verdict overridden',
-  'allow-file': 'Flagged file allowed',
-  'allow-commit': 'Flagged commit allowed',
-  'cap-reached': 'Cap reached',
-  'cap-answer': 'Cap card answered',
-  'usage-answer': 'Automatic work kept running near a usage limit',
-}
-
-const CAP: Record<string, string> = { money: 'spending cap', time: 'time cap', turns: 'turn cap', disk: 'disk cap' }
-const CAP_ANSWER: Record<string, string> = { raised: 'raised', stopped: 'stopped' }
-
-const PLACE: Record<string, string> = { worktree: 'a session worktree', clone: 'the clone folder', user: 'the agents’ user settings' }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0)
@@ -55,11 +43,11 @@ function at(ms: number): HTMLTimeElement {
 }
 
 function itemOf(r: Record<string, unknown>): Item {
-  return { kind: text(r.kind), time: num(r.time), sid: text(r.sid), repo: text(r.repo), branch: text(r.branch), commit: text(r.commit), reviewer: text(r.reviewer), path: text(r.path), missing: num(r.missing), result: text(r.result), verdict: text(r.verdict), reason: text(r.reason) }
+  return { kind: text(r.kind), time: num(r.time), sid: text(r.sid), repo: text(r.repo), branch: text(r.branch), commit: text(r.commit), reviewer: text(r.reviewer), path: text(r.path), missing: num(r.missing), result: text(r.result), verdict: text(r.verdict), reason: text(r.reason), label: text(r.label) || text(r.kind), note: text(r.note) }
 }
 
 function ruleOf(r: Record<string, unknown>): Rule {
-  return { rule: text(r.rule), place: text(r.place), worktree: text(r.worktree), path: text(r.path), wide: Array.isArray(r.wide) ? (r.wide as unknown[]).filter((w): w is string => typeof w === 'string') : [] }
+  return { rule: text(r.rule), place: text(r.place), placeLabel: text(r.placeLabel), worktree: text(r.worktree), path: text(r.path), wide: Array.isArray(r.wide) ? (r.wide as unknown[]).filter((w): w is string => typeof w === 'string') : [] }
 }
 
 function until(expires: number, now: number): string {
@@ -83,20 +71,12 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     for (const e of items) {
       const li = el('li', 'exception-row')
       const head = el('div', 'row')
-      const freed = e.kind === 'cap-answer' && e.verdict === 'freed'
-      const what = freed ? 'Disk cap cleared by the engine’s measurement' : KIND[e.kind] ?? visible(e.kind)
-      const detail = freed ? ''
-        : e.kind === 'override' ? (e.reviewer ? ` (${visible(e.reviewer)})` : '')
-        : e.kind === 'allow-file' && e.path ? ` (${visible(e.path)})`
-        : e.kind === 'allow-push' ? ` (${e.missing} missing)`
-        : e.kind.startsWith('cap-') && (CAP[e.result] || CAP_ANSWER[e.verdict]) ? ` (${[CAP[e.result] ?? '', CAP_ANSWER[e.verdict] ?? ''].filter(Boolean).join(', ')})` : ''
-      head.append(el('strong', 'small', `${what}${detail}`), el('span', 'spacer'), at(e.time))
+      head.append(el('strong', 'small', visible(e.label)), el('span', 'spacer'), at(e.time))
       const session = e.sid ? labelOf(e.sid) || `session ${e.sid.slice(0, 8)}` : ''
       const where = [session && visible(session), e.repo && visible(e.repo), e.branch && visible(e.branch), e.commit && `commit ${shortSha(e.commit)}`].filter(Boolean).join(' · ')
       li.append(head)
       if (where) li.append(el('p', 'small muted', where))
-      if (freed) li.append(el('p', 'small', 'The engine counted the whole session folder under its disk cap, so the session went on. Nobody answered the card.'))
-      else li.append(el('p', 'small', e.reason ? `Your reason: “${visible(e.reason)}”` : 'No reason recorded.'))
+      li.append(el('p', 'small', visible(e.note)))
       list.append(li)
     }
     parts.push(list)
@@ -137,7 +117,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
           const row = el('div', 'row')
           row.append(el('code', '', visible(rule.rule)))
           if (rule.wide.length) row.append(el('span', 'tag warn', 'wide'))
-          li.append(row, el('p', 'small muted', `In ${PLACE[rule.place] ?? visible(rule.place)}${rule.worktree ? ` (${visible(rule.worktree)})` : ''}: ${visible(rule.path)}`))
+          li.append(row, el('p', 'small muted', `In ${visible(rule.placeLabel || rule.place)}${rule.worktree ? ` (${visible(rule.worktree)})` : ''}: ${visible(rule.path)}`))
           if (rule.wide.length) li.append(el('p', 'small warn', rule.wide.map(visible).join('; ')))
           ul.append(li)
         }

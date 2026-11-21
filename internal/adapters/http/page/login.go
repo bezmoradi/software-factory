@@ -107,7 +107,7 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2*time.Minute + writeFor))
-	if !okTarget || (step == "code") != (code != "") {
+	if !okTarget || step != "code" && code != "" {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}

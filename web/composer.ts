@@ -1,6 +1,6 @@
 import { api, upload } from './api.ts'
 import { current, say, scroller, sessions, state, toast, type Session } from './app-state.ts'
-import { button, byId, el } from './lib/dom.ts'
+import { button, byId, el, visible } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
 import { agentWord } from './lib/format.ts'
 import { icon } from './components/icon.ts'
@@ -18,34 +18,10 @@ interface Composer {
   paint: (s: Session | null, blocked: boolean, readOnly?: string) => void
 }
 
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-const MAX_SIDE = 1568
-const MAX_IMAGE = 2.5 * 1024 * 1024
-const MAX_DROP = 10 * 1024 * 1024
-
 interface Draft {
   text: string
   images: { blob: Blob; url: string }[]
   files: File[]
-}
-
-async function shrink(file: File): Promise<Blob | null> {
-  if (file.type === 'image/gif') return file
-  const bitmap = await createImageBitmap(file).catch(() => null)
-  if (!bitmap) return null
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height))
-  if (scale === 1 && file.size <= MAX_IMAGE) {
-    bitmap.close()
-    return file
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  bitmap.close()
-  const encode = (type: string, quality: number) => new Promise<Blob | null>(resolve => canvas.toBlob(resolve, type, quality))
-  const blob = await encode(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9)
-  return blob && blob.size > MAX_IMAGE ? encode('image/jpeg', 0.85) : blob
 }
 
 async function sha256(data: ArrayBuffer): Promise<string> {
@@ -118,8 +94,11 @@ export function startComposer({ send }: ComposerDeps): Composer {
 
   function paintWarning() {
     const d = drafts.get(current.key)
-    const warn = current()?.gate?.effective === 'incident' && !!(d?.images.length || d?.files.length)
-    if (byId('upload-warning').hidden === warn) byId('upload-warning').hidden = !warn
+    const said = current()?.gate?.uploadWarning ?? ''
+    const warn = !!said && !!(d?.images.length || d?.files.length)
+    const box = byId('upload-warning')
+    if (box.textContent !== said) box.textContent = said
+    if (box.hidden === warn) box.hidden = !warn
   }
 
   function mention(key: string, path: string) {
@@ -136,14 +115,13 @@ export function startComposer({ send }: ComposerDeps): Composer {
   }
 
   async function attachFile(file: File, key: string, sid: string) {
-    if (file.size > MAX_DROP) return say(`${file.name} is larger than 10 MB. Type its path with @ instead.`)
     const data = await file.arrayBuffer().catch(() => null)
     if (!data) return say(`The page couldn't read ${file.name}. For a folder, type its path with @ instead.`)
     const res = await api('/api/file-match', { sid, name: file.name, size: file.size, sha256: await sha256(data) }).catch(() => null)
-    const found: { path?: unknown } | null = res && res.ok ? await res.json().catch(() => null) : null
-    if (typeof found?.path === 'string' && found.path) return mention(key, found.path)
+    const found: { path?: unknown; message?: unknown } | null = res ? await res.json().catch(() => null) : null
+    if (res && !res.ok && typeof found?.message === 'string' && found.message) return say(visible(found.message))
+    if (res?.ok && typeof found?.path === 'string' && found.path) return mention(key, found.path)
     const d = draftOf(key)
-    if (d.files.length >= 4) return say('You can attach up to 4 files to a message.')
     d.files.push(file)
     toast({ id: `copy:${file.name}`, title: `${file.name} isn’t in this project`, description: `${agentWord(sessions.get(sid)?.info.agent)} gets a read-only copy, deleted when the session ends. Changes don’t reach your file.`, tone: 'info', timeout: 8000 })
   }
@@ -153,21 +131,12 @@ export function startComposer({ send }: ComposerDeps): Composer {
     const attached = draftOf(key).images
     const sid = current()?.sid
     for (const file of files) {
-      if (!IMAGE_TYPES.includes(file.type)) {
+      if (!state.imageTypes.includes(file.type)) {
         if (sid) await attachFile(file, key, sid)
         continue
       }
-      if (attached.length >= 4) {
-        say('You can attach up to 4 images to a message.')
-        break
-      }
-      const blob = await shrink(file)
-      if (!blob || blob.size > MAX_IMAGE || !IMAGE_TYPES.includes(blob.type)) {
-        say('That image is too large to send, or not one the page can read.')
-        continue
-      }
       if (drafts.get(key)?.images !== attached) break
-      attached.push({ blob, url: URL.createObjectURL(blob) })
+      attached.push({ blob: file, url: URL.createObjectURL(file) })
     }
     if (key === current.key) {
       paintAttached()
@@ -293,16 +262,19 @@ export function startComposer({ send }: ComposerDeps): Composer {
     e.preventDefault()
     const s = current()
     const key = current.key
-    const value = text.value.trim()
+    const value = text.value
     const attached = [...(drafts.get(key)?.images ?? [])]
     const files = [...(drafts.get(key)?.files ?? [])]
     if (text.disabled) return
-    if (!s || (!value && !attached.length && !files.length) || !state.connected || sending.has(key)) return
+    if (!s || !state.connected || sending.has(key)) return
     sending.add(key)
+    let refused = ''
     const sent = async (blob: Blob, name = '') => {
       const res = await upload(blob, s.sid, name).catch(() => null)
-      const body: { id?: unknown } | null = res && res.ok ? await res.json().catch(() => null) : null
-      return body && typeof body.id === 'string' ? body.id : ''
+      const body: { id?: unknown; message?: unknown } | null = res ? await res.json().catch(() => null) : null
+      if (res?.ok && typeof body?.id === 'string') return body.id
+      refused = typeof body?.message === 'string' ? visible(body.message) : ''
+      return ''
     }
     const ids: string[] = []
     for (const item of attached) {
@@ -318,8 +290,8 @@ export function startComposer({ send }: ComposerDeps): Composer {
         fids.push(id)
       }
     }
-    if (ids.length !== attached.length) say('An image did not go through. Try again, or check that the session is still running.')
-    else if (fids.length !== files.length) say('A file did not go through. Try again, or check that the session is still running.')
+    if (ids.length !== attached.length) say(refused || 'An image did not go through. Try again, or check that the session is still running.')
+    else if (fids.length !== files.length) say(refused || 'A file did not go through. Try again, or check that the session is still running.')
     else if (await send(value, ids, s, false, fids)) {
       const d = drafts.get(key)
       if (d) {
@@ -328,11 +300,11 @@ export function startComposer({ send }: ComposerDeps): Composer {
           if (d.images.includes(item)) d.images.splice(d.images.indexOf(item), 1)
         }
         for (const file of files) if (d.files.includes(file)) d.files.splice(d.files.indexOf(file), 1)
-        if (d.text.trim() === value) d.text = ''
+        if (d.text === value) d.text = ''
         if (!d.text && !d.images.length && !d.files.length) drafts.delete(key)
       }
       if (key === current.key) {
-        if (text.value.trim() === value) text.value = ''
+        if (text.value === value) text.value = ''
         grow()
         paintAttached()
       }

@@ -475,3 +475,10 @@ func (a *ReviewerAgents) audit(e AuditEntry) {
 		a.cfg.Logger.Warn("reviewer agents", "event", "audit-not-written")
 	}
 }
+
+func ProjectAgentsFull(files int) string {
+	if files < MaxProjectAgents {
+		return ""
+	}
+	return "This project keeps " + strconv.Itoa(MaxProjectAgents) + " agent files, its limit. Remove one to add another."
+}

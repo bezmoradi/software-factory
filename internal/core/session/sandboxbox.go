@@ -248,7 +248,7 @@ func (d *Dispatcher) round(ctx context.Context) {
 
 func (d *Dispatcher) boxFailed(sid string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), haltFor)
+		ctx, cancel := context.WithTimeout(context.Background(), stopEveryFor)
 		defer cancel()
 		d.stopOne(ctx, sid, BoxStopReason)
 	}()

@@ -123,6 +123,10 @@ func (l *Limits) Frame() Fields {
 			f["levels"] = Fields{CapMoney: capLevel(CapMoney, c, s.used), CapTime: capLevel(CapTime, c, s.used), CapTurns: capLevel(CapTurns, c, s.used), CapDisk: capLevel(CapDisk, c, s.used)}
 			f["reached"] = s.reached
 			f["reachedAt"] = ms(s.reachedAt)
+			if s.reached != "" {
+				least, suggested := raiseFor(s.reached, c, s.used)
+				f["raise"] = Fields{"min": least, "suggested": suggested}
+			}
 		}
 		if t != nil && t.notice != nil {
 			f["stuck"] = Fields{"tool": t.notice.tool, "detail": t.notice.detail, "count": float64(t.notice.count), "failing": t.notice.failing, "at": ms(t.notice.at)}
@@ -302,6 +306,28 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	return err
 }
 
+func (l *Limits) StartCaps(sid string, c Caps) error {
+	var k limitsSession
+	if clean, ok := CheckCaps(c); ok && l.reg.admittedProject(sid, &k) && clean == l.ProjectCaps(k.project) {
+		return nil
+	}
+	return l.SetSession(sid, c)
+}
+
+func (d *Dispatcher) startCaps(sid string, c *Caps) string {
+	if c == nil || sid == "" {
+		return ""
+	}
+	err := d.reg.Limits().StartCaps(sid, *c)
+	if err == nil {
+		return ""
+	}
+	if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
+		return e.Message
+	}
+	return "The engine couldn't save the session's caps."
+}
+
 func (r *Registry) admittedProject(sid string, out *limitsSession) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -410,4 +436,25 @@ func (l *Limits) branchHeld(sid string) error {
 	doubled := l.cfg.Doubled
 	l.mu.Unlock()
 	return heldBranch(doubled, sid)
+}
+
+func raiseFor(kind string, c Caps, u CapsUsed) (float64, float64) {
+	now := capValue(kind, c)
+	var least float64
+	switch kind {
+	case CapMoney:
+		least = max(now, math.Round(u.CostUSD*10000)/10000)
+		double := now * 2
+		if double == 0 {
+			double = 1
+		}
+		return least, math.Round(double*100) / 100
+	case CapTime:
+		least = max(now+1, math.Ceil(math.Floor(u.Time.Minutes()*10)/10)+1)
+	case CapTurns:
+		least = max(now+1, float64(u.Turns))
+	case CapDisk:
+		least = max(now+1, math.Floor(float64(u.DiskBytes)/(1<<30))+1)
+	}
+	return least, max(now*2, least)
 }

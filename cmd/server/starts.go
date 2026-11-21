@@ -10,11 +10,11 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func useStarts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+func useStarts(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, issues *session.IssueStarts, cfg PageConfig, logger shared.Logger) {
 	if parts.dispatcher == nil {
 		return
 	}
-	pairs, err := session.NewPairs(session.PairsConfig{Dispatcher: parts.dispatcher, Store: state.NewPairs(cfg.StateDir), Tell: tellSession(reg),
+	pairs, err := session.NewPairs(session.PairsConfig{Dispatcher: parts.dispatcher, Issues: issues, Store: state.NewPairs(cfg.StateDir), Tell: tellSession(reg),
 		Changes: files.Reader{}, History: files.Reader{}, Base: base, Logger: logger})
 	if err != nil {
 		logger.Warn("pairs", "event", "not-started")
@@ -29,5 +29,6 @@ func useStarts(base context.Context, srv *page.Server, reg *session.Registry, pa
 		return
 	}
 	splits.Restore()
+	go splits.Run(base)
 	srv.UseSplits(splits)
 }

@@ -9,14 +9,12 @@ import (
 const haltRoute = "/api/halt"
 
 type haltJSON struct {
-	Mode    string   `json:"mode"`
-	Since   int64    `json:"since"`
 	AwayAll bool     `json:"awayAll"`
 	Away    []string `json:"away"`
 }
 
 func haltOf(st session.HaltState) haltJSON {
-	return haltJSON{Mode: st.Mode, Since: millis(st.Since), AwayAll: st.AwayAll, Away: nonNil(st.Away)}
+	return haltJSON{AwayAll: st.AwayAll, Away: nonNil(st.Away)}
 }
 
 func (s *Server) halt(w http.ResponseWriter, body map[string]any) {
@@ -28,18 +26,10 @@ func (s *Server) halt(w http.ResponseWriter, body map[string]any) {
 	}
 	var err error
 	switch op {
-	case "read", "stop", "pause", "release":
+	case "read":
 		if !keysWithin(body, "op") {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
-		}
-		switch op {
-		case "stop":
-			err = h.StopAll()
-		case "pause":
-			err = h.PauseAll()
-		case "release":
-			err = h.Release()
 		}
 	case "away":
 		on, okOn := body["on"].(bool)

@@ -72,10 +72,12 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 		return false, conflict("not running")
 	case !r.lastControl(sid):
 		return false, explained(conflict("asleep"), "This session was read-only on this page when it stopped. Wake it without a message from the ⋯ menu first.")
-	case text == "" || utf16Len(text) > MaxText || !utf8.ValidString(text):
-		return false, invalid("text")
+	case text == "":
+		return false, explained(invalid("text"), "Type a message first.")
+	case utf16Len(text) > MaxText || !utf8.ValidString(text):
+		return false, explained(invalid("text"), "A message holds at most 20,000 characters.")
 	case strings.HasPrefix(text, "!"):
-		return false, invalid("command")
+		return false, shellLine(text)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
 		return false, explained(invalid("command"), commandRefused(a.Box, a.ID))

@@ -399,6 +399,11 @@ func fileError(err error) string {
 	return errMissing.Error()
 }
 
+func fileProblem(err error) problem {
+	code := fileError(err)
+	return problem{Error: code, Message: session.FileErrorMessage(code)}
+}
+
 func notRead(err error) bool {
 	for _, e := range []error{errSecret, errLarge, errBinary, errLink} {
 		if errors.Is(err, e) {
@@ -472,7 +477,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 	c, err := s.checkout(sid)
 	if err != nil {
 		if route == "/api/file" {
-			send(w, http.StatusUnprocessableEntity, problem{Error: fileError(err)})
+			send(w, http.StatusUnprocessableEntity, fileProblem(err))
 			return
 		}
 		refuse(w, http.StatusConflict, "unverified")
@@ -489,7 +494,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 		rel, text, err := c.text(given)
 		s.logger.Info("file read", "ok", err == nil)
 		if err != nil {
-			send(w, http.StatusUnprocessableEntity, problem{Error: fileError(err)})
+			send(w, http.StatusUnprocessableEntity, fileProblem(err))
 			return
 		}
 		send(w, http.StatusOK, map[string]string{"path": rel, "text": text})
@@ -516,7 +521,11 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 		name, _ := body["name"].(string)
 		sum, _ := body["sha256"].(string)
 		size, ok := integer(body["size"])
-		if !session.UploadName(name) || !ok || size < 0 || size > session.MaxDrop || !sha256Hex.MatchString(sum) {
+		if session.UploadName(name) && ok && size > session.MaxDrop {
+			send(w, http.StatusBadRequest, problem{Error: "match", Message: session.DropRefused(name)})
+			return
+		}
+		if !session.UploadName(name) || !ok || size < 0 || !sha256Hex.MatchString(sum) {
 			refuse(w, http.StatusBadRequest, "match")
 			return
 		}
@@ -613,7 +622,7 @@ func (s *Server) commitFiles(w http.ResponseWriter, route, sid string, body map[
 		rels, texts, errs := s.commitTexts(sid, commit, []string{given})
 		s.logger.Info("file read", "ok", errs[0] == nil, "at", "commit")
 		if errs[0] != nil {
-			send(w, http.StatusUnprocessableEntity, problem{Error: fileError(errs[0])})
+			send(w, http.StatusUnprocessableEntity, fileProblem(errs[0]))
 			return
 		}
 		send(w, http.StatusOK, map[string]string{"path": rels[0], "text": texts[0], "commit": commit})

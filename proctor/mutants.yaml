@@ -236,8 +236,8 @@
   title: "The attachment count cap is removed"
   edits:
     - file: "internal/adapters/http/page/upload.go"
-      find: "if !ok || len(list) > session.MaxAttached {"
-      replace: "if !ok {"
+      find: "if list, isList := body[key].([]any); isList && len(list) > session.MaxAttached {"
+      replace: "if list, isList := body[key].([]any); isList && false {"
 - id: PAGE-028
   title: "Uploaded files are saved world-readable"
   edits:
@@ -326,7 +326,7 @@
   title: "The cap on agents in a pair is removed"
   edits:
     - file: "internal/adapters/http/page/pair.go"
-      find: "if !ok || len(list) == 0 || len(list) > session.MaxPairAgents {"
+      find: "if !ok || len(list) != 1 {"
       replace: "if !ok || len(list) == 0 {"
 - id: PAGE-043
   title: "Dismissed task cards stay in the session's view"
@@ -352,12 +352,6 @@
     - file: "internal/adapters/http/page/repos.go"
       find: "\t\tif !ok || len(v) > limit {"
       replace: "\t\tif !ok {"
-- id: PAGE-047
-  title: "Stop all pauses instead of stopping"
-  edits:
-    - file: "internal/adapters/http/page/halt.go"
-      find: "\t\tcase \"stop\":\n\t\t\terr = h.StopAll()"
-      replace: "\t\tcase \"stop\":\n\t\t\terr = h.PauseAll()"
 - id: PAGE-048
   title: "The commit pattern for flags is no longer anchored at the end"
   edits:
@@ -442,12 +436,6 @@
     - file: "internal/adapters/http/page/forge.go"
       find: "confirmed, okConfirmed := body[\"confirmed\"].(bool)"
       replace: "confirmed, okConfirmed := body[\"confirmed\"] != false, true"
-- id: PAGE-062
-  title: "The update route takes check and later together"
-  edits:
-    - file: "internal/adapters/http/page/update.go"
-      find: "if len(body) > 1 || !keysWithin(body, \"check\", \"later\") {"
-      replace: "if !keysWithin(body, \"check\", \"later\") {"
 - id: PAGE-063
   title: "Switching the package lookup on switches it off and the other way round"
   edits:
@@ -616,12 +604,6 @@
     - file: "cmd/server/backup.go"
       find: "\t\tRestart: hook.restart,\n"
       replace: "\t\tRestart: func() {},\n"
-- id: CMD-020
-  title: "Pushes aren't told about the stop switch"
-  edits:
-    - file: "cmd/server/durable.go"
-      find: "\t\tp.pushes.UseHalt(reg.Halt())\n"
-      replace: ""
 - id: CMD-021
   title: "Diagnostics shows the named settings' values, not only set or unset"
   edits:
@@ -1168,12 +1150,6 @@
     - file: "internal/core/session/bridge.go"
       find: "\tfor card := range b.reqs {\n\t\tb.recordLocked(Fields{\"type\": \"resolved\", \"id\": card})\n\t}\n"
       replace: ""
-- id: SESS-021
-  title: "Queued messages start new turns while Pause all or Stop everything is on"
-  edits:
-    - file: "internal/core/session/bridge.go"
-      find: "if len(b.waiting) == 0 || b.ended || b.reg.halt.turns() != \"\" {"
-      replace: "if len(b.waiting) == 0 || b.ended {"
 - id: SESS-022
   title: "A tool call's command is shown without masking tokens"
   edits:
@@ -1226,14 +1202,14 @@
   title: "Yes is accepted on a permission card the page couldn't show in full"
   edits:
     - file: "internal/core/session/cards.go"
-      find: "\t\tcase \"yes\":\n\t\t\treturn c.complete\n"
-      replace: "\t\tcase \"yes\":\n\t\t\treturn true\n"
+      find: "\t\tcase \"yes\":\n\t\t\treturn c.complete, \"\"\n"
+      replace: "\t\tcase \"yes\":\n\t\t\treturn true, \"\"\n"
 - id: SESS-031
   title: "Answers to questions the agent didn't ask are accepted"
   edits:
     - file: "internal/core/session/cards.go"
-      find: "if !asked[k] || !ok || strings.TrimSpace(text) == \"\""
-      replace: "if !asked[k] && k == \"\" || !ok || strings.TrimSpace(text) == \"\""
+      find: "case !asked[k] || !ok:"
+      replace: "case !asked[k] && k == \"\" || !ok:"
 - id: SESS-032
   title: "Changes from a commit accept any text as the commit"
   edits:
@@ -1310,7 +1286,7 @@
   title: "The gateway's host isn't checked against the deny list"
   edits:
     - file: "internal/core/session/egress.go"
-      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif !agents && !reviewers {"
+      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn onField(\"url\", err)\n\t\t}\n\t\tif !agents && !reviewers {"
       replace: "\t\tif !agents && !reviewers {"
 - id: SESS-045
   title: "registry.npmjs.org is no longer treated as an upload host"
@@ -1354,12 +1330,6 @@
     - file: "internal/core/session/fetchmain.go"
       find: "\tif !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
       replace: "\tif false && !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
-- id: SESS-052
-  title: "Bring in main messages the agent while Pause all or Stop everything is on"
-  edits:
-    - file: "internal/core/session/fetchmain.go"
-      find: "\tif why := d.reg.halt.turns(); why != \"\" {\n\t\treturn \"\", explained(conflict(\"halted\"), why)\n\t}\n"
-      replace: ""
 - id: SESS-053
   title: "Issues from findings open for a commit that isn't the latest review's"
   edits:
@@ -1468,36 +1438,12 @@
     - file: "internal/core/session/fork.go"
       find: "\t\tin, err = false, nil"
       replace: "\t\tin, err = true, nil"
-- id: SESS-071
-  title: "Stop everything doesn't stop the running sessions"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n\th.stopEvery(cfg)\n"
-      replace: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n"
-- id: SESS-072
-  title: "Stop everything lets sessions start and wake, and Pause all blocks them"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tif h.modeNow() == HaltStopped {\n\t\treturn \"Stop everything is on, so no session starts"
-      replace: "\tif h.modeNow() == HaltPaused {\n\t\treturn \"Stop everything is on, so no session starts"
-- id: SESS-073
-  title: "Pause all doesn't stop new turns"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tcase HaltPaused:\n\t\treturn \"Pause all is on, so no new turn starts until you press Release at the top of the page.\"\n"
-      replace: ""
 - id: SESS-074
   title: "Away mode for every session has no effect"
   edits:
     - file: "internal/core/session/halt.go"
       find: "return h.awayAll || h.away[sid]"
       replace: "return h.away[sid]"
-- id: SESS-075
-  title: "Pause all refuses the person's own Push from the page"
-  edits:
-    - file: "internal/core/session/haltpush.go"
-      find: "if p.halted(ByPage) == \"\" {"
-      replace: "if p.halted(ByAgent) == \"\" {"
 - id: SESS-077
   title: "The commit name may hold < or >, which breaks the author line"
   edits:
@@ -1594,18 +1540,6 @@
     - file: "internal/core/session/pushes.go"
       find: "AllowFor        = 15 * time.Minute"
       replace: "AllowFor        = 15 * time.Hour"
-- id: SESS-502
-  title: "Pressing Push on the page ignores an engine-wide halt"
-  edits:
-    - file: "internal/core/session/pushes.go"
-      find: "\tif err := p.pageHalted(); err != nil {\n\t\treturn err\n\t}\n\tif err := p.claim(sid); err != nil {"
-      replace: "\tif err := p.claim(sid); err != nil {"
-- id: SESS-503
-  title: "Answering a held card checks the halt for Deny instead of Allow"
-  edits:
-    - file: "internal/core/session/pushes.go"
-      find: "if err := p.pageHalted(); allow && err != nil {"
-      replace: "if err := p.pageHalted(); !allow && err != nil {"
 - id: SESS-504
   title: "Allowing a push with exactly one missing item needs no reason"
   edits:
@@ -1682,8 +1616,8 @@
   title: "Negative push-hold limits are accepted"
   edits:
     - file: "internal/core/session/pushhold.go"
-      find: "return h.MaxFiles >= 0 && h.MaxFiles <= MaxHoldFiles"
-      replace: "return h.MaxFiles >= -1 && h.MaxFiles <= MaxHoldFiles"
+      find: "case h.MaxFiles < 0 || h.MaxFiles > MaxHoldFiles:"
+      replace: "case h.MaxFiles < -1 || h.MaxFiles > MaxHoldFiles:"
 - id: SESS-517
   title: "The file-count hold triggers at the limit instead of above it"
   edits:
@@ -1895,11 +1829,11 @@
       find: "\tcase g.base == g.head:\n"
       replace: "\tcase g.base == g.head && g.base == \"\":\n"
 - id: SESS-552
-  title: "Images up to 5 MB are accepted instead of 2.5 MB"
+  title: "Images up to 64 MiB are taken in instead of 32 MiB"
   edits:
-    - file: "internal/core/session/uploads.go"
-      find: "MaxImage       = 5 << 19"
-      replace: "MaxImage       = 5 << 20"
+    - file: "internal/core/session/imagefit.go"
+      find: "MaxImageUpload = 32 << 20"
+      replace: "MaxImageUpload = 64 << 20"
 - id: SESS-553
   title: "An upload's bytes aren't checked against its image type"
   edits:
@@ -1928,8 +1862,8 @@
   title: "Uploads are accepted for a stopped session"
   edits:
     - file: "internal/core/session/uploads.go"
-      find: "\tcase !a.running:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
-      replace: "\tcase false:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
+      find: "\tcase !a.running:\n\t\treturn explained(conflict(\"not running\")"
+      replace: "\tcase false:\n\t\treturn explained(conflict(\"not running\")"
 - id: SESS-558
   title: "A message may attach another session's upload"
   edits:
@@ -1984,12 +1918,6 @@
     - file: "internal/core/session/sandbox.go"
       find: "if d.cfg.Sandbox == nil || o.Event == level.CheckPassed {"
       replace: "if d.cfg.Sandbox == nil || o.Event != level.CheckFailed {"
-- id: SESS-567
-  title: "Sessions start during an engine-wide halt"
-  edits:
-    - file: "internal/core/session/sandbox.go"
-      find: "\tif why := d.reg.halt.starts(); why != \"\" {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
-      replace: "\tif why := d.reg.halt.starts(); why != \"\" && false {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
 - id: SESS-568
   title: "The sandbox check gets 90 ms instead of 90 seconds"
   edits:
@@ -2120,8 +2048,8 @@
   title: "The queue holds 11 messages instead of 10"
   edits:
     - file: "internal/core/session/queue.go"
-      find: "if len(q.items) >= MaxQueue {"
-      replace: "if len(q.items) > MaxQueue {"
+      find: "if queued < MaxQueue {"
+      replace: "if queued <= MaxQueue {"
 - id: BOX-001
   title: "The helper's request size limit is 8 KiB instead of 1 KiB, so a 2 KiB request header is read instead of refused with 431"
   edits:
@@ -2977,3 +2905,177 @@
     - file: "internal/adapters/http/page/packs.go"
       find: "\t\tif !keysWithin(body, \"op\", \"path\") {"
       replace: "\t\tif !keysWithin(body, \"op\", \"path\", \"proctorUnknownField\") {"
+- id: PAGE-074
+  title: "The update route takes check again, the setting it no longer has"
+  edits:
+    - file: "internal/adapters/http/page/update.go"
+      find: "if !keysWithin(body, \"later\") {"
+      replace: "if !keysWithin(body, \"check\", \"later\") {"
+- id: SESS-594
+  title: "A revise note of only spaces is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\tif note == \"\" {\n\t\treturn \"\", explained(invalid(\"note\"), \"Type what should change first.\")"
+      replace: "\tif false {\n\t\treturn \"\", explained(invalid(\"note\"), \"Type what should change first.\")"
+- id: SESS-595
+  title: "More than 50 line comments go in one message"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if len(list) > MaxComments {"
+      replace: "if len(list) > 4*MaxComments {"
+- id: SESS-596
+  title: "An empty line comment is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\t\tif text == \"\" {\n\t\t\treturn \"\", explained(invalid(\"comments\")"
+      replace: "\t\tif false {\n\t\t\treturn \"\", explained(invalid(\"comments\")"
+- id: SESS-597
+  title: "Line comments over the message limit are sent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\tif utf16Len(text) > MaxText {"
+      replace: "\tif false {"
+- id: SESS-598
+  title: "A time cap over 43,200 minutes is accepted"
+  edits:
+    - file: "internal/core/session/caps.go"
+      find: "if c.Minutes < 0 || c.Minutes > MaxCapMinutes {"
+      replace: "if c.Minutes < 0 {"
+- id: PAGE-075
+  title: "A cap refusal names no field"
+  edits:
+    - file: "internal/adapters/http/page/limits.go"
+      find: "refuseCaps(w, capWireFields[fault], session.CapRefusal(fault))"
+      replace: "refuseCaps(w, \"\", session.CapRefusal(fault))"
+- id: SESS-599
+  title: "A revise note over 2,000 characters is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if utf16Len(note) > MaxNote {"
+      replace: "if false {"
+- id: SESS-600
+  title: "A line comment over 2,000 characters is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if utf16Len(pageTrim(c.Text)) > MaxComment {"
+      replace: "if false {"
+- id: SESS-651
+  title: "A card for a command that can't be undone keeps its don't-ask-again choice"
+  edits:
+    - file: "internal/core/session/cards.go"
+      find: "if kind == \"permission\" && ev[\"irreversible\"] == true {"
+      replace: "if false {"
+- id: SESS-652
+  title: "A refused shell line's copyable command keeps its leading !"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "e.Line = strings.TrimSpace(strings.TrimPrefix(text, \"!\"))"
+      replace: "e.Line = text"
+- id: PAGE-151
+  title: "A dropped file over 10 MiB is refused with the image's message instead of naming the file"
+  edits:
+    - file: "internal/adapters/http/page/upload.go"
+      find: "tooBig.Message = session.DropRefused(name)"
+      replace: "tooBig.Message = session.ImageRefused"
+- id: SESS-653
+  title: "A branch with no commit beyond main counts as started, so Review is offered with nothing to review"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase g.base == g.head:\n\t\treturn StartedNone"
+      replace: "\tcase g.base == g.head:\n\t\treturn StartedCommits"
+- id: SESS-654
+  title: "A wake that needs changed settings approved names approving start-up files as the next step"
+  edits:
+    - file: "internal/core/session/startup.go"
+      find: "\tcase n.Home != nil:\n\t\treturn NextHome"
+      replace: "\tcase n.Home != nil:\n\t\treturn NextApprove"
+- id: SESS-655
+  title: "A session the page controls is offered Let this page control it instead of Make it read-only"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "c.Action, c.Label = ControlReadOnly, \"Make it read-only\""
+      replace: "c.Action, c.Label = ControlTake, \"Make it read-only\""
+- id: SESS-656
+  title: "A finished turn sends no turn-finished notice on the stream"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "\t\tif turnEnded {\n"
+      replace: "\t\tif turnEnded && false {\n"
+- id: SESS-657
+  title: "A message may name two composed parts, an ask and a revise"
+  edits:
+    - file: "internal/adapters/http/page/composed.go"
+      find: "if parts != 1 || hasText"
+      replace: "if parts > 2 || hasText"
+- id: SESS-658
+  title: "An ask the engine doesn't know is taken as a step"
+  edits:
+    - file: "internal/adapters/http/page/composed.go"
+      find: "if !ok || !session.ValidAsk(name) {"
+      replace: "if !ok {"
+- id: SESS-659
+  title: "A goal's queue starts a task while 3 of the goal's sessions run"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "len(queue) == 0 || running >= MaxGoalRunning"
+      replace: "len(queue) == 0"
+    - file: "internal/core/session/split.go"
+      find: "\tif running >= MaxGoalRunning {"
+      replace: "\tif running >= MaxGoalRunning && !queued {"
+- id: SESS-660
+  title: "A goal's queue goes on starting tasks while one of its cards waits for the person's answer"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "wait := held[goal] || "
+      replace: "wait := "
+- id: SESS-661
+  title: "A queued task starts with a cost confirmation the person never gave"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "s.start(start, goal, queue[0], Consent{}, true)"
+      replace: "s.start(start, goal, queue[0], Consent{CostOK: true}, true)"
+- id: SESS-662
+  title: "Start caps equal to the project's become the session's own, so it stops following the project's"
+  edits:
+    - file: "internal/core/session/capspage.go"
+      find: "&& clean == l.ProjectCaps(k.project) {"
+      replace: "&& false {"
+- id: SESS-663
+  title: "A pair's first session starts without the caps the person typed"
+  edits:
+    - file: "internal/core/session/pair.go"
+      find: "From: from, Box: q.Box, Caps: q.Caps,"
+      replace: "From: from, Box: q.Box,"
+- id: SESS-664
+  title: "A pair's second session starts without the caps the person typed"
+  edits:
+    - file: "internal/core/session/pair.go"
+      find: "Box: box, Caps: caps, pinned: &at,"
+      replace: "Box: box, pinned: &at,"
+- id: SESS-665
+  title: "The engine builds a pair's second session without the second model the person chose"
+  edits:
+    - file: "internal/core/session/pair.go"
+      find: "list = append(list, PairAgent{Agent: q.Agent.Agent, Model: q.SecondModel})"
+      replace: "list = append(list, PairAgent{Agent: q.Agent.Agent})"
+- id: SESS-666
+  title: "A benchmark takes a start point beside the merged pull request's base"
+  edits:
+    - file: "internal/core/session/pair.go"
+      find: "case q.Bench != 0 && q.From.chosen() > 0:"
+      replace: "case false:"
+- id: SESS-667
+  title: "A pair's second session starts in a new container instead of the one waiting for the person's answer"
+  edits:
+    - file: "internal/core/session/pair.go"
+      find: "groupKind: GroupPair, asked: \"pair:\" + id})"
+      replace: "groupKind: GroupPair})"
+- id: PAGE-152
+  title: "A start takes an issue hash that isn't 64 hex digits"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "if !isText || !session.ValidIssueHash(h) {"
+      replace: "if !isText {"
+    - file: "internal/core/session/fromissue.go"
+      find: "\tif !ValidIssueHash(hash) {"
+      replace: "\tif false {"

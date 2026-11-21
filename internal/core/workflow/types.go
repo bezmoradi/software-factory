@@ -40,6 +40,24 @@ const (
 
 const IncidentType = "incident"
 
+const incidentUploadWarning = "Logs and screenshots go to Anthropic with the rest of the session. Remove customer data and secrets first."
+
+const incidentStartWarning = "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause."
+
+func (p Profile) StartWarning() string {
+	if p == Incident {
+		return incidentStartWarning
+	}
+	return ""
+}
+
+func (p Profile) UploadWarning() string {
+	if p == Incident {
+		return incidentUploadWarning
+	}
+	return ""
+}
+
 type WorkType struct {
 	ID      string
 	Name    string

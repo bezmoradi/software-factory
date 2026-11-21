@@ -646,6 +646,20 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	return ProjectID{Name: name, URL: recs[at].URL}, nil
 }
 
+func tokenShape(host, token string) string {
+	switch {
+	case host == "https://github.com" && !strings.HasPrefix(token, "github_pat_") && !githubClassic(token):
+		return "GitHub tokens start with github_pat_ or ghp_. Check that you pasted the token itself."
+	case host == "https://gitlab.com" && !strings.HasPrefix(token, "glpat-"):
+		return "GitLab personal access tokens start with glpat-. Check that you pasted the token itself."
+	}
+	return ""
+}
+
+func githubClassic(token string) bool {
+	return len(token) >= 4 && token[:2] == "gh" && strings.ContainsRune("pousr", rune(token[2])) && token[3] == '_'
+}
+
 func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, error) {
 	h, err := HostOf(host)
 	if err != nil {
@@ -668,6 +682,9 @@ func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, e
 			return TokenInfo{}, explained(invalid("token"), v.Problem)
 		}
 		warning = v.Warning
+	}
+	if shape := tokenShape(h, token); shape != "" {
+		warning = strings.TrimSpace(shape + " " + warning)
 	}
 	at := c.cfg.Now().UTC().Truncate(time.Second)
 	if err := c.cfg.Tokens.Save(h, token, at); err != nil {
@@ -954,4 +971,16 @@ func (c *Repos) recloned(k Cloning) {
 	c.cfg.Logger.Info("repository", "event", "recloned")
 	c.frame("added", k.URL, done.Name, "")
 	c.hostsChanged()
+}
+
+const DevTokenHost = "https://gitserver.test:8443"
+
+func TokenHostsOffered(saved []TokenInfo, development bool) []string {
+	hosts := []string{"https://github.com", "https://gitlab.com"}
+	if development {
+		hosts = append(hosts, DevTokenHost)
+	}
+	return slices.DeleteFunc(hosts, func(h string) bool {
+		return slices.ContainsFunc(saved, func(t TokenInfo) bool { return t.Host == h })
+	})
 }

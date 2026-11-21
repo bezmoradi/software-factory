@@ -8,7 +8,6 @@ type Send = (file: Blob) => Promise<Response>
 const VIEW = '/api/backup'
 const EXPORT = '/api/export'
 const CLONE = '/api/clone-again'
-const MAX_IMPORT = 256 * 1024 * 1024
 
 interface Dropped {
   store: string
@@ -212,16 +211,12 @@ export function openBackup(post: Post, send: Send): void {
     const file = picker.files?.[0]
     picker.value = ''
     if (!file) return
-    if (file.size > MAX_IMPORT) {
-      say.textContent = 'That file is larger than 256 MiB, more than an import takes.'
-      return
-    }
     say.textContent = `Importing ${visible(file.name)}…`
     void whileBusy(importButton, () => send(file).then(async res => {
       const parsed: unknown = await res.json().catch(() => ({}))
       const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
       if (!res.ok) {
-        say.textContent = text(r.message) ? visible(text(r.message)) : res.status === 413 ? 'That file is larger than an import takes.' : 'The import didn’t finish.'
+        say.textContent = text(r.message) ? visible(text(r.message)) : 'The import didn’t finish.'
         return
       }
       const report = reportOf(r.report)

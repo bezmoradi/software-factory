@@ -607,6 +607,7 @@ func (l *DecisionLog) SetDecision(repo, id, name, text string, hidden bool) (Dec
 	if !ValidDecisionID(id) {
 		return DecisionLogView{}, invalid("id")
 	}
+	name, text = strings.TrimSpace(name), strings.TrimSpace(text)
 	if err := checkPersonText(name, text); err != nil {
 		return DecisionLogView{}, err
 	}
@@ -642,6 +643,7 @@ func (l *DecisionLog) SetDecision(repo, id, name, text string, hidden bool) (Dec
 }
 
 func (l *DecisionLog) AddDecision(repo, text string) (DecisionLogView, error) {
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return DecisionLogView{}, explained(invalid("text"), "An entry needs its text.")
 	}

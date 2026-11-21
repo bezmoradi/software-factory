@@ -38,6 +38,10 @@ type forgeJSON struct {
 	SecretAt   string `json:"secretAt,omitempty"`
 	SecretLine string `json:"secretLine,omitempty"`
 	From       string `json:"from,omitempty"`
+
+	Said      saidJSON `json:"said"`
+	KindLabel string   `json:"kindLabel"`
+	Note      string   `json:"note"`
 }
 
 func forgeOf(list []session.ForgeView) []forgeJSON {
@@ -45,7 +49,8 @@ func forgeOf(list []session.ForgeView) []forgeJSON {
 	for _, v := range list {
 		out = append(out, forgeJSON{Card: v.Card, Kind: string(v.Kind), State: v.State, Title: v.Title, Body: v.Body, Head: v.Head, Base: v.Base,
 			Host: v.Host, Repo: v.Repo, Number: v.Number, URL: v.URL, Reason: v.Reason, Draft: v.Draft, Asked: millis(v.Asked), At: millis(v.At), Matches: matchesOf(v.Matches),
-			SecretAt: v.SecretAt, SecretLine: v.SecretLine, From: v.From})
+			SecretAt: v.SecretAt, SecretLine: v.SecretLine, From: v.From,
+			Said: saidJSONOf(session.ForgeSaid(v.State)), KindLabel: session.ForgeKindLabel(string(v.Kind)), Note: session.ForgeNote(string(v.Kind), v.State, v.From)})
 	}
 	return out
 }

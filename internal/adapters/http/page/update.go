@@ -19,7 +19,6 @@ type updateReleaseJSON struct {
 
 type updateJSON struct {
 	Running     string             `json:"running"`
-	Check       bool               `json:"check"`
 	Forced      bool               `json:"forced"`
 	Unreadable  bool               `json:"unreadable"`
 	Development bool               `json:"development"`
@@ -29,7 +28,7 @@ type updateJSON struct {
 }
 
 func updateJSONOf(v session.UpdateView) updateJSON {
-	out := updateJSON{Running: v.Running, Check: v.Check, Forced: v.Forced, Unreadable: v.Unreadable, Development: v.Development, Result: v.Result, Checked: millis(v.Checked)}
+	out := updateJSON{Running: v.Running, Forced: v.Forced, Unreadable: v.Unreadable, Development: v.Development, Result: v.Result, Checked: millis(v.Checked)}
 	if v.Version != "" {
 		out.Update = &updateReleaseJSON{Version: v.Version}
 	}
@@ -54,7 +53,7 @@ func updateRefusal(err error) string {
 			return known.Error()
 		}
 	}
-	return "The engine couldn't save the update setting in its state folder."
+	return "The engine couldn't save Remind me later in its state folder."
 }
 
 func (s *Server) update(w http.ResponseWriter, r *http.Request, body map[string]any) {
@@ -63,19 +62,9 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, body map[string]
 		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no update check."})
 		return
 	}
-	if len(body) > 1 || !keysWithin(body, "check", "later") {
+	if !keysWithin(body, "later") {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
-	}
-	var err error
-	event := ""
-	if raw, present := body["check"]; present {
-		on, ok := raw.(bool)
-		if !ok {
-			refuse(w, http.StatusBadRequest, "fields")
-			return
-		}
-		err, event = u.SetCheck(on), "setting"
 	}
 	if raw, present := body["later"]; present {
 		version, ok := raw.(string)
@@ -83,14 +72,11 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, body map[string]
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
-		err, event = u.Later(version), "later"
-	}
-	if err != nil {
-		send(w, http.StatusConflict, problem{Error: "update", Message: updateRefusal(err)})
-		return
-	}
-	if event != "" {
-		shared.For(r.Context(), s.logger).Info("update check", "event", event)
+		if err := u.Later(version); err != nil {
+			send(w, http.StatusConflict, problem{Error: "update", Message: updateRefusal(err)})
+			return
+		}
+		shared.For(r.Context(), s.logger).Info("update check", "event", "later")
 	}
 	send(w, http.StatusOK, updateJSONOf(u.View()))
 }

@@ -95,6 +95,27 @@ export function field(label: string, control: HTMLElement, help?: string, cls = 
 const TONES = ['bad', 'warn', 'ok', 'muted'] as const
 export type Tone = typeof TONES[number]
 
+export function labelError(input: HTMLElement, message: string): void {
+  if (!input.id) input.id = `field-${++fields}`
+  const id = `${input.id}-error`
+  const root = input.getRootNode()
+  const label = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) : null
+  label?.querySelector('.label-error')?.remove()
+  const described = (input.getAttribute('aria-describedby') ?? '').split(' ').filter(d => d && d !== id)
+  if (!message || !label) {
+    input.removeAttribute('aria-invalid')
+    if (described.length) input.setAttribute('aria-describedby', described.join(' '))
+    else input.removeAttribute('aria-describedby')
+    return
+  }
+  const note = el('span', 'label-error', `(${message.trim().replace(/\.$/, '')})`)
+  note.id = id
+  note.setAttribute('aria-hidden', 'true')
+  label.append(note)
+  input.setAttribute('aria-invalid', 'true')
+  input.setAttribute('aria-describedby', [...described, id].join(' '))
+}
+
 export function statusLine(cls?: string): HTMLParagraphElement
 export function statusLine(cls: string, tag: 'span'): HTMLSpanElement
 export function statusLine(cls = 'small', tag: 'p' | 'span' = 'p'): HTMLParagraphElement | HTMLSpanElement {

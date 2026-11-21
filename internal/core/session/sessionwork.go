@@ -192,15 +192,19 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 	check, okCheck := CheckProjectCommand(c.Check)
 	setup, okSetup := CheckProjectCommand(c.Setup)
 	if !okCheck || !okSetup {
-		return explained(invalid("command"), "A check or setup command is one line of at most 300 bytes, with no control characters.")
+		field := "check"
+		if okCheck {
+			field = "setup"
+		}
+		return onField(field, explained(invalid("command"), "A check or setup command is one line of at most 300 bytes, with no control characters."))
 	}
 	browser, okBrowser := CheckProjectCommand(c.Browser)
 	if !okBrowser {
-		return explained(invalid("browser"), "A browser command is one line of at most 300 bytes, with no control characters.")
+		return onField("browser", explained(invalid("browser"), "A browser command is one line of at most 300 bytes, with no control characters."))
 	}
 	image, okImage := CheckVerifyImage(c.Image)
 	if !okImage {
-		return explained(invalid("image"), "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes.")
+		return onField("image", explained(invalid("image"), "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."))
 	}
 	id, known := w.projectID(project)
 	if !known {
@@ -383,6 +387,17 @@ func ClaudeOffered() []AgentModel {
 		out = append(out, AgentModel{ID: id, Name: names[id], Efforts: ClaudeEfforts})
 	}
 	return out
+}
+
+func AgentModels(agent string) []AgentModel {
+	return agentModels(agent)
+}
+
+func AgentEfforts(agent string) []string {
+	if agent == "claude" {
+		return ClaudeEfforts
+	}
+	return []string{}
 }
 
 func agentModels(agent string) []AgentModel {

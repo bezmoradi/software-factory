@@ -1,4 +1,4 @@
-import { button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, field, labelError, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { actionRow, modal } from '../lib/dialog.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
@@ -28,34 +28,43 @@ export async function identityState(post: Post): Promise<CommitIdentity | null |
   return a.ok ? identityOf(a.body.identity) : undefined
 }
 
-function textField(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
+function textField(name: string, words: string, type: string, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
   const input = el('input', 'textbox')
   input.type = type
   input.name = name
   input.autocomplete = auto
   input.spellcheck = false
-  input.required = true
-  input.maxLength = max
+  input.setAttribute('aria-required', 'true')
   input.value = value
   return [field(words, input), input]
 }
 
 export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity) => void): void {
   const form = el('form', 'identity-form')
-  const [nameField, name] = textField('name', 'Name', 'text', 100, current?.name ?? '', 'name')
-  const [emailField, email] = textField('email', 'Email', 'email', 254, current?.email ?? '', 'email')
+  form.noValidate = true
+  const [nameField, name] = textField('name', 'Name', 'text', current?.name ?? '', 'name')
+  const [emailField, email] = textField('email', 'Email', 'email', current?.email ?? '', 'email')
   const why = statusLine('small warn status-slot')
+  const mark = (bad: HTMLInputElement | null, message = '') => {
+    for (const input of [name, email]) labelError(input, input === bad ? message : '')
+  }
+  for (const input of [name, email]) input.addEventListener('input', () => labelError(input, ''))
   const save = button('Save', 'primary small', undefined, 'submit')
   form.append(nameField, emailField, why, actionRow([], [button('Cancel', 'ghost small', () => m.close()), save]))
   form.addEventListener('submit', e => {
     e.preventDefault()
-    if (!form.reportValidity()) return
     void whileBusy(save, () => call(post, { op: 'set', name: name.value, email: email.value })).then(a => {
       const id = identityOf(a.body.identity)
       if (!a.ok || !id) {
-        say(why, typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.', 'warn')
+        const bad = a.body.error === 'name' ? name : a.body.error === 'email' ? email : null
+        const message = typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.'
+        mark(bad, message)
+        say(why, bad ? '' : message, 'warn')
+        bad?.focus()
         return
       }
+      mark(null)
+      say(why, '')
       m.close()
       saved(id)
     })

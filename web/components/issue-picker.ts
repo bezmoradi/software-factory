@@ -5,8 +5,6 @@ type Issue = { number: number; title: string; body?: string; url: string; author
 
 type Picked = { issue: Issue; refused: string; clipped: boolean; hash: string }
 
-const HASH = /^[0-9a-f]{64}$/
-
 let serial = 0
 
 async function call(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -73,7 +71,6 @@ class SfIssuePicker extends HTMLElement {
     const name = el('label', 'small', 'Label (optional)')
     name.htmlFor = id
     this.#label.id = id
-    this.#label.maxLength = 50
     this.#label.placeholder = 'Any label'
     this.#label.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return
@@ -95,14 +92,14 @@ class SfIssuePicker extends HTMLElement {
     void this.#load(1)
   }
 
-  chosen(): { issue: number; issueHash: string } | null | 'refused' {
-    if (!this.#chosen) return null
-    if (this.#chosen.refused || !HASH.test(this.#chosen.hash)) {
-      this.#details.open = true
-      say(this.#status, this.#chosen.refused ? 'This issue can\'t be sent to an agent. Clear it, or pick another.' : 'Read the issue again before starting from it.', 'bad')
-      return 'refused'
-    }
-    return { issue: this.#chosen.issue.number, issueHash: this.#chosen.hash }
+  chosen(): { issue: number; issueHash: string } | null {
+    return this.#chosen ? { issue: this.#chosen.issue.number, issueHash: this.#chosen.hash } : null
+  }
+
+  refuse(text: string): boolean {
+    this.#details.open = true
+    say(this.#status, text, 'bad')
+    return true
   }
 
   async #load(page: number) {
@@ -110,8 +107,7 @@ class SfIssuePicker extends HTMLElement {
     this.#busy = true
     const gen = this.#gen
     say(this.#status, 'Reading the open issues…', 'muted')
-    const label = this.#label.value.trim()
-    const a = await call({ op: 'list', path: this.path, page, ...(label ? { label } : {}) })
+    const a = await call({ op: 'list', path: this.path, page, label: this.#label.value })
     if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
@@ -122,6 +118,7 @@ class SfIssuePicker extends HTMLElement {
     this.#more = a.body.more === true
     this.#issues = Array.isArray(a.body.issues) ? (a.body.issues as Issue[]) : []
     this.#loaded = true
+    const label = typeof a.body.label === 'string' ? a.body.label : ''
     this.#status.textContent = this.#issues.length ? `Page ${this.#page} of the open issues${label ? ` labeled ${shown(label)}` : ''} in ${shown(String(a.body.repo ?? ''))}.` : `No open issues${label ? ` labeled ${shown(label)}` : ''} on this page.`
     this.#paintList()
   }

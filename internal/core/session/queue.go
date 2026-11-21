@@ -145,7 +145,17 @@ func (w *SessionWork) branchHeld(sid string) error {
 	return heldBranch(w.d.Doubled, sid)
 }
 
+func QueueFull(queued int) string {
+	if queued < MaxQueue {
+		return ""
+	}
+	return "Ten messages already wait in this session's queue."
+}
+
 func checkQueued(text string) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", explained(invalid("text"), "Type the message to queue first.")
+	}
 	if secretText(text) {
 		return "", explained(invalid("text"), "The queue doesn't keep token-shaped text. Send that message directly instead.")
 	}
@@ -174,9 +184,9 @@ func (w *SessionWork) QueueAdd(sid, text string) error {
 func (w *SessionWork) push(sid, text string) error {
 	w.mu.Lock()
 	q := w.queueOf(sid)
-	if len(q.items) >= MaxQueue {
+	if full := QueueFull(len(q.items)); full != "" {
 		w.mu.Unlock()
-		return explained(limited("queue"), "Ten messages already wait in this session's queue.")
+		return explained(limited("queue"), full)
 	}
 	if _, ok := w.queues[sid]; !ok && len(w.queues) >= maxQueueSessions {
 		w.mu.Unlock()
@@ -294,9 +304,6 @@ func (w *SessionWork) afterTurn(sid, reason string) {
 }
 
 func (w *SessionWork) blocked(sid, ended string) string {
-	if why := w.reg.halt.turns(); why != "" {
-		return why
-	}
 	switch {
 	case ended == "aborted":
 		return queueAborted
@@ -364,4 +371,15 @@ func queueRefused(err error) string {
 		return "The engine didn't send the next message (" + clip(e.Reason, 40) + ")."
 	}
 	return "The engine didn't send the next message."
+}
+
+func QueueMoves(count, i int, sending bool) (up, down, editable bool) {
+	editable = !sending || i != 0
+	up = i > 0 && (!sending || i > 1)
+	down = i < count-1 && (!sending || i != 0)
+	return up, down, editable
+}
+
+func ModelSwitchable(agent string) bool {
+	return agent == "claude"
 }

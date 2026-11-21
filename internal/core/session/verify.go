@@ -204,9 +204,8 @@ type VerifyConfig struct {
 }
 
 type verifyLive struct {
-	stop   chan struct{}
-	once   sync.Once
-	halted bool
+	stop chan struct{}
+	once sync.Once
 }
 
 func (l *verifyLive) cancel() {
@@ -221,7 +220,6 @@ type Verifier struct {
 	runs       []VerifyRun
 	live       map[string]*verifyLive
 	queue      []queuedVerify
-	dropped    []queuedVerify
 	noted      map[string]bool
 	starting   map[string]string
 	mains      map[string]bool
@@ -257,26 +255,7 @@ func NewVerifier(reg *Registry, cfg VerifyConfig) *Verifier {
 	cfg.Audit = masking(cfg.Audit)
 	v := &Verifier{cfg: cfg, reg: reg, live: map[string]*verifyLive{}}
 	v.load()
-	if reg != nil && reg.halt != nil {
-		reg.halt.OnStopAll(v.stopAll)
-		reg.halt.OnRelease(func() { go v.released() })
-	}
 	return v
-}
-
-func (v *Verifier) stopAll() {
-	v.mu.Lock()
-	for _, l := range v.live {
-		l.halted = true
-		l.cancel()
-	}
-	v.dropped = append(v.dropped, v.queue...)
-	dropped := v.queue
-	v.queue = nil
-	v.mu.Unlock()
-	for _, q := range dropped {
-		v.notify(q.sid)
-	}
 }
 
 func (v *Verifier) load() {
@@ -333,23 +312,6 @@ func (v *Verifier) notify(sid string) {
 	if v.reg != nil {
 		v.reg.Notify(Fields{"type": verifyFrame, "sid": sid})
 	}
-}
-
-func (v *Verifier) halted() string {
-	if v.reg == nil || v.reg.halt == nil {
-		return ""
-	}
-	switch v.reg.halt.modeNow() {
-	case HaltStopped:
-		return "Stop everything is on, so the engine starts no verification run until you press Release at the top of the page."
-	case HaltPaused:
-		return "Pause all is on, so the engine starts no verification run until you press Release at the top of the page."
-	}
-	return ""
-}
-
-func (v *Verifier) stopEverything() bool {
-	return v.reg != nil && v.reg.halt != nil && v.reg.halt.modeNow() == HaltStopped
 }
 
 func shownCommand(command string) string {
@@ -469,9 +431,6 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	}
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
 		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")
-	}
-	if why := v.halted(); why != "" {
-		return VerifyRun{}, explained(conflict("halted"), why)
 	}
 	t, ok := v.targetOf(sid)
 	if !ok {
@@ -659,11 +618,6 @@ func (v *Verifier) serveQueue(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			if v.halted() != "" {
-				v.mu.Lock()
-				v.dropped = append(v.dropped, next)
-				v.mu.Unlock()
-			}
 			settle()
 		}
 	}
@@ -689,21 +643,6 @@ func (v *Verifier) OnCommitDone(fn func(commit string)) {
 	v.mu.Lock()
 	v.commitDone = fn
 	v.mu.Unlock()
-}
-
-func (v *Verifier) released() {
-	v.mu.Lock()
-	dropped := v.dropped
-	v.dropped = nil
-	fn := v.done
-	v.mu.Unlock()
-	if fn == nil {
-		return
-	}
-	for _, q := range dropped {
-		v.notify(q.sid)
-		fn(q.sid, q.head)
-	}
 }
 
 func (v *Verifier) audit(ctx context.Context, r VerifyRun, result string) {
@@ -788,9 +727,6 @@ func (v *Verifier) attempt(ctx context.Context, rec VerifyRun, t PushTarget, com
 			return verifyEnd{state: VerifyInterrupted, reason: "The engine stopped while it ran, so nothing the run did afterwards counts.", imageID: info.Image, limit: info.Limit}
 		case <-timer.C:
 		}
-		if v.stopEverything() {
-			return verifyEnd{state: VerifyStopped, reason: "Stop everything stopped it before it finished.", imageID: info.Image, limit: info.Limit}
-		}
 		cctx, cancel := context.WithTimeout(ctx, verifyCallFor)
 		got, err := v.cfg.Host.VerifierState(cctx, rec.ID)
 		cancel()
@@ -838,12 +774,6 @@ func (v *Verifier) attempt(ctx context.Context, rec VerifyRun, t PushTarget, com
 }
 
 func (v *Verifier) stoppedEnd(live *verifyLive) (verifyEnd, bool) {
-	v.mu.Lock()
-	halted := live.halted
-	v.mu.Unlock()
-	if halted || v.stopEverything() {
-		return verifyEnd{state: VerifyStopped, reason: "Stop everything stopped it before it finished."}, true
-	}
 	select {
 	case <-live.stop:
 		return verifyEnd{state: VerifyStopped, reason: "It was stopped before it finished."}, true

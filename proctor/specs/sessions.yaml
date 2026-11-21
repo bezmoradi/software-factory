@@ -140,6 +140,10 @@ scenarios:
             "$.body.gate.workType": fix
             "$.body.gate.allowed": false
             "$.body.gate.testLock": { offered: false, why: "The session's branch has no commit the main branch lacks yet. Lock the tests once the agent has committed the ones you want kept.", files: 0, paths: [], cut: false, branchLeft: 0, changed: null }
+            "$.body.gate.started": false
+            "$.body.gate.pushed": false
+            "$.body.gate.review.available": false
+            "$.body.gate.review.reason": "Nothing to review or push yet: this session has no commits."
           present: ["$.body.gate.head"]
         save: { head: "$.body.gate.head" }
       - id: changes
@@ -345,6 +349,45 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.branch": "sf/${id}"
+      - id: message-empty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "  " }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: text, message: "Type a message first." }
+        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
+      - id: message-too-long
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "${fill(20001)}" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: text, message: "A message holds at most 20,000 characters." }
+        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
+      - id: message-shell-line
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: " !ls -la " }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: command, message: "The page doesn't run shell lines: it sends messages to the agent. Ask it to run the command, or run it yourself in the agent container.", line: "ls -la" }
+        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
       - id: ask-for-a-file
         do: http.request
         identity: page
@@ -1052,6 +1095,7 @@ scenarios:
             "$.body.needs.home.first": false
             "$.body.needs.box": "${box}"
             "$.body.needs.agent": dev-acp
+            "$.body.needs.next": home
           matches: { "$.body.needs.home.digest": "[0-9a-f]{64}" }
           absent: ["$.body.needs.home.problem", "$.body.needs.approval", "$.body.needs.signIn"]
         save: { digest: "$.body.needs.home.digest" }

@@ -1,7 +1,6 @@
-import { button, el, emit, field, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, field, focusedKey, labelError, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { diffText, lineDiff } from '../lib/diff.ts'
-import { shortSha } from '../lib/format.ts'
-import type { AsideRun, HoldSetting, PlanApproval, ProjectAgents } from '../types.ts'
+import type { AsideRun, HoldSetting, HoldTyped, PlanApproval, ProjectAgents } from '../types.ts'
 import './markdown.ts'
 import { asideBox } from './aside-run.ts'
 
@@ -10,15 +9,16 @@ class SfApproval extends HTMLElement {
   #key = ''
   #open = new Map<string, boolean>()
   #field = el('input', 'textbox')
+  #fieldWords = document.createTextNode('What the agent should change in the plan')
+  #fieldBox = field('', this.#field)
 
   constructor() {
     super()
     this.#field.name = 'note'
-    this.#field.maxLength = 2000
-    this.#field.placeholder = 'What should the agent change?'
-    this.#field.setAttribute('aria-label', 'What the agent should change in the plan')
     this.#field.dataset.key = 'note'
-    this.#field.required = true
+    this.#field.setAttribute('aria-required', 'true')
+    this.#fieldBox.querySelector('label')!.append(this.#fieldWords)
+    this.#field.addEventListener('input', () => this.refuse(''))
   }
 
   set view(value: PlanApproval | null) {
@@ -33,7 +33,15 @@ class SfApproval extends HTMLElement {
   }
 
   sent(note: string) {
-    if (this.#field.value.trim() === note) this.#field.value = ''
+    if (this.#field.value === note) this.#field.value = ''
+    this.refuse('')
+  }
+
+  refuse(why: string, error = '') {
+    const mine = !!why && error === 'note'
+    labelError(this.#field, mine ? why : '')
+    this.#noteWhy.textContent = mine ? '' : why
+    if (mine && !this.#field.disabled) this.#field.focus()
   }
 
   #changes(v: PlanApproval): HTMLElement {
@@ -82,6 +90,7 @@ class SfApproval extends HTMLElement {
   }
 
   #why = statusLine('small warn approval-why')
+  #noteWhy = statusLine('small warn')
 
   #render() {
     const v = this.#view
@@ -92,20 +101,8 @@ class SfApproval extends HTMLElement {
     const reqs = v.kind === 'requirements'
     const cause = v.kind === 'root-cause'
     const what = reqs ? 'the requirements' : cause ? 'the root cause' : 'the plan'
-    this.#field.setAttribute('aria-label', `What the agent should change in ${what}`)
-    const What = reqs ? 'The requirements' : cause ? 'The root cause' : 'The plan'
-    const them = reqs ? 'them' : 'it'
-    const status = v.onBase
-      ? `${What} ${reqs ? 'are' : 'is'} from an earlier task, already on the base branch, so ${reqs ? 'they aren’t' : 'it isn’t'} approvable here. The engine counts only text this session’s own commits added or changed${v.changed ? ', so your earlier approval no longer counts' : ''}.`
-      : v.reported
-      ? `${What} ${reqs ? 'aren’t' : 'isn’t'} committed on the session’s branch: this is the text the agent reported. The engine counts an approval only of committed text${v.changed ? ', so your earlier approval no longer counts' : ''}.`
-      : v.approved
-        ? v.approvedAt ? `You approved this version of ${what}, read from commit ${shortSha(v.approvedAt)}.` : `You approved this version of ${what}.`
-        : v.changed
-          ? v.approvedAt && v.commit
-            ? `${What} in commit ${shortSha(v.commit)} ${reqs ? 'differ' : 'differs'} from the version you approved in commit ${shortSha(v.approvedAt)}, so that approval no longer counts. Read ${them} and approve again.`
-            : `${What} changed after you approved ${them}. Read ${them} and approve again.`
-          : reqs ? 'Plan starts once you read the agreed requirements and approve them.' : cause ? 'Fix starts once you read the confirmed root cause and approve it. Approving it lets this branch push code; an edit to the file clears it.' : 'Implement starts once you read the plan and approve it.'
+    this.#fieldWords.data = `What the agent should change in ${what}`
+    const status = v.status
     const body = el('div', 'reply')
     const text = el('sf-markdown', 'body')
     text.exact = true
@@ -135,17 +132,13 @@ class SfApproval extends HTMLElement {
       if (!v.hold) emit(this, 'sf-approve', { hash: v.hash })
     }, 'button', 'approve')
     const form = el('form', 'other field-row')
+    form.noValidate = true
     const ask = button('Ask for changes', 'ghost', undefined, 'submit', 'ask')
-    form.append(this.#field, ask)
+    form.append(this.#fieldBox, ask)
     form.addEventListener('submit', e => {
       e.preventDefault()
-      const note = this.#field.value.trim()
-      if (!note) {
-        this.#field.value = ''
-        this.#field.reportValidity()
-        return this.#field.focus()
-      }
-      emit(this, 'sf-revise', { note })
+      this.refuse('')
+      emit(this, 'sf-revise', { note: this.#field.value })
     })
     for (const control of [approve, ask, this.#field]) control.disabled = v.disabled
     if (v.hold) approve.setAttribute('aria-disabled', 'true')
@@ -155,13 +148,15 @@ class SfApproval extends HTMLElement {
     if (v.note) parts.push(el('p', 'small muted', v.note))
     const why = v.refused || v.hold || ''
     this.#why.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-approval-why`
+    this.#noteWhy.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-note-why`
     if (why) approve.setAttribute('aria-describedby', this.#why.id)
     this.#why.classList.remove('status-slot')
-    replaceKeeping(this, [...parts, this.#why, form])
+    replaceKeeping(this, [...parts, this.#why, form, this.#noteWhy])
     if (this.#why.textContent !== why) this.#why.textContent = why
   }
 
   #quiet(parts: HTMLElement[]) {
+    this.refuse('')
     this.#why.textContent = ''
     this.#why.classList.add('status-slot')
     replaceKeeping(this, [...parts, this.#why])
@@ -172,41 +167,53 @@ class HoldFields {
   #after = el('input')
   #files = el('input', 'textbox')
   #lines = el('input', 'textbox')
-  #shown: HoldSetting = { afterBlock: false, maxFiles: 0, maxLines: 0 }
+  #refused = new Map<HTMLInputElement, string>()
 
   constructor(changed: () => void) {
     this.#after.type = 'checkbox'
     this.#after.id = 'project-hold-after'
     this.#after.dataset.key = 'hold-after'
     this.#after.setAttribute('aria-describedby', 'project-hold-help')
-    this.#after.addEventListener('change', changed)
-    for (const [input, id, max] of [[this.#files, 'project-hold-files', 100000], [this.#lines, 'project-hold-lines', 10000000]] as const) {
+    for (const [input, id] of [[this.#files, 'project-hold-files'], [this.#lines, 'project-hold-lines']] as const) {
       input.id = id
       input.dataset.key = id
       input.type = 'number'
       input.inputMode = 'numeric'
-      input.min = '0'
-      input.max = String(max)
-      input.step = '1'
       input.setAttribute('aria-describedby', 'project-hold-help')
+      input.addEventListener('input', () => this.#clear(input))
+    }
+    for (const input of [this.#after, this.#files, this.#lines]) {
       input.addEventListener('change', () => {
-        const n = Number(input.value)
-        if (!Number.isInteger(n) || n < 0 || n > max) {
-          this.show(this.#shown, false)
-          return
-        }
+        this.#clearAll()
         changed()
       })
     }
   }
 
-  get value(): HoldSetting {
-    const count = (f: HTMLInputElement) => Math.max(0, Math.trunc(Number(f.value) || 0))
-    return { afterBlock: this.#after.checked, maxFiles: count(this.#files), maxLines: count(this.#lines) }
+  #clear(input: HTMLInputElement) {
+    if (this.#refused.delete(input)) labelError(input, '')
+  }
+
+  #clearAll() {
+    for (const input of [...this.#refused.keys()]) this.#clear(input)
+  }
+
+  refuse(field: string, message: string): boolean {
+    const input = new Map([['afterBlock', this.#after], ['maxFiles', this.#files], ['maxLines', this.#lines]]).get(field)
+    if (!input || !message) return false
+    this.#clearAll()
+    this.#refused.set(input, message)
+    labelError(input, message)
+    if (!input.disabled) input.focus()
+    return true
+  }
+
+  get value(): HoldTyped {
+    return { afterBlock: this.#after.checked, maxFiles: this.#files.value, maxLines: this.#lines.value }
   }
 
   show(h: HoldSetting, disabled: boolean) {
-    this.#shown = h
+    this.#clearAll()
     this.#after.checked = h.afterBlock
     this.#files.value = String(h.maxFiles)
     this.#lines.value = String(h.maxLines)
@@ -262,11 +269,6 @@ class SfProjectAgents extends HTMLElement {
     })
     this.#rounds.id = 'project-rounds'
     this.#rounds.dataset.key = 'rounds'
-    for (let n = 1; n <= 20; n++) {
-      const o = el('option', '', String(n))
-      o.value = String(n)
-      this.#rounds.append(o)
-    }
     this.#rounds.addEventListener('change', () => {
       const v = this.#view
       if (v?.project) emit(this, 'sf-project-setting', { path: v.project, op: 'rounds', rounds: Number(this.#rounds.value) })
@@ -282,6 +284,10 @@ class SfProjectAgents extends HTMLElement {
   reset() {
     this.#key = ''
     this.view = this.#view
+  }
+
+  refuse(field: string, message: string): boolean {
+    return this.#hold.refuse(field, message)
   }
 
   set view(value: ProjectAgents | null) {
@@ -305,6 +311,13 @@ class SfProjectAgents extends HTMLElement {
       o.value = value ?? ''
       return o
     }))
+    if (this.#rounds.options.length !== v.roundsMax) {
+      this.#rounds.replaceChildren(...Array.from({ length: v.roundsMax }, (_, i) => {
+        const o = el('option', '', String(i + 1))
+        o.value = String(i + 1)
+        return o
+      }))
+    }
     this.#rounds.value = String(v.rounds)
     this.#type.value = v.types.some(([id]) => id === v.type) ? v.type : ''
     this.#findings.checked = v.autoFindings

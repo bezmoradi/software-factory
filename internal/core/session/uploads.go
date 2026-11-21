@@ -3,6 +3,8 @@ package session
 import (
 	"bytes"
 	"context"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,10 @@ const (
 )
 
 var ImageTypes = map[string]string{"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+
+func ImageTypeList() []string {
+	return slices.Sorted(maps.Keys(ImageTypes))
+}
 
 type UploadFiles interface {
 	Save(folder, id, name string, data []byte) (string, error)
@@ -97,6 +103,10 @@ func imageMatches(kind string, data []byte) bool {
 	return false
 }
 
+func DropRefused(name string) string {
+	return name + " is larger than 10 MB. Type its path with @ instead."
+}
+
 func UploadName(name string) bool {
 	if name == "" || name == "." || name == ".." || len(name) > maxUploadName || !utf8.ValidString(name) {
 		return false
@@ -117,8 +127,8 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 			return "", invalid("upload")
 		}
 		name = "image." + ext
-		if len(data) > MaxImage {
-			return "", explained(invalid("too big"), "An image may be at most 2.5 MB.")
+		if len(data) > MaxImageUpload {
+			return "", explained(invalid("too big"), ImageRefused)
 		}
 		if !imageMatches(kind, data) {
 			return "", explained(invalid("upload"), "That isn't the kind of image it says it is.")
@@ -128,32 +138,32 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 			return "", explained(invalid("name"), "That file's name can't be used.")
 		}
 		if len(data) > MaxDrop {
-			return "", explained(invalid("too big"), "A file may be at most 10 MB.")
+			return "", explained(invalid("too big"), DropRefused(name))
 		}
 	}
 	if len(data) == 0 {
 		return "", explained(invalid("upload"), "The file is empty.")
 	}
+	if image {
+		if err := r.uploadTarget(sid, true); err != nil {
+			return "", err
+		}
+		fitted, small, ok := fitImage(kind, data)
+		if !ok {
+			return "", explained(invalid("too big"), ImageRefused)
+		}
+		if fitted != kind {
+			name = "image." + ImageTypes[fitted]
+		}
+		kind, data = fitted, small
+	}
 	r.mu.Lock()
+	if err := r.uploadTargetLocked(sid, image); err != nil {
+		r.mu.Unlock()
+		return "", err
+	}
 	files := r.uploads.files
 	a := r.admitted[sid]
-	switch {
-	case files == nil:
-		r.mu.Unlock()
-		return "", explained(conflict("no uploads"), "This engine has no uploads folder, so it takes no images or files.")
-	case a == nil:
-		r.mu.Unlock()
-		return "", explained(notFound("session"), "Only a session this engine started takes images and files.")
-	case !a.running:
-		r.mu.Unlock()
-		return "", explained(conflict("not running"), "Images and files need a running session. Wake it first.")
-	case image && r.uploads.noImage[sid]:
-		r.mu.Unlock()
-		return "", explained(conflict("no images"), noImages)
-	case !ValidBox(a.Box):
-		r.mu.Unlock()
-		return "", oldLayout()
-	}
 	r.trimUnsent(sid)
 	if r.uploads.bytes+int64(len(data)) > MaxUploadBytes {
 		r.mu.Unlock()
@@ -185,6 +195,31 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	u.Path = path
 	return id, nil
 }
+
+func (r *Registry) uploadTarget(sid string, image bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.uploadTargetLocked(sid, image)
+}
+
+func (r *Registry) uploadTargetLocked(sid string, image bool) error {
+	a := r.admitted[sid]
+	switch {
+	case r.uploads.files == nil:
+		return explained(conflict("no uploads"), "This engine has no uploads folder, so it takes no images or files.")
+	case a == nil:
+		return explained(notFound("session"), "Only a session this engine started takes images and files.")
+	case !a.running:
+		return explained(conflict("not running"), NeedsRunning)
+	case image && r.uploads.noImage[sid]:
+		return explained(conflict("no images"), noImages)
+	case !ValidBox(a.Box):
+		return oldLayout()
+	}
+	return nil
+}
+
+const NeedsRunning = "Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu."
 
 const noImages = "This agent doesn't take images in its messages (it doesn't offer ACP's image prompt capability), so send the text alone, or with files: the agent gets those as paths it can read."
 

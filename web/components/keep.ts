@@ -67,7 +67,7 @@ function readHead(v: unknown): KeptHead | null {
   const roles = Array.isArray(v.roles) ? v.roles.map(readRole).filter(r => r !== null) : []
   return {
     commit: sha(v.commit), at: num(v.at), holds: v.holds === true, restorable: v.restorable === true, refusal: text(v.refusal),
-    reviewed: v.reviewed === true, rolesRead: v.rolesRead === true, roles, passed: v.passed === true && roles.length > 0,
+    reviewed: v.reviewed === true, rolesRead: v.rolesRead === true, roles, passed: v.passed === true,
   }
 }
 

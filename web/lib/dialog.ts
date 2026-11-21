@@ -100,7 +100,9 @@ export function modal(o: ModalOptions): Modal {
   d.addEventListener('close', finish)
   if (o.backdropCloses) {
     d.addEventListener('click', e => {
-      if (e.target === d) handle.close()
+      if (e.target !== d) return
+      const r = d.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) handle.close()
     })
   }
   if (o.single) singles.set(o.single, { modal: handle, focus })

@@ -21,14 +21,14 @@ func approvedRequirements(work *session.Work) func(ctx context.Context, sid stri
 	}
 }
 
-func usePulls(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
+func usePulls(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) *session.IssueStarts {
 	if parts.forges == nil || parts.dispatcher == nil || parts.repos == nil {
-		return
+		return nil
 	}
 	client, err := remote.Remote{CAFile: cfg.DevGitCA}.HTTPClient()
 	if err != nil {
 		logger.Warn("pull follow", "event", "no-http-client")
-		return
+		return nil
 	}
 	fc := session.FollowsConfig{
 		API: github.API{Client: client, Expiry: reg.Limits().TokenExpiry, Rates: github.NewRates()}, Forges: parts.forges, Store: state.NewPRFollows(cfg.StateDir),
@@ -44,7 +44,7 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 	follows, err := session.NewFollows(fc)
 	if err != nil {
 		logger.Warn("pull follow", "event", "not-started")
-		return
+		return nil
 	}
 	parts.repos.OnRemoved(follows.ForgetProject)
 	if parts.reviews != nil {
@@ -55,7 +55,8 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 	issues, err := session.NewIssueStarts(session.IssueStartsConfig{Follows: follows, Projects: parts.dispatcher.Projects, Tell: tellSession(reg), Base: base, Logger: logger})
 	if err != nil {
 		srv.UsePulls(follows, nil, nil)
-		return
+		return nil
 	}
 	srv.UsePulls(follows, issues, session.IssueDispatcher{Dispatcher: parts.dispatcher, Issues: issues})
+	return issues
 }

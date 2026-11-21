@@ -1,31 +1,32 @@
 import { api } from './api.ts'
-import { armed, controllable, current, paint, say, schedulePaint, sleeping, state, toast, type Session } from './app-state.ts'
+import { allowed, armed, current, paint, say, schedulePaint, state, toast, type Session } from './app-state.ts'
 import { byId, pressed, visible, whileBusy } from './lib/dom.ts'
 import { agentWord, label } from './lib/format.ts'
 import { boxSignIn } from './components/login.ts'
 import { approveHomeSettings, approveTrustFiles, askTrust, consentFor } from './components/consent.ts'
 import type { Toast } from './components/toasts.ts'
-import type { Consent, Needs } from './types.ts'
+import type { Consent, LineCommentBody, Needs } from './types.ts'
 
 type Reply = { ok: boolean; body: Record<string, unknown> }
+
+export type ComposedMessage = { part: { revise: { kind: 'requirements' | 'plan' | 'root-cause'; note: string } } | { comments: LineCommentBody[] } | { ask: string }; refused?: (why: string, error: string) => void }
 
 interface SessionActionsDeps {
   reply: (res: Response | null) => Promise<Reply>
   loadGate: (s: Session, force?: boolean) => Promise<void>
   starterNames: () => ReadonlyMap<string, string>
   identityAction: (body: Record<string, unknown>) => Toast['action']
-  markCheckpoint: (sid: string, level: string) => void
   copy: (command: string) => Promise<void>
   forgetSession: (sid: string) => void
 }
 
 export interface SessionActions {
-  send: (text: string, images?: string[], s?: Session | null, pressed?: boolean, files?: string[]) => Promise<boolean>
+  send: (text: string, images?: string[], s?: Session | null, pressed?: boolean, files?: string[], composed?: ComposedMessage) => Promise<boolean>
   manage: (s: Session, path: string, body: Record<string, unknown>) => Promise<string>
   answerForge: (s: Session | null, answer: { card: string; approve: boolean; draft?: boolean; confirmed?: boolean }) => Promise<void>
-  sessionAsk: (s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) => Promise<void>
+  sessionAsk: (s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string, refused?: (said: Record<string, unknown>) => boolean) => Promise<void>
   startPush: (s: Session | null) => Promise<void>
-  answerPush: (s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }) => Promise<void>
+  answerPush: (s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }, refused?: (said: Record<string, unknown>) => boolean) => Promise<void>
   startReview: (s: Session | null, all: boolean) => Promise<void>
   startTestList: (s: Session | null) => Promise<void>
   startAside: (s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) => Promise<void>
@@ -43,7 +44,6 @@ export const reviewAsking = new Set<string>()
 export const pushAsking = new Set<string>()
 const pushWatched = new Map<string, number>()
 export const pushSaid = new Map<string, { text: string; tone: string }>()
-const PUSH_SAID: Record<string, { text: string; tone: string }> = { held: { text: 'Held', tone: 'warn' }, denied: { text: 'Denied', tone: 'bad' }, refused: { text: 'Not pushed', tone: 'bad' } }
 export const answerAsking = new Set<string>()
 
 const ASKED_MS = 30000
@@ -81,9 +81,7 @@ export function whilePressed<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export function pushedHead(s: Session): boolean {
-  const p = s.info.push
-  const head = s.gate?.head ?? ''
-  return !!p && !p.running && !pushAsking.has(s.sid) && (p.result === 'pushed' || p.result === 'up-to-date') && !!head && p.commit === head
+  return s.gate?.pushed === true && !s.info.push?.running && !pushAsking.has(s.sid)
 }
 
 export function pushOutcome(s: Session) {
@@ -91,7 +89,7 @@ export function pushOutcome(s: Session) {
   const p = s.info.push
   if (since === undefined || !p || p.running || pushAsking.has(s.sid) || p.at === since) return
   pushWatched.delete(s.sid)
-  const said = PUSH_SAID[p.result]
+  const said = p.resultSaid ? { text: p.resultSaid.label, tone: p.resultSaid.tone } : null
   if (said) {
     pushSaid.set(s.sid, said)
     setTimeout(() => {
@@ -129,7 +127,7 @@ async function notThrough(res: Response | null, title: string) {
 }
 
 export function forkable(s: Session): boolean {
-  return !!(state.connected && s.info.verified && s.info.kind === 'background' && s.info.project)
+  return state.connected && allowed(s, 'fork')
 }
 
 export async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): Promise<T> {
@@ -143,7 +141,7 @@ export async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): P
   }
 }
 
-export function startSessionActions({ reply, loadGate, starterNames, identityAction, markCheckpoint, copy, forgetSession }: SessionActionsDeps): SessionActions {
+export function startSessionActions({ reply, loadGate, starterNames, identityAction, copy, forgetSession }: SessionActionsDeps): SessionActions {
   async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
     busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
     schedulePaint()
@@ -174,9 +172,10 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     if (!ok) toast({ id: `forge-answer:${s.sid}`, title: !answer.approve ? "It wasn't denied." : comment ? "It wasn't posted." : "It wasn't opened.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
   }
 
-  async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string) {
+  async function sessionAsk(s: Session | null, route: string, body: Record<string, unknown>, title: string, done: string, refused?: (said: Record<string, unknown>) => boolean) {
     if (!s) return
     const { ok, body: said } = await whilePressed(async () => reply(await api(route, { sid: s.sid, ...body }).catch(() => null)))
+    if (!ok && refused?.(said)) return
     if (!ok) return void toast({ id: `${route}:${s.sid}`, title, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad' })
     toast({ title: done, tone: 'ok' })
     s.auditSeen++
@@ -197,13 +196,14 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     if (!ok) toast({ id: `push:${s.sid}`, title: "The push didn't start.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
   }
 
-  async function answerPush(s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }) {
+  async function answerPush(s: Session | null, answer: { card: string; commit: string; allow: boolean; reason: string }, refused?: (said: Record<string, unknown>) => boolean) {
     if (!s || answerAsking.has(s.sid)) return
     answerAsking.add(s.sid)
     schedulePaint()
     const { ok, body } = await reply(await api('/api/push-answer', { sid: s.sid, ...answer }).catch(() => null))
     answerAsking.delete(s.sid)
     schedulePaint()
+    if (!ok && refused?.(body)) return
     if (!ok) toast({ id: `push-answer:${s.sid}`, title: answer.allow ? "The push wasn't allowed." : "The push wasn't denied.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
   }
 
@@ -212,13 +212,11 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     reviewAsking.add(s.sid)
     schedulePaint()
     const asked = all ? { sid: s.sid, all: true } : { sid: s.sid }
-    let consent: Consent = {}
     let answer = await reply(await api('/api/review', asked).catch(() => null))
-    for (let round = 0; !answer.ok && round < 2; round++) {
+    while (!answer.ok) {
       const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the review')
       if (!more?.costOk) break
-      consent = { costOk: true }
-      answer = await reply(await api('/api/review', { ...asked, ...consent }).catch(() => null))
+      answer = await reply(await api('/api/review', { ...asked, costOk: true }).catch(() => null))
     }
     const { ok, body } = answer
     reviewAsking.delete(s.sid)
@@ -233,7 +231,7 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     testAsking.add(s.sid)
     schedulePaint()
     let answer = await reply(await api('/api/test-list', { sid: s.sid }).catch(() => null))
-    for (let round = 0; !answer.ok && round < 2; round++) {
+    while (!answer.ok) {
       const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", 'the manual test list')
       if (!more?.costOk) break
       answer = await reply(await api('/api/test-list', { sid: s.sid, costOk: true }).catch(() => null))
@@ -249,7 +247,7 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     asking.add(s.sid)
     schedulePaint()
     let answer = await reply(await api(route, { sid: s.sid, ...body }).catch(() => null))
-    for (let round = 0; !answer.ok && round < 2; round++) {
+    while (!answer.ok) {
       const more = await consentFor(answer.body.needs as Needs | undefined, "The reviewers' Claude Code", what)
       if (!more?.costOk) break
       answer = await reply(await api(route, { sid: s.sid, ...body, costOk: true }).catch(() => null))
@@ -260,34 +258,13 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: typeof said.message === 'string' ? visible(said.message) : 'Check that the engine is running.', tone: 'bad', timeout: said.needs ? 0 : undefined })
   }
 
-  async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = []) {
+  async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = [], composed?: ComposedMessage) {
     if (!s) return false
-    const asleep = sleeping(s)
-    if (asleep && !s.info.controlled) {
-      say('Wake the session first: it was read-only on this page when it stopped.')
-      return false
-    }
-    if (asleep && (images.length || files.length)) {
-      say('Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu.')
-      return false
-    }
-    if (!asleep && !controllable(s)) {
-      say('This session is read-only on this page.')
-      return false
-    }
-    if (text.startsWith('!')) {
-      const line = text.slice(1).trim()
-      toast({ id: 'shell-line', title: "The page doesn't run shell lines.", description: `It sends messages to ${agentWord(s.info.agent)}. Ask it to run the command, or run it yourself in the agent container.`, tone: 'warn', ...(line ? { action: { label: 'Copy the command', run: () => void copy(line) } } : {}) })
-      return false
-    }
-    if (/^\/[^\s/]+(?:\s|$)/.test(text) && (images.length || files.length)) {
-      say("A command can't carry images or files. Send them in a message of their own.")
-      return false
-    }
+    const asleep = allowed(s, 'wake')
     const bypass = s.info.mode === 'bypassPermissions'
     if (bypass && !pressed && !confirmed(`${s.sid}:bypass`, 'This session runs with bypassPermissions: Claude runs every tool without asking. Press Enter again to send anyway.')) return false
     say('')
-    const body: { sid: string; text: string; images?: string[]; files?: string[]; confirm?: boolean } = { sid: s.sid, text }
+    const body: { sid: string; text?: string; revise?: { kind: string; note: string }; comments?: LineCommentBody[]; ask?: string; images?: string[]; files?: string[]; confirm?: boolean } = composed ? { sid: s.sid, ...composed.part } : { sid: s.sid, text }
     if (images.length) body.images = images
     if (files.length) body.files = files
     if (bypass) body.confirm = true
@@ -295,17 +272,17 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
     const answer = asleep ? await withConsent(name, 'the session', consent => api('/api/message', { ...body, ...consent }), false, s.sid) : await reply(await api('/api/message', body).catch(() => null))
     if (!answer.ok) {
       const why = answer.body.message
-      say(typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.')
+      const line = typeof answer.body.line === 'string' ? answer.body.line : ''
+      if (line) toast({ id: 'shell-line', title: "The page doesn't run shell lines.", description: typeof why === 'string' && why ? visible(why) : '', tone: 'warn', action: { label: 'Copy the command', run: () => void copy(line) } })
+      const said = typeof why === 'string' && why ? visible(why) : 'The message did not go through. Check that the session is still running.'
+      if (composed?.refused) composed.refused(said, typeof answer.body.error === 'string' ? answer.body.error : '')
+      else say(said)
       const action = identityAction(answer.body)
       if (action) toast({ id: 'identity-needed', title: 'The session didn’t wake.', description: 'Set the name and email agents commit with first.', tone: 'bad', timeout: 0, action })
       return false
     }
     if (asleep) {
       say(s.info.live ? '' : `Waking the session. The message goes to ${agentWord(s.info.agent)} once it reconnects, if that happens within 2 minutes.`)
-    }
-    if (s.context && /^\/knackpack:checkpoint(?:\s|$)/.test(text)) {
-      markCheckpoint(s.sid, s.context.level)
-      schedulePaint()
     }
     return true
   }
@@ -340,17 +317,17 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
   }
 
   async function answerTrust(path: string): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
-    const rounds = 3
     let approve: string | undefined
-    for (let round = 1; round <= rounds; round++) {
+    for (;;) {
       toast({ id: 'trust', title: 'Answering Claude Code’s trust question…', description: 'This takes a few seconds.', tone: 'info', timeout: 60000 })
       const trusted = await reply(await api('/api/claude-trust', approve ? { path, approve } : { path }).catch(() => null))
-      const files = (trusted.body.needs as Needs | undefined)?.approval
-      if (trusted.ok || !files) return trusted
-      if (round === rounds) {
-        toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: 'The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.', tone: 'warn', timeout: 0 })
+      const needs = trusted.body.needs as Needs | undefined
+      const files = needs?.next === 'approve' ? needs.approval : undefined
+      if (!trusted.ok && trusted.body.error === 'changing') {
+        toast({ id: 'trust', title: 'Claude Code’s trust question wasn’t answered.', description: typeof trusted.body.message === 'string' ? visible(trusted.body.message) : '', tone: 'warn', timeout: 0 })
         return null
       }
+      if (trusted.ok || !files) return trusted
       const said = typeof trusted.body.message === 'string' ? visible(trusted.body.message) : undefined
       toast(approve ? { id: 'trust', title: 'The files changed since you approved them.', description: said, tone: 'warn', timeout: 0 } : { id: 'trust', title: 'Claude Code’s trust question waits for your approval.', tone: 'info', timeout: 5000 })
       if (!(await approveTrustFiles(files, starterNames().get('claude') ?? 'Claude Code'))) {
@@ -359,7 +336,6 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
       }
       approve = files.hash
     }
-    return null
   }
 
   async function refuseWake(sid: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
@@ -371,21 +347,23 @@ export function startSessionActions({ reply, loadGate, starterNames, identityAct
   async function withConsent(name: string, what: string, send: (c: Consent) => Promise<Response>, resumable = false, sid?: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
     let consent: Consent = {}
     let answer = await reply(await send(consent).catch(() => null))
-    for (let round = 0; !answer.ok && round < 5; round++) {
+    while (!answer.ok) {
       const needs = answer.body.needs as Needs | undefined
-      if (needs?.home) {
+      const next = needs?.next ?? ''
+      if (!needs || !next) break
+      if (next === 'home' && needs.home) {
         if (!(await approveHomeSettings(needs.home, name))) return sid ? refuseWake(sid) : answer
         consent = { ...consent, home: needs.home.digest }
         answer = await reply(await send(consent).catch(() => null))
         continue
       }
-      if (resumable && needs?.box) consent = { ...consent, box: needs.box }
-      if (needs?.signIn && needs.box && !needs.cost) {
+      if (resumable && needs.box) consent = { ...consent, box: needs.box }
+      if (next === 'sign-in') {
         if (!(await boxSignIn(api, needs, name, title => toast({ title, tone: 'ok' })))) break
         answer = await reply(await send(consent).catch(() => null))
         continue
       }
-      if (needs?.trust) {
+      if (next === 'trust' && needs.trust) {
         if (!(await askTrust(needs.trust))) break
         const trusted = await answerTrust(needs.trust)
         if (!trusted) break

@@ -91,13 +91,15 @@ type needsJSON struct {
 	Box      string            `json:"box,omitempty"`
 	Agent    string            `json:"agent,omitempty"`
 	Code     bool              `json:"code,omitempty"`
+	Next     string            `json:"next,omitempty"`
+	Tries    int               `json:"tries,omitempty"`
 }
 
 func needsOf(n *session.Needs) *needsJSON {
 	if n == nil {
 		return nil
 	}
-	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust, Box: n.Box, Agent: n.Agent, Code: n.Code}
+	out := &needsJSON{SignIn: signInOf(n.SignIn), Step: n.Step, Cost: n.Cost, Trust: n.Trust, Box: n.Box, Agent: n.Agent, Code: n.Code, Next: n.NextStep(), Tries: n.Tries}
 	if n.Expected != "" {
 		out.Expected = string(n.Expected)
 	}

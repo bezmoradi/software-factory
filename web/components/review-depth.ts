@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { button, el, field, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, field, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 
 interface DepthView {
   advisory: string[]
@@ -16,18 +16,16 @@ interface DepthView {
   maxRuns: number
 }
 
-const AGENT = /^[A-Za-z0-9][\w.:@-]{0,119}$/
-
 let serial = 0
 
 function text(value: string): string {
   return visible(unspoofed(value))
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
+async function problemOf(res: Response | null): Promise<{ text: string; field: string }> {
+  if (!res) return { text: 'The engine didn\'t answer. Try again.', field: '' }
+  const body = await res.json().catch(() => null) as { message?: unknown; field?: unknown } | null
+  return { text: typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.', field: typeof body?.field === 'string' ? body.field : '' }
 }
 
 function isDepth(v: unknown): v is DepthView {
@@ -36,20 +34,20 @@ function isDepth(v: unknown): v is DepthView {
     typeof d.maxFiles === 'number' && typeof d.maxLines === 'number' && typeof d.extraRuns === 'number' && typeof d.runsTotal === 'number'
 }
 
-function names(value: string): string[] | null {
-  const list = value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
-  return list.every(a => AGENT.test(a)) ? [...new Set(list)] : null
-}
-
-function runSelect(id: string, value: number, max: number): HTMLSelectElement {
-  const s = el('select', 'textbox')
-  s.id = id
+function runOptions(s: HTMLSelectElement, value: number, max: number) {
+  s.replaceChildren()
   for (let n = 1; n <= max; n++) {
     const o = el('option', '', n === 1 ? 'Once' : `${n} times`)
     o.value = String(n)
     s.append(o)
   }
-  s.value = String(Math.min(Math.max(value || 1, 1), max))
+  s.value = String(value)
+}
+
+function runSelect(id: string, value: number, max: number): HTMLSelectElement {
+  const s = el('select', 'textbox')
+  s.id = id
+  runOptions(s, value, max)
   return s
 }
 
@@ -64,7 +62,7 @@ class SfReviewDepth extends HTMLElement {
   #files = el('input', 'textbox')
   #lines = el('input', 'textbox')
   #extra = el('input', 'textbox')
-  #extraRuns: HTMLSelectElement = runSelect('', 1, 3)
+  #extraRuns: HTMLSelectElement = runSelect('', 1, 1)
   #save = button('Save review settings', 'small', () => void this.#store(), 'button', 'depth-save')
   #said = statusLine()
   #again = button('Read again', 'link small', () => {
@@ -89,13 +87,10 @@ class SfReviewDepth extends HTMLElement {
       input.spellcheck = false
       input.autocomplete = 'off'
     }
-    for (const input of [this.#files, this.#lines]) {
-      input.inputMode = 'numeric'
-      input.maxLength = 8
-    }
-    this.#advisory.maxLength = 700
-    this.#extra.maxLength = 700
+    for (const input of [this.#files, this.#lines]) input.inputMode = 'numeric'
     this.#extraRuns.id = `depth-extra-runs-${this.#n}`
+    for (const input of [this.#advisory, this.#files, this.#lines, this.#extra]) input.addEventListener('input', () => labelError(input, ''))
+    this.#extraRuns.addEventListener('change', () => labelError(this.#extraRuns, ''))
     this.replaceChildren(
       el('h3', 'label', 'Review depth'),
       el('p', 'small muted', 'These settings come only from this page, never from the repository or the team file, and they only add reviews: a work type\'s required roles always run. Each run uses the reviewers\' sign-in.'),
@@ -123,7 +118,7 @@ class SfReviewDepth extends HTMLElement {
   }
 
   #show(v: DepthView) {
-    const max = Math.max(1, Math.min(v.maxRuns || 3, 3))
+    const max = v.maxRuns
     const kind = v.type ? text(v.type) : 'review'
     const parts = [`On this project a ${kind}'s review now takes ${v.runsTotal} reviewer ${v.runsTotal === 1 ? 'run' : 'runs'}`]
     if (v.advisoryRuns) parts.push(`plus ${v.advisoryRuns} advisory ${v.advisoryRuns === 1 ? 'run' : 'runs'}`)
@@ -145,7 +140,7 @@ class SfReviewDepth extends HTMLElement {
     this.#extra.value = v.extra.join(', ')
     this.#files.value = String(v.maxFiles)
     this.#lines.value = String(v.maxLines)
-    this.#extraRuns.value = String(Math.min(Math.max(v.extraRuns || 1, 1), max))
+    runOptions(this.#extraRuns, v.extraRuns || 1, max)
   }
 
   async #load() {
@@ -157,7 +152,7 @@ class SfReviewDepth extends HTMLElement {
       const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
       if (path !== this.#path) return
       if (!res || !res.ok) {
-        say(this.#said, await problemOf(res), 'warn')
+        say(this.#said, (await problemOf(res)).text, 'warn')
         return this.#retry(true)
       }
       const body: unknown = await res.json().catch(() => null)
@@ -182,27 +177,27 @@ class SfReviewDepth extends HTMLElement {
   }
 
   async #store() {
-    const advisory = names(this.#advisory.value)
-    const extra = names(this.#extra.value)
-    const count = (input: HTMLInputElement) => {
-      const t = input.value.trim()
-      return t === '' ? 0 : /^\d{1,8}$/.test(t) ? Number(t) : -1
-    }
-    const maxFiles = count(this.#files)
-    const maxLines = count(this.#lines)
-    if (!advisory || !extra || advisory.length > 5 || extra.length > 5 || maxFiles < 0 || maxLines < 0) {
-      say(this.#said, 'Name at most 5 agents in each list, separated by commas, and give each size as a whole number, 0 to switch it off.', 'warn')
-      return
-    }
-    const runs: Record<string, number> = {}
+    const advisory = this.#advisory.value
+    const extra = this.#extra.value
+    const maxFiles = this.#files.value
+    const maxLines = this.#lines.value
+    const runs: Record<string, string> = {}
     for (const s of this.#runs.querySelectorAll<HTMLSelectElement>('select[data-agent]')) {
-      const n = Number(s.value)
-      if (s.dataset.agent && n > 1) runs[s.dataset.agent] = n
+      if (s.dataset.agent) runs[s.dataset.agent] = s.value
     }
-    const extraRuns = Number(this.#extraRuns.value) > 1 ? Number(this.#extraRuns.value) : 0
+    const extraRuns = this.#extraRuns.value
+    const inputs: Record<string, HTMLInputElement | HTMLSelectElement> = { advisory: this.#advisory, extra: this.#extra, maxFiles: this.#files, maxLines: this.#lines, extraRuns: this.#extraRuns }
+    for (const input of Object.values(inputs)) labelError(input, '')
+    say(this.#said, '')
     const res = await whileBusy(this.#save, () => api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null))
     if (!res || !res.ok) {
-      say(this.#said, await problemOf(res), 'warn')
+      const { text, field } = await problemOf(res)
+      const own = Object.hasOwn(inputs, field) ? inputs[field] : undefined
+      if (own) {
+        labelError(own, visible(text))
+        return own.focus()
+      }
+      say(this.#said, text, 'warn')
       return
     }
     const body: unknown = await res.json().catch(() => null)

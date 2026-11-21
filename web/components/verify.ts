@@ -1,6 +1,6 @@
 import { api } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visibleCommand, whileBusy } from '../lib/dom.ts'
-import { isRecord } from '../lib/json.ts'
+import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { pngBlob, saveBlob } from '../lib/files.ts'
 
@@ -9,7 +9,6 @@ const SHA = /^[0-9a-f]{40}$/
 const RUN = /^[0-9a-f]{16}$/
 const STATES = ['running', 'passed', 'failed', 'timed-out', 'oom', 'error', 'interrupted', 'stopped'] as const
 const FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.(png|jpe?g|gif|zip)$/
-const MAX_TRACE = 50 << 20
 
 type RunState = typeof STATES[number]
 type Kind = 'check' | 'browser'
@@ -29,6 +28,8 @@ interface VerifyRun {
   files: VerifyFile[]
   fileNote: string
   state: RunState
+  said: Said
+  outcome: string
   code: number
   tail: string
   cut: boolean
@@ -95,7 +96,7 @@ function readRun(v: unknown): VerifyRun | null {
   if (!s) return null
   const files = Array.isArray(v.files) ? v.files.map(readFile).filter(f => f !== null).slice(0, 20) : []
   return {
-    id: v.id, commit: sha(v.commit), kind: v.kind === 'browser' ? 'browser' : 'check', files, fileNote: text(v.fileNote), state: s, code: num(v.code), tail: text(v.tail), cut: v.cut === true, withheld: v.withheld === true, reason: text(v.reason),
+    id: v.id, commit: sha(v.commit), kind: v.kind === 'browser' ? 'browser' : 'check', files, fileNote: text(v.fileNote), state: s, said: saidOf(v.said, s), outcome: text(v.outcome) || s, code: num(v.code), tail: text(v.tail), cut: v.cut === true, withheld: v.withheld === true, reason: text(v.reason),
     by: text(v.by), image: text(v.image), imageId: text(v.imageId), limit: num(v.limitSeconds), started: num(v.started), ended: num(v.ended),
   }
 }
@@ -120,23 +121,12 @@ function size(n: number): string {
   return `${(n / (1 << 20)).toFixed(1)} MiB`
 }
 
-const WORDS: Record<RunState, string> = {
-  running: 'running',
-  passed: 'passed',
-  failed: 'failed',
-  'timed-out': 'ran out of time',
-  oom: 'ran out of memory',
-  error: 'couldn’t run',
-  interrupted: 'cut off by an engine restart',
-  stopped: 'stopped',
-}
-
 function when(ms: number): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
 }
 
 function outcome(r: VerifyRun): string {
-  const what = r.state === 'failed' ? `failed with exit code ${r.code}` : WORDS[r.state]
+  const what = r.outcome
   const at = r.ended ? `, ended ${when(r.ended)}` : r.started ? `, started ${when(r.started)}` : ''
   return `${r.kind === 'browser' ? 'Browser check of commit' : 'Commit'} ${shortSha(r.commit)}: ${what}${at}.`
 }
@@ -271,7 +261,7 @@ class SfVerify extends HTMLElement {
     const res = await api(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name }).catch(() => null)
     const blob = res?.ok && res.headers.get('Content-Type') === 'application/octet-stream' ? await res.blob().catch(() => null) : null
     this.#fetching = ''
-    if (!blob || blob.size > MAX_TRACE) {
+    if (!blob) {
       say(this.#status, res && !res.ok ? await problemOf(res) : 'The engine didn’t send that file.', 'warn')
       this.#paint()
       return
@@ -314,14 +304,14 @@ class SfVerify extends HTMLElement {
   #summaryText(v: VerifyView): string {
     const c = v.current
     const b = v.browser.current
-    const browser = b ? `; browser check: ${WORDS[b.state]}` : v.browser.queued ? '; browser check: queued' : ''
-    if (c) return `Verification run: ${WORDS[c.state]} on ${shortSha(c.commit)}${browser}`
+    const browser = b ? `; browser check: ${b.said.label}` : v.browser.queued ? '; browser check: queued' : ''
+    if (c) return `Verification run: ${c.said.label} on ${shortSha(c.commit)}${browser}`
     if (v.queued) return `Verification run: queued for a free slot${browser}`
     return (v.required ? 'Verification run: none for this commit, and a push needs one' : 'Verification run: none for this commit') + browser
   }
 
   #run(r: VerifyRun, current: boolean): HTMLElement[] {
-    const tone = r.state === 'passed' ? 'small ok' : r.state === 'running' ? 'small' : 'small warn'
+    const tone = r.said.tone ? `small ${r.said.tone}` : 'small'
     const out: HTMLElement[] = [el('p', tone, outcome(r))]
     const facts: string[] = []
     if (r.image) facts.push(`image ${shown(r.image)}`)

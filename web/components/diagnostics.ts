@@ -1,6 +1,7 @@
 import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { saveFile } from '../lib/download.ts'
+import './agent-report.ts'
 
 type Post = (path: string, body: unknown) => Promise<Response>
 
@@ -48,6 +49,7 @@ export function openDiagnostics(post: Post): void {
     body: [
       el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),
       el('p', 'small muted', 'It holds no repository name, host, path, address, token, prompt or log text, and the page never sends it anywhere: you save it and choose where it goes.'),
+      document.createElement('sf-agent-report'),
       say, shown,
     ],
     lead: [saveButton, actionButton('Build again', 'ghost small', load)],

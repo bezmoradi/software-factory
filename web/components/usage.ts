@@ -43,6 +43,7 @@ export interface SessionLimits {
   levels: Record<string, string>
   reached: string
   reachedAt: number
+  raise: { min: number; suggested: number } | null
   stuck: Stuck | null
   wakeAt: number
   wakeOffer: number
@@ -118,11 +119,13 @@ export function limitsOf(raw: unknown): LimitsView | null {
     const used = s.used ? rec(s.used) : null
     const stuck = s.stuck ? rec(s.stuck) : null
     const levels = rec(s.levels)
+    const raise = s.raise ? rec(s.raise) : null
     sessions.set(sid, {
       sid, caps: s.caps ? capsOf(s.caps) : null, own: s.own === true,
       used: used ? { costUsd: num(used.costUsd), minutes: num(used.minutes), turns: num(used.turns), diskBytes: num(used.diskBytes, 2 ** 53), diskMore: used.diskMore === true, diskAt: num(used.diskAt, 1e15) } : null,
       levels: { money: text(levels.money, 20), time: text(levels.time, 20), turns: text(levels.turns, 20), disk: text(levels.disk, 20) },
       reached: ['money', 'time', 'turns', 'disk'].includes(text(s.reached, 20)) ? text(s.reached, 20) : '', reachedAt: num(s.reachedAt, 1e15),
+      raise: raise ? { min: num(raise.min), suggested: num(raise.suggested) } : null,
       stuck: stuck ? { tool: text(stuck.tool, 80), detail: text(stuck.detail, 200), count: num(stuck.count, 100), failing: stuck.failing === true, at: num(stuck.at, 1e15) } : null,
       wakeAt: num(s.wakeAt, 1e15), wakeOffer: num(s.wakeOffer, 1e15), signInFrom: num(s.signInFrom, 1e15), signInUntil: num(s.signInUntil, 1e15),
     })
@@ -184,19 +187,23 @@ function paintAll() {
   for (const node of shown) node.paint()
 }
 
-export async function limitsCall(body: Record<string, unknown>): Promise<string> {
+export async function limitsAnswer(body: Record<string, unknown>): Promise<{ problem: string; field: string; error: string }> {
   try {
     const res = await api('/api/limits', body)
     const data: unknown = await res.json().catch(() => null)
     if (res.ok) {
       setLimits(data)
-      return ''
+      return { problem: '', field: '', error: '' }
     }
-    const message = rec(data).message
-    return typeof message === 'string' && message ? visible(message) : "The engine didn't take that. Try again."
+    const { message, field, error } = rec(data)
+    return { problem: typeof message === 'string' && message ? visible(message) : "The engine didn't take that. Try again.", field: typeof field === 'string' ? field : '', error: typeof error === 'string' ? error : '' }
   } catch {
-    return "The engine didn't answer. Try again once the page is connected."
+    return { problem: "The engine didn't answer. Try again once the page is connected.", field: '', error: '' }
   }
+}
+
+export async function limitsCall(body: Record<string, unknown>): Promise<string> {
+  return (await limitsAnswer(body)).problem
 }
 
 export function loadLimits(): Promise<string> {
@@ -233,7 +240,7 @@ export function windowLine(w: RateWindowView): HTMLElement {
 
 export function expiryText(e: Expiry): string {
   if (e.what === 'token') return `The token saved for ${visible(e.host)} expires ${when(e.until)}. Save a new one under Projects, Tokens, before then, or the engine can't push or open pull requests there.`
-  return `${visible(e.label)} has a claude.ai sign-in that ends between ${day(e.from)} and ${day(e.until)}. Renewing it doesn't move those dates: sign in again before then (Finish setting up on the Welcome page).`
+  return `${visible(e.label)} has a claude.ai sign-in that ends between ${day(e.from)} and ${day(e.until)}. Renewing it doesn't move those dates: sign in again before then (Reviewers’ sign-in in the command palette).`
 }
 
 class SfUsage extends HTMLElement {

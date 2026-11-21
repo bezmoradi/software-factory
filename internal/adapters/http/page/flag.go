@@ -60,7 +60,7 @@ func (s *Server) flag(ctx context.Context, w http.ResponseWriter, route, sid str
 	case allowFileRoute:
 		reason, okReason := body["reason"].(string)
 		digest, okDigest := body["digest"].(string)
-		if !keysWithin(body, "sid", "path", "digest", "reason") || !okReason || len(reason) > 2000 || !okDigest || !flagDigest.MatchString(digest) {
+		if !keysWithin(body, "sid", "path", "digest", "reason") || !okReason || !okDigest || !flagDigest.MatchString(digest) {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -88,7 +88,7 @@ func (s *Server) commitFlag(ctx context.Context, w http.ResponseWriter, route, s
 	switch route {
 	case allowCommitRoute:
 		reason, okReason := body["reason"].(string)
-		if !keysWithin(body, "sid", "commit", "field", "reason") || !okReason || len(reason) > 2000 {
+		if !keysWithin(body, "sid", "commit", "field", "reason") || !okReason {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}

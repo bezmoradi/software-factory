@@ -1,8 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
-
-const MAX_NAME = 60
-const MAX_TEXT = 20000
+import { busy, button, el, emit, field, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 
 interface SavedPrompt {
   id: string
@@ -30,16 +27,21 @@ function readList(body: unknown): SavedPrompt[] | null {
 class SfSavedPrompts extends HTMLElement {
   #view: SavedPromptsView | null = null
   #list: SavedPrompt[] | null = null
+  #canAdd = true
+  #full = ''
   #editing: SavedPrompt | null = null
   #deleting = ''
   #busy = false
   #busyOp = ''
+  #refused = ''
   #inside = false
   #toggle = button('Saved prompts', 'ghost small', undefined, 'button', 'saved-prompts-toggle')
   #panel = el('div', 'saved-prompts surface')
   #status = statusLine()
   #name = el('input', 'textbox')
   #text = el('textarea', 'textbox')
+  #nameField = field('Prompt name', this.#name)
+  #textField = field('Prompt text', this.#text)
   draft: () => string = () => ''
 
   constructor() {
@@ -51,17 +53,13 @@ class SfSavedPrompts extends HTMLElement {
     this.#toggle.popoverTargetElement = this.#panel
     this.#toggle.setAttribute('aria-haspopup', 'dialog')
     this.#toggle.title = "Prompts saved for this project: insert one into the message box, or edit and delete them"
-    this.#name.maxLength = MAX_NAME
-    this.#name.required = true
+    this.#name.setAttribute('aria-required', 'true')
     this.#name.dataset.key = 'name'
-    this.#name.setAttribute('aria-label', 'Prompt name')
-    this.#name.placeholder = 'Name'
-    this.#text.maxLength = MAX_TEXT
     this.#text.rows = 5
-    this.#text.required = true
+    this.#text.setAttribute('aria-required', 'true')
     this.#text.dataset.key = 'text'
-    this.#text.setAttribute('aria-label', 'Prompt text')
     this.#text.placeholder = 'The text to insert into the message box'
+    for (const input of [this.#name, this.#text]) input.addEventListener('input', () => labelError(input, ''))
     this.#name.addEventListener('keydown', e => {
       if (e.key !== 'Enter' || e.isComposing) return
       e.preventDefault()
@@ -105,6 +103,8 @@ class SfSavedPrompts extends HTMLElement {
     this.hidden = !value
     if (changed) {
       this.#list = null
+      this.#canAdd = true
+      this.#full = ''
       this.#editing = null
       this.#deleting = ''
       if (this.#panel.matches(':popover-open')) this.#panel.hidePopover()
@@ -115,16 +115,25 @@ class SfSavedPrompts extends HTMLElement {
   async #call(body: Record<string, unknown>): Promise<boolean> {
     this.#busy = true
     this.#busyOp = typeof body.op === 'string' ? body.op : ''
+    if (body.op === 'save') this.#unrefuse()
     this.#paint()
     const res = await api('/api/saved-prompts', body).catch(() => null)
     this.#busy = false
     const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
+    this.#refused = typeof answer?.error === 'string' ? answer.error : ''
     if (!res || !res.ok) {
-      say(this.#status, typeof answer?.message === 'string' ? visible(answer.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
+      const said = typeof answer?.message === 'string' ? visible(answer.message) : ''
+      const own = body.op === 'save' && said ? (this.#refused === 'name' ? this.#name : this.#refused === 'text' ? this.#text : null) : null
+      if (own) labelError(own, said)
+      say(this.#status, own ? '' : said || 'The engine didn’t answer. Check that it is running.', 'bad')
       this.#paint()
       return false
     }
-    if (answer?.repo === this.#view?.repo) this.#list = readList(answer)
+    if (answer?.repo === this.#view?.repo) {
+      this.#list = readList(answer)
+      this.#canAdd = answer?.canAdd !== false
+      this.#full = typeof answer?.full === 'string' ? answer.full : ''
+    }
     this.#paint()
     return true
   }
@@ -133,16 +142,18 @@ class SfSavedPrompts extends HTMLElement {
     const v = this.#view
     const e = this.#editing
     if (!v || !e || this.#busy) return
-    const name = this.#name.value.trim()
+    const name = this.#name.value
     const text = this.#text.value
-    if (!name) return this.#name.reportValidity()
-    if (!text.trim()) return this.#text.reportValidity()
     const ok = await this.#call({ op: 'save', repo: v.repo, ...(e.id ? { id: e.id } : {}), name, text })
-    if (!ok) return
+    if (!ok) return void (this.#refused === 'text' ? this.#text : this.#name).focus()
     say(this.#status, `Saved “${visible(name)}”.`, 'ok')
     this.#editing = null
     this.#paint()
     this.#toggleFocus()
+  }
+
+  #unrefuse() {
+    for (const input of [this.#name, this.#text]) labelError(input, '')
   }
 
   #heading(): HTMLElement | null {
@@ -162,8 +173,9 @@ class SfSavedPrompts extends HTMLElement {
   #edit(p: SavedPrompt | null) {
     this.#editing = p ?? { id: '', name: '', text: this.draft() }
     this.#deleting = ''
+    this.#unrefuse()
     this.#name.value = this.#editing.name
-    this.#text.value = this.#editing.text.slice(0, MAX_TEXT)
+    this.#text.value = this.#editing.text
     this.#status.textContent = ''
     this.#paint()
     this.#name.focus()
@@ -189,7 +201,7 @@ class SfSavedPrompts extends HTMLElement {
       }, 'button', 'cancel')
       const row = el('div', 'row')
       row.append(cancel, save)
-      parts.push(el('p', 'small muted', e.id ? 'Edit the prompt. It is your own text: the engine keeps it for this project and sends it only when you send the message.' : 'Name it and write the text. It is your own text: the engine keeps it for this project and sends it only when you send the message.'), this.#name, this.#text, row)
+      parts.push(el('p', 'small muted', e.id ? 'Edit the prompt. It is your own text: the engine keeps it for this project and sends it only when you send the message.' : 'Name it and write the text. It is your own text: the engine keeps it for this project and sends it only when you send the message.'), this.#nameField, this.#textField, row)
     } else {
       const list = this.#list
       if (!list) parts.push(el('p', 'small muted', this.#busy ? 'Loading…' : 'The list isn’t loaded.'))
@@ -202,9 +214,9 @@ class SfSavedPrompts extends HTMLElement {
       const add = button('New prompt', 'ghost small', () => {
         if (!this.#busy) this.#edit(null)
       }, 'button', 'new')
-      add.disabled = v.disabled || (list?.length ?? 0) >= 50
+      add.disabled = v.disabled || !this.#canAdd
       if (this.#busy) add.setAttribute('aria-disabled', 'true')
-      if ((list?.length ?? 0) >= 50) add.title = 'A project keeps at most 50 saved prompts'
+      if (this.#full) add.title = visible(this.#full)
       parts.push(add)
     }
     parts.push(this.#status)

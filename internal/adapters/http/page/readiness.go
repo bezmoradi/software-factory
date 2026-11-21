@@ -13,13 +13,17 @@ type readinessJSON struct {
 	Result string `json:"result,omitempty"`
 	Code   int    `json:"code,omitempty"`
 	Tail   string `json:"tail,omitempty"`
+
+	Label string `json:"label"`
+	Tone  string `json:"tone"`
 }
 
 func readinessOf(list []session.ReadinessLine) []readinessJSON {
 	out := make([]readinessJSON, 0, len(list))
 	for _, l := range list {
+		said := session.ReadinessSaid(l.Kind, l.State)
 		out = append(out, readinessJSON{Kind: l.Kind, State: l.State, Found: nonNil(l.Found), Note: l.Note,
-			Commit: l.Commit, At: millis(l.At), Result: l.Result, Code: l.Code, Tail: l.Tail})
+			Commit: l.Commit, At: millis(l.At), Result: l.Result, Code: l.Code, Tail: l.Tail, Label: said.Label, Tone: said.Tone})
 	}
 	return out
 }

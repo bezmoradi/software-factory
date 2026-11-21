@@ -61,6 +61,7 @@ type pairJSON struct {
 	Members []pairMemberJSON `json:"members"`
 	Kept    string           `json:"kept,omitempty"`
 	Bench   *benchJSON       `json:"benchmark,omitempty"`
+	Issue   int              `json:"issue,omitempty"`
 	At      time.Time        `json:"at"`
 	History bool             `json:"historyOnly,omitempty"`
 	Owner   string           `json:"owner,omitempty"`
@@ -85,11 +86,11 @@ func pairOf(p pairJSON) (session.Pair, bool) {
 	ok := pairID.MatchString(p.ID) && repoName.MatchString(p.Repo) && cleanAbs(p.Path) && commitID.MatchString(p.Commit) && cleanText(p.Origin, maxOrigin) &&
 		cleanText(p.Name, maxPairName) && (p.Type == "" || typeName.MatchString(p.Type)) &&
 		p.Message != "" && utf8.ValidString(p.Message) && utf8.RuneCountInString(p.Message) <= session.MaxText &&
-		len(p.Members) >= 1 && len(p.Members) <= session.MaxPairAgents && benchOK(p.Bench) && !p.At.IsZero()
+		len(p.Members) >= 1 && len(p.Members) <= session.MaxPairAgents && benchOK(p.Bench) && p.Issue >= 0 && p.Issue <= session.MaxIssueNumber && !p.At.IsZero()
 	if !ok {
 		return session.Pair{}, false
 	}
-	out := session.Pair{ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, At: p.At, History: p.History}
+	out := session.Pair{ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, Issue: p.Issue, At: p.At, History: p.History}
 	for _, m := range p.Members {
 		if !memberOK(m) {
 			return session.Pair{}, false
@@ -136,7 +137,7 @@ func (s Pairs) Save(list []session.Pair) error {
 	f := pairsJSON{Version: 1, Pairs: []pairJSON{}}
 	size := 0
 	for _, p := range slices.Backward(list) {
-		j := pairJSON{Owner: owner, ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, Kept: p.Kept, At: p.At.UTC(), History: p.History}
+		j := pairJSON{Owner: owner, ID: p.ID, Repo: p.Repo, Path: p.Path, Commit: p.Commit, Origin: p.Origin, Name: p.Name, Type: p.Type, Message: p.Message, Kept: p.Kept, Issue: p.Issue, At: p.At.UTC(), History: p.History}
 		for _, m := range p.Members {
 			j.Members = append(j.Members, pairMemberJSON{Agent: m.Agent, Model: m.Model, Effort: m.Effort, SID: m.SID})
 		}

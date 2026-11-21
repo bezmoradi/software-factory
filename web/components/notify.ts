@@ -10,10 +10,6 @@ export interface Watched {
   name: string
   cards: string[]
   pushHeld: number
-  busy: boolean
-  seq: number
-  reviewRunning: boolean
-  review: string
 }
 
 const supported = typeof window !== 'undefined' && 'Notification' in window
@@ -38,8 +34,8 @@ function readSeen(): string[] {
 let on = supported && readSetting() && Notification.permission === 'granted'
 let opener: (sid: string) => void = () => undefined
 const seen = new Set<string>(readSeen())
-const last = new Map<string, { busy: boolean; reviewRunning: boolean }>()
 let dirty = false
+let fired = 0
 
 function saveSetting() {
   try {
@@ -76,25 +72,27 @@ function show(sid: string, name: string, what: string, tag: string) {
   } catch {}
 }
 
+function once(sid: string, name: string, what: string, key: string) {
+  if (seen.has(key)) return
+  seen.add(key)
+  dirty = true
+  if (on && away() && fired < MAX_AT_ONCE && Notification.permission === 'granted') {
+    fired++
+    show(sid, name, what, key)
+  }
+}
+
+export function notify(sid: string, name: string, what: string, key: string): void {
+  fired = 0
+  once(sid, name, visible(what), key)
+  saveSeen()
+}
+
 export function watchNotify(list: Watched[]): void {
-  let fired = 0
+  fired = 0
   for (const s of list) {
-    const prev = last.get(s.sid)
-    last.set(s.sid, { busy: s.busy, reviewRunning: s.reviewRunning })
-    const events: [string, string][] = []
-    for (const id of s.cards) events.push([`card:${s.sid}:${id}`, 'card waiting'])
-    if (s.pushHeld) events.push([`push:${s.sid}:${s.pushHeld}`, 'push held'])
-    if (prev?.busy && !s.busy) events.push([`turn:${s.sid}:${s.seq}`, 'turn finished'])
-    if (prev?.reviewRunning && !s.reviewRunning && s.review) events.push([`review:${s.sid}:${s.review}`, 'review finished'])
-    for (const [key, what] of events) {
-      if (seen.has(key)) continue
-      seen.add(key)
-      dirty = true
-      if (on && away() && fired < MAX_AT_ONCE && Notification.permission === 'granted') {
-        fired++
-        show(s.sid, s.name, what, key)
-      }
-    }
+    for (const id of s.cards) once(s.sid, s.name, 'card waiting', `card:${s.sid}:${id}`)
+    if (s.pushHeld) once(s.sid, s.name, 'push held', `push:${s.sid}:${s.pushHeld}`)
   }
   saveSeen()
 }
@@ -112,7 +110,7 @@ class SfNotify extends HTMLElement {
     label.append(this.#box, el('span', '', 'Desktop notifications'))
     const legend = el('legend', 'label', 'Notifications')
     const set = el('fieldset', 'themes')
-    set.append(legend, label, el('p', 'small muted', 'When this tab is in the background: a card waiting, a push held, a turn or a review finished. Each names the session and nothing an agent wrote. The setting lasts for this tab.'), this.#said)
+    set.append(legend, label, this.#said)
     this.append(set)
     if (!supported) {
       this.#box.disabled = true

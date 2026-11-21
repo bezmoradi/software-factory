@@ -1,7 +1,6 @@
 import { byId } from './lib/dom.ts'
-import type { Started, Step } from './lib/path.ts'
 import type { Toast } from './components/toasts.ts'
-import type { AgentInfo, Catalog, ChangeFrom, Changes, GateEvent, IntentRecord, PlanFileEvent, SessionInfo, WorkflowEvent } from './types.ts'
+import type { AgentInfo, Catalog, ChangeFrom, Changes, GateEvent, IntentRecord, PlanFileEvent, SessionAction, SessionInfo, WorkflowEvent } from './types.ts'
 
 export interface Session {
   sid: string
@@ -26,16 +25,19 @@ export interface Session {
   changesKey: string
   changesAt: number
   compare: { from: ChangeFrom; commit: string }
-  forkStart: Started
   busy: boolean
-  step: Step
   compacting: string
-  context: { tokens: number; level: string } | null
+  context: { level: string; text: string; said: string; stop: boolean } | null
   asked: { requirements?: { hash: string; at: number }; plan?: { hash: string; at: number } }
   refused: { requirements?: { hash: string; text: string }; plan?: { hash: string; text: string } }
-  audit: { key: string; entries: AuditEntry[]; refusals: Record<string, number> } | null
+  audit: { key: string; entries: AuditEntry[]; refusals: Record<string, number>; history: HistoryLine[]; friction: string[] } | null
   auditSeen: number
-  lastAt?: number
+}
+
+export interface HistoryLine {
+  time: number
+  text: string
+  tone: string
 }
 
 export interface AuditEntry {
@@ -57,12 +59,11 @@ export interface AuditEntry {
   source?: string
 }
 
-const ACTIVE = ['pending', 'running', 'waiting']
 
 export const scroller = byId('scroller')
 export const toast = (t: Toast) => byId<HTMLElementTagNameMap['sf-toasts']>('toasts').show(t)
 export const sessions = new Map<string, Session>()
-export const state = { connected: false, note: '', stream: '', supervisor: '' }
+export const state = { connected: false, note: '', stream: '', supervisor: '', imageTypes: [] as string[] }
 export const armed = new Set<string>()
 let paintQueued = false
 let painter: () => void = () => {}
@@ -75,11 +76,6 @@ export function paint() {
   painter()
 }
 
-export function startedOf(s: Session): Started {
-  if (s.changes && s.changes.from && s.changes.from !== 'fork') return s.forkStart
-  return !s.changes ? null : s.changes.noBase ? 'nobase' : s.changes.commits.length > 0
-}
-
 export function inTurn(s: Session): boolean {
   return s.busy || !!s.info.busy
 }
@@ -88,23 +84,20 @@ export function working(s: Session): boolean {
   return inTurn(s) || !!s.compacting || s.agents.some(a => a.status === 'running')
 }
 
-export function reviewsActive(s: Session): boolean {
-  const required = s.gate?.reviewers ?? []
-  return required.some(r => r.state === 'running' || ACTIVE.includes(s.agents.filter(a => a.type === r.type).at(-1)?.status ?? ''))
-}
 
 export function pickingSize(s: Session) {
-  return !!(state.connected && s.gate && s.gate.chosen === false && s.view.blank && controllable(s))
+  return !!(state.connected && s.gate && s.gate.chosen === false && s.view.blank && allowed(s, 'control'))
 }
 
-export function controllable(s: Session) {
-  const i = s?.info
-  return !!i && i.controlled && i.verified && i.running && i.live && !i.disputed && !i.outdated
+export const UNLISTED = 'The engine no longer lists this session.'
+
+export function allowed(s: Session | null | undefined, action: SessionAction): boolean {
+  return s?.info.actions?.[action] === ''
 }
 
-export function sleeping(s: Session | null) {
-  const i = s?.info
-  return !!i && i.kind === 'background' && i.verified === true && !i.doubled && !i.running && !i.live && /^[0-9a-f]{8}$/.test(i.id || '')
+export function offWhy(s: Session, action: SessionAction): string {
+  const why = s.info.actions?.[action]
+  return why === undefined ? UNLISTED : why
 }
 
 export function current(): Session | null {

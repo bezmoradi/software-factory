@@ -193,8 +193,9 @@ func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
+	tooBig := problem{Error: "body", Message: session.ImportTooBig}
 	if r.ContentLength > session.MaxImport {
-		refuse(w, http.StatusRequestEntityTooLarge, "body")
+		send(w, http.StatusRequestEntityTooLarge, tooBig)
 		return
 	}
 	b := s.backupPage()
@@ -208,7 +209,7 @@ func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
 	body := &watchedBody{r: http.MaxBytesReader(w, r.Body, session.MaxImport)}
 	report, err := b.Import(body)
 	if err != nil && body.over {
-		refuse(w, http.StatusRequestEntityTooLarge, "body")
+		send(w, http.StatusRequestEntityTooLarge, tooBig)
 		return
 	}
 	shared.For(r.Context(), s.logger).Info("import", "ok", err == nil)

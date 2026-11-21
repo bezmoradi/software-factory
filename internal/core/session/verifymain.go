@@ -126,9 +126,6 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
 		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")
 	}
-	if why := v.halted(); why != "" {
-		return VerifyRun{}, explained(conflict("halted"), why)
-	}
 	r, err := v.repository(repo)
 	if err != nil {
 		return VerifyRun{}, err
@@ -165,9 +162,6 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 	}
 	if id, cmds, err = v.mainCommands(repo); err != nil {
 		return VerifyRun{}, err
-	}
-	if why := v.halted(); why != "" {
-		return VerifyRun{}, explained(conflict("halted"), why)
 	}
 	run, err := NewBox()
 	if err != nil {

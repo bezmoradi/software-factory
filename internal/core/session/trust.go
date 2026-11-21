@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -102,16 +103,52 @@ func (d *Dispatcher) trustFiles(spec AgentSpec, repo Repository, clone, approve 
 	}
 	hash := SetHash(spec.Startup+" trust", read.Files)
 	if approve == hash {
+		d.trustMoved.reset(clone)
 		d.trustAudit(spec, repo, read.Commit, hash)
 		d.cfg.Logger.Info("claude trust", "event", "start-up-approved")
 		return nil
 	}
 	msg := spec.Name + " loads these files from " + repo.Name + "'s clone folder once it trusts the folder. No commit put them there, and they can change what it may do without asking. Read them, then approve to answer the trust question."
-	if approve != "" {
+	tries := TrustApprovals
+	if approve == "" {
+		d.trustMoved.reset(clone)
+	} else {
+		tries = d.trustMoved.moved(clone)
+		if tries <= 0 {
+			d.trustMoved.reset(clone)
+			d.cfg.Logger.Info("claude trust", "event", "kept-changing")
+			return explained(conflict("changing"), "The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.")
+		}
 		msg = "The files in the clone folder changed since you looked at them. Read them again, then approve to answer the trust question."
 	}
 	d.cfg.Logger.Info("claude trust", "event", "needs-approval")
-	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(spec.ID, repo.Name, read, hash, nil)}}
+	return &Error{Kind: Conflict, Reason: "needs approval", Message: msg, Needs: &Needs{Approval: approvalView(spec.ID, repo.Name, read, hash, nil), Tries: tries}}
+}
+
+const (
+	TrustApprovals   = 2
+	maxTrustCounters = 1000
+)
+
+type trustChanges struct {
+	mu    sync.Mutex
+	moves map[string]int
+}
+
+func (t *trustChanges) moved(clone string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.moves == nil || len(t.moves) >= maxTrustCounters {
+		t.moves = map[string]int{}
+	}
+	t.moves[clone]++
+	return TrustApprovals - t.moves[clone]
+}
+
+func (t *trustChanges) reset(clone string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.moves, clone)
 }
 
 func (d *Dispatcher) trustAudit(spec AgentSpec, repo Repository, commit, hash string) {

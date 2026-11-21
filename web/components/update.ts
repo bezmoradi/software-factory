@@ -11,7 +11,6 @@ interface Release {
 
 export interface UpdateView {
   running: string
-  check: boolean
   forced: boolean
   unreadable: boolean
   development: boolean
@@ -45,10 +44,9 @@ function releaseOf(v: unknown): Release | null {
 export function updateOf(v: unknown): UpdateView | null {
   if (v === null || typeof v !== 'object') return null
   const r = v as Record<string, unknown>
-  if (typeof r.running !== 'string' || typeof r.check !== 'boolean') return null
+  if (typeof r.running !== 'string') return null
   return {
     running: VERSION.test(r.running) ? r.running : '',
-    check: r.check,
     forced: r.forced === true,
     unreadable: r.unreadable === true,
     development: r.development === true,
@@ -59,7 +57,7 @@ export function updateOf(v: unknown): UpdateView | null {
 
 function settle() {
   clearTimeout(soon)
-  if (view?.check && view.result === 'not-yet' && tries < SOON_TRIES) {
+  if (view && !view.forced && !view.unreadable && view.result === 'not-yet' && tries < SOON_TRIES) {
     tries++
     soon = window.setTimeout(() => void loadUpdate(), SOON_MS)
     return
@@ -84,10 +82,6 @@ async function call(body: Record<string, unknown>): Promise<{ ok: boolean; messa
   }
   const message = parsed !== null && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string' ? (parsed as { message: string }).message : ''
   return { ok: false, message: message || 'The engine didn’t take that. Try again once the page is connected.' }
-}
-
-export function developmentBuild(): boolean {
-  return view?.development === true
 }
 
 export function initUpdates(p: Post): void {
@@ -249,70 +243,10 @@ class SfUpdate extends HTMLElement {
   }
 }
 
-class SfUpdateSetting extends HTMLElement {
-  #box = el('input')
-  #label = el('label', 'notify-pref small')
-  #note = el('p', 'small muted')
-  #off = el('span', 'update-off', '(off)')
-  #said = statusLine('small warn')
-  #busy = false
-
-  connectedCallback() {
-    painted.add(this)
-    if (!this.childElementCount) {
-      this.#box.type = 'checkbox'
-      this.#note.id = 'update-setting-note'
-      this.#box.setAttribute('aria-describedby', this.#note.id)
-      this.#box.addEventListener('click', e => {
-        if (this.#busy || this.#box.getAttribute('aria-disabled') === 'true') e.preventDefault()
-      })
-      this.#box.addEventListener('change', () => void this.#change())
-      this.#off.setAttribute('aria-hidden', 'true')
-      this.#label.append(this.#box, el('span', '', 'Check for updates'), this.#off)
-      const set = el('fieldset', 'themes')
-      set.append(el('legend', 'label', 'Updates'), this.#label, this.#note, this.#said)
-      this.append(set)
-    }
-    this.paint()
-  }
-
-  disconnectedCallback() {
-    painted.delete(this)
-  }
-
-  async #change() {
-    const on = this.#box.checked
-    this.#busy = true
-    this.#box.setAttribute('aria-busy', 'true')
-    const a = await call({ check: on })
-    this.#busy = false
-    this.#box.removeAttribute('aria-busy')
-    this.#said.textContent = a.ok ? '' : a.message
-    this.paint()
-  }
-
-  paint() {
-    const v = view
-    const locked = !v || v.forced || v.unreadable
-    if (!this.#busy) this.#box.checked = !!v?.check
-    if (locked) this.#box.setAttribute('aria-disabled', 'true')
-    else this.#box.removeAttribute('aria-disabled')
-    this.#label.classList.toggle('is-off', locked)
-    this.#off.hidden = !v || !locked
-    this.#note.classList.toggle('muted', !locked)
-    if (!v) this.#note.textContent = 'Shown once the page is connected to the engine.'
-    else if (v.forced) this.#note.textContent = 'Off: the engine was started with SF_NO_UPDATE_CHECK set, so this can’t be turned on here.'
-    else if (v.unreadable) this.#note.textContent = 'Off: the engine can’t read its update setting (update.json in its state).'
-    else this.#note.textContent = 'Once a day the engine asks api.github.com for the newest release, from your computer, with no token or cookie. A newer one shows Update in the top bar.'
-  }
-}
-
 customElements.define('sf-update', SfUpdate)
-customElements.define('sf-update-setting', SfUpdateSetting)
 
 declare global {
   interface HTMLElementTagNameMap {
     'sf-update': SfUpdate
-    'sf-update-setting': SfUpdateSetting
   }
 }

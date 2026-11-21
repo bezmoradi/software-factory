@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 
 interface AgentFileView {
   name: string
@@ -17,9 +17,9 @@ interface AgentFilesView {
   roles: Record<string, string>
   defaults: Record<string, string>
   roleNames: Record<string, string>
-  limit: number
-  maxBytes: number
   tools: string[]
+  canAdd: boolean
+  full: string
 }
 
 export interface ReviewerAgentsTarget {
@@ -33,13 +33,14 @@ function readView(body: unknown): AgentFilesView | null {
   const record = (x: unknown) => x && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, string> : null
   if (!Array.isArray(v.files) || !record(v.roles) || !record(v.defaults) || !record(v.roleNames) || !Array.isArray(v.tools)) return null
   const files = v.files.filter((f): f is AgentFileView => !!f && typeof f.name === 'string' && typeof f.agent === 'string' && typeof f.description === 'string' && Array.isArray(f.tools))
-  return { files, roles: v.roles!, defaults: v.defaults!, roleNames: v.roleNames!, limit: Number(v.limit) || 0, maxBytes: Number(v.maxBytes) || 0, tools: v.tools.filter((t): t is string => typeof t === 'string') }
+  return { files, roles: v.roles!, defaults: v.defaults!, roleNames: v.roleNames!, tools: v.tools.filter((t): t is string => typeof t === 'string'), canAdd: v.canAdd === true, full: typeof v.full === 'string' ? v.full : '' }
 }
 
 async function problemOf(res: Response | null): Promise<string> {
   if (!res) return 'The engine didn\'t answer. Try again.'
   const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
+  if (typeof body?.message === 'string' && body.message) return body.message
+  return res.status === 413 ? 'The engine refused this agent file: it is over 1 MiB, the most a request to it carries.' : 'The engine refused the change. Try again.'
 }
 
 class SfReviewerAgents extends HTMLElement {
@@ -49,6 +50,7 @@ class SfReviewerAgents extends HTMLElement {
   #removing = ''
   #file = el('input')
   #status = statusLine()
+  #fileRefused = ''
   #loaded = ''
   #key = ''
 
@@ -90,13 +92,17 @@ class SfReviewerAgents extends HTMLElement {
     const project = this.#target?.project
     if (!project) return false
     this.#busy = true
+    this.#fileRefused = ''
     this.#paint()
     const res = await api('/api/reviewer-agents', { ...body, path: project }).catch(() => null)
     this.#busy = false
     if (project !== this.#target?.project) return false
     if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+      const text = await problemOf(res)
+      if (body.op === 'add' && res) this.#fileRefused = visible(text)
+      say(this.#status, this.#fileRefused ? '' : text, 'warn')
       this.#paint()
+      if (this.#fileRefused) this.#file.focus()
       return false
     }
     const v = readView(await res.json().catch(() => null))
@@ -116,11 +122,6 @@ class SfReviewerAgents extends HTMLElement {
     const file = this.#file.files?.[0]
     this.#file.value = ''
     if (!file || this.#busy) return
-    const max = this.#view?.maxBytes || 0
-    if (max && file.size > max) {
-      say(this.#status, `The engine refused ${visible(file.name)}: it is over ${Math.floor(max / 1024)} KiB.`, 'warn')
-      return this.#paint()
-    }
     const text = await file.text().catch(() => null)
     if (text === null) {
       say(this.#status, `The page couldn't read ${visible(file.name)}.`, 'warn')
@@ -155,20 +156,21 @@ class SfReviewerAgents extends HTMLElement {
     const focused = focusedKey(this)
     const v = this.#view
     const off = target.disabled || this.#busy
-    const tools = (v?.tools ?? ['Read', 'Grep', 'Glob', 'Agent', 'ToolSearch']).join(', ')
+    const tools = v ? `, with tools any of ${v.tools.map(visible).join(', ')}` : ''
     const help = el('div', 'small muted')
     help.id = 'reviewer-agent-help'
     help.append(
-      el('p', '', `A Claude Code agent file (.md) of your own can fill the bug hunter or simplicity checker role in place of the agent of the project's pack. Its front matter may hold only name, description, model and tools, with tools any of ${tools}. The engine refuses mcpServers, hooks, permissionMode, skills and every other key, and says why.`),
+      el('p', '', `A Claude Code agent file (.md) of your own can fill the bug hunter or simplicity checker role in place of the agent of the project's pack. Its front matter may hold only name, description, model and tools${tools}. The engine refuses mcpServers, hooks, permissionMode, skills and every other key, and says why.`),
       el('p', '', 'The body is your own instructions. They run in a trusted reviewer container, with read-only tools, on the code under review, so write them as you would a reviewer you trust. The engine writes the file into that container for each review, never from the repository.'),
       el('p', '', 'Its reply must end with a line of its own, Verdict: pass or Verdict: block. A last line knackpack-verdict/1: pass or knackpack-verdict/1: block counts too. Anything else counts as no verdict, and a push still needs every required role passing.'),
     )
-    this.#file.disabled = target.disabled || (!!v && v.files.length >= v.limit)
+    this.#file.disabled = target.disabled || (!!v && !v.canAdd)
     if (this.#busy) this.#file.setAttribute('aria-disabled', 'true')
     else this.#file.removeAttribute('aria-disabled')
     const add = field('Add an agent file', this.#file, undefined, 'row field-row')
+    labelError(this.#file, this.#fileRefused)
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer agents for this project'), help, add]
-    if (v && v.files.length >= v.limit) parts.push(el('p', 'small muted', `This project keeps ${v.limit} agent files, its limit. Remove one to add another.`))
+    if (v?.full) parts.push(el('p', 'small muted', visible(v.full)))
     if (v?.files.length) {
       const list = el('ul', 'list')
       for (const f of v.files) {

@@ -56,6 +56,7 @@ type Pair struct {
 	Members []PairMember
 	Kept    string
 	Bench   *Benchmark
+	Issue   int
 	At      time.Time
 	History bool
 }
@@ -67,23 +68,30 @@ type PairStore interface {
 }
 
 type PairStart struct {
-	Path      string
-	Name      string
-	Type      string
-	Message   string
-	Agents    []PairAgent
-	Double    bool
-	Bench     int
-	BenchHash string
-	BenchBase string
-	Consent   Consent
-	Box       string
+	Path        string
+	Name        string
+	Type        string
+	Message     string
+	Agent       PairAgent
+	SecondModel string
+	Double      bool
+	Bench       int
+	BenchHash   string
+	BenchBase   string
+	From        StartFrom
+	Issue       int
+	IssueHash   string
+	Caps        *Caps
+	Consent     Consent
+	Box         string
 }
 
 type PairStarted struct {
 	Started
-	Pair string
-	Next bool
+	Pair      string
+	Next      bool
+	Second    Started
+	SecondErr error
 }
 
 type PairsPage interface {
@@ -98,6 +106,7 @@ type PairsPage interface {
 
 type PairsConfig struct {
 	Dispatcher *Dispatcher
+	Issues     *IssueStarts
 	Store      PairStore
 	Tell       func(sid, text string) error
 	Changes    ChangeReader
@@ -113,6 +122,7 @@ type Pairs struct {
 	mu    sync.Mutex
 	pairs []*Pair
 	busy  map[string]bool
+	caps  map[string]Caps
 	reads *limiter
 }
 
@@ -131,7 +141,7 @@ func NewPairs(cfg PairsConfig) (*Pairs, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = quiet{}
 	}
-	return &Pairs{cfg: cfg, send: newFirstSender(cfg.Base, cfg.Tell, cfg.Now, cfg.Logger), busy: map[string]bool{}, reads: newLimiter(MergedCalls, 10*time.Minute)}, nil
+	return &Pairs{cfg: cfg, send: newFirstSender(cfg.Base, cfg.Tell, cfg.Now, cfg.Logger), busy: map[string]bool{}, caps: map[string]Caps{}, reads: newLimiter(MergedCalls, 10*time.Minute)}, nil
 }
 
 func (p *Pairs) Close() { p.send.close() }
@@ -259,54 +269,98 @@ func (d *Dispatcher) waitStartGap(ctx context.Context) error {
 	}
 }
 
-func checkAgents(list []PairAgent, bench bool, double bool) error {
+func (d *Dispatcher) pairAgents(q PairStart) ([]PairAgent, error) {
+	list := []PairAgent{q.Agent}
 	switch {
-	case len(list) < 1 || len(list) > MaxPairAgents:
-		return explained(invalid("agents"), "Start one session on a merged pull request, or two sessions on one task.")
-	case len(list) == 1 && !bench:
-		return explained(invalid("agents"), "Start with both needs two sessions of one agent.")
-	case len(list) == 2 && list[0].Agent != list[1].Agent:
-		return explained(invalid("agents"), "Start with both runs two sessions of one agent; only their models can differ.")
-	case len(list) == 2 && !double:
-		return explained(conflict("double"), DoubleUsage+" Confirm it to start them.")
+	case q.Double:
+		list = append(list, PairAgent{Agent: q.Agent.Agent, Model: q.SecondModel})
+	case q.SecondModel != "":
+		return nil, explained(conflict("double"), DoubleUsage+" Confirm it to start them.")
+	case q.Bench == 0:
+		return nil, explained(invalid("agents"), "Start with both needs two sessions of one agent.")
+	}
+	if spec, ok := findAgent(d.cfg.Agents, q.Agent.Agent); ok && len(list) == 2 {
+		if err := checkChoice(spec, q.SecondModel, ""); err != nil {
+			return nil, onField("secondModel", err)
+		}
+	}
+	return list, nil
+}
+
+func pairPoint(q PairStart) error {
+	switch {
+	case q.Bench != 0 && q.From.chosen() > 0:
+		return onField("from", explained(invalid("from"), "A benchmark starts from the merged pull request’s base. Set Start from back to main first."))
+	case q.Bench != 0 && q.Issue != 0:
+		return onField("issue", explained(invalid("issue"), "A benchmark’s first message is the merged pull request’s description, so it starts without an issue. Clear the issue first."))
+	case q.Issue != 0 && strings.TrimSpace(q.Message) != "":
+		return onField("message", explained(invalid("message"), "Both sessions get the issue as their first message. Clear this message, or clear the issue."))
+	case q.Bench != 0 && strings.TrimSpace(q.Message) != "":
+		return onField("message", explained(invalid("message"), "A benchmark's first message is the merged pull request's description."))
 	}
 	return nil
 }
 
-func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
-	if err := checkAgents(q.Agents, q.Bench != 0, q.Double); err != nil {
-		return PairStarted{}, err
-	}
-	d := p.cfg.Dispatcher
-	var pinned *startPoint
-	var bench *Benchmark
-	text := ""
-	if q.Bench == 0 {
-		t, err := firstMessage(q.Message)
-		if err != nil {
-			return PairStarted{}, err
-		}
-		text = t
-	} else {
-		if strings.TrimSpace(q.Message) != "" {
-			return PairStarted{}, explained(invalid("message"), "A benchmark's first message is the merged pull request's description.")
-		}
+func (p *Pairs) firstText(ctx context.Context, q PairStart) (*startPoint, *Benchmark, string, error) {
+	switch {
+	case q.Bench != 0:
 		at, b, t, err := p.benchPoint(ctx, q)
 		if err != nil {
-			return PairStarted{}, err
+			return nil, nil, "", err
 		}
-		pinned, bench, text = &at, &b, t
+		return &at, &b, t, nil
+	case q.Issue != 0:
+		if p.cfg.Issues == nil {
+			return nil, nil, "", onField("issue", explained(conflict("no issues"), "This engine can't start a session from an issue."))
+		}
+		t, err := p.cfg.Issues.startText(ctx, q.Path, q.Issue, q.IssueHash)
+		return nil, nil, t, err
+	}
+	t, err := firstMessage(q.Message)
+	return nil, nil, t, onField("message", err)
+}
+
+func (p *Pairs) greet(sid string, issue int, text string) {
+	if issue != 0 && p.cfg.Issues != nil {
+		p.cfg.Issues.begin(sid, issue, text)
+		return
+	}
+	p.send.send(sid, text, "the pair's first message")
+}
+
+func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
+	d := p.cfg.Dispatcher
+	agents, err := d.pairAgents(q)
+	if err != nil {
+		return PairStarted{}, err
+	}
+	if err := pairPoint(q); err != nil {
+		return PairStarted{}, err
+	}
+	if q.Bench != 0 && (!ValidIssueHash(q.BenchHash) || !sha1Hex.MatchString(q.BenchBase)) {
+		return PairStarted{}, benchUnread()
+	}
+	if q.Issue != 0 && !ValidIssueHash(q.IssueHash) {
+		return PairStarted{}, onField("issue", explained(invalid("issue"), "Read the issue again before starting from it."))
+	}
+	pinned, bench, text, err := p.firstText(ctx, q)
+	if err != nil {
+		return PairStarted{}, err
+	}
+	from := q.From
+	if pinned != nil {
+		from = StartFrom{}
 	}
 	id := randomHex(8)
-	a := q.Agents[0]
+	a := agents[0]
 	started, err := d.Dispatch(ctx, Dispatch{Path: q.Path, Agent: a.Agent, Name: d.memberName(q.Name, a), Model: a.Model, Effort: a.Effort, Type: q.Type, Consent: q.Consent,
-		Box: q.Box, pinned: pinned, group: id, groupKind: GroupPair})
+		From: from, Box: q.Box, Caps: q.Caps, pinned: pinned, group: id, groupKind: GroupPair})
 	if err != nil || started.SID == "" {
 		return PairStarted{Started: started}, err
 	}
 	at, repo, _ := d.startedAt(started.SID)
-	pr := &Pair{ID: id, Repo: repo, Path: q.Path, Commit: at.commit, Origin: at.origin, Name: q.Name, Type: q.Type, Message: text, Bench: bench, At: p.cfg.Now()}
-	for i, x := range q.Agents {
+	pr := &Pair{ID: id, Repo: repo, Path: q.Path, Commit: at.commit, Origin: at.origin, Name: q.Name, Type: q.Type, Message: text, Bench: bench, Issue: q.Issue, At: p.cfg.Now()}
+	for i, x := range agents {
 		m := PairMember{PairAgent: x}
 		if i == 0 {
 			m.SID = started.SID
@@ -315,11 +369,23 @@ func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
 	}
 	p.mu.Lock()
 	p.pairs = append(p.pairs, pr)
+	if q.Caps != nil && len(agents) == 2 {
+		p.caps[id] = *q.Caps
+	}
 	p.saveLocked()
 	p.mu.Unlock()
-	p.send.send(started.SID, text, "the pair's first message")
-	shared.For(ctx, p.cfg.Logger).Info("pairs", "event", "started", "agents", len(q.Agents), "benchmark", bench != nil)
-	return PairStarted{Started: started, Pair: id, Next: len(q.Agents) == 2}, nil
+	p.greet(started.SID, q.Issue, text)
+	shared.For(ctx, p.cfg.Logger).Info("pairs", "event", "started", "agents", len(agents), "benchmark", bench != nil, "issue", q.Issue != 0)
+	out := PairStarted{Started: started, Pair: id}
+	if len(agents) == 2 {
+		out.Second, out.SecondErr = p.Next(ctx, id, Consent{}, "")
+		out.Next = out.SecondErr != nil || out.Second.SID == ""
+	}
+	return out, nil
+}
+
+func benchUnread() error {
+	return onField("benchmark", explained(invalid("benchmark"), "Read the pull request again before starting from it."))
 }
 
 func (p *Pairs) find(id string) *Pair {
@@ -352,7 +418,7 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string
 		return Started{}, explained(limited("busy"), "The second session is starting.")
 	}
 	p.busy[id] = true
-	a, path, name, typ, text := pr.Members[1].PairAgent, pr.Path, pr.Name, pr.Type, pr.Message
+	a, path, name, typ, text, issue := pr.Members[1].PairAgent, pr.Path, pr.Name, pr.Type, pr.Message, pr.Issue
 	at := startPoint{commit: pr.Commit, origin: pr.Origin}
 	p.mu.Unlock()
 	defer func() {
@@ -364,8 +430,14 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string
 	if err := d.waitStartGap(ctx); err != nil {
 		return Started{}, err
 	}
+	p.mu.Lock()
+	var caps *Caps
+	if c, ok := p.caps[id]; ok {
+		caps = &c
+	}
+	p.mu.Unlock()
 	started, err := d.Dispatch(ctx, Dispatch{Path: path, Agent: a.Agent, Name: d.memberName(name, a), Model: a.Model, Effort: a.Effort, Type: typ, Consent: consent,
-		Box: box, pinned: &at, group: id, groupKind: GroupPair})
+		Box: box, Caps: caps, pinned: &at, group: id, groupKind: GroupPair, asked: "pair:" + id})
 	if err != nil || started.SID == "" {
 		return started, err
 	}
@@ -373,9 +445,10 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string
 	if pr := p.find(id); pr != nil && len(pr.Members) == 2 {
 		pr.Members[1].SID = started.SID
 	}
+	delete(p.caps, id)
 	p.saveLocked()
 	p.mu.Unlock()
-	p.send.send(started.SID, text, "the pair's first message")
+	p.greet(started.SID, issue, text)
 	shared.For(ctx, p.cfg.Logger).Info("pairs", "event", "second-started")
 	return started, nil
 }

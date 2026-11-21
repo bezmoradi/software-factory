@@ -3,8 +3,6 @@ package page
 import (
 	"net/http"
 	"time"
-
-	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 var repoRoutes = map[string]bool{"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true}
@@ -51,7 +49,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]a
 	}
 	switch r.URL.Path {
 	case "/api/add-repo":
-		f, ok := textFields(w, body, 4096, "url")
+		f, ok := textFields(w, body, MaxPageBody, "url")
 		if !ok {
 			return
 		}
@@ -69,7 +67,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]a
 		}
 		reply(w, s.cfg.Repos.Remove(f["name"]), http.StatusOK)
 	case "/api/save-token":
-		f, ok := textFields(w, body, session.MaxTokenLength+1, "host", "token")
+		f, ok := textFields(w, body, MaxPageBody, "host", "token")
 		if !ok {
 			return
 		}

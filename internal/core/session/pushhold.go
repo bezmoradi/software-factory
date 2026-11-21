@@ -25,7 +25,17 @@ func (h HoldSettings) On() bool {
 }
 
 func (h HoldSettings) Valid() bool {
-	return h.MaxFiles >= 0 && h.MaxFiles <= MaxHoldFiles && h.MaxLines >= 0 && h.MaxLines <= MaxHoldLines
+	return h.Fault() == ""
+}
+
+func (h HoldSettings) Fault() string {
+	switch {
+	case h.MaxFiles < 0 || h.MaxFiles > MaxHoldFiles:
+		return "maxFiles"
+	case h.MaxLines < 0 || h.MaxLines > MaxHoldLines:
+		return "maxLines"
+	}
+	return ""
 }
 
 func (p *Pushes) holdItems(ctx context.Context, t PushTarget, h HoldSettings, entries map[review.Key]ReviewEntry, required []workflow.Requirement, head, main string) []string {

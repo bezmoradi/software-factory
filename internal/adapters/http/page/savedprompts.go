@@ -53,7 +53,7 @@ func (s *Server) savedPrompts(w http.ResponseWriter, body map[string]any) {
 		}
 		name, okName := body["name"].(string)
 		text, okText := body["text"].(string)
-		if !keysWithin(body, "op", "repo", "id", "name", "text") || !okID || !okName || !okText || len(name) > 4*session.MaxPromptName || len(text) > 4*session.MaxText {
+		if !keysWithin(body, "op", "repo", "id", "name", "text") || !okID || !okName || !okText {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
@@ -80,5 +80,6 @@ func (s *Server) savedPrompts(w http.ResponseWriter, body map[string]any) {
 	for _, p := range list {
 		out = append(out, savedPromptJSON{ID: p.ID, Name: p.Name, Text: p.Text, At: millis(p.At)})
 	}
-	send(w, http.StatusOK, map[string]any{"repo": repo, "prompts": out, "max": session.MaxSavedPrompts})
+	full := session.PromptsFull(len(list))
+	send(w, http.StatusOK, map[string]any{"repo": repo, "prompts": out, "max": session.MaxSavedPrompts, "canAdd": full == "", "full": full})
 }

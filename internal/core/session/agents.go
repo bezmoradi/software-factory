@@ -26,6 +26,7 @@ type AgentSpec struct {
 	Off         string
 	Startup     string
 	Status      *SignInStatus
+	install     bool
 }
 
 type AgentView struct {
@@ -34,6 +35,7 @@ type AgentView struct {
 	Method  Method
 	Enabled bool
 	Off     string
+	Install bool
 }
 
 func Agents() []AgentSpec {
@@ -81,7 +83,7 @@ func (a AgentSpec) StepIn(box string) string {
 }
 
 func viewOf(a AgentSpec) AgentView {
-	return AgentView{ID: a.ID, Name: a.Name, Method: a.Method, Enabled: a.Enabled, Off: a.Off}
+	return AgentView{ID: a.ID, Name: a.Name, Method: a.Method, Enabled: a.Enabled, Off: a.Off, Install: a.install}
 }
 
 func findAgent(list []AgentSpec, id string) (AgentSpec, bool) {
@@ -90,4 +92,58 @@ func findAgent(list []AgentSpec, id string) (AgentSpec, bool) {
 		return AgentSpec{}, false
 	}
 	return list[i], true
+}
+
+type ShellCommands struct {
+	Container string
+	Attach    string
+	Logs      string
+	SignIn    string
+}
+
+func claudeSessionID(id string) bool {
+	if len(id) != 8 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func CommandsFor(agent, id, box string) ShellCommands {
+	c := ShellCommands{SignIn: "the session's sign-in panel, which Wake opens"}
+	if !ValidBox(box) {
+		return c
+	}
+	c.Container = BoxContainer(box)
+	c.SignIn = "docker exec -it " + c.Container + " claude, then /login"
+	if (agent == "" || agent == "claude") && claudeSessionID(id) {
+		c.Attach = "docker exec -it " + c.Container + " claude attach " + id
+		c.Logs = "docker exec " + c.Container + " claude logs " + id
+	}
+	return c
+}
+
+type StarterFields struct {
+	Model  bool
+	Effort bool
+	Expect bool
+}
+
+func FieldsOf(m Method) StarterFields {
+	plugin := m == MethodPlugin
+	return StarterFields{Model: plugin, Effort: plugin, Expect: !plugin}
+}
+
+func StartCommand(m Method, id string) string {
+	switch m {
+	case MethodPlugin:
+		return "claude --bg"
+	case MethodACP:
+		return "its ACP server"
+	}
+	return id
 }

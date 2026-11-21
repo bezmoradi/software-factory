@@ -7,6 +7,7 @@ export interface PaletteItem {
   label: string
   detail?: string
   off?: string
+  keys?: string[]
   run: () => void
 }
 
@@ -31,6 +32,41 @@ function score(item: PaletteItem, words: string[]): number {
   return (name.startsWith(words[0]!) ? 4 : 0) + (words.every(w => name.includes(w)) ? 2 : 0) + 1
 }
 
+function highlighted(text: string, words: string[]): (Node | string)[] {
+  const lower = text.toLowerCase()
+  if (lower.length !== text.length) return [text]
+  const hits: [number, number][] = []
+  for (const w of words) {
+    const at = lower.indexOf(w)
+    if (at >= 0) hits.push([at, at + w.length])
+  }
+  hits.sort((a, b) => a[0] - b[0])
+  const out: (Node | string)[] = []
+  let pos = 0
+  for (const [from, to] of hits) {
+    const start = Math.max(from, pos)
+    if (to <= start) continue
+    if (start > pos) out.push(text.slice(pos, start))
+    out.push(el('span', 'palette-hit', text.slice(start, to)))
+    pos = to
+  }
+  if (pos < text.length) out.push(text.slice(pos))
+  return out
+}
+
+function keyCaps(keys: string[]): HTMLElement {
+  const box = el('span', 'palette-keys')
+  keys.forEach((chord, i) => {
+    if (i) box.append(el('span', 'palette-chord', ' '))
+    const parts = chord.length > 1 && !chord.endsWith('+') ? chord.split('+') : [chord]
+    parts.forEach((part, j) => {
+      if (j && !isMac) box.append(el('span', 'palette-key-plus', '+'))
+      box.append(el('kbd', 'palette-key', part))
+    })
+  })
+  return box
+}
+
 export function openPalette(list: () => PaletteItem[]): void {
   if (reopen('palette')) return
   const items = list()
@@ -39,31 +75,34 @@ export function openPalette(list: () => PaletteItem[]): void {
   input.id = 'palette-input'
   input.autocomplete = 'off'
   input.spellcheck = false
-  input.placeholder = 'Go to a session, project or panel, or run an action'
+  input.placeholder = 'Search sessions, projects and commands'
   input.setAttribute('role', 'combobox')
   input.setAttribute('aria-expanded', 'true')
   input.setAttribute('aria-controls', 'palette-list')
   input.setAttribute('aria-autocomplete', 'list')
   const name = el('label', 'sr-only', 'Command')
   name.htmlFor = input.id
+  const head = el('div', 'palette-head')
+  head.append(name, input)
   const listbox = el('div', 'palette-list')
   listbox.id = 'palette-list'
   listbox.setAttribute('role', 'listbox')
   listbox.setAttribute('aria-label', 'Commands')
+  const none = el('p', 'palette-none', 'No matching results')
+  none.hidden = true
   const said = statusLine('sr-only')
-  const hint = el('p', 'small muted palette-hint', 'Up and Down arrows choose, Enter runs, Escape closes. Each action asks what its own button asks.')
   let shown: PaletteItem[] = []
   let at = -1
 
   const options = () => [...listbox.querySelectorAll<HTMLElement>('[role="option"]')]
-  const mark = (i: number) => {
+  const mark = (i: number, scroll = true) => {
     const all = options()
     at = i
     all.forEach((o, j) => o.setAttribute('aria-selected', String(j === i)))
     const node = all[i]
     if (node) {
       input.setAttribute('aria-activedescendant', node.id)
-      node.scrollIntoView({ block: 'nearest' })
+      if (scroll) node.scrollIntoView({ block: 'nearest' })
     } else input.removeAttribute('aria-activedescendant')
   }
   const move = (step: number) => {
@@ -71,6 +110,14 @@ export function openPalette(list: () => PaletteItem[]): void {
     let i = at
     for (let n = 0; n < shown.length; n++) {
       i = (i + step + shown.length) % shown.length
+      if (!shown[i]!.off) return mark(i)
+    }
+  }
+  const page = (step: number) => {
+    const row = listbox.querySelector<HTMLElement>('[role="option"]')?.offsetHeight || 1
+    const rows = Math.max(1, Math.floor(listbox.clientHeight / row) - 1)
+    const target = Math.min(shown.length - 1, Math.max(0, (at < 0 ? 0 : at) + step * rows))
+    for (let i = target; i >= 0 && i < shown.length; i += step > 0 ? -1 : 1) {
       if (!shown[i]!.off) return mark(i)
     }
   }
@@ -98,31 +145,36 @@ export function openPalette(list: () => PaletteItem[]): void {
     for (const [title, group] of groups) {
       const box = el('div', 'palette-group')
       box.setAttribute('role', 'group')
-      const head = el('div', 'label palette-head', title)
-      head.id = `palette-g-${nodes.length}`
-      head.setAttribute('role', 'presentation')
-      box.setAttribute('aria-labelledby', head.id)
-      box.append(head)
-      for (const item of group) {
+      box.setAttribute('aria-label', visible(title))
+      group.forEach((item, k) => {
         const i = n++
         const o = el('div', `palette-option${item.off ? ' off' : ''}`)
         o.id = `palette-o-${i}`
         o.setAttribute('role', 'option')
         o.setAttribute('aria-selected', 'false')
         if (item.off) o.setAttribute('aria-disabled', 'true')
-        o.append(el('span', 'palette-label', visible(item.label)))
+        const label = el('span', 'palette-label')
+        label.append(...highlighted(visible(item.label), words))
+        o.append(label)
         const detail = item.off ? `Not now: ${item.off}` : item.detail ?? ''
-        if (detail) o.append(el('span', 'small muted palette-detail', visible(detail)))
+        if (detail) o.append(el('span', 'palette-detail', visible(detail)))
+        if (item.keys?.length) o.append(keyCaps(item.keys))
+        if (k === 0) {
+          const tag = el('span', 'palette-group-name', visible(title))
+          tag.setAttribute('aria-hidden', 'true')
+          o.append(tag)
+        }
         o.addEventListener('click', () => run(i))
         o.addEventListener('pointermove', () => {
-          if (at !== i && !item.off) mark(i)
+          if (at !== i && !item.off) mark(i, false)
         })
         box.append(o)
-      }
+      })
       nodes.push(box)
     }
-    if (!shown.length) nodes.push(el('p', 'small muted palette-none', 'Nothing matches.'))
     listbox.replaceChildren(...nodes)
+    listbox.hidden = !shown.length
+    none.hidden = !!shown.length
     at = -1
     move(1)
     said.textContent = shown.length ? `${shown.length} ${shown.length === 1 ? 'result' : 'results'}` : 'No results'
@@ -134,7 +186,7 @@ export function openPalette(list: () => PaletteItem[]): void {
       move(e.key === 'ArrowDown' ? 1 : -1)
     } else if (e.key === 'PageDown' || e.key === 'PageUp') {
       e.preventDefault()
-      for (let k = 0; k < 8; k++) move(e.key === 'PageDown' ? 1 : -1)
+      page(e.key === 'PageDown' ? 1 : -1)
     } else if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
       run(at)
@@ -145,7 +197,7 @@ export function openPalette(list: () => PaletteItem[]): void {
     consent: false,
     title: 'Command palette',
     headingClass: 'sr-only',
-    body: [name, input, listbox, said, hint],
+    body: [head, listbox, none, said],
     focus: input,
     single: 'palette',
     backdropCloses: true,

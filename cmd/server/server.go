@@ -600,10 +600,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	useAgentReports(sends, srv, parts, cfg, logger)
 	useViews(srv, parts, cfg, reg, ws, logger)
 	useSavedPrompts(srv, parts, cfg, logger)
-	usePulls(sends, srv, reg, parts, cfg, logger)
+	issues := usePulls(sends, srv, reg, parts, cfg, logger)
 	useProjectViews(srv, parts, cfg, reg, logger)
 	useKeep(srv, reg, parts, cfg, logger)
-	useStarts(sends, srv, reg, parts, cfg, logger)
+	useStarts(sends, srv, reg, parts, issues, cfg, logger)
 	restart := &restartHook{}
 	useBackups(srv, parts, cfg, begun, restart, logger)
 	useReviewExtras(srv, reg, parts, cfg, logger)

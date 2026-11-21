@@ -14,7 +14,6 @@ const (
 	issuesRoute        = "/api/issues"
 	findingIssuesRoute = "/api/finding-issues"
 	pullFor            = 60 * time.Second
-	maxBotLogin        = 44
 )
 
 var pullRoutes = map[string]bool{pullRoute: true, issuesRoute: true, findingIssuesRoute: true}
@@ -182,14 +181,14 @@ func (s *Server) pullRequest(ctx context.Context, w http.ResponseWriter, pulls s
 		list, okList := body["bots"].([]any)
 		auto, okAuto := body["auto"].(bool)
 		assign, okAssign := body["assign"].(bool)
-		if !okList || !okAuto || !okAssign || len(list) > session.MaxFollowBots {
+		if !okList || !okAuto || !okAssign {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
 		bots := make([]string, 0, len(list))
 		for _, v := range list {
 			b, ok := v.(string)
-			if !ok || b == "" || len(b) > maxBotLogin {
+			if !ok {
 				refuse(w, http.StatusBadRequest, "fields")
 				return
 			}
@@ -232,7 +231,7 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 		label := ""
 		if v, has := body["label"]; has {
 			l, ok := v.(string)
-			if !ok || len(l) > 4*session.MaxIssueLabel {
+			if !ok {
 				refuse(w, http.StatusBadRequest, "fields")
 				return
 			}

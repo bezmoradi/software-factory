@@ -183,7 +183,7 @@ func (p *Pairs) ReadMerged(ctx context.Context, path string, number int) (Merged
 
 func (p *Pairs) benchPoint(ctx context.Context, q PairStart) (startPoint, Benchmark, string, error) {
 	if !ValidIssueHash(q.BenchHash) || !sha1Hex.MatchString(q.BenchBase) {
-		return startPoint{}, Benchmark{}, "", explained(invalid("benchmark"), "Read the merged pull request on the page before starting from it.")
+		return startPoint{}, Benchmark{}, "", benchUnread()
 	}
 	v, text, repo, err := p.readMerged(ctx, q.Path, q.Bench)
 	if err != nil {
@@ -192,11 +192,11 @@ func (p *Pairs) benchPoint(ctx context.Context, q PairStart) (startPoint, Benchm
 	n := strconv.Itoa(q.Bench)
 	switch {
 	case v.Refused != "":
-		return startPoint{}, Benchmark{}, "", explained(conflict("benchmark"), v.Refused+" No session started.")
+		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark"), "This pull request's description can't be sent to an agent. Clear it, or pick another."))
 	case v.Hash != q.BenchHash:
-		return startPoint{}, Benchmark{}, "", explained(conflict("benchmark changed"), "Pull request #"+n+"'s description changed since you read it; read it again. No session started.")
+		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark changed"), "Pull request #"+n+"'s description changed since you read it; read it again. No session started."))
 	case v.Pull.Base != q.BenchBase:
-		return startPoint{}, Benchmark{}, "", explained(conflict("benchmark moved"), "Pull request #"+n+"'s base is now commit "+shortSHA(v.Pull.Base)+", not the "+shortSHA(q.BenchBase)+" the page showed, so no session started. Read it again.")
+		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark moved"), "Pull request #"+n+"'s base is now commit "+shortSHA(v.Pull.Base)+", not the "+shortSHA(q.BenchBase)+" the page showed, so no session started. Read it again."))
 	}
 	src, ok := p.cfg.Dispatcher.sources()
 	if !ok {

@@ -81,31 +81,27 @@ func (s *Server) UsePairs(pairs session.PairsPage) {
 	s.mu.Unlock()
 }
 
-func pairAgentsOf(v any) ([]session.PairAgent, bool) {
+func pairAgentOf(v any) (session.PairAgent, bool) {
 	list, ok := v.([]any)
-	if !ok || len(list) == 0 || len(list) > session.MaxPairAgents {
-		return nil, false
+	if !ok || len(list) != 1 {
+		return session.PairAgent{}, false
 	}
-	out := make([]session.PairAgent, 0, len(list))
-	for _, x := range list {
-		m, isObject := x.(map[string]any)
-		agent, okAgent := m["agent"].(string)
-		if !isObject || !keysWithin(m, "agent", "model", "effort") || !okAgent || !agentID.MatchString(agent) {
-			return nil, false
-		}
-		a := session.PairAgent{Agent: agent}
-		for k, dst := range map[string]*string{"model": &a.Model, "effort": &a.Effort} {
-			if raw, has := m[k]; has {
-				t, isText := raw.(string)
-				if !isText || len(t) > 40 {
-					return nil, false
-				}
-				*dst = t
+	m, isObject := list[0].(map[string]any)
+	agent, okAgent := m["agent"].(string)
+	if !isObject || !keysWithin(m, "agent", "model", "effort") || !okAgent || !agentID.MatchString(agent) {
+		return session.PairAgent{}, false
+	}
+	a := session.PairAgent{Agent: agent}
+	for k, dst := range map[string]*string{"model": &a.Model, "effort": &a.Effort} {
+		if raw, has := m[k]; has {
+			t, isText := raw.(string)
+			if !isText || len(t) > 40 {
+				return session.PairAgent{}, false
 			}
+			*dst = t
 		}
-		out = append(out, a)
 	}
-	return out, true
+	return a, true
 }
 
 func benchOf(v any, present bool) (int, string, string, bool) {
@@ -116,7 +112,7 @@ func benchOf(v any, present bool) (int, string, string, bool) {
 	n, okNumber := wholeNumber(m["number"], 1, session.MaxIssueNumber)
 	hash, okHash := m["hash"].(string)
 	base, okBase := m["base"].(string)
-	if !ok || !keysWithin(m, "number", "hash", "base") || !okNumber || !okHash || !session.ValidIssueHash(hash) || !okBase || !commitHex.MatchString(base) {
+	if !ok || !keysWithin(m, "number", "hash", "base") || !okNumber || !okHash || len(hash) > 64 || !okBase || len(base) > 40 {
 		return 0, "", "", false
 	}
 	return n, hash, base, true
@@ -146,7 +142,10 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 		return
 	}
 	limit := pairFor
-	if op == "start" || op == "next" {
+	switch op {
+	case "start":
+		limit = 2*dispatchFor + manageFor
+	case "next":
 		limit = dispatchFor + manageFor
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(limit + writeFor))
@@ -172,7 +171,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusAccepted, map[string]any{"ok": true, "id": started.ID, "sid": started.SID})
+		send(w, http.StatusAccepted, startAnswer(started))
 	case "view", "merged-diff":
 		id, okID := pairID(body)
 		if !keysWithin(body, "op", "pair") || !okID {
@@ -248,18 +247,21 @@ func (s *Server) mergedAPI(ctx context.Context, w http.ResponseWriter, pairs ses
 
 func (s *Server) pairStart(ctx context.Context, w http.ResponseWriter, pairs session.PairsPage, body map[string]any) {
 	path, okPath := pairPath(body)
-	agents, okAgents := pairAgentsOf(body["agents"])
+	agent, okAgent := pairAgentOf(body["agents"])
 	rawBench, hasBench := body["benchmark"]
 	bench, hash, base, okBench := benchOf(rawBench, hasBench)
+	rawFrom, hasFrom := body["from"]
+	from, okFrom := startFromOf(rawFrom, hasFrom)
 	consent, consented := consentOf(body)
 	double, hasDouble := body["double"]
 	isDouble, okDouble := double.(bool)
 	box, okBox := boxOf(body)
-	if !keysWithin(body, "op", "path", "name", "type", "message", "agents", "double", "benchmark", "approve", "costOk", "box") || !okPath || !okAgents || !okBench || !consented || hasDouble && !okDouble || !okBox {
+	if !keysWithin(body, "op", "path", "name", "type", "message", "agents", "secondModel", "double", "benchmark", "from", "issue", "issueHash", "caps", "approve", "costOk", "box") ||
+		!okPath || !okAgent || !okBench || !okFrom || !consented || hasDouble && !okDouble || !okBox {
 		refuse(w, http.StatusBadRequest, "fields")
 		return
 	}
-	for _, k := range []string{"name", "type", "message"} {
+	for _, k := range []string{"name", "type", "message", "secondModel"} {
 		if v, ok := body[k]; ok {
 			if _, isText := v.(string); !isText {
 				refuse(w, http.StatusBadRequest, k)
@@ -267,13 +269,34 @@ func (s *Server) pairStart(ctx context.Context, w http.ResponseWriter, pairs ses
 			}
 		}
 	}
+	issue, issueHash, okIssue := startIssueOf(w, body)
+	if !okIssue {
+		return
+	}
+	caps, okCaps := startCapsOf(w, body)
+	if !okCaps {
+		return
+	}
 	started, err := pairs.Start(ctx, session.PairStart{Path: path, Name: str(body["name"], 400), Type: str(body["type"], 40), Message: str(body["message"], 4*session.MaxText+1),
-		Agents: agents, Double: isDouble, Bench: bench, BenchHash: hash, BenchBase: base, Consent: consent, Box: box})
-	s.logger.Info("pair start", "agents", len(agents), "benchmark", bench > 0, "ok", err == nil)
+		Agent: agent, SecondModel: str(body["secondModel"], 41), Double: isDouble, Bench: bench, BenchHash: hash, BenchBase: base, From: from, Issue: issue, IssueHash: issueHash,
+		Caps: caps, Consent: consent, Box: box})
+	s.logger.Info("pair start", "double", isDouble, "benchmark", bench > 0, "issue", issue > 0, "ok", err == nil, "second", started.Second.SID != "")
 	if err != nil {
 		code, p := status(err)
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusAccepted, map[string]any{"ok": true, "id": started.ID, "sid": started.SID, "pair": started.Pair, "next": started.Next})
+	out := startAnswer(started.Started)
+	out["pair"], out["next"] = started.Pair, started.Next
+	if started.Second.SID != "" {
+		out["second"] = map[string]string{"id": started.Second.ID, "sid": started.Second.SID}
+	}
+	if started.SecondErr != nil {
+		_, p := status(started.SecondErr)
+		out["secondRefused"] = p
+	}
+	if started.CapsRefused == "" && started.Second.CapsRefused != "" {
+		out["capsRefused"] = started.Second.CapsRefused
+	}
+	send(w, http.StatusAccepted, out)
 }

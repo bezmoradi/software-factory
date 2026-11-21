@@ -48,9 +48,11 @@ func send(w http.ResponseWriter, status int, body any) {
 
 type problem struct {
 	Error   string     `json:"error"`
+	Field   string     `json:"field,omitempty"`
 	Message string     `json:"message,omitempty"`
 	Wait    int        `json:"wait,omitempty"`
 	Needs   *needsJSON `json:"needs,omitempty"`
+	Line    string     `json:"line,omitempty"`
 }
 
 func refuse(w http.ResponseWriter, status int, reason string) {

@@ -56,6 +56,7 @@ type Dispatch struct {
 	IssueHash string
 	Effort    string
 	Box       string
+	Caps      *Caps
 
 	pinned    *startPoint
 	group     string
@@ -64,8 +65,9 @@ type Dispatch struct {
 }
 
 type Started struct {
-	SID string
-	ID  string
+	SID         string
+	ID          string
+	CapsRefused string
 }
 
 type Offer struct {
@@ -198,6 +200,7 @@ type Dispatcher struct {
 	removed    []func(sid string)
 
 	branchState func(WorkspaceSession) (string, string, string)
+	trustMoved  trustChanges
 }
 
 var (
@@ -236,6 +239,7 @@ func (d *Dispatcher) installed(a AgentSpec) AgentSpec {
 	if ok, note := d.cfg.Installs.Ready(a.ID); !ok {
 		a.Enabled = false
 		a.Off = note
+		a.install = true
 	}
 	return a
 }
@@ -318,9 +322,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) 
 		return Started{}, err
 	}
 	defer d.endStart()
-	if why := d.reg.halt.starts(); why != "" {
-		return Started{}, explained(conflict("halted"), why)
-	}
 	if q.Box == "" {
 		q.Box = d.askedBox(q)
 	}
@@ -422,7 +423,7 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 		return Started{SID: r.sid, ID: r.id}, err
 	}
 	d.audited(ctx, r)
-	return Started{SID: r.sid, ID: r.id}, nil
+	return Started{SID: r.sid, ID: r.id, CapsRefused: d.startCaps(r.sid, q.Caps)}, nil
 }
 
 func utf8Valid(s string) bool {
@@ -882,9 +883,6 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 	if err := d.claimWake(); err != nil {
 		return err
 	}
-	if why := d.reg.halt.starts(); why != "" {
-		return explained(conflict("halted"), why)
-	}
 	d.gateBox(r)
 	d.mu.Lock()
 	waiting := !r.waitAt.IsZero() && d.reg.now().Sub(r.waitAt) < PendingBoxFor
@@ -1229,9 +1227,6 @@ func (d *Dispatcher) reviewAs(ctx context.Context, sid string, costOK, auto bool
 	}
 	if d.cfg.Reviews == nil {
 		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't run reviews.")
-	}
-	if why := d.reg.halt.automatic(); auto && why != "" {
-		return explained(conflict("halted"), why)
 	}
 	if why := d.automaticHeldIf(auto, sid); why != "" {
 		return explained(conflict("limits"), why)

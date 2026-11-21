@@ -142,6 +142,33 @@ type Needs struct {
 	Box      string
 	Agent    string
 	Code     bool
+	Tries    int
+}
+
+const (
+	NextHome    = "home"
+	NextSignIn  = "sign-in"
+	NextTrust   = "trust"
+	NextApprove = "approve"
+	NextCost    = "cost"
+)
+
+func (n *Needs) NextStep() string {
+	switch {
+	case n == nil:
+		return ""
+	case n.Home != nil:
+		return NextHome
+	case n.SignIn != nil && n.Box != "" && !n.Cost:
+		return NextSignIn
+	case n.Trust != "":
+		return NextTrust
+	case n.Approval != nil:
+		return NextApprove
+	case n.Cost && n.SignIn != nil:
+		return NextCost
+	}
+	return ""
 }
 
 type Consent struct {

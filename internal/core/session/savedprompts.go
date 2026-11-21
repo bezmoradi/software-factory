@@ -221,7 +221,15 @@ func (s *SavedPrompts) save(st SavedPromptState) error {
 	return nil
 }
 
+func PromptsFull(saved int) string {
+	if saved < MaxSavedPrompts {
+		return ""
+	}
+	return "A project keeps at most 50 saved prompts"
+}
+
 func (s *SavedPrompts) SavePrompt(repo, id, name, text string) ([]SavedPrompt, error) {
+	name = strings.TrimSpace(name)
 	if err := s.known(repo); err != nil {
 		return nil, err
 	}

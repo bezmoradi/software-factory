@@ -16,7 +16,7 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: fields }
     no_state_check: "refused with 400 by the route's field check before it reads or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
-    waive: { EXE-09: { rows: [pck_no_path, pck_op_number, pck_list_extra, pck_fetch_no_commit, pck_fetch_commit_number, pck_fetch_extra, pck_add_no_digest, pck_remove_empty, pck_use_extra, pck_use_no_pack, pck_upload_no_files, pck_upload_empty_files, pck_upload_file_extra, pck_upload_no_name], reason: "every row is refused with 400 by the route's field check before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
+    waive: { EXE-09: { rows: [pck_no_path, pck_op_number, pck_list_extra, pck_fetch_no_commit, pck_fetch_commit_number, pck_fetch_extra, pck_add_no_digest, pck_remove_empty, pck_use_extra, pck_use_no_pack, pck_upload_no_files, pck_upload_file_extra, pck_upload_no_name], reason: "every row is refused with 400 by the route's field check before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body"]
     rows:
       - ["pck_no_path", { op: list }]
@@ -30,7 +30,6 @@ tables:
       - ["pck_use_extra", { op: use, path: /workspace/base/demo, pack: none, proctorUnknownField: true }]
       - ["pck_use_no_pack", { op: use, path: /workspace/base/demo }]
       - ["pck_upload_no_files", { op: upload, path: /workspace/base/demo, name: acme }]
-      - ["pck_upload_empty_files", { op: upload, path: /workspace/base/demo, name: acme, files: [] }]
       - ["pck_upload_file_extra", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: x, mode: "0755" }] }]
       - ["pck_upload_no_name", { op: upload, path: /workspace/base/demo, files: [{ path: agents/a.md, text: x }] }]
   - id: PCK-T02
@@ -48,7 +47,7 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", message: "${row.message}" }
     no_state_check: "refused with 400 before the handler fetches anything or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
-    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_fetch_http, pck_fetch_branch, pck_add_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul, pck_upload_twice, pck_upload_bad_name], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
+    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_fetch_http, pck_fetch_branch, pck_add_bad_digest, pck_add_use_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul, pck_upload_twice, pck_upload_bad_name, pck_fetch_empty_url, pck_fetch_empty_commit, pck_upload_empty_files, pck_upload_no_manifest], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body", "error", "message"]
     rows:
       - ["pck_unknown_op", { op: delete, path: /workspace/base/demo }, "op", "The engine lists, fetches, adds, uploads, removes and uses packs only."]
@@ -56,6 +55,7 @@ tables:
       - ["pck_fetch_http", { op: fetch, path: /workspace/base/demo, url: "http://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "A pack comes from a plain https address of a git repository, with no user, query or fragment."]
       - ["pck_fetch_branch", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: main }, "commit", "A pack is pinned by a full 40-character commit hash, never a branch or tag."]
       - ["pck_add_bad_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
+      - ["pck_add_use_bad_digest", { op: add-use, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
       - ["pck_remove_bad_digest", { op: remove, path: /workspace/base/demo, digest: abc }, "digest", "Remove a pack by the digest the page shows."]
       - ["pck_upload_hooks", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: hooks/hooks.json, text: "{}" }] }, "refused upload", "The engine refused this upload: The upload's hooks/hooks.json isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."]
       - ["pck_upload_dotdot", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/../bin/x, text: x }] }, "refused upload", "The engine refused this upload: The upload's agents/../bin/x isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."]
@@ -63,6 +63,10 @@ tables:
       - ["pck_upload_nul", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: "a\u0000b" }] }, "refused upload", "The engine refused this upload: The upload's agents/a.md isn't UTF-8 text with no NUL byte."]
       - ["pck_upload_twice", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: x }, { path: agents/A.md, text: x }] }, "refused upload", "The engine refused this upload: The upload names agents/A.md twice, in some letter case."]
       - ["pck_upload_bad_name", { op: upload, path: /workspace/base/demo, name: Beta, files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: a pack's name is lowercase letters, digits and hyphens, at most 64, starting with a letter or digit."]
+      - ["pck_fetch_empty_url", { op: fetch, path: /workspace/base/demo, url: "", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "A pack comes from a plain https address of a git repository, with no user, query or fragment."]
+      - ["pck_fetch_empty_commit", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: "" }, "commit", "A pack is pinned by a full 40-character commit hash, never a branch or tag."]
+      - ["pck_upload_empty_files", { op: upload, path: /workspace/base/demo, name: acme, files: [] }, "refused upload", "The engine refused this upload: An upload holds 1 to 200 files."]
+      - ["pck_upload_no_manifest", { op: upload, path: /workspace/base/demo, name: "", files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: The folder has no software-factory-pack.json naming the pack at its top."]
   - id: PCK-T03
     name: "/api/packs answers 404 for a project it doesn't list and a pack it doesn't keep"
     do: http.request

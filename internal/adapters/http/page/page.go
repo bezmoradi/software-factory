@@ -642,7 +642,7 @@ func status(err error) (int, problem) {
 	if !ok {
 		code = http.StatusInternalServerError
 	}
-	return code, problem{Error: e.Reason, Message: e.Message, Needs: needsOf(e.Needs)}
+	return code, problem{Error: e.Reason, Field: e.Field, Message: e.Message, Needs: needsOf(e.Needs), Line: e.Line}
 }
 
 func reply(w http.ResponseWriter, err error, okStatus int) {

@@ -672,7 +672,7 @@ func (l *Lessons) Approve(project, id, sid string) error {
 	}
 	in := slices.ContainsFunc(l.cfg.Sessions(), func(i Info) bool { return i.SID == sid && i.Project == project })
 	if !in {
-		return explained(conflict("session"), "Pick a session of this project to send the line to.")
+		return onField("sid", explained(conflict("session"), "Pick a session of this project to send the line to."))
 	}
 	if l.cfg.History != nil {
 		if err := l.cfg.History(sid); err != nil {

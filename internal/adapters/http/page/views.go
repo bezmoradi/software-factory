@@ -86,20 +86,21 @@ func (s *Server) recap(w http.ResponseWriter, body map[string]any) {
 }
 
 type workspaceRowJSON struct {
-	SID       string `json:"sid"`
-	Name      string `json:"name"`
-	Repo      string `json:"repo"`
-	Branch    string `json:"branch"`
-	Tree      string `json:"tree"`
-	Running   bool   `json:"running"`
-	Size      int64  `json:"size"`
-	Entries   int    `json:"entries"`
-	SizeMore  bool   `json:"sizeMore"`
-	SizeKnown bool   `json:"sizeKnown"`
-	State     string `json:"state"`
-	Head      string `json:"head"`
-	Deletable bool   `json:"deletable"`
-	Why       string `json:"why"`
+	SID       string   `json:"sid"`
+	Name      string   `json:"name"`
+	Repo      string   `json:"repo"`
+	Branch    string   `json:"branch"`
+	Tree      string   `json:"tree"`
+	Running   bool     `json:"running"`
+	Size      int64    `json:"size"`
+	Entries   int      `json:"entries"`
+	SizeMore  bool     `json:"sizeMore"`
+	SizeKnown bool     `json:"sizeKnown"`
+	State     string   `json:"state"`
+	Head      string   `json:"head"`
+	Deletable bool     `json:"deletable"`
+	Why       string   `json:"why"`
+	Said      saidJSON `json:"said"`
 }
 
 func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[string]any) {
@@ -130,7 +131,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 		rows := make([]workspaceRowJSON, 0, len(v.Sessions))
 		for _, x := range v.Sessions {
 			rows = append(rows, workspaceRowJSON{SID: x.SID, Name: x.Name, Repo: x.Repo, Branch: x.Branch, Tree: x.Tree, Running: x.Running, Size: x.Size.Bytes, Entries: x.Size.Entries,
-				SizeMore: x.Size.More, SizeKnown: x.SizeKnown, State: x.State, Head: x.Head, Deletable: x.Deletable, Why: x.Why})
+				SizeMore: x.Size.More, SizeKnown: x.SizeKnown, State: x.State, Head: x.Head, Deletable: x.Deletable, Why: x.Why, Said: saidJSONOf(session.WorkspaceSaid(x.State))})
 		}
 		send(w, http.StatusOK, map[string]any{"spaceKnown": v.SpaceKnown, "free": v.Free, "total": v.Total, "low": v.Low, "lowBelow": v.LowBelow, "sessions": rows})
 	case "delete":
@@ -182,6 +183,8 @@ type exceptionJSON struct {
 	Result   string `json:"result"`
 	Verdict  string `json:"verdict"`
 	Reason   string `json:"reason"`
+	Label    string `json:"label"`
+	Note     string `json:"note"`
 }
 
 type exceptionHostJSON struct {
@@ -217,7 +220,8 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 	}
 	items := make([]exceptionJSON, 0, len(v.Items))
 	for _, e := range v.Items {
-		items = append(items, exceptionJSON{Kind: e.Kind, Time: millis(e.Time), SID: e.SID, Repo: e.Repo, Branch: e.Branch, Commit: e.Commit, Reviewer: e.Reviewer, Path: e.Path, Missing: e.Missing, Result: e.Result, Verdict: e.Verdict, Reason: e.Reason})
+		items = append(items, exceptionJSON{Kind: e.Kind, Time: millis(e.Time), SID: e.SID, Repo: e.Repo, Branch: e.Branch, Commit: e.Commit, Reviewer: e.Reviewer, Path: e.Path, Missing: e.Missing, Result: e.Result, Verdict: e.Verdict, Reason: e.Reason,
+			Label: session.ExceptionLabel(e.Kind, e.Result, e.Verdict, e.Reviewer, e.Path, e.Missing), Note: session.ExceptionNote(e.Kind, e.Verdict, e.Reason)})
 	}
 	hosts := make([]exceptionHostJSON, 0, len(v.Hosts))
 	for _, h := range v.Hosts {
@@ -231,7 +235,7 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 	for _, x := range v.Rules {
 		list := make([]ruleJSON, 0, len(x.Rules))
 		for _, rule := range x.Rules {
-			list = append(list, ruleJSON{Rule: rule.Rule, Place: string(rule.Place), Worktree: rule.Worktree, Path: rule.Path, Wide: nonNil(rule.Wide)})
+			list = append(list, ruleJSON{Rule: rule.Rule, Place: string(rule.Place), Worktree: rule.Worktree, Path: rule.Path, Wide: nonNil(rule.Wide), Where: session.PlaceLabel(string(rule.Place))})
 		}
 		rules = append(rules, exceptionRulesJSON{Repo: x.Repo, Problem: x.Problem, Rules: list})
 	}

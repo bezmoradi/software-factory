@@ -1,11 +1,10 @@
 import { api, sendState } from './api.ts'
-import { armed, current, sessions, sleeping, state, waitingOf, working, type Session } from './app-state.ts'
+import { armed, current, offWhy, sessions, state, type Session } from './app-state.ts'
 import { setSide } from './layout.ts'
 import type { Navigation } from './navigation.ts'
 import { reviewAsking, type SessionActions } from './session-actions.ts'
-import { byId, visible } from './lib/dom.ts'
+import { byId, shown, visible } from './lib/dom.ts'
 import { label } from './lib/format.ts'
-import { sessionState } from './components/session-list.ts'
 import { isMac, openPalette, openShortcuts, paletteKey, typing, type PaletteItem } from './components/palette.ts'
 import { openEgress } from './components/egress-panel.ts'
 import { openAway } from './components/halt.ts'
@@ -47,14 +46,13 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     const group = `This session: ${name}`
     const offline = !state.connected ? 'the page isn’t connected to the engine' : ''
     const rv = reviewsOf(s)
-    const noReview = !rv ? 'reviews and pushes run for a session this engine started in a project of your list' : rv.disabled
+    const noReview = !rv ? offWhy(s, 'review') : rv.disabled
     const out: PaletteItem[] = []
-    out.push({ id: 'wake', group, label: 'Wake the session', detail: 'Asks for any sign-in or cost confirmation, as Wake does', off: offline || (!sleeping(s) ? 'it isn’t a stopped Claude Code background session' : ''), run: () => void wakeSession(s) })
-    out.push({ id: 'turn', group, label: 'Stop the turn', off: offline || (byId('stop').hidden ? 'no turn is running that this page controls' : ''), run: () => byId('stop').click() })
-    const manageBox = byId('manage')
+    out.push({ id: 'wake', group, label: 'Wake the session', detail: 'Asks for any sign-in or cost confirmation, as Wake does', off: offline || offWhy(s, 'wake'), run: () => void wakeSession(s) })
+    out.push({ id: 'turn', group, label: 'Stop the turn', off: offline || offWhy(s, 'stop'), run: () => byId('stop').click() })
     const manageButton = byId<HTMLButtonElement>('manage-button')
     const stopping = manageButton.dataset.action !== 'remove'
-    out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || (manageBox.hidden ? 'only a Claude Code background session this engine started is stopped or deleted here' : manageButton.disabled || manageButton.getAttribute('aria-busy') === 'true' ? 'it is already being stopped or deleted' : ''), run: () => {
+    out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || offWhy(s, 'manage') || (manageButton.disabled || manageButton.getAttribute('aria-busy') === 'true' ? 'it is already being stopped or deleted' : ''), run: () => {
       for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
       manageButton.click()
       manageButton.focus()
@@ -62,7 +60,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     out.push({ id: 'review', group, label: 'Review', detail: 'Runs the required reviewers, asking for cost confirmation when the sign-in is per use', off: offline || noReview || (s.info.review?.running || reviewAsking.has(s.sid) ? 'a review is running' : ''), run: () => void startReview(s, false) })
     out.push({ id: 'push', group, label: 'Push', detail: 'The gate checks the reviews first; a held push waits on its card', off: offline || noReview || (rv?.pushing ? 'a push is being decided' : rv?.pushed ? 'the latest commit is already pushed' : ''), run: () => void startPush(s) })
     out.push({ id: 'changes', group, label: 'Open Changes', detail: 'The diff, its comparison points and viewed marks', off: !s.changes ? 'the engine hasn’t sent this session’s changes yet' : '', run: () => openSessionPanel('changes') })
-    out.push({ id: 'rules', group, label: 'What this session may and may not do', off: !s.info.verified ? 'only a session this engine started has this view' : '', run: () => openSessionPanel('rules') })
+    out.push({ id: 'rules', group, label: 'What this session may and may not do', off: offWhy(s, 'rules'), run: () => openSessionPanel('rules') })
     return out
   }
 
@@ -71,8 +69,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     const s = current()
     if (s) items.push(...sessionActions(s))
     for (const x of [...sessions.values()].sort((a, b) => (b.info.startedAt || 0) - (a.info.startedAt || 0))) {
-      const st = sessionState({ ...x.info, busy: working(x), needs: waitingOf(x).length })
-      items.push({ id: `s:${x.sid}`, group: 'Sessions', label: visible(label(x.info)), detail: [st.word, x.info.project, x.info.lineage?.branch].filter(Boolean).map(t => visible(String(t))).join(' · '), run: () => go(`s/${x.sid}`) })
+      items.push({ id: `s:${x.sid}`, group: 'Sessions', label: visible(label(x.info)), detail: [shown(x.info.summary?.word ?? ''), x.info.project, x.info.lineage?.branch].filter(Boolean).map(t => visible(String(t))).join(' · '), run: () => go(`s/${x.sid}`) })
     }
     for (const p of projectList()) {
       items.push({ id: `p:${p.path}`, group: 'Projects', label: visible(p.name), detail: 'Open the project', run: () => {
@@ -102,7 +99,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     panel('v:signin', 'Reviewers’ sign-in', () => openSignIn(), needsEngine)
     panel('v:away', 'Away mode', () => openAway(), needsEngine)
     panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
-    panel('v:keys', 'Keyboard shortcuts', () => showShortcuts())
+    items.push({ id: 'v:keys', group: 'Views and panels', label: 'Keyboard shortcuts', keys: document.documentElement.dataset.keys === 'off' ? undefined : ['?'], run: () => showShortcuts() })
     return items
   }
 

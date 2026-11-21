@@ -1,5 +1,5 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { busy, button, el, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 
@@ -65,6 +65,7 @@ class SfLessons extends HTMLElement {
   #busy = ''
   #doing = ''
   #chosen = new Map<string, string>()
+  #pickRefused = new Map<string, string>()
   #built = false
   #gen = 0
   #reads = 0
@@ -117,13 +118,17 @@ class SfLessons extends HTMLElement {
     if (project !== this.#project || (read && gen !== this.#gen)) return false
     this.#busy = ''
     if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: Needs } | null
-      if (problem?.needs?.cost && body.op === 'suggest' && !body.costOk) {
+      const problem = await res?.json().catch(() => null) as { error?: unknown; field?: unknown; message?: unknown; needs?: Needs } | null
+      if (problem?.needs?.next === 'cost' && body.op === 'suggest' && !body.costOk) {
         const ok = await consentFor(problem.needs, project, 'suggesting instruction lines')
         if (ok?.costOk) return this.#call({ ...body, costOk: true })
       }
-      say(this.#said, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+      const said = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : ''
+      const pick = body.op === 'approve' && problem?.field === 'sid' && said && typeof body.id === 'string' ? body.id : ''
+      if (pick) this.#pickRefused.set(pick, said)
+      say(this.#said, pick ? '' : said || 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
+      if (pick) document.getElementById(`lesson-session-${pick}`)?.focus()
       if (read) this.#retry(true)
       return false
     }
@@ -230,16 +235,15 @@ class SfLessons extends HTMLElement {
       pick.append(o)
     }
     pick.value = this.#chosen.get(x.id) ?? ''
-    pick.addEventListener('change', () => this.#chosen.set(x.id, pick.value))
+    pick.addEventListener('change', () => {
+      this.#chosen.set(x.id, pick.value)
+      if (this.#pickRefused.delete(x.id)) labelError(pick, '')
+    })
     const held = this.#busy === x.id
     const approve = button('Approve', 'small', () => {
       if (held) return
-      if (!pick.value) {
-        pick.setAttribute('aria-invalid', 'true')
-        pick.focus()
-        return
-      }
-      pick.removeAttribute('aria-invalid')
+      this.#pickRefused.delete(x.id)
+      labelError(pick, '')
       this.#busy = x.id
       this.#doing = 'approve'
       void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
@@ -261,6 +265,7 @@ class SfLessons extends HTMLElement {
     if (held && this.#doing === 'decline') busy(decline, true)
     else decline.setAttribute('aria-disabled', String(held))
     row.append(label, pick, approve, decline)
+    labelError(pick, this.#pickRefused.get(x.id) ?? '')
     li.append(row)
     return li
   }

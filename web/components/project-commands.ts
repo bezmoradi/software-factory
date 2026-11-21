@@ -1,19 +1,12 @@
 import { api } from '../api.ts'
-import { button, el, field, focusedKey, refocus, say, statusLine, whileBusy } from '../lib/dom.ts'
-
-const MAX = 300
-const IMAGE = /^(?:[a-z0-9](?:[a-z0-9.-]{0,252}[a-z0-9])?(?::[0-9]{1,5})?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}$/
+import { button, el, field, focusedKey, labelError, refocus, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 
 let serial = 0
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
-}
-
-function bytes(text: string): number {
-  return new TextEncoder().encode(text).length
+async function problemOf(res: Response | null): Promise<{ text: string; field: string }> {
+  if (!res) return { text: 'The engine didn\'t answer. Try again.', field: '' }
+  const body = await res.json().catch(() => null) as { message?: unknown; field?: unknown } | null
+  return { text: typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.', field: typeof body?.field === 'string' ? body.field : '' }
 }
 
 class SfProjectCommands extends HTMLElement {
@@ -45,7 +38,7 @@ class SfProjectCommands extends HTMLElement {
       input.placeholder = holder
       input.spellcheck = false
       input.autocomplete = 'off'
-      input.maxLength = MAX
+      input.addEventListener('input', () => labelError(input, ''))
     }
     this.replaceChildren(
       el('h3', 'label', 'Check and setup commands'),
@@ -76,7 +69,7 @@ class SfProjectCommands extends HTMLElement {
       const res = await api('/api/project-commands', { op: 'read', name: project }).catch(() => null)
       if (project !== this.#project) return
       if (!res || !res.ok) {
-        say(this.#said, await problemOf(res), 'warn')
+        say(this.#said, (await problemOf(res)).text, 'warn')
         return this.#retry(true)
       }
       const body = await res.json().catch(() => null) as { check?: unknown; setup?: unknown; image?: unknown; browser?: unknown } | null
@@ -100,21 +93,22 @@ class SfProjectCommands extends HTMLElement {
   }
 
   async #store() {
-    const check = this.#check.value.trim()
-    const setup = this.#setup.value.trim()
-    const image = this.#image.value.trim()
-    const browser = this.#browser.value.trim()
-    if (bytes(check) > MAX || bytes(setup) > MAX || bytes(browser) > MAX || /[\r\n]/.test(check + setup + browser)) {
-      say(this.#said, `Each command is one line of at most ${MAX} bytes.`, 'warn')
-      return
-    }
-    if (image && (bytes(image) > MAX || !IMAGE.test(image))) {
-      say(this.#said, 'The image is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits.', 'warn')
-      return
-    }
+    const check = this.#check.value
+    const setup = this.#setup.value
+    const image = this.#image.value
+    const browser = this.#browser.value
+    const inputs: Record<string, HTMLInputElement> = { check: this.#check, setup: this.#setup, image: this.#image, browser: this.#browser }
+    for (const input of Object.values(inputs)) labelError(input, '')
+    say(this.#said, '')
     const res = await whileBusy(this.#save, () => api('/api/project-commands', { op: 'set', name: this.#project, check, setup, image, browser }).catch(() => null))
     if (!res || !res.ok) {
-      say(this.#said, await problemOf(res), 'warn')
+      const { text, field } = await problemOf(res)
+      const own = Object.hasOwn(inputs, field) ? inputs[field] : undefined
+      if (own) {
+        labelError(own, visible(text))
+        return own.focus()
+      }
+      say(this.#said, text, 'warn')
       return
     }
     say(this.#said, 'Saved. New turns and new sessions use them.', 'muted')

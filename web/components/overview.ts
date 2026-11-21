@@ -1,32 +1,20 @@
 import { button, el, emit, field, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
-import { agentWord, label, plural, signInStep } from '../lib/format.ts'
-import { bySessionOrder, isRunning, loginNeeded, sessionKey, sessionLink, sessionRow, sessionTable, sharing, titled } from './session-list.ts'
-import type { AskEvent, CardEvent, OverviewSession, PermissionEvent, SessionInfo } from '../types.ts'
+import { agentWord, label, plural } from '../lib/format.ts'
+import { bySessionOrder, isRunning, sessionKey, sessionLink, sessionRow, sessionTable, titled } from './session-list.ts'
+import type { AskEvent, CardEvent, OverviewSession, PermissionEvent } from '../types.ts'
 
 const CARD_WORDS: Record<string, ((c: CardEvent) => string) | undefined> = { permission: c => `wants to run ${(c as PermissionEvent).tool}`, ask: c => `asks: ${(c as AskEvent).questions?.[0]?.question ?? 'a question'}`, plan: () => 'has a plan ready' }
 
 const SETTLED = new Set(['done', 'stopped', 'blocked', 'failed'])
 
-export function warnings(s: SessionInfo, all: SessionInfo[]): string[] {
-  const out: string[] = []
-  if (s.verified && s.level === 'locked' && s.sandboxed === false) out.push(`Locked, not sandboxed: every check since this run started passed, but a check failed or couldn't run in an earlier run, so the session's work isn't counted as sandboxed and its pushes are held on the sandbox item.`)
-  if (s.verified && s.level === 'held') out.push(`Held: every push from this session is held and no new session starts, because ${s.levelReason || 'the sandbox check hasn\'t passed'}.${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
-  if (loginNeeded(s)) out.push(`Claude Code couldn't use this session's login: its last request failed authentication. Sign in again inside the session's container (${signInStep(s.box)}); this page never signs in for you.`)
-  if (s.signInWait) out.push(`Waiting for sign-in: ${agentWord(s.agent)} in this session's container isn't signed in. Press Wake to open the session's sign-in panel, sign in there, then continue.`)
-  if (s.homeHeld) out.push(`Its settings changed since its last start: ${agentWord(s.agent)}'s user settings in this session's container changed, so it didn't wake. Press Wake to review them.`)
-  const others = sharing(s, all)
-  if (others.length) out.push(`${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} also in ${s.checkout}, with no worktree between them, and at least one of these sessions is working, so their edits can collide.`)
-  return out
-}
-
 export type SessionFilter = 'running' | 'waiting' | 'held' | 'stopped' | 'done'
 
-export const SESSION_FILTERS: { id: SessionFilter; label: string; test: (s: OverviewSession) => boolean }[] = [
-  { id: 'running', label: 'Running', test: s => isRunning(s) },
-  { id: 'waiting', label: 'Waiting for you', test: s => (s.waiting?.length ?? 0) > 0 || !!s.needs || !!s.signInWait || !!s.homeHeld },
-  { id: 'held', label: 'Held push', test: s => s.push?.result === 'held' && !s.push.running },
-  { id: 'stopped', label: 'Stopped', test: s => !isRunning(s) && s.state !== 'done' },
-  { id: 'done', label: 'Done', test: s => !isRunning(s) && s.state === 'done' },
+export const SESSION_FILTERS: { id: SessionFilter; label: string }[] = [
+  { id: 'running', label: 'Running' },
+  { id: 'waiting', label: 'Waiting for you' },
+  { id: 'held', label: 'Held push' },
+  { id: 'stopped', label: 'Stopped' },
+  { id: 'done', label: 'Done' },
 ]
 
 const MAX_QUERY = 200
@@ -77,7 +65,6 @@ class SfOverview extends HTMLElement {
     this.#states = from.states
     this.#search.type = 'search'
     this.#search.id = 'session-search'
-    this.#search.maxLength = MAX_QUERY
     this.#search.autocomplete = 'off'
     this.#search.spellcheck = false
     this.#search.placeholder = 'Name, branch or project'
@@ -163,7 +150,7 @@ class SfOverview extends HTMLElement {
   #paintTools(all: OverviewSession[], matching: OverviewSession[]) {
     const focused = document.activeElement instanceof HTMLElement && this.#chips.contains(document.activeElement) ? document.activeElement.dataset.key ?? '' : ''
     this.#chips.replaceChildren(...SESSION_FILTERS.map(f => {
-      const n = all.filter(s => sessionMatches(s, this.#query) && f.test(s)).length
+      const n = all.filter(s => sessionMatches(s, this.#query) && !!s.filters?.includes(f.id)).length
       const on = this.#states.has(f.id)
       const chip = button('', `ghost small chip${on ? ' on' : ''}`, () => {
         const next = new Set(this.#states)
@@ -185,7 +172,7 @@ class SfOverview extends HTMLElement {
   #render() {
     const focused = focusedKey(this)
     const all = this.#sessions
-    const visibleSessions = all.filter(s => sessionMatches(s, this.#query) && (!this.#states.size || SESSION_FILTERS.some(f => this.#states.has(f.id) && f.test(s))))
+    const visibleSessions = all.filter(s => sessionMatches(s, this.#query) && (!this.#states.size || SESSION_FILTERS.some(f => this.#states.has(f.id) && !!s.filters?.includes(f.id))))
     this.#paintTools(all, visibleSessions)
     const shownSet = new Set(visibleSessions.map(s => s.sid))
     const cards = all.flatMap(s => (s.waiting || []).map(c => ({ s, c }))).sort((a, b) => (a.c.ts || 0) - (b.c.ts || 0))

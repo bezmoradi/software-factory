@@ -153,10 +153,6 @@ func (p *Pushes) saveWaiting() {
 }
 
 func (p *Pushes) Resume(_ context.Context) int {
-	if p.halted(ByReviews) != "" {
-		p.cfg.Logger.Info("push resume", "event", "held-by-halt")
-		return 0
-	}
 	p.mu.Lock()
 	plans := maps.Clone(p.waiting)
 	p.mu.Unlock()
@@ -231,7 +227,7 @@ func (p *Pushes) work() {
 	q := &p.resume
 	for {
 		q.mu.Lock()
-		if len(q.queue) == 0 || ctx.Err() != nil || p.stopping() || p.halted(ByReviews) != "" {
+		if len(q.queue) == 0 || ctx.Err() != nil || p.stopping() {
 			q.running = false
 			q.mu.Unlock()
 			return
@@ -349,8 +345,6 @@ func (p *Pushes) resumeOne(ctx context.Context, item queuedReview) bool {
 	switch {
 	case ok && e.Reason == "reviewing":
 		return true
-	case ok && e.Reason == "halted":
-		return false
 	case ok && e.Reason == "reviews":
 		return true
 	case (!ok || slices.Contains(transientStart, e.Reason)) && p.cfg.Now().Before(item.until):

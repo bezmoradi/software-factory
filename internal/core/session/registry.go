@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -108,53 +109,62 @@ type Batch struct {
 }
 
 type Info struct {
-	SID          string
-	Cwd          string
-	Name         string
-	ID           string
-	Kind         string
-	Agent        string
-	Project      string
-	Mode         string
-	Epoch        string
-	StartedAt    time.Time
-	Verified     bool
-	Running      bool
-	Live         bool
-	Disputed     bool
-	Outdated     bool
-	Controlled   bool
-	Busy         bool
-	Login        bool
-	Claims       []string
-	Needs        int
-	LastSeq      int64
-	Level        level.Level
-	LevelReason  string
-	LevelDropped bool
-	LevelLost    bool
-	Sandboxed    bool
-	Review       *ReviewView
-	Push         *PushView
-	Forge        []ForgeView
-	SignIn       *SignIn
-	State        string
-	Status       string
-	WaitingFor   string
-	Queued       int
-	Unbacked     []TurnMarks
-	StopReason   string
-	Uncommitted  *Uncommitted
-	Overlaps     []Overlap
-	Checks       []AgentCheck
-	Lineage      *Lineage
-	Follow       *FollowView
-	Splits       []SplitView
-	Box          string
-	SignInWait   bool
-	HomeHeld     bool
-	Branch       string
-	Doubled      bool
+	SID             string
+	Cwd             string
+	Name            string
+	ID              string
+	Kind            string
+	Agent           string
+	Project         string
+	Mode            string
+	Epoch           string
+	StartedAt       time.Time
+	Verified        bool
+	Running         bool
+	Live            bool
+	Disputed        bool
+	Outdated        bool
+	Controlled      bool
+	Busy            bool
+	Login           bool
+	Claims          []string
+	Needs           int
+	LastSeq         int64
+	Level           level.Level
+	LevelReason     string
+	LevelDropped    bool
+	LevelLost       bool
+	Sandboxed       bool
+	Review          *ReviewView
+	Push            *PushView
+	Forge           []ForgeView
+	SignIn          *SignIn
+	State           string
+	Status          string
+	WaitingFor      string
+	Queued          int
+	Unbacked        []TurnMarks
+	StopReason      string
+	Uncommitted     *Uncommitted
+	Overlaps        []Overlap
+	Checks          []AgentCheck
+	Lineage         *Lineage
+	Follow          *FollowView
+	Splits          []SplitView
+	SplitGoal       *SplitGoal
+	Box             string
+	SignInWait      bool
+	HomeHeld        bool
+	Branch          string
+	Doubled         bool
+	Stalled         bool
+	StalledSince    time.Time
+	Compacting      bool
+	Subagents       bool
+	CheckpointSaved bool
+	Step            string
+	StepsRan        []string
+	AgentStates     map[string]string
 }
 
 type conn struct {
@@ -195,12 +205,21 @@ type admitted struct {
 	forge        []ForgeView
 	follow       *FollowView
 	splits       []SplitView
+	splitGoal    *SplitGoal
 	turnLog      *turnLog
 	unbacked     []TurnMarks
 	lastMessage  string
 	turnSince    time.Time
 	stopReason   string
 	doneItself   bool
+	lastReport   time.Time
+	subagents    bool
+	compacting   bool
+	contextLevel string
+	checkpointed string
+	step         string
+	stepsRan     []string
+	agentStates  map[string]string
 }
 
 type replay struct {
@@ -263,7 +282,7 @@ var (
 	controlChars   = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 )
 
-var engineFrames = map[string]bool{"hello": true, "sessions": true, "reset": true, "dropped": true, "omitted": true}
+var engineFrames = map[string]bool{"hello": true, "sessions": true, "reset": true, "dropped": true, "omitted": true, NotifyFrame: true}
 
 var forwarded = map[string]bool{
 	"prompt": true, "command": true, "text": true, "tool": true, "tool_done": true, "busy": true, "idle": true,
@@ -609,6 +628,7 @@ func (r *Registry) Report(given string, b Batch) error {
 			continue
 		}
 		shown := forwarded[kind]
+		turnEnded := false
 		if kind == "workflow" {
 			clean, ok := workflowOf(ev)
 			if !ok {
@@ -630,6 +650,9 @@ func (r *Registry) Report(given string, b Batch) error {
 				continue
 			}
 			c.lastSeq = seq
+			turnEnded = kind == "idle" && c.busy
+			changed = r.noteReport(c.sid, kind, ev, now) || changed
+			changed = r.noteContext(c.sid, kind, ev) || changed
 			r.limitsSeen(c, kind, ev, now)
 			r.trackTurn(c, kind, ev, seq, now)
 			r.markTurn(c.sid, kind, ev, now)
@@ -656,6 +679,10 @@ func (r *Registry) Report(given string, b Batch) error {
 			frame["epoch"] = c.epoch
 			delete(frame, "away")
 			delete(frame, "reported")
+			delete(frame, "checkpoint")
+			if cp := r.checkpointOf(c.sid, kind, ev); cp != nil {
+				frame["checkpoint"] = cp
+			}
 			if !c.bridged || kind != "prompt" {
 				frame["reported"] = true
 			}
@@ -673,6 +700,9 @@ func (r *Registry) Report(given string, b Batch) error {
 			continue
 		}
 		r.broadcast(frame, now)
+		if turnEnded {
+			r.broadcast(notifyOf(c.sid, NotifyTurn, "turn:"+c.sid+":"+strconv.FormatInt(seq, 10)), now)
+		}
 	}
 	if changed {
 		r.announce(now)
@@ -1025,6 +1055,9 @@ func (r *Registry) SetReview(sid string, v ReviewView) {
 		return
 	}
 	v = v.clone()
+	if key, ok := reviewFinished(sid, a.review, v); ok {
+		r.broadcast(notifyOf(sid, NotifyReview, key), r.now())
+	}
 	a.review = &v
 	r.announce(r.now())
 }
@@ -1275,6 +1308,11 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		if len(a.splits) > 0 {
 			info.Splits = slices.Clone(a.splits)
 			info.Needs += splitsWaiting(a.splits)
+			if a.splitGoal != nil {
+				g := *a.splitGoal
+				g.Queue = slices.Clone(a.splitGoal.Queue)
+				info.SplitGoal = &g
+			}
 		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor
@@ -1291,6 +1329,8 @@ func (r *Registry) info(sid string, now time.Time) Info {
 			info.Needs++
 		}
 	}
+	r.workingInto(sid, &info)
+	r.stallInto(sid, &info, now)
 	lv := level.Of(observations)
 	info.Level = lv.Level
 	info.LevelReason = lv.Reason
@@ -1361,11 +1401,16 @@ func (r *Registry) Replay(stream, sid, epoch string, since int64) error {
 	return nil
 }
 
+const ShellLine = "The page doesn't run shell lines: it sends messages to the agent. Ask it to run the command, or run it yourself in the agent container."
+
+func shellLine(text string) *Error {
+	e := explained(invalid("command"), ShellLine)
+	e.Line = strings.TrimSpace(strings.TrimPrefix(text, "!"))
+	return e
+}
+
 func (r *Registry) Message(sid, text string, confirm bool, images, files []string) error {
 	text = strings.TrimSpace(text)
-	if why := r.halt.turns(); why != "" {
-		return explained(conflict("halted"), why)
-	}
 	if why := r.limitsMessageHeld(sid); why != "" {
 		return explained(conflict("cap"), why)
 	}
@@ -1377,14 +1422,19 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 	now := r.now()
 	c, err := r.controllable(sid, true, now)
 	if err != nil {
+		if e, ok := errors.AsType[*Error](err); ok && e.Reason == "read-only" {
+			return explained(e, "This session is read-only on this page.")
+		}
 		return err
 	}
 	attached := len(images) > 0 || len(files) > 0
 	switch {
-	case (text == "" && !attached) || utf16Len(text) > MaxText || !utf8.ValidString(text):
-		return invalid("text")
+	case text == "" && !attached:
+		return explained(invalid("text"), "Type a message first.")
+	case utf16Len(text) > MaxText || !utf8.ValidString(text):
+		return explained(invalid("text"), "A message holds at most 20,000 characters.")
 	case strings.HasPrefix(text, "!"):
-		return invalid("command")
+		return shellLine(text)
 	case attached && commandName(text) != "":
 		return explained(invalid("command"), "A command can't carry images or files. Send them in a message of their own.")
 	case len(images) > 0 && r.uploads.noImage[sid]:
@@ -1410,6 +1460,7 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 	msg["kind"] = "prompt"
 	sent, noted := r.noted(sid, text)
 	msg["text"] = sent
+	asked := r.checkpointAsked(sid, text)
 	if q := r.queued[sid]; q != nil {
 		if len(q.msgs) >= maxQueued {
 			return explained(limited("queue"), "Twenty messages already wait for this session to wake.")
@@ -1424,6 +1475,9 @@ func (r *Registry) Message(sid, text string, confirm bool, images, files []strin
 	r.tell(c, msg, now)
 	if noted {
 		r.dropNotesLocked(sid)
+	}
+	if asked {
+		r.announce(now)
 	}
 	if commandName(text) == "" {
 		r.limitsMessage(sid)
@@ -1467,8 +1521,9 @@ func (r *Registry) Answer(sid, id string, value any) error {
 	if _, err := r.controllable(sid, true, now); err != nil {
 		return err
 	}
-	if !validAnswer(k, value) {
-		return invalid("answer")
+	value = normalAnswer(k, value)
+	if err := answerError(k, value); err != nil {
+		return err
 	}
 	if k.kind == "permission" {
 		r.halt.answered(sid, k, value, false)

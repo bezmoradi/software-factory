@@ -1,22 +1,11 @@
 import { api } from '../api.ts'
-import { around, busy, button, el, field, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { around, busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 
-const MAX_NAME = 120
-const MAX_TEXT = 500
-
-const KINDS: Record<string, string> = {
-  requirements: 'Requirements approved',
-  plan: 'Plan approved',
-  override: 'Verdict overridden',
-  allow: 'Push allowed',
-  denied: 'Push denied',
-  merged: 'Pull request merged',
-  note: 'Your entry',
-}
 
 interface Entry {
   id: string
   kind: string
+  label: string
   at: number
   line: string
   reason: string
@@ -47,8 +36,8 @@ function str(x: unknown): string {
 function readEntry(x: unknown): Entry[] {
   if (!x || typeof x !== 'object') return []
   const e = x as Record<string, unknown>
-  if (typeof e.id !== 'string' || !/^[0-9a-f]{16}$/.test(e.id) || typeof e.kind !== 'string' || !Object.hasOwn(KINDS, e.kind)) return []
-  return [{ id: e.id, kind: e.kind, at: Number(e.at) || 0, line: shown(str(e.line)), reason: shown(str(e.reason)), withheld: e.withheld === true, name: str(e.name), text: str(e.text), hidden: e.hidden === true, added: e.added === true, edited: e.edited === true }]
+  if (typeof e.id !== 'string' || !/^[0-9a-f]{16}$/.test(e.id) || typeof e.kind !== 'string' || typeof e.label !== 'string') return []
+  return [{ id: e.id, kind: e.kind, label: e.label, at: Number(e.at) || 0, line: shown(str(e.line)), reason: shown(str(e.reason)), withheld: e.withheld === true, name: str(e.name), text: str(e.text), hidden: e.hidden === true, added: e.added === true, edited: e.edited === true }]
 }
 
 function readView(body: unknown): LogView | null {
@@ -79,18 +68,17 @@ class SfDecisionLog extends HTMLElement {
   #n = ++serial
   #order: string[] = []
   #formFor = ''
+  #refused = ''
+  #bad: { input: HTMLElement; text: string } | null = null
 
   constructor() {
     super()
     this.#adding.rows = 2
-    this.#adding.maxLength = MAX_TEXT
     this.#adding.id = `decision-add-${this.#n}`
     this.#adding.placeholder = 'A decision for the next sessions, such as "Keep the public API stable until 2.0"'
-    this.#name.maxLength = MAX_NAME
     this.#name.id = `decision-name-${this.#n}`
     this.#name.placeholder = 'What it was, such as "Sign-in by email"'
     this.#text.rows = 3
-    this.#text.maxLength = MAX_TEXT
     this.#text.id = `decision-text-${this.#n}`
     this.#text.placeholder = 'Your own wording; empty keeps the engine\'s line'
     this.#hidden.type = 'checkbox'
@@ -99,6 +87,11 @@ class SfDecisionLog extends HTMLElement {
     this.#name.dataset.key = 'decision-name'
     this.#text.dataset.key = 'decision-text'
     this.#hidden.dataset.key = 'decision-hidden'
+    for (const input of [this.#adding, this.#name, this.#text]) input.addEventListener('input', () => {
+      if (this.#bad?.input !== input) return
+      this.#bad = null
+      labelError(input, '')
+    })
   }
 
   set project(value: string) {
@@ -120,13 +113,18 @@ class SfDecisionLog extends HTMLElement {
     const project = this.#project
     this.#busy = true
     this.#doing = key
+    this.#bad = null
     this.#paint()
     const res = await api('/api/decision-log', body).catch(() => null)
     if (project !== this.#project) return false
     this.#busy = false
     const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
+    this.#refused = typeof answer?.error === 'string' ? answer.error : ''
     if (!res || !res.ok) {
-      say(this.#status, typeof answer?.message === 'string' && answer.message ? shown(answer.message) : 'The engine didn\'t answer. Try again.', 'warn')
+      const said = typeof answer?.message === 'string' && answer.message ? shown(answer.message) : ''
+      const input = !said ? null : body.op === 'add' ? (this.#refused === 'text' ? this.#adding : null) : body.op === 'set' ? (this.#refused === 'name' ? this.#name : this.#refused === 'text' ? this.#text : null) : null
+      this.#bad = input && { input, text: said }
+      say(this.#status, input ? '' : said || 'The engine didn\'t answer. Try again.', 'warn')
       this.#paint()
       return false
     }
@@ -137,12 +135,12 @@ class SfDecisionLog extends HTMLElement {
   }
 
   async #add() {
-    const text = this.#adding.value.trim()
-    if (!text || this.#busy) return
+    const text = this.#adding.value
+    if (this.#busy) return
     if (await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add')) {
       this.#adding.value = ''
       say(this.#status, 'Added. New sessions get it with their first message.', 'muted')
-    }
+    } else this.#adding.focus()
   }
 
   #edit(e: Entry) {
@@ -158,13 +156,13 @@ class SfDecisionLog extends HTMLElement {
 
   async #save(e: Entry) {
     if (this.#busy) return
-    const name = this.#name.value.trim()
-    const text = this.#text.value.trim()
+    const name = this.#name.value
+    const text = this.#text.value
     if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)) {
       this.#editing = ''
       say(this.#status, 'Saved. It stays through every rebuild of the log.', 'muted')
       this.#paint()
-    }
+    } else (this.#refused === 'name' ? this.#name : this.#text).focus()
   }
 
   #form(e: Entry): HTMLElement {
@@ -194,7 +192,7 @@ class SfDecisionLog extends HTMLElement {
 
   #entry(e: Entry): HTMLElement {
     const li = el('li', e.hidden ? 'muted' : '')
-    li.append(el('span', 'muted', `${day(e.at)} `), el('strong', '', KINDS[e.kind] ?? e.kind))
+    li.append(el('span', 'muted', `${day(e.at)} `), el('strong', '', e.label))
     if (e.name) li.append(` “${shown(e.name)}”`)
     if (e.hidden) li.append(' ', el('span', 'tag', 'hidden'))
     if (e.line) li.append(el('p', 'small muted', e.line))
@@ -263,6 +261,7 @@ class SfDecisionLog extends HTMLElement {
     this.#hold(again)
     parts.push(again, this.#status)
     replaceKeeping(this, parts)
+    for (const input of [this.#adding, this.#name, this.#text]) labelError(input, this.#bad?.input === input ? this.#bad.text : '')
     this.#order = v?.entries.map(e => e.id) ?? []
     this.#formFor = this.#editing
     refocus(this, focused, () => near)

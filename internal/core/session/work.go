@@ -30,6 +30,7 @@ const (
 	TeamFile       = "software-factory.json"
 	DefaultRounds  = 3
 	maxRounds      = 20
+	RoundsMax      = maxRounds
 )
 
 var (
@@ -224,6 +225,28 @@ type GateView struct {
 	CatalogWhy    string
 	Lock          LockView
 	Change        *TypeChange
+	Started       BranchStart
+}
+
+type BranchStart string
+
+const (
+	StartedUnknown BranchStart = ""
+	StartedNone    BranchStart = "none"
+	StartedCommits BranchStart = "commits"
+	StartedNoBase  BranchStart = "nobase"
+)
+
+func startedOf(g gathered) BranchStart {
+	switch {
+	case g.head == "" || !g.listed:
+		return StartedUnknown
+	case g.base == "":
+		return StartedNoBase
+	case g.base == g.head:
+		return StartedNone
+	}
+	return StartedCommits
 }
 
 type TeamView struct {
@@ -242,6 +265,7 @@ type TeamView struct {
 }
 
 type ProjectInfo struct {
+	Types        []workflow.WorkType
 	Rounds       int
 	Type         string
 	Instructions []string
@@ -1367,6 +1391,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	v.Catalog, v.CatalogWhy = g.setup.setup.Catalog.State, g.setup.setup.Catalog.Reason
 	v.Lock = w.lockView(ctx, g)
 	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
+	v.Started = startedOf(g)
 	if g.head != "" {
 		if tc := w.typeChange(g.t.Repo, g.chosen, g.setup.setup.Protect, g.specs, g.base, g.head, g.net, g.listed); len(tc.Lines) > 0 {
 			v.Change = &tc
@@ -1541,6 +1566,7 @@ func (w *Work) Project(name string) ProjectInfo {
 	if !ok {
 		return out
 	}
+	out.Types = w.setupFor(name).setup.Types
 	main, err := w.cfg.Repos.Main(name)
 	if err != nil || main == "" {
 		return out

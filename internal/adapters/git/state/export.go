@@ -83,7 +83,7 @@ var stores = map[string]storeRow{
 	verifyRunsFile:      {class: classDropped, version: 1, label: "verification runs, whose results count only on the engine that ran them"},
 	capsFile:            {class: classKept, version: 1, label: "caps"},
 	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
-	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},
+	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "away mode"},
 	identityFile:        {class: classKept, version: 1, place: placeKeepOwn, label: "the name and email agents commit with"},
 	personFile:          {class: classKept, version: 1, label: "the local person's id, which saved records and audit lines carry; the importing engine takes it as its own"},
 	portsFile:           {class: classKept, version: 1, label: "port ranges"},

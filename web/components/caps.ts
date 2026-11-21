@@ -1,18 +1,18 @@
 import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
-import { continueBody, day, limitsCall, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
+import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { continueBody, day, limitsAnswer, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, SessionLimits } from './usage.ts'
 
 type CapKind = 'money' | 'time' | 'turns' | 'disk'
 
-const KINDS: { kind: CapKind; key: keyof CapsValues; label: string; unit: string; step: string; max: number }[] = [
-  { kind: 'money', key: 'money', label: 'Spending cap (USD)', unit: '$', step: '0.01', max: 100000 },
-  { kind: 'time', key: 'minutes', label: 'Time cap (minutes)', unit: 'min', step: '1', max: 43200 },
-  { kind: 'turns', key: 'turns', label: 'Turn cap', unit: 'turns', step: '1', max: 10000 },
-  { kind: 'disk', key: 'disk', label: 'Disk cap (GiB)', unit: 'GiB', step: '1', max: 4096 },
-]
+type CapsAnswer = { problem: string; field: string; error: string }
 
-const CAPS_INVALID = 'Each cap is a number from 0 up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB; minutes, turns and GiB are whole numbers.'
+const KINDS: { kind: CapKind; key: keyof CapsValues; label: string; unit: string }[] = [
+  { kind: 'money', key: 'money', label: 'Spending cap (USD)', unit: '$' },
+  { kind: 'time', key: 'minutes', label: 'Time cap (minutes)', unit: 'min' },
+  { kind: 'turns', key: 'turns', label: 'Turn cap', unit: 'turns' },
+  { kind: 'disk', key: 'disk', label: 'Disk cap (GiB)', unit: 'GiB' },
+]
 
 const NO_CAPS: CapsValues = { money: 0, minutes: 0, turns: 0, disk: 0 }
 
@@ -84,19 +84,6 @@ function capOf(kind: CapKind, c: CapsValues): number {
   }
 }
 
-function raiseMin(kind: CapKind, cap: number, used: number): number {
-  switch (kind) {
-    case 'money':
-      return Math.max(cap, used)
-    case 'time':
-      return Math.max(cap + 1, Math.ceil(used) + 1)
-    case 'turns':
-      return Math.max(cap + 1, used)
-    case 'disk':
-      return Math.max(cap + 1, Math.floor(used) + 1)
-  }
-}
-
 function capName(kind: CapKind): string {
   switch (kind) {
     case 'money':
@@ -132,15 +119,13 @@ class CapsInputs {
     for (const k of KINDS) {
       const input = el('input', 'textbox')
       input.type = 'number'
-      input.min = '0'
-      input.max = String(k.max)
-      input.step = k.step
+      input.inputMode = k.key === 'money' ? 'decimal' : 'numeric'
       input.placeholder = `${k.unit}: off`
       input.id = `caps-${k.key}-${++fieldSerial}`
-      input.setAttribute('aria-label', k.label)
       input.title = `${k.label}; empty or 0 is off`
+      input.addEventListener('input', () => labelError(input, ''))
       this.inputs.set(k.key, input)
-      this.box.append(input)
+      this.box.append(field(k.label, input))
     }
   }
 
@@ -166,25 +151,28 @@ class CapsInputs {
     return JSON.stringify([...this.inputs.values()].map(i => i.value))
   }
 
-  value(): CapsValues | null {
+  value(): CapsValues {
     const out: CapsValues = { ...NO_CAPS }
     for (const k of KINDS) {
       const raw = this.inputs.get(k.key)!.value.trim()
-      if (!raw) continue
-      const n = Number(raw)
-      if (!Number.isFinite(n) || n < 0 || n > k.max || (k.key !== 'money' && !Number.isInteger(n))) return null
-      out[k.key] = k.key === 'money' ? Math.round(n * 100) / 100 : n
+      if (raw) out[k.key] = Number(raw)
     }
     return out
+  }
+
+  mark(name: string, message = ''): HTMLInputElement | null {
+    let bad: HTMLInputElement | null = null
+    for (const [key, input] of this.inputs) {
+      const hit = !!message && key === name
+      labelError(input, hit ? message : '')
+      if (hit) bad = input
+    }
+    return bad
   }
 }
 
 export function capsSet(c: CapsValues | null): boolean {
   return !!c && (c.money > 0 || c.minutes > 0 || c.turns > 0 || c.disk > 0)
-}
-
-export function saveSessionCaps(sid: string, caps: CapsValues): Promise<string> {
-  return limitsCall({ op: 'session', sid, ...caps })
 }
 
 class SfCapsFields extends HTMLElement {
@@ -193,27 +181,32 @@ class SfCapsFields extends HTMLElement {
   #built = false
 
   #note = statusLine('small muted')
+  #refused: HTMLInputElement | null = null
 
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      this.#invalid(false)
+      this.#invalid('')
       this.replaceChildren(this.#inputs.box, this.#note)
     }
     this.#fill()
   }
 
-  #invalid(on: boolean) {
-    this.#note.className = on ? 'small warn' : 'small muted'
-    this.#note.textContent = on
-      ? CAPS_INVALID
-      : 'Caps for this session: money from the agent’s own reported cost, time by the engine’s clock while it runs, turns, and disk, the size of the session’s folder, which the engine measures every 2 minutes. At a cap the engine interrupts the turn and asks you. Empty is off; the project’s caps fill these in.'
+  #invalid(problem: string) {
+    this.#note.className = problem ? 'small warn' : 'small muted'
+    this.#note.textContent = problem || 'Caps for this session: money from the agent’s own reported cost, time by the engine’s clock while it runs, turns, and disk, the size of the session’s folder, which the engine measures every 2 minutes. At a cap the engine interrupts the turn and asks you. Empty is off; the project’s caps fill these in.'
   }
 
-  checked(): CapsValues | null | 'invalid' {
-    const v = this.value
-    this.#invalid(v === 'invalid')
-    return v
+  refuse(name: string, problem: string): boolean {
+    this.#refused = this.#inputs.mark(name, problem)
+    this.#invalid(this.#refused ? '' : problem)
+    this.#refused?.focus()
+    return !!this.#refused
+  }
+
+  clear() {
+    this.#refused = this.#inputs.mark('')
+    this.#invalid('')
   }
 
   set project(name: string) {
@@ -225,11 +218,8 @@ class SfCapsFields extends HTMLElement {
     this.#inputs.fill(this.#project)
   }
 
-  get value(): CapsValues | null | 'invalid' {
-    const v = this.#inputs.value()
-    if (v === null) return 'invalid'
-    const p = limitsNow().projects.get(this.#project) ?? NO_CAPS
-    return v.money === p.money && v.minutes === p.minutes && v.turns === p.turns && v.disk === p.disk ? null : v
+  get value(): CapsValues {
+    return this.#inputs.value()
   }
 }
 
@@ -268,24 +258,24 @@ class SfProjectCaps extends HTMLElement {
   }
 
   async #store() {
+    if (this.#saving) return
     const v = this.#inputs.value()
-    if (!v) {
-      say(this.#said, CAPS_INVALID, 'warn')
-      return
-    }
+    this.#inputs.mark('')
     this.#saving = true
-    const problem = await whileBusy(this.#save, () => limitsCall({ op: 'project', name: this.#project, ...v }))
+    const { problem, field: name } = await whileBusy(this.#save, () => limitsAnswer({ op: 'project', name: this.#project, ...v }))
     this.#saving = false
     if (!problem) this.#inputs.fill(this.#project, true)
-    this.#said.className = problem ? 'small warn' : 'small muted'
-    this.#said.textContent = problem || 'Saved.'
+    const bad = this.#inputs.mark(name, problem)
+    this.#said.className = problem && !bad ? 'small warn' : 'small muted'
+    this.#said.textContent = bad ? '' : problem || 'Saved.'
+    bad?.focus()
   }
 }
 
 class SfSessionLimits extends HTMLElement {
   #stop = () => {}
   #said = statusLine('small warn status-slot')
-  #raise = new Map<string, HTMLInputElement>()
+  #raise = new Map<string, { input: HTMLInputElement; box: HTMLDivElement }>()
   #edit = new CapsInputs('Caps for this session')
   #editing = false
   #busy = false
@@ -320,7 +310,7 @@ class SfSessionLimits extends HTMLElement {
     if (s?.reached) parts.push(this.#reached(s))
     if (s?.stuck) parts.push(this.#stuck(sid, s))
     if (s?.caps && capsSet(s.caps)) parts.push(this.#caps(s))
-    if (s?.signInUntil) parts.push(el('p', 'notice warn small', `This agent's claude.ai sign-in ends between ${day(s.signInFrom)} and ${day(s.signInUntil)}. Renewing it doesn't move those dates: sign in again before then (Finish setting up on the Welcome page).`))
+    if (s?.signInUntil) parts.push(el('p', 'notice warn small', `This agent's claude.ai sign-in ends between ${day(s.signInFrom)} and ${day(s.signInUntil)}. Renewing it doesn't move those dates: sign in again before then (Reviewers’ sign-in in the command palette).`))
     let pausedShown = false
     for (const p of v.paused) {
       if (p.sid !== sid) continue
@@ -398,19 +388,19 @@ class SfSessionLimits extends HTMLElement {
     } else {
       box.append(el('p', '', `This session reached its ${capName(kind)} of ${amount(kind, cap)}${at}: ${usedAmount(kind, used)} used. The engine interrupted its turn, holds its automatic reviews and Send findings, and passes on no message until you answer.`))
     }
-    let input = this.#raise.get(s.sid + s.reached)
-    if (!input) {
-      input = el('input', 'textbox')
+    let raise = this.#raise.get(s.sid + s.reached)
+    if (!raise) {
+      const input = el('input', 'textbox')
       input.type = 'number'
-      input.step = k.step
-      input.max = String(k.max)
-      input.setAttribute('aria-label', `New ${capName(kind)}`)
-      input.value = String(kind === 'money' ? Math.round((cap * 2 || 1) * 100) / 100 : Math.max(cap * 2, raiseMin(kind, cap, used)))
-      this.#raise.set(s.sid + s.reached, input)
+      input.inputMode = kind === 'money' ? 'decimal' : 'numeric'
+      input.addEventListener('input', () => labelError(input, ''))
+      input.value = s.raise ? String(s.raise.suggested) : ''
+      raise = { input, box: field(`New ${capName(kind)}`, input) }
+      this.#raise.set(s.sid + s.reached, raise)
     }
-    input.min = String(kind === 'money' ? used : raiseMin(kind, cap, used))
-    const row = el('div', 'field-row')
-    row.append(input, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind, value: Number(input!.value) }, 'raise'), 'button', 'raise'))
+    const row = el('div', 'row field-row')
+    const raised = raise.input
+    row.append(raise.box, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind, value: Number(raised.value) }, 'raise', a => (a.field === 'value' || a.error === 'value' ? raised : null)), 'button', 'raise'))
     if (kind === 'disk') row.append(button('Check again', 'small', () => void this.#call({ op: 'measure', sid: s.sid }, 'measure'), 'button', 'measure'))
     row.append(stop)
     box.append(row)
@@ -465,27 +455,31 @@ class SfSessionLimits extends HTMLElement {
   }
 
   async #saveEdit() {
-    if (this.#busy) return
     const sid = limitsSession()
-    const v = this.#edit.value()
-    if (!sid || !v) {
-      this.#said.textContent = CAPS_INVALID
-      return this.paint()
+    if (this.#busy || !sid) return
+    this.#edit.mark('')
+    const { problem } = await this.#call({ op: 'session', sid, ...this.#edit.value() }, 'caps-save', a => this.#edit.mark(a.field, a.problem))
+    if (!problem) {
+      this.#editing = false
+      this.paint()
     }
-    this.#editing = false
-    await this.#call({ op: 'session', sid, ...v }, 'caps-save')
   }
 
-  async #call(body: Record<string, unknown>, key: string) {
-    if (this.#busy) return
+  async #call(body: Record<string, unknown>, key: string, mark: (a: CapsAnswer) => HTMLInputElement | null = () => null): Promise<CapsAnswer> {
+    if (this.#busy) return { problem: '', field: '', error: '' }
     this.#busy = true
     this.#busyKey = key
     this.#said.textContent = ''
     this.paint()
-    this.#said.textContent = await limitsCall(body)
+    const answer = await limitsAnswer(body)
+    const bad = answer.problem ? mark(answer) : null
+    if (bad) labelError(bad, answer.problem)
+    this.#said.textContent = bad ? '' : answer.problem
     this.#busy = false
     busy(this.#editSave, false)
     this.paint()
+    bad?.focus()
+    return answer
   }
 }
 

@@ -97,9 +97,6 @@ func unwaited() level.Observation {
 }
 
 func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, error) {
-	if why := d.reg.halt.starts(); why != "" {
-		return CheckState{}, explained(conflict("halted"), why)
-	}
 	st := d.check(ctx)
 	if d.cfg.Sandbox != nil && st.Observation.Event == level.CheckPassed {
 		bctx, cancel := context.WithTimeout(ctx, checkFor)

@@ -1,7 +1,6 @@
 import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
 import type { Tone } from '../lib/dom.ts'
-import { DOUBLED_NOTE } from '../lib/format.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
 
 type Answer = { ok: boolean; status: number; body: Record<string, unknown> }
@@ -12,8 +11,6 @@ type Findings = { key: string; commit: string; items: Finding[]; held: number; o
 
 type Settings = { project: string; bots: string[]; auto: boolean; assign: boolean }
 
-const MAX_BOTS = 20
-const BOT = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/
 
 async function call(path: string, body: unknown): Promise<Answer> {
   const res = await api(path, body).catch(() => null)
@@ -64,7 +61,7 @@ function reviewKey(v: PullFollowView): string {
 
 export function pullFollowOf(sid: string, info: SessionInfo, connected: boolean): PullFollowView | null {
   if (!info.verified) return null
-  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.doubled ? DOUBLED_NOTE : connected ? '' : 'Actions work once the page is connected again.', connected }
+  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.readOnly || (connected ? '' : 'Actions work once the page is connected again.'), connected }
 }
 
 class SfPullFollow extends HTMLElement {
@@ -72,6 +69,7 @@ class SfPullFollow extends HTMLElement {
   #key = ''
   #busy = ''
   #status = new Map<string, [string, Tone | undefined]>()
+  #botsRefused = new Map<string, string>()
   #said = statusLine('small status-slot')
   #findings = new Map<string, Findings>()
   #loading = ''
@@ -97,7 +95,7 @@ class SfPullFollow extends HTMLElement {
     else this.#status.delete(sid)
   }
 
-  async #run(op: string, path: string, body: Record<string, unknown>, ok: string, fail: string): Promise<Answer | null> {
+  async #run(op: string, path: string, body: Record<string, unknown>, ok: string, fail: string, own: (a: Answer) => boolean = () => false): Promise<Answer | null> {
     const v = this.#view
     if (!v || this.#busy || v.disabled) return null
     this.#busy = op
@@ -105,7 +103,7 @@ class SfPullFollow extends HTMLElement {
     this.#paint()
     const a = await call(path, body)
     this.#busy = ''
-    this.#say(v.sid, a.ok ? ok : message(a, fail), a.ok ? 'muted' : 'bad')
+    this.#say(v.sid, a.ok ? ok : own(a) ? '' : message(a, fail), a.ok ? 'muted' : 'bad')
     this.#paint()
     return a
   }
@@ -314,6 +312,7 @@ class SfPullFollow extends HTMLElement {
       return d
     }
     const form = el('form', 'stacked pull-settings-form')
+    form.noValidate = true
     form.autocomplete = 'off'
     const botsId = `pull-bots-${v.sid}`
     const label = el('label', 'small', 'Bot logins whose comments the engine follows, exactly as GitHub shows them (none by default)')
@@ -323,7 +322,10 @@ class SfPullFollow extends HTMLElement {
     bots.value = draft.bots
     bots.placeholder = 'e.g. coderabbitai[bot], sonarcloud[bot]'
     bots.dataset.key = `pull-bots:${v.sid}`
-    bots.addEventListener('input', () => { draft.bots = bots.value })
+    bots.addEventListener('input', () => {
+      draft.bots = bots.value
+      if (this.#botsRefused.delete(v.sid)) labelError(bots, '')
+    })
     const auto = el('input')
     auto.type = 'checkbox'
     auto.checked = draft.auto
@@ -338,22 +340,15 @@ class SfPullFollow extends HTMLElement {
     assign.addEventListener('change', () => { draft.assign = assign.checked })
     const assignLabel = el('label', 'check small')
     assignLabel.append(assign, 'Assign the issues and pull requests the engine opens to the token\'s own user')
-    const why = el('p', 'small bad')
-    why.hidden = true
     const save = button('Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)
     save.setAttribute('aria-disabled', String(this.#off()))
     if (this.#busy === 'settings') busy(save, true)
-    form.append(el('p', 'small muted', `For ${shown(saved.project)}. Comments by anyone else never reach the agent.`), label, bots, autoLabel, assignLabel, why, save)
+    form.append(el('p', 'small muted', `For ${shown(saved.project)}. Comments by anyone else never reach the agent.`), label, bots, autoLabel, assignLabel, save)
+    labelError(bots, this.#botsRefused.get(v.sid) ?? '')
     form.addEventListener('submit', e => {
       e.preventDefault()
       if (this.#off()) return
       const list = draft.bots.split(/[\s,]+/).filter(Boolean)
-      const bad = list.find(b => !BOT.test(b))
-      if (bad || list.length > MAX_BOTS) {
-        why.textContent = bad ? `${shown(bad)} isn't a GitHub login.` : `At most ${MAX_BOTS} bot logins.`
-        why.hidden = false
-        return void bots.focus()
-      }
       void this.#saveSettings(v.sid, list, draft.auto, draft.assign)
     })
     d.append(form)
@@ -361,7 +356,15 @@ class SfPullFollow extends HTMLElement {
   }
 
   async #saveSettings(sid: string, bots: string[], auto: boolean, assign: boolean) {
-    const a = await this.#run('settings', '/api/pull-request', { op: 'set', sid, bots, auto, assign }, 'Saved.', "The settings weren't saved.")
+    this.#botsRefused.delete(sid)
+    const a = await this.#run('settings', '/api/pull-request', { op: 'set', sid, bots, auto, assign }, 'Saved.', "The settings weren't saved.", b => {
+      if (b.body.error !== 'bots') return false
+      this.#botsRefused.set(sid, message(b, "The settings weren't saved."))
+      return true
+    })
+    if (a && !a.ok && a.body.error === 'bots') {
+      this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`pull-bots:${sid}`)}"]`)?.focus()
+    }
     if (a?.ok) {
       const s = this.#settings.get(sid)
       if (s) this.#settings.set(sid, { ...s, bots, auto, assign })

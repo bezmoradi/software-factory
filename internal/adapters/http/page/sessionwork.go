@@ -32,22 +32,26 @@ func (s *Server) UseSessionWork(w *session.SessionWork) {
 }
 
 type commandRunJSON struct {
-	Kind     string `json:"kind"`
-	State    string `json:"state"`
-	Code     int    `json:"code"`
-	Tail     string `json:"tail"`
-	Cut      bool   `json:"cut"`
-	Withheld bool   `json:"withheld"`
-	Reason   string `json:"reason"`
-	Retry    bool   `json:"retry"`
-	Started  int64  `json:"started"`
-	Ended    int64  `json:"ended"`
+	Kind     string   `json:"kind"`
+	State    string   `json:"state"`
+	Code     int      `json:"code"`
+	Tail     string   `json:"tail"`
+	Cut      bool     `json:"cut"`
+	Withheld bool     `json:"withheld"`
+	Reason   string   `json:"reason"`
+	Retry    bool     `json:"retry"`
+	Started  int64    `json:"started"`
+	Ended    int64    `json:"ended"`
+	Said     saidJSON `json:"said"`
 }
 
 type queuedJSON struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	At   int64  `json:"at"`
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	At       int64  `json:"at"`
+	Up       bool   `json:"up"`
+	Down     bool   `json:"down"`
+	Editable bool   `json:"editable"`
 }
 
 type queueViewJSON struct {
@@ -56,6 +60,8 @@ type queueViewJSON struct {
 	Waiting string       `json:"waiting"`
 	Sending bool         `json:"sending"`
 	Max     int          `json:"max"`
+	CanAdd  bool         `json:"canAdd"`
+	Full    string       `json:"full,omitempty"`
 }
 
 type agentModelJSON struct {
@@ -73,6 +79,7 @@ type sessionModelJSON struct {
 	NowEffort   string           `json:"nowEffort"`
 	From        string           `json:"from"`
 	Offered     []agentModelJSON `json:"offered"`
+	Efforts     []string         `json:"efforts"`
 }
 
 type portsJSON struct {
@@ -90,13 +97,15 @@ type sessionWorkJSON struct {
 	Ports    *portsJSON       `json:"ports"`
 	HasCheck bool             `json:"hasCheck"`
 	HasSetup bool             `json:"hasSetup"`
+
+	CanSwitchModel bool `json:"canSwitchModel"`
 }
 
 func runJSONOf(r *session.CommandRun) *commandRunJSON {
 	if r == nil {
 		return nil
 	}
-	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended)}
+	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended), Said: saidJSONOf(session.RunSaid(r.State))}
 }
 
 func modelsJSONOf(list []session.AgentModel) []agentModelJSON {
@@ -111,16 +120,20 @@ func workJSONOf(v session.SessionWorkView) sessionWorkJSON {
 	now := v.Model.Now()
 	out := sessionWorkJSON{Agent: v.Agent,
 		Model: sessionModelJSON{Start: v.Model.StartModel, StartEffort: v.Model.StartEffort, Model: v.Model.Model, Effort: v.Model.Effort,
-			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered)},
-		Queue:    queueViewJSON{Items: []queuedJSON{}, Stopped: v.Queue.Stopped, Waiting: v.Queue.Waiting, Sending: v.Queue.Sending, Max: session.MaxQueue},
+			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered), Efforts: session.AgentEfforts(v.Agent)},
+		Queue:    queueViewJSON{Items: []queuedJSON{}, Stopped: v.Queue.Stopped, Waiting: v.Queue.Waiting, Sending: v.Queue.Sending, Max: session.MaxQueue, Full: session.QueueFull(len(v.Queue.Items))},
 		Check:    runJSONOf(v.Check),
 		Setup:    runJSONOf(v.Setup),
 		HasCheck: v.Commands.Check != "",
 		HasSetup: v.Commands.Setup != "",
+
+		CanSwitchModel: session.ModelSwitchable(v.Agent),
 	}
-	for _, m := range v.Queue.Items {
-		out.Queue.Items = append(out.Queue.Items, queuedJSON{ID: m.ID, Text: m.Text, At: millis(m.At)})
+	for i, m := range v.Queue.Items {
+		up, down, editable := session.QueueMoves(len(v.Queue.Items), i, v.Queue.Sending)
+		out.Queue.Items = append(out.Queue.Items, queuedJSON{ID: m.ID, Text: m.Text, At: millis(m.At), Up: up, Down: down, Editable: editable})
 	}
+	out.Queue.CanAdd = out.Queue.Full == ""
 	if v.Ports > 0 {
 		out.Ports = &portsJSON{First: v.Ports, Last: v.Ports + session.PortSpan - 1, Env: v.PortsEnv}
 	}
@@ -253,7 +266,7 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 		if raw, given := body["browser"]; given {
 			browser, okBrowser = raw.(string)
 		}
-		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 || len(image) > session.MaxVerifyImage+64 || len(browser) > session.MaxProjectCommand+64 {
+		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser {
 			refuse(w, http.StatusBadRequest, "fields")
 			return
 		}
