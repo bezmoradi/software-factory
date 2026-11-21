@@ -23,11 +23,11 @@ const (
 func (s *Server) pushRequest(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxAgentBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	if len(body) != 0 {
-		refuse(w, http.StatusBadRequest, "input")
+		agentRefuse(w, http.StatusBadRequest, "input")
 		return
 	}
 	tokens := r.Header.Values("X-SF-Push")
@@ -61,23 +61,23 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	}
 	body, bad := readObject(w, r, MaxCheckBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	if !keysWithin(body, "tool", "input", "top", "paths") {
-		refuse(w, http.StatusBadRequest, "fields")
+		agentRefuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	tool, ok := body["tool"].(string)
 	if !ok || tool == "" || len(tool) > 200 {
-		refuse(w, http.StatusBadRequest, "tool")
+		agentRefuse(w, http.StatusBadRequest, "tool")
 		return
 	}
 	input := map[string]any{}
 	if raw, present := body["input"]; present && raw != nil {
 		m, ok := raw.(map[string]any)
 		if !ok {
-			refuse(w, http.StatusBadRequest, "input")
+			agentRefuse(w, http.StatusBadRequest, "input")
 			return
 		}
 		input = m
@@ -86,7 +86,7 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	if raw, present := body["top"]; present {
 		t, ok := raw.(string)
 		if !ok || len(t) > 4096 {
-			refuse(w, http.StatusBadRequest, "top")
+			agentRefuse(w, http.StatusBadRequest, "top")
 			return
 		}
 		top = t
@@ -95,13 +95,13 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	if raw, present := body["paths"]; present {
 		list, ok := raw.([]any)
 		if !ok || len(list) > maxCheckPaths {
-			refuse(w, http.StatusBadRequest, "paths")
+			agentRefuse(w, http.StatusBadRequest, "paths")
 			return
 		}
 		for _, item := range list {
 			p, ok := item.(string)
 			if !ok || len(p) > 4096 {
-				refuse(w, http.StatusBadRequest, "paths")
+				agentRefuse(w, http.StatusBadRequest, "paths")
 				return
 			}
 			paths = append(paths, p)

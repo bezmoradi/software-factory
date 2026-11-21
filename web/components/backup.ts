@@ -1,9 +1,11 @@
+import { download, type EngineAnswer } from '../api.ts'
 import { actionButton, button, el, sayWhenShown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { saveFile } from '../lib/download.ts'
+import { emptyState } from '../lib/page.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
-type Send = (file: Blob) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
+type Send = (file: Blob) => Promise<EngineAnswer>
 
 const VIEW = '/api/backup'
 const EXPORT = '/api/export'
@@ -82,11 +84,9 @@ function viewOf(v: Record<string, unknown>): View {
 }
 
 async function load(post: Post): Promise<{ view: View | null; message: string }> {
-  const res = await post(VIEW, {}).catch(() => null)
-  const parsed: unknown = res ? await res.json().catch(() => ({})) : {}
-  const v = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-  if (!res || !res.ok) return { view: null, message: text(v.message) ? visible(text(v.message)) : 'The engine didn’t answer.' }
-  return { view: viewOf(v), message: '' }
+  const a = await post(VIEW, {})
+  if (!a.ok) return { view: null, message: a.message }
+  return { view: viewOf(a.body), message: '' }
 }
 
 function day(ms: number): string {
@@ -129,8 +129,8 @@ function reportNodes(r: Report): Node[] {
   return parts
 }
 
-function fileName(res: Response): string {
-  const m = /filename="(software-factory-state-[0-9-]+\.tar\.gz)"/.exec(res.headers.get('Content-Disposition') ?? '')
+function fileName(disposition: string): string {
+  const m = /filename="(software-factory-state-[0-9-]+\.tar\.gz)"/.exec(disposition)
   return m?.[1] ?? 'software-factory-state.tar.gz'
 }
 
@@ -156,15 +156,9 @@ export function openBackup(post: Post, send: Send): void {
       for (const name of v.needClone) {
         const li = el('li', 'row')
         const b = actionButton('Clone again', 'ghost small', async () => {
-          const res = await post(CLONE, { name }).catch(() => null)
-          if (!res) {
-            say.textContent = 'The engine didn’t answer.'
-            return
-          }
-          const parsed: unknown = await res.json().catch(() => ({}))
-          const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-          say.textContent = res.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : text(r.message) ? visible(text(r.message)) : 'The clone didn’t start.'
-          if (res.ok) b.disabled = true
+          const a = await post(CLONE, { name })
+          say.textContent = a.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : a.message
+          if (a.ok) b.disabled = true
         })
         li.append(el('code', '', visible(name)), el('span', 'spacer'), b)
         ul.append(li)
@@ -172,10 +166,10 @@ export function openBackup(post: Post, send: Send): void {
       parts.push(ul)
     }
     parts.push(el('h3', 'label', 'Dropped records'))
-    if (!v.drops.length) parts.push(el('p', 'small muted', 'No store has dropped old records.'))
+    if (!v.drops.length) parts.push(emptyState('No store has dropped old records.'))
     for (const x of v.drops) parts.push(el('p', 'small warn', droppedLine(x)))
     parts.push(el('h3', 'label', 'Copies from before a format change'))
-    if (!v.copies.length) parts.push(el('p', 'small muted', 'None yet. Before an engine writes a store in a newer format, it copies the old file here, so the engine before it can read it after a rollback.'))
+    if (!v.copies.length) parts.push(emptyState('None yet. Before an engine writes a store in a newer format, it copies the old file here, so the engine before it can read it after a rollback.'))
     for (const c of v.copies) parts.push(el('p', 'small', `backup/${visible(c.version)}: ${c.files.map(visible).join(', ') || 'empty'} (${day(c.at)})`))
     if (v.last) parts.push(...reportNodes(v.last))
     body.replaceChildren(...parts)
@@ -190,21 +184,20 @@ export function openBackup(post: Post, send: Send): void {
     if (view) paint(view)
   }
 
-  exportButton.addEventListener('click', () => void whileBusy(exportButton, () => {
+  exportButton.addEventListener('click', () => void whileBusy(exportButton, async () => {
     say.textContent = 'Exporting…'
-    return post(EXPORT, {}).then(async res => {
-      if (!res.ok) {
-        const parsed: unknown = await res.json().catch(() => ({}))
-        const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-        say.textContent = text(r.message) ? visible(text(r.message)) : 'The export didn’t finish.'
-        return
-      }
-      const blob = await res.blob()
-      saveFile(blob, fileName(res))
-      say.textContent = `Saved ${fileName(res)} (${Math.ceil(blob.size / 1024).toLocaleString()} KiB).`
-    }).catch(() => {
+    const got = await download(EXPORT)
+    if (!got.answer.ok) {
+      say.textContent = got.answer.message
+      return
+    }
+    if (!got.file) {
       say.textContent = 'The export was cut off. Try again.'
-    })
+      return
+    }
+    const name = fileName(got.disposition)
+    saveFile(got.file, name)
+    say.textContent = `Saved ${name} (${Math.ceil(got.file.size / 1024).toLocaleString()} KiB).`
   }))
 
   picker.addEventListener('change', () => {
@@ -212,20 +205,16 @@ export function openBackup(post: Post, send: Send): void {
     picker.value = ''
     if (!file) return
     say.textContent = `Importing ${visible(file.name)}…`
-    void whileBusy(importButton, () => send(file).then(async res => {
-      const parsed: unknown = await res.json().catch(() => ({}))
-      const r = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-      if (!res.ok) {
-        say.textContent = text(r.message) ? visible(text(r.message)) : 'The import didn’t finish.'
+    void whileBusy(importButton, () => send(file).then(a => {
+      if (!a.ok) {
+        say.textContent = a.message
         return
       }
-      const report = reportOf(r.report)
+      const report = reportOf(a.body.report)
       generation++
       say.textContent = 'Imported. The engine restarts to finish; the page reconnects once it’s back.'
       importButton.disabled = true
       if (report) body.replaceChildren(...reportNodes(report))
-    }).catch(() => {
-      say.textContent = 'The import was cut off. Try again.'
     }))
   })
 
@@ -234,6 +223,7 @@ export function openBackup(post: Post, send: Send): void {
   const m = modal({
     kind: 'backup',
     title: 'Export and import',
+    docs: 'maintenance',
     body: [
       el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
       el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),

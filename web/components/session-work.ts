@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { actions, answerControl, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
@@ -134,11 +135,8 @@ function shown(value: string): string {
   return visible(unspoofed(value))
 }
 
-async function problemOf(res: Response | null): Promise<{ text: string; error: string }> {
-  if (!res) return { text: 'The engine didn\'t answer. Try again.', error: '' }
-  const body = await res.json().catch(() => null) as { error?: unknown; message?: unknown } | null
-  const error = typeof body?.error === 'string' ? body.error : ''
-  return typeof body?.message === 'string' && body.message ? { text: body.message, error } : { text: 'The engine refused the change. Try again.', error: '' }
+function problemOf(a: EngineAnswer): string {
+  return a.message
 }
 
 function when(ms: number): string {
@@ -156,7 +154,7 @@ class SfSessionWork extends HTMLElement {
   #add = el('textarea', 'textbox')
   #editing = ''
   #edit = el('textarea', 'textbox')
-  #bad: { input: HTMLTextAreaElement; text: string } | null = null
+  #bad: { input: HTMLElement; text: string } | null = null
   #loading = 0
   #key = ''
   #details = el('details', 'session-work')
@@ -175,12 +173,14 @@ class SfSessionWork extends HTMLElement {
     this.#effort.setAttribute('aria-label', 'Effort from the next turn')
     this.#model.addEventListener('change', () => this.#fillEfforts())
     this.#add.id = 'work-queue-add'
+    this.#add.name = 'text'
     this.#add.dataset.key = 'work-queue-add'
     this.#add.rows = 2
     this.#add.placeholder = 'A message for after the current turn'
     this.#edit.rows = 3
     this.#edit.dataset.key = 'work-queue-edit'
     this.#edit.id = 'work-queue-edit'
+    this.#edit.name = 'text'
     for (const input of [this.#add, this.#edit]) input.addEventListener('input', () => {
       if (this.#bad?.input !== input) return
       this.#bad = null
@@ -219,9 +219,9 @@ class SfSessionWork extends HTMLElement {
     if (sid !== this.#target?.sid) return
     const n = ++this.#loading
     void this.#readLock(sid)
-    const res = await api('/api/session-work', { op: 'read', sid }).catch(() => null)
-    if (n !== this.#loading || sid !== this.#target?.sid || !res || !res.ok) return
-    const v = readView(await res.json().catch(() => null))
+    const a = await request('/api/session-work', { op: 'read', sid })
+    if (n !== this.#loading || sid !== this.#target?.sid || !a.ok) return
+    const v = readView(a.body)
     if (!v) return
     this.#view = v
     this.#paint()
@@ -229,9 +229,9 @@ class SfSessionWork extends HTMLElement {
 
   async #readLock(sid: string) {
     const n = ++this.#lockLoading
-    const res = await api('/api/gate', { sid }).catch(() => null)
-    if (n !== this.#lockLoading || sid !== this.#target?.sid || !res || !res.ok) return
-    const v = readLock(await res.json().catch(() => null))
+    const a = await request('/api/gate', { sid })
+    if (n !== this.#lockLoading || sid !== this.#target?.sid || !a.ok) return
+    const v = readLock(a.body)
     if (!v) return
     this.#lock = v
     this.#paint()
@@ -245,11 +245,11 @@ class SfSessionWork extends HTMLElement {
     this.#busyKey = key
     this.#opened ??= this.#details.open
     this.#paint()
-    const res = await api('/api/lock-tests', op === 'lock' ? { sid, op, head } : { sid, op }).catch(() => null)
+    const a = await request('/api/lock-tests', op === 'lock' ? { sid, op, head } : { sid, op })
     this.#busy = false
     if (sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      say(this.#status, (await problemOf(res)).text, 'warn')
+    if (!a.ok) {
+      say(this.#status, problemOf(a), 'warn')
       this.#paint()
       void this.#readLock(sid)
       return
@@ -340,7 +340,7 @@ class SfSessionWork extends HTMLElement {
     return true
   }
 
-  async #call(body: Record<string, unknown>, ok: string, key: string): Promise<boolean> {
+  async #call(body: Record<string, unknown>, ok: string | null, key: string): Promise<boolean> {
     const sid = this.#target?.sid
     if (!sid) return false
     this.#busy = true
@@ -348,21 +348,21 @@ class SfSessionWork extends HTMLElement {
     this.#bad = null
     this.#opened ??= this.#details.open
     this.#paint()
-    const res = await api('/api/session-work', { ...body, sid }).catch(() => null)
+    const a = await request('/api/session-work', { ...body, sid })
     this.#busy = false
     if (sid !== this.#target?.sid) return false
-    if (!res || !res.ok) {
-      const { text, error } = await problemOf(res)
-      const input = error !== 'text' ? null : body.op === 'queue-add' ? this.#add : body.op === 'queue-edit' ? this.#edit : null
-      this.#bad = input && { input, text: visible(text) }
-      say(this.#status, input ? '' : text, 'warn')
+    if (!a.ok) {
+      const place = body.op === 'queue-add' ? this.#add.form : body.op === 'queue-edit' ? this.#edit.form : null
+      const input = place && a.message ? answerControl(place, a) : null
+      this.#bad = input && { input, text: a.message }
+      say(this.#status, input ? '' : problemOf(a), 'warn')
       this.#paint()
       input?.focus()
       return false
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
-    say(this.#status, ok, 'muted')
+    say(this.#status, ok ?? a.message, ok === null ? savedTone(a) : 'muted')
     this.#paint()
     return true
   }
@@ -389,15 +389,16 @@ class SfSessionWork extends HTMLElement {
       this.#fillEfforts()
       this.#effort.value = [...this.#effort.options].some(o => o.value === v.model.effort) ? v.model.effort : ''
     }
-    const label = el('label', 'small', 'Switch to')
-    label.htmlFor = this.#model.id
     this.#model.disabled = off
     this.#effort.disabled = off
-    const go = button('Switch model', 'small', () => void this.#call({ op: 'model', model: this.#model.value, effort: this.#effort.value }, 'Switched. The new model applies from the next turn.', 'work-switch'), 'button', 'work-switch')
+    const go = button('Switch model', 'small', undefined, 'submit', 'work-switch')
     go.disabled = !this.#held(go) && off
-    const row = el('div', 'row field-row')
-    row.append(label, this.#model, this.#effort, go)
-    parts.push(row)
+    parts.push(form({
+      inline: true,
+      cls: 'field-row',
+      children: [field('Switch to', this.#model, { kind: 'inline', cls: 'field-row' }), this.#effort, actions([go])],
+      onSubmit: () => void this.#call({ op: 'model', model: this.#model.value, effort: this.#effort.value }, 'Switched. The new model applies from the next turn.', 'work-switch'),
+    }))
     return parts
   }
 
@@ -416,20 +417,23 @@ class SfSessionWork extends HTMLElement {
       const list = el('ol', 'list')
       q.items.forEach((m, i) => {
         const li = el('li')
-        const row = el('div', 'row')
         if (this.#editing === m.id) {
-          const save = button('Save', 'small', () => void this.#call({ op: 'queue-edit', id: m.id, text: this.#edit.value }, 'Saved.', `work-save:${m.id}`).then(ok => {
-            if (ok) {
-              this.#editing = ''
-              this.#paint()
-            }
-          }), 'button', `work-save:${m.id}`)
+          const save = button('Save', 'small', undefined, 'submit', `work-save:${m.id}`)
           const cancel = button('Cancel', 'ghost small', () => {
             this.#editing = ''
             this.#paint()
           }, 'button', `work-cancel:${m.id}`)
           save.disabled = !this.#held(save) && off
-          row.append(field('Queued message', this.#edit), cancel, save)
+          li.append(form({
+            inline: true,
+            children: [field('Queued message', this.#edit), actions([cancel, save])],
+            onSubmit: () => void this.#call({ op: 'queue-edit', id: m.id, text: this.#edit.value }, null, `work-save:${m.id}`).then(ok => {
+              if (ok) {
+                this.#editing = ''
+                this.#paint()
+              }
+            }),
+          }))
         } else {
           const text = el('p', 'small queued-text', visible(m.text.length > 400 ? `${m.text.slice(0, 400)}…` : m.text))
           const up = button('Up', 'ghost small', () => void this.#call({ op: 'queue-move', id: m.id, to: i - 1 }, 'Moved.', `work-up:${m.id}`), 'button', `work-up:${m.id}`)
@@ -446,27 +450,27 @@ class SfSessionWork extends HTMLElement {
           edit.disabled = off || !m.editable
           remove.disabled = !this.#held(remove) && edit.disabled
           for (const [b, what] of [[up, 'Move up'], [down, 'Move down'], [edit, 'Edit'], [remove, 'Remove']] as const) b.setAttribute('aria-label', `${what} queued message ${i + 1}`)
+          const row = el('div', 'row')
           row.append(text, up, down, edit, remove)
+          li.append(row)
         }
-        li.append(row)
         list.append(li)
       })
       parts.push(list)
     }
-    const label = el('label', 'small', 'Add to the queue')
-    label.htmlFor = this.#add.id
     this.#add.disabled = off || !q.canAdd
-    const add = button('Add to queue', 'small', () => {
-      const text = this.#add.value.trim()
-      void this.#call({ op: 'queue-add', text }, 'Queued.', 'work-add').then(ok => {
-        if (ok) this.#add.value = ''
-        else this.#add.focus()
-      })
-    }, 'button', 'work-add')
+    const add = button('Add to queue', 'small', undefined, 'submit', 'work-add')
     add.disabled = !this.#held(add) && this.#add.disabled
-    const box = el('div', 'field')
-    box.append(label, this.#add, add)
-    parts.push(box)
+    parts.push(form({
+      children: [field('Add to the queue', this.#add), actions([add])],
+      onSubmit: () => {
+        const text = this.#add.value.trim()
+        void this.#call({ op: 'queue-add', text }, 'Queued.', 'work-add').then(ok => {
+          if (ok) this.#add.value = ''
+          else this.#add.focus()
+        })
+      },
+    }))
     if (q.full) parts.push(el('p', 'small muted', visible(q.full)))
     return parts
   }

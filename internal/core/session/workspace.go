@@ -290,12 +290,12 @@ func (w *Workspace) BoxSize(ctx context.Context, box string) (TreeSize, error) {
 
 func (w *Workspace) DeleteSession(ctx context.Context, sid string, offer *Offer) (*Offer, error) {
 	if w.cfg.Sessions == nil || w.cfg.Remove == nil {
-		return nil, explained(conflict("no agent-host"), "This engine has no agent-host, so it has no sessions to delete.")
+		return nil, conflict("no agent-host", "This engine has no agent-host, so it has no sessions to delete.")
 	}
 	list := w.cfg.Sessions()
 	i := slices.IndexFunc(list, func(s WorkspaceSession) bool { return s.SID == sid })
 	if i < 0 {
-		return nil, explained(notFound("session"), "Only a session this engine started can be deleted from here.")
+		return nil, notFound("session", "Only a session this engine started can be deleted from here.")
 	}
 	s := list[i]
 	row := w.row(s, w.pushedCommits())
@@ -304,7 +304,7 @@ func (w *Workspace) DeleteSession(ctx context.Context, sid string, offer *Offer)
 		if s.Running {
 			reason = "running"
 		}
-		return nil, explained(conflict(reason), row.Why)
+		return nil, conflict(reason, row.Why)
 	}
 	out, err := w.cfg.Remove(ctx, sid, offer)
 	if err == nil {

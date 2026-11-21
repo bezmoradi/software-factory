@@ -467,7 +467,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 		"/api/file-match": {"sid", "name", "size", "sha256"},
 	}
 	if !keysWithin(body, allowed[route]...) || sid == "" {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if _, ok := body["commit"]; ok {
@@ -480,7 +480,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 			send(w, http.StatusUnprocessableEntity, fileProblem(err))
 			return
 		}
-		refuse(w, http.StatusConflict, "unverified")
+		refuse(w, http.StatusConflict, "unverified", "The engine didn't start this session, so it shows none of its files.")
 		return
 	}
 	defer c.Close()
@@ -488,7 +488,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 	case "/api/file":
 		given, ok := body["path"].(string)
 		if !ok || given == "" || len(given) > maxFilePath {
-			refuse(w, http.StatusBadRequest, "path")
+			refuse(w, http.StatusBadRequest, "path", "The file couldn't be read.")
 			return
 		}
 		rel, text, err := c.text(given)
@@ -501,7 +501,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 	case "/api/file-check":
 		paths, ok := checkedPaths(body)
 		if !ok {
-			refuse(w, http.StatusBadRequest, "paths")
+			refuse(w, http.StatusBadRequest, "paths", "The file check takes a list of paths, each of them text. Reload the page and try again.")
 			return
 		}
 		errs := make([]error, len(paths))
@@ -512,7 +512,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 	case "/api/files":
 		q, ok := body["q"].(string)
 		if !ok || len(q) > maxQuery {
-			refuse(w, http.StatusBadRequest, "query")
+			refuse(w, http.StatusBadRequest, "query", "A file search holds at most 200 characters.")
 			return
 		}
 		listed := s.lists.of(c)
@@ -526,7 +526,7 @@ func (s *Server) files(w http.ResponseWriter, route string, body map[string]any)
 			return
 		}
 		if !session.UploadName(name) || !ok || size < 0 || !sha256Hex.MatchString(sum) {
-			refuse(w, http.StatusBadRequest, "match")
+			refuse(w, http.StatusBadRequest, "match", "The file to match needs its name, size and SHA-256 digest. Reload the page and try again.")
 			return
 		}
 		s.logger.Info("file match")
@@ -601,22 +601,22 @@ func (s *Server) commitTexts(sid, commit string, given []string) ([]string, []st
 func (s *Server) commitFiles(w http.ResponseWriter, route, sid string, body map[string]any) {
 	commit, ok := body["commit"].(string)
 	if !ok || !commitHex.MatchString(commit) {
-		refuse(w, http.StatusBadRequest, "commit")
+		refuse(w, http.StatusBadRequest, "commit", "A commit is named by its full 40-character hash.")
 		return
 	}
 	if s.cfg.Work == nil {
 		if route == "/api/file" {
-			send(w, http.StatusUnprocessableEntity, problem{Error: errCommit.Error()})
+			send(w, http.StatusUnprocessableEntity, fileProblem(errCommit))
 			return
 		}
-		refuse(w, http.StatusConflict, "unverified")
+		refuse(w, http.StatusConflict, "unverified", "The engine didn't start this session, so it shows none of its files.")
 		return
 	}
 	switch route {
 	case "/api/file":
 		given, ok := body["path"].(string)
 		if !ok || given == "" || len(given) > maxFilePath {
-			refuse(w, http.StatusBadRequest, "path")
+			refuse(w, http.StatusBadRequest, "path", "The file couldn't be read.")
 			return
 		}
 		rels, texts, errs := s.commitTexts(sid, commit, []string{given})
@@ -629,12 +629,12 @@ func (s *Server) commitFiles(w http.ResponseWriter, route, sid string, body map[
 	case "/api/file-check":
 		paths, ok := checkedPaths(body)
 		if !ok {
-			refuse(w, http.StatusBadRequest, "paths")
+			refuse(w, http.StatusBadRequest, "paths", "The file check takes a list of paths, each of them text. Reload the page and try again.")
 			return
 		}
 		_, _, errs := s.commitTexts(sid, commit, paths)
 		send(w, http.StatusOK, checkedAnswer(paths, secretsNotLookedUp(errs)))
 	default:
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 	}
 }

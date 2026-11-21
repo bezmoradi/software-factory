@@ -1,4 +1,10 @@
-import type { SessionGrant } from './types.ts'
+import { visible } from './types.ts'
+import type { EngineAnswer, SessionGrant } from './types.ts'
+
+export type { EngineAnswer }
+
+export const NO_ANSWER = 'The engine didn’t answer. Check that it is running.'
+export const UNREAD = 'The engine’s answer couldn’t be read. Check that it is running.'
 
 const TOKEN_KEY = 'sf-key'
 let token = readToken()
@@ -40,24 +46,58 @@ export async function exchange(): Promise<void> {
 export async function trade(): Promise<void> {
   const res = await fetch('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', cache: 'no-store' }).catch(() => null)
   if (!res || !res.ok) return
-  const body = (await res.json()) as SessionGrant
-  keep(typeof body.token === 'string' ? body.token : '')
+  const grant = (await answerOf(res)).body as Partial<SessionGrant>
+  keep(typeof grant.token === 'string' ? grant.token : '')
 }
 
 export function events(): Promise<Response> {
   return fetch('/api/events', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
 }
 
-export function api(path: string, body: unknown): Promise<Response> {
+function api(path: string, body: unknown): Promise<Response> {
   return fetch(path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' })
 }
 
-export function sendState(file: Blob): Promise<Response> {
-  return fetch('/api/import', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/gzip' }, body: file, cache: 'no-store' })
+function text(v: unknown): string {
+  return typeof v === 'string' ? v : ''
 }
 
-export function upload(blob: Blob, sid: string, name = ''): Promise<Response> {
+export async function answerOf(res: Response | null): Promise<EngineAnswer> {
+  if (!res) return { ok: false, status: 0, error: '', field: '', message: NO_ANSWER, body: {} }
+  const parsed: unknown = await res.json().catch(() => null)
+  const body = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
+  const message = visible(text(body.message))
+  return { ok: res.ok, status: res.status, error: text(body.error), field: text(body.field), message: res.ok || message ? message : UNREAD, body }
+}
+
+export function savedTone(a: EngineAnswer): 'ok' | 'warn' {
+  return a.body.tone === 'warn' ? 'warn' : 'ok'
+}
+
+export async function request(path: string, body: unknown = {}): Promise<EngineAnswer> {
+  return answerOf(await api(path, body).catch(() => null))
+}
+
+export interface Download {
+  answer: EngineAnswer
+  file: Blob | null
+  type: string
+  disposition: string
+}
+
+export async function download(path: string, body: unknown = {}): Promise<Download> {
+  const res = await api(path, body).catch(() => null)
+  if (!res?.ok) return { answer: await answerOf(res), file: null, type: '', disposition: '' }
+  const file = await res.blob().catch(() => null)
+  return { answer: { ok: true, status: res.status, error: '', field: '', message: '', body: {} }, file, type: res.headers.get('Content-Type') ?? '', disposition: res.headers.get('Content-Disposition') ?? '' }
+}
+
+export async function sendState(file: Blob): Promise<EngineAnswer> {
+  return answerOf(await fetch('/api/import', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/gzip' }, body: file, cache: 'no-store' }).catch(() => null))
+}
+
+export async function upload(blob: Blob, sid: string, name = ''): Promise<EngineAnswer> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': name ? 'application/octet-stream' : blob.type, 'X-SF-Session': sid }
   if (name) headers['X-SF-Name'] = encodeURIComponent(name)
-  return fetch('/api/upload', { method: 'POST', headers, body: blob, cache: 'no-store' })
+  return answerOf(await fetch('/api/upload', { method: 'POST', headers, body: blob, cache: 'no-store' }).catch(() => null))
 }

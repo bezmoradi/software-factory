@@ -36,7 +36,7 @@ func (s *Server) projectHold(w http.ResponseWriter, body map[string]any) {
 	repo, okPath := body["path"].(string)
 	raw, okHold := body["hold"].(map[string]any)
 	if !keysWithin(body, "path", "op", "hold") || !okPath || len(repo) > session.MaxCwd || !okHold || !keysWithin(raw, "afterBlock", "maxFiles", "maxLines") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	after, okAfter := raw["afterBlock"].(bool)

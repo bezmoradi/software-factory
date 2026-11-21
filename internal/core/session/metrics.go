@@ -101,14 +101,14 @@ func NewMetrics(cfg MetricsConfig) *Metrics {
 
 func knownRepo(repos Repositories, name string) error {
 	if repos == nil {
-		return explained(conflict("not-yet"), "This engine has no repositories.")
+		return conflict("not-yet", "This engine has no repositories.")
 	}
 	list, err := repos.List()
 	if err != nil {
-		return explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	if !slices.ContainsFunc(list, func(r Repository) bool { return r.Name == name }) {
-		return explained(notFound("project"), "That project is no longer in the list.")
+		return notFound("project", "That project is no longer in the list.")
 	}
 	return nil
 }

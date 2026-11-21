@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { el, replaceKeeping, say, sayWhenShown, shown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 
@@ -45,15 +45,14 @@ class SfTeamRules extends HTMLElement {
   }
 
   async #load(path: string) {
-    const res = await api('/api/team', { path, op: 'read' }).catch(() => null)
-    const body = await res?.json().catch(() => null) as Record<string, unknown> | null
+    const a = await request('/api/team', { path, op: 'read' })
     if (path !== this.#path) return
     const parts: HTMLElement[] = [el('h3', 'label', 'Team rules from main')]
-    if (!res || !res.ok) {
+    if (!a.ok) {
       replaceKeeping(this, [...parts, this.#status])
-      return sayWhenShown(this.#status, typeof body?.message === 'string' ? visible(body.message) : 'The engine didn’t answer. Check that it is running.', 'bad')
+      return sayWhenShown(this.#status, a.message, 'bad')
     }
-    const v = readRules(body)
+    const v = readRules(a.body)
     if (!v || !v.present) return this.replaceChildren(...parts, el('p', 'small muted', 'The main branch has no software-factory.json, so no team rules apply.'))
     const where = `From software-factory.json on the main branch${v.head ? ` at commit ${shortSha(v.head)}` : ''}. Only main's version counts: the same file on a session's branch changes nothing.`
     const state = !v.approved ? 'You haven’t approved this team file, so these rules don’t apply yet. Approve it under Review the team file in a session of this project.'

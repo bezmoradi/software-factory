@@ -3702,6 +3702,7 @@ scenarios:
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
+        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; incident-gate reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -3850,6 +3851,21 @@ scenarios:
             "$.status": 200
             "$.body.gate.planDoc.path": ".knackpack/fake-incident/ROOT-CAUSE.md"
             "$.body.gate.planDoc.hash": "1f969cd992d5e428372645d2d30554ffb6ac689ab7a36e400d08a49599a1e568"
+      - id: none-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: approve-plan }
       - id: approve-confirmed
         do: http.request
         identity: page
@@ -3906,6 +3922,978 @@ scenarios:
         eventually: { within: 30s, every: 1s }
         expect:
           equal: { "$.found": false }
+      - id: turns-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.changes.commits": { where: { subject: "docs(knackpack): root cause for fake-incident" }, is: 3 }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-007
+    name: "A Feature session's requirements brief in the checked format, knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md: the engine reads it and refuses Approve requirements with the reason the gate's holds.approveRequirements showed before the press, for a blocking open question, including one after a fence line indented four spaces, which opens no fence, and for each invalid brief (a requirement without Acceptance, a question without exactly one Blocking marker, a duplicate requirement or question ID, a level-4 heading under the requirements that isn't a requirement, a Q- bullet that isn't a question, a section heading twice, the marker line twice, a missing section, no requirement, and no questions section, reported before no requirement), and approves a ready brief whose fenced examples don't count"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: blocked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: yes\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: blocked-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "b0c5b8b20f86a6c47afe44811702889b42b5297522a1d59419b619cd316b04ba"
+      - id: blocked-hold
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": "Can't approve yet: Q-02 is a blocking open question. Answer it with Claude, then approve."
+      - id: blocked-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "b0c5b8b20f86a6c47afe44811702889b42b5297522a1d59419b619cd316b04ba", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: yes\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: Q-02 is a blocking open question. Answer it with Claude, then approve." }
+      - id: no-acceptance
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: no-acceptance-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "1098a000440a011f38209cf8c9123cde9f9ac233a771e94b6b03620b96812bb4"
+      - id: no-acceptance-hold
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": "Can't approve yet: REQ-02 has no acceptance criterion."
+      - id: no-acceptance-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "1098a000440a011f38209cf8c9123cde9f9ac233a771e94b6b03620b96812bb4", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: REQ-02 has no acceptance criterion." }
+      - id: no-blocking
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: no-blocking-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "f58dca8ca9b4fcb155ebd2347b721635b34ffa4a0c613778d1ec30e595103150"
+      - id: no-blocking-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "f58dca8ca9b4fcb155ebd2347b721635b34ffa4a0c613778d1ec30e595103150", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: Q-01 doesn't say whether it blocks." }
+      - id: two-blocking
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: yes Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: two-blocking-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "7a8cead4031b22b4c58448d21f859b541d7802737ad32eca88ca25655cdf9922"
+      - id: two-blocking-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "7a8cead4031b22b4c58448d21f859b541d7802737ad32eca88ca25655cdf9922", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: yes Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: Q-01 says whether it blocks more than once." }
+      - id: same-requirement
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-01: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: same-requirement-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "162373294523b52c48d75fd5ee5e84cde3f1f471aca45fd991b07b6d81e1325d"
+      - id: same-requirement-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "162373294523b52c48d75fd5ee5e84cde3f1f471aca45fd991b07b6d81e1325d", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-01: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: REQ-01 appears twice." }
+      - id: same-question
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-01: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: same-question-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "7c35800cbb586cd7955890ee8cc9391c8005c78ec381351d232e5b0d27e96b10"
+      - id: same-question-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "7c35800cbb586cd7955890ee8cc9391c8005c78ec381351d232e5b0d27e96b10", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-01: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: Q-01 appears twice." }
+      - id: bad-heading
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### Notes\nExports are slow.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: bad-heading-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "af399a79a2f199789053597cd177144317c81796f7125294017b8cacb9acfb7b"
+      - id: bad-heading-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "af399a79a2f199789053597cd177144317c81796f7125294017b8cacb9acfb7b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### Notes\nExports are slow.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: a heading under the requirements isn't `#### <ID>: …`." }
+      - id: two-markers
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: two-markers-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "3f954d6aa9b4d12202f3a1789b4425b58f0ad2b06b878afb9842c9a60402cb58"
+      - id: two-markers-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "3f954d6aa9b4d12202f3a1789b4425b58f0ad2b06b878afb9842c9a60402cb58", text: "knackpack-requirements/1\n\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the line knackpack-requirements/1 appears more than once." }
+      - id: no-requirements-section
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: no-requirements-section-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "d8694ac6b68b1a116066bb00f5b0ecadf57a4199ee067cedd30e905dc8d0fae6"
+      - id: no-requirements-section-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "d8694ac6b68b1a116066bb00f5b0ecadf57a4199ee067cedd30e905dc8d0fae6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the brief has no section headed \"### Requirements and acceptance criteria\"." }
+      - id: no-requirement
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: no-requirement-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "a922ece78f57df71b6b6be5caa1c765f41aa25ad9a3a363803eacb53dfed880b"
+      - id: no-requirement-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "a922ece78f57df71b6b6be5caa1c765f41aa25ad9a3a363803eacb53dfed880b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the brief lists no requirement." }
+      - id: no-questions-section
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: no-questions-section-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "d2f10f6fc05adaaf9e167b532ce6eb1a9356436c37f34731bd8f58e09121dd59"
+      - id: no-questions-section-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "d2f10f6fc05adaaf9e167b532ce6eb1a9356436c37f34731bd8f58e09121dd59", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the brief has no section headed \"### Open questions and risks\"." }
+      - id: bad-question
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02 May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: bad-question-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "cb5704bebcb733001968df9f0b82d0ae694394f6e01cc99eeaf7f8b624ae808b"
+      - id: bad-question-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "cb5704bebcb733001968df9f0b82d0ae694394f6e01cc99eeaf7f8b624ae808b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02 May support staff export across organizations? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: a question isn't `- Q-<n>: …` with 1 to 4 digits." }
+      - id: second-section
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n### Requirements and acceptance criteria\n\n#### REQ-03: A manager sees when an export finished\nAcceptance: The export's row shows the time it finished.\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: second-section-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "944b461962a0bc15047e82459845ba455c2ffce8c2f6b643bf42169b063735d9"
+      - id: second-section-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "944b461962a0bc15047e82459845ba455c2ffce8c2f6b643bf42169b063735d9", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n### Requirements and acceptance criteria\n\n#### REQ-03: A manager sees when an export finished\nAcceptance: The export's row shows the time it finished.\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the brief has more than one section headed \"### Requirements and acceptance criteria\"." }
+      - id: indented-fence
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n    ```\n- Q-03: Four spaces before the backticks open no fence, so this question counts. Blocking: yes\n    ```\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: indented-fence-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "3a1b3cd3a9ffd46e75d0fec24fb1089f59d51cc5fb1f12d6d1f5d4660cb545f6"
+      - id: indented-fence-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "3a1b3cd3a9ffd46e75d0fec24fb1089f59d51cc5fb1f12d6d1f5d4660cb545f6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n    ```\n- Q-03: Four spaces before the backticks open no fence, so this question counts. Blocking: yes\n    ```\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: Q-03 is a blocking open question. Answer it with Claude, then approve." }
+      - id: empty-requirements
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: empty-requirements-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "a6bebbb95723a5e2f6804ddc62bc5a8f3591e07b6a4fafb4c24512c99ea84d6a"
+      - id: empty-requirements-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "a6bebbb95723a5e2f6804ddc62bc5a8f3591e07b6a4fafb4c24512c99ea84d6a", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Can't approve yet: the brief has no section headed \"### Open questions and risks\"." }
+      - id: ready
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n```\n- Q-09: An example inside a fence. Blocking: yes\n#### REQ-09: An example without an acceptance criterion\n```\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: ready-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "72ed8520494eb029307be5a414c92b045ac7157e22556d66b908e82bee2ba788"
+      - id: ready-hold
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": ""
+      - id: ready-not-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: approve-requirements }
+      - id: ready-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "72ed8520494eb029307be5a414c92b045ac7157e22556d66b908e82bee2ba788", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n```\n- Q-09: An example inside a fence. Blocking: yes\n#### REQ-09: An example without an acceptance criterion\n```\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: ready-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+      - id: approval-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: approve-requirements }, is: 1 }
+          any:
+            "$.body.entries": { kind: approve-requirements, hash: "72ed8520494eb029307be5a414c92b045ac7157e22556d66b908e82bee2ba788", session: "${sid}" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: turns-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.changes.commits": { where: { subject: "docs(knackpack): requirements for fake-feature" }, is: 16 }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-008
+    name: "A Feature session's requirements brief without the marker line knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md, in a knackpack session on a knackpack that writes the checked format (the stand-in at 0.40.0, RequirementsFormatSince and Knackpack.Floor; the owner's decision D1): the gate's holds.approveRequirements shows \"Written before the checked format; ask Claude to rewrite it.\" before the press, Approve requirements is refused with 409 held and that sentence, and nothing is approved or audited"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: older
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: older-committed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "d144c547b72fa864a6ca070e3687d2c55e2224ec859afdba2618818350db22ef"
+      - id: older-hold
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": "Written before the checked format; ask Claude to rewrite it."
+      - id: older-not-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: approve-requirements }
+      - id: older-approve
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "d144c547b72fa864a6ca070e3687d2c55e2224ec859afdba2618818350db22ef", text: "### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: held, message: "Written before the checked format; ask Claude to rewrite it." }
+      - id: older-still-unapproved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": "Written before the checked format; ask Claude to rewrite it."
+      - id: nothing-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: approve-requirements }, is: 0 }
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: turns-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.changes.commits": { where: { subject: "docs(knackpack): requirements for fake-feature" }, is: 1 }
       - id: remove
         do: http.request
         identity: page

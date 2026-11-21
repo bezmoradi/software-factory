@@ -417,6 +417,11 @@ func answer(id json.RawMessage, text string) bool {
 		reply(id, map[string]any{"stopReason": "end_turn"})
 		return true
 	}
+	if said, ok := requirementsLine(text); ok {
+		chunk(said)
+		reply(id, map[string]any{"stopReason": "end_turn"})
+		return true
+	}
 	if tool := toolNamed(text); tool != "" {
 		args := toolArgs(tool, text)
 		go func() {

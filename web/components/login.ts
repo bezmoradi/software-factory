@@ -1,5 +1,7 @@
-import { busy, button, el, field, labelError, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { UNREAD, type EngineAnswer } from '../api.ts'
+import { busy, button, el, labelError, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { actions, field, form, showAnswer } from '../lib/form.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
 import { secret } from './secret.ts'
@@ -7,22 +9,9 @@ import { commandBlock } from './copy.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
-
-interface Answer {
-  ok: boolean
-  body: Record<string, unknown>
-}
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/claude-login'
-
-async function call(post: Post, body: unknown): Promise<Answer> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  const record = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-  return { ok: res.ok, body: record }
-}
 
 function signInOf(v: unknown): SignIn | null {
   if (v === null || typeof v !== 'object') return null
@@ -70,7 +59,7 @@ function secretField(name: string, words: string, what: string, autocomplete: Au
   input.spellcheck = false
   input.setAttribute('aria-required', 'true')
   input.addEventListener('input', () => labelError(input, ''))
-  return [field(words, secret(input, what), undefined, 'login-field'), input]
+  return [field(words, secret(input, what), { cls: 'login-field' }), input]
 }
 
 function sending(input: HTMLInputElement, on: boolean) {
@@ -91,6 +80,8 @@ class Row {
   private readonly linkSaid = statusLine('small muted status-slot login-link-said')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
+  private readonly codeForm: HTMLFormElement
+  private readonly keyForm: HTMLFormElement
   private readonly subscription = el('div', 'login-panel')
   private readonly apiKey = el('div', 'login-panel')
   private waiting = false
@@ -109,19 +100,20 @@ class Row {
     this.link.rel = 'noopener noreferrer'
     const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
-    const codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
+    this.codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(
       el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
       this.linkSaid,
-      codeForm,
+      this.codeForm,
       this.subscriptionSaid,
     )
     const agents = target !== 'reviewers'
-    const [keyLabel, key] = secretField('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
+    const [keyLabel, key] = secretField('key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
     this.key = key
+    this.keyForm = this.form(keyLabel, this.keyGo, () => void this.finishKey())
     this.apiKey.append(
       el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
-      this.form(keyLabel, this.keyGo, () => void this.finishKey()),
+      this.keyForm,
       this.keySaid,
     )
     this.kinds.addEventListener('sf-expand', e => {
@@ -133,14 +125,7 @@ class Row {
   }
 
   private form(label: HTMLElement, go: HTMLButtonElement, done: () => void): HTMLFormElement {
-    const form = el('form', 'row login-code')
-    form.noValidate = true
-    form.append(label, go)
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      done()
-    })
-    return form
+    return form({ inline: true, cls: 'login-code', children: [label, actions([go])], onSubmit: done })
   }
 
   private paint() {
@@ -183,12 +168,12 @@ class Row {
     const mine = ++this.starting
     this.unready(keepNote ? '' : 'Getting the sign-in link…')
     if (!keepNote) this.note(this.subscriptionSaid, '')
-    const a = await call(this.post, { step: 'start', target: this.target })
+    const a = await this.post(ROUTE, { step: 'start', target: this.target })
     if (mine !== this.starting) return
     const link = safeLink(a.body.url)
     if (!a.ok || !link) {
       sayIfChanged(this.linkSaid, '')
-      return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+      return this.note(this.subscriptionSaid, a.ok ? UNREAD : a.message, true)
     }
     this.waiting = true
     this.ready(link, keepNote)
@@ -202,12 +187,12 @@ class Row {
     busy(this.codeGo, true)
     this.note(this.subscriptionSaid, '')
     labelError(this.code, '')
-    const a = await call(this.post, { step: 'code', target: this.target, code })
-    if (!a.ok && a.body.error === 'code') {
+    const a = await this.post(ROUTE, { step: 'code', target: this.target, code })
+    if (!a.ok && a.field === 'code') {
       sending(this.code, false)
       busy(this.codeGo, false)
-      labelError(this.code, typeof a.body.message === 'string' ? visible(a.body.message) : 'That didn’t work.')
-      return this.code.focus()
+      showAnswer(this.codeForm, a, this.subscriptionSaid)
+      return
     }
     this.code.value = ''
     this.code.type = 'password'
@@ -215,8 +200,7 @@ class Row {
     busy(this.codeGo, false)
     this.waiting = false
     this.unready()
-    if (!a.ok) {
-      this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'That didn’t work.', true)
+    if (!showAnswer(this.codeForm, a, this.subscriptionSaid)) {
       if (this.kinds.open === 'subscription') void this.begin(true)
       return
     }
@@ -231,17 +215,12 @@ class Row {
     busy(this.keyGo, true)
     this.note(this.keySaid, '')
     labelError(this.key, '')
-    const a = await call(this.post, { step: 'key', target: this.target, key })
+    const a = await this.post(ROUTE, { step: 'key', target: this.target, key })
     this.key.value = ''
     this.key.type = 'password'
     sending(this.key, false)
     busy(this.keyGo, false)
-    if (!a.ok) {
-      const said = typeof a.body.message === 'string' ? visible(a.body.message) : 'The key wasn’t saved. Try again.'
-      if (a.body.error === 'key') labelError(this.key, said)
-      else this.note(this.keySaid, said, true)
-      return this.key.focus()
-    }
+    if (!showAnswer(this.keyForm, a, this.keySaid)) return this.key.focus()
     this.show(signInOf(a.body.signIn))
     this.signedIn('your API key')
   }
@@ -249,7 +228,7 @@ class Row {
   cancel() {
     this.starting++
     this.unready()
-    if (this.waiting) void call(this.post, { step: 'cancel', target: this.target })
+    if (this.waiting) void this.post(ROUTE, { step: 'cancel', target: this.target })
     this.waiting = false
   }
 }
@@ -272,7 +251,7 @@ function signedIn(v: unknown): boolean | null {
 }
 
 export async function signInState(post: Post): Promise<SignInState | null> {
-  const a = await call(post, { step: 'status' })
+  const a = await post(ROUTE, { step: 'status' })
   if (!a.ok) return null
   const each = Array.isArray(a.body.each) ? (a.body.each as unknown[]) : []
   const agents: AgentLogin[] = []
@@ -295,6 +274,7 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
   const m = modal({
     kind: 'login',
     title: 'Sign Claude Code in for the reviewers',
+    docs: 'run-it-with-docker',
     body: [
       el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
       reviewers.node,
@@ -310,7 +290,7 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
   })
   if (known) reviewers.show(known)
   const refresh = async (): Promise<void> => {
-    const a = await call(post, { step: 'status' })
+    const a = await post(ROUTE, { step: 'status' })
     if (!open) return
     if (a.body.reviewer !== true) return void reviewers.node.remove()
     const busy = a.body.reviewersBusy === true
@@ -343,9 +323,9 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
     }) : null
     const check = async (): Promise<boolean | null> => {
       say(status, 'Checking…')
-      const a = await call(post, { step: 'status', target })
+      const a = await post(ROUTE, { step: 'status', target })
       if (!a.ok) {
-        say(status, typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.')
+        say(status, a.message)
         return null
       }
       const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
@@ -374,6 +354,7 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
     const m = modal({
       kind: 'login',
       title: `Sign ${visible(name)} in for this session`,
+      docs: 'run-it-with-docker',
       body: parts,
       actions: [button('Cancel', 'ghost small', () => done(false)), go],
     })

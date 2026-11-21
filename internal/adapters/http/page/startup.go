@@ -163,7 +163,7 @@ func (s *Server) expect(w http.ResponseWriter, body map[string]any) {
 	agent, okAgent := body["agent"].(string)
 	x, okExpect := body["expect"].(string)
 	if !keysWithin(body, "agent", "expect") || !okAgent || !okExpect || agent == "" || len(agent) > 40 || len(x) > 20 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	err := s.cfg.Starter.Expect(agent, session.Expect(x))

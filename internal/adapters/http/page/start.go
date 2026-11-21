@@ -159,13 +159,13 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		from, okFrom := startFromOf(rawFrom, hasFrom)
 		box, okBox := boxOf(body)
 		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box", "caps") || !okFrom || !okBox {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		for _, k := range []string{"path", "name", "model", "mode", "agent", "type", "effort"} {
 			if v, ok := body[k]; ok {
 				if _, isText := v.(string); !isText {
-					refuse(w, http.StatusBadRequest, k)
+					refuse(w, http.StatusBadRequest, k, saidFields)
 					return
 				}
 			}
@@ -177,7 +177,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		}
 		consent, ok := consentOf(body)
 		if !ok {
-			refuse(w, http.StatusBadRequest, "consent")
+			refuse(w, http.StatusBadRequest, "consent", "The consent in the request isn't one the engine reads. Reload the page and try again.")
 			return
 		}
 		agent := str(body["agent"], 40)
@@ -210,7 +210,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		send(w, http.StatusAccepted, startAnswer(started))
 	case "/api/stop-session":
 		if !keysWithin(body, "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Starter.Stop(ctx, sid)
@@ -219,7 +219,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	case "/api/wake":
 		if _, refusing := body["refuse"]; refusing {
 			if !keysWithin(body, "sid", "refuse") || body["refuse"] != true {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			err := s.cfg.Starter.RefuseWake(ctx, sid)
@@ -229,7 +229,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		}
 		consent, ok := consentOf(body)
 		if !keysWithin(body, "sid", "approve", "home", "costOk") || !ok {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Starter.Wake(ctx, sid, consent)
@@ -237,7 +237,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		reply(w, err, http.StatusAccepted)
 	case "/api/remove-session":
 		if !keysWithin(body, "sid", "flag", "value") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var given *session.Offer
@@ -245,7 +245,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 			f, isFlag := flag.(string)
 			v, isValue := body["value"].(string)
 			if !isFlag || !isValue || !slices.Contains([]string{"discard", "force", "worktree"}, f) || len(v) > 200 {
-				refuse(w, http.StatusBadRequest, "offer")
+				refuse(w, http.StatusBadRequest, "offer", saidOffer)
 				return
 			}
 			given = &session.Offer{Flag: f, Value: v}
@@ -299,7 +299,7 @@ func startCapsOf(w http.ResponseWriter, body map[string]any) (*session.Caps, boo
 	}
 	m, ok := raw.(map[string]any)
 	if !ok || !keysWithin(m, "money", "minutes", "turns", "disk") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return nil, false
 	}
 	c, ok := checkedCaps(w, m)
@@ -323,7 +323,7 @@ func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]
 	all, hasAll := body["all"]
 	every, isBool := all.(bool)
 	if !keysWithin(body, "sid", "costOk", "all") || !ok || !consented || sid == "" || len(sid) > 80 || hasAll && !isBool {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
@@ -342,7 +342,7 @@ func (s *Server) override(w http.ResponseWriter, r *http.Request, sid string, ok
 	reason, okReason := body["reason"].(string)
 	if !keysWithin(body, "sid", "agent", "commit", "reason") || !ok || sid == "" || len(sid) > 80 || !okAgent || !agentName.MatchString(agent) ||
 		!okCommit || !commitHex.MatchString(commit) || !okReason {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

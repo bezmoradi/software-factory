@@ -1,4 +1,5 @@
 import { el, statusLine, visible } from '../lib/dom.ts'
+import { field } from '../lib/form.ts'
 
 const SETTING_KEY = 'sf-notify'
 const SEEN_KEY = 'sf-notified'
@@ -106,11 +107,9 @@ class SfNotify extends HTMLElement {
     this.#box.type = 'checkbox'
     this.#box.checked = on
     this.#box.addEventListener('change', () => void this.#change())
-    const label = el('label', 'notify-pref small')
-    label.append(this.#box, el('span', '', 'Desktop notifications'))
     const legend = el('legend', 'label', 'Notifications')
     const set = el('fieldset', 'themes')
-    set.append(legend, label, this.#said)
+    set.append(legend, field('Desktop notifications', this.#box, { kind: 'check', cls: 'notify-pref' }), this.#said)
     this.append(set)
     if (!supported) {
       this.#box.disabled = true

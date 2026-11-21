@@ -33,7 +33,7 @@ const (
 var (
 	pluginID    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 	commitHash  = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	inertKeys   = []string{"name", "version", "description", "author", "homepage", "repository", "license", "keywords", "engines"}
+	inertKeys   = []string{"name", "version", "description", "author", "homepage", "repository", "license", "keywords", "engines", "network"}
 	serverFiles = []string{".mcp.json", ".lsp.json", "monitors", "workflows", "settings.json"}
 	versionForm = regexp.MustCompile(`^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}([-+][0-9A-Za-z.+-]{1,64})?$`)
 )

@@ -65,31 +65,31 @@ func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
 	a := r.admitted[sid]
 	switch {
 	case a == nil:
-		return false, conflict("unverified")
+		return false, conflict("unverified", "The engine didn't start this session, so it takes nothing for it from the page.")
 	case a.running || len(r.liveFor(sid, now)) > 0:
-		return false, conflict("not stopped")
+		return false, conflict("not stopped", "The session is running again. Send the message once more.")
 	case a.Kind != "background":
-		return false, conflict("not running")
+		return false, conflict("not running", "The session isn't running. Wake it first.")
 	case !r.lastControl(sid):
-		return false, explained(conflict("asleep"), "This session was read-only on this page when it stopped. Wake it without a message from the ⋯ menu first.")
+		return false, conflict("asleep", "This session was read-only on this page when it stopped. Wake it without a message from the ⋯ menu first.")
 	case text == "":
-		return false, explained(invalid("text"), "Type a message first.")
+		return false, invalid("text", "Type a message first.")
 	case utf16Len(text) > MaxText || !utf8.ValidString(text):
-		return false, explained(invalid("text"), "A message holds at most 20,000 characters.")
+		return false, invalid("text", "A message holds at most 20,000 characters.")
 	case strings.HasPrefix(text, "!"):
 		return false, shellLine(text)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return false, explained(invalid("command"), commandRefused(a.Box, a.ID))
+		return false, invalid("command", commandRefused(a.Box, a.ID))
 	}
 	if r.lastMode[sid] == "bypassPermissions" && !confirm {
-		return false, conflict("confirm")
+		return false, conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
 	}
 	sent, noted := r.noted(sid, text)
 	msg := Fields{"kind": "prompt", "text": sent}
 	if q := r.queued[sid]; q != nil {
 		if len(q.msgs) >= maxQueued {
-			return false, explained(limited("queue"), "Twenty messages already wait for this session to wake.")
+			return false, limited("queue", "Twenty messages already wait for this session to wake.")
 		}
 		q.msgs = append(q.msgs, msg)
 		if noted {

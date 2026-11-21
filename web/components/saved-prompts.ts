@@ -1,5 +1,7 @@
-import { api } from '../api.ts'
-import { busy, button, el, emit, field, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { actions, field, fieldGroup, showAnswer } from '../lib/form.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface SavedPrompt {
   id: string
@@ -42,6 +44,7 @@ class SfSavedPrompts extends HTMLElement {
   #text = el('textarea', 'textbox')
   #nameField = field('Prompt name', this.#name)
   #textField = field('Prompt text', this.#text)
+  #editor = fieldGroup([])
   draft: () => string = () => ''
 
   constructor() {
@@ -55,9 +58,11 @@ class SfSavedPrompts extends HTMLElement {
     this.#toggle.title = "Prompts saved for this project: insert one into the message box, or edit and delete them"
     this.#name.setAttribute('aria-required', 'true')
     this.#name.dataset.key = 'name'
+    this.#name.name = 'name'
     this.#text.rows = 5
     this.#text.setAttribute('aria-required', 'true')
     this.#text.dataset.key = 'text'
+    this.#text.name = 'text'
     this.#text.placeholder = 'The text to insert into the message box'
     for (const input of [this.#name, this.#text]) input.addEventListener('input', () => labelError(input, ''))
     this.#name.addEventListener('keydown', e => {
@@ -112,30 +117,28 @@ class SfSavedPrompts extends HTMLElement {
     this.#toggle.disabled = !value || value.disabled
   }
 
-  async #call(body: Record<string, unknown>): Promise<boolean> {
+  async #call(body: Record<string, unknown>): Promise<EngineAnswer> {
     this.#busy = true
     this.#busyOp = typeof body.op === 'string' ? body.op : ''
     if (body.op === 'save') this.#unrefuse()
     this.#paint()
-    const res = await api('/api/saved-prompts', body).catch(() => null)
+    const a = await request('/api/saved-prompts', body)
     this.#busy = false
-    const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
-    this.#refused = typeof answer?.error === 'string' ? answer.error : ''
-    if (!res || !res.ok) {
-      const said = typeof answer?.message === 'string' ? visible(answer.message) : ''
-      const own = body.op === 'save' && said ? (this.#refused === 'name' ? this.#name : this.#refused === 'text' ? this.#text : null) : null
-      if (own) labelError(own, said)
-      say(this.#status, own ? '' : said || 'The engine didn’t answer. Check that it is running.', 'bad')
+    this.#refused = a.field
+    if (!a.ok) {
+      if (body.op === 'save') showAnswer(this.#editor, a, this.#status)
+      else say(this.#status, a.message, 'bad')
       this.#paint()
-      return false
+      return a
     }
-    if (answer?.repo === this.#view?.repo) {
+    const answer = a.body
+    if (answer.repo === this.#view?.repo) {
       this.#list = readList(answer)
-      this.#canAdd = answer?.canAdd !== false
-      this.#full = typeof answer?.full === 'string' ? answer.full : ''
+      this.#canAdd = answer.canAdd !== false
+      this.#full = typeof answer.full === 'string' ? answer.full : ''
     }
     this.#paint()
-    return true
+    return a
   }
 
   async #save() {
@@ -144,9 +147,9 @@ class SfSavedPrompts extends HTMLElement {
     if (!v || !e || this.#busy) return
     const name = this.#name.value
     const text = this.#text.value
-    const ok = await this.#call({ op: 'save', repo: v.repo, ...(e.id ? { id: e.id } : {}), name, text })
-    if (!ok) return void (this.#refused === 'text' ? this.#text : this.#name).focus()
-    say(this.#status, `Saved “${visible(name)}”.`, 'ok')
+    const a = await this.#call({ op: 'save', repo: v.repo, ...(e.id ? { id: e.id } : {}), name, text })
+    if (!a.ok) return void (this.#refused === 'text' ? this.#text : this.#name).focus()
+    say(this.#status, a.message, savedTone(a))
     this.#editing = null
     this.#paint()
     this.#toggleFocus()
@@ -199,13 +202,13 @@ class SfSavedPrompts extends HTMLElement {
         this.#paint()
         this.#toggleFocus()
       }, 'button', 'cancel')
-      const row = el('div', 'row')
-      row.append(cancel, save)
-      parts.push(el('p', 'small muted', e.id ? 'Edit the prompt. It is your own text: the engine keeps it for this project and sends it only when you send the message.' : 'Name it and write the text. It is your own text: the engine keeps it for this project and sends it only when you send the message.'), this.#nameField, this.#textField, row)
+      const row = actions([cancel, save])
+      replaceKeeping(this.#editor, [el('p', 'small muted', e.id ? 'Edit the prompt. It is your own text: the engine keeps it for this project and sends it only when you send the message.' : 'Name it and write the text. It is your own text: the engine keeps it for this project and sends it only when you send the message.'), this.#nameField, this.#textField, row])
+      parts.push(this.#editor)
     } else {
       const list = this.#list
       if (!list) parts.push(el('p', 'small muted', this.#busy ? 'Loading…' : 'The list isn’t loaded.'))
-      else if (!list.length) parts.push(el('p', 'small muted', 'None yet. Save one with New prompt; Insert puts it into the message box.'))
+      else if (!list.length) parts.push(emptyState('None yet. Save one with New prompt; Insert puts it into the message box.'))
       else {
         const ul = el('ul', 'list saved-prompts-list')
         for (const p of list) ul.append(this.#row(p, v))
@@ -231,8 +234,8 @@ class SfSavedPrompts extends HTMLElement {
     if (this.#deleting === p.id) {
       const yes = button('Delete', 'danger small', () => {
         if (this.#busy) return
-        void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(ok => {
-          if (ok) {
+        void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(a => {
+          if (a.ok) {
             say(this.#status, `Deleted “${visible(p.name)}”.`, 'ok')
           }
           this.#deleting = ''

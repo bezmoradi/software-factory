@@ -200,15 +200,15 @@ func (f *ProjectFacts) LookupsOn(project string) bool {
 
 func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 	if f.cfg.Repos == nil || f.cfg.Lookups == nil {
-		return explained(conflict("not-yet"), "This engine keeps no project settings.")
+		return conflict("not-yet", "This engine keeps no project settings.")
 	}
 	if _, err := f.cfg.Repos.record(repo); err != nil {
-		return explained(notFound("project"), "That project is no longer in the list.")
+		return notFound("project", "That project is no longer in the list.")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.loadLocked() != nil {
-		return explained(conflict("records"), "The engine couldn't read its package lookup setting.")
+		return conflict("records", "The engine couldn't read its package lookup setting.")
 	}
 	f.settleLocked()
 	next := map[string]bool{}
@@ -219,10 +219,10 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 		delete(next, repo)
 	}
 	if len(next) > MaxLookupProjects {
-		return explained(conflict("full"), "The package lookup is on for too many projects.")
+		return conflict("full", "The package lookup is on for too many projects.")
 	}
 	if err := f.cfg.Lookups.Save(LookupState{Projects: next, Removed: slices.Clone(f.removed)}); err != nil {
-		return explained(conflict("records"), "The engine couldn't save the package lookup setting.")
+		return conflict("records", "The engine couldn't save the package lookup setting.")
 	}
 	f.on = next
 	if f.cfg.Audit != nil {
@@ -239,15 +239,15 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 
 func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFactsView, error) {
 	if f.cfg.Repos == nil {
-		return ProjectFactsView{}, explained(conflict("not-yet"), "This engine has no repositories.")
+		return ProjectFactsView{}, conflict("not-yet", "This engine has no repositories.")
 	}
 	list, err := f.cfg.Repos.List()
 	if err != nil {
-		return ProjectFactsView{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return ProjectFactsView{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Name == repo })
 	if i < 0 {
-		return ProjectFactsView{}, explained(notFound("project"), "That project is no longer in the list.")
+		return ProjectFactsView{}, notFound("project", "That project is no longer in the list.")
 	}
 	r := list[i]
 	out := ProjectFactsView{Repo: r.Name, Branch: r.Branch, Lookups: f.LookupsOn(r.Name), Protection: Protection{State: ProtectionUnknown, Reviews: ProtectionUnknown, Checks: ProtectionUnknown}}

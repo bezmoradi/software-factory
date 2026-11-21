@@ -19,7 +19,12 @@ const (
 	reviewDepthRoute = "/api/review-depth"
 	maxDepthAgent    = 120
 	maxProjectName   = 400
-	depthListRule    = "each list of roles is agent names, separated by commas"
+	depthListRule    = "Agent names, separated by commas."
+)
+
+const (
+	saidDepthSaved     = "Saved. The next review uses them."
+	saidDepthUnchanged = "No change: these review settings are already saved."
 )
 
 var (
@@ -42,7 +47,7 @@ func (s *Server) UseReviewDepth(d session.ReviewDepthPage) {
 func (s *Server) lessonsAPI(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	s.mu.Lock()
@@ -62,7 +67,7 @@ func (s *Server) lessonsAPI(w http.ResponseWriter, r *http.Request, body map[str
 		}
 		s.depthOp(w, depth, op, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -133,7 +138,7 @@ func lessonsOf(v session.LessonsView) lessonsJSON {
 func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons session.LessonsPage, op string, body map[string]any) {
 	name, okName := body["name"].(string)
 	if !okName || name == "" || len(name) > maxProjectName {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	id, okID := body["id"].(string)
@@ -142,13 +147,13 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "name") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "suggest":
 		consent, consented := consentOf(body)
 		if !keysWithin(body, "op", "name", "costOk") || !consented {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if !s.knownProject(name) {
@@ -166,13 +171,13 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 		sid, okSID := viewSession(body)
 		okSID = okSID || body["sid"] == ""
 		if !keysWithin(body, "op", "name", "id", "sid") || !okID || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = lessons.Approve(name, id, sid)
 	case "decline":
 		if !keysWithin(body, "op", "name", "id") || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = lessons.Decline(name, id)
@@ -202,6 +207,7 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 }
 
 type depthJSON struct {
+	savedSaid
 	Advisory     []string       `json:"advisory"`
 	Runs         map[string]int `json:"runs"`
 	MaxFiles     int            `json:"maxFiles"`
@@ -248,25 +254,26 @@ func typedCount(v any) (int64, bool) {
 	return n, err == nil
 }
 
-func refuseDepth(w http.ResponseWriter, field, why string) {
-	send(w, http.StatusBadRequest, problem{Error: "depth", Field: field, Message: "The engine didn't save it: " + why + "."})
+func refuseDepth(w http.ResponseWriter, field, message string) {
+	send(w, http.StatusBadRequest, problem{Error: "depth", Field: field, Message: message})
 }
 
 func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, op string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if !okPath || path == "" || len(path) > session.MaxCwd {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
+	var said savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "set":
 		if !keysWithin(body, "op", "path", "advisory", "runs", "maxFiles", "maxLines", "extra", "extraRuns") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		advisory, okAdvisory := agentList(body["advisory"])
@@ -289,7 +296,7 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 			refuseDepth(w, "maxLines", workflow.DepthSizeRule)
 			return
 		case !okExtraRuns || extraRuns < 0 || extraRuns > review.MaxRuns:
-			refuseDepth(w, "extraRuns", workflow.DepthSizeRule)
+			refuseDepth(w, "extraRuns", workflow.DepthExtraRunsRule)
 			return
 		case !okRuns || len(rawRuns) > 20:
 			refuseDepth(w, "runs", workflow.DepthRunsRule)
@@ -304,13 +311,14 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 			}
 			runs[a] = int(n)
 		}
-		err := depth.SetReviewDepth(path, workflow.Depth{Advisory: advisory, Runs: runs, MaxFiles: int(files), MaxLines: int(lines), Extra: extra, ExtraRuns: int(extraRuns)})
-		s.logger.Info("project setting", "op", "review-depth", "ok", err == nil)
+		changed, err := depth.SetReviewDepth(path, workflow.Depth{Advisory: advisory, Runs: runs, MaxFiles: int(files), MaxLines: int(lines), Extra: extra, ExtraRuns: int(extraRuns)})
+		s.logger.Info("project setting", "op", "review-depth", "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		said = saveSaid(changed, saidDepthSaved, saidDepthUnchanged)
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads and sets a project's review settings only."})
 		return
@@ -325,6 +333,6 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 	if runs == nil {
 		runs = map[string]int{}
 	}
-	send(w, http.StatusOK, depthJSON{Advisory: nonNil(v.Depth.Advisory), Runs: runs, MaxFiles: v.Depth.MaxFiles, MaxLines: v.Depth.MaxLines, Extra: nonNil(v.Depth.Extra),
+	send(w, http.StatusOK, depthJSON{savedSaid: said, Advisory: nonNil(v.Depth.Advisory), Runs: runs, MaxFiles: v.Depth.MaxFiles, MaxLines: v.Depth.MaxLines, Extra: nonNil(v.Depth.Extra),
 		ExtraRuns: v.Depth.ExtraRuns, Agents: nonNil(v.Agents), Type: v.Type, RunsTotal: v.Runs, AboveRuns: v.AboveRuns, AdvisoryRuns: v.Advisory, MaxRuns: review.MaxRuns})
 }

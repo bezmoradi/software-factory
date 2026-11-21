@@ -63,13 +63,13 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, body map[string]
 		return
 	}
 	if !keysWithin(body, "later") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if raw, present := body["later"]; present {
 		version, ok := raw.(string)
 		if !ok || version == "" || len(version) > maxLaterField {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if err := u.Later(version); err != nil {

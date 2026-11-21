@@ -19,7 +19,7 @@ const (
 	knackpackRepo   = "knackpack.git"
 	knackpackPublic = "/public/" + knackpackRepo
 	knackpackSeeded = "2026-11-01T00:00:00Z"
-	knackpackFirst  = "0.26.0"
+	knackpackFirst  = "0.40.0"
 )
 
 var (

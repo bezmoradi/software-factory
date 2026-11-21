@@ -187,7 +187,7 @@ func (f *Forges) commentPush(ctx context.Context, p PushedFacts, number int) {
 func (f *Forges) answerCommentUnlocking(sid string, c *forgeCard, approve bool, req string) error {
 	if c.pushed == nil {
 		f.mu.Unlock()
-		return explained(conflict("card"), "That comment has no push record any more.")
+		return conflict("card", "That comment has no push record any more.")
 	}
 	p := *c.pushed
 	if shared.ValidRequest(req) {

@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface RoleNumbers {
   role: string
@@ -123,14 +124,13 @@ class SfProjectMetrics extends HTMLElement {
     const project = this.#project
     this.#busy = true
     this.#paint()
-    const res = await api('/api/metrics', { op: 'read', repo: project }).catch(() => null)
+    const a = await request('/api/metrics', { op: 'read', repo: project })
     if (project !== this.#project) return
     this.#busy = false
-    const body = await res?.json().catch(() => null) as Record<string, unknown> | null
-    if (!res || !res.ok) {
-      say(this.#status, typeof body?.message === 'string' && body.message ? shown(body.message) : 'The engine didn\'t answer. Try again.', 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
     } else {
-      const v = readView(body)
+      const v = readView(a.body)
       if (v) this.#view = v
       this.#status.textContent = ''
     }
@@ -156,7 +156,7 @@ class SfProjectMetrics extends HTMLElement {
     const box = el('div')
     box.append(el('p', 'small', 'Per review role'))
     if (!v.roles.length) {
-      box.append(el('p', 'small muted', 'No finished reviews in the window.'))
+      box.append(emptyState('No finished reviews in the window.'))
       return box
     }
     const ul = el('ul', 'small list')

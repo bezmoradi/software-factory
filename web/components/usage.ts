@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request, savedTone } from '../api.ts'
 import { actionButton, el, focusedKey, refocus, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 
 export interface CapsValues {
@@ -187,19 +187,21 @@ function paintAll() {
   for (const node of shown) node.paint()
 }
 
-export async function limitsAnswer(body: Record<string, unknown>): Promise<{ problem: string; field: string; error: string }> {
-  try {
-    const res = await api('/api/limits', body)
-    const data: unknown = await res.json().catch(() => null)
-    if (res.ok) {
-      setLimits(data)
-      return { problem: '', field: '', error: '' }
-    }
-    const { message, field, error } = rec(data)
-    return { problem: typeof message === 'string' && message ? visible(message) : "The engine didn't take that. Try again.", field: typeof field === 'string' ? field : '', error: typeof error === 'string' ? error : '' }
-  } catch {
-    return { problem: "The engine didn't answer. Try again once the page is connected.", field: '', error: '' }
+export interface LimitsAnswer {
+  problem: string
+  field: string
+  error: string
+  said: string
+  tone: 'ok' | 'warn'
+}
+
+export async function limitsAnswer(body: Record<string, unknown>): Promise<LimitsAnswer> {
+  const a = await request('/api/limits', body)
+  if (a.ok) {
+    setLimits(a.body)
+    return { problem: '', field: '', error: '', said: a.message, tone: savedTone(a) }
   }
+  return { problem: a.message, field: a.field, error: a.error, said: '', tone: 'ok' }
 }
 
 export async function limitsCall(body: Record<string, unknown>): Promise<string> {

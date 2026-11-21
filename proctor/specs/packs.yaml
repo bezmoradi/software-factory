@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 400
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: fields }
+        "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }
     no_state_check: "refused with 400 by the route's field check before it reads or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
     waive: { EXE-09: { rows: [pck_no_path, pck_op_number, pck_list_extra, pck_fetch_no_commit, pck_fetch_commit_number, pck_fetch_extra, pck_add_no_digest, pck_remove_empty, pck_use_extra, pck_use_no_pack, pck_upload_no_files, pck_upload_file_extra, pck_upload_no_name], reason: "every row is refused with 400 by the route's field check before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body"]
@@ -47,13 +47,11 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", message: "${row.message}" }
     no_state_check: "refused with 400 before the handler fetches anything or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
-    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_fetch_http, pck_fetch_branch, pck_add_bad_digest, pck_add_use_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul, pck_upload_twice, pck_upload_bad_name, pck_fetch_empty_url, pck_fetch_empty_commit, pck_upload_empty_files, pck_upload_no_manifest], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
+    waive: { EXE-09: { rows: [pck_unknown_op, pck_use_bad_pack, pck_add_bad_digest, pck_add_use_bad_digest, pck_remove_bad_digest, pck_upload_hooks, pck_upload_dotdot, pck_upload_knackpack, pck_upload_nul, pck_upload_twice, pck_upload_bad_name, pck_upload_empty_files, pck_upload_no_manifest], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body", "error", "message"]
     rows:
       - ["pck_unknown_op", { op: delete, path: /workspace/base/demo }, "op", "The engine lists, fetches, adds, uploads, removes and uses packs only."]
       - ["pck_use_bad_pack", { op: use, path: /workspace/base/demo, pack: acme }, "pack", "A project uses knackpack, a pack the engine keeps, by its digest, or none."]
-      - ["pck_fetch_http", { op: fetch, path: /workspace/base/demo, url: "http://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "A pack comes from a plain https address of a git repository, with no user, query or fragment."]
-      - ["pck_fetch_branch", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: main }, "commit", "A pack is pinned by a full 40-character commit hash, never a branch or tag."]
       - ["pck_add_bad_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
       - ["pck_add_use_bad_digest", { op: add-use, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
       - ["pck_remove_bad_digest", { op: remove, path: /workspace/base/demo, digest: abc }, "digest", "Remove a pack by the digest the page shows."]
@@ -63,10 +61,30 @@ tables:
       - ["pck_upload_nul", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: "a\u0000b" }] }, "refused upload", "The engine refused this upload: The upload's agents/a.md isn't UTF-8 text with no NUL byte."]
       - ["pck_upload_twice", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/a.md, text: x }, { path: agents/A.md, text: x }] }, "refused upload", "The engine refused this upload: The upload names agents/A.md twice, in some letter case."]
       - ["pck_upload_bad_name", { op: upload, path: /workspace/base/demo, name: Beta, files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: a pack's name is lowercase letters, digits and hyphens, at most 64, starting with a letter or digit."]
-      - ["pck_fetch_empty_url", { op: fetch, path: /workspace/base/demo, url: "", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "A pack comes from a plain https address of a git repository, with no user, query or fragment."]
-      - ["pck_fetch_empty_commit", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: "" }, "commit", "A pack is pinned by a full 40-character commit hash, never a branch or tag."]
       - ["pck_upload_empty_files", { op: upload, path: /workspace/base/demo, name: acme, files: [] }, "refused upload", "The engine refused this upload: An upload holds 1 to 200 files."]
       - ["pck_upload_no_manifest", { op: upload, path: /workspace/base/demo, name: "", files: [{ path: agents/a.md, text: x }] }, "refused upload", "The engine refused this upload: The folder has no software-factory-pack.json naming the pack at its top."]
+  - id: PCK-T06
+    name: "/api/packs refuses a fetch's address or commit that its rule doesn't take, naming the field and saying what it takes, before it fetches or changes anything"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/packs"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 before the handler fetches anything or writes packs.json, the agents volume or the audit, so nothing changed; a row can't name a read of its own"
+    waive: { EXE-09: { rows: [pck_fetch_http, pck_fetch_branch, pck_fetch_empty_url, pck_fetch_empty_commit], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
+    columns: ["case", "body", "error", "field", "message"]
+    rows:
+      - ["pck_fetch_http", { op: fetch, path: /workspace/base/demo, url: "http://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "url", "Needs a plain https address of a git repository."]
+      - ["pck_fetch_branch", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: main }, "commit", "commit", "Needs a full 40-character commit hash."]
+      - ["pck_fetch_empty_url", { op: fetch, path: /workspace/base/demo, url: "", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "url", "Needs a plain https address of a git repository."]
+      - ["pck_fetch_empty_commit", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: "" }, "commit", "commit", "Needs a full 40-character commit hash."]
   - id: PCK-T03
     name: "/api/packs answers 404 for a project it doesn't list and a pack it doesn't keep"
     do: http.request
@@ -156,7 +174,7 @@ scenarios:
         expect:
           equal:
             "$.status": 413
-            "$.body": { error: body }
+            "$.body": { error: body, message: "The engine refused the upload: it is over 2 MiB in all, the most a request to it carries." }
         no_state_check: "refused with 413 while the body is read, before the handler runs, so nothing changed"
         waive: { EXE-09: "the body holds only a pad field, which names no pack or project, and it is refused with 413 while the body is read, so nothing can be removed or overwritten" }
       - id: under
@@ -170,7 +188,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: fields }
+            "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }
         no_state_check: "a body under 2 MiB is read whole and then refused with 400 by the field check, since it names no op or path, so nothing changed"
         waive: { EXE-09: "the body holds only a pad field, which names no pack or project, and the field check refuses it with 400 before the handler acts, so nothing can be removed or overwritten" }
   - id: PCK-001
@@ -269,7 +287,7 @@ scenarios:
             "$.body.using": knackpack
             "$.body.packs": []
             "$.body.max": 8
-            "$.body.knackpack.version": "0.26.0"
+            "$.body.knackpack.version": "0.40.0"
             "$.body.roleNames": { bug-hunter: "bug hunter", simplicity: "simplicity checker" }
           matches: { "$.body.knackpack.commit": "[0-9a-f]{40}" }
       - id: still-knackpack
@@ -420,7 +438,7 @@ scenarios:
             "$.body.entries[0].kind": pack
             "$.body.entries[0].result": added
             "$.body.entries[0].commit": c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0
-            "$.body.entries[0].reason": "the developer added the pack acme 1.0.0 from git, pinned at commit c8c68ae, on the page"
+            "$.body.entries[0].reason": "the developer added the pack acme 1.0.0 from git, pinned at commit c8c68ae1519c, on the page"
       - id: use-acme
         do: http.request
         identity: page
@@ -602,7 +620,7 @@ scenarios:
           matches: { "$.body.packs[0].addedAt": "[0-9]{13}" }
           absent: ["$.body.packs[1]"]
         save: { digest: "$.body.packs[0].digest" }
-        waive: { EXE-09: "an upload only adds a pack: one with a name the engine keeps is refused with 409 name, one with the same digest is left as it is, and it changes no project's choice, so nothing can be removed or overwritten" }
+        waive: { EXE-09: "an upload only adds a pack: one with a name the engine keeps is refused with 409 name, one with the same digest is left as it is, and it changes no project's choice, so nothing can be removed or overwritten", FIX-05: "the pack's name is in its software-factory-pack.json, whose bytes give the digests this scenario pins (fc23c188 and a98b266c) and the wake note quotes, so it can't carry ${run.id} without unpinning them; this upload's 200 lists beta as the only pack, so no earlier run's beta is kept, and on-beta reads the gate of the session saved from this run's dispatch" }
       - id: upload-same-name
         do: http.request
         identity: page
@@ -615,7 +633,7 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: name, message: "The engine already keeps a pack named beta. Remove it first, or use the one it keeps." }
-        waive: { EXE-09: "an upload only adds a pack, and this one is refused with 409 name because the engine keeps a pack named beta, so nothing can be removed or overwritten" }
+        waive: { EXE-09: "an upload only adds a pack, and this one is refused with 409 name because the engine keeps a pack named beta, so nothing can be removed or overwritten", FIX-05: "it must name beta, the pack upload kept, for the engine to refuse it with 409 name, and that name can't carry ${run.id} (see upload); on-beta reads the gate of the session saved from this run's dispatch, and audited shows this upload added nothing" }
       - id: use-beta
         do: http.request
         identity: page
@@ -698,6 +716,7 @@ scenarios:
             "$.status": 200
             "$.body.using": knackpack
             "$.body.packs[0].usedBy": []
+        waive: { FIX-05: "knackpack is the built-in pack's fixed id and can't carry ${run.id}; no earlier step can send remove's request and read the project's choice, since a remove of this run's digest is an act, but use-beta's answer showed the project using this run's digest before this step, and still-kept reads this step's audit entry" }
       - id: keeps-beta
         do: http.request
         identity: page

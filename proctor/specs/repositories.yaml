@@ -34,8 +34,8 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.starters":
-              - { enabled: true, expect: any, id: claude, method: plugin, name: "Claude Code", default: true, models: [{ id: fable, name: Fable, efforts: [low, medium, high, xhigh, max] }, { id: opus, name: Opus, efforts: [low, medium, high, xhigh, max] }, { id: sonnet, name: Sonnet, efforts: [low, medium, high, xhigh, max] }, { id: haiku, name: Haiku, efforts: [low, medium, high, xhigh, max] }], efforts: [low, medium, high, xhigh, max] }
-              - { enabled: true, expect: any, id: dev-acp, method: acp, name: "Development ACP agent", models: [], efforts: [] }
+              - { enabled: true, expect: any, id: claude, method: plugin, name: "Claude Code", default: true, models: [{ id: fable, name: Fable, efforts: [low, medium, high, xhigh, max] }, { id: opus, name: Opus, efforts: [low, medium, high, xhigh, max] }, { id: sonnet, name: Sonnet, efforts: [low, medium, high, xhigh, max] }, { id: haiku, name: Haiku, efforts: [low, medium, high, xhigh, max] }], efforts: [low, medium, high, xhigh, max], fields: { model: true, effort: true, expect: false }, command: "claude --bg" }
+              - { enabled: true, expect: any, id: dev-acp, method: acp, name: "Development ACP agent", models: [], efforts: [], fields: { model: false, effort: false, expect: true }, command: "its ACP server" }
           count:
             "$.body.hosts": { where: { host: "https://gitserver.test:8443" }, is: 1 }
           any:
@@ -57,7 +57,7 @@ scenarios:
           equal:
             "$.status": 409
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: exists, message: "That repository is in the list already, as demo." }
+            "$.body": { error: exists, field: url, message: "Already in the list as demo." }
         waive: { FIX-05: "the dev git host serves only fixed repositories, so the URL can't carry ${run.id}; this request is refused, and the step after it counts the list's entries for the URL" }
       - id: listed-once
         do: http.request
@@ -183,7 +183,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "Leave the user name and password out of the address; save a token for the host instead." }
+            "$.body": { error: url, field: url, message: "Leave out the user name and password." }
       - id: add-http
         do: http.request
         identity: page
@@ -196,7 +196,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
+            "$.body": { error: url, field: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
       - id: add-ssh
         do: http.request
         identity: page
@@ -209,7 +209,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
+            "$.body": { error: url, field: url, message: "Only https:// addresses are accepted; SSH and http aren't." }
       - id: add-with-query
         do: http.request
         identity: page
@@ -222,7 +222,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "Leave out the ? query or # fragment: give the repository's plain https address." }
+            "$.body": { error: url, field: url, message: "Leave out the ? query and # fragment." }
       - id: add-with-fragment
         do: http.request
         identity: page
@@ -235,7 +235,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "Leave out the ? query or # fragment: give the repository's plain https address." }
+            "$.body": { error: url, field: url, message: "Leave out the ? query and # fragment." }
       - id: add-with-dot-dot
         do: http.request
         identity: page
@@ -248,7 +248,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: url, message: "The path can't have . or .. parts." }
+            "$.body": { error: url, field: url, message: "The path can't have . or .. parts." }
       - id: nothing-added
         do: http.request
         identity: page

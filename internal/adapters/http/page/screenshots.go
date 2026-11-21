@@ -252,7 +252,7 @@ func (s *Server) screenshots(w http.ResponseWriter, route string, body map[strin
 	allowed := map[string][]string{screenshotsRoute: {"sid"}, screenshotRoute: {"sid", "name"}}
 	sid, ok := body["sid"].(string)
 	if !keysWithin(body, allowed[route]...) || !ok || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if route == screenshotsRoute {
@@ -271,7 +271,7 @@ func (s *Server) screenshots(w http.ResponseWriter, route string, body map[strin
 	}
 	name, ok := body["name"].(string)
 	if !ok || name == "" || len(name) > 255 {
-		refuse(w, http.StatusBadRequest, "name")
+		refuse(w, http.StatusBadRequest, "name", "Name a screenshot from the list. Reload it and try again.")
 		return
 	}
 	shot, err := s.reg.Screenshot(sid, name)

@@ -1,8 +1,9 @@
-import { api } from '../api.ts'
+import { request, type EngineAnswer } from '../api.ts'
 import { button, el, emit, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
+import { emptyState } from '../lib/page.ts'
 
 export type RulesLink = 'allow-rules' | 'egress' | 'team' | 'away' | 'exceptions'
 
@@ -15,7 +16,7 @@ export interface RulesView {
   box: string
 }
 
-type Answer = { ok: boolean; body: Record<string, unknown> }
+type Answer = EngineAnswer
 
 const FIXED: { what: string; why: string; claude?: boolean }[] = [
   { what: 'Reach a built-in git host or one on the deny list', why: 'Egress always refuses GitHub, githubusercontent.com, GitLab, Bitbucket and the hosts on its deny list. Another git host you add under Network access is reachable like any allowed host.' },
@@ -33,15 +34,10 @@ const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string =>
 const records = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)) : [])
 const record = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 
-async function call(route: string, body: unknown): Promise<Answer> {
-  const res = await api(route, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  return { ok: res.ok, body: record(parsed) }
-}
+const OUTSIDE: Answer = { ok: false, status: 0, error: '', field: '', message: 'This session isn’t in a project of your list.', body: {} }
 
-function failed(a: Answer, fallback: string): HTMLElement {
-  return el('p', 'small warn', text(a.body.message) ? visible(text(a.body.message)) : fallback)
+function failed(a: Answer): HTMLElement {
+  return el('p', 'small warn', a.message)
 }
 
 class SfRules extends HTMLElement {
@@ -109,10 +105,10 @@ class SfRules extends HTMLElement {
     this.#pending = v.sid
     this.#status.textContent = 'Reading what the engine holds…'
     const [rules, egress, team, exceptions] = await Promise.all([
-      v.repo ? call('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
-      call('/api/egress', { op: 'read' }),
-      v.path ? call('/api/team', { path: v.path, op: 'read' }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
-      call('/api/exceptions', {}),
+      v.repo ? request('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve(OUTSIDE),
+      request('/api/egress', { op: 'read' }),
+      v.path ? request('/api/team', { path: v.path, op: 'read' }) : Promise.resolve(OUTSIDE),
+      request('/api/exceptions', {}),
     ])
     if (gen !== this.#gen || this.#view?.sid !== v.sid) return
     this.#pending = ''
@@ -137,10 +133,10 @@ class SfRules extends HTMLElement {
 
   #saved(v: RulesView, a: Answer): HTMLElement {
     const link = this.#link('Change on Projects', 'allow-rules', 'the saved allow rules of this project')
-    if (!a.ok) return this.#section('Saved “don’t ask again” rules', failed(a, 'The saved rules didn’t load.'), link)
+    if (!a.ok) return this.#section('Saved “don’t ask again” rules', failed(a), link)
     const mine = records(a.body.rules).filter(r => text(r.rule) && (text(r.place) === 'clone' || (!!v.box && text(r.box) === v.box)))
     const ul = el('ul', 'list rules-list')
-    if (!mine.length) ul.append(el('li', 'small muted', a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.'))
+    if (!mine.length) ul.append(emptyState(a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.', { tag: 'li' }))
     for (const r of mine) {
       const li = el('li', 'small')
       li.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${visible(text(r.placeLabel) || text(r.place))}`))
@@ -153,14 +149,14 @@ class SfRules extends HTMLElement {
 
   #hosts(a: Answer): HTMLElement {
     const link = this.#link('Change under Network access', 'egress', 'the hosts sessions may reach')
-    if (!a.ok) return this.#section('Hosts the session may reach', failed(a, 'Network access didn’t load.'), link)
+    if (!a.ok) return this.#section('Hosts the session may reach', failed(a), link)
     const lists = record(a.body.lists)
     const allow = strings(record(lists.agents).allow)
     const now = Number(a.body.now) || Math.floor(Date.now() / 1000)
     const added = records(a.body.added).filter(h => text(h.host))
     const parts: Node[] = []
     const ul = el('ul', 'list rules-hosts')
-    if (!allow.length) ul.append(el('li', 'small muted', 'No host: every connection is refused.'))
+    if (!allow.length) ul.append(emptyState('No host: every connection is refused.', { tag: 'li' }))
     for (const h of allow) {
       const extra = added.find(x => text(x.host) === h)
       const li = el('li', 'small')
@@ -180,7 +176,7 @@ class SfRules extends HTMLElement {
 
   #limits(v: RulesView, a: Answer): HTMLElement {
     const link = this.#link('Review the team file', 'team', 'the protect list in the team file on main')
-    if (!a.ok) return this.#section('Paths it must ask before writing', failed(a, 'The team file didn’t load.'), link)
+    if (!a.ok) return this.#section('Paths it must ask before writing', failed(a), link)
     const setup = record(a.body.setup)
     const protect = strings(setup.protect)
     const approved = record(a.body.approved)
@@ -191,7 +187,7 @@ class SfRules extends HTMLElement {
       const applies = !!a.body.approved && approved.same === true
       parts.push(el('p', `small ${applies ? 'muted' : 'warn'}`, `From software-factory.json on main${head ? ` at ${shortSha(head)}` : ''}. ${applies ? 'You approved this version, so it applies.' : !a.body.approved ? 'You haven’t approved it, so it doesn’t apply yet.' : 'It changed since you approved it, so it applies once you approve this version.'}`))
       const ul = el('ul', 'list rules-list')
-      if (!protect.length) ul.append(el('li', 'small muted', 'No path is protected.'))
+      if (!protect.length) ul.append(emptyState('No path is protected.', { tag: 'li' }))
       for (const p of protect) ul.append(el('li', 'small mono', shown(p)))
       parts.push(ul, el('p', `small ${v.claude ? 'muted' : 'warn'}`, v.claude ? 'Claude Code shows a card before each write to these paths, with no “don’t ask again”. A push is never held by path.' : 'This session’s agent isn’t Claude Code, so it writes these paths without a card. A push is never held by path.'))
     }
@@ -209,11 +205,11 @@ class SfRules extends HTMLElement {
 
   #register(v: RulesView, a: Answer): HTMLElement {
     const link = this.#link('Open the register of exceptions', 'exceptions', 'every exception you made')
-    if (!a.ok) return this.#section('Exceptions you made for this session', failed(a, 'The register didn’t load.'), link)
+    if (!a.ok) return this.#section('Exceptions you made for this session', failed(a), link)
     const mine = records(a.body.items).filter(i => text(i.sid) === v.sid)
     const KIND: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', 'cap-reached': 'Cap reached', 'cap-answer': 'Cap card answered', 'usage-answer': 'Kept running near a usage limit' }
     const ul = el('ul', 'list rules-list')
-    if (!mine.length) ul.append(el('li', 'small muted', 'None recorded for this session.'))
+    if (!mine.length) ul.append(emptyState('None recorded for this session.', { tag: 'li' }))
     for (const i of mine.slice(0, 10)) {
       const li = el('li', 'small')
       const at = Number(i.time) || 0

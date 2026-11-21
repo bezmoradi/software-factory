@@ -1,5 +1,6 @@
 import { button, el, settleFocus, statusLine, visible } from '../lib/dom.ts'
 import { modal, reopen } from '../lib/dialog.ts'
+import { field, form } from '../lib/form.ts'
 
 export interface PaletteItem {
   id: string
@@ -80,10 +81,7 @@ export function openPalette(list: () => PaletteItem[]): void {
   input.setAttribute('aria-expanded', 'true')
   input.setAttribute('aria-controls', 'palette-list')
   input.setAttribute('aria-autocomplete', 'list')
-  const name = el('label', 'sr-only', 'Command')
-  name.htmlFor = input.id
-  const head = el('div', 'palette-head')
-  head.append(name, input)
+  const head = field('Command', input, { kind: 'hidden', cls: 'palette-head' })
   const listbox = el('div', 'palette-list')
   listbox.id = 'palette-list'
   listbox.setAttribute('role', 'listbox')
@@ -196,11 +194,12 @@ export function openPalette(list: () => PaletteItem[]): void {
     kind: 'palette',
     consent: false,
     title: 'Command palette',
+    docs: 'working-in-a-session',
     headingClass: 'sr-only',
     body: [head, listbox, none, said],
     focus: input,
     single: 'palette',
-    backdropCloses: true,
+    searchOnly: true,
   })
   paint()
 }
@@ -253,12 +252,11 @@ export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) =>
     tbody.append(tr)
   }
   table.append(caption, thead, tbody)
-  const toggle = el('label', 'small check-inline')
   const box = el('input')
   box.type = 'checkbox'
   box.checked = questionOn
   box.addEventListener('change', () => setQuestion(box.checked))
-  toggle.append(box, ' Open this list with the ? key')
+  const toggle = form({ children: [field('Open this list with the ? key', box, { kind: 'check' })] })
   const note = el('p', 'small muted', 'None of these replaces a key the browser or a screen reader uses: the palette key is the browser’s search shortcut only while this page has focus, and ? works only outside text fields. A screen reader in browse mode keeps every key it uses for itself.')
   const closeButton = button('Close', 'ghost small', () => m.close())
   const wrap = el('div', 'shortcut-wrap')
@@ -269,6 +267,7 @@ export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) =>
   const m = modal({
     kind: 'shortcuts',
     title: 'Keyboard shortcuts',
+    docs: 'working-in-a-session',
     body: [wrap, toggle, note],
     actions: [closeButton],
     focus: closeButton,

@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 415
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: type }
+        "$.body": { error: type, message: "The engine takes an image as PNG, JPEG, GIF or WebP, or a file as application/octet-stream." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]"]
@@ -138,7 +138,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400 by the upload handler's name check, before the body is read or anything is saved; no page read lists uploads"
       - id: file-name-with-slash
         do: http.request
@@ -151,7 +151,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400, since the name decodes to one holding a slash, which session.UploadName refuses, before the body is read or anything is saved; no page read lists uploads"
       - id: file-name-bad-escape
         do: http.request
@@ -164,7 +164,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400, since url.PathUnescape refuses the name's %zz, before the body is read or anything is saved; no page read lists uploads"
       - id: image-with-name
         do: http.request
@@ -177,7 +177,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "Only a file, not an image, is sent with its name. Reload the page and try again." }
         no_state_check: "refused with 400, since an image takes its name from its type and a name sent with one is refused, before the body is read or anything is saved; no page read lists uploads"
 
   - id: UPL-003
@@ -208,7 +208,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: session }
+            "$.body": { error: session, message: "The upload's session id is missing or longer than 80 characters. Reload the page and try again." }
         no_state_check: "refused with 400 by the upload handler's session check, before the body is read or anything is saved; no page read lists uploads"
       - id: long-session
         do: http.request
@@ -221,7 +221,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: session }
+            "$.body": { error: session, message: "The upload's session id is missing or longer than 80 characters. Reload the page and try again." }
         no_state_check: "refused with 400, since the session header is 81 characters and the handler takes at most 80, before the body is read or anything is saved; no page read lists uploads"
 
   - id: UPL-004
@@ -314,7 +314,7 @@ scenarios:
           equal:
             "$.status": 415
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: x-gzip
         do: http.request
         identity: page
@@ -326,7 +326,7 @@ scenarios:
         expect:
           equal:
             "$.status": 415
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: gzip-with-parameter
         do: http.request
         identity: page
@@ -338,7 +338,7 @@ scenarios:
         expect:
           equal:
             "$.status": 415
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: with-name
         do: http.request
         identity: page
@@ -350,7 +350,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: fields }
+            "$.body": { error: fields, message: "An import takes no X-SF-Name or X-SF-Session header. Reload the page and try again." }
       - id: with-session
         do: http.request
         identity: page
@@ -362,7 +362,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: fields }
+            "$.body": { error: fields, message: "An import takes no X-SF-Name or X-SF-Session header. Reload the page and try again." }
       - id: over-limit
         do: http.request
         identity: page

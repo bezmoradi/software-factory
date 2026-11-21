@@ -124,25 +124,25 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	if image {
 		ext, ok := ImageTypes[kind]
 		if !ok {
-			return "", invalid("upload")
+			return "", invalid("upload", "The engine takes images as PNG, JPEG, GIF or WebP only.")
 		}
 		name = "image." + ext
 		if len(data) > MaxImageUpload {
-			return "", explained(invalid("too big"), ImageRefused)
+			return "", invalid("too big", ImageRefused)
 		}
 		if !imageMatches(kind, data) {
-			return "", explained(invalid("upload"), "That isn't the kind of image it says it is.")
+			return "", invalid("upload", "That isn't the kind of image it says it is.")
 		}
 	} else {
 		if !UploadName(name) {
-			return "", explained(invalid("name"), "That file's name can't be used.")
+			return "", invalid("name", "That file's name can't be used.")
 		}
 		if len(data) > MaxDrop {
-			return "", explained(invalid("too big"), DropRefused(name))
+			return "", invalid("too big", DropRefused(name))
 		}
 	}
 	if len(data) == 0 {
-		return "", explained(invalid("upload"), "The file is empty.")
+		return "", invalid("upload", "The file is empty.")
 	}
 	if image {
 		if err := r.uploadTarget(sid, true); err != nil {
@@ -150,7 +150,7 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 		}
 		fitted, small, ok := fitImage(kind, data)
 		if !ok {
-			return "", explained(invalid("too big"), ImageRefused)
+			return "", invalid("too big", ImageRefused)
 		}
 		if fitted != kind {
 			name = "image." + ImageTypes[fitted]
@@ -167,7 +167,7 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	r.trimUnsent(sid)
 	if r.uploads.bytes+int64(len(data)) > MaxUploadBytes {
 		r.mu.Unlock()
-		return "", explained(limited("uploads"), "The uploads folder is full. Send or remove what's waiting, or wait for older uploads to be deleted.")
+		return "", limited("uploads", "The uploads folder is full. Send or remove what's waiting, or wait for older uploads to be deleted.")
 	}
 	folder := r.uploads.folders[sid]
 	if folder == "" {
@@ -186,11 +186,11 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	defer r.mu.Unlock()
 	if r.uploads.items[id] != u {
 		go func() { _ = files.Drop(folder, id) }()
-		return "", explained(conflict("gone"), "The session ended while the file was saved.")
+		return "", conflict("gone", "The session ended while the file was saved.")
 	}
 	if err != nil {
 		r.dropUpload(id)
-		return "", explained(conflict("save"), "The engine couldn't save the file.")
+		return "", conflict("save", "The engine couldn't save the file.")
 	}
 	u.Path = path
 	return id, nil
@@ -206,13 +206,13 @@ func (r *Registry) uploadTargetLocked(sid string, image bool) error {
 	a := r.admitted[sid]
 	switch {
 	case r.uploads.files == nil:
-		return explained(conflict("no uploads"), "This engine has no uploads folder, so it takes no images or files.")
+		return conflict("no uploads", "This engine has no uploads folder, so it takes no images or files.")
 	case a == nil:
-		return explained(notFound("session"), "Only a session this engine started takes images and files.")
+		return notFound("session", "Only a session this engine started takes images and files.")
 	case !a.running:
-		return explained(conflict("not running"), NeedsRunning)
+		return conflict("not running", NeedsRunning)
 	case image && r.uploads.noImage[sid]:
-		return explained(conflict("no images"), noImages)
+		return conflict("no images", noImages)
 	case !ValidBox(a.Box):
 		return oldLayout()
 	}
@@ -299,7 +299,7 @@ func (r *Registry) sweepUploads(now time.Time) {
 
 func (r *Registry) takeUploads(sid string, ids []string, image bool) ([]Upload, error) {
 	if len(ids) > MaxAttached {
-		return nil, invalid("attachments")
+		return nil, invalid("attachments", "A message carries at most 4 images and 4 files.")
 	}
 	seen := map[string]bool{}
 	out := make([]Upload, 0, len(ids))
@@ -307,9 +307,9 @@ func (r *Registry) takeUploads(sid string, ids []string, image bool) ([]Upload, 
 		u := r.uploads.items[id]
 		if seen[id] || u == nil || u.SID != sid || u.Sent || u.Image != image || u.Path == "" {
 			if image {
-				return nil, explained(invalid("images"), "An image is no longer waiting to be sent. Attach it again.")
+				return nil, invalid("images", "An image is no longer waiting to be sent. Attach it again.")
 			}
-			return nil, explained(invalid("files"), "A file is no longer waiting to be sent. Attach it again.")
+			return nil, invalid("files", "A file is no longer waiting to be sent. Attach it again.")
 		}
 		seen[id] = true
 		out = append(out, *u)
@@ -345,21 +345,21 @@ func (r *Registry) Image(given, id string) (Upload, []byte, error) {
 	}
 	if r.disputed(c.sid, now) {
 		r.mu.Unlock()
-		return Upload{}, nil, conflict("disputed")
+		return Upload{}, nil, toAgent(Conflict, "disputed")
 	}
 	u := r.uploads.items[id]
 	if u == nil || u.SID != c.sid || !u.Image || !u.Sent {
 		r.mu.Unlock()
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	got, folder, files := *u, r.uploads.folders[u.SID], r.uploads.files
 	r.mu.Unlock()
 	if files == nil || folder == "" {
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	data, err := files.Read(folder, got.ID, got.Name, MaxImage)
 	if err != nil {
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	return got, data, nil
 }

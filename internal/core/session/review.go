@@ -752,7 +752,7 @@ func (r *Reviews) holdLocked(key string) error {
 func (r *Reviews) holdRunsLocked(key string, runs int) error {
 	held := r.heldLocked()
 	if held >= MaxReviewerRuns || held > 0 && held+runs > MaxReviewerRuns {
-		return explained(limited("reviews"), fmt.Sprintf("The engine runs at most %d reviewer runs at once, each in a reviewer container of its own. Wait for one to finish.", MaxReviewerRuns))
+		return limited("reviews", fmt.Sprintf("The engine runs at most %d reviewer runs at once, each in a reviewer container of its own. Wait for one to finish.", MaxReviewerRuns))
 	}
 	r.running[key] = runs
 	return nil
@@ -961,7 +961,7 @@ func (r *Reviews) branchCost(branch string) float64 {
 
 func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 	if r.cfg.SignIns == nil {
-		return SignIn{}, explained(conflict("no sign-in check"), "This engine can't check the reviewers' sign-in, so it doesn't start reviews.")
+		return SignIn{}, conflict("no sign-in check", "This engine can't check the reviewers' sign-in, so it doesn't start reviews.")
 	}
 	started := r.cfg.Now()
 	r.mu.Lock()
@@ -979,7 +979,7 @@ func (r *Reviews) CheckSignIn(ctx context.Context) (SignIn, error) {
 		} else {
 			shared.For(ctx, r.cfg.Logger).Warn("review sign-in check", "event", "failed")
 		}
-		return SignIn{}, explained(conflict("sign-in check"), "The engine couldn't check the reviewers' sign-in, so the review doesn't start: "+hostMessage(err))
+		return SignIn{}, conflict("sign-in check", "The engine couldn't check the reviewers' sign-in, so the review doesn't start: "+hostMessage(err))
 	}
 	s.CheckedAt = started
 	r.mu.Lock()
@@ -1048,21 +1048,21 @@ func (r *Reviews) SignIn() (SignIn, bool) {
 func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
-		return explained(invalid("reason"), "An override needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
+		return onField("reason", invalid("reason", "Needs your reason, up to 500 characters."))
 	}
 	head, err := r.cfg.Snapshots.Head(t.Repo, t.Branch)
 	if err != nil {
-		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	if head != commit {
-		return explained(conflict("moved"), "The branch moved on since the page showed this verdict, so it wasn't overridden. Read the latest review first.")
+		return conflict("moved", "The branch moved on since the page showed this verdict, so it wasn't overridden. Read the latest review first.")
 	}
 	k := review.Key{Commit: head, Branch: t.Branch, Agent: agent}
 	r.store.Lock()
 	list, err := r.cfg.Records.Load()
 	if err != nil {
 		r.store.Unlock()
-		return explained(conflict("records"), "The engine couldn't read its review records.")
+		return conflict("records", "The engine couldn't read its review records.")
 	}
 	var blocking []int
 	found, running, overridden := false, false, false
@@ -1082,16 +1082,16 @@ func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason str
 	switch {
 	case !found:
 		r.store.Unlock()
-		return explained(conflict("no review"), "There's no review by "+agent+" of this commit to override.")
+		return conflict("no review", "There's no review by "+agent+" of this commit to override.")
 	case running:
 		r.store.Unlock()
-		return explained(conflict("reviewing"), "A run of "+agent+" on this commit is still going. Wait for it to finish, then override.")
+		return conflict("reviewing", "A run of "+agent+" on this commit is still going. Wait for it to finish, then override.")
 	case len(blocking) == 0 && overridden:
 		r.store.Unlock()
-		return explained(conflict("overridden"), "You already overrode this verdict.")
+		return conflict("overridden", "You already overrode this verdict.")
 	case len(blocking) == 0:
 		r.store.Unlock()
-		return explained(conflict("not blocking"), "Only a blocking verdict can be overridden, and "+agent+"'s verdict on this commit doesn't block.")
+		return conflict("not blocking", "Only a blocking verdict can be overridden, and "+agent+"'s verdict on this commit doesn't block.")
 	}
 	for _, i := range blocking {
 		list[i].Record.Override = clean
@@ -1099,7 +1099,7 @@ func (r *Reviews) Override(sid string, t ReviewTarget, agent, commit, reason str
 	e := list[blocking[0]]
 	if err := r.cfg.Records.Save(list); err != nil {
 		r.store.Unlock()
-		return explained(conflict("records"), "The engine couldn't save the override.")
+		return conflict("records", "The engine couldn't save the override.")
 	}
 	r.store.Unlock()
 	r.mu.Lock()

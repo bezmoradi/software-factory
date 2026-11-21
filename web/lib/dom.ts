@@ -1,3 +1,7 @@
+import { INVISIBLE, visible } from '../types.ts'
+
+export { visible }
+
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K]
 export function el(tag: string, cls?: string, text?: string): HTMLElement
 export function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -8,12 +12,6 @@ export function el(tag: string, cls?: string, text?: string): HTMLElement {
 }
 
 export const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-
-const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
-
-export function visible(text: string): string {
-  return String(text).replace(INVISIBLE, c => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, '0')}}`)
-}
 
 const SPOOFING = /[\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu
 
@@ -68,39 +66,36 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   return b
 }
 
-let fields = 0
+let ids = 0
 
-function labelTarget(control: HTMLElement): HTMLElement {
-  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement || control instanceof HTMLButtonElement) return control
-  return control.querySelector<HTMLElement>('input, select, textarea') ?? control
-}
-
-export function field(label: string, control: HTMLElement, help?: string, cls = 'field'): HTMLDivElement {
-  const target = labelTarget(control)
-  if (!target.id) target.id = `field-${++fields}`
-  const box = el('div', cls)
-  const name = el('label', 'small', label)
-  name.htmlFor = target.id
-  box.append(name, control)
-  if (help) {
-    const note = el('p', 'small muted', help)
-    note.id = `${target.id}-help`
-    const described = (target.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
-    if (!described.includes(note.id)) target.setAttribute('aria-describedby', [...described, note.id].join(' '))
-    box.append(note)
-  }
-  return box
+export function ensureId(node: HTMLElement): string {
+  if (!node.id) node.id = `field-${++ids}`
+  return node.id
 }
 
 const TONES = ['bad', 'warn', 'ok', 'muted'] as const
 export type Tone = typeof TONES[number]
 
+function sideBySideRow(label: HTMLLabelElement): HTMLElement | null {
+  const holder = label.closest('.field')?.parentElement?.closest<HTMLElement>('.form, .form-row')
+  return holder?.matches('.form-inline, .form-row') ? holder : null
+}
+
+function labelName(label: HTMLLabelElement): string {
+  const name = label.cloneNode(true) as HTMLLabelElement
+  for (const part of name.querySelectorAll('.label-error, .muted, input, select, textarea, button')) part.remove()
+  return (name.textContent ?? '').trim()
+}
+
 export function labelError(input: HTMLElement, message: string): void {
-  if (!input.id) input.id = `field-${++fields}`
-  const id = `${input.id}-error`
+  const id = `${ensureId(input)}-error`
   const root = input.getRootNode()
-  const label = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) : null
+  const scope = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root : null
+  const label = scope?.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) ?? null
   label?.querySelector('.label-error')?.remove()
+  const row = label ? sideBySideRow(label) : null
+  const lineId = `${id}-row`
+  for (const place of [row, scope]) place?.querySelector(`[id="${CSS.escape(lineId)}"]`)?.remove()
   const described = (input.getAttribute('aria-describedby') ?? '').split(' ').filter(d => d && d !== id)
   if (!message || !label) {
     input.removeAttribute('aria-invalid')
@@ -111,7 +106,13 @@ export function labelError(input: HTMLElement, message: string): void {
   const note = el('span', 'label-error', `(${message.trim().replace(/\.$/, '')})`)
   note.id = id
   note.setAttribute('aria-hidden', 'true')
-  label.append(note)
+  if (row) {
+    const line = el('p', 'small row-error')
+    line.id = lineId
+    line.setAttribute('aria-hidden', 'true')
+    line.append(labelName(label), ' ', note)
+    row.append(line)
+  } else label.append(note)
   input.setAttribute('aria-invalid', 'true')
   input.setAttribute('aria-describedby', [...described, id].join(' '))
 }
@@ -237,7 +238,7 @@ function busyLine(layer: Element): HTMLSpanElement {
   let line = busyLines.get(layer)
   if (!line?.isConnected) {
     line = statusLine('sr-only', 'span')
-    layer.append(line)
+    layer.prepend(line)
     busyLines.set(layer, line)
   }
   return line
@@ -406,18 +407,6 @@ export function remembered(open: Map<string, boolean>, key: string, openByDefaul
   d.addEventListener('toggle', () => open.set(key, d.open))
   d.append(summary, ...content)
   return d
-}
-
-export function pageCrumb(text: string): HTMLElement {
-  const nav = el('nav', 'crumbs')
-  nav.setAttribute('aria-label', 'Breadcrumb')
-  const li = el('li')
-  li.setAttribute('aria-current', 'page')
-  li.append(el('h1', '', text))
-  const ol = el('ol')
-  ol.append(li)
-  nav.append(ol)
-  return nav
 }
 
 export function focusView(): void {

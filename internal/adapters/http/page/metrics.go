@@ -92,7 +92,7 @@ func (s *Server) projectMetrics(w http.ResponseWriter, body map[string]any) {
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) || !keysWithin(body, "op", "repo") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if op != "read" {

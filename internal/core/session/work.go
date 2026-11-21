@@ -454,13 +454,13 @@ func (w *Work) change(fn func(*WorkState) error) error {
 	defer w.store.Unlock()
 	st, err := w.loadLocked()
 	if err != nil {
-		return explained(conflict("state"), "The engine couldn't read its project settings.")
+		return conflict("state", "The engine couldn't read its project settings.")
 	}
 	if err := fn(&st); err != nil {
 		return err
 	}
 	if err := w.cfg.Store.Save(st); err != nil {
-		return explained(conflict("state"), "The engine couldn't save its project settings.")
+		return conflict("state", "The engine couldn't save its project settings.")
 	}
 	return nil
 }
@@ -468,11 +468,11 @@ func (w *Work) change(fn func(*WorkState) error) error {
 func (w *Work) repoByPath(path string) (Repository, error) {
 	list, err := w.cfg.Repos.List()
 	if err != nil {
-		return Repository{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return Repository{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Path == path })
 	if i < 0 {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return list[i], nil
 }
@@ -620,7 +620,7 @@ func (w *Work) Check(repo, typeID string) error {
 		return nil
 	}
 	if _, ok := typeIn(w.setupFor(repo).setup.Types, typeID); !ok {
-		return explained(invalid("type"), "That work type isn't one this project offers.")
+		return invalid("type", "That work type isn't one this project offers.")
 	}
 	return nil
 }
@@ -672,10 +672,10 @@ func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	}
 	ws, ok := w.session(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started has a work type here.")
+		return conflict("not started here", "Only a session this engine started has a work type here.")
 	}
 	if _, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id); !ok {
-		return explained(invalid("type"), "That work type isn't one this project offers.")
+		return invalid("type", "That work type isn't one this project offers.")
 	}
 	w.mu.Lock()
 	if s := w.sessions[sid]; s != nil {
@@ -1018,7 +1018,7 @@ func (w *Work) current(ctx context.Context, sid string) (gathered, error) {
 func (w *Work) currentOf(ctx context.Context, sid string, lookup func(sid string) (PushTarget, bool)) (gathered, error) {
 	ws, ok := w.session(sid)
 	if !ok {
-		return gathered{}, explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
+		return gathered{}, conflict("not started here", "Only a session this engine started has a workflow here.")
 	}
 	t, ok := lookup(sid)
 	if !ok {
@@ -1040,6 +1040,7 @@ func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 		UsesArtifacts: g.docs.held}
 	if g.docs.req != nil {
 		f.ReqHash = g.docs.req.Hash
+		f.Brief = w.briefCheck(g.adapter, g.docs.req.Text)
 	}
 	if g.docs.plan != nil {
 		f.PlanFile, f.PlanHash = g.docs.plan.Path, g.docs.plan.Hash
@@ -1068,9 +1069,17 @@ func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	return f
 }
 
+func (w *Work) briefCheck(adapter workflow.AdapterID, text string) workflow.BriefCheck {
+	c := workflow.RequirementsReadiness(text)
+	if c.Kind == workflow.BriefNone && (adapter != workflow.Knackpack || w.cfg.Packs == nil || !workflow.WritesRequirementsFormat(w.cfg.Packs.KnackpackVersion)) {
+		return workflow.BriefCheck{}
+	}
+	return c
+}
+
 func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text string) error {
 	if !sha256Hex.MatchString(hash) || textHash(text) != hash {
-		return explained(invalid("hash"), "The text the page showed doesn't match its hash. Reload the page and read it again.")
+		return invalid("hash", "The text the page showed doesn't match its hash. Reload the page and read it again.")
 	}
 	g, err := w.current(ctx, sid)
 	if err != nil {
@@ -1086,17 +1095,17 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	}
 	switch {
 	case doc == nil && onBase != nil:
-		return explained(conflict("on base"), "The "+what+" text is from an earlier task, already on the base branch, so it can't be approved here. The session's own commits must add or change it.")
+		return conflict("on base", "The "+what+" text is from an earlier task, already on the base branch, so it can't be approved here. The session's own commits must add or change it.")
 	case doc == nil && g.docs.held:
-		return explained(conflict("not committed"), "The engine counts only the "+what+" text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve.")
+		return conflict("not committed", "The engine counts only the "+what+" text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve.")
 	case doc == nil:
-		return explained(conflict("nothing"), "There's no "+what+" to approve yet.")
+		return conflict("nothing", "There's no "+what+" to approve yet.")
 	case doc.Clipped:
-		return explained(conflict("too long"), "The "+what+" is longer than the page shows, so it can't be approved as a whole. Ask for a shorter one.")
+		return conflict("too long", "The "+what+" is longer than the page shows, so it can't be approved as a whole. Ask for a shorter one.")
 	case doc.Hash != hash:
-		return explained(conflict("changed"), "The "+what+" changed before your approval arrived. Read the new version and approve it again.")
+		return conflict("changed", "The "+what+" changed before your approval arrived. Read the new version and approve it again.")
 	case g.head == "":
-		return explained(conflict("head"), "The "+what+" weren't approved: the engine couldn't read the session's branch.")
+		return conflict("head", "The "+what+" weren't approved: the engine couldn't read the session's branch.")
 	}
 	f := w.facts(ctx, g)
 	kind := workflow.ApproveRequirements
@@ -1104,7 +1113,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 		kind = workflow.ApprovePlan
 	}
 	if why := workflow.Decide(f, workflow.Action{Kind: kind, Hash: hash}); why != "" {
-		return explained(conflict("held"), why)
+		return conflict("held", why)
 	}
 	a := &workApproval{Hash: hash, Commit: g.head, At: w.cfg.Now()}
 	if !plan {
@@ -1490,7 +1499,7 @@ func (w *Work) fetched(ctx context.Context, path string) (Repository, error) {
 		if e, ok := errors.AsType[*Error](err); ok {
 			return Repository{}, e
 		}
-		return Repository{}, explained(conflict("fetch"), "The engine couldn't fetch the main branch, so it can't read the team file there.")
+		return Repository{}, conflict("fetch", "The engine couldn't fetch the main branch, so it can't read the team file there.")
 	}
 	return r, nil
 }
@@ -1511,11 +1520,11 @@ func (w *Work) ApproveTeam(ctx context.Context, path, sha string) (TeamView, err
 	t := w.readTeam(r)
 	switch {
 	case !t.present:
-		return TeamView{}, explained(conflict("no team file"), "The main branch has no "+TeamFile+" to approve.")
+		return TeamView{}, conflict("no team file", "The main branch has no "+TeamFile+" to approve.")
 	case t.sha != sha:
-		return TeamView{}, explained(conflict("changed"), "The team file changed on the main branch before your approval arrived. Read it again.")
+		return TeamView{}, conflict("changed", "The team file changed on the main branch before your approval arrived. Read it again.")
 	case t.team == nil:
-		return TeamView{}, explained(conflict("problems"), "The team file has problems, so it can't be approved. Fix them on the main branch first.")
+		return TeamView{}, conflict("problems", "The team file has problems, so it can't be approved. Fix them on the main branch first.")
 	}
 	if err := w.change(func(st *WorkState) error {
 		st.Teams[r.Name] = TeamApproval{SHA: sha, At: w.cfg.Now()}
@@ -1587,16 +1596,16 @@ func (w *Work) SetProject(ctx context.Context, path, op string, rounds int, kind
 	switch op {
 	case "rounds":
 		if rounds < 1 || rounds > maxRounds {
-			return explained(invalid("rounds"), "Review rounds go from 1 to 20.")
+			return invalid("rounds", "Review rounds go from 1 to 20.")
 		}
 	case "type":
 		if kind != "" {
 			if _, ok := typeIn(w.setupFor(r.Name).setup.Types, kind); !ok {
-				return explained(invalid("type"), "That work type isn't one this project offers.")
+				return invalid("type", "That work type isn't one this project offers.")
 			}
 		}
 	default:
-		return explained(invalid("op"), "The engine keeps a project's review rounds and default work type only.")
+		return invalid("op", "The engine keeps a project's review rounds and default work type only.")
 	}
 	if err := w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]
@@ -1692,7 +1701,7 @@ func (w *Work) flagged(ctx context.Context, sid, path string) (gathered, Flag, e
 			return g, f.Flag, nil
 		}
 	}
-	return g, Flag{}, explained(conflict("not flagged"), "That file isn't flagged on this branch any more.")
+	return g, Flag{}, conflict("not flagged", "That file isn't flagged on this branch any more.")
 }
 
 func (w *Work) flaggedCommit(ctx context.Context, sid, commit string, field CommitField) (gathered, Flag, error) {
@@ -1705,7 +1714,7 @@ func (w *Work) flaggedCommit(ctx context.Context, sid, commit string, field Comm
 			return g, f.Flag, nil
 		}
 	}
-	return g, Flag{}, explained(conflict("not flagged"), "That commit's "+FieldWords[field]+" isn't flagged on this branch any more.")
+	return g, Flag{}, conflict("not flagged", "That commit's "+FieldWords[field]+" isn't flagged on this branch any more.")
 }
 
 func (w *Work) allow(sid string, f Flag) error {
@@ -1713,7 +1722,7 @@ func (w *Work) allow(sid string, f Flag) error {
 	defer w.mu.Unlock()
 	s := w.sessions[sid]
 	if s == nil {
-		return explained(conflict("not started here"), "Only a session this engine started has flagged items here.")
+		return conflict("not started here", "Only a session this engine started has flagged items here.")
 	}
 	if s.allowed == nil {
 		s.allowed = map[string]map[string]bool{}
@@ -1732,20 +1741,20 @@ func (w *Work) allow(sid string, f Flag) error {
 func (w *Work) AllowFile(ctx context.Context, sid, path, digest, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
-		return explained(invalid("reason"), "Allowing a flagged file needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
+		return onField("reason", invalid("reason", "Needs your reason, up to 500 characters."))
 	}
 	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
 		return err
 	}
 	if f.Link {
-		return explained(conflict("link"), "This is a symbolic link the hold on Proctor's specifications can't follow (under proctor/ and pointing outside it, or a root Makefile that is a link), so it can't be allowed. Ask the agent to take it out of the branch.")
+		return conflict("link", "This is a symbolic link the hold on Proctor's specifications can't follow (under proctor/ and pointing outside it, or a root Makefile that is a link), so it can't be allowed. Ask the agent to take it out of the branch.")
 	}
 	if !hmac.Equal([]byte(w.flagDigest(f)), []byte(digest)) {
-		return explained(conflict("stale"), "This file changed on the branch since the page showed it, so nothing was allowed and it still holds the push. Look at it again, then allow it with your reason.")
+		return conflict("stale", "This file changed on the branch since the page showed it, so nothing was allowed and it still holds the push. Look at it again, then allow it with your reason.")
 	}
 	if f.Full || len(f.Versions) == 0 {
-		return explained(conflict("versions"), "This file has more than 20 flagged versions on the branch, the most the gate lists, so it can't be allowed. Take it out of the commits that hold it.")
+		return conflict("versions", "This file has more than 20 flagged versions on the branch, the most the gate lists, so it can't be allowed. Take it out of the commits that hold it.")
 	}
 	if err := w.allow(sid, f); err != nil {
 		return err
@@ -1764,7 +1773,7 @@ func (w *Work) AllowFile(ctx context.Context, sid, path, digest, reason string) 
 
 func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 	if w.cfg.Tell == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message.")
+		return conflict("no session", "This engine can't send the session a message.")
 	}
 	g, f, err := w.flagged(ctx, sid, path)
 	if err != nil {
@@ -1782,7 +1791,7 @@ func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
-		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
+		return conflict("not sent", "The message couldn't reach the session, which must be running and controlled from this page.")
 	}
 	w.cfg.Logger.Info("flag", "event", "asked", "kind", string(f.Kind))
 	return nil
@@ -1791,7 +1800,7 @@ func (w *Work) AskRemove(ctx context.Context, sid, path string) error {
 func (w *Work) AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error {
 	clean := gate.Reason(reason)
 	if clean == "" {
-		return explained(invalid("reason"), "Allowing a flagged commit needs your reason, at most 500 characters with no control characters. The audit file keeps it.")
+		return onField("reason", invalid("reason", "Needs your reason, up to 500 characters."))
 	}
 	g, f, err := w.flaggedCommit(ctx, sid, commit, field)
 	if err != nil {
@@ -1814,7 +1823,7 @@ func (w *Work) AllowCommit(ctx context.Context, sid, commit string, field Commit
 
 func (w *Work) AskRewrite(ctx context.Context, sid, commit string, field CommitField) error {
 	if w.cfg.Tell == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message.")
+		return conflict("no session", "This engine can't send the session a message.")
 	}
 	_, f, err := w.flaggedCommit(ctx, sid, commit, field)
 	if err != nil {
@@ -1837,7 +1846,7 @@ func (w *Work) AskRewrite(ctx context.Context, sid, commit string, field CommitF
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
-		return explained(conflict("not sent"), "The message couldn't reach the session, which must be running and controlled from this page.")
+		return conflict("not sent", "The message couldn't reach the session, which must be running and controlled from this page.")
 	}
 	w.cfg.Logger.Info("flag", "event", "asked-rewrite", "field", string(f.Field))
 	return nil

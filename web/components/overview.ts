@@ -1,4 +1,5 @@
-import { button, el, emit, field, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, refocus, remembered, statusLine, visible } from '../lib/dom.ts'
+import { field } from '../lib/form.ts'
 import { agentWord, label, plural } from '../lib/format.ts'
 import { bySessionOrder, isRunning, sessionKey, sessionLink, sessionRow, sessionTable, titled } from './session-list.ts'
 import type { AskEvent, CardEvent, OverviewSession, PermissionEvent } from '../types.ts'
@@ -78,7 +79,7 @@ class SfOverview extends HTMLElement {
         this.#set('', this.#states)
       }
     })
-    const search = field('Search sessions', this.#search, undefined, 'filter-search')
+    const search = field('Search sessions', this.#search, { kind: 'inline', cls: 'filter-search' })
     this.#chips.setAttribute('role', 'group')
     this.#chips.setAttribute('aria-label', 'Show sessions that are')
     this.#tools.setAttribute('role', 'search')

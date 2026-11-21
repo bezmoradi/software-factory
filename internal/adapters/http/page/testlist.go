@@ -40,7 +40,7 @@ func (s *Server) testList(w http.ResponseWriter, r *http.Request, body map[strin
 	sid, ok := body["sid"].(string)
 	consent, consented := consentOf(body)
 	if !keysWithin(body, "sid", "costOk") || !ok || !consented || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

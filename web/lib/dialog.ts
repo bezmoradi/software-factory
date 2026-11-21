@@ -1,4 +1,6 @@
 import { button, el, opener } from './dom.ts'
+import { actions } from './form.ts'
+import { docsLink, pageHead } from './page.ts'
 
 export interface ModalOptions {
   kind: string
@@ -11,7 +13,8 @@ export interface ModalOptions {
   closeButton?: boolean
   focus?: 'heading' | HTMLElement
   single?: string
-  backdropCloses?: boolean
+  docs: string
+  searchOnly?: boolean
 }
 
 export interface Modal {
@@ -22,12 +25,6 @@ export interface Modal {
 
 const singles = new Map<string, { modal: Modal; focus: () => void }>()
 let titles = 0
-
-export function actionRow(lead: Node[], end: Node[]): HTMLDivElement {
-  const row = el('div', 'row consent-actions')
-  row.append(...lead, el('span', 'spacer'), ...end)
-  return row
-}
 
 export function reopen(single: string): boolean {
   const open = singles.get(single)
@@ -79,7 +76,8 @@ export function modal(o: ModalOptions): Modal {
     else if (o.focus instanceof HTMLElement) o.focus.focus()
   }
   if (o.focus === 'heading') heading.tabIndex = -1
-  let head: Node = heading
+  const docs = docsLink({ doc: o.docs, open: () => handle.close() })
+  let head: HTMLElement = pageHead({ title: heading, action: docs })[0]!
   if (o.closeButton) {
     const cross = button('', 'ghost icon-button dialog-x', () => handle.close())
     cross.setAttribute('aria-label', 'Close')
@@ -88,23 +86,36 @@ export function modal(o: ModalOptions): Modal {
     mark.setAttribute('name', 'close')
     cross.append(mark)
     const wrap = el('div', 'dialog-head')
-    wrap.append(heading, cross)
+    wrap.append(heading, docs, cross)
     head = wrap
   }
   d.append(head, ...(o.body ?? []))
-  if (o.lead?.length || o.actions?.length) d.append(actionRow(o.lead ?? [], o.actions ?? []))
+  if (o.lead?.length || o.actions?.length) d.append(actions(o.actions ?? [], o.lead ?? []))
   d.addEventListener('cancel', e => {
     e.preventDefault()
     handle.close()
   })
   d.addEventListener('close', finish)
-  if (o.backdropCloses) {
-    d.addEventListener('click', e => {
-      if (e.target !== d) return
-      const r = d.getBoundingClientRect()
-      if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) handle.close()
-    })
+  let changed = false
+  let pressedOutside = false
+  const outside = (e: MouseEvent) => {
+    if (e.target !== d) return false
+    const r = d.getBoundingClientRect()
+    return e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom
   }
+  const touched = () => {
+    if (!o.searchOnly) changed = true
+  }
+  d.addEventListener('input', touched)
+  d.addEventListener('change', touched)
+  d.addEventListener('pointerdown', e => {
+    pressedOutside = outside(e)
+  })
+  d.addEventListener('click', e => {
+    const wasOutside = pressedOutside
+    pressedOutside = false
+    if (wasOutside && !changed && outside(e)) handle.close()
+  })
   if (o.single) singles.set(o.single, { modal: handle, focus })
   document.body.append(d)
   d.showModal()
@@ -112,12 +123,13 @@ export function modal(o: ModalOptions): Modal {
   return handle
 }
 
-export function confirmDialog(title: string, parts: Node[], yes: string, tone: 'primary' | 'danger', cleanup?: () => void, no = 'Cancel'): Promise<boolean> {
+export function confirmDialog(title: string, docs: string, parts: Node[], yes: string, tone: 'primary' | 'danger', cleanup?: () => void, no = 'Cancel'): Promise<boolean> {
   return new Promise(resolve => {
     let answer = false
     const m = modal({
       kind: '',
       title,
+      docs,
       body: parts,
       actions: [
         button(no, 'ghost small', () => m.close()),

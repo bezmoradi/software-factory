@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { download, request, type EngineAnswer } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
@@ -131,10 +131,8 @@ function outcome(r: VerifyRun): string {
   return `${r.kind === 'browser' ? 'Browser check of commit' : 'Commit'} ${shortSha(r.commit)}: ${what}${at}.`
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn’t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? shown(body.message) : 'The engine refused. Try again.'
+function problemOf(a: EngineAnswer): string {
+  return a.message
 }
 
 class SfVerify extends HTMLElement {
@@ -184,16 +182,16 @@ class SfVerify extends HTMLElement {
   async refresh(sid: string) {
     if (!sid || sid !== this.#target?.sid) return
     const n = ++this.#loading
-    const res = await api(ROUTE, { op: 'read', sid }).catch(() => null)
+    const a = await request(ROUTE, { op: 'read', sid })
     if (n !== this.#loading || sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      if (res && res.status !== 404 && res.status !== 409 && res.status !== 501) return
+    if (!a.ok) {
+      if (a.status !== 0 && a.status !== 404 && a.status !== 409 && a.status !== 501) return
       this.#view = null
       this.hidden = true
       this.replaceChildren()
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (!v) return
     this.#view = v
     this.#paint()
@@ -205,15 +203,15 @@ class SfVerify extends HTMLElement {
     this.#busy = true
     this.#opened = true
     this.#paint()
-    const res = await api(ROUTE, { ...body, sid }).catch(() => null)
+    const a = await request(ROUTE, { ...body, sid })
     this.#busy = false
     if (sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+    if (!a.ok) {
+      say(this.#status, problemOf(a), 'warn')
       void this.refresh(sid)
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
     say(this.#status, said, 'muted')
     this.#paint()
@@ -238,13 +236,13 @@ class SfVerify extends HTMLElement {
     }
     this.#fetching = `${run.id}/${f.name}`
     this.#paint()
-    const res = await api(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name }).catch(() => null)
-    const body = res?.ok ? await res.json().catch(() => null) as unknown : null
+    const a = await request(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name })
     this.#fetching = ''
     if (sid !== this.#target?.sid) return
-    const blob = isRecord(body) && body.type === 'image/png' && typeof body.data === 'string' ? pngBlob(body.data) : null
+    const body = a.body
+    const blob = a.ok && body.type === 'image/png' && typeof body.data === 'string' ? pngBlob(body.data) : null
     if (!blob) {
-      say(this.#status, res && !res.ok ? await problemOf(res) : 'The engine’s answer wasn’t a PNG image.', 'warn')
+      say(this.#status, a.ok ? 'The engine’s answer wasn’t a PNG image.' : problemOf(a), 'warn')
       this.#paint()
       return
     }
@@ -258,11 +256,11 @@ class SfVerify extends HTMLElement {
     if (!sid || this.#fetching) return
     this.#fetching = `${run.id}/${f.name}`
     this.#paint()
-    const res = await api(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name }).catch(() => null)
-    const blob = res?.ok && res.headers.get('Content-Type') === 'application/octet-stream' ? await res.blob().catch(() => null) : null
+    const got = await download(ROUTE, { op: 'attachment', sid, id: run.id, name: f.name })
+    const blob = got.type === 'application/octet-stream' ? got.file : null
     this.#fetching = ''
     if (!blob) {
-      say(this.#status, res && !res.ok ? await problemOf(res) : 'The engine didn’t send that file.', 'warn')
+      say(this.#status, got.answer.ok ? 'The engine didn’t send that file.' : problemOf(got.answer), 'warn')
       this.#paint()
       return
     }

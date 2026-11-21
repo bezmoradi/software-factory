@@ -90,7 +90,7 @@ type SplitStore interface {
 }
 
 type SplitsPage interface {
-	Edit(sid, card, title, message string) error
+	Edit(sid, card, title, message string) (bool, error)
 	Dismiss(sid, card string) error
 	Unqueue(sid, card string) error
 	Start(ctx context.Context, sid, card string, consent Consent) (Started, error)
@@ -288,23 +288,25 @@ func (s *Splits) saveLocked() {
 	}
 }
 
+var splitSubject = map[string]string{"title": "a task's title", "message": "a task's first message"}
+
 func splitText(title, message string) (string, string, string, string) {
 	title = strings.TrimSpace(title)
 	message = strings.TrimSpace(message)
 	if title == "" {
-		return "", "", "title", "a task's title is empty"
+		return "", "", "title", "is empty"
 	}
 	if _, why := ForgeText(title, MaxSplitTitle, false); why != "" {
-		return "", "", "title", "a task's title " + why + "; give one line of plain text"
+		return "", "", "title", why
 	}
 	if message == "" {
-		return "", "", "message", "a task's first message is empty"
+		return "", "", "message", "is empty"
 	}
 	if strings.HasPrefix(message, "!") {
-		return "", "", "message", "a task's first message can't start with !"
+		return "", "", "message", "can't start with !"
 	}
 	if _, why := ForgeText(message, MaxSplitMessage, true); why != "" {
-		return "", "", "message", "a task's first message " + why
+		return "", "", "message", why
 	}
 	return title, message, "", ""
 }
@@ -332,9 +334,9 @@ func (s *Splits) Request(sid string, tasks []SplitTask) ForgeReply {
 	}
 	clean := make([]SplitTask, 0, len(tasks))
 	for i, t := range tasks {
-		title, message, _, why := splitText(t.Title, t.Message)
+		title, message, field, why := splitText(t.Title, t.Message)
 		if why != "" {
-			return refuse("task " + strconv.Itoa(i+1) + ": " + why)
+			return refuse("task " + strconv.Itoa(i+1) + ": " + splitSubject[field] + " " + why)
 		}
 		clean = append(clean, SplitTask{Title: title, Message: message})
 	}
@@ -375,27 +377,29 @@ func (s *Splits) cardLocked(sid, card string) *SplitCard {
 	return nil
 }
 
-func (s *Splits) Edit(sid, card, title, message string) error {
+func (s *Splits) Edit(sid, card, title, message string) (bool, error) {
 	title, message, field, why := splitText(title, message)
 	if why != "" {
-		return onField(field, explained(invalid("text"), strings.ToUpper(why[:1])+why[1:]+"."))
+		return false, onField(field, invalid("text", strings.ToUpper(why[:1])+why[1:]+"."))
 	}
 	if err := heldBranch(s.cfg.Dispatcher.Doubled, sid); err != nil {
-		return err
+		return false, err
 	}
 	s.mu.Lock()
 	c := s.cardLocked(sid, card)
 	if c == nil || c.State != SplitWaiting && c.State != SplitQueued {
 		s.mu.Unlock()
-		return explained(conflict("card"), "That card can't be edited any more.")
+		return false, conflict("card", "That card can't be edited any more.")
 	}
-	if c.Title != title || c.Message != message {
-		c.Title, c.Message, c.Edited, c.At = title, message, true, s.cfg.Now()
+	if c.Title == title && c.Message == message {
+		s.mu.Unlock()
+		return false, nil
 	}
+	c.Title, c.Message, c.Edited, c.At = title, message, true, s.cfg.Now()
 	s.saveLocked()
 	s.mu.Unlock()
 	s.show(sid)
-	return nil
+	return true, nil
 }
 
 func (s *Splits) Dismiss(sid, card string) error {
@@ -406,7 +410,7 @@ func (s *Splits) Dismiss(sid, card string) error {
 	c := s.cardLocked(sid, card)
 	if c == nil || c.State != SplitWaiting && c.State != SplitQueued {
 		s.mu.Unlock()
-		return explained(conflict("card"), "That card isn't waiting any more.")
+		return conflict("card", "That card isn't waiting any more.")
 	}
 	c.State, c.At = SplitDismissed, s.cfg.Now()
 	delete(s.holds, card)
@@ -457,23 +461,23 @@ func (s *Splits) start(ctx context.Context, sid, card string, consent Consent, q
 	}
 	path, agent, typ, running, ok := d.goalOf(sid)
 	if !ok {
-		return Started{}, explained(conflict("goal"), "The goal session isn't one this engine can start tasks from any more.")
+		return Started{}, conflict("goal", "The goal session isn't one this engine can start tasks from any more.")
 	}
 	s.mu.Lock()
 	c := s.cardLocked(sid, card)
 	switch {
 	case s.closed:
 		s.mu.Unlock()
-		return Started{}, explained(conflict("stopping"), stoppingMessage)
+		return Started{}, conflict("stopping", stoppingMessage)
 	case c == nil || c.State != SplitWaiting && c.State != SplitQueued || queued && c.State != SplitQueued:
 		s.mu.Unlock()
-		return Started{}, explained(conflict("card"), "That card isn't waiting any more.")
+		return Started{}, conflict("card", "That card isn't waiting any more.")
 	case s.starting[sid]:
 		s.mu.Unlock()
-		return Started{}, explained(limited("busy"), "Another task of this goal is starting. Wait for it.")
+		return Started{}, limited("busy", "Another task of this goal is starting. Wait for it.")
 	}
 	if where, _ := ForgeSecret(c.Title, c.Message); where != "" {
-		err := explained(conflict("secret"), "The card holds what looks like a token ("+where+"). Edit it out before starting.")
+		err := conflict("secret", "The card holds what looks like a token ("+where+"). Edit it out before starting.")
 		if queued {
 			s.afterQueuedLocked(c, err)
 			s.saveLocked()
@@ -498,7 +502,7 @@ func (s *Splits) start(ctx context.Context, sid, card string, consent Consent, q
 		}
 		s.mu.Unlock()
 		s.show(sid)
-		return Started{}, explained(limited("goal full"), strconv.Itoa(MaxGoalRunning)+" of this goal's sessions are running, so this task waits. It starts when one of them stops.")
+		return Started{}, limited("goal full", strconv.Itoa(MaxGoalRunning)+" of this goal's sessions are running, so this task waits. It starts when one of them stops.")
 	}
 	before := c.State
 	c.State = SplitStarting
@@ -561,7 +565,7 @@ func (s *Splits) Unqueue(sid, card string) error {
 	c := s.cardLocked(sid, card)
 	if c == nil || c.State != SplitQueued {
 		s.mu.Unlock()
-		return explained(conflict("card"), "That card isn't in the queue any more.")
+		return conflict("card", "That card isn't in the queue any more.")
 	}
 	c.State, c.At, c.Queued = SplitWaiting, s.cfg.Now(), time.Time{}
 	delete(s.holds, card)

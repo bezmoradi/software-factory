@@ -242,10 +242,10 @@ func NormalizeURL(raw string) (string, error) {
 		return "", refusal("Type the repository's https address.")
 	}
 	if len(raw) > maxURL || controlChars.MatchString(raw) || strings.ContainsAny(raw, " \\\"'`<>{}|^") {
-		return "", refusal("That address has characters a repository address doesn't use.")
+		return "", refusal("Has characters a repository address doesn't use.")
 	}
 	if strings.Contains(raw, "#") || strings.Contains(raw, "?") {
-		return "", refusal("Leave out the ? query or # fragment: give the repository's plain https address.")
+		return "", refusal("Leave out the ? query and # fragment.")
 	}
 	if !strings.HasPrefix(strings.ToLower(raw), "https://") {
 		return "", refusal("Only https:// addresses are accepted; SSH and http aren't.")
@@ -258,7 +258,7 @@ func NormalizeURL(raw string) (string, error) {
 		return "", refusal("Only https:// addresses are accepted; SSH and http aren't.")
 	}
 	if u.User != nil || strings.Contains(u.Host, "@") {
-		return "", refusal("Leave the user name and password out of the address; save a token for the host instead.")
+		return "", refusal("Leave out the user name and password.")
 	}
 	origin, err := hostOf(u)
 	if err != nil {
@@ -266,7 +266,7 @@ func NormalizeURL(raw string) (string, error) {
 	}
 	p := u.EscapedPath()
 	if p != u.Path || !urlPath.MatchString(p) {
-		return "", refusal("Give the repository's path after the host, such as https://git.example.com/team/project.git.")
+		return "", refusal("Needs a path like https://git.example.com/team/repo.git.")
 	}
 	for part := range strings.SplitSeq(strings.Trim(p, "/"), "/") {
 		if part == "." || part == ".." {
@@ -282,11 +282,11 @@ func HostOf(raw string) (string, error) {
 		raw = "https://" + raw
 	}
 	if len(raw) > maxURL || controlChars.MatchString(raw) || strings.ContainsAny(raw, " \\\"'`<>{}|^#?") {
-		return "", refusal("Give the git host as https://host, such as https://git.example.com.")
+		return "", refusal("Needs a host like https://git.example.com.")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Opaque != "" || !strings.EqualFold(u.Scheme, "https") || u.User != nil {
-		return "", refusal("Give the git host as https://host, such as https://git.example.com.")
+		return "", refusal("Needs a host like https://git.example.com.")
 	}
 	return hostOf(u)
 }
@@ -467,37 +467,37 @@ func (c *Repos) frame(state, u, name, message string) {
 func (c *Repos) Add(raw string) (Cloning, error) {
 	u, err := NormalizeURL(raw)
 	if err != nil {
-		return Cloning{}, explained(invalid("url"), err.Error())
+		return Cloning{}, onField("url", invalid("url", err.Error()))
 	}
 	c.mu.Lock()
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
 		c.mu.Unlock()
-		return Cloning{}, explained(conflict("records"), "The engine couldn't read its list of repositories, so it added nothing.")
+		return Cloning{}, conflict("records", "The engine couldn't read its list of repositories, so it added nothing.")
 	}
 	if i := slices.IndexFunc(recs, func(r Record) bool { return sameRepository(r.URL, u) }); i >= 0 {
 		c.mu.Unlock()
-		return Cloning{}, explained(conflict("exists"), "That repository is in the list already, as "+recs[i].Name+".")
+		return Cloning{}, onField("url", conflict("exists", withName("Already in the list as ", recs[i].Name, ".")))
 	}
 	if len(recs) >= MaxRecords {
 		c.mu.Unlock()
-		return Cloning{}, explained(full("records"), "The list holds at most "+strconv.Itoa(MaxRecords)+" repositories. Remove one first.")
+		return Cloning{}, full("records", "The list holds at most "+strconv.Itoa(MaxRecords)+" repositories. Remove one first.")
 	}
 	for k := range c.cloning {
 		if sameRepository(k, u) {
 			c.mu.Unlock()
-			return Cloning{}, explained(conflict("cloning"), "That repository is being cloned already.")
+			return Cloning{}, onField("url", conflict("cloning", "That repository is being cloned already."))
 		}
 	}
 	for _, was := range c.settling {
 		if sameRepository(was, u) {
 			c.mu.Unlock()
-			return Cloning{}, explained(conflict("removing"), "That repository is still being removed. Try again in a moment.")
+			return Cloning{}, onField("url", conflict("removing", "Still being removed. Try again in a moment."))
 		}
 	}
 	if len(c.cloning) >= MaxClones {
 		c.mu.Unlock()
-		return Cloning{}, explained(limited("clones"), "Wait for a clone to finish before adding another repository.")
+		return Cloning{}, limited("clones", "Wait for a clone to finish before adding another repository.")
 	}
 	k := Cloning{URL: u, Name: RepoName(u), StartedAt: c.cfg.Now()}
 	c.cloning[u] = k
@@ -615,20 +615,20 @@ func (c *Repos) settled(name string) {
 func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
-		return ProjectID{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return ProjectID{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	at := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	kept := slices.DeleteFunc(slices.Clone(recs), func(r Record) bool { return r.Name == name })
 	if len(kept) == len(recs) {
-		return ProjectID{}, explained(notFound("repository"), "That repository is no longer in the list.")
+		return ProjectID{}, notFound("repository", "That repository is no longer in the list.")
 	}
 	for _, k := range c.cloning {
 		if k.Name == name || sameRepository(k.URL, recs[at].URL) {
-			return ProjectID{}, explained(conflict("cloning"), "This repository is being cloned again. Wait for the clone to finish, then remove it.")
+			return ProjectID{}, conflict("cloning", "This repository is being cloned again. Wait for the clone to finish, then remove it.")
 		}
 	}
 	if _, busy := c.settling[name]; busy {
-		return ProjectID{}, explained(conflict("cloning"), "This repository is still being added. Wait a moment, then remove it.")
+		return ProjectID{}, conflict("cloning", "This repository is still being added. Wait a moment, then remove it.")
 	}
 	if c.sessions != nil {
 		if n := c.sessions(name); n > 0 {
@@ -636,11 +636,11 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 			if n > 1 {
 				what = "its " + strconv.Itoa(n) + " sessions"
 			}
-			return ProjectID{}, explained(conflict("sessions"), "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
+			return ProjectID{}, conflict("sessions", "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
 		}
 	}
 	if err := c.cfg.Records.Save(kept); err != nil {
-		return ProjectID{}, explained(conflict("records"), "The engine couldn't save its list of repositories.")
+		return ProjectID{}, conflict("records", "The engine couldn't save its list of repositories.")
 	}
 	c.cfg.Logger.Info("repository", "event", "removed")
 	return ProjectID{Name: name, URL: recs[at].URL}, nil
@@ -663,10 +663,10 @@ func githubClassic(token string) bool {
 func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, error) {
 	h, err := HostOf(host)
 	if err != nil {
-		return TokenInfo{}, explained(invalid("host"), err.Error())
+		return TokenInfo{}, onField("host", invalid("host", err.Error()))
 	}
 	if !validToken(token) {
-		return TokenInfo{}, explained(invalid("token"), "A token is 1 to 4096 printable characters with no spaces.")
+		return TokenInfo{}, onField("token", invalid("token", "Needs 1 to 4096 printable characters with no spaces."))
 	}
 	warning := ""
 	if c.cfg.Checker != nil {
@@ -675,11 +675,11 @@ func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, e
 		cancel()
 		if ctx.Err() != nil {
 			c.cfg.Logger.Info("token not saved for " + h + ": the request ended during the check")
-			return TokenInfo{}, explained(conflict("abandoned"), "The save ended before the engine finished checking the token, so it saved nothing.")
+			return TokenInfo{}, conflict("abandoned", "The save ended before the engine finished checking the token, so it saved nothing.")
 		}
 		if v.Rejected {
 			c.cfg.Logger.Info("token refused for " + h)
-			return TokenInfo{}, explained(invalid("token"), v.Problem)
+			return TokenInfo{}, onField("token", invalid("token", v.Problem))
 		}
 		warning = v.Warning
 	}
@@ -688,7 +688,7 @@ func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, e
 	}
 	at := c.cfg.Now().UTC().Truncate(time.Second)
 	if err := c.cfg.Tokens.Save(h, token, at); err != nil {
-		return TokenInfo{}, explained(conflict("tokens"), "The engine couldn't save the token.")
+		return TokenInfo{}, conflict("tokens", "The engine couldn't save the token.")
 	}
 	c.cfg.Logger.Info("token saved for " + h)
 	c.hostsChanged()
@@ -698,14 +698,14 @@ func (c *Repos) SaveToken(ctx context.Context, host, token string) (TokenInfo, e
 func (c *Repos) RemoveToken(host string) error {
 	h, err := HostOf(host)
 	if err != nil {
-		return explained(invalid("host"), err.Error())
+		return invalid("host", err.Error())
 	}
 	removed, err := c.cfg.Tokens.Remove(h)
 	if err != nil {
-		return explained(conflict("tokens"), "The engine couldn't remove the token.")
+		return conflict("tokens", "The engine couldn't remove the token.")
 	}
 	if !removed {
-		return explained(notFound("token"), "No token is saved for "+h+".")
+		return notFound("token", "No token is saved for "+h+".")
 	}
 	c.cfg.Logger.Info("token removed for " + h)
 	return nil
@@ -716,17 +716,17 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	recs, err := c.cfg.Records.Load()
 	c.mu.Unlock()
 	if err != nil {
-		return "", explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return "", conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	if i < 0 {
-		return "", explained(notFound("project"), "That project is no longer in the list.")
+		return "", notFound("project", "That project is no longer in the list.")
 	}
 	rec := recs[i]
 	host, _ := HostOf(rec.URL)
 	token, _, err := c.cfg.Tokens.Token(host)
 	if err != nil {
-		return "", explained(conflict("tokens"), "The engine couldn't read its saved tokens.")
+		return "", conflict("tokens", "The engine couldn't read its saved tokens.")
 	}
 	var mine uint64
 	read := func() {
@@ -767,13 +767,13 @@ func (c *Repos) Fresh(ctx context.Context, name string) (string, error) {
 	cancel()
 	if err != nil {
 		shared.For(ctx, c.cfg.Logger).Warn("repository", "event", "fetch-failed")
-		return "", explained(conflict("fetch"), "The engine couldn't fetch the main branch of "+rec.URL+", so no session started: "+clip(err.Error(), 600))
+		return "", conflict("fetch", "The engine couldn't fetch the main branch of "+rec.URL+", so no session started: "+clip(err.Error(), 600))
 	}
 	if !sha1Hex.MatchString(got.Commit) || !push.ValidBranch(got.Branch) {
-		return "", explained(conflict("fetch"), "The fetch answered a branch or commit the engine doesn't accept.")
+		return "", conflict("fetch", "The fetch answered a branch or commit the engine doesn't accept.")
 	}
 	if _, err := c.cfg.Commits.Commit(path, got.Commit); err != nil {
-		return "", explained(conflict("fetch"), "The fetched commit "+got.Commit[:12]+" couldn't be read back from the clone.")
+		return "", conflict("fetch", "The fetched commit "+got.Commit[:12]+" couldn't be read back from the clone.")
 	}
 	read()
 	deliver.Lock()
@@ -813,7 +813,7 @@ func (c *Repos) record(name string) (Record, error) {
 	}
 	i := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	if i < 0 {
-		return Record{}, notFound("project")
+		return Record{}, notFound("project", "That project is no longer in the list.")
 	}
 	return recs[i], nil
 }
@@ -879,25 +879,25 @@ func (c *Repos) Reclone(name string) (Cloning, error) {
 	recs, err := c.cfg.Records.Load()
 	if err != nil {
 		c.mu.Unlock()
-		return Cloning{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return Cloning{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(recs, func(r Record) bool { return r.Name == name })
 	if i < 0 {
 		c.mu.Unlock()
-		return Cloning{}, explained(notFound("repository"), "That project is no longer in the list.")
+		return Cloning{}, notFound("repository", "That project is no longer in the list.")
 	}
 	rec := recs[i]
 	if _, busy := c.cloning[rec.URL]; busy {
 		c.mu.Unlock()
-		return Cloning{}, explained(conflict("cloning"), "That repository is being cloned already.")
+		return Cloning{}, conflict("cloning", "That repository is being cloned already.")
 	}
 	if len(c.cloning) >= MaxClones {
 		c.mu.Unlock()
-		return Cloning{}, explained(limited("clones"), "Wait for a clone to finish before starting another.")
+		return Cloning{}, limited("clones", "Wait for a clone to finish before starting another.")
 	}
 	if !c.cloneMissing(rec) {
 		c.mu.Unlock()
-		return Cloning{}, explained(conflict("cloned"), "That project's clone is in the workspace already.")
+		return Cloning{}, conflict("cloned", "That project's clone is in the workspace already.")
 	}
 	k := Cloning{URL: rec.URL, Name: rec.Name, StartedAt: c.cfg.Now()}
 	c.cloning[rec.URL] = k

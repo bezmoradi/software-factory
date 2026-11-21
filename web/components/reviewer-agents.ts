@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { field, form } from '../lib/form.ts'
 
 interface AgentFileView {
   name: string
@@ -36,11 +37,8 @@ function readView(body: unknown): AgentFilesView | null {
   return { files, roles: v.roles!, defaults: v.defaults!, roleNames: v.roleNames!, tools: v.tools.filter((t): t is string => typeof t === 'string'), canAdd: v.canAdd === true, full: typeof v.full === 'string' ? v.full : '' }
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  if (typeof body?.message === 'string' && body.message) return body.message
-  return res.status === 413 ? 'The engine refused this agent file: it is over 1 MiB, the most a request to it carries.' : 'The engine refused the change. Try again.'
+function problemOf(a: EngineAnswer): string {
+  return a.message
 }
 
 class SfReviewerAgents extends HTMLElement {
@@ -94,18 +92,18 @@ class SfReviewerAgents extends HTMLElement {
     this.#busy = true
     this.#fileRefused = ''
     this.#paint()
-    const res = await api('/api/reviewer-agents', { ...body, path: project }).catch(() => null)
+    const a = await request('/api/reviewer-agents', { ...body, path: project })
     this.#busy = false
     if (project !== this.#target?.project) return false
-    if (!res || !res.ok) {
-      const text = await problemOf(res)
-      if (body.op === 'add' && res) this.#fileRefused = visible(text)
+    if (!a.ok) {
+      const text = problemOf(a)
+      if (body.op === 'add' && a.status !== 0) this.#fileRefused = text
       say(this.#status, this.#fileRefused ? '' : text, 'warn')
       this.#paint()
       if (this.#fileRefused) this.#file.focus()
       return false
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) {
       this.#view = v
       this.#loaded = project
@@ -167,7 +165,7 @@ class SfReviewerAgents extends HTMLElement {
     this.#file.disabled = target.disabled || (!!v && !v.canAdd)
     if (this.#busy) this.#file.setAttribute('aria-disabled', 'true')
     else this.#file.removeAttribute('aria-disabled')
-    const add = field('Add an agent file', this.#file, undefined, 'row field-row')
+    const add = form({ children: [field('Add an agent file', this.#file, { kind: 'inline', cls: 'field-row' })] })
     labelError(this.#file, this.#fileRefused)
     const parts: HTMLElement[] = [el('p', 'small', 'Reviewer agents for this project'), help, add]
     if (v?.full) parts.push(el('p', 'small muted', visible(v.full)))
@@ -191,6 +189,7 @@ class SfReviewerAgents extends HTMLElement {
       parts.push(list)
     }
     if (v) {
+      const roles: HTMLElement[] = []
       for (const role of Object.keys(v.roleNames)) {
         const select = el('select', 'textbox')
         select.id = `reviewer-role-${role}`
@@ -215,8 +214,9 @@ class SfReviewerAgents extends HTMLElement {
           void this.#pick(role, select.value)
         })
         const name = v.roleNames[role] ?? role
-        parts.push(field(`The ${name} role uses`, select, undefined, 'row field-row'))
+        roles.push(field(`The ${name} role uses`, select, { kind: 'inline', cls: 'field-row' }))
       }
+      if (roles.length) parts.push(form({ children: roles }))
     }
     parts.push(this.#status)
     replaceKeeping(this, parts)

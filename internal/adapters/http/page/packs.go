@@ -82,7 +82,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 	repo, okPath := body["path"].(string)
 	op, okOp := body["op"].(string)
 	if !okPath || repo == "" || len(repo) > session.MaxCwd || !okOp {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	text := func(key string, limit int) (string, bool) {
@@ -101,7 +101,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 	switch op {
 	case "list":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.ListPacks(repo)
@@ -109,7 +109,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		url, okURL := typed("url")
 		commit, okCommit := typed("commit")
 		if !keysWithin(body, "op", "path", "url", "commit") || !okURL || !okCommit {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		pv, ferr := s.cfg.Packs.FetchPack(r.Context(), repo, url, commit)
@@ -126,7 +126,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		commit, okCommit := text("commit", 64)
 		digest, okDigest := text("digest", 64)
 		if !keysWithin(body, "op", "path", "url", "commit", "digest") || !okURL || !okCommit || !okDigest {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.AddPack(r.Context(), repo, url, commit, digest)
@@ -135,21 +135,21 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		commit, okCommit := text("commit", 64)
 		digest, okDigest := text("digest", 64)
 		if !keysWithin(body, "op", "path", "url", "commit", "digest") || !okURL || !okCommit || !okDigest {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.AddAndUsePack(r.Context(), repo, url, commit, digest)
 	case "remove":
 		digest, ok := text("digest", 64)
 		if !keysWithin(body, "op", "path", "digest") || !ok {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.RemovePack(repo, digest)
 	case "use":
 		pack, ok := text("pack", 64)
 		if !keysWithin(body, "op", "path", "pack") || !ok {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.UsePack(repo, pack)
@@ -157,7 +157,7 @@ func (s *Server) packs(w http.ResponseWriter, r *http.Request, body map[string]a
 		name, okName := typed("name")
 		files, okFiles := uploadFiles(body["files"])
 		if !keysWithin(body, "op", "path", "name", "files") || !okName || !okFiles {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.Packs.UploadPack(repo, name, files)

@@ -143,13 +143,13 @@ func (r *Reviews) CheckStep(sid, commit string, step int, done bool) error {
 	switch {
 	case !ok || v.State != TestListDone || len(v.Steps) == 0:
 		r.mu.Unlock()
-		return explained(conflict("no walkthrough"), "This session has no walkthrough to check off. Press Write a manual test list first.")
+		return conflict("no walkthrough", "This session has no walkthrough to check off. Press Write a manual test list first.")
 	case v.Commit != commit:
 		r.mu.Unlock()
-		return explained(conflict("moved"), "A newer walkthrough replaced this one, so the step wasn't changed. Read the new one first.")
+		return conflict("moved", "A newer walkthrough replaced this one, so the step wasn't changed. Read the new one first.")
 	case step < 1 || step > len(v.Steps):
 		r.mu.Unlock()
-		return explained(invalid("step"), "That step isn't in this session's walkthrough.")
+		return invalid("step", "That step isn't in this session's walkthrough.")
 	}
 	v.Steps = slices.Clone(v.Steps)
 	v.Steps[step-1].Done = done
@@ -159,7 +159,7 @@ func (r *Reviews) CheckStep(sid, commit string, step int, done bool) error {
 	if r.cfg.Walkthroughs != nil {
 		if err := r.cfg.Walkthroughs.Save(all); err != nil {
 			r.cfg.Logger.Warn("walkthrough", "event", "not-saved")
-			return explained(conflict("not saved"), "The engine couldn't save the check-off, so the step wasn't changed.")
+			return conflict("not saved", "The engine couldn't save the check-off, so the step wasn't changed.")
 		}
 	}
 	r.mu.Lock()
@@ -190,7 +190,7 @@ func keptLists(tests map[string]TestListView, keep string) {
 
 func (d *Dispatcher) CheckStep(_ context.Context, sid, commit string, step int, done bool) error {
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it keeps no walkthroughs.")
+		return conflict("no reviewer", "This engine runs no reviewer containers, so it keeps no walkthroughs.")
 	}
 	if _, ok := d.PushTarget(sid); !ok {
 		return notStartedHere(d.Doubled, sid, "Only a session this engine started has a walkthrough here.")

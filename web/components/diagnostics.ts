@@ -1,9 +1,10 @@
+import { UNREAD, type EngineAnswer } from '../api.ts'
 import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { saveFile } from '../lib/download.ts'
 import './agent-report.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/diagnostics'
 
@@ -30,12 +31,11 @@ export function openDiagnostics(post: Post): void {
     const mine = ++generation
     saveButton.disabled = true
     say.textContent = 'Building the file…'
-    const res = await post(ROUTE, {}).catch(() => null)
-    const parsed: unknown = res ? await res.json().catch(() => null) : null
+    const a = await post(ROUTE, {})
     if (mine !== generation) return
-    const got = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-    if (!res || !res.ok || typeof got.text !== 'string') {
-      say.textContent = typeof got.message === 'string' && got.message ? got.message : 'The engine didn’t build the file.'
+    const got = a.body
+    if (!a.ok || typeof got.text !== 'string') {
+      say.textContent = a.ok ? UNREAD : a.message
       return
     }
     text = got.text
@@ -46,6 +46,7 @@ export function openDiagnostics(post: Post): void {
   const m = modal({
     kind: 'diagnostics',
     title: 'Diagnostics',
+    docs: 'maintenance',
     body: [
       el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),
       el('p', 'small muted', 'It holds no repository name, host, path, address, token, prompt or log text, and the page never sends it anywhere: you save it and choose where it goes.'),

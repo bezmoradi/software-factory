@@ -138,7 +138,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 	}
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	limit := pairFor
@@ -161,7 +161,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 		consent, consented := consentOf(body)
 		box, okBox := boxOf(body)
 		if !keysWithin(body, "op", "pair", "approve", "costOk", "box") || !okID || !consented || !okBox {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		started, err := pairs.Next(ctx, id, consent, box)
@@ -175,7 +175,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 	case "view", "merged-diff":
 		id, okID := pairID(body)
 		if !keysWithin(body, "op", "pair") || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if op == "view" {
@@ -199,7 +199,7 @@ func (s *Server) pairAPI(w http.ResponseWriter, r *http.Request, body map[string
 		id, okID := pairID(body)
 		sid, okSID := body["sid"].(string)
 		if !keysWithin(body, "op", "pair", "sid") || !okID || !okSID || len(sid) > 80 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := pairs.Keep(id, sid)
@@ -215,7 +215,7 @@ func (s *Server) mergedAPI(ctx context.Context, w http.ResponseWriter, pairs ses
 	if op == "merged-list" {
 		page, okPage := wholeNumber(body["page"], 1, session.MaxMergedPage)
 		if !keysWithin(body, "op", "path", "page") || !okPath || !okPage {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		list, err := pairs.MergedPulls(ctx, path, page)
@@ -233,7 +233,7 @@ func (s *Server) mergedAPI(ctx context.Context, w http.ResponseWriter, pairs ses
 	}
 	number, okNumber := wholeNumber(body["number"], 1, session.MaxIssueNumber)
 	if !keysWithin(body, "op", "path", "number") || !okPath || !okNumber {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	v, err := pairs.ReadMerged(ctx, path, number)
@@ -258,13 +258,13 @@ func (s *Server) pairStart(ctx context.Context, w http.ResponseWriter, pairs ses
 	box, okBox := boxOf(body)
 	if !keysWithin(body, "op", "path", "name", "type", "message", "agents", "secondModel", "double", "benchmark", "from", "issue", "issueHash", "caps", "approve", "costOk", "box") ||
 		!okPath || !okAgent || !okBench || !okFrom || !consented || hasDouble && !okDouble || !okBox {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	for _, k := range []string{"name", "type", "message", "secondModel"} {
 		if v, ok := body[k]; ok {
 			if _, isText := v.(string); !isText {
-				refuse(w, http.StatusBadRequest, k)
+				refuse(w, http.StatusBadRequest, k, saidFields)
 				return
 			}
 		}

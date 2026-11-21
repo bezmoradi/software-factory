@@ -65,10 +65,10 @@ func oneLine(s string) string {
 func ReviseMessage(kind, note string, docPath func() (string, error)) (string, error) {
 	note = pageTrim(note)
 	if note == "" {
-		return "", explained(invalid("note"), "Type what should change first.")
+		return "", onField("note", invalid("note", "Type what should change first."))
 	}
 	if utf16Len(note) > MaxNote {
-		return "", explained(invalid("note"), "A note holds at most 2,000 characters.")
+		return "", onField("note", invalid("note", "At most 2,000 characters."))
 	}
 	var text string
 	switch kind {
@@ -84,7 +84,7 @@ func ReviseMessage(kind, note string, docPath func() (string, error)) (string, e
 			if kind == ReviseRootCause {
 				what = "the root cause's file"
 			}
-			return "", explained(conflict("no file"), "The engine doesn't know "+what+" for this session, so it can't ask for the change. Ask for it in the conversation instead.")
+			return "", conflict("no file", "The engine doesn't know "+what+" for this session, so it can't ask for the change. Ask for it in the conversation instead.")
 		}
 		if kind == RevisePlan {
 			text = "Before going on, change the plan in " + path + ": " + note
@@ -92,7 +92,7 @@ func ReviseMessage(kind, note string, docPath func() (string, error)) (string, e
 			text = "/knackpack:debug-incident Correct the diagnosis in " + path + ": " + note
 		}
 	default:
-		return "", invalid("text")
+		return "", invalid("text", "The engine asks for a change to the requirements, the plan or the root cause only.")
 	}
 	return text, nil
 }
@@ -100,10 +100,10 @@ func ReviseMessage(kind, note string, docPath func() (string, error)) (string, e
 func CommentsMessage(list []LineComment) (string, error) {
 	const fewer = " Remove some, send these, then add the rest."
 	if len(list) == 0 {
-		return "", explained(invalid("comments"), "Add a comment first.")
+		return "", invalid("comments", "Add a comment first.")
 	}
 	if len(list) > MaxComments {
-		return "", explained(invalid("comments"), "At most 50 comments go in one message."+fewer)
+		return "", invalid("comments", "At most 50 comments go in one message."+fewer)
 	}
 	count := strconv.Itoa(len(list))
 	if len(list) == 1 {
@@ -114,10 +114,10 @@ func CommentsMessage(list []LineComment) (string, error) {
 		text := oneLine(c.Text)
 		which := "Comment " + strconv.Itoa(i+1) + ", on " + c.File + " line " + strconv.Itoa(c.Line)
 		if text == "" {
-			return "", explained(invalid("comments"), which+", is empty: write it, or remove it.")
+			return "", invalid("comments", which+", is empty: write it, or remove it.")
 		}
 		if utf16Len(pageTrim(c.Text)) > MaxComment {
-			return "", explained(invalid("comments"), which+", is over 2,000 characters: shorten it.")
+			return "", invalid("comments", which+", is over 2,000 characters: shorten it.")
 		}
 		removed := ""
 		if c.Removed {
@@ -127,7 +127,7 @@ func CommentsMessage(list []LineComment) (string, error) {
 	}
 	text := strings.Join(lines, "\n")
 	if utf16Len(text) > MaxText {
-		return "", explained(invalid("comments"), "These comments would make a message over 20,000 characters."+fewer)
+		return "", invalid("comments", "These comments would make a message over 20,000 characters."+fewer)
 	}
 	return text, nil
 }
@@ -208,5 +208,5 @@ func AskMessage(ask string, view func() (GateView, error)) (string, error) {
 	if text := stageCommands(v)[ask]; text != "" {
 		return text, nil
 	}
-	return "", explained(conflict("step"), "This session's workflow doesn't offer that step now.")
+	return "", conflict("step", "This session's workflow doesn't offer that step now.")
 }

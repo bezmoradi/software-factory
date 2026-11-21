@@ -1,4 +1,7 @@
-import { busy, button, el, emit, field, focusedKey, labelError, pageCrumb, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
+import type { EngineAnswer } from '../api.ts'
+import { actions as actionsRow, answerControl, field, fieldRow, form, showAnswer } from '../lib/form.ts'
+import { emptyState, pageHead } from '../lib/page.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
 import { effortOptions } from './session-work.ts'
@@ -86,18 +89,11 @@ function blank(...inputs: HTMLInputElement[]) {
 }
 
 function actions(...buttons: HTMLElement[]): HTMLElement[] {
-  if (!buttons.length) return []
-  const row = el('div', 'form-actions')
-  row.append(...buttons)
-  return [row]
+  return buttons.length ? [actionsRow(buttons)] : []
 }
 
 function stacked(...children: HTMLElement[]): HTMLFormElement {
-  const form = el('form', 'stacked')
-  form.noValidate = true
-  form.autocomplete = 'off'
-  form.append(...children)
-  return form
+  return form({ cls: 'stacked', autocomplete: 'off', children })
 }
 
 function webAddress(url: string): string {
@@ -140,7 +136,7 @@ function nearby(key: string): string[] {
 
 
 class DispatchForm {
-  form = el('form', 'dispatch')
+  form = form({ cls: 'dispatch', autocomplete: 'off' })
   agent = el('select', 'textbox')
   why = el('div', 'small muted')
   name = el('input', 'textbox')
@@ -159,8 +155,6 @@ class DispatchForm {
 
   constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '', forkAt = '') {
     const path = p.path
-    this.form.noValidate = true
-    this.form.autocomplete = 'off'
     this.name.name = 'name'
     this.model.name = 'model'
     this.name.placeholder = 'Optional'
@@ -193,14 +187,12 @@ class DispatchForm {
       if (chosen) chosen.expect = this.expect.value as Expect
       emit(this.form, 'sf-expect', { agent: this.agent.value, expect: this.expect.value as Expect })
     })
-    const row = el('div', 'opts field-row')
     const picks = el('span', 'dispatch-picks')
     picks.append(this.agent, this.model)
     const go = el('span', 'dispatch-actions')
     go.append(button('Cancel', 'ghost small', onCancel), this.start)
-    row.append(field('Session name', this.name), picks, go)
-    const more = el('div', 'opts field-row')
-    more.append(this.effort, this.kind, this.expect)
+    const row = fieldRow([field('Session name', this.name), picks, go], 'opts field-row')
+    const more = fieldRow([this.effort, this.kind, this.expect], 'opts field-row')
     const note = el('p', 'small muted')
     const command = el('code', '')
     note.append('Fetches ', el('code', '', p.branch || 'the main branch'), ' from ', el('code', '', p.url || p.name), ', then runs ', command, " in a new worktree that starts there, once you've approved the repository files that agent loads at start and its own sign-in check passed. The session shows in this project's list when it connects; open it there to write its first message. This page controls it from the start. It starts in the agent's own asking mode, so it asks before it acts; auto and bypass modes can't be chosen here.")
@@ -239,8 +231,7 @@ class DispatchForm {
     this.form.append(row, this.why, this.advanced)
     this.form.append(this.issue)
     this.form.append(this.pair.box, this.bench.box)
-    this.form.addEventListener('submit', e => {
-      e.preventDefault()
+    this.form.addEventListener('submit', () => {
       if (this.start.disabled) return
       this.unrefuse()
       const caps = this.caps.value
@@ -255,23 +246,19 @@ class DispatchForm {
     this.model.addEventListener('change', () => this.efforts())
   }
 
-  refuse(field: string, text: string): boolean {
-    if (field === 'issue') return this.issue.refuse(text)
-    if (field === 'benchmark') return this.bench.refuse(text)
-    if (['money', 'minutes', 'turns', 'disk'].includes(field)) {
-      this.advanced.open = true
-      return this.caps.refuse(field, text)
-    }
-    if (field === 'secondModel') {
-      this.pair.say(text)
+  refuse(a: EngineAnswer): boolean {
+    if (!a.message) return false
+    if (a.field === 'issue') return this.issue.refuse(a.message)
+    if (a.field === 'benchmark') return this.bench.refuse(a.message)
+    if (a.field === 'secondModel') {
+      this.pair.say(a.message)
       return true
     }
-    const input = field === 'name' ? this.name : field === 'from' ? this.from.select : field === 'message' ? this.pair.message : null
+    const input = answerControl(this.form, a)
     if (!input) return false
-    if (input === this.from.select) this.advanced.open = true
-    if (input === this.pair.message) this.pair.box.open = true
-    labelError(input, text)
-    input.focus()
+    for (let box = input.closest('details'); box; box = box.parentElement?.closest('details') ?? null) box.open = true
+    if (this.caps.contains(input)) return this.caps.refuse(a.field, a.message)
+    showAnswer(this.form, a)
     return true
   }
 
@@ -404,17 +391,14 @@ class SfProjects extends HTMLElement {
     }
     this.#hostField = field('Host', this.#tokenHost)
     this.#tokenField = field('Token', secret(this.#tokenValue, 'token'))
-    this.#replaceField = field('New token', secret(this.#replaceValue, 'token'))
-    this.#replaceField.querySelector('label')!.replaceChildren(this.#replaceWords)
+    this.#replaceField = field(this.#replaceWords, secret(this.#replaceValue, 'token'))
     this.#hostList.setAttribute('aria-label', 'Saved git host tokens')
-    this.#tokenForm.addEventListener('submit', e => {
-      e.preventDefault()
+    this.#tokenForm.addEventListener('submit', () => {
       const host = this.#tokenHost.value.trim()
       const token = this.#tokenValue.value
       this.#tokenSend('', { op: 'save', host, token }, 'token-save')
     })
-    this.#replaceForm.addEventListener('submit', e => {
-      e.preventDefault()
+    this.#replaceForm.addEventListener('submit', () => {
       const host = this.#replacing
       const token = this.#replaceValue.value
       if (host) this.#tokenSend(host, { op: 'save', host, token }, `host:${host}:save`)
@@ -550,9 +534,9 @@ class SfProjects extends HTMLElement {
     this.#setBusy(false)
   }
 
-  startRefused(path: string, field: string, text: string): boolean {
+  startRefused(path: string, a: EngineAnswer): boolean {
     const form = this.#forms.get(path)
-    return !!form?.form.isConnected && !!field && form.refuse(field, text)
+    return !!form?.form.isConnected && !!a.field && form.refuse(a)
   }
 
   verifiedOnMain(repo: string) {
@@ -605,9 +589,9 @@ class SfProjects extends HTMLElement {
     this.#add.focus()
   }
 
-  tokenFailed(text: string, error: unknown): boolean {
+  tokenFailed(text: string, field: string): boolean {
     const fresh = this.#tokenFrom === ''
-    const input = error === 'token' ? (fresh ? this.#tokenValue : this.#replaceValue) : error === 'host' && fresh ? this.#tokenHost : null
+    const input = field === 'token' ? (fresh ? this.#tokenValue : this.#replaceValue) : field === 'host' && fresh ? this.#tokenHost : null
     if (!input) return false
     labelError(input, text)
     input.focus()
@@ -943,8 +927,7 @@ class SfProjects extends HTMLElement {
     }
     const parts: HTMLElement[] = [row]
     if (this.#forgetting === h.host) {
-      const confirm = el('div', 'stacked')
-      confirm.append(el('p', 'small muted', 'Remove this token? Clones and fetches from this host go without one.'), ...actions(button('Cancel', 'ghost', () => {
+      const confirm = stacked(el('p', 'small muted', 'Remove this token? Clones and fetches from this host go without one.'), ...actions(button('Cancel', 'ghost', () => {
         this.#forgetting = ''
         this.#render()
       }, 'button', `host:${h.host}:keep`), button('Remove token', 'danger', () => {
@@ -978,13 +961,7 @@ class SfProjects extends HTMLElement {
 
   #tokens(): HTMLElement[] {
     const hosts = this.#view.hosts ?? []
-    const title = el('div', 'page-head')
-    const docs = button('View in docs', 'link small docs-link', undefined, 'button', 'token-docs')
-    docs.dataset.doc = 'git-host-tokens'
-    docs.prepend(icon('link'))
-    title.append(el('h2', 'label', 'Tokens'), docs)
-    const about = el('p', 'small muted page-intro', 'One per git host, to clone, push and open pull requests. Agents never see it.')
-    const parts: HTMLElement[] = [title, about]
+    const parts: HTMLElement[] = pageHead({ title: 'Tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'git-host-tokens', key: 'token-docs' } })
     const offered = this.#view.offerHosts ?? []
     if (this.#replacing) parts.push(...this.#tokenHelp(this.#replacing))
     for (const host of this.#hostRows.keys()) if (!hosts.some(h => h.host === host)) this.#hostRows.delete(host)
@@ -1045,38 +1022,28 @@ class SfProjects extends HTMLElement {
       labelError(this.#add, this.#addError)
       const add = stacked(box, ...actions(...cancel, button('Add repository', 'primary', undefined, 'submit', 'add')))
       add.classList.add('repo-add')
-      if (collapsible) add.classList.add('repo-add-card')
-      add.addEventListener('submit', e => {
-        e.preventDefault()
+      add.addEventListener('submit', () => {
         const url = this.#add.value.trim()
         this.#addError = ''
         labelError(this.#add, '')
         this.#hold('repo', 'add')
         emit(this, 'sf-repo', { op: 'add', url })
       })
-      return add
+      if (!collapsible) return add
+      const card = el('div', 'repo-add-card')
+      card.append(add)
+      return card
     }
-    const head = el('div', 'page-head')
-    const docs = button('View in docs', 'link small docs-link', undefined, 'button', 'docs')
-    docs.dataset.doc = 'projects-and-new-sessions'
-    docs.prepend(icon('link'))
-    head.append(pageCrumb('Projects'), docs)
-    const sub = el('p', 'small muted page-intro', 'Your repositories. Each session works on its own branch, started from the latest main.')
     const parts: HTMLElement[] = [
       ...this.#readinessNotices(),
-      head,
-      sub,
+      ...pageHead({ title: 'Projects', crumb: true, intro: 'Your repositories. Each session works on its own branch, started from the latest main.', docs: { doc: 'projects-and-new-sessions', key: 'docs' } }),
     ]
     if (!empty && this.#addingRepo) parts.push(addControl(true))
     const message = this.#message.path === '' ? this.#message.text : ''
     sayIfChanged(this.#messageLine, message, this.#message.bad ? 'bad' : 'muted')
     parts.push(this.#messageLine)
     if (empty) {
-      const box = el('div', 'projects-empty')
-      const media = el('div', 'projects-empty-icon')
-      media.append(icon('folder', ''))
-      box.append(media, el('h3', '', 'No projects yet'), el('p', 'small muted', "Add a repository by its https address. If it's private, save a token for its git host first."), addControl(false))
-      parts.push(box)
+      parts.push(emptyState("Add a repository by its https address. If it's private, save a token for its git host first.", { title: 'No projects yet', icon: 'folder', action: addControl(false) }))
     }
     if (!empty && !this.#addingRepo) {
       const actions = el('div', 'projects-actions')

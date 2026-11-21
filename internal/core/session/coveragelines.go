@@ -51,15 +51,22 @@ func RequirementID(id string) bool {
 
 func RequirementIDs(text string) []string {
 	var out []string
-	for _, id := range requirementWord.FindAllString(text, -1) {
+	for _, at := range requirementWord.FindAllStringIndex(text, -1) {
 		if len(out) >= MaxRequirementIDs {
 			break
 		}
-		if !slices.Contains(out, id) {
+		if partOfLongerID(text, at[0], at[1]) {
+			continue
+		}
+		if id := text[at[0]:at[1]]; !slices.Contains(out, id) {
 			out = append(out, id)
 		}
 	}
 	return out
+}
+
+func partOfLongerID(text string, start, end int) bool {
+	return (start > 0 && text[start-1] == '-') || (end < len(text) && text[end] == '-')
 }
 
 func coverageRun(reply string) ([]string, bool) {

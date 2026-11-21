@@ -195,7 +195,7 @@ func (s *Server) projectFacts(w http.ResponseWriter, r *http.Request, body map[s
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), projectFactsFor)
@@ -204,13 +204,13 @@ func (s *Server) projectFacts(w http.ResponseWriter, r *http.Request, body map[s
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "lookups":
 		on, okOn := body["on"].(bool)
 		if !keysWithin(body, "op", "repo", "on") || !okOn {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := facts.SetLookups(repo, on)

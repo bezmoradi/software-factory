@@ -318,6 +318,21 @@ scenarios:
             "$.status": 200
             "$.body.current": null
             "$.body.runs": []
+      - id: verify-not-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: verify }
       - id: remove-while-running
         do: http.request
         identity: page
@@ -361,7 +376,6 @@ scenarios:
           equal:
             "$.status": 400
             "$.body": { error: text, message: "Type a message first." }
-        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
       - id: message-too-long
         do: http.request
         identity: page
@@ -374,7 +388,6 @@ scenarios:
           equal:
             "$.status": 400
             "$.body": { error: text, message: "A message holds at most 20,000 characters." }
-        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
       - id: message-shell-line
         do: http.request
         identity: page
@@ -387,7 +400,6 @@ scenarios:
           equal:
             "$.status": 400
             "$.body": { error: command, message: "The page doesn't run shell lines: it sends messages to the agent. Ask it to run the command, or run it yourself in the agent container.", line: "ls -la" }
-        no_state_check: "refused with 400 by Registry.Message before anything reaches the session, so nothing changed; no page read shows the messages a session was sent"
       - id: ask-for-a-file
         do: http.request
         identity: page
@@ -634,6 +646,8 @@ scenarios:
             "$.status": 200
             "$.body.type": limits
             "$.body.unread": false
+            "$.body.message": "Saved. This session runs with these caps."
+            "$.body.tone": ok
           any:
             "$.body.sessions": { sid: "${sid}", own: true, reached: "", reachedAt: 0, caps: { money: 5, minutes: 600, turns: 50, disk: 0 }, levels: { money: "", time: "", turns: "", disk: "" }, used.costUsd: 0, used.diskBytes: 0, used.diskMore: false, used.diskAt: 0 }
       - id: grow
@@ -685,6 +699,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
+            "$.body.message": "Saved. This session runs with these caps."
+            "$.body.tone": ok
           any:
             "$.body.sessions": { sid: "${sid}", own: true, caps: { money: 5, minutes: 600, turns: 50, disk: 1 } }
       - id: reached
@@ -761,7 +777,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: value, message: "The new cap must be more than this session has used (1.1 GiB in the session's folder by the engine's count) and more than the cap now, and at most 4,096 GiB, a whole number." }
+            "$.body": { error: value, field: value, message: "Above the cap and what's used, up to 4,096 whole GiB." }
         waive: { FIX-05: "kind is one of the fixed cap kinds (money, time, turns, disk) and can't carry ${run.id}; every later frame entry that expects it is matched by the session id saved from this run's dispatch" }
       - id: check-while-over
         do: http.request
@@ -815,6 +831,8 @@ scenarios:
             "$.status": 200
           any:
             "$.body.entries": { kind: cap-answer, by: engine, result: disk, verdict: freed, session: "${sid}" }
+          count:
+            "$.body.entries": { where: { kind: cap-answer }, is: 1 }
       - id: check-not-at-cap
         do: http.request
         identity: page
@@ -863,6 +881,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
+            "$.body.message": "No change: this session already has these caps."
+            "$.body.tone": warn
           any:
             "$.body.sessions": { sid: "${sid}", caps.disk: 1 }
       - id: reached-again
@@ -906,6 +926,8 @@ scenarios:
             "$.status": 200
           any:
             "$.body.entries": { kind: cap-answer, by: page, result: disk, verdict: raised, session: "${sid}" }
+          count:
+            "$.body.entries": { where: { kind: cap-answer }, is: 2 }
       - id: message-through
         do: http.request
         identity: page
@@ -1531,7 +1553,21 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back, and verify-start's answer and run-container show the run using them"
+      - id: set-image-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "No change: these commands are already saved.", tone: warn }
+        no_state_check: "saves nothing, since the commands are already these, as the answer's No change says; no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back"
       - id: image-read-back
         do: http.request
         identity: page
@@ -1545,6 +1581,7 @@ scenarios:
             "$.status": 200
             "$.body.image": "proctor@${helper_image}"
             "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: verify-start
         do: http.request
         identity: page
@@ -1658,6 +1695,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "test -f README.md && echo ${run.id}"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; pass-not-counted's answer shows the earlier pass not counting under the new command"
       - id: pass-not-counted
         do: http.request
         identity: page
@@ -1684,6 +1722,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "echo ${run.id} && exit 3"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; verify-failing runs it, and failing-ended and failed read its exit code 3 and its output"
       - id: verify-failing
         do: http.request
         identity: page
@@ -1745,6 +1784,7 @@ scenarios:
             "$.status": 200
             "$.body.browser": "chromium --version && echo ${run.id}"
             "$.body.check": "echo ${run.id} && exit 3"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; browser-start's answer shows the browser command"
       - id: browser-start
         do: http.request
         identity: page
@@ -1764,6 +1804,7 @@ scenarios:
             "$.body.current.id": "${failing}"
           length: { "$.body.runs": 3 }
         save: { browser_run: "$.body.runs[0].id" }
+        waive: { FIX-05: "kind is one of the two fixed verification kinds (check, browser) and can't carry ${run.id}; no-browser reads the run whose id this step's answer saved (browser_run), so no earlier run's can match" }
       - id: browser-refused
         do: http.request
         identity: page
@@ -1817,7 +1858,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; cleared reads them back empty"
       - id: cleared
         do: http.request
         identity: page
@@ -1831,6 +1873,7 @@ scenarios:
             "$.status": 200
             "$.body.image": ""
             "$.body.check": ""
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: stop
         do: http.request
         identity: page
@@ -1930,6 +1973,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; main-check-read-back reads them back, and main-container shows the run on main using the image"
       - id: main-check-read-back
         do: http.request
         identity: page
@@ -1942,6 +1986,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.image": "proctor@${helper_image}"
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: main-start
         do: http.request
         identity: page
@@ -1998,7 +2043,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; main-cleared reads them back empty, and main-recorded's why shows the change"
       - id: main-cleared
         do: http.request
         identity: page
@@ -2011,6 +2057,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": ""
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: main-recorded
         do: http.request
         identity: page
@@ -2029,3 +2076,4 @@ scenarios:
             "$.body.runs[0].by": page
             "$.body.runs[0].image": "proctor@${helper_image}"
             "$.body.why": "The check command or the project's verification image changed since the last run, so it doesn't count."
+        no_state_check: "op read changes nothing; /api/verify isn't declared a read, since op start on the same path starts a run"

@@ -104,7 +104,7 @@ func (r *Recaps) loadLocked() {
 
 func (r *Recaps) target(sid string) (PushTarget, error) {
 	if r.cfg.Targets == nil {
-		return PushTarget{}, explained(conflict("not started here"), "Only a session this engine started has a recap.")
+		return PushTarget{}, conflict("not started here", "Only a session this engine started has a recap.")
 	}
 	t, ok := targetOrHeld(r.cfg.Targets, r.cfg.Held, sid)
 	if !ok {
@@ -144,7 +144,7 @@ func (r *Recaps) Seen(sid string) error {
 		if r.cfg.Logger != nil {
 			r.cfg.Logger.Warn("recap", "event", "seen-not-saved")
 		}
-		return explained(conflict("state"), "The engine couldn't save when you last viewed this session.")
+		return conflict("state", "The engine couldn't save when you last viewed this session.")
 	}
 	return nil
 }
@@ -167,7 +167,7 @@ func (r *Recaps) Recap(sid string) (RecapView, error) {
 	}
 	entries, err := r.cfg.Audit.ReadAll(AuditReadAll)
 	if err != nil {
-		return v, explained(conflict("audit"), "The engine couldn't read its audit file.")
+		return v, conflict("audit", "The engine couldn't read its audit file.")
 	}
 	answered, denied := 0, 0
 	var lastAnswer time.Time

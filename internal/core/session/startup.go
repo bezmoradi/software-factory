@@ -340,7 +340,7 @@ func (d *Dispatcher) packStartup(r *run, read *StartupRead) (string, error) {
 	files, err := d.cfg.Packs.SessionCode(r.pack)
 	if err != nil {
 		d.cfg.Logger.Warn("start-up files", "event", "pack-unreadable")
-		return "", explained(conflict("start-up files"), clip("The engine couldn't read the files of the pack "+r.pack.Name+" that run code in a session, so it can't show them and doesn't start the session: "+err.Error(), maxOutput))
+		return "", conflict("start-up files", clip("The engine couldn't read the files of the pack "+r.pack.Name+" that run code in a session, so it can't show them and doesn't start the session: "+err.Error(), maxOutput))
 	}
 	read.Files = append(read.Files, files...)
 	return "\x00pack\x00" + r.pack.Name + "\x00" + r.pack.SessionDigest, nil
@@ -350,10 +350,10 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	list := r.spec.Startup
 	entries, ok := StartupLists[list]
 	if !ok {
-		return explained(conflict("no start-up list"), "Software Factory has no list of the files "+r.spec.Name+" loads at start, so it can't show them for approval and doesn't start it.")
+		return conflict("no start-up list", "Software Factory has no list of the files "+r.spec.Name+" loads at start, so it can't show them for approval and doesn't start it.")
 	}
 	if d.cfg.Startup == nil {
-		return explained(conflict("no start-up reader"), "This engine can't read the worktree's start-up files, so it doesn't start agents.")
+		return conflict("no start-up reader", "This engine can't read the worktree's start-up files, so it doesn't start agents.")
 	}
 	scan := StartupScan{Entries: entries, Instructions: InstructionLists[list], Walk: true}
 	if len(scan.Instructions.Above) > 0 {
@@ -365,7 +365,7 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	read, err := d.cfg.Startup.Read(r.clone, r.cwd, r.branch, scan)
 	if err != nil {
 		d.cfg.Logger.Warn("start-up files", "event", "unreadable")
-		return explained(conflict("start-up files"), clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
+		return conflict("start-up files", clip("The engine couldn't read "+r.spec.Name+"'s start-up files in the worktree, so it can't show them and doesn't start it: "+err.Error(), maxOutput))
 	}
 	packList, err := d.packStartup(r, &read)
 	if err != nil {
@@ -377,14 +377,14 @@ func (d *Dispatcher) startup(r *run, consent Consent) error {
 	hash := startupHash(list+packList, read)
 	last, err := d.lastApproval(r.repo, r.spec.ID)
 	if err != nil {
-		return explained(conflict("approvals"), "The engine couldn't read its approvals of start-up files, so it doesn't start the agent.")
+		return conflict("approvals", "The engine couldn't read its approvals of start-up files, so it doesn't start the agent.")
 	}
 	if last.Hash == hash {
 		return nil
 	}
 	if consent.Approve != "" && consent.Approve == hash {
 		if err := d.approve(r.repo, r.spec.ID, hash, instructionHashes(read.Instructions)); err != nil {
-			return explained(conflict("approvals"), "The engine couldn't save the approval, so it doesn't start the agent.")
+			return conflict("approvals", "The engine couldn't save the approval, so it doesn't start the agent.")
 		}
 		d.startupAudit(r, hash)
 		d.cfg.Logger.Info("start-up files", "event", "approved")

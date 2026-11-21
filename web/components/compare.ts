@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request, UNREAD, type EngineAnswer } from '../api.ts'
 import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import { confirmDialog } from '../lib/dialog.ts'
 import { label, shortSha } from '../lib/format.ts'
@@ -45,14 +45,8 @@ interface PairRecord {
 
 export type PairNext = (pair: string, agent: string) => Promise<string>
 
-async function call(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const res = await api('/api/pair', body).catch(() => null)
-  const parsed = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-  return { ok: !!res && res.ok, body: parsed }
-}
-
-function said(body: Record<string, unknown>, fallback: string): string {
-  return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
+function said(a: EngineAnswer): string {
+  return a.ok ? UNREAD : a.message
 }
 
 function pairOf(raw: unknown): PairRecord | null {
@@ -69,7 +63,7 @@ function elapsed(from: number | undefined): string {
 }
 
 export function confirmBoth(): Promise<boolean> {
-  return confirmDialog('Start both sessions?', [
+  return confirmDialog('Start both sessions?', 'projects-and-new-sessions', [
     el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
   ], 'Start both', 'primary')
 }
@@ -131,12 +125,12 @@ class SfCompare extends HTMLElement {
 
   async #load(id: string, pairKey: string) {
     this.#loading = pairKey
-    const a = await call({ op: 'view', pair: id })
+    const a = await request('/api/pair', { op: 'view', pair: id })
     if (this.#loading !== pairKey) return
     this.#loading = ''
     this.#pairKey = pairKey
     this.#pair = a.ok ? pairOf(a.body) : null
-    this.#note = a.ok ? '' : said(a.body, "The comparison couldn't be read.")
+    this.#note = a.ok ? '' : said(a)
     this.#key = ''
     this.view = this.#view
   }
@@ -216,7 +210,7 @@ class SfCompare extends HTMLElement {
     if (p.kept && p.kept !== m.sid && !s.info.running) row.append(button('Delete this session', 'small danger', () => {
       if (!v.disabled) emit(this, 'sf-delete-session', { sid: m.sid })
     }, 'button', `delete:${m.sid}`))
-    row.append(this.#diffButton(m.sid, () => api('/api/changes', { sid: m.sid })))
+    row.append(this.#diffButton(m.sid, () => request('/api/changes', { sid: m.sid })))
     col.append(row)
     const d = this.#diffs.get(m.sid)
     if (typeof d === 'string') col.append(el('p', 'small bad', d))
@@ -230,7 +224,7 @@ class SfCompare extends HTMLElement {
     col.append(el('h3', 'label', `Merged pull request #${b.number}`))
     col.append(el('p', 'small muted', `What its author merged, from where it left its base ${shortSha(b.base)} up to ${shortSha(b.head)}.`))
     const key = `merged:${p.id}`
-    col.append(this.#diffButton(key, () => api('/api/pair', { op: 'merged-diff', pair: p.id })))
+    col.append(this.#diffButton(key, () => request('/api/pair', { op: 'merged-diff', pair: p.id })))
     const d = this.#diffs.get(key)
     if (typeof d === 'string') col.append(el('p', 'small bad', d))
     else if (d) col.append(diffBox(d, `The merged change of pull request #${b.number}`))
@@ -245,10 +239,10 @@ class SfCompare extends HTMLElement {
         this.#busyKey = `keep:${sid}`
         this.#key = ''
         this.view = this.#view
-        const a = await call({ op: 'keep', pair: p.id, sid })
+        const a = await request('/api/pair', { op: 'keep', pair: p.id, sid })
         this.#busy = false
         this.#busyKey = ''
-        this.#note = a.ok ? '' : said(a.body, "The choice wasn't saved.")
+        this.#note = a.ok ? '' : said(a)
         if (a.ok) p.kept = sid
         this.#key = ''
         this.view = this.#view
@@ -259,18 +253,17 @@ class SfCompare extends HTMLElement {
     return b
   }
 
-  #diffButton(key: string, load: () => Promise<Response>): HTMLButtonElement {
+  #diffButton(key: string, load: () => Promise<EngineAnswer>): HTMLButtonElement {
     const shownNow = this.#diffs.has(key)
     const b = button(shownNow ? 'Hide the diff' : 'Show the diff', 'small ghost', () => {
       if (this.#diffs.has(key)) this.#diffs.delete(key)
       else
         void (async () => {
           this.#diffLoading.add(key)
-          const res = await load().catch(() => null)
+          const a = await load()
           this.#diffLoading.delete(key)
-          const body = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-          const changes = body.changes as Changes | undefined
-          this.#diffs.set(key, res?.ok && changes && Array.isArray(changes.files) ? changes : said(body, "The diff couldn't be read."))
+          const changes = a.body.changes as Changes | undefined
+          this.#diffs.set(key, a.ok && changes && Array.isArray(changes.files) ? changes : said(a))
           this.#key = ''
           this.view = this.#view
         })()

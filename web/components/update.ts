@@ -1,9 +1,10 @@
+import { answerOf, type EngineAnswer } from '../api.ts'
 import { actionButton, button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
 import { commandBlock } from './copy.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 interface Release {
   version: string
@@ -27,7 +28,7 @@ const RELOAD_MS = 60 * 60 * 1000
 const SOON_MS = 15_000
 const SOON_TRIES = 8
 
-let post: Post = () => Promise.reject(new Error('not ready'))
+let post: Post = () => answerOf(null)
 let view: UpdateView | null = null
 let timer = 0
 let soon = 0
@@ -70,18 +71,15 @@ function paintAll() {
 }
 
 async function call(body: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, message: 'The engine didn’t answer.' }
-  const parsed: unknown = await res.json().catch(() => null)
-  const next = res.ok ? updateOf(parsed) : null
+  const a = await post(ROUTE, body)
+  const next = a.ok ? updateOf(a.body) : null
   if (next) {
     view = next
     paintAll()
     settle()
     return { ok: true, message: '' }
   }
-  const message = parsed !== null && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string' ? (parsed as { message: string }).message : ''
-  return { ok: false, message: message || 'The engine didn’t take that. Try again once the page is connected.' }
+  return { ok: false, message: a.message }
 }
 
 export function initUpdates(p: Post): void {
@@ -195,6 +193,7 @@ export function openUpdate(): void {
   const m = modal({
     kind: 'update',
     title,
+    docs: 'maintenance',
     closeButton: true,
     body: [
       para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),

@@ -58,11 +58,11 @@ func (d *Dispatcher) TestList(ctx context.Context, sid string, costOK bool) erro
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't write a manual test list.")
+		return conflict("no reviewer", "This engine runs no reviewer containers, so it can't write a manual test list.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can get a manual test list here.")
+		return conflict("not started here", "Only a session this engine started can get a manual test list here.")
 	}
 	return d.cfg.Reviews.TestList(ctx, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK})
 }
@@ -90,13 +90,13 @@ func (r *Reviews) setTestList(sid string, v TestListView) {
 func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 	t.Req = requestOr(ctx, t.Req)
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
-		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't write a test list for it.")
+		return conflict("no clone", "The engine doesn't know which clone and branch this session works in, so it can't write a test list for it.")
 	}
 	key := testListKey + t.SID
 	r.mu.Lock()
 	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
-		return explained(conflict("writing"), "A manual test list for this session is being written. Wait for it to finish.")
+		return conflict("writing", "A manual test list for this session is being written. Wait for it to finish.")
 	}
 	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
@@ -120,13 +120,13 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
-		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
+		return conflict("no plugin", clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	plugin := pack.Path
 	head, err := r.cfg.Snapshots.Head(t.Repo, t.Branch)
 	if err != nil {
 		release()
-		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	main, err := r.cfg.Mains.Fresh(ctx, t.Name)
 	if err != nil {
@@ -134,16 +134,16 @@ func (r *Reviews) TestList(ctx context.Context, t ReviewTarget) error {
 		if e, ok := errors.AsType[*Error](err); ok {
 			return e
 		}
-		return explained(conflict("fetch"), "The engine couldn't fetch the remote's main branch, so it can't tell what changed.")
+		return conflict("fetch", "The engine couldn't fetch the remote's main branch, so it can't tell what changed.")
 	}
 	base, err := r.cfg.History.MergeBase(ctx, t.Repo, head, main)
 	if err != nil {
 		release()
-		return explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
+		return conflict("merge base", clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
 	}
 	if base == head {
 		release()
-		return explained(conflict("no change"), "The session's branch has nothing the remote's main branch lacks, so there's nothing to test. Commit the work first.")
+		return conflict("no change", "The session's branch has nothing the remote's main branch lacks, so there's nothing to test. Commit the work first.")
 	}
 	r.setTestList(t.SID, TestListView{Commit: head, Branch: t.Branch, State: TestListRunning, At: r.cfg.Now()})
 	shared.For(ctx, r.cfg.Logger).Info("test list", "event", "started")

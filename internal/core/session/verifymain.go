@@ -37,15 +37,15 @@ func (v *Verifier) notifyRun(r VerifyRun) {
 
 func (v *Verifier) repository(name string) (Repository, error) {
 	if v.cfg.Mains == nil {
-		return Repository{}, explained(conflict("no-repos"), "This engine has no repositories, so it runs nothing on main.")
+		return Repository{}, conflict("no-repos", "This engine has no repositories, so it runs nothing on main.")
 	}
 	list, err := v.cfg.Mains.List()
 	if err != nil {
-		return Repository{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return Repository{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Name == name })
 	if i < 0 {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return list[i], nil
 }
@@ -121,10 +121,10 @@ func mainStaleWhy(last VerifyRun, main string) string {
 
 func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, by string) (VerifyRun, error) {
 	if kind != VerifyCheck {
-		return VerifyRun{}, explained(invalid("kind"), "The engine runs verification runs of one kind on main: check.")
+		return VerifyRun{}, invalid("kind", "The engine runs verification runs of one kind on main: check.")
 	}
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
-		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")
+		return VerifyRun{}, conflict("no-helper", "This engine has no box helper or verification folder, so it runs no verification.")
 	}
 	r, err := v.repository(repo)
 	if err != nil {
@@ -138,10 +138,10 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 	switch {
 	case v.mains[repo] || v.mainLiveLocked(id):
 		v.mu.Unlock()
-		return VerifyRun{}, explained(conflict("running"), "A run of the check on main is running for this project. Wait for it.")
+		return VerifyRun{}, conflict("running", "A run of the check on main is running for this project. Wait for it.")
 	case len(v.live) >= MaxVerifyRuns:
 		v.mu.Unlock()
-		return VerifyRun{}, explained(limited("verify-busy"), "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
+		return VerifyRun{}, limited("verify-busy", "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
 	}
 	if v.mains == nil {
 		v.mains = map[string]bool{}
@@ -158,14 +158,14 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 		if e, ok := errors.AsType[*Error](err); ok {
 			return VerifyRun{}, explained(e, strings.Replace(e.Message, ", so no session started", ", so it ran nothing", 1))
 		}
-		return VerifyRun{}, explained(conflict("fetch"), "The engine couldn't fetch the project's main branch, so it ran nothing.")
+		return VerifyRun{}, conflict("fetch", "The engine couldn't fetch the project's main branch, so it ran nothing.")
 	}
 	if id, cmds, err = v.mainCommands(repo); err != nil {
 		return VerifyRun{}, err
 	}
 	run, err := NewBox()
 	if err != nil {
-		return VerifyRun{}, explained(conflict("random"), "The engine couldn't make an id for the run.")
+		return VerifyRun{}, conflict("random", "The engine couldn't make an id for the run.")
 	}
 	rec := VerifyRun{ID: run, Project: id, Branch: r.Branch, Commit: commit, Kind: kind, CommandHash: commandHash(cmds.Check), Image: cmds.Image,
 		State: RunRunning, By: by, Started: v.cfg.Now()}
@@ -173,7 +173,7 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 	v.mu.Lock()
 	if len(v.live) >= MaxVerifyRuns {
 		v.mu.Unlock()
-		return VerifyRun{}, explained(limited("verify-busy"), "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
+		return VerifyRun{}, limited("verify-busy", "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
 	}
 	v.live[run] = live
 	v.runs = append(v.runs, rec)
@@ -195,11 +195,11 @@ func (v *Verifier) mainCommands(repo string) (ProjectID, ProjectCommands, error)
 	id, cmds, known := v.project(repo)
 	switch {
 	case !known:
-		return id, cmds, explained(notFound("project"), "The engine has no record of this project.")
+		return id, cmds, notFound("project", "The engine has no record of this project.")
 	case cmds.Check == "":
-		return id, cmds, explained(conflict("no-check"), "Set a check command first: this project has none, so there is nothing to run on main. Set one under Check and setup commands on the project's card.")
+		return id, cmds, conflict("no-check", "Set a check command first: this project has none, so there is nothing to run on main. Set one under Check and setup commands on the project's card.")
 	case VerifyDigest(cmds.Image) == "":
-		return id, cmds, explained(conflict("no-image"), "Set an image for verification runs first: this project names none, so it can't run one. Set an image pinned by digest under Check and setup commands on the project's card.")
+		return id, cmds, conflict("no-image", "Set an image for verification runs first: this project names none, so it can't run one. Set an image pinned by digest under Check and setup commands on the project's card.")
 	}
 	return id, cmds, nil
 }

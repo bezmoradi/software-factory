@@ -55,4 +55,4 @@ type Tracked struct {
 
 var RefusedKnackpack = []string{}
 
-var Knackpack = Tracked{ID: "knackpack", Name: "knackpack", URL: "https://github.com/bezmoradi/knackpack.git", Branch: "main", Floor: "0.26.0", Refused: RefusedKnackpack}
+var Knackpack = Tracked{ID: "knackpack", Name: "knackpack", URL: "https://github.com/bezmoradi/knackpack.git", Branch: "main", Floor: "0.40.0", Refused: RefusedKnackpack}

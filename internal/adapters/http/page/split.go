@@ -16,6 +16,11 @@ const (
 	MaxSplitBody   = 512 << 10
 )
 
+const (
+	saidSplitSaved     = "Saved. The task starts with this title and message."
+	saidSplitUnchanged = "No change: the task card already says this."
+)
+
 var splitCard = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type splitJSON struct {
@@ -85,12 +90,12 @@ func (s *Server) splitsPart() *session.Splits {
 func (s *Server) splitRequest(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxSplitBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	raw, ok := body["tasks"].([]any)
 	if !keysWithin(body, "tasks") || !ok || len(raw) == 0 || len(raw) > session.MaxSplitTasks {
-		refuse(w, http.StatusBadRequest, "input")
+		agentRefuse(w, http.StatusBadRequest, "input")
 		return
 	}
 	tasks := make([]session.SplitTask, 0, len(raw))
@@ -99,7 +104,7 @@ func (s *Server) splitRequest(w http.ResponseWriter, r *http.Request) {
 		title, okTitle := m["title"].(string)
 		message, okMessage := m["message"].(string)
 		if !isObject || !keysWithin(m, "title", "message") || !okTitle || !okMessage {
-			refuse(w, http.StatusBadRequest, "input")
+			agentRefuse(w, http.StatusBadRequest, "input")
 			return
 		}
 		tasks = append(tasks, session.SplitTask{Title: title, Message: message})
@@ -128,7 +133,7 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 	sid, okSID := viewSession(body)
 	card, okCard := body["card"].(string)
 	if !okOp || !okSID || !okCard || !splitCard.MatchString(card) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
@@ -136,15 +141,20 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 		title, okTitle := body["title"].(string)
 		message, okMessage := body["message"].(string)
 		if !keysWithin(body, "op", "sid", "card", "title", "message") || !okTitle || !okMessage {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-		err := splits.Edit(sid, card, title, message)
-		shared.For(r.Context(), s.logger).Info("split edit", "ok", err == nil)
-		reply(w, err, http.StatusOK)
+		changed, err := splits.Edit(sid, card, title, message)
+		shared.For(r.Context(), s.logger).Info("split edit", "ok", err == nil, "changed", changed)
+		if err != nil {
+			code, p := status(err)
+			send(w, code, p)
+			return
+		}
+		send(w, http.StatusOK, saveSaid(changed, saidSplitSaved, saidSplitUnchanged).ok())
 	case "dismiss", "unqueue":
 		if !keysWithin(body, "op", "sid", "card") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var err error
@@ -158,7 +168,7 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 	case "start":
 		consent, consented := consentOf(body)
 		if !keysWithin(body, "op", "sid", "card", "approve", "costOk") || !consented {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(dispatchFor + writeFor))

@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface SavedRule {
   box: string
@@ -83,18 +84,15 @@ class SfAllowRules extends HTMLElement {
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const gen = ++this.#gen
     const current = () => gen === this.#gen
-    const res = await api('/api/allow-rules', body).catch(() => null)
+    const a = await request('/api/allow-rules', body)
     if (!current()) return false
     this.#busy = ''
-    if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { message?: unknown } | null
-      if (!current()) return false
-      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       this.#paint()
       return false
     }
-    const v = readView(await res.json().catch(() => null))
-    if (!current()) return false
+    const v = readView(a.body)
     if (v) this.#view = v
     this.#paint()
     return true
@@ -139,15 +137,15 @@ class SfAllowRules extends HTMLElement {
     ]
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', 'Reading the saved rules…'))
-    else if (v.idle) parts.push(el('p', 'small muted', 'No session of this project is running, so no session’s container is there to read. Each session keeps its rules in its own container.'))
-    else if (!v.files.length) parts.push(el('p', 'small muted', 'No settings file holds saved rules for this project.'))
+    else if (v.idle) parts.push(emptyState('No session of this project is running, so no session’s container is there to read. Each session keeps its rules in its own container.'))
+    else if (!v.files.length) parts.push(emptyState('No settings file holds saved rules for this project.'))
     else {
       for (const f of v.files) {
         const section = el('div')
         section.append(el('p', 'small', `${PLACES[f.place] ?? visible(f.place)}, in ${visible(f.container || 'a session’s container')}: `), el('code', 'small', visible(f.path)))
         if (f.problem) section.append(el('p', 'small warn', visible(f.problem)))
         const rules = v.rules.filter(r => r.box === f.box && r.place === f.place && r.worktree === f.worktree)
-        if (!rules.length && !f.problem) section.append(el('p', 'small muted', 'No allow rules in this file.'))
+        if (!rules.length && !f.problem) section.append(emptyState('No allow rules in this file.'))
         if (rules.length) {
           const list = el('ul', 'list')
           for (const r of rules) list.append(this.#rule(r))

@@ -197,7 +197,7 @@ func samePair(a, b *admitted) bool {
 func firstMessage(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" || utf16Len(text) > MaxText || !utf8.ValidString(text) || strings.HasPrefix(text, "!") {
-		return "", explained(invalid("message"), "Write the first message both sessions get: at most 20,000 characters, not starting with !.")
+		return "", invalid("message", "Needs up to 20,000 characters, not starting with !.")
 	}
 	return text, nil
 }
@@ -227,15 +227,15 @@ func clipUnits(s string, n int) string {
 
 func (d *Dispatcher) projectAt(path string) (Repository, error) {
 	if d.cfg.Repositories == nil {
-		return Repository{}, explained(conflict("no agent-host"), "This engine has no agent-host to start sessions in.")
+		return Repository{}, conflict("no agent-host", "This engine has no agent-host to start sessions in.")
 	}
 	repos, err := d.cfg.Repositories.List()
 	if err != nil {
-		return Repository{}, explained(conflict("workspace"), "The engine couldn't read the workspace's repositories.")
+		return Repository{}, conflict("workspace", "The engine couldn't read the workspace's repositories.")
 	}
 	i := slices.IndexFunc(repos, func(r Repository) bool { return r.Path == path })
 	if i < 0 {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return repos[i], nil
 }
@@ -263,7 +263,7 @@ func (d *Dispatcher) waitStartGap(ctx context.Context) error {
 	}
 	select {
 	case <-ctx.Done():
-		return explained(limited("wait"), "Wait a few seconds between starts.")
+		return limited("wait", "Wait a few seconds between starts.")
 	case <-time.After(wait):
 		return nil
 	}
@@ -275,9 +275,9 @@ func (d *Dispatcher) pairAgents(q PairStart) ([]PairAgent, error) {
 	case q.Double:
 		list = append(list, PairAgent{Agent: q.Agent.Agent, Model: q.SecondModel})
 	case q.SecondModel != "":
-		return nil, explained(conflict("double"), DoubleUsage+" Confirm it to start them.")
+		return nil, conflict("double", DoubleUsage+" Confirm it to start them.")
 	case q.Bench == 0:
-		return nil, explained(invalid("agents"), "Start with both needs two sessions of one agent.")
+		return nil, invalid("agents", "Start with both needs two sessions of one agent.")
 	}
 	if spec, ok := findAgent(d.cfg.Agents, q.Agent.Agent); ok && len(list) == 2 {
 		if err := checkChoice(spec, q.SecondModel, ""); err != nil {
@@ -290,13 +290,13 @@ func (d *Dispatcher) pairAgents(q PairStart) ([]PairAgent, error) {
 func pairPoint(q PairStart) error {
 	switch {
 	case q.Bench != 0 && q.From.chosen() > 0:
-		return onField("from", explained(invalid("from"), "A benchmark starts from the merged pull request’s base. Set Start from back to main first."))
+		return onField("from", invalid("from", "Set it back to main for a benchmark."))
 	case q.Bench != 0 && q.Issue != 0:
-		return onField("issue", explained(invalid("issue"), "A benchmark’s first message is the merged pull request’s description, so it starts without an issue. Clear the issue first."))
+		return onField("issue", invalid("issue", "Clear it for a benchmark."))
 	case q.Issue != 0 && strings.TrimSpace(q.Message) != "":
-		return onField("message", explained(invalid("message"), "Both sessions get the issue as their first message. Clear this message, or clear the issue."))
+		return onField("message", invalid("message", "Clear it, or clear the issue."))
 	case q.Bench != 0 && strings.TrimSpace(q.Message) != "":
-		return onField("message", explained(invalid("message"), "A benchmark's first message is the merged pull request's description."))
+		return onField("message", invalid("message", "Clear it for a benchmark."))
 	}
 	return nil
 }
@@ -311,7 +311,7 @@ func (p *Pairs) firstText(ctx context.Context, q PairStart) (*startPoint, *Bench
 		return &at, &b, t, nil
 	case q.Issue != 0:
 		if p.cfg.Issues == nil {
-			return nil, nil, "", onField("issue", explained(conflict("no issues"), "This engine can't start a session from an issue."))
+			return nil, nil, "", onField("issue", conflict("no issues", "This engine can't start a session from an issue."))
 		}
 		t, err := p.cfg.Issues.startText(ctx, q.Path, q.Issue, q.IssueHash)
 		return nil, nil, t, err
@@ -341,11 +341,11 @@ func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
 		return PairStarted{}, benchUnread()
 	}
 	if q.Issue != 0 && !ValidIssueHash(q.IssueHash) {
-		return PairStarted{}, onField("issue", explained(invalid("issue"), "Read the issue again before starting from it."))
+		return PairStarted{}, onField("issue", invalid("issue", "Read the issue again before starting from it."))
 	}
 	pinned, bench, text, err := p.firstText(ctx, q)
 	if err != nil {
-		return PairStarted{}, err
+		return PairStarted{}, onStartField(err)
 	}
 	from := q.From
 	if pinned != nil {
@@ -385,7 +385,7 @@ func (p *Pairs) Start(ctx context.Context, q PairStart) (PairStarted, error) {
 }
 
 func benchUnread() error {
-	return onField("benchmark", explained(invalid("benchmark"), "Read the pull request again before starting from it."))
+	return onField("benchmark", invalid("benchmark", "Read the pull request again before starting from it."))
 }
 
 func (p *Pairs) find(id string) *Pair {
@@ -403,19 +403,19 @@ func (p *Pairs) Next(ctx context.Context, id string, consent Consent, box string
 	switch {
 	case pr == nil:
 		p.mu.Unlock()
-		return Started{}, explained(notFound("pair"), "That pair isn't one this engine started.")
+		return Started{}, notFound("pair", "That pair isn't one this engine started.")
 	case len(pr.Members) < 2:
 		p.mu.Unlock()
-		return Started{}, explained(conflict("one"), "This benchmark runs one agent.")
+		return Started{}, conflict("one", "This benchmark runs one agent.")
 	case pr.History:
 		p.mu.Unlock()
-		return Started{}, explained(conflict("history only"), pairHistoryMessage)
+		return Started{}, conflict("history only", pairHistoryMessage)
 	case pr.Members[1].SID != "":
 		p.mu.Unlock()
-		return Started{}, explained(conflict("started"), "Both sessions of this pair started already.")
+		return Started{}, conflict("started", "Both sessions of this pair started already.")
 	case p.busy[id]:
 		p.mu.Unlock()
-		return Started{}, explained(limited("busy"), "The second session is starting.")
+		return Started{}, limited("busy", "The second session is starting.")
 	}
 	p.busy[id] = true
 	a, path, name, typ, text, issue := pr.Members[1].PairAgent, pr.Path, pr.Name, pr.Type, pr.Message, pr.Issue
@@ -458,7 +458,7 @@ func (p *Pairs) View(id string) (Pair, error) {
 	defer p.mu.Unlock()
 	pr := p.find(id)
 	if pr == nil {
-		return Pair{}, explained(notFound("pair"), "That pair isn't one this engine started.")
+		return Pair{}, notFound("pair", "That pair isn't one this engine started.")
 	}
 	out := *pr
 	out.Members = slices.Clone(pr.Members)
@@ -477,13 +477,13 @@ func (p *Pairs) Keep(id, sid string) error {
 	defer p.mu.Unlock()
 	pr := p.find(id)
 	if pr == nil {
-		return explained(notFound("pair"), "That pair isn't one this engine started.")
+		return notFound("pair", "That pair isn't one this engine started.")
 	}
 	if pr.History {
-		return explained(conflict("history only"), pairHistoryMessage)
+		return conflict("history only", pairHistoryMessage)
 	}
 	if sid != "" && !slices.ContainsFunc(pr.Members, func(m PairMember) bool { return m.SID == sid }) {
-		return explained(invalid("sid"), "That session isn't one of this pair's.")
+		return invalid("sid", "That session isn't one of this pair's.")
 	}
 	pr.Kept = sid
 	p.saveLocked()

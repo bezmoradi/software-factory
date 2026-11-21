@@ -222,7 +222,7 @@ func oneHeader(r *http.Request, name string) string {
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	kind, ok := uploadKind(r)
 	if !ok {
-		refuse(w, http.StatusUnsupportedMediaType, "type")
+		refuse(w, http.StatusUnsupportedMediaType, "type", "The engine takes an image as PNG, JPEG, GIF or WebP, or a file as application/octet-stream.")
 		return
 	}
 	sid := oneHeader(r, "X-SF-Session")
@@ -232,17 +232,17 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		raw := oneHeader(r, "X-SF-Name")
 		decoded, err := url.PathUnescape(raw)
 		if err != nil || !session.UploadName(decoded) {
-			refuse(w, http.StatusBadRequest, "name")
+			refuse(w, http.StatusBadRequest, "name", "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character.")
 			return
 		}
 		name = decoded
 		limit = session.MaxDrop
 	} else if len(r.Header.Values("X-SF-Name")) != 0 {
-		refuse(w, http.StatusBadRequest, "name")
+		refuse(w, http.StatusBadRequest, "name", "Only a file, not an image, is sent with its name. Reload the page and try again.")
 		return
 	}
 	if sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "session")
+		refuse(w, http.StatusBadRequest, "session", "The upload's session id is missing or longer than 80 characters. Reload the page and try again.")
 		return
 	}
 	tooBig := problem{Error: "body", Message: session.ImageRefused}
@@ -263,7 +263,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			send(w, http.StatusRequestEntityTooLarge, tooBig)
 			return
 		}
-		refuse(w, http.StatusBadRequest, "body")
+		refuse(w, http.StatusBadRequest, "body", "The upload was cut off before the engine read all of it. Try again.")
 		return
 	}
 	id, err := s.reg.Upload(sid, kind, name, data)
@@ -280,7 +280,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	id := q.Get("id")
 	if len(q) != 1 || len(q["id"]) != 1 || !uploadID.MatchString(id) {
-		refuse(w, http.StatusBadRequest, "id")
+		agentRefuse(w, http.StatusBadRequest, "id")
 		return
 	}
 	u, data, err := s.reg.Image(connSecret(r), id)
@@ -320,7 +320,7 @@ func stopped(err error) bool {
 
 func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if !keysWithin(body, "sid", "text", "revise", "comments", "ask", "images", "files", "confirm", "approve", "home", "costOk") {
-		refuse(w, http.StatusBadRequest, "text")
+		refuse(w, http.StatusBadRequest, "text", saidMessage)
 		return
 	}
 	sid := str(body["sid"], 80)
@@ -331,7 +331,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 	if hasRevise || hasComments || hasAsk {
 		composed, err := s.composedText(r.Context(), sid, body)
 		if errors.Is(err, errComposedShape) {
-			refuse(w, http.StatusBadRequest, "text")
+			refuse(w, http.StatusBadRequest, "text", saidMessage)
 			return
 		}
 		if err != nil {
@@ -351,7 +351,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 		}
 	}
 	if !ok || !okImages || !okFiles || !okConsent {
-		refuse(w, http.StatusBadRequest, "text")
+		refuse(w, http.StatusBadRequest, "text", saidMessage)
 		return
 	}
 	confirm := body["confirm"] == true

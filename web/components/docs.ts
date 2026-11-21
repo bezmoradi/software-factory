@@ -1,4 +1,5 @@
-import { button, el, pageCrumb } from '../lib/dom.ts'
+import { button, el } from '../lib/dom.ts'
+import { pageHead } from '../lib/page.ts'
 import { headings } from './markdown.ts'
 import { icon } from './icon.ts'
 
@@ -202,9 +203,7 @@ class SfDocs extends HTMLElement {
     nav.setAttribute('aria-label', 'Docs sections')
     const toc = el('ul', 'docs-toc')
     const body = el('div', 'docs-body')
-    const head = el('div', 'page-head')
-    head.append(pageCrumb('Docs'))
-    body.append(head)
+    body.append(...pageHead({ title: 'Docs', crumb: true }))
     for (const s of list) {
       const part = el('section', 'docs-section')
       part.dataset.doc = s.id

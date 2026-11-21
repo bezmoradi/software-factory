@@ -16,9 +16,9 @@ func CleanHostReason(raw string) (string, error) {
 	case r == "":
 		return "", nil
 	case !utf8.ValidString(r) || utf8.RuneCountInString(r) > MaxHostReason || hostReasonControl.MatchString(r):
-		return "", explained(invalid("reason"), "A reason is plain text on one line, at most 200 characters.")
+		return "", onField("reason", invalid("reason", "Plain text on one line, at most 200 characters."))
 	case secretText(r):
-		return "", explained(invalid("reason"), "The reason looks like it holds a token or a key, so it wasn't saved. Write it without one.")
+		return "", onField("reason", invalid("reason", "Looks like a token or key, so it wasn't saved."))
 	}
 	return r, nil
 }

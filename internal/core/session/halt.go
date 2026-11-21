@@ -120,7 +120,7 @@ func (h *Halt) save() error {
 	st := h.State()
 	if err := cfg.Store.Save(st); err != nil {
 		cfg.Logger.Warn("halt", "event", "state-not-saved")
-		return explained(conflict("state"), "This is in effect now, but the engine couldn't save it, so a restart of the engine forgets it.")
+		return conflict("state", "This is in effect now, but the engine couldn't save it, so a restart of the engine forgets it.")
 	}
 	return nil
 }
@@ -146,7 +146,7 @@ func (h *Halt) audit(e AuditEntry) {
 
 func (h *Halt) SetAway(sid string, on bool) error {
 	if sid != "" && !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	h.mu.Lock()
 	doubled, known := h.cfg.Doubled, h.cfg.Known
@@ -165,7 +165,7 @@ func (h *Halt) SetAway(sid string, on bool) error {
 	case on && !h.away[sid]:
 		if len(h.away) >= maxAway {
 			h.mu.Unlock()
-			return explained(limited("away"), "Away mode is on for a thousand sessions already. Turn it on for every session instead.")
+			return limited("away", "Away mode is on for a thousand sessions already. Turn it on for every session instead.")
 		}
 		h.away[sid], changed = true, true
 	case !on && h.away[sid]:

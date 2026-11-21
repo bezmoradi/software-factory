@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { field, form } from '../lib/form.ts'
 
 interface RoleModel {
   name: string
@@ -31,11 +32,6 @@ function readView(v: unknown): ReviewModelsView | null {
   return { roles, models, efforts: (b.efforts as unknown[]).filter((e): e is string => typeof e === 'string') }
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
-}
 
 class SfReviewModels extends HTMLElement {
   #target: ReviewModelsTarget | null = null
@@ -68,14 +64,14 @@ class SfReviewModels extends HTMLElement {
     if (!project) return
     this.#busy = true
     this.#paint()
-    const res = await api('/api/review-models', { ...body, path: project }).catch(() => null)
+    const a = await request('/api/review-models', { ...body, path: project })
     this.#busy = false
     if (project !== this.#target?.project) return
-    if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       return this.#paint()
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
     if (ok) {
       say(this.#status, ok, 'ok')
@@ -126,11 +122,7 @@ class SfReviewModels extends HTMLElement {
       effort.addEventListener('change', save)
       model.disabled = effort.disabled = off
       if (this.#busy) for (const s of [model, effort]) s.setAttribute('aria-disabled', 'true')
-      const label = el('label', 'small', `The ${visible(r.name)} role runs on`)
-      label.htmlFor = model.id
-      const row = el('div', 'row field-row')
-      row.append(label, model, effort)
-      parts.push(row)
+      parts.push(form({ inline: true, cls: 'field-row', children: [field(`The ${visible(r.name)} role runs on`, model, { kind: 'inline', cls: 'field-row' }), effort] }))
     }
     parts.push(this.#status)
     replaceKeeping(this, parts)

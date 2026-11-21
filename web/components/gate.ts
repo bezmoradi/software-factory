@@ -1,5 +1,6 @@
-import { button, el, emit, field, focusedKey, labelError, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, focusedKey, labelError, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { diffText, lineDiff } from '../lib/diff.ts'
+import { actions, field, form } from '../lib/form.ts'
 import type { AsideRun, HoldSetting, HoldTyped, PlanApproval, ProjectAgents } from '../types.ts'
 import './markdown.ts'
 import { asideBox } from './aside-run.ts'
@@ -10,14 +11,13 @@ class SfApproval extends HTMLElement {
   #open = new Map<string, boolean>()
   #field = el('input', 'textbox')
   #fieldWords = document.createTextNode('What the agent should change in the plan')
-  #fieldBox = field('', this.#field)
+  #fieldBox = field(this.#fieldWords, this.#field)
 
   constructor() {
     super()
     this.#field.name = 'note'
     this.#field.dataset.key = 'note'
     this.#field.setAttribute('aria-required', 'true')
-    this.#fieldBox.querySelector('label')!.append(this.#fieldWords)
     this.#field.addEventListener('input', () => this.refuse(''))
   }
 
@@ -37,8 +37,8 @@ class SfApproval extends HTMLElement {
     this.refuse('')
   }
 
-  refuse(why: string, error = '') {
-    const mine = !!why && error === 'note'
+  refuse(why: string, field = '') {
+    const mine = !!why && field === 'note'
     labelError(this.#field, mine ? why : '')
     this.#noteWhy.textContent = mine ? '' : why
     if (mine && !this.#field.disabled) this.#field.focus()
@@ -131,14 +131,15 @@ class SfApproval extends HTMLElement {
       }
       if (!v.hold) emit(this, 'sf-approve', { hash: v.hash })
     }, 'button', 'approve')
-    const form = el('form', 'other field-row')
-    form.noValidate = true
     const ask = button('Ask for changes', 'ghost', undefined, 'submit', 'ask')
-    form.append(this.#fieldBox, ask)
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      this.refuse('')
-      emit(this, 'sf-revise', { note: this.#field.value })
+    const revise = form({
+      inline: true,
+      cls: 'other field-row',
+      children: [this.#fieldBox, actions([ask])],
+      onSubmit: () => {
+        this.refuse('')
+        emit(this, 'sf-revise', { note: this.#field.value })
+      },
     })
     for (const control of [approve, ask, this.#field]) control.disabled = v.disabled
     if (v.hold) approve.setAttribute('aria-disabled', 'true')
@@ -151,7 +152,7 @@ class SfApproval extends HTMLElement {
     this.#noteWhy.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-note-why`
     if (why) approve.setAttribute('aria-describedby', this.#why.id)
     this.#why.classList.remove('status-slot')
-    replaceKeeping(this, [...parts, this.#why, form, this.#noteWhy])
+    replaceKeeping(this, [...parts, this.#why, revise, this.#noteWhy])
     if (this.#why.textContent !== why) this.#why.textContent = why
   }
 
@@ -221,11 +222,8 @@ class HoldFields {
   }
 
   rows(): HTMLElement[] {
-    const row = (label: string, control: HTMLElement) => field(label, control, undefined, 'row field-row')
-    const after = el('div', 'row check-row')
-    const afterLabel = el('label', 'small', 'Hold the agent\'s own push after a reviewer blocked on its branch')
-    afterLabel.htmlFor = this.#after.id
-    after.append(this.#after, afterLabel)
+    const row = (label: string, control: HTMLElement) => field(label, control, { kind: 'inline', cls: 'field-row' })
+    const after = field('Hold the agent\'s own push after a reviewer blocked on its branch', this.#after, { kind: 'check' })
     const help = el('p', 'small muted', 'Off by default; 0 means no limit. Only the agent\'s own push waits for your Push, with the reason on its card; your Push on the page isn\'t held. The engine counts files and lines, never which files.')
     help.id = 'project-hold-help'
     return [
@@ -324,21 +322,15 @@ class SfProjectAgents extends HTMLElement {
     this.#comment.checked = v.prComment
     for (const c of [this.#rounds, this.#type, this.#findings, this.#comment]) c.disabled = v.disabled
     this.#hold.show(v.hold ?? { afterBlock: false, maxFiles: 0, maxLines: 0 }, v.disabled)
-    const rounds = field('Review rounds before you decide', this.#rounds, undefined, 'row field-row')
-    const type = field('New sessions start as', this.#type, undefined, 'row field-row')
-    const findings = el('div', 'row check-row')
-    const findingsLabel = el('label', 'small', 'Send blocking findings to the agent automatically')
-    findingsLabel.htmlFor = this.#findings.id
-    findings.append(this.#findings, findingsLabel)
+    const rounds = field('Review rounds before you decide', this.#rounds, { kind: 'inline', cls: 'field-row' })
+    const type = field('New sessions start as', this.#type, { kind: 'inline', cls: 'field-row' })
+    const findings = field('Send blocking findings to the agent automatically', this.#findings, { kind: 'check' })
     const findingsHelp = el('p', 'small muted', 'When reviews the agent asked for block its push, the engine sends the agent the reviewers\' final messages, marked as untrusted, so it can fix and push again. Only when the agent and the reviewers use a subscription, and never past the round limit or 12 automatic review runs on a branch.')
     findingsHelp.id = 'project-findings-help'
-    const comment = el('div', 'row check-row')
-    const commentLabel = el('label', 'small', 'Comment on the pull request after each push')
-    commentLabel.htmlFor = this.#comment.id
-    comment.append(this.#comment, commentLabel)
+    const comment = field('Comment on the pull request after each push', this.#comment, { kind: 'check' })
     const commentHelp = el('p', 'small muted', 'Off by default. When on, the engine posts a short note under your token on the branch\'s open pull request after each push: the commit, who caused the push and which reviews passed, from its own records only. The page shows each note.')
     commentHelp.id = 'project-pr-comment-help'
-    this.append(rounds, el('p', 'small muted', 'Kept for the round limit: after this many rounds of one reviewer blocking on a branch, you decide on the push.'), type, findings, findingsHelp, comment, commentHelp, ...this.#hold.rows())
+    this.append(form({ children: [rounds, el('p', 'small muted', 'Kept for the round limit: after this many rounds of one reviewer blocking on a branch, you decide on the push.'), type, findings, findingsHelp, comment, commentHelp, ...this.#hold.rows()] }))
   }
 }
 

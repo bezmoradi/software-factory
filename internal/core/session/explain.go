@@ -71,11 +71,11 @@ func (d *Dispatcher) Explain(ctx context.Context, sid string, costOK bool) error
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't explain a change.")
+		return conflict("no reviewer", "This engine runs no reviewer containers, so it can't explain a change.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can have its change explained here.")
+		return conflict("not started here", "Only a session this engine started can have its change explained here.")
 	}
 	return d.cfg.Reviews.Explain(ctx, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK})
 }
@@ -118,13 +118,13 @@ func (r *Reviews) setAside(sid string, v AsideView) {
 func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) error {
 	t.Req = requestOr(ctx, t.Req)
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
-		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't write "+a.what+".")
+		return conflict("no clone", "The engine doesn't know which clone and branch this session works in, so it can't write "+a.what+".")
 	}
 	key := a.kind + ":" + t.SID
 	r.mu.Lock()
 	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
-		return explained(conflict("writing"), a.busy+" Wait for it to finish.")
+		return conflict("writing", a.busy+" Wait for it to finish.")
 	}
 	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
@@ -148,13 +148,13 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
-		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
+		return conflict("no plugin", clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	plugin := pack.Path
 	head, err := r.cfg.Snapshots.Head(t.Repo, t.Branch)
 	if err != nil {
 		release()
-		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	main, err := r.cfg.Mains.Fresh(ctx, t.Name)
 	if err != nil {
@@ -162,16 +162,16 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 		if e, ok := errors.AsType[*Error](err); ok {
 			return e
 		}
-		return explained(conflict("fetch"), "The engine couldn't fetch the remote's main branch, so it can't tell what changed.")
+		return conflict("fetch", "The engine couldn't fetch the remote's main branch, so it can't tell what changed.")
 	}
 	base, err := r.cfg.History.MergeBase(ctx, t.Repo, head, main)
 	if err != nil {
 		release()
-		return explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
+		return conflict("merge base", clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
 	}
 	if base == head && !a.empty {
 		release()
-		return explained(conflict("no change"), "The session's branch has nothing the remote's main branch lacks, so there's nothing to explain. Commit the work first.")
+		return conflict("no change", "The session's branch has nothing the remote's main branch lacks, so there's nothing to explain. Commit the work first.")
 	}
 	r.setAside(t.SID, AsideView{Kind: a.kind, Commit: head, Branch: t.Branch, State: TestListRunning, At: r.cfg.Now(), PlanHash: a.planHash, PlanPath: a.planPath})
 	shared.For(ctx, r.cfg.Logger).Info("reviewer run", "kind", a.kind, "event", "started")

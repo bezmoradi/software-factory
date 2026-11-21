@@ -1,7 +1,9 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { busy, button, el, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { actions, field, form } from '../lib/form.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface LessonFinding {
   id: string
@@ -112,21 +114,20 @@ class SfLessons extends HTMLElement {
     const read = body.op === 'read'
     if (read) this.#reads++
     this.#hold()
-    const res = await api('/api/lessons', body).catch(() => null)
+    const a = await request('/api/lessons', body)
     if (read) this.#reads--
     this.#hold()
     if (project !== this.#project || (read && gen !== this.#gen)) return false
     this.#busy = ''
-    if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { error?: unknown; field?: unknown; message?: unknown; needs?: Needs } | null
-      if (problem?.needs?.next === 'cost' && body.op === 'suggest' && !body.costOk) {
-        const ok = await consentFor(problem.needs, project, 'suggesting instruction lines')
+    if (!a.ok) {
+      const needs = a.body.needs as Needs | undefined
+      if (needs?.next === 'cost' && body.op === 'suggest' && !body.costOk) {
+        const ok = await consentFor(needs, project, 'suggesting instruction lines')
         if (ok?.costOk) return this.#call({ ...body, costOk: true })
       }
-      const said = typeof problem?.message === 'string' && problem.message ? visible(problem.message) : ''
-      const pick = body.op === 'approve' && problem?.field === 'sid' && said && typeof body.id === 'string' ? body.id : ''
-      if (pick) this.#pickRefused.set(pick, said)
-      say(this.#said, pick ? '' : said || 'The engine didn\'t answer. Try again.', 'warn')
+      const pick = body.op === 'approve' && a.field === 'sid' && a.message && typeof body.id === 'string' ? body.id : ''
+      if (pick) this.#pickRefused.set(pick, a.message)
+      say(this.#said, pick ? '' : a.message, 'warn')
       this.#paint()
       if (pick) document.getElementById(`lesson-session-${pick}`)?.focus()
       if (read) this.#retry(true)
@@ -136,7 +137,7 @@ class SfLessons extends HTMLElement {
       say(this.#said, 'The run started in a reviewer container. Its lines show here when it ends.', 'muted')
       return this.#call({ op: 'read', name: project })
     }
-    const v: unknown = await res.json().catch(() => null)
+    const v: unknown = a.body
     if (project !== this.#project || (read && gen !== this.#gen)) return false
     if (isView(v)) this.#view = v
     this.#paint()
@@ -167,7 +168,7 @@ class SfLessons extends HTMLElement {
     const parts: Node[] = []
     const titles = new Map(v.findings.map(f => [f.id, f]))
     if (!v.findings.length) {
-      parts.push(el('p', 'small muted', `No blocking finding has come back on this project yet. When one blocks ${v.after} commits, Suggest lines appears here.`))
+      parts.push(emptyState(`No blocking finding has come back on this project yet. When one blocks ${v.after} commits, Suggest lines appears here.`))
     } else {
       const list = el('ul', 'small lessons-findings')
       for (const f of v.findings) {
@@ -221,11 +222,9 @@ class SfLessons extends HTMLElement {
     li.append(el('div', 'small', text(x.text)))
     const from = x.from.map(id => titles.get(id)).filter((f): f is LessonFinding => !!f).map(f => text(f.title))
     li.append(el('div', 'small muted', from.length ? `From: ${from.join('; ')}` : 'From findings no longer listed'))
-    const row = el('div', 'row field-row')
     const pick = el('select', 'textbox')
     pick.id = `lesson-session-${x.id}`
-    const label = el('label', 'small', 'Send to')
-    label.htmlFor = pick.id
+    pick.name = 'sid'
     const none = el('option', '', v.sessions.length ? 'Pick a session' : 'No session of this project')
     none.value = ''
     pick.append(none)
@@ -240,7 +239,8 @@ class SfLessons extends HTMLElement {
       if (this.#pickRefused.delete(x.id)) labelError(pick, '')
     })
     const held = this.#busy === x.id
-    const approve = button('Approve', 'small', () => {
+    const approve = button('Approve', 'small', undefined, 'submit', `lessons-approve:${this.#project}:${x.id}`)
+    const send = () => {
       if (held) return
       this.#pickRefused.delete(x.id)
       labelError(pick, '')
@@ -250,7 +250,7 @@ class SfLessons extends HTMLElement {
         if (!ok) return
         say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
       })
-    }, 'button', `lessons-approve:${this.#project}:${x.id}`)
+    }
     const decline = button('Decline', 'small ghost', () => {
       if (held) return
       this.#busy = x.id
@@ -264,7 +264,7 @@ class SfLessons extends HTMLElement {
     else approve.setAttribute('aria-disabled', String(held))
     if (held && this.#doing === 'decline') busy(decline, true)
     else decline.setAttribute('aria-disabled', String(held))
-    row.append(label, pick, approve, decline)
+    const row = form({ inline: true, cls: 'field-row', children: [field('Send to', pick, { kind: 'inline', cls: 'field-row' }), actions([approve, decline])], onSubmit: send })
     labelError(pick, this.#pickRefused.get(x.id) ?? '')
     li.append(row)
     return li

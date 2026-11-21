@@ -44,7 +44,7 @@ func (s *Server) views(w http.ResponseWriter, r *http.Request, body map[string]a
 	case exceptionsRoute:
 		s.exceptions(w, r, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -62,7 +62,7 @@ func (s *Server) recap(w http.ResponseWriter, body map[string]any) {
 	op, okOp := body["op"].(string)
 	sid, okSID := viewSession(body)
 	if !keysWithin(body, "op", "sid") || !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
@@ -81,7 +81,7 @@ func (s *Server) recap(w http.ResponseWriter, body map[string]any) {
 		}
 		send(w, http.StatusOK, map[string]any{"since": millis(v.Since), "waiting": v.Waiting, "more": v.More, "lines": lines})
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 	}
 }
 
@@ -110,7 +110,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 	}
 	op, ok := body["op"].(string)
 	if !ok {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(workspaceFor + writeFor))
@@ -119,7 +119,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 	switch op {
 	case "view":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.WorkspaceView.WorkspaceView(ctx)
@@ -137,7 +137,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 	case "delete":
 		sid, okSID := viewSession(body)
 		if !keysWithin(body, "op", "sid", "flag", "value") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var given *session.Offer
@@ -145,12 +145,12 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 			f, isFlag := flag.(string)
 			v, isValue := body["value"].(string)
 			if !isFlag || !isValue || !slices.Contains([]string{"discard", "force", "worktree"}, f) || len(v) > maxOfferValue {
-				refuse(w, http.StatusBadRequest, "offer")
+				refuse(w, http.StatusBadRequest, "offer", saidOffer)
 				return
 			}
 			given = &session.Offer{Flag: f, Value: v}
 		} else if _, has := body["value"]; has {
-			refuse(w, http.StatusBadRequest, "offer")
+			refuse(w, http.StatusBadRequest, "offer", saidOffer)
 			return
 		}
 		offer, err := s.cfg.WorkspaceView.DeleteSession(ctx, sid, given)
@@ -166,7 +166,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 	}
 }
 
@@ -206,7 +206,7 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 		return
 	}
 	if !keysWithin(body) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(exceptionsFor + writeFor))

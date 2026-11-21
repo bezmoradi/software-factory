@@ -133,7 +133,7 @@ func (w *SessionWork) queueOf(sid string) *sessionQueue {
 
 func (w *SessionWork) admitted(sid string) error {
 	if _, ok := w.reg.workInfo(sid); !ok {
-		return explained(notFound("session"), "The engine has no session of that id.")
+		return notFound("session", "The engine has no session of that id.")
 	}
 	return w.branchHeld(sid)
 }
@@ -154,14 +154,14 @@ func QueueFull(queued int) string {
 
 func checkQueued(text string) (string, error) {
 	if strings.TrimSpace(text) == "" {
-		return "", explained(invalid("text"), "Type the message to queue first.")
+		return "", onField("text", invalid("text", "Type the message to queue first."))
 	}
 	if secretText(text) {
-		return "", explained(invalid("text"), "The queue doesn't keep token-shaped text. Send that message directly instead.")
+		return "", onField("text", invalid("text", "Can't hold token-shaped text. Send it directly."))
 	}
 	t, ok := queueText(text)
 	if !ok {
-		return "", explained(invalid("text"), "A queued message is text of at most 20,000 characters, and not a command.")
+		return "", onField("text", invalid("text", "At most 20,000 characters, and not a command."))
 	}
 	return t, nil
 }
@@ -186,11 +186,11 @@ func (w *SessionWork) push(sid, text string) error {
 	q := w.queueOf(sid)
 	if full := QueueFull(len(q.items)); full != "" {
 		w.mu.Unlock()
-		return explained(limited("queue"), full)
+		return limited("queue", full)
 	}
 	if _, ok := w.queues[sid]; !ok && len(w.queues) >= maxQueueSessions {
 		w.mu.Unlock()
-		return explained(limited("queue"), "The engine keeps queues for at most 1,000 sessions.")
+		return limited("queue", "The engine keeps queues for at most 1,000 sessions.")
 	}
 	q.items = append(q.items, QueuedMessage{ID: randomHex(16), Text: text, At: w.cfg.Now()})
 	w.mu.Unlock()
@@ -199,29 +199,41 @@ func (w *SessionWork) push(sid, text string) error {
 	return nil
 }
 
-func (w *SessionWork) QueueEdit(sid, id, text string) error {
+func (w *SessionWork) QueueEdit(sid, id, text string) (bool, error) {
 	t, err := checkQueued(text)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) { q.items[i].Text = t })
-}
-
-func (w *SessionWork) QueueRemove(sid, id string) error {
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) { q.items = slices.Delete(q.items, i, i+1) })
-}
-
-func (w *SessionWork) QueueMove(sid, id string, to int) error {
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) {
-		to = min(max(to, 0), len(q.items)-1)
-		m := q.items[i]
-		q.items = slices.Insert(slices.Delete(q.items, i, i+1), to, m)
+	return w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		if q.items[i].Text == t {
+			return false
+		}
+		q.items[i].Text = t
+		return true
 	})
 }
 
-func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i int)) error {
+func (w *SessionWork) QueueRemove(sid, id string) error {
+	_, err := w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		q.items = slices.Delete(q.items, i, i+1)
+		return true
+	})
+	return err
+}
+
+func (w *SessionWork) QueueMove(sid, id string, to int) error {
+	_, err := w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		to = min(max(to, 0), len(q.items)-1)
+		m := q.items[i]
+		q.items = slices.Insert(slices.Delete(q.items, i, i+1), to, m)
+		return true
+	})
+	return err
+}
+
+func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i int) bool) (bool, error) {
 	if err := w.branchHeld(sid); err != nil {
-		return err
+		return false, err
 	}
 	w.mu.Lock()
 	q := w.queues[sid]
@@ -231,20 +243,23 @@ func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i
 	}
 	if i < 0 {
 		w.mu.Unlock()
-		return explained(notFound("queued"), "That message is no longer in the queue.")
+		return false, notFound("queued", "That message is no longer in the queue.")
 	}
 	if q.sending && i == 0 {
 		w.mu.Unlock()
-		return explained(conflict("sending"), "That message is being sent now.")
+		return false, conflict("sending", "That message is being sent now.")
 	}
-	change(q, i)
+	if !change(q, i) {
+		w.mu.Unlock()
+		return false, nil
+	}
 	if len(q.items) == 0 {
 		q.stopped = ""
 	}
 	w.mu.Unlock()
 	w.saveQueues()
 	w.changed(sid)
-	return nil
+	return true, nil
 }
 
 func (w *SessionWork) QueueResume(sid string) error {
@@ -271,11 +286,11 @@ func (w *SessionWork) divert(sid, text string, attached bool) (bool, error) {
 		return false, nil
 	}
 	if attached {
-		return true, explained(conflict("setup"), "The setup command is still running in this session's worktree. Send images and files once it has finished.")
+		return true, conflict("setup", "The setup command is still running in this session's worktree. Send images and files once it has finished.")
 	}
 	t, err := checkQueued(text)
 	if err != nil {
-		return true, explained(conflict("setup"), "The setup command is still running in this session's worktree, and this message can't wait in the queue. Send it once setup has finished.")
+		return true, conflict("setup", "The setup command is still running in this session's worktree, and this message can't wait in the queue. Send it once setup has finished.")
 	}
 	return true, w.push(sid, t)
 }

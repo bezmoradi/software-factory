@@ -36,7 +36,7 @@ func (s *Server) audit(w http.ResponseWriter, body map[string]any) {
 	}
 	sid, ok := body["sid"].(string)
 	if !keysWithin(body, "sid", "branch") || !ok || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	v, err := s.cfg.Audit.View(sid)

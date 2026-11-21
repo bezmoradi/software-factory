@@ -1,4 +1,5 @@
 import { el, emit, shown } from '../lib/dom.ts'
+import { field, form } from '../lib/form.ts'
 import type { WalkStep } from '../types.ts'
 
 export interface WalkthroughView {
@@ -25,7 +26,7 @@ class SfWalkthrough extends HTMLElement {
     list.setAttribute('aria-describedby', count.id)
     value.steps.forEach((step, i) => list.append(this.#step(value.commit, step, i + 1, !!value.readOnly)))
     if (value.readOnly) count.append(' ', value.readOnly)
-    this.append(count, list)
+    this.append(count, form({ children: [list] }))
   }
 
   #step(commit: string, step: WalkStep, n: number, readOnly: boolean): HTMLLIElement {
@@ -36,11 +37,7 @@ class SfWalkthrough extends HTMLElement {
     box.dataset.key = box.id
     box.checked = step.done
     box.disabled = readOnly
-    const label = el('label', 'walkthrough-do', `Step ${n}: ${shown(step.do)}`)
-    label.htmlFor = box.id
-    const row = el('div', 'row walkthrough-row')
-    row.append(box, label)
-    li.append(row)
+    li.append(field(`Step ${n}: ${shown(step.do)}`, box, { kind: 'check', labelCls: 'walkthrough-do' }))
     if (step.expect) li.append(el('div', 'small', `Expected: ${shown(step.expect)}`))
     if (step.input) li.append(el('div', 'small muted', `Sample input: ${shown(step.input)}`))
     box.addEventListener('change', () => {

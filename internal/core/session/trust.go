@@ -36,7 +36,7 @@ func CloneBox(p string) (string, string, bool) {
 func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 	box, name, ok := CloneBox(clone)
 	if !ok || clone != BoxClone(d.cfg.Workspace, box, name) {
-		return explained(notFound("project"), "That folder isn't a session's clone on this engine.")
+		return notFound("project", "That folder isn't a session's clone on this engine.")
 	}
 	b, err := d.boxLogin(ctx, BoxTarget(box))
 	if err != nil {
@@ -45,15 +45,15 @@ func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 	spec := b.spec
 	host, isTrust := b.host.(TrustHost)
 	if spec.Method != MethodPlugin || len(spec.Command) == 0 || !isTrust || d.cfg.Repositories == nil {
-		return explained(conflict("trust"), "This engine can't answer Claude Code's trust question in that session's container.")
+		return conflict("trust", "This engine can't answer Claude Code's trust question in that session's container.")
 	}
 	repos, err := d.cfg.Repositories.List()
 	if err != nil {
-		return explained(conflict("workspace"), "The engine couldn't read the workspace's repositories.")
+		return conflict("workspace", "The engine couldn't read the workspace's repositories.")
 	}
 	i := slices.IndexFunc(repos, func(r Repository) bool { return r.Name == name })
 	if i < 0 {
-		return explained(notFound("project"), "That project is no longer in the list.")
+		return notFound("project", "That project is no longer in the list.")
 	}
 	repo := repos[i]
 	if err := d.trustFiles(spec, repo, clone, approve); err != nil {
@@ -68,7 +68,7 @@ func (d *Dispatcher) Trust(ctx context.Context, clone, approve string) error {
 		if !strings.HasSuffix(said, ".") {
 			said += "."
 		}
-		return explained(conflict("trust"), said+" Trust it in a terminal instead: docker exec -it -w "+clone+" "+BoxContainer(box)+" claude, then choose Yes, I trust this folder.")
+		return conflict("trust", said+" Trust it in a terminal instead: docker exec -it -w "+clone+" "+BoxContainer(box)+" claude, then choose Yes, I trust this folder.")
 	}
 	return nil
 }
@@ -88,15 +88,15 @@ func cloneEntries(list string) []StartupEntry {
 func (d *Dispatcher) trustFiles(spec AgentSpec, repo Repository, clone, approve string) error {
 	entries := cloneEntries(spec.Startup)
 	if len(entries) == 0 {
-		return explained(conflict("no start-up list"), "Software Factory has no list of the files "+spec.Name+" loads at start, so it can't show them and doesn't answer the trust question.")
+		return conflict("no start-up list", "Software Factory has no list of the files "+spec.Name+" loads at start, so it can't show them and doesn't answer the trust question.")
 	}
 	if d.cfg.Startup == nil {
-		return explained(conflict("no start-up reader"), "This engine can't read the clone folder's start-up files, so it doesn't answer the trust question.")
+		return conflict("no start-up reader", "This engine can't read the clone folder's start-up files, so it doesn't answer the trust question.")
 	}
 	read, err := d.cfg.Startup.Read(clone, "", repo.Branch, StartupScan{Entries: entries})
 	if err != nil {
 		d.cfg.Logger.Warn("claude trust", "event", "start-up-unreadable")
-		return explained(conflict("start-up files"), clip("The engine couldn't read the files "+spec.Name+" loads from the clone folder, so it can't show them and doesn't answer the trust question: "+err.Error(), maxOutput))
+		return conflict("start-up files", clip("The engine couldn't read the files "+spec.Name+" loads from the clone folder, so it can't show them and doesn't answer the trust question: "+err.Error(), maxOutput))
 	}
 	if len(read.Files) == 0 {
 		return nil
@@ -117,7 +117,7 @@ func (d *Dispatcher) trustFiles(spec AgentSpec, repo Repository, clone, approve 
 		if tries <= 0 {
 			d.trustMoved.reset(clone)
 			d.cfg.Logger.Info("claude trust", "event", "kept-changing")
-			return explained(conflict("changing"), "The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.")
+			return conflict("changing", "The files in the clone folder kept changing while you read them, so the folder stays untrusted. Try again once they stop changing.")
 		}
 		msg = "The files in the clone folder changed since you looked at them. Read them again, then approve to answer the trust question."
 	}

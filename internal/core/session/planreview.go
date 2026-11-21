@@ -36,7 +36,7 @@ func (w *Work) PlanText(ctx context.Context, sid string) (WorkDoc, error) {
 		return WorkDoc{}, err
 	}
 	if v.Plan == nil || strings.TrimSpace(v.Plan.Text) == "" {
-		return WorkDoc{}, explained(conflict("no plan"), "This session has no plan to review yet. Start the Plan step first.")
+		return WorkDoc{}, conflict("no plan", "This session has no plan to review yet. Start the Plan step first.")
 	}
 	return *v.Plan, nil
 }
@@ -46,24 +46,24 @@ func (d *Dispatcher) PlanReview(ctx context.Context, sid, hash string, costOK bo
 		return err
 	}
 	if d.cfg.Reviews == nil {
-		return explained(conflict("no reviewer"), "This engine runs no reviewer containers, so it can't review a plan.")
+		return conflict("no reviewer", "This engine runs no reviewer containers, so it can't review a plan.")
 	}
 	t, ok := d.PushTarget(sid)
 	if !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can have its plan reviewed here.")
+		return conflict("not started here", "Only a session this engine started can have its plan reviewed here.")
 	}
 	if d.cfg.Work == nil {
-		return explained(conflict("no workflow"), "This engine has no workflow, so it holds no plan to review.")
+		return conflict("no workflow", "This engine has no workflow, so it holds no plan to review.")
 	}
 	plan, err := d.cfg.Work.PlanText(ctx, sid)
 	if err != nil {
 		return err
 	}
 	if plan.Hash != hash {
-		return explained(conflict("changed"), "The plan changed since the page showed it. Read the new version, then press Review this plan again.")
+		return conflict("changed", "The plan changed since the page showed it. Read the new version, then press Review this plan again.")
 	}
 	if secretText(plan.Text) {
-		return explained(conflict("secret"), "The plan looks like it holds a secret, so the engine doesn't send it to a reviewer. Ask the agent to take it out.")
+		return conflict("secret", "The plan looks like it holds a secret, so the engine doesn't send it to a reviewer. Ask the agent to take it out.")
 	}
 	return d.cfg.Reviews.PlanReview(ctx, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK}, plan)
 }

@@ -1,4 +1,5 @@
 import { busy, button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { actions, form } from '../lib/form.ts'
 import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
@@ -142,7 +143,7 @@ interface NoteOptions {
 }
 
 class NoteForm {
-  form = el('form', 'other')
+  form = form({ inline: true, cls: 'other' })
   field = el('input', 'textbox')
   send: HTMLButtonElement
   toggle: HTMLButtonElement | null = null
@@ -154,13 +155,9 @@ class NoteForm {
     this.field.placeholder = o.placeholder
     this.field.setAttribute('aria-label', o.label)
     if (o.required) this.field.setAttribute('aria-required', 'true')
-    this.form.noValidate = true
     this.send = button(o.send, '', undefined, 'submit')
-    this.form.append(this.field, this.send)
-    this.form.addEventListener('submit', e => {
-      e.preventDefault()
-      this.onSend(this.field.value)
-    })
+    this.form.append(this.field, actions([this.send]))
+    this.form.addEventListener('submit', () => this.onSend(this.field.value))
     if (o.toggle === undefined) return
     this.#hideToggle = !!o.hideToggle
     this.toggle = button(o.toggle, '', () => this.#show(true))

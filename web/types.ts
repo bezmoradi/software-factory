@@ -1,3 +1,18 @@
+export const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
+
+export function visible(text: string): string {
+  return String(text).replace(INVISIBLE, c => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, '0')}}`)
+}
+
+export interface EngineAnswer {
+  ok: boolean
+  status: number
+  error: string
+  field: string
+  message: string
+  body: Record<string, unknown>
+}
+
 export interface SessionInfo {
   sid: string
   cwd: string

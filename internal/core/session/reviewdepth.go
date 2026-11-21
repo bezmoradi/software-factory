@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strconv"
@@ -146,13 +147,13 @@ func (w *Work) ReviewDepth(path string) (DepthView, error) {
 	return v, nil
 }
 
-func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
+func (w *Work) SetReviewDepth(path string, d workflow.Depth) (bool, error) {
 	if field, why := d.Problem(); why != "" {
-		return onField(field, explained(invalid("depth"), "The engine didn't save it: "+why+"."))
+		return false, onField(field, invalid("depth", why))
 	}
 	r, err := w.repoByPath(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	installed, known := w.installed(r.Name), w.packKnown(r.Name)
 	for _, list := range []struct {
@@ -161,7 +162,7 @@ func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
 	}{{"advisory", d.Advisory}, {"extra", d.Extra}} {
 		for _, a := range list.agents {
 			if why := w.roleRefusal(a, installed, known); why != "" {
-				return onField(list.field, explained(invalid("agent"), clip("The engine didn't save it: "+why, maxOutput)))
+				return false, onField(list.field, invalid("agent", why))
 			}
 		}
 	}
@@ -177,28 +178,41 @@ func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
 	if clean.ExtraRuns < 2 {
 		clean.ExtraRuns = 0
 	}
-	if err := w.change(func(st *WorkState) error {
+	err = w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]
+		if sameDepth(p.Depth, clean) {
+			return errNoDepthChange
+		}
 		p.Depth = clean
 		st.Projects[r.Name] = p
 		return nil
-	}); err != nil {
-		return err
+	})
+	if errors.Is(err, errNoDepthChange) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	w.cfg.Logger.Info("project setting", "op", "review-depth", "advisory", len(clean.Advisory), "repeated", len(clean.Runs), "sized", clean.Sized())
-	return nil
+	return true, nil
+}
+
+var errNoDepthChange = errors.New("the review settings are already these")
+
+func sameDepth(a, b workflow.Depth) bool {
+	return slices.Equal(a.Advisory, b.Advisory) && maps.Equal(a.Runs, b.Runs) && a.MaxFiles == b.MaxFiles && a.MaxLines == b.MaxLines && slices.Equal(a.Extra, b.Extra) && a.ExtraRuns == b.ExtraRuns
 }
 
 func (w *Work) roleRefusal(a string, installed []string, known bool) string {
 	offer := offerFor(w.cfg.RoleAgents, a)
-	if why := review.RoleProblem(a, &offer); why != "" {
-		return why + "."
+	if review.RoleProblem(a, &offer) != "" {
+		return withName("", a, " isn't from a trusted source.")
 	}
 	if strings.HasPrefix(a, "knackpack:") && !known && len(installed) > 0 && !slices.Contains(installed, a) {
-		return a + " isn't an agent the knackpack installed in the reviewer image provides."
+		return withName("", a, " isn't in the installed knackpack.")
 	}
 	if strings.Contains(a, ":") && known && !slices.Contains(installed, a) {
-		return a + " isn't an agent of the pack this project uses."
+		return withName("", a, " isn't in this project's pack.")
 	}
 	return ""
 }
@@ -215,7 +229,7 @@ func unique(list []string) []string {
 
 type ReviewDepthPage interface {
 	ReviewDepth(path string) (DepthView, error)
-	SetReviewDepth(path string, d workflow.Depth) error
+	SetReviewDepth(path string, d workflow.Depth) (bool, error)
 }
 
 var _ ReviewDepthPage = (*Work)(nil)

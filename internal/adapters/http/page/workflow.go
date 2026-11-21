@@ -364,7 +364,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		s.commitFlag(r.Context(), w, path, sid, body)
 	case "/api/gate":
 		if !keysWithin(body, "sid") || sid == "" {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.Work.View(r.Context(), sid)
@@ -382,7 +382,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	case "/api/size":
 		size, ok := body["size"].(string)
 		if !keysWithin(body, "sid", "size") || sid == "" || !ok || !workTypeID.MatchString(size) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Work.SetType(r.Context(), sid, size)
@@ -392,7 +392,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		hash, okHash := body["hash"].(string)
 		text, okText := body["text"].(string)
 		if !keysWithin(body, "sid", "hash", "text") || sid == "" || !okHash || !hash256.MatchString(hash) || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Work.Approve(r.Context(), sid, path == "/api/approve-plan", hash, text)
@@ -401,7 +401,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	case lockTestsRoute:
 		op, okOp := body["op"].(string)
 		if !okOp || sid == "" {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var err error
@@ -409,18 +409,18 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "lock":
 			head, okHead := body["head"].(string)
 			if !keysWithin(body, "sid", "op", "head") || !okHead || !flagCommit.MatchString(head) {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			err = s.cfg.Work.LockTests(r.Context(), sid, head)
 		case "unlock":
 			if !keysWithin(body, "sid", "op") {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			err = s.cfg.Work.UnlockTests(sid)
 		default:
-			refuse(w, http.StatusBadRequest, "op")
+			refuse(w, http.StatusBadRequest, "op", saidOp)
 			return
 		}
 		shared.For(r.Context(), s.logger).Info("test lock", "op", op, "ok", err == nil)
@@ -429,7 +429,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		repo, okPath := body["path"].(string)
 		op, okOp := body["op"].(string)
 		if !keysWithin(body, "path", "op", "sha") || !okPath || len(repo) > session.MaxCwd || !okOp {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
@@ -443,14 +443,14 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "approve":
 			sha, ok := body["sha"].(string)
 			if !ok || !hash256.MatchString(sha) {
-				refuse(w, http.StatusBadRequest, "sha")
+				refuse(w, http.StatusBadRequest, "sha", "That isn't the SHA-256 of a team file. Reload the team file and approve it again.")
 				return
 			}
 			v, err = s.cfg.Work.ApproveTeam(ctx, repo, sha)
 		case "forget":
 			v, err = s.cfg.Work.ForgetTeam(repo)
 		default:
-			refuse(w, http.StatusBadRequest, "op")
+			refuse(w, http.StatusBadRequest, "op", saidOp)
 			return
 		}
 		if err != nil {
@@ -467,7 +467,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		if !keysWithin(body, "path", "op", "rounds", "type", "findings", "on") || !okPath || len(repo) > session.MaxCwd || !okOp {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rounds, kind := 0, ""
@@ -475,7 +475,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case session.ProjectPRComment:
 			on, ok := body["on"].(bool)
 			if !ok || !keysWithin(body, "path", "op", "on") {
-				refuse(w, http.StatusBadRequest, "on")
+				refuse(w, http.StatusBadRequest, "on", saidFields)
 				return
 			}
 			err := s.cfg.Work.SetProjectOption(repo, op, on)
@@ -485,21 +485,21 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "rounds":
 			n, ok := integer(body["rounds"])
 			if !ok || n < 1 || n > 20 || !keysWithin(body, "path", "op", "rounds") {
-				refuse(w, http.StatusBadRequest, "rounds")
+				refuse(w, http.StatusBadRequest, "rounds", "Review rounds are a whole number from 1 to 20.")
 				return
 			}
 			rounds = int(n)
 		case "type":
 			t, ok := body["type"].(string)
 			if !ok || (t != "" && !workTypeID.MatchString(t)) || !keysWithin(body, "path", "op", "type") {
-				refuse(w, http.StatusBadRequest, "type")
+				refuse(w, http.StatusBadRequest, "type", "That isn't a work type the engine knows. Reload the page and pick one from the list.")
 				return
 			}
 			kind = t
 		case "findings":
 			on, ok := body["findings"].(bool)
 			if !ok || !keysWithin(body, "path", "op", "findings") {
-				refuse(w, http.StatusBadRequest, "findings")
+				refuse(w, http.StatusBadRequest, "findings", saidFields)
 				return
 			}
 			err := s.cfg.Work.SetAutoFindings(repo, on)

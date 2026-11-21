@@ -188,7 +188,7 @@ func (w *SessionWork) ForgetProject(id ProjectID) {
 	}
 }
 
-func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
+func (w *SessionWork) SetCommands(project string, c ProjectCommands) (bool, error) {
 	check, okCheck := CheckProjectCommand(c.Check)
 	setup, okSetup := CheckProjectCommand(c.Setup)
 	if !okCheck || !okSetup {
@@ -196,31 +196,36 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 		if okCheck {
 			field = "setup"
 		}
-		return onField(field, explained(invalid("command"), "A check or setup command is one line of at most 300 bytes, with no control characters."))
+		return false, onField(field, invalid("command", "One line of at most 300 bytes, with no control characters."))
 	}
 	browser, okBrowser := CheckProjectCommand(c.Browser)
 	if !okBrowser {
-		return onField("browser", explained(invalid("browser"), "A browser command is one line of at most 300 bytes, with no control characters."))
+		return false, onField("browser", invalid("browser", "One line of at most 300 bytes, with no control characters."))
 	}
 	image, okImage := CheckVerifyImage(c.Image)
 	if !okImage {
-		return onField("image", explained(invalid("image"), "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."))
+		return false, onField("image", invalid("image", "Needs a digest-pinned name like node@sha256:<64 hex>."))
 	}
 	id, known := w.projectID(project)
 	if !known {
-		return explained(notFound("project"), "The engine has no project of that name.")
+		return false, notFound("project", "The engine has no project of that name.")
 	}
 	w.saveMu.Lock()
 	w.mu.Lock()
 	before := w.projects[id]
 	next := ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser}
+	if before == next {
+		w.mu.Unlock()
+		w.saveMu.Unlock()
+		return false, nil
+	}
 	if next == (ProjectCommands{}) {
 		delete(w.projects, id)
 	} else {
 		if _, ok := w.projects[id]; !ok && len(w.projects) >= maxCommandProjects {
 			w.mu.Unlock()
 			w.saveMu.Unlock()
-			return explained(limited("projects"), "The engine keeps commands for at most 1,000 projects.")
+			return false, limited("projects", "The engine keeps commands for at most 1,000 projects.")
 		}
 		w.projects[id] = next
 	}
@@ -236,7 +241,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 			}
 			w.mu.Unlock()
 			w.saveMu.Unlock()
-			return explained(conflict("state"), "The engine couldn't save the project's commands.")
+			return false, conflict("state", "The engine couldn't save the project's commands.")
 		}
 	}
 	w.saveMu.Unlock()
@@ -250,7 +255,7 @@ func (w *SessionWork) SetCommands(project string, c ProjectCommands) error {
 		}
 		w.audit(AuditEntry{Time: w.cfg.Now(), Repository: project, By: "page", Kind: AuditProjectCmd, Result: result, Reason: kind})
 	}
-	return nil
+	return true, nil
 }
 
 func (r *Registry) workInfo(sid string) (workFacts, bool) {
@@ -410,7 +415,7 @@ func agentModels(agent string) []AgentModel {
 func (w *SessionWork) View(sid string) (SessionWorkView, error) {
 	info, ok := w.reg.workInfo(sid)
 	if !ok {
-		return SessionWorkView{}, explained(notFound("session"), "The engine has no session of that id.")
+		return SessionWorkView{}, notFound("session", "The engine has no session of that id.")
 	}
 	v := SessionWorkView{Agent: info.Agent, Queue: w.Queue(sid), Ports: w.Ports(sid), Commands: w.Commands(info.Project)}
 	v.Model, _ = w.SessionModel(sid)

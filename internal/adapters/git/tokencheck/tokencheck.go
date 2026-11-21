@@ -92,7 +92,7 @@ func (c Checker) github(ctx context.Context, name, token string) session.TokenCh
 	case !ok:
 		return unchecked("GitHub")
 	case status == http.StatusUnauthorized:
-		return session.TokenCheck{Rejected: true, Problem: "GitHub didn't accept this token. Check that you copied all of it and that it isn't expired or revoked."}
+		return session.TokenCheck{Rejected: true, Problem: "GitHub didn't accept this token."}
 	case status != http.StatusOK:
 		return unchecked("GitHub")
 	}
@@ -124,7 +124,7 @@ func (c Checker) gitlab(ctx context.Context, name, token string) session.TokenCh
 	case !ok:
 		return unchecked("GitLab")
 	case status == http.StatusUnauthorized:
-		return session.TokenCheck{Rejected: true, Problem: "GitLab didn't accept this token. Check that you copied all of it and that it isn't expired or revoked."}
+		return session.TokenCheck{Rejected: true, Problem: "GitLab didn't accept this token."}
 	case status != http.StatusOK:
 		return unchecked("GitLab")
 	}
@@ -138,7 +138,7 @@ func (c Checker) gitlab(ctx context.Context, name, token string) session.TokenCh
 		return unchecked("GitLab")
 	}
 	if self.Revoked || self.Active != nil && !*self.Active {
-		return session.TokenCheck{Rejected: true, Problem: "GitLab says this token is revoked or expired. Create a new one."}
+		return session.TokenCheck{Rejected: true, Problem: "GitLab says this token is revoked or expired."}
 	}
 	var warnings []string
 	if !slices.Contains(self.Scopes, "write_repository") && !slices.Contains(self.Scopes, "api") {

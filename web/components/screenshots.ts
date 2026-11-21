@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request, UNREAD } from '../api.ts'
 import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { pngBlob } from '../lib/files.ts'
@@ -86,13 +86,13 @@ class SfScreenshots extends HTMLElement {
   async refresh(sid: string) {
     if (sid !== this.#target?.sid) return
     const n = ++this.#loading
-    const res = await api('/api/screenshots', { sid }).catch(() => null)
+    const a = await request('/api/screenshots', { sid })
     if (n !== this.#loading || sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
+    if (!a.ok) {
       this.#status.textContent = this.#shots.length ? 'The screenshots couldn\'t be listed.' : ''
       return
     }
-    this.#shots = shotsOf(await res.json().catch(() => null))
+    this.#shots = shotsOf(a.body)
     if (this.#shown && !this.#shots.some(s => s.name === this.#shown)) this.#drop()
     this.#paint()
   }
@@ -118,14 +118,12 @@ class SfScreenshots extends HTMLElement {
     const current = () => n === this.#opening && sid === this.#target?.sid && this.isConnected
     this.#reading = true
     this.#status.textContent = 'Reading the screenshot…'
-    const res = await api('/api/screenshot', { sid, name }).catch(() => null)
-    if (!current()) return
-    const body = res ? await res.json().catch(() => null) as unknown : null
+    const a = await request('/api/screenshot', { sid, name })
     if (!current()) return
     this.#reading = false
-    if (!res || !res.ok || !isRecord(body) || body.type !== 'image/png' || typeof body.data !== 'string') {
-      const why = isRecord(body) && typeof body.message === 'string' ? body.message : 'The engine didn\'t show that screenshot.'
-      this.#status.textContent = visible(why)
+    const body = a.body
+    if (!a.ok || body.type !== 'image/png' || typeof body.data !== 'string') {
+      this.#status.textContent = a.ok ? UNREAD : a.message
       return
     }
     const blob = pngBlob(body.data)

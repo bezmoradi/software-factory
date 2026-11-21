@@ -8,7 +8,7 @@ func (w *Work) SetProjectOption(path, op string, on bool) error {
 		return err
 	}
 	if op != ProjectPRComment {
-		return explained(invalid("op"), "The engine doesn't keep that project setting.")
+		return invalid("op", "The engine doesn't keep that project setting.")
 	}
 	return w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]

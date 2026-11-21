@@ -46,10 +46,7 @@
 
 <div id="prefs" class="prefs surface" popover>
   <fieldset id="theme" class="themes"><legend class="label">Theme</legend></fieldset>
-  <fieldset id="bar-side" class="themes"><legend class="label">Activity bar</legend>
-    <label class="theme"><input type="radio" name="bar" value="left"><span>Left</span></label>
-    <label class="theme"><input type="radio" name="bar" value="right"><span>Right</span></label>
-  </fieldset>
+  <fieldset id="bar-side" class="themes"><legend class="label">Activity bar</legend></fieldset>
   <div class="size" role="group" aria-labelledby="scale-label">
     <p class="label"><span id="scale-label">Text size</span><button type="button" class="link" id="scale-reset" hidden>Reset</button></p>
     <span class="stepper"><button type="button" class="ghost" id="scale-down" aria-label="Smaller text">−</button><output id="scale-value" aria-live="polite"></output><button type="button" class="ghost" id="scale-up" aria-label="Larger text">+</button></span>
@@ -58,7 +55,7 @@
   <button type="button" class="ghost small shortcuts-open" id="shortcuts-open">Keyboard shortcuts</button>
 </div>
 <div id="account" class="prefs menu surface" popover>
-  <button type="button" class="ghost" id="account-identity">Name and email for commits</button>
+  <button type="button" class="ghost" id="account-identity">Git name and email</button>
 </div>
 
 <div class="frame" id="frame">
@@ -105,7 +102,6 @@
 <div class="layout" id="live-view" hidden>
   <button type="button" id="side-toggle" class="side-toggle label" aria-expanded="false" aria-controls="side"><sf-icon class="icon" name="chevron"></sf-icon>Session details</button>
   <main>
-    <div class="page-head"><nav id="crumbs" class="crumbs" aria-label="Breadcrumb"><ol id="crumbs-list"></ol></nav><button type="button" class="link small docs-link" id="session-docs" data-doc="working-in-a-session"><sf-icon class="icon" name="link"></sf-icon>View in docs</button></div>
     <div id="warnings" class="notice warn small" hidden></div>
     <sf-recap id="recap" class="notice small recap" hidden></sf-recap>
     <sf-session-facts id="session-facts" hidden></sf-session-facts>
@@ -125,7 +121,7 @@
     <div id="team-view" class="small team-view" hidden><p class="small muted" id="team-path"></p><p class="small muted" id="team-remote"></p><pre id="team-text" class="team-text" tabindex="0" role="region" aria-label="Team file"></pre><ul id="team-problems" class="small warn"></ul><div id="team-setup" class="small team-setup"></div><div class="row team-actions"><button type="button" class="primary small" id="team-approve">Approve this team file</button><button type="button" class="ghost small" id="team-forget">Stop using a team file</button></div></div>
     <section id="path-section">
       <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"><span></span></div><p class="path-card-detail small muted"></p><button type="button" class="primary path-card-open" id="side-open">Open execution path</button></div>
-      <div class="row field-row size-row"><label class="small" for="size">Work type</label> <select id="size" class="textbox" title="Sets what a push needs; the steps below show it"></select></div>
+      <div id="size-row"><select id="size" class="textbox" title="Sets what a push needs; the steps below show it"></select></div>
       <p id="size-note" class="small warn" hidden></p>
       <p id="path-busy" class="small muted" hidden>Step buttons are available when Claude finishes.</p>
       <ol id="path" class="path">
@@ -159,7 +155,7 @@
 <div class="page-side" id="projects-side"></div>
 </div>
 
-<form id="composer" class="composer" autocomplete="off" novalidate tabindex="-1" hidden>
+<div id="composer-parts" hidden>
   <div class="composer-main">
     <div id="control" class="control small session-notice" hidden><span id="control-text"></span> <button type="button" class="ghost small stack" id="control-button"><span></span><span class="off"></span></button> <button type="button" class="ghost small" id="control-cancel" hidden>Cancel</button></div>
     <span id="checkpoint-said" class="sr-only" role="status"></span><div id="checkpoint" class="control small nudge" hidden><span><strong>Long conversation.</strong> <span id="checkpoint-text"></span></span> <button type="button" class="ghost small" id="checkpoint-cancel">Cancel</button> <button type="button" class="primary small" id="checkpoint-button">Save a checkpoint</button></div>
@@ -195,7 +191,7 @@
     <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" id="menu-bring-main" hidden>Bring in the latest main</button><button type="button" role="menuitem" id="menu-fork" hidden>Fork here</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>
   </div>
   <p class="muted small hint" id="hint" role="status"></p>
-</form>
+</div>
 </div>
 </div>
 

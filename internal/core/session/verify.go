@@ -325,7 +325,7 @@ func shownCommand(command string) string {
 func (v *Verifier) View(_ context.Context, sid string) (VerifyView, error) {
 	t, ok := v.targetOf(sid)
 	if !ok {
-		return VerifyView{}, explained(conflict("not started here"), "Only a session this engine started has verification runs here.")
+		return VerifyView{}, conflict("not started here", "Only a session this engine started has verification runs here.")
 	}
 	out := VerifyView{Branch: t.Branch}
 	if head, err := v.cfg.Heads.Head(t.Repo, t.Branch); err == nil {
@@ -423,42 +423,42 @@ func (v *Verifier) Start(ctx context.Context, sid string, kind VerifyKind, by st
 	return v.start(ctx, sid, kind, by, false, "")
 }
 
-var errVerifyQueued = explained(conflict("queued"), "The run waits for a free verification slot.")
+var errVerifyQueued = conflict("queued", "The run waits for a free verification slot.")
 
 func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by string, front bool, want string) (VerifyRun, error) {
 	if !slices.Contains(VerifyKinds, kind) {
-		return VerifyRun{}, explained(invalid("kind"), "The engine runs two kinds of verification: check and browser.")
+		return VerifyRun{}, invalid("kind", "The engine runs two kinds of verification: check and browser.")
 	}
 	if v.cfg.Host == nil || v.cfg.Trees == nil {
-		return VerifyRun{}, explained(conflict("no-helper"), "This engine has no box helper or verification folder, so it runs no verification.")
+		return VerifyRun{}, conflict("no-helper", "This engine has no box helper or verification folder, so it runs no verification.")
 	}
 	t, ok := v.targetOf(sid)
 	if !ok {
-		return VerifyRun{}, explained(conflict("not started here"), "Only a session this engine started can be verified here.")
+		return VerifyRun{}, conflict("not started here", "Only a session this engine started can be verified here.")
 	}
 	head, err := v.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {
-		return VerifyRun{}, explained(conflict("branch"), "The engine couldn't read the session's branch "+t.Branch+", so it has no commit to verify.")
+		return VerifyRun{}, conflict("branch", "The engine couldn't read the session's branch "+t.Branch+", so it has no commit to verify.")
 	}
 	if want != "" && head != want {
-		return VerifyRun{}, explained(conflict("moved"), "The session's branch moved since the run was queued.")
+		return VerifyRun{}, conflict("moved", "The session's branch moved since the run was queued.")
 	}
 	id, cmds, known := v.project(t.Name)
 	switch {
 	case !known:
-		return VerifyRun{}, explained(notFound("project"), "The engine has no record of this session's project.")
+		return VerifyRun{}, notFound("project", "The engine has no record of this session's project.")
 	case kind == VerifyCheck && cmds.Check == "":
-		return VerifyRun{}, explained(conflict("no-check"), "This project has no check command, so there is nothing to verify. Set one under Check and setup commands on the project's card.")
+		return VerifyRun{}, conflict("no-check", "This project has no check command, so there is nothing to verify. Set one under Check and setup commands on the project's card.")
 	case kind == VerifyBrowser && cmds.Browser == "":
-		return VerifyRun{}, explained(conflict("no-browser-command"), "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card.")
+		return VerifyRun{}, conflict("no-browser-command", "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card.")
 	case kind == VerifyBrowser && v.cfg.Files == nil:
-		return VerifyRun{}, explained(conflict("no-files"), "This engine has no folder for a browser run's files, so it runs no browser check.")
+		return VerifyRun{}, conflict("no-files", "This engine has no folder for a browser run's files, so it runs no browser check.")
 	case VerifyDigest(cmds.Image) == "":
-		return VerifyRun{}, explained(conflict("no-image"), "This project names no image for verification runs, so it can't run one. Set an image pinned by digest under Check and setup commands on the project's card.")
+		return VerifyRun{}, conflict("no-image", "This project names no image for verification runs, so it can't run one. Set an image pinned by digest under Check and setup commands on the project's card.")
 	}
 	run, err := NewBox()
 	if err != nil {
-		return VerifyRun{}, explained(conflict("random"), "The engine couldn't make an id for the run.")
+		return VerifyRun{}, conflict("random", "The engine couldn't make an id for the run.")
 	}
 	command := verifyCommand(kind, cmds)
 	rec := VerifyRun{ID: run, Project: id, SID: sid, Branch: t.Branch, Commit: head, Kind: kind, CommandHash: commandHash(command), Image: cmds.Image,
@@ -470,7 +470,7 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 		if by == VerifyByEngine {
 			return VerifyRun{}, errVerifyQueued
 		}
-		return VerifyRun{}, explained(conflict("starting"), "A run of this commit is about to start for a push. Wait for it.")
+		return VerifyRun{}, conflict("starting", "A run of this commit is about to start for a push. Wait for it.")
 	}
 	for _, r := range v.runs {
 		if _, running := v.live[r.ID]; running && r.SID == sid && r.Kind == kind && r.Commit == head && r.CommandHash == rec.CommandHash && VerifyDigest(r.Image) == VerifyDigest(rec.Image) {
@@ -488,7 +488,7 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 				return VerifyRun{}, errVerifyQueued
 			}
 			v.mu.Unlock()
-			return VerifyRun{}, explained(conflict("running"), "A verification run of this session is running. Wait for it, or stop it first.")
+			return VerifyRun{}, conflict("running", "A verification run of this session is running. Wait for it, or stop it first.")
 		}
 	}
 	engineRuns := 0
@@ -507,7 +507,7 @@ func (v *Verifier) start(ctx context.Context, sid string, kind VerifyKind, by st
 	}
 	if len(v.live) >= MaxVerifyRuns {
 		v.mu.Unlock()
-		return VerifyRun{}, explained(limited("verify-busy"), "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
+		return VerifyRun{}, limited("verify-busy", "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
 	}
 	v.live[run] = live
 	if by == VerifyByPage {
@@ -884,14 +884,14 @@ func (v *Verifier) finish(ctx context.Context, run string, end verifyEnd) {
 
 func (v *Verifier) Stop(ctx context.Context, sid, id string) error {
 	if !ValidBox(id) {
-		return explained(invalid("id"), "A verification run's id is 16 hexadecimal digits.")
+		return invalid("id", "A verification run's id is 16 hexadecimal digits.")
 	}
 	v.mu.Lock()
 	l, ok := v.live[id]
 	owned := slices.ContainsFunc(v.runs, func(r VerifyRun) bool { return r.ID == id && r.SID == sid })
 	v.mu.Unlock()
 	if !ok || !owned {
-		return explained(conflict("not running"), "That verification run isn't running.")
+		return conflict("not running", "That verification run isn't running.")
 	}
 	l.cancel()
 	shared.For(ctx, v.cfg.Logger).Info("verify", "event", "stop-asked", "run", id)

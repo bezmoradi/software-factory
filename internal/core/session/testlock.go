@@ -139,24 +139,24 @@ func (w *Work) LockTests(ctx context.Context, sid, head string) error {
 		return err
 	}
 	if why := lockOffer(g); why != "" {
-		return explained(conflict("nothing to lock"), why)
+		return conflict("nothing to lock", why)
 	}
 	if g.head != head {
-		return explained(conflict("changed"), "The session's branch moved since the page read it. Look at the new commit, then lock again.")
+		return conflict("changed", "The session's branch moved since the page read it. Look at the new commit, then lock again.")
 	}
 	files, cut, left, err := w.testsAt(ctx, g.t.Repo, g.base, g.head)
 	if err != nil {
-		return explained(conflict("unreadable"), "The engine's reader couldn't list the files of commit "+shortSHA7(g.head)+", so it locked nothing.")
+		return conflict("unreadable", "The engine's reader couldn't list the files of commit "+shortSHA7(g.head)+", so it locked nothing.")
 	}
 	if len(files) == 0 {
-		return explained(conflict("no tests"), "Commit "+shortSHA7(g.head)+" has no file the engine counts as a test (such as *_test.go, *.test.ts, test_*.py or a file in a tests/ folder), so there's nothing to lock.")
+		return conflict("no tests", "Commit "+shortSHA7(g.head)+" has no file the engine counts as a test (such as *_test.go, *.test.ts, test_*.py or a file in a tests/ folder), so there's nothing to lock.")
 	}
 	lock := &TestLock{Commit: g.head, At: w.cfg.Now(), Files: files, Cut: cut, BranchLeft: left}
 	w.mu.Lock()
 	s := w.sessions[sid]
 	if s == nil {
 		w.mu.Unlock()
-		return explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
+		return conflict("not started here", "Only a session this engine started has a workflow here.")
 	}
 	total := lock.size()
 	for id, o := range w.sessions {
@@ -166,7 +166,7 @@ func (w *Work) LockTests(ctx context.Context, sid, head string) error {
 	}
 	if total > maxAllLockedBytes {
 		w.mu.Unlock()
-		return explained(conflict("locks"), "The engine keeps at most 1 MiB of locked test paths across all sessions, and this lock would pass it. Unlock the tests of a session you're done with, then lock again.")
+		return conflict("locks", "The engine keeps at most 1 MiB of locked test paths across all sessions, and this lock would pass it. Unlock the tests of a session you're done with, then lock again.")
 	}
 	s.lock = lock
 	w.mu.Unlock()
@@ -198,9 +198,9 @@ func (w *Work) UnlockTests(sid string) error {
 	w.mu.Unlock()
 	switch {
 	case s == nil:
-		return explained(conflict("not started here"), "Only a session this engine started has a workflow here.")
+		return conflict("not started here", "Only a session this engine started has a workflow here.")
 	case was == nil:
-		return explained(conflict("not locked"), "This session has no locked tests.")
+		return conflict("not locked", "This session has no locked tests.")
 	}
 	w.persist(sid)
 	w.unlocked(sid, t, was, "the developer unlocked on the page the tests locked at commit "+shortSHA(was.Commit))

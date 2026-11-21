@@ -1,10 +1,11 @@
-import { api, exchange, trade } from './api.ts'
+import { exchange, request, trade, type EngineAnswer } from './api.ts'
 import { claudeLogin, signInState } from './components/login.ts'
 import { editIdentity, identityState, type CommitIdentity } from './components/identity.ts'
 import { GATEWAY_WARNING, openEgress } from './components/egress-panel.ts'
 import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visible, visibleCommand, whileBusy } from './lib/dom.ts'
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
+import { field, form } from './lib/form.ts'
 import { agentWord, baseName, isClaude, label, plural, setAgentNames, shortSha } from './lib/format.ts'
 import { paintPath } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
@@ -58,6 +59,12 @@ import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, resto
 import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
 import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
+import { crumbTrail, emptyState, pageHead } from './lib/page.ts'
+
+const sessionCrumbs = crumbTrail()
+sessionCrumbs.id = 'crumbs'
+sessionCrumbs.querySelector('ol')!.id = 'crumbs-list'
+byId('warnings').before(...pageHead({ title: sessionCrumbs, docs: { doc: 'working-in-a-session', id: 'session-docs' } }))
 
 setPainter(paint)
 
@@ -134,7 +141,7 @@ function onEvent(ev: StreamEvent) {
     projectsAt = 0
     void markSignIn()
     void markIdentity()
-    void stateNotices(api, byId('state-notices'))
+    void stateNotices(request, byId('state-notices'))
     void loadLimits()
     updateSessions(ev.sessions)
     for (const s of sessions.values()) requestReplay(s, true)
@@ -166,8 +173,8 @@ function onEvent(ev: StreamEvent) {
       toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} is cloned.`, description: `Start a session in it from Projects. New sessions start from ${where}'s main branch.`, tone: 'ok' })
     }
     if (ev.state === 'failed') {
-      projects.say('', ev.message ? visible(ev.message) : `The clone of ${where} failed.`, true)
-      toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} wasn't added`, description: ev.message ? visible(ev.message) : '', tone: 'bad', timeout: 0 })
+      projects.say('', visible(ev.message ?? ''), true)
+      toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} wasn't added`, description: visible(ev.message ?? ''), tone: 'bad', timeout: 0 })
     }
     return void loadProjects(true)
   }
@@ -526,7 +533,7 @@ function findingLinks(sid: string, review: SessionReview | null): { commit: stri
   if (had?.key === key) return had.done ? { commit: review.commit, paths: had.found } : undefined
   const now = { key, found: [] as string[], done: false }
   findingChecks.set(sid, now)
-  void api('/api/file-check', { sid, commit: review.commit, paths }).catch(() => null).then(reply).then(({ ok, body }) => {
+  void request('/api/file-check', { sid, commit: review.commit, paths }).then(({ ok, body }) => {
     if (findingChecks.get(sid) !== now) return
     now.done = true
     if (ok && Array.isArray(body.found)) now.found = body.found.filter((p): p is string => typeof p === 'string' && paths.includes(p))
@@ -561,7 +568,7 @@ function forgePanelOf(s: Session): ForgePanelView | null {
 function paintAgents(s: Session) {
   const list = byId('agents')
   list.replaceChildren()
-  if (!s.agents.length) return list.append(el('li', 'muted', 'None yet.'))
+  if (!s.agents.length) return list.append(emptyState('None yet.', { tag: 'li' }))
   for (const a of s.agents.slice(-12).reverse()) {
     const li = el('li')
     const row = el('div', 'row')
@@ -629,10 +636,10 @@ async function loadGate(s: Session, force = false) {
   if (!force && Date.now() - s.gateAt < 3000) return void setTimeout(schedulePaint, 3100 - (Date.now() - s.gateAt))
   s.gateAt = Date.now()
   s.gateKey = key
-  const res = await api('/api/gate', { sid: s.sid }).catch(() => null)
-  const body = res && res.ok ? ((await res.json().catch(() => null)) as { gate?: GateEvent } | null) : null
+  const a = await request('/api/gate', { sid: s.sid })
+  const body = a.ok ? (a.body as { gate?: GateEvent }) : null
   if (!body?.gate || !Array.isArray(body.gate.reviewers) || !Array.isArray(body.gate.missing)) {
-    if (!res || res.status >= 500) s.gateKey = ''
+    if (a.status === 0 || a.status >= 500) s.gateKey = ''
     return
   }
   s.gate = body.gate
@@ -691,11 +698,10 @@ async function teamOp(op: 'read' | 'approve' | 'forget') {
   const s = current()
   const project = s ? projectFor(s) : null
   if (!s || !project) return void toast({ title: 'Add this project first.', description: 'The team file is read for projects in your list, under Projects.', tone: 'bad' })
-  const res = await api('/api/team', { path: project.path, op, ...(op === 'approve' ? { sha: teamShown?.sha ?? '' } : {}) }).catch(() => null)
-  const body = res ? ((await res.json().catch(() => null)) as (TeamView & { message?: string }) | null) : null
+  const a = await request('/api/team', { path: project.path, op, ...(op === 'approve' ? { sha: teamShown?.sha ?? '' } : {}) })
   if (current()?.sid !== s.sid) return
-  if (!res || !res.ok || !body) return void toast({ title: op === 'approve' ? "The team file wasn't approved." : op === 'forget' ? 'The team file is still in use.' : "The team file couldn't be read.", description: body?.message ?? 'Check that the project is still in your list.', tone: 'bad' })
-  teamShown = body
+  if (!a.ok) return void toast({ title: op === 'approve' ? "The team file wasn't approved." : op === 'forget' ? 'The team file is still in use.' : "The team file couldn't be read.", description: a.message, tone: 'bad' })
+  teamShown = a.body as unknown as TeamView
   if (op !== 'read') toast({ title: op === 'approve' ? 'You approved the team file.' : 'This project uses the built-in setup now.', tone: 'ok' })
   if (op !== 'read') void loadGate(s, true)
   paintTeam(s, s.gate ?? null)
@@ -717,11 +723,12 @@ function paintExceptions(s: Session) {
   const key = gate ? `${s.sid}:${gate.branch}:${gate.head}:${s.auditSeen}` : ''
   if (key && s.audit?.key !== key && state.connected && (allowed(s, 'control') || !!s.info.doubled)) {
     s.audit = { key, entries: s.audit?.entries ?? [], refusals: s.audit?.refusals ?? {}, history: s.audit?.history ?? [], friction: s.audit?.friction ?? [] }
-    void api('/api/audit', { sid: s.sid, branch: gate?.branch ?? '' }).then(r => (r.ok ? r.json() : null)).then((v: { entries?: AuditEntry[]; refusals?: Record<string, number>; history?: unknown[]; friction?: unknown[] } | null) => {
-      if (!v || s.audit?.key !== key) return
+    void request('/api/audit', { sid: s.sid, branch: gate?.branch ?? '' }).then(a => {
+      const v = a.body as { entries?: AuditEntry[]; refusals?: Record<string, number>; history?: unknown[]; friction?: unknown[] }
+      if (!a.ok || s.audit?.key !== key) return
       s.audit = { key, entries: Array.isArray(v.entries) ? v.entries : [], refusals: v.refusals && typeof v.refusals === 'object' ? v.refusals : {}, history: Array.isArray(v.history) ? v.history.filter(isHistoryLine) : [], friction: Array.isArray(v.friction) ? v.friction.filter((t): t is string => typeof t === 'string') : [] }
       if (current() === s) paint()
-    }, () => undefined)
+    })
   }
   const box = byId('exceptions')
   const items = (s.audit?.history ?? []).map(e => {
@@ -800,8 +807,8 @@ function paintCrumbs(s: Session) {
 async function loadProjects(force = false) {
   if (!state.connected || (!force && Date.now() - projectsAt < 10000)) return
   projectsAt = Date.now()
-  const res = await api('/api/projects', {}).catch(() => null)
-  const body = res && res.ok ? ((await res.json().catch(() => null)) as ProjectsView | null) : null
+  const a = await request('/api/projects')
+  const body = a.ok && Array.isArray(a.body.projects) ? (a.body as unknown as ProjectsView) : null
   if (body) byId<HTMLElementTagNameMap['sf-projects']>('projects').view = body
   if (body) byId('helper-notice').hidden = body.helper !== 'unreachable'
   if (body) {
@@ -832,27 +839,21 @@ function sessionTwin(x: Session): { description: string; short: string } {
   return { description: words, short: words }
 }
 
-async function reply(res: Response | null): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const body = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-  return { ok: !!res && res.ok, body }
-}
-
 async function loadChanges(s: Session, force = false) {
   const key = `${s.gate?.head ?? ''}:${s.gate?.branch ?? ''}:${working(s)}:${s.info.review?.commit ?? ''}:${s.info.review?.running ?? ''}:${s.info.push?.at ?? ''}:${s.compare.from}:${s.compare.commit}`
   if (!state.connected || (s.changesKey === key && !force)) return
   if (!force && Date.now() - s.changesAt < 5000) return void setTimeout(schedulePaint, 5100 - (Date.now() - s.changesAt))
   s.changesAt = Date.now()
   const asked = { ...s.compare }
-  const res = await api('/api/changes', asked.from === 'fork' ? { sid: s.sid } : asked.from === 'commit' ? { sid: s.sid, from: 'commit', commit: asked.commit } : { sid: s.sid, from: asked.from }).catch(() => null)
+  const a = await request('/api/changes', asked.from === 'fork' ? { sid: s.sid } : asked.from === 'commit' ? { sid: s.sid, from: 'commit', commit: asked.commit } : { sid: s.sid, from: asked.from })
   if (asked.from !== s.compare.from || asked.commit !== s.compare.commit) return
-  if (res && res.status === 409 && asked.from !== 'fork') {
-    const said = (await res.json().catch(() => null)) as { message?: unknown } | null
-    toast({ id: `changes:${s.sid}`, title: 'That comparison isn’t available.', description: typeof said?.message === 'string' ? visible(said.message) : 'The Changes view went back to where the branch leaves main.', tone: 'warn' })
+  if (a.status === 409 && asked.from !== 'fork') {
+    toast({ id: `changes:${s.sid}`, title: 'That comparison isn’t available.', description: a.message, tone: 'warn' })
     s.compare = { from: 'fork', commit: '' }
     s.changesKey = ''
     return loadChanges(s, true)
   }
-  const body = res && res.ok ? ((await res.json().catch(() => null)) as { changes?: Changes | null } | null) : null
+  const body = a.ok ? (a.body as { changes?: Changes | null }) : null
   if (body) s.changesKey = key
   else setTimeout(schedulePaint, 5100)
   s.changes = body?.changes ?? null
@@ -867,43 +868,43 @@ async function markViewed(s: Session | null, d: { path: string; blob: string; vi
     if (changesSession() === s) byId<HTMLElementTagNameMap['sf-changes']>('changes').changes = s.changes
   }
   flip(d.viewed)
-  const { ok, body } = await reply(await api('/api/viewed', { sid: s.sid, ...d }).catch(() => null))
+  const { ok, message } = await request('/api/viewed', { sid: s.sid, ...d })
   if (ok) return
   flip(!d.viewed)
-  toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
+  toast({ id: `viewed:${s.sid}`, title: d.viewed ? 'The file wasn’t marked viewed.' : 'The viewed mark wasn’t cleared.', description: message, tone: 'bad' })
 }
 
 async function markSignIn() {
-  if (await signInState(api)) void loadProjects(true)
+  if (await signInState(request)) void loadProjects(true)
 }
 
 function openSignIn() {
-  void claudeLogin(api, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
+  void claudeLogin(request, title => toast({ title, tone: 'ok' }), () => void markSignIn(), reviewer?.signIn ?? null)
 }
 
 function openIdentity() {
-  editIdentity(api, commitIdentity ?? null, id => {
+  editIdentity(request, commitIdentity ?? null, (id, said, tone) => {
     commitIdentity = id
-    toast({ id: 'identity', title: 'Saved the name and email agents commit with.', description: `${visible(id.name)} <${visible(id.email)}>`, tone: 'ok' })
+    toast({ id: 'identity', title: said, description: `${visible(id.name)} <${visible(id.email)}>`, tone })
     void loadProjects(true)
   })
 }
 
-function identityAction(body: Record<string, unknown>): Toast['action'] {
-  return body.error === 'no commit identity' ? { label: 'Set name and email', run: openIdentity } : undefined
+function identityAction(a: EngineAnswer): Toast['action'] {
+  return a.error === 'no commit identity' ? { label: 'Set Git name and email', run: openIdentity } : undefined
 }
 
 async function markIdentity() {
-  commitIdentity = await identityState(api)
+  commitIdentity = await identityState(request)
   schedulePaint()
 }
 
 byId('conversations').addEventListener('sf-answer', async e => {
   const sid = (e.target as Element).closest('sf-conversation')?.dataset.sid
   schedulePaint()
-  const { ok, body } = sid ? await reply(await api('/api/answer', { sid, ...e.detail }).catch(() => null)) : { ok: false, body: {} as Record<string, unknown> }
-  if (!ok) {
-    ;(e.target as CardHost).error = typeof body.message === 'string' && body.message ? visible(body.message) : 'That answer did not go through. It may already have been answered in the session itself.'
+  const a = sid ? await request('/api/answer', { sid, ...e.detail }) : null
+  if (!a?.ok) {
+    ;(e.target as CardHost).error = a ? a.message : 'The page lost track of this question. Reload the page.'
     return schedulePaint()
   }
 })
@@ -926,13 +927,13 @@ byId('approval').addEventListener('sf-plan-review', e => {
 })
 byId('reviews').addEventListener('sf-walkthrough-check', e => void checkStep(current(), e.detail))
 async function setExpect(agent: string, expect: Expect) {
-  const { ok, body } = await reply(await api('/api/sign-in-expect', { agent, expect }).catch(() => null))
-  if (!ok) toast({ id: `expect:${agent}`, title: "What you expect wasn't saved.", description: typeof body.message === 'string' ? visible(body.message) : 'Check that the engine is running.', tone: 'bad' })
+  const { ok, message } = await request('/api/sign-in-expect', { agent, expect })
+  if (!ok) toast({ id: `expect:${agent}`, title: "What you expect wasn't saved.", description: message, tone: 'bad' })
   await loadProjects(true)
 }
 byId('reviews').addEventListener('sf-push-request', () => void startPush(current()))
 const pushPanel = () => byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel')
-const reasonRefused = (refuse: (message: string) => boolean) => (said: Record<string, unknown>) => said.error === 'reason' && typeof said.message === 'string' && refuse(visible(said.message))
+const reasonRefused = (refuse: (message: string) => boolean) => (a: EngineAnswer) => a.field === 'reason' && !!a.message && refuse(a.message)
 byId('push-panel').addEventListener('sf-push-answer', e => void answerPush(current(), e.detail, reasonRefused(m => pushPanel().refuse('reason', m))))
 byId('session-facts').addEventListener('sf-commit-ask', () => once(current(), 'commit', () => whilePressed(() => ask('commit'))))
 byId('forge-panel').addEventListener('sf-forge-answer', e => void answerForge(current(), e.detail))
@@ -988,17 +989,18 @@ byId('size-pick').addEventListener('click', async e => {
   const s = current()
   if (!b || !s || byId('size-pick').querySelector('button[aria-busy="true"]')) return
   const picked = b.dataset.size ?? ''
-  const res = await whileBusy(b, () => api('/api/size', { sid: s.sid, size: picked }).catch(() => null))
-  if (!res || !res.ok) return say('The work type did not change. Check that the session is still running.')
+  const res = await whileBusy(b, () => request('/api/size', { sid: s.sid, size: picked }))
+  if (!res.ok) return say(res.message)
   if (s.gate) s.gate = { ...s.gate, workType: picked, chosen: true }
   void loadGate(s, true)
   paint()
   byId('text').focus()
 })
+byId('size-row').replaceWith(form({ inline: true, cls: 'size-row', children: [field('Work type', byId('size'), { kind: 'inline', cls: 'field-row' })] }))
 byId('size').addEventListener('change', async () => {
   const s = current()
   const size = byId<HTMLSelectElement>('size')
-  const res = s ? await api('/api/size', { sid: s.sid, size: size.value }).catch(() => null) : null
+  const res = s ? await request('/api/size', { sid: s.sid, size: size.value }) : null
   if (!res || !res.ok) {
     toast({ title: 'The work type did not change.', description: 'Check that the session is still running.', tone: 'bad' })
     if (s?.gate?.workType ?? s?.gate?.size) size.value = s?.gate?.workType ?? s?.gate?.size ?? ''
@@ -1023,20 +1025,18 @@ function revise(id: string, kind: 'requirements' | 'plan' | 'root-cause', note: 
   const s = current()
   if (!s) return
   const card = byId<HTMLElementTagNameMap['sf-approval']>(id)
-  once(s, `revise-${kind}:${note}`, () => whilePressed(() => send('', [], s, false, [], { part: { revise: { kind, note } }, refused: (why, error) => card.refuse(why, error) }).then(ok => {
+  once(s, `revise-${kind}:${note}`, () => whilePressed(() => send('', [], s, false, [], { part: { revise: { kind, note } }, refused: (why, field) => card.refuse(why, field) }).then(ok => {
     if (ok) card.sent(note)
     return ok
   })))
 }
 byId('project-agents').addEventListener('sf-project-setting', async e => {
-  const res = await api('/api/project', e.detail).catch(() => null)
-  if (!res || !res.ok) {
-    const body = res ? await res.json().catch(() => null) as { message?: unknown; field?: unknown } | null : null
-    const why = typeof body?.message === 'string' ? body.message : ''
+  const a = await request('/api/project', e.detail)
+  if (!a.ok) {
     const agents = byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents')
-    if (typeof body?.field === 'string' && agents.refuse(body.field, visible(why))) return
+    if (a.field && agents.refuse(a.field, a.message)) return
     agents.reset()
-    return void toast({ title: 'The project’s setting did not change.', description: why || 'Try again.', tone: 'bad' })
+    return void toast({ title: 'The project’s setting did not change.', description: a.message, tone: 'bad' })
   }
   await loadProjects(true)
   paint()
@@ -1044,7 +1044,7 @@ byId('project-agents').addEventListener('sf-project-setting', async e => {
 byId('checkpoint-button').addEventListener('click', () => once(current(), 'checkpoint', () => whileBusy(byId<HTMLButtonElement>('checkpoint-button'), () => ask('checkpoint'))))
 byId('stall-stop').addEventListener('click', () => {
   const s = current()
-  if (s) void whileBusy(byId<HTMLButtonElement>('stall-stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
+  if (s) void whileBusy(byId<HTMLButtonElement>('stall-stop'), () => request('/api/interrupt', { sid: s.sid }))
 })
 byId('stall-copy').addEventListener('click', () => {
   const command = byId('stall-copy').dataset.command
@@ -1091,8 +1091,8 @@ byId('menu-readonly').addEventListener('click', async () => {
   byId('session-menu').hidePopover()
   byId('session-more').focus()
   if (!s || !s.info.controlled) return
-  const res = await api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null)
-  if (!res || !res.ok) toast({ title: 'The page could not make this session read-only.', tone: 'bad' })
+  const res = await request('/api/control', { sid: s.sid, on: false, confirm: true })
+  if (!res.ok) toast({ title: 'The page could not make this session read-only.', description: res.message, tone: 'bad' })
 })
 function usageText(s: Session): string {
   const parts: string[] = []
@@ -1137,7 +1137,7 @@ for (const id of ['split', 'compare']) {
 byId<HTMLElementTagNameMap['sf-split']>('split').start = (sid, card) => {
   const goal = sessions.get(sid)
   const name = starterNames.get(goal?.info.agent || 'claude') ?? 'The agent'
-  return withConsent(name, 'the session', consent => api('/api/split', { op: 'start', sid, card, ...consent }))
+  return withConsent(name, 'the session', consent => request('/api/split', { op: 'start', sid, card, ...consent }))
 }
 byId<HTMLElementTagNameMap['sf-compare']>('compare').next = startSecond
 byId('compare').addEventListener('sf-delete-session', async e => {
@@ -1198,18 +1198,18 @@ byId('control-button').addEventListener('click', async () => {
   const s = current()
   if (!s || controlBusy.has(s.sid)) return
   if (byId('control-button').dataset.action === 'release') {
-    const res = await controlBusyWhile(s, () => api('/api/release', { sid: s.sid }).catch(() => null))
-    toast(res && res.ok ? { title: 'Ended both connections.', description: 'The real session reconnects by itself within a few seconds. If the other one comes back too, stop the program that runs it.', tone: 'info', timeout: 10000 } : { title: 'The connections could not be ended.', description: 'Try again, or restart the session.', tone: 'bad' })
+    const res = await controlBusyWhile(s, () => request('/api/release', { sid: s.sid }))
+    toast(res.ok ? { title: 'Ended both connections.', description: 'The real session reconnects by itself within a few seconds. If the other one comes back too, stop the program that runs it.', tone: 'info', timeout: 10000 } : { title: 'The connections could not be ended.', description: res.message, tone: 'bad' })
     return
   }
   if (byId('control-button').dataset.action === 'wake') return void controlBusyWhile(s, () => wakeSession(s))
   if (s.info.controlled) {
-    await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: false, confirm: true }).catch(() => null))
+    await controlBusyWhile(s, () => request('/api/control', { sid: s.sid, on: false, confirm: true }))
     return
   }
   if (!confirmed(`${s.sid}:control`)) return
-  const res = await controlBusyWhile(s, () => api('/api/control', { sid: s.sid, on: true, confirm: true }).catch(() => null))
-  if (!res || !res.ok) toast({ title: 'The page could not take control of this session.', tone: 'bad' })
+  const res = await controlBusyWhile(s, () => request('/api/control', { sid: s.sid, on: true, confirm: true }))
+  if (!res.ok) toast({ title: 'The page could not take control of this session.', description: res.message, tone: 'bad' })
 })
 byId('use-tab').addEventListener('click', async () => {
   showGone('Signing in…', '', false, true)
@@ -1270,7 +1270,7 @@ function markFiles(view: HTMLElement, sid: string) {
   const paths = [...ask].slice(0, 20)
   if (!paths.length) return
   for (const p of paths) seen.set(p, now)
-  void api('/api/file-check', { sid, paths }).catch(() => null).then(reply).then(({ ok, body }) => {
+  void request('/api/file-check', { sid, paths }).then(({ ok, body }) => {
     if (!ok || !Array.isArray(body.found)) {
       for (const p of paths) seen.delete(p)
       return
@@ -1303,6 +1303,10 @@ byId('session-docs').addEventListener('click', () => {
   const s = current()
   openDocs(byId('session-docs').dataset.doc!, s ? { view: current.key, label: 'session' } : null)
 })
+document.addEventListener('click', e => {
+  const link = (e.target as Element).closest<HTMLElement>('dialog button[data-doc]')
+  if (link) openDocs(link.dataset.doc!)
+})
 for (const id of ['projects', 'projects-side']) byId(id).addEventListener('click', e => {
   const link = (e.target as Element).closest<HTMLElement>('button[data-doc]')
   if (link) openDocs(link.dataset.doc!, { view: 'projects', label: 'Projects' })
@@ -1313,11 +1317,11 @@ byId('welcome').addEventListener('click', e => {
   if (walk) return openDocs(walk.dataset.doc!, { view: 'overview', label: 'Welcome' })
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
-  if (start === 'egress') openEgress(api)
-  if (start === 'workspace') openWorkspace(api, labelOfSid, forgetSession)
-  if (start === 'exceptions') openExceptions(api, labelOfSid)
-  if (start === 'backup') openBackup(api, sendState)
-  if (start === 'diagnostics') openDiagnostics(api)
+  if (start === 'egress') openEgress(request)
+  if (start === 'workspace') openWorkspace(request, labelOfSid, forgetSession)
+  if (start === 'exceptions') openExceptions(request, labelOfSid)
+  if (start === 'backup') openBackup(request, sendState)
+  if (start === 'diagnostics') openDiagnostics(request)
   if (start === 'session') go('projects')
 })
 byId('account-identity').addEventListener('click', () => {
@@ -1332,12 +1336,11 @@ async function changeRepo(detail: { op: 'add'; url: string } | { op: 'remove'; n
     projects.settle('repo')
   }
 }
-const REPO_URL_REFUSALS = new Set(['url', 'exists', 'cloning', 'removing'])
 async function changeRepoNow(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
-  const { ok, body } = detail.op === 'add' ? await reply(await api('/api/add-repo', { url: detail.url }).catch(() => null)) : await reply(await api('/api/remove-repo', { name: detail.name }).catch(() => null))
-  if (!ok) {
-    const problem = typeof body.message === 'string' ? visible(body.message) : "That didn't work. Try again."
-    return detail.op === 'add' && typeof body.error === 'string' && REPO_URL_REFUSALS.has(body.error) ? projects.addFailed(problem) : projects.say('', problem, true)
+  const a = detail.op === 'add' ? await request('/api/add-repo', { url: detail.url }) : await request('/api/remove-repo', { name: detail.name })
+  if (!a.ok) {
+    const problem = a.message
+    return detail.op === 'add' && a.field === 'url' ? projects.addFailed(problem) : projects.say('', problem, true)
   }
   if (detail.op === 'add') projects.added()
   projects.say('', '')
@@ -1351,11 +1354,11 @@ async function changeToken(detail: { op: 'save'; host: string; token: string } |
   }
 }
 async function changeTokenNow(detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }) {
-  const { ok, body } = detail.op === 'save' ? await reply(await api('/api/save-token', { host: detail.host, token: detail.token }).catch(() => null)) : await reply(await api('/api/remove-token', { host: detail.host }).catch(() => null))
+  const { ok, body, field, message } = detail.op === 'save' ? await request('/api/save-token', { host: detail.host, token: detail.token }) : await request('/api/remove-token', { host: detail.host })
   const where = visible(detail.host.replace(/^https:\/\//, ''))
-  if (!ok && detail.op === 'save' && typeof body.message === 'string' && projects.tokenFailed(visible(body.message), body.error)) return
+  if (!ok && detail.op === 'save' && message && projects.tokenFailed(message, field)) return
   if (!ok) {
-    return void toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? `The token for ${where} wasn't saved` : `The token for ${where} wasn't removed`, description: typeof body.message === 'string' ? visible(body.message) : "That didn't work. Try again.", tone: 'bad', timeout: 0 })
+    return void toast({ id: `token:${detail.host}`, title: detail.op === 'save' ? `The token for ${where} wasn't saved` : `The token for ${where} wasn't removed`, description: message, tone: 'bad', timeout: 0 })
   }
   const saved = isRecord(body.host) && typeof body.host.host === 'string' ? body.host.host : detail.host
   if (typeof body.warning === 'string' && body.warning) toast({ id: `token:${saved}`, title: `Token saved for ${visible(saved)}, with a warning`, description: visible(body.warning), tone: 'warn', timeout: 0 })
@@ -1387,21 +1390,18 @@ function capsRefused(body: Record<string, unknown>) {
   const sid = typeof body.sid === 'string' ? body.sid : ''
   toast({ id: `caps:${sid}`, title: 'The session started without its caps', description: visible(body.capsRefused), tone: 'warn', timeout: 0 })
 }
-function refusedField(body: Record<string, unknown>): string {
-  return typeof body.field === 'string' && body.field ? body.field : typeof body.error === 'string' ? body.error : ''
-}
 projects.addEventListener('sf-dispatch', async e => {
   const detail = e.detail
   const { path } = detail
   projects.starting(path)
   const name = starterNames.get(detail.agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/dispatch', { ...detail, ...consent }), true)
+  const a = await withConsent(name, 'the session', consent => request('/api/dispatch', { ...detail, ...consent }), true)
+  const { ok, body } = a
   if (!ok) {
     projects.failed()
-    const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
-    if (typeof body.message === 'string' && projects.startRefused(path, refusedField(body), visible(text))) return
-    const trust = body.error === 'not trusted'
-    toast({ id: `start:${path}`, title: trust ? `Claude Code doesn't trust ${baseName(path)} yet` : `No session started in ${baseName(path)}`, description: visible(text), tone: trust ? 'warn' : 'bad', timeout: 0, action: identityAction(body) })
+    if (projects.startRefused(path, a)) return
+    const trust = a.error === 'not trusted'
+    toast({ id: `start:${path}`, title: trust ? `Claude Code doesn't trust ${baseName(path)} yet` : `No session started in ${baseName(path)}`, description: a.message, tone: trust ? 'warn' : 'bad', timeout: 0, action: identityAction(a) })
     return void loadProjects(true)
   }
   byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
@@ -1410,17 +1410,17 @@ projects.addEventListener('sf-dispatch', async e => {
 })
 async function startSecond(pair: string, agent: string): Promise<string> {
   const name = starterNames.get(agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'next', pair, ...consent }), true)
+  const a = await withConsent(name, 'the session', consent => request('/api/pair', { op: 'next', pair, ...consent }), true)
+  const { ok, body } = a
   if (!ok) {
-    secondNotStarted(pair, body)
+    secondNotStarted(pair, a.message)
     return ''
   }
   capsRefused(body)
   return typeof body.sid === 'string' ? body.sid : ''
 }
-function secondNotStarted(pair: string, body: Record<string, unknown>) {
-  const text = typeof body.message === 'string' ? body.message : "The second session didn't start."
-  toast({ id: `pair:${pair}`, title: "The second session of the pair didn't start", description: `${visible(text)} Start it from the comparison in the first session.`, tone: 'bad', timeout: 0 })
+function secondNotStarted(pair: string, message: string) {
+  toast({ id: `pair:${pair}`, title: "The second session of the pair didn't start", description: `${message} Start it from the comparison in the first session.`, tone: 'bad', timeout: 0 })
 }
 projects.addEventListener('sf-pair', async e => {
   const detail = e.detail
@@ -1428,12 +1428,12 @@ projects.addEventListener('sf-pair', async e => {
   if (detail.double && !(await confirmBoth())) return
   projects.starting(path)
   const name = starterNames.get(detail.agents[0].agent) ?? 'The agent'
-  const { ok, body } = await withConsent(name, 'the session', consent => api('/api/pair', { op: 'start', ...detail, ...consent }), true)
+  const a = await withConsent(name, 'the session', consent => request('/api/pair', { op: 'start', ...detail, ...consent }), true)
+  const { ok, body } = a
   if (!ok) {
     projects.failed()
-    const text = typeof body.message === 'string' ? body.message : "The session didn't start. Try again."
-    if (typeof body.message === 'string' && projects.startRefused(path, refusedField(body), visible(text))) return
-    toast({ id: `start:${path}`, title: `No session started in ${baseName(path)}`, description: visible(text), tone: 'bad', timeout: 0, action: identityAction(body) })
+    if (projects.startRefused(path, a)) return
+    toast({ id: `start:${path}`, title: `No session started in ${baseName(path)}`, description: a.message, tone: 'bad', timeout: 0, action: identityAction(a) })
     return void loadProjects(true)
   }
   byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
@@ -1442,7 +1442,7 @@ projects.addEventListener('sf-pair', async e => {
   if (body.next !== true || typeof body.pair !== 'string') return
   const refused = body.secondRefused && typeof body.secondRefused === 'object' ? (body.secondRefused as Record<string, unknown>) : {}
   if (refused.needs) await startSecond(body.pair, detail.agents[0].agent)
-  else secondNotStarted(body.pair, refused)
+  else secondNotStarted(body.pair, typeof refused.message === 'string' ? visible(refused.message) : '')
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))
 byId('tabs').addEventListener('sf-move', e => moveTab(e.detail.id, e.detail.index))
@@ -1465,23 +1465,23 @@ byId('overview').addEventListener('sf-counts', e => {
 
 startLayout({ jumpLatest: () => composer.jump('latest') })
 
-const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain } = startSessionActions({ reply, loadGate, starterNames: () => starterNames, identityAction, copy, forgetSession })
+const { send, manage, answerForge, sessionAsk, startPush, answerPush, startReview, startTestList, startAside, checkStep, approve, wakeSession, withConsent, bringMain } = startSessionActions({ loadGate, starterNames: () => starterNames, identityAction, copy, forgetSession })
 
 const composer = startComposer({ send })
-const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer, reply })
+const { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs } = startNavigation({ composer })
 const { connect, applySession } = startStream({ onEvent, markCheckpoint })
 startTopBar()
 
 byId('stop').addEventListener('click', () => {
   const s = current()
-  if (s) void whileBusy(byId<HTMLButtonElement>('stop'), () => api('/api/interrupt', { sid: s.sid }).catch(() => null))
+  if (s) void whileBusy(byId<HTMLButtonElement>('stop'), () => request('/api/interrupt', { sid: s.sid }))
 })
 byId('rules').addEventListener('sf-rules-open', e => {
   const s = current()
   const p = s ? projectFor(s) : null
-  if (e.detail.to === 'egress') return openEgress(api)
+  if (e.detail.to === 'egress') return openEgress(request)
   if (e.detail.to === 'away') return openAway(true)
-  if (e.detail.to === 'exceptions') return openExceptions(api, labelOfSid)
+  if (e.detail.to === 'exceptions') return openExceptions(request, labelOfSid)
   if (e.detail.to === 'team') {
     if (!s) return
     const focusTeam = () => {
@@ -1499,13 +1499,13 @@ byId('rules').addEventListener('sf-rules-open', e => {
 
 startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
 restoreTabs()
-byId<HTMLElementTagNameMap['sf-recap']>('recap').post = api
+byId<HTMLElementTagNameMap['sf-recap']>('recap').post = request
 onNotifyOpen(sid => {
   if (sessions.has(sid)) go(`s/${sid}`)
 })
 paint()
-initPrefs(body => api('/api/prefs', body).catch(() => null))
-initUpdates(api)
+initPrefs(body => request('/api/prefs', body))
+initUpdates(request)
 addEventListener('pagehide', () => {
   saveTabs()
   saveCheckpoints()

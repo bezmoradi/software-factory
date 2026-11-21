@@ -21,14 +21,14 @@ func (s *Server) halt(w http.ResponseWriter, body map[string]any) {
 	h := s.reg.Halt()
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	var err error
 	switch op {
 	case "read":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "away":
@@ -36,12 +36,12 @@ func (s *Server) halt(w http.ResponseWriter, body map[string]any) {
 		raw, hasSid := body["sid"]
 		sid, okSid := raw.(string)
 		if !keysWithin(body, "op", "on", "sid") || !okOn || hasSid && (!okSid || sid == "" || len(sid) > 80) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = h.SetAway(sid, on)
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	if op != "read" {

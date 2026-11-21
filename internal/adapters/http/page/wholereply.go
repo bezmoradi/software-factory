@@ -37,7 +37,7 @@ func (s *Server) wholeReply(w http.ResponseWriter, body map[string]any) {
 	run, okRun := wholeNumber(body["run"], 1, review.MaxRuns)
 	if !keysWithin(body, "sid", "agent", "commit", "run") || !okSID || sid == "" || len(sid) > 80 || !okAgent || len(agent) > maxAgentName || !agentName.MatchString(agent) ||
 		!okCommit || !commitHex.MatchString(commit) || !okRun {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	got, err := replies.WholeReply(sid, agent, commit, run)
@@ -47,7 +47,7 @@ func (s *Server) wholeReply(w http.ResponseWriter, body map[string]any) {
 		return
 	}
 	if len(got.Text) > session.MaxFullReply {
-		refuse(w, http.StatusInternalServerError, "size")
+		refuse(w, http.StatusInternalServerError, "size", "The reviewer's reply is too long for the engine to show here.")
 		return
 	}
 	send(w, http.StatusOK, wholeReplyJSON{Text: got.Text, Clipped: got.Clipped})

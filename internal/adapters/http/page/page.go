@@ -217,17 +217,18 @@ func (s *Server) pageRoute(r *http.Request) string {
 	return "other"
 }
 
-func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why string) {
+func (s *Server) reject(w http.ResponseWriter, r *http.Request, status int, why, message string) {
 	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", why)
-	refuse(w, status, why)
+	refuse(w, status, why, message)
 }
 
 func (s *Server) refuseKey(w http.ResponseWriter, r *http.Request) {
 	shared.For(r.Context(), s.logger).Warn("request refused", "side", "page", "why", "token")
-	body := map[string]string{"error": "token"}
+	body := map[string]string{"error": "token", "message": saidKey}
 	if given, ok := presentedKey(r); ok {
 		if why := s.keys.why(given); why != "" {
 			body["why"] = why
+			body["message"] = keyEnded(why)
 		}
 	}
 	send(w, http.StatusUnauthorized, body)
@@ -245,17 +246,17 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	_ = rc.SetWriteDeadline(time.Now().Add(writeFor))
 	_ = rc.SetReadDeadline(time.Now().Add(readFor))
 	if r.Host != s.host {
-		s.reject(w, r, http.StatusMisdirectedRequest, "host")
+		s.reject(w, r, http.StatusMisdirectedRequest, "host", saidHost)
 		return
 	}
 	origin, hasOrigin := r.Header["Origin"]
 	if hasOrigin && (len(origin) != 1 || origin[0] != s.origin) {
-		s.reject(w, r, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin", saidOrigin)
 		return
 	}
 	visit := r.Method == http.MethodGet && r.URL.Path == "/" && r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Dest") == "document"
 	if site, ok := r.Header["Sec-Fetch-Site"]; ok && !siteAllowed(site, visit) {
-		s.reject(w, r, http.StatusForbidden, "site")
+		s.reject(w, r, http.StatusForbidden, "site", saidSite)
 		return
 	}
 	if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, s.assets.prefix) {
@@ -264,7 +265,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	known := r.URL.Path == signinRoute || pageRoutes[r.URL.Path] || workflowRoutes[r.URL.Path]
 	if !known || !strings.HasPrefix(r.URL.Path, "/api/") {
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 		return
 	}
 	want := http.MethodPost
@@ -272,20 +273,20 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		want = http.MethodGet
 	}
 	if r.Method != want {
-		refuse(w, http.StatusMethodNotAllowed, "method")
+		refuse(w, http.StatusMethodNotAllowed, "method", saidMethod)
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		s.reject(w, r, http.StatusBadRequest, "query")
+		s.reject(w, r, http.StatusBadRequest, "query", saidQuery)
 		return
 	}
 	if r.Method == http.MethodPost && !hasOrigin {
-		s.reject(w, r, http.StatusForbidden, "origin")
+		s.reject(w, r, http.StatusForbidden, "origin", saidOrigin)
 		return
 	}
 	if r.URL.Path == signinRoute {
 		if !isJSON(r) {
-			refuse(w, http.StatusUnsupportedMediaType, "type")
+			refuse(w, http.StatusUnsupportedMediaType, "type", saidType)
 			return
 		}
 		s.signin(w, r)
@@ -308,7 +309,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isJSON(r) {
-		refuse(w, http.StatusUnsupportedMediaType, "type")
+		refuse(w, http.StatusUnsupportedMediaType, "type", saidType)
 		return
 	}
 	limit := int64(MaxPageBody)
@@ -320,7 +321,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	body, bad := readObject(w, r, limit)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		refuse(w, bad, "body", bodyRefused(r.URL.Path, bad, limit))
 		return
 	}
 	if workflowRoutes[r.URL.Path] {
@@ -513,7 +514,7 @@ func (s *Server) authorized(r *http.Request) bool {
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		refuse(w, http.StatusMethodNotAllowed, "method")
+		refuse(w, http.StatusMethodNotAllowed, "method", saidMethod)
 		return
 	}
 	if r.URL.Path == "/" {
@@ -530,7 +531,7 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	}
 	a, ok := s.assets.files[strings.TrimPrefix(r.URL.Path, s.assets.prefix)]
 	if !ok {
-		refuse(w, http.StatusNotFound, "missing")
+		refuse(w, http.StatusNotFound, "missing", "The page has no such file. Reload the page.")
 		return
 	}
 	w.Header().Set("Content-Type", a.kind)
@@ -558,16 +559,16 @@ func (s *Server) allowSignin() bool {
 
 func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 	if !s.allowSignin() {
-		s.reject(w, r, http.StatusTooManyRequests, "signin-rate")
+		s.reject(w, r, http.StatusTooManyRequests, "signin-rate", "The page signed in too many times in the last minute. Wait a minute, then reload the page.")
 		return
 	}
 	body, bad := readObject(w, r, MaxPageBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		refuse(w, bad, "body", bodySaid(bad, MaxPageBody))
 		return
 	}
 	if len(body) != 0 {
-		s.reject(w, r, http.StatusBadRequest, "body")
+		s.reject(w, r, http.StatusBadRequest, "body", "Signing in takes an empty JSON object. Reload the page.")
 		return
 	}
 	key := s.keys.issue()
@@ -582,7 +583,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	sink := newStream(MaxStreamQueue)
 	id, err := s.reg.Attach(sink)
 	if err != nil {
-		s.reject(w, r, http.StatusTooManyRequests, "streams")
+		s.reject(w, r, http.StatusTooManyRequests, "streams", "The page holds two live streams at once, and both are open. Close another tab of the page, then reload this one.")
 		return
 	}
 	defer s.reg.Detach(id)
@@ -627,7 +628,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 func status(err error) (int, problem) {
 	var e *session.Error
 	if !errors.As(err, &e) {
-		return http.StatusInternalServerError, problem{Error: "server"}
+		return http.StatusInternalServerError, problem{Error: "server", Message: saidServer}
 	}
 	codes := map[session.Kind]int{
 		session.Invalid:      http.StatusBadRequest,
@@ -691,13 +692,13 @@ var apiFields = map[string][]string{
 
 func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	if fields, ok := apiFields[path]; ok && !keysWithin(body, fields...) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	for _, k := range []string{"sid", "stream", "epoch", "id"} {
 		if v, present := body[k]; present {
 			if _, ok := v.(string); !ok {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 		}
@@ -706,7 +707,7 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	switch path {
 	case "/api/prefs":
 		if !s.assets.save(body) {
-			refuse(w, http.StatusBadRequest, "prefs")
+			refuse(w, http.StatusBadRequest, "prefs", "The engine saves only a theme and a text size the page offers. Reload the page and pick again.")
 			return
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
@@ -727,7 +728,7 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	case "/api/control":
 		on, ok := body["on"].(bool)
 		if body["confirm"] != true || !ok {
-			refuse(w, http.StatusBadRequest, "confirm")
+			refuse(w, http.StatusBadRequest, "confirm", "Changing who controls this session needs your confirmation. Reload the page and try again.")
 			return
 		}
 		reply(w, s.reg.Control(sid, on), http.StatusAccepted)
@@ -744,6 +745,6 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 	case "/api/audit":
 		s.audit(w, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }

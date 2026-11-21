@@ -14,11 +14,11 @@ const commentsRoute = "/comments-request"
 func (s *Server) commentsRequest(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxAgentBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	if len(body) != 0 {
-		refuse(w, http.StatusBadRequest, "input")
+		agentRefuse(w, http.StatusBadRequest, "input")
 		return
 	}
 	sid, ok := s.forgeSession(w, r)

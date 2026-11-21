@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
+import { field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import type { WorkflowRun } from '../types.ts'
 
@@ -104,18 +105,15 @@ class SfProjectFacts extends HTMLElement {
     this.#busy = true
     this.#op = typeof body.op === 'string' ? body.op : ''
     this.#paint()
-    const res = await api('/api/project-facts', body).catch(() => null)
+    const a = await request('/api/project-facts', body)
     if (!current()) return false
     this.#busy = false
-    if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { message?: unknown } | null
-      if (!current()) return false
-      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       this.#paint()
       return false
     }
-    const v = readView(await res.json().catch(() => null))
-    if (!current()) return false
+    const v = readView(a.body)
     if (v) this.#view = v
     this.#paint()
     return true
@@ -170,13 +168,11 @@ class SfProjectFacts extends HTMLElement {
     this.#op = 'run-main'
     this.#status.textContent = ''
     this.#paint()
-    const res = await api('/api/verify', { op: 'start', repo, kind: 'check' }).catch(() => null)
+    const a = await request('/api/verify', { op: 'start', repo, kind: 'check' })
     if (gen !== this.#gen) return
-    if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { message?: unknown } | null
-      if (gen !== this.#gen) return
+    if (!a.ok) {
       this.#busy = false
-      say(this.#status, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+      say(this.#status, a.message, 'warn')
       this.#paint()
       return
     }
@@ -232,7 +228,6 @@ class SfProjectFacts extends HTMLElement {
   }
 
   #lookups(v: FactsView): HTMLElement {
-    const row = el('div', 'row field-row')
     const box = el('input')
     box.type = 'checkbox'
     box.id = `lookups-${this.#repo}`
@@ -242,18 +237,13 @@ class SfProjectFacts extends HTMLElement {
     box.addEventListener('click', e => {
       if (this.#busy) e.preventDefault()
     })
-    const label = el('label', 'small', 'Look up new packages on their public registry (npm, PyPI, proxy.golang.org, crates.io) for the push card')
-    label.htmlFor = box.id
     box.addEventListener('change', () => {
       if (this.#busy) return
       this.#status.textContent = ''
       void this.#call({ op: 'lookups', repo: this.#repo, on: box.checked })
     })
-    row.append(box, label)
     const note = el('p', 'small muted', 'Off by default. When on, the engine asks each registry from its own network whether each package a push adds exists and when it was first published, and marks missing and very young ones, since attackers register names agents invent. Only package names are sent.')
-    const wrap = el('div')
-    wrap.append(row, note)
-    return wrap
+    return form({ children: [field('Look up new packages on their public registry (npm, PyPI, proxy.golang.org, crates.io) for the push card', box, { kind: 'check' }), note] })
   }
 
   #paint() {

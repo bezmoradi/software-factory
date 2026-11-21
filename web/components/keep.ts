@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
@@ -93,12 +93,6 @@ function reviewsOf(h: KeptHead): string {
   return `Recorded reviews: ${h.roles.map(r => `${visible(r.name)} ${r.verdict}`).join(' · ')}.`
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn’t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? visible(body.message) : 'The engine didn’t restore the branch. Try again.'
-}
-
 function when(ms: number): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
 }
@@ -154,17 +148,17 @@ class SfKeep extends HTMLElement {
   async refresh(sid: string) {
     if (!sid || sid !== this.#target?.sid) return
     const n = ++this.#loading
-    const res = await api(ROUTE, { op: 'read', sid }).catch(() => null)
+    const a = await request(ROUTE, { op: 'read', sid })
     if (n !== this.#loading || sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      if (res && res.status !== 404 && res.status !== 501) return
+    if (!a.ok) {
+      if (a.status !== 0 && a.status !== 404 && a.status !== 501) return
       this.#view = null
       this.#status.textContent = ''
       this.hidden = true
       this.replaceChildren()
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (!v) return
     this.#view = v
     this.#paint()
@@ -198,15 +192,15 @@ class SfKeep extends HTMLElement {
     this.#confirm = null
     say(this.#status, 'Restoring the branch…', 'muted')
     this.#paint()
-    const res = await api(ROUTE, commit ? { op: 'restore', sid, commit } : { op: 'restore', sid }).catch(() => null)
+    const a = await request(ROUTE, commit ? { op: 'restore', sid, commit } : { op: 'restore', sid })
     this.#busy = false
     if (sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       void this.refresh(sid)
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
     const back = v?.head || commit || v?.commit || ''
     const at = back ? ` at ${shortSha(back)}` : ''

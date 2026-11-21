@@ -182,11 +182,11 @@ type pushVerificationJSON struct {
 
 func (p *PushRecords) PushRecord(ctx context.Context, sid, commit string) (PushRecord, error) {
 	if p.cfg.Targets == nil || p.cfg.Audit == nil {
-		return PushRecord{}, explained(conflict("not started here"), "Only a session this engine started has push records here.")
+		return PushRecord{}, conflict("not started here", "Only a session this engine started has push records here.")
 	}
 	t, ok := p.cfg.Targets(sid)
 	if !ok {
-		return PushRecord{}, explained(conflict("not started here"), "Only a session this engine started has push records here.")
+		return PushRecord{}, conflict("not started here", "Only a session this engine started has push records here.")
 	}
 	lines, err := p.cfg.Audit.Read(t.Name, t.Branch, pushRecordLines)
 	if err != nil {
@@ -194,7 +194,7 @@ func (p *PushRecords) PushRecord(ctx context.Context, sid, commit string) (PushR
 	}
 	pushed, found := pushedLine(lines, sid, commit)
 	if !found {
-		return PushRecord{}, explained(notFound("push"), "The engine's audit has no push of that commit on this branch.")
+		return PushRecord{}, notFound("push", "The engine's audit has no push of that commit on this branch.")
 	}
 	if err := ctx.Err(); err != nil {
 		return PushRecord{}, err

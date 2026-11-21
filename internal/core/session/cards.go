@@ -231,9 +231,9 @@ func answerError(c *card, value any) error {
 	case ok:
 		return nil
 	case why != "":
-		return explained(invalid("answer"), why)
+		return invalid("answer", why)
 	}
-	return invalid("answer")
+	return invalid("answer", "That answer isn't one this question takes. Pick one of its choices.")
 }
 
 func checkAnswer(c *card, value any) (bool, string) {

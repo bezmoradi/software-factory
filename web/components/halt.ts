@@ -1,4 +1,4 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, rovingKeys, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
@@ -65,17 +65,11 @@ async function send(body: Record<string, unknown>, key: string) {
   sending = key
   said = ''
   paintAll()
-  try {
-    const res = await api('/api/halt', body)
-    const data: unknown = await res.json().catch(() => null)
-    if (res.ok) setHalt(data)
-    else said = typeof (data as { message?: unknown } | null)?.message === 'string' ? (data as { message: string }).message : "The engine didn't take that. Try again."
-  } catch {
-    said = "The engine didn't answer. Try again once the page is connected."
-  } finally {
-    sending = ''
-    paintAll()
-  }
+  const a = await request('/api/halt', body)
+  if (a.ok) setHalt(a.body)
+  else said = a.message
+  sending = ''
+  paintAll()
 }
 
 const awayHere = () => !!session && view.away.includes(session.sid)

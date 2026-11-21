@@ -38,7 +38,7 @@ else
 fi
 say "Proctor $("$proctor_bin" version 2>/dev/null || echo unknown) at $proctor_bin"
 
-needed="app_logs app_logs.logfmt approved_logs docker exe09.related_guard exe09.waivers_guard_nothing exe11.fact_paths http.body_base64 http.body_fill http.destructive http.reads http.shows http.stream matchers.differs matchers.excludes matchers.matches matchers.overflow policy_from report.always step.timeout tables.covers time14.accumulates transcripts waive.rows"
+needed="app_logs app_logs.logfmt approved_logs docker exe09.related_guard exe09.waivers_guard_nothing exe11.fact_paths http.body_base64 http.body_fill http.destructive http.reads http.shows http.stream matchers.differs matchers.excludes matchers.matches matchers.matches_numbers matchers.overflow policy_from relations report.always step.timeout tables.covers time14.accumulates transcripts waive.rows"
 if ! features=$("$proctor_bin" version --features 2>/dev/null); then
 	say "this Proctor build can't list its features (proctor version --features), so it is older than the specifications need; set PROCTOR to a newer build, one with the features $needed (.claude/rules/proctor.md)"
 	exit 2

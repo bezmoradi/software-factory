@@ -546,19 +546,19 @@ func (f *Forges) Answer(ctx context.Context, sid, card string, approve, draft, c
 	if c == nil || c.view.State != ForgeWaiting {
 		f.mu.Unlock()
 		f.show(sid)
-		return explained(conflict("card"), "That card isn't waiting any more.")
+		return conflict("card", "That card isn't waiting any more.")
 	}
 	if f.closed {
 		f.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if draft && c.view.Kind != ForgePull {
 		f.mu.Unlock()
-		return explained(invalid("draft"), "Only a pull request can open as a draft.")
+		return invalid("draft", "Only a pull request can open as a draft.")
 	}
 	if where, _ := ForgeSecret(c.view.Title, c.view.Body); approve && where != "" && !confirmed {
 		f.mu.Unlock()
-		return explained(conflict("secret"), "This looks like a secret ("+where+"). Confirm on the card that it isn't one before it goes to the git host.")
+		return conflict("secret", "This looks like a secret ("+where+"). Confirm on the card that it isn't one before it goes to the git host.")
 	}
 	if c.view.Kind == ForgeComment {
 		return f.answerCommentUnlocking(sid, c, approve, shared.RequestOf(ctx))

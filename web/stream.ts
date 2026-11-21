@@ -1,4 +1,4 @@
-import { api, events, forget, signedIn, trade } from './api.ts'
+import { answerOf, events, forget, request, signedIn, trade } from './api.ts'
 import { allowed, current, UNLISTED, paint, say, schedulePaint, scroller, sessions, state, type Session } from './app-state.ts'
 import { openTabs } from './navigation.ts'
 import { byId, el } from './lib/dom.ts'
@@ -79,8 +79,8 @@ async function signInAgain(): Promise<void> {
 }
 
 async function whyOf(res: Response): Promise<string> {
-  const body: unknown = await res.json().catch(() => null)
-  return isRecord(body) && typeof body.why === 'string' ? body.why : ''
+  const { body } = await answerOf(res)
+  return typeof body.why === 'string' ? body.why : ''
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -108,7 +108,7 @@ export function requestReplay(s: Session, force = false) {
   if (!state.stream || !s.info.live || s.info.disputed) return
   if (!force && Date.now() - s.replayAt < 3000) return
   s.replayAt = Date.now()
-  void api('/api/replay', { stream: state.stream, sid: s.sid, epoch: s.epoch, since: s.seq }).catch(() => null)
+  void request('/api/replay', { stream: state.stream, sid: s.sid, epoch: s.epoch, since: s.seq })
 }
 
 export function updateSessions(list: unknown) {
@@ -238,7 +238,7 @@ export function startStream({ onEvent, markCheckpoint }: StreamDeps): Stream {
         return gen === generation ? connect() : undefined
       }
       if (res.status === 403) {
-        const body: { wait?: unknown } = await res.json().catch(() => ({}))
+        const { body } = await answerOf(res)
         showGone('Signing in…', 'This takes a few seconds.', false, true)
         await sleep(Math.max(500, Math.min(20000, Number(body.wait) || 1000)))
         return gen === generation ? connect() : undefined

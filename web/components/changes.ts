@@ -1,7 +1,9 @@
-import { busy, button, el, emit, field, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { field } from '../lib/form.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes, LineCommentBody } from '../types.ts'
+import { emptyState } from '../lib/page.ts'
 
 const MARK: Record<string, string> = { added: 'A', changed: 'M', deleted: 'D' }
 const MAX_HIGHLIGHT = 20000
@@ -524,8 +526,8 @@ class SfChanges extends HTMLElement {
     commitPick.addEventListener('change', () => {
       if (SHA.test(commitPick.value)) emit(this, 'sf-compare-point', { from: 'commit', commit: commitPick.value })
     })
-    bar.append(field('Compare with', pick, undefined, 'field-inline'))
-    if (from === 'commit') bar.append(field('Changes after', commitPick, undefined, 'field-inline'))
+    bar.append(field('Compare with', pick, { kind: 'inline' }))
+    if (from === 'commit') bar.append(field('Changes after', commitPick, { kind: 'inline' }))
     const group = el('div', 'segmented')
     group.setAttribute('role', 'group')
     group.setAttribute('aria-label', 'Diff layout')
@@ -534,14 +536,12 @@ class SfChanges extends HTMLElement {
     unified.setAttribute('aria-pressed', String(!this.#layout.split))
     split.setAttribute('aria-pressed', String(this.#layout.split))
     group.append(unified, split)
-    const hl = el('label', 'small check-inline')
     const box = el('input')
     box.type = 'checkbox'
     box.checked = this.#layout.highlight
     box.dataset.key = 'layout:highlight'
     box.addEventListener('change', () => this.#setLayout({ highlight: box.checked }))
-    hl.append(box, ' Highlight syntax')
-    bar.append(group, hl)
+    bar.append(group, field('Highlight syntax', box, { kind: 'check' }))
     return bar
   }
 
@@ -558,7 +558,6 @@ class SfChanges extends HTMLElement {
     const skip = f.notDiffed ? f.notDiffedWhy ?? '' : ''
     if (skip) li.append(el('span', 'tag', `not diffed: ${skip}${f.size ? `, ${sizeWords(f.size)}` : ''}`))
     if (f.blob && SHA.test(f.blob)) {
-      const label = el('label', 'viewed-mark small')
       const box = el('input')
       box.type = 'checkbox'
       box.checked = !!f.viewed
@@ -568,8 +567,7 @@ class SfChanges extends HTMLElement {
       box.addEventListener('change', () => emit(this, 'sf-viewed', { path: f.path, blob: f.blob!, viewed: box.checked }))
       const word = el('span', '', 'Viewed')
       word.setAttribute('aria-hidden', 'true')
-      label.append(box, word)
-      li.append(label)
+      li.append(field(word, box, { kind: 'check', cls: 'viewed-mark' }))
     }
     return li
   }
@@ -655,7 +653,7 @@ class SfChanges extends HTMLElement {
       if (this.#mine.length) parts.push(this.#panel)
     }
     this.#paintList()
-    if (!value.commits.length) parts.push(el('p', 'small muted', from === 'fork' ? 'No commits beyond the base branch.' : 'No commits since the commit compared with.'))
+    if (!value.commits.length) parts.push(emptyState(from === 'fork' ? 'No commits beyond the base branch.' : 'No commits since the commit compared with.'))
     replaceKeeping(this, parts)
     refocus(this, focused)
   }
@@ -668,7 +666,7 @@ declare global {
     'sf-changes': SfChanges
   }
   interface HTMLElementEventMap {
-    'sf-line-comments': CustomEvent<{ comments: LineCommentBody[]; refused: (why: string, error: string) => void; done: (ok: boolean) => void }>
+    'sf-line-comments': CustomEvent<{ comments: LineCommentBody[]; refused: (why: string, field: string) => void; done: (ok: boolean) => void }>
     'sf-fork-commit': CustomEvent<{ sha: string }>
     'sf-compare-point': CustomEvent<{ from: ChangeFrom; commit: string }>
     'sf-viewed': CustomEvent<{ path: string; blob: string; viewed: boolean }>

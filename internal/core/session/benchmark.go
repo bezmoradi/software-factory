@@ -61,22 +61,22 @@ func (p *Pairs) mergedAPI(path string) (Repository, ForgeRepo, MergedPullsAPI, e
 	f := d.forges
 	d.mu.Unlock()
 	if f == nil {
-		return Repository{}, ForgeRepo{}, nil, explained(conflict("no git host API"), "This engine has no git host API, so it lists no merged pull requests.")
+		return Repository{}, ForgeRepo{}, nil, conflict("no git host API", "This engine has no git host API, so it lists no merged pull requests.")
 	}
 	api, ok := f.cfg.API.(MergedPullsAPI)
 	if !ok {
-		return Repository{}, ForgeRepo{}, nil, explained(conflict("no git host API"), "This engine's git host API can't list merged pull requests.")
+		return Repository{}, ForgeRepo{}, nil, conflict("no git host API", "This engine's git host API can't list merged pull requests.")
 	}
 	raw, token, _, err := f.cfg.Repos.ForgeTarget(repo.Name)
 	if err != nil {
-		return Repository{}, ForgeRepo{}, nil, explained(conflict("repository"), "The project's repository isn't in the engine's list any more.")
+		return Repository{}, ForgeRepo{}, nil, conflict("repository", "The project's repository isn't in the engine's list any more.")
 	}
 	host, owner, name, ok := ForgeRepoOf(raw)
 	if !ok || !f.cfg.API.Supports(host) {
-		return Repository{}, ForgeRepo{}, nil, explained(conflict("not github"), "Merged pull requests are listed only for GitHub (github.com or a GitHub Enterprise server).")
+		return Repository{}, ForgeRepo{}, nil, conflict("not github", "Merged pull requests are listed only for GitHub (github.com or a GitHub Enterprise server).")
 	}
 	if token == "" {
-		return Repository{}, ForgeRepo{}, nil, explained(conflict("no token"), "No token is saved for "+strings.TrimPrefix(host, "https://")+". Save one under Git host tokens, with "+strings.TrimSuffix(NeedPulls, " and write")+".")
+		return Repository{}, ForgeRepo{}, nil, conflict("no token", "No token is saved for "+strings.TrimPrefix(host, "https://")+". Save one under Git host tokens, with "+strings.TrimSuffix(NeedPulls, " and write")+".")
 	}
 	return repo, ForgeRepo{Host: host, Owner: owner, Name: name, Token: token}, api, nil
 }
@@ -85,7 +85,7 @@ func (p *Pairs) allowRead(path string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.reads.allow(path, p.cfg.Now()) {
-		return explained(limited("merged"), "The engine read this project's merged pull requests "+strconv.Itoa(MergedCalls)+" times in 10 minutes. Wait a few minutes.")
+		return limited("merged", "The engine read this project's merged pull requests "+strconv.Itoa(MergedCalls)+" times in 10 minutes. Wait a few minutes.")
 	}
 	return nil
 }
@@ -110,7 +110,7 @@ func cleanMerged(m MergedPull) (MergedPull, bool) {
 
 func (p *Pairs) MergedPulls(ctx context.Context, path string, page int) (MergedList, error) {
 	if page < 1 || page > MaxMergedPage {
-		return MergedList{}, explained(invalid("page"), "The page is a number from 1 to 100.")
+		return MergedList{}, invalid("page", "The page is a number from 1 to 100.")
 	}
 	if err := p.allowRead(path); err != nil {
 		return MergedList{}, err
@@ -123,7 +123,7 @@ func (p *Pairs) MergedPulls(ctx context.Context, path string, page int) (MergedL
 	defer cancel()
 	list, more, err := api.MergedPulls(ctx, repo, page)
 	if err != nil {
-		return MergedList{}, explained(conflict("host"), p.clean(repo.Token, "The engine couldn't list the merged pull requests: "+forgeWhy(err, NeedPulls)+"."))
+		return MergedList{}, conflict("host", p.clean(repo.Token, "The engine couldn't list the merged pull requests: "+forgeWhy(err, NeedPulls)+"."))
 	}
 	out := MergedList{Repo: repo.Host + "/" + repo.Slug(), Page: page, More: more}
 	for _, m := range list {
@@ -148,7 +148,7 @@ func benchRefusal(m MergedPull, text string) string {
 
 func (p *Pairs) readMerged(ctx context.Context, path string, number int) (MergedView, string, Repository, error) {
 	if number < 1 || number > MaxIssueNumber {
-		return MergedView{}, "", Repository{}, explained(invalid("number"), "That isn't a pull request number.")
+		return MergedView{}, "", Repository{}, invalid("number", "That isn't a pull request number.")
 	}
 	if err := p.allowRead(path); err != nil {
 		return MergedView{}, "", Repository{}, err
@@ -161,12 +161,12 @@ func (p *Pairs) readMerged(ctx context.Context, path string, number int) (Merged
 	defer cancel()
 	m, err := api.MergedPull(ctx, repo, number)
 	if err != nil {
-		return MergedView{}, "", Repository{}, explained(conflict("host"), p.clean(repo.Token, "The engine couldn't read pull request #"+strconv.Itoa(number)+": "+forgeWhy(err, NeedPulls)+"."))
+		return MergedView{}, "", Repository{}, conflict("host", p.clean(repo.Token, "The engine couldn't read pull request #"+strconv.Itoa(number)+": "+forgeWhy(err, NeedPulls)+"."))
 	}
 	body := m.Body
 	c, ok := cleanMerged(m)
 	if !ok || c.Number != number {
-		return MergedView{}, "", Repository{}, explained(conflict("not merged"), "Pull request #"+strconv.Itoa(number)+" isn't a merged pull request the engine can start from.")
+		return MergedView{}, "", Repository{}, conflict("not merged", "Pull request #"+strconv.Itoa(number)+" isn't a merged pull request the engine can start from.")
 	}
 	c.Body = body
 	text, clipped := BenchText(c.Number, c.Title, body)
@@ -192,15 +192,15 @@ func (p *Pairs) benchPoint(ctx context.Context, q PairStart) (startPoint, Benchm
 	n := strconv.Itoa(q.Bench)
 	switch {
 	case v.Refused != "":
-		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark"), "This pull request's description can't be sent to an agent. Clear it, or pick another."))
+		return startPoint{}, Benchmark{}, "", onField("benchmark", conflict("benchmark", "Can't be sent to an agent. Clear it or pick another."))
 	case v.Hash != q.BenchHash:
-		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark changed"), "Pull request #"+n+"'s description changed since you read it; read it again. No session started."))
+		return startPoint{}, Benchmark{}, "", onField("benchmark", conflict("benchmark changed", "Changed since you read it. Read it again."))
 	case v.Pull.Base != q.BenchBase:
-		return startPoint{}, Benchmark{}, "", onField("benchmark", explained(conflict("benchmark moved"), "Pull request #"+n+"'s base is now commit "+shortSHA(v.Pull.Base)+", not the "+shortSHA(q.BenchBase)+" the page showed, so no session started. Read it again."))
+		return startPoint{}, Benchmark{}, "", onField("benchmark", conflict("benchmark moved", "Its base is now commit "+shortSHA(v.Pull.Base)+". Read it again."))
 	}
 	src, ok := p.cfg.Dispatcher.sources()
 	if !ok {
-		return startPoint{}, Benchmark{}, "", explained(conflict("from"), "This engine can't fetch commits.")
+		return startPoint{}, Benchmark{}, "", conflict("from", "This engine can't fetch commits.")
 	}
 	if err := src.FetchCommit(ctx, repo.Name, v.Pull.Base); err != nil {
 		return startPoint{}, Benchmark{}, "", err
@@ -218,19 +218,19 @@ func (p *Pairs) MergedDiff(ctx context.Context, id string) (ChangeView, error) {
 		return ChangeView{}, err
 	}
 	if pr.Bench == nil {
-		return ChangeView{}, explained(conflict("not a benchmark"), "This pair didn't start from a merged pull request.")
+		return ChangeView{}, conflict("not a benchmark", "This pair didn't start from a merged pull request.")
 	}
 	if p.cfg.Changes == nil || p.cfg.History == nil {
-		return ChangeView{}, explained(conflict("changes"), "This engine can't read changes.")
+		return ChangeView{}, conflict("changes", "This engine can't read changes.")
 	}
 	b := pr.Bench
 	base, err := p.cfg.History.MergeBase(ctx, pr.Path, b.Base, b.Head)
 	if err != nil || base == "" {
-		return ChangeView{}, explained(conflict("merged"), "The engine couldn't read the merged pull request's commits in the clone. Its head, "+shortSHA(b.Head)+", may not have been fetched.")
+		return ChangeView{}, conflict("merged", "The engine couldn't read the merged pull request's commits in the clone. Its head, "+shortSHA(b.Head)+", may not have been fetched.")
 	}
 	cs, err := p.cfg.Changes.Changes(ctx, pr.Path, base, b.Head)
 	if err != nil {
-		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the merged change: "+err.Error(), maxOutput))
+		return ChangeView{}, conflict("changes", clip("The engine couldn't read the merged change: "+err.Error(), maxOutput))
 	}
 	return ChangeView{Branch: "pull request #" + strconv.Itoa(b.Number), Head: b.Head, Base: base, Main: b.Base, ChangeSet: maskChanges(cs)}, nil
 }

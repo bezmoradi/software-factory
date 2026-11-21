@@ -1,5 +1,7 @@
-import { api } from '../api.ts'
-import { around, busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { around, busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { actions, answerControl, field, form } from '../lib/form.ts'
+import { emptyState } from '../lib/page.ts'
 
 
 interface Entry {
@@ -75,11 +77,14 @@ class SfDecisionLog extends HTMLElement {
     super()
     this.#adding.rows = 2
     this.#adding.id = `decision-add-${this.#n}`
+    this.#adding.name = 'text'
     this.#adding.placeholder = 'A decision for the next sessions, such as "Keep the public API stable until 2.0"'
     this.#name.id = `decision-name-${this.#n}`
+    this.#name.name = 'name'
     this.#name.placeholder = 'What it was, such as "Sign-in by email"'
     this.#text.rows = 3
     this.#text.id = `decision-text-${this.#n}`
+    this.#text.name = 'text'
     this.#text.placeholder = 'Your own wording; empty keeps the engine\'s line'
     this.#hidden.type = 'checkbox'
     this.#hidden.id = `decision-hidden-${this.#n}`
@@ -109,35 +114,34 @@ class SfDecisionLog extends HTMLElement {
     else if (this.#busy) b.setAttribute('aria-disabled', 'true')
   }
 
-  async #call(body: Record<string, unknown>, key: string): Promise<boolean> {
+  async #call(body: Record<string, unknown>, key: string): Promise<EngineAnswer | null> {
     const project = this.#project
     this.#busy = true
     this.#doing = key
     this.#bad = null
     this.#paint()
-    const res = await api('/api/decision-log', body).catch(() => null)
-    if (project !== this.#project) return false
+    const a = await request('/api/decision-log', body)
+    if (project !== this.#project) return null
     this.#busy = false
-    const answer = await res?.json().catch(() => null) as Record<string, unknown> | null
-    this.#refused = typeof answer?.error === 'string' ? answer.error : ''
-    if (!res || !res.ok) {
-      const said = typeof answer?.message === 'string' && answer.message ? shown(answer.message) : ''
-      const input = !said ? null : body.op === 'add' ? (this.#refused === 'text' ? this.#adding : null) : body.op === 'set' ? (this.#refused === 'name' ? this.#name : this.#refused === 'text' ? this.#text : null) : null
-      this.#bad = input && { input, text: said }
-      say(this.#status, input ? '' : said || 'The engine didn\'t answer. Try again.', 'warn')
+    this.#refused = a.field
+    if (!a.ok) {
+      const place = body.op === 'add' ? this.#adding.form : body.op === 'set' ? this.#name.form : null
+      const input = place && a.message ? answerControl(place, a) : null
+      this.#bad = input && { input, text: a.message }
+      say(this.#status, input ? '' : a.message, 'warn')
       this.#paint()
-      return false
+      return a
     }
-    const v = readView(answer)
+    const v = readView(a.body)
     if (v) this.#view = v
     this.#paint()
-    return true
+    return a
   }
 
   async #add() {
     const text = this.#adding.value
     if (this.#busy) return
-    if (await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add')) {
+    if ((await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add'))?.ok) {
       this.#adding.value = ''
       say(this.#status, 'Added. New sessions get it with their first message.', 'muted')
     } else this.#adding.focus()
@@ -158,27 +162,16 @@ class SfDecisionLog extends HTMLElement {
     if (this.#busy) return
     const name = this.#name.value
     const text = this.#text.value
-    if (await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)) {
+    const a = await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)
+    if (a?.ok) {
       this.#editing = ''
-      say(this.#status, 'Saved. It stays through every rebuild of the log.', 'muted')
+      say(this.#status, a.message, savedTone(a))
       this.#paint()
     } else (this.#refused === 'name' ? this.#name : this.#text).focus()
   }
 
   #form(e: Entry): HTMLElement {
-    const box = el('div', 'field')
-    const labelled = (label: string, input: HTMLElement & { id: string }) => {
-      const l = el('label', 'small', label)
-      l.htmlFor = input.id
-      box.append(l, input)
-    }
-    labelled('Name', this.#name)
-    labelled(e.added ? 'Text' : 'Your wording (optional)', this.#text)
-    const row = el('div', 'row field-row')
-    const hide = el('label', 'small', 'Hide it from new sessions')
-    hide.htmlFor = this.#hidden.id
-    row.append(this.#hidden, hide)
-    const save = button('Save', 'small', () => void this.#save(e), 'button', `decision-save:${e.id}`)
+    const save = button('Save', 'small', undefined, 'submit', `decision-save:${e.id}`)
     const cancel = button('Cancel', 'link small', () => {
       if (this.#busy) return
       this.#editing = ''
@@ -186,8 +179,15 @@ class SfDecisionLog extends HTMLElement {
     }, 'button', `decision-cancel:${e.id}`)
     this.#hold(save)
     this.#hold(cancel)
-    box.append(row, cancel, save)
-    return box
+    return form({
+      children: [
+        field('Name', this.#name),
+        e.added ? field('Text', this.#text) : field('Your wording', this.#text, { optional: true }),
+        field('Hide it from new sessions', this.#hidden, { kind: 'check' }),
+        actions([cancel, save]),
+      ],
+      onSubmit: () => void this.#save(e),
+    })
   }
 
   #entry(e: Entry): HTMLElement {
@@ -237,12 +237,10 @@ class SfDecisionLog extends HTMLElement {
     else {
       if (v.auditSince) parts.push(el('p', 'small muted', `The audit file goes back to ${day(v.auditSince)}; older decisions have rotated out.`))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
-      const add = button('Add', 'small', () => void this.#add(), 'button', 'decision-add')
+      const add = button('Add', 'small', undefined, 'submit', 'decision-add')
       this.#hold(add)
-      const addBox = field('Add an entry', this.#adding)
-      addBox.append(add)
-      parts.push(addBox)
-      if (!v.entries.length) parts.push(el('p', 'small muted', 'No decisions in the window yet.'))
+      parts.push(form({ children: [field('Add an entry', this.#adding), actions([add])], onSubmit: () => void this.#add() }))
+      if (!v.entries.length) parts.push(emptyState('No decisions in the window yet.'))
       else {
         const ul = el('ul', 'small list')
         for (const e of v.entries) ul.append(this.#entry(e))

@@ -1,4 +1,4 @@
-import { api, sendState } from './api.ts'
+import { request, sendState } from './api.ts'
 import { armed, current, offWhy, sessions, state, type Session } from './app-state.ts'
 import { setSide } from './layout.ts'
 import type { Navigation } from './navigation.ts'
@@ -90,12 +90,12 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     })
     panel('v:projects', 'Projects', () => go('projects'))
     panel('v:docs', 'Docs', () => openDocs(''))
-    panel('v:egress', 'Network access', () => openEgress(api), needsEngine)
-    panel('v:workspace', 'Workspace and disk space', () => openWorkspace(api, labelOfSid, forgetSession), needsEngine)
-    panel('v:exceptions', 'Register of exceptions', () => openExceptions(api, labelOfSid), needsEngine)
-    panel('v:backup', 'Export and import', () => openBackup(api, sendState), needsEngine)
-    panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(api), needsEngine)
-    panel('v:identity', 'Name and email for commits', () => openIdentity(), needsEngine)
+    panel('v:egress', 'Network access', () => openEgress(request), needsEngine)
+    panel('v:workspace', 'Workspace and disk space', () => openWorkspace(request, labelOfSid, forgetSession), needsEngine)
+    panel('v:exceptions', 'Register of exceptions', () => openExceptions(request, labelOfSid), needsEngine)
+    panel('v:backup', 'Export and import', () => openBackup(request, sendState), needsEngine)
+    panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(request), needsEngine)
+    panel('v:identity', 'Git name and email', () => openIdentity(), needsEngine)
     panel('v:signin', 'Reviewers’ sign-in', () => openSignIn(), needsEngine)
     panel('v:away', 'Away mode', () => openAway(), needsEngine)
     panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
@@ -107,7 +107,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     const root = document.documentElement
     openShortcuts(root.dataset.keys !== 'off', on => {
       root.dataset.keys = on ? 'on' : 'off'
-      void api('/api/prefs', { keys: root.dataset.keys }).catch(() => null)
+      void request('/api/prefs', { keys: root.dataset.keys })
     })
   }
 

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,7 @@ type Facts struct {
 	UsesArtifacts bool
 	Artifacts     []string
 	ArtifactsOnly bool
+	Brief         BriefCheck
 }
 
 type ActionKind string
@@ -60,7 +62,7 @@ func Decide(f Facts, a Action) string {
 		case f.Head == "":
 			return "The requirements weren't approved: the current commit couldn't be read."
 		}
-		return ""
+		return briefHold(f.Brief)
 	case StartPlan:
 		if feature && !f.ReqOk {
 			return "Plan can't start until the developer approves the requirements on the software factory page. " + order
@@ -77,6 +79,35 @@ func Decide(f Facts, a Action) string {
 		return editHold(f, a.Path)
 	}
 	return ""
+}
+
+func briefHold(c BriefCheck) string {
+	switch c.Kind {
+	case BriefBlocked:
+		if len(c.Blocking) == 1 {
+			return "Can't approve yet: " + listed(c.Blocking, 8) + " is a blocking open question. Answer it with Claude, then approve."
+		}
+		return "Can't approve yet: " + listed(c.Blocking, 8) + " are blocking open questions. Answer them with Claude, then approve."
+	case BriefInvalid:
+		return "Can't approve yet: " + c.Problem + "."
+	case BriefNone:
+		return "Written before the checked format; ask Claude to rewrite it."
+	}
+	return ""
+}
+
+func listed(ids []string, most int) string {
+	shown := make([]string, 0, min(len(ids), most))
+	for _, id := range ids[:min(len(ids), most)] {
+		shown = append(shown, clip(id, 40))
+	}
+	switch {
+	case len(ids) > most:
+		return strings.Join(shown, ", ") + " and " + strconv.Itoa(len(ids)-most) + " more"
+	case len(shown) < 2:
+		return strings.Join(shown, "")
+	}
+	return strings.Join(shown[:len(shown)-1], ", ") + " and " + shown[len(shown)-1]
 }
 
 func approvePlan(f Facts, a Action) string {

@@ -16,6 +16,13 @@ const (
 	limitsFor   = 2*time.Minute + 15*time.Second
 )
 
+const (
+	saidProjectCapsSaved     = "Saved. New sessions in this project get these caps."
+	saidProjectCapsUnchanged = "No change: these caps are already saved."
+	saidSessionCapsSaved     = "Saved. This session runs with these caps."
+	saidSessionCapsUnchanged = "No change: this session already has these caps."
+)
+
 type capsProblem struct {
 	Error   string `json:"error"`
 	Field   string `json:"field"`
@@ -75,21 +82,22 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 	l := s.reg.Limits()
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	sid, okSid := body["sid"].(string)
 	okSid = okSid && sid != "" && len(sid) <= 80
 	var err error
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "check":
 		if !keysWithin(body, "op", "money", "minutes", "turns", "disk") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if _, ok := checkedCaps(w, body); !ok {
@@ -98,7 +106,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 	case "project":
 		name, okName := body["name"].(string)
 		if !keysWithin(body, "op", "name", "money", "minutes", "turns", "disk") || !okName || len(name) > 400 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		c, okCaps := checkedCaps(w, body)
@@ -109,22 +117,28 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 			send(w, http.StatusNotFound, problem{Error: "project", Message: "The engine has no project of that name."})
 			return
 		}
-		err = l.SetProject(name, c)
+		var changed bool
+		changed, err = l.SetProject(name, c)
+		done := saveSaid(changed, saidProjectCapsSaved, saidProjectCapsUnchanged)
+		said = &done
 	case "session":
 		if !keysWithin(body, "op", "sid", "money", "minutes", "turns", "disk") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		c, okCaps := checkedCaps(w, body)
 		if !okCaps {
 			return
 		}
-		err = l.SetSession(sid, c)
+		var changed bool
+		changed, err = l.SetSession(sid, c)
+		done := saveSaid(changed, saidSessionCapsSaved, saidSessionCapsUnchanged)
+		said = &done
 	case "raise":
 		kind, okKind := body["kind"].(string)
 		value, okValue := body["value"].(float64)
 		if !keysWithin(body, "op", "sid", "kind", "value") || !okSid || !okKind || !session.ValidCapKind(kind) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if !okValue || math.IsNaN(value) || math.IsInf(value, 0) {
@@ -134,7 +148,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		err = l.Raise(sid, kind, value)
 	case "stop":
 		if !keysWithin(body, "op", "sid") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rc := http.NewResponseController(w)
@@ -144,7 +158,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		cancel()
 	case "measure":
 		if !keysWithin(body, "op", "sid") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rc := http.NewResponseController(w)
@@ -157,19 +171,19 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		kind, okKind := body["kind"].(string)
 		_, hasSid := body["sid"]
 		if !keysWithin(body, "op", "side", "kind", "sid") || !okSide || !okKind || len(side) > 40 || len(kind) > 60 || hasSid && !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = l.Continue(r.Context(), side, sid, kind)
 	case "wake":
 		on, okOn := body["on"].(bool)
 		if !keysWithin(body, "op", "sid", "on") || !okSid || !okOn {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = l.WakeAtReset(sid, on)
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	if op != "read" && op != "check" {
@@ -180,5 +194,9 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, l.Frame())
+	answer := l.Frame()
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }

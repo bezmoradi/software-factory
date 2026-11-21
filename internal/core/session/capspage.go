@@ -232,19 +232,22 @@ func (l *Limits) ProjectCaps(name string) Caps {
 	return l.projects[name]
 }
 
-func (l *Limits) SetProject(name string, c Caps) error {
+func (l *Limits) SetProject(name string, c Caps) (bool, error) {
 	clean, ok := CheckCaps(c)
 	if !ok || name == "" || len(name) > 400 {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
+		return false, invalid("caps", "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
-	_, had := l.projects[name]
+	was, had := l.projects[name]
 	switch {
+	case was == clean:
+		l.mu.Unlock()
+		return false, nil
 	case !clean.Any():
 		delete(l.projects, name)
 	case !had && len(l.projects) >= MaxCapProjects:
 		l.mu.Unlock()
-		return explained(limited("projects"), "The engine keeps caps for at most 1,000 projects.")
+		return false, limited("projects", "The engine keeps caps for at most 1,000 projects.")
 	default:
 		l.projects[name] = clean
 	}
@@ -256,19 +259,19 @@ func (l *Limits) SetProject(name string, c Caps) error {
 	l.mu.Unlock()
 	err := l.save()
 	l.flush(true)
-	return err
+	return true, err
 }
 
-func (l *Limits) SetSession(sid string, c Caps) error {
+func (l *Limits) SetSession(sid string, c Caps) (bool, error) {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return false, invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
-		return err
+		return false, err
 	}
 	clean, ok := CheckCaps(c)
 	if !ok {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
+		return false, invalid("caps", "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
 	k, known := l.known[sid]
@@ -282,28 +285,34 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	}
 	if !known {
 		l.mu.Unlock()
-		return explained(conflict("not started here"), "Only a session this engine started can have caps.")
+		return false, conflict("not started here", "Only a session this engine started can have caps.")
 	}
 	s := l.sessionLocked(sid, k.project)
 	if s == nil {
 		l.mu.Unlock()
-		return explained(limited("sessions"), "The engine keeps caps for at most 1,000 sessions.")
+		return false, limited("sessions", "The engine keeps caps for at most 1,000 sessions.")
 	}
 	if s.reached != "" {
 		l.mu.Unlock()
-		return explained(conflict("reached"), "This session is at a cap. Answer Raise the cap or Stop on the session first.")
+		return false, conflict("reached", "This session is at a cap. Answer Raise the cap or Stop on the session first.")
 	}
+	changed := s.own == nil || *s.own != clean
 	s.own = &clean
 	l.checkLocked(sid, s)
-	l.unsaved = true
+	if changed {
+		l.unsaved = true
+	}
 	measure := clean.DiskGiB > 0 && k.running && l.cfg.Disk != nil
 	l.mu.Unlock()
 	if measure {
 		l.measureSoon(sid, k.box)
 	}
-	err := l.save()
+	var err error
+	if changed {
+		err = l.save()
+	}
 	l.flush(true)
-	return err
+	return changed, err
 }
 
 func (l *Limits) StartCaps(sid string, c Caps) error {
@@ -311,7 +320,8 @@ func (l *Limits) StartCaps(sid string, c Caps) error {
 	if clean, ok := CheckCaps(c); ok && l.reg.admittedProject(sid, &k) && clean == l.ProjectCaps(k.project) {
 		return nil
 	}
-	return l.SetSession(sid, c)
+	_, err := l.SetSession(sid, c)
+	return err
 }
 
 func (d *Dispatcher) startCaps(sid string, c *Caps) string {
@@ -341,7 +351,7 @@ func (r *Registry) admittedProject(sid string, out *limitsSession) bool {
 
 func (l *Limits) Raise(sid, kind string, value float64) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
 		return err
@@ -350,7 +360,7 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	s := l.sessions[sid]
 	if s == nil || s.reached == "" || s.reached != kind {
 		l.mu.Unlock()
-		return explained(conflict("not reached"), "This session isn't at that cap, so there is nothing to raise.")
+		return conflict("not reached", "This session isn't at that cap, so there is nothing to raise.")
 	}
 	c := l.capsOfLocked(s)
 	old := capWords(kind, c)
@@ -368,15 +378,12 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	clean, ok := CheckCaps(next)
 	if !ok || value != math.Trunc(value) && kind != CapMoney || overCap(kind, clean, s.used) || capValue(kind, clean) <= capValue(kind, c) {
 		l.mu.Unlock()
-		most := "$100,000, 43,200 minutes or 10,000 turns"
-		if kind == CapDisk {
-			most = "4,096 GiB, a whole number"
-		}
-		return explained(invalid("value"), "The new cap must be more than this session has used ("+usedWords(kind, s.used)+") and more than the cap now, and at most "+most+".")
+		most := map[string]string{CapMoney: "$100,000", CapTime: "43,200 minutes", CapTurns: "10,000 turns", CapDisk: "4,096 whole GiB"}[kind]
+		return onField("value", invalid("value", "Above the cap and what's used, up to "+most+"."))
 	}
 	if least := (s.used.Time + raiseTimeMargin + time.Minute - 1).Truncate(time.Minute); kind == CapTime && time.Duration(clean.Minutes)*time.Minute < least {
 		l.mu.Unlock()
-		return explained(invalid("value"), "The session's time keeps counting while it waits at the cap, so a new time cap must leave it at least a minute: "+formatMinutes(least)+" or more ("+usedWords(kind, s.used)+" used).")
+		return onField("value", invalid("value", "Needs at least "+formatMinutes(least)+"."))
 	}
 	s.own = &clean
 	s.reached, s.reachedAt = "", time.Time{}
@@ -397,7 +404,7 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 
 func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
 		return err
@@ -407,13 +414,13 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	stop := l.cfg.Stop
 	if s == nil || s.reached == "" {
 		l.mu.Unlock()
-		return explained(conflict("not reached"), "This session isn't at a cap.")
+		return conflict("not reached", "This session isn't at a cap.")
 	}
 	kind := s.reached
 	words := capWords(kind, l.capsOfLocked(s))
 	l.mu.Unlock()
 	if stop == nil {
-		return explained(conflict("no agent-host"), "This engine can't stop sessions.")
+		return conflict("no agent-host", "This engine can't stop sessions.")
 	}
 	sctx, cancel := context.WithTimeout(ctx, capStopFor)
 	defer cancel()

@@ -157,30 +157,30 @@ func PyPIHost(entry string) bool {
 func CheckGatewayURL(raw string) (string, string, error) {
 	raw = strings.TrimSpace(raw)
 	bad := func(why string) (string, string, error) {
-		return "", "", explained(invalid("gateway"), why)
+		return "", "", invalid("gateway", why)
 	}
 	if raw == "" || len(raw) > MaxGatewayURL {
-		return bad("The gateway's base URL needs 1 to 512 characters.")
+		return bad("Needs 1 to 512 characters.")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Opaque != "" {
-		return bad("The gateway's base URL must start with https:// and name a host, such as https://llm-gateway.example.com.")
+		return bad("Needs an address like https://llm.example.com.")
 	}
 	if u.User != nil {
-		return bad("The gateway's base URL can't hold a user name or password. Paste its key or token in the key field instead.")
+		return bad("Leave out the user name and password.")
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
-		return bad("The gateway's base URL can't have a query (?) or a fragment (#).")
+		return bad("Can't have a query (?) or a fragment (#).")
 	}
 	if p := u.Port(); p != "" && p != "443" {
-		return bad("The gateway must answer on port 443: egress lets agents reach only that port.")
+		return bad("Needs port 443 or none.")
 	}
 	host := HostName(u.Hostname())
 	if strings.HasPrefix(host, ".") || !ValidAllowEntry(host) {
-		return bad("The gateway's base URL must name one host by a name with at least two labels, not an IP address or a leading dot for subdomains.")
+		return bad("Needs one host name, like llm.example.com.")
 	}
 	if len(u.EscapedPath()) > maxGatewayPath || strings.ContainsAny(u.Path, "\x00\r\n\t ") {
-		return bad("The gateway's base URL path is longer than 256 characters or holds spaces or control characters.")
+		return bad("Needs a path of at most 256 characters, no spaces.")
 	}
 	out := url.URL{Scheme: "https", Host: host, Path: strings.TrimRight(u.Path, "/"), RawPath: strings.TrimRight(u.RawPath, "/")}
 	return out.String(), host, nil

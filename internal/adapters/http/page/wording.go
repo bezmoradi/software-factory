@@ -18,3 +18,24 @@ func saidPtr(s *session.Said) *saidJSON {
 	out := saidJSONOf(*s)
 	return &out
 }
+
+type savedSaid struct {
+	Message string `json:"message,omitempty"`
+	Tone    string `json:"tone,omitempty"`
+}
+
+func saveSaid(changed bool, saved, unchanged string) savedSaid {
+	if changed {
+		return savedSaid{Message: saved, Tone: "ok"}
+	}
+	return savedSaid{Message: unchanged, Tone: "warn"}
+}
+
+func (s savedSaid) on(answer map[string]any) map[string]any {
+	answer["message"], answer["tone"] = s.Message, s.Tone
+	return answer
+}
+
+func (s savedSaid) ok() map[string]any {
+	return s.on(map[string]any{"ok": true})
+}

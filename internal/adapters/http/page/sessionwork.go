@@ -21,6 +21,13 @@ const (
 	maxQueueText         = 80 << 10
 )
 
+const (
+	saidQueuedSaved       = "Saved. The session gets the new text when its turn comes."
+	saidQueuedUnchanged   = "No change: the queued message already says this."
+	saidCommandsSaved     = "Saved. New turns and new sessions use them."
+	saidCommandsUnchanged = "No change: these commands are already saved."
+)
+
 var (
 	runRoutes = map[string]bool{sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true}
 	queueID   = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -89,6 +96,7 @@ type portsJSON struct {
 }
 
 type sessionWorkJSON struct {
+	savedSaid
 	Agent    string           `json:"agent"`
 	Model    sessionModelJSON `json:"model"`
 	Queue    queueViewJSON    `json:"queue"`
@@ -147,7 +155,7 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request, body map[string]an
 	}
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sessionWorkFor + writeFor))
@@ -161,7 +169,7 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request, body map[string]an
 	case reviewModelsRoute:
 		s.reviewModels(w, op, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -172,48 +180,51 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 	text, okText := body["text"].(string)
 	okText = okText && len(text) <= maxQueueText
 	var err error
+	var said savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "sid") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "model":
 		model, okModel := body["model"].(string)
 		effort, okEffort := body["effort"].(string)
 		if !keysWithin(body, "op", "sid", "model", "effort") || !okSID || !okModel || !okEffort || !modelText.MatchString(model) || len(effort) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.SwitchModel(ctx, sid, model, effort)
 	case "queue-add":
 		if !keysWithin(body, "op", "sid", "text") || !okSID || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueAdd(sid, text)
 	case "queue-edit":
 		if !keysWithin(body, "op", "sid", "id", "text") || !okSID || !okID || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-		err = s.work.QueueEdit(sid, id, text)
+		var changed bool
+		changed, err = s.work.QueueEdit(sid, id, text)
+		said = saveSaid(changed, saidQueuedSaved, saidQueuedUnchanged)
 	case "queue-move":
 		to, okTo := integer(body["to"])
 		if !keysWithin(body, "op", "sid", "id", "to") || !okSID || !okID || !okTo || to < 0 || to >= session.MaxQueue {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueMove(sid, id, int(to))
 	case "queue-remove":
 		if !keysWithin(body, "op", "sid", "id") || !okSID || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueRemove(sid, id)
 	case "queue-resume":
 		if !keysWithin(body, "op", "sid") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueResume(sid)
@@ -235,19 +246,22 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, workJSONOf(v))
+	answer := workJSONOf(v)
+	answer.savedSaid = said
+	send(w, http.StatusOK, answer)
 }
 
 func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[string]any) {
 	name, okName := body["name"].(string)
 	if !okName || name == "" || len(name) > 400 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "name") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if !s.knownProject(name) {
@@ -267,22 +281,28 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 			browser, okBrowser = raw.(string)
 		}
 		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser})
-		s.logger.Info("project commands", "op", op, "ok", err == nil)
+		changed, err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser})
+		s.logger.Info("project commands", "op", op, "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		done := saveSaid(changed, saidCommandsSaved, saidCommandsUnchanged)
+		said = &done
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads and sets a project's commands only."})
 		return
 	}
 	c := s.work.Commands(name)
-	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "browser": c.Browser, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage})
+	answer := map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "browser": c.Browser, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage}
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }
 
 type roleModelJSON struct {
@@ -294,7 +314,7 @@ type roleModelJSON struct {
 func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if !okPath || path == "" || len(path) > session.MaxCwd {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var roles map[review.Role]session.ModelChoice
@@ -302,7 +322,7 @@ func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		roles, err = s.work.RoleModels(path)
@@ -311,7 +331,7 @@ func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]
 		model, okModel := body["model"].(string)
 		effort, okEffort := body["effort"].(string)
 		if !keysWithin(body, "op", "path", "role", "model", "effort") || !okRole || len(role) > 40 || !okModel || len(model) > 40 || !okEffort || len(effort) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		roles, err = s.work.SetRoleModel(path, review.Role(role), model, effort)
@@ -341,7 +361,7 @@ func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	body, bad := readObject(w, r, MaxAgentBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	again, okAgain := body["again"].(bool)
@@ -349,7 +369,7 @@ func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {
 		okAgain = true
 	}
 	if !keysWithin(body, "again") || !okAgain {
-		refuse(w, http.StatusBadRequest, "fields")
+		agentRefuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	if s.work == nil {

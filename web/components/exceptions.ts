@@ -1,8 +1,10 @@
+import type { EngineAnswer } from '../api.ts'
 import { actionButton, button, el, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { shortSha } from '../lib/format.ts'
+import { emptyState } from '../lib/page.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/exceptions'
 
@@ -67,7 +69,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     const parts: Node[] = [el('h3', 'label', 'Decisions you made')]
     if (text(v.auditProblem)) parts.push(el('p', 'small bad', visible(text(v.auditProblem))))
     const list = el('ul', 'list')
-    if (!items.length) list.append(el('li', 'muted', 'No Allows, overrides or allowed flags in the audit file.'))
+    if (!items.length) list.append(emptyState('No Allows, overrides or allowed flags in the audit file.', { tag: 'li' }))
     for (const e of items) {
       const li = el('li', 'exception-row')
       const head = el('div', 'row')
@@ -86,7 +88,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     if (v.hostsKnown !== true) hosts.append(el('li', 'muted', 'This engine has no network access settings to show.'))
     else {
       const added = records(v.hosts)
-      if (!added.length) hosts.append(el('li', 'muted', 'No hosts added.'))
+      if (!added.length) hosts.append(emptyState('No hosts added.', { tag: 'li' }))
       for (const h of added) {
         const li = el('li', 'row')
         li.append(el('code', '', visible(text(h.host))), el('span', 'small muted', `added ${num(h.addedAt) ? new Date(num(h.addedAt)).toLocaleString() : 'at an unknown time'}, ${until(num(h.expires), now)}`), el('span', 'small', text(h.reason) ? `Your reason: “${visible(text(h.reason))}”` : 'no reason given'))
@@ -106,12 +108,12 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     if (v.rulesKnown !== true) parts.push(el('p', 'small muted', 'This engine has no agent-host to list saved rules from.'))
     else {
       const repos = records(v.rules)
-      if (!repos.length) parts.push(el('p', 'small muted', 'No projects.'))
+      if (!repos.length) parts.push(emptyState('No projects.'))
       for (const r of repos) {
         const rules = records(r.rules).map(ruleOf)
         const ul = el('ul', 'list')
         if (text(r.problem)) ul.append(el('li', 'bad small', visible(text(r.problem))))
-        else if (!rules.length) ul.append(el('li', 'muted small', 'No saved rules.'))
+        else if (!rules.length) ul.append(emptyState('No saved rules.', { tag: 'li' }))
         for (const rule of rules) {
           const li = el('li', '')
           const row = el('div', 'row')
@@ -131,21 +133,20 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
   const reload = async () => {
     const mine = ++generation
     say.textContent = 'Loading…'
-    const res = await post(ROUTE, {}).catch(() => null)
-    const parsed: unknown = res ? await res.json().catch(() => ({})) : {}
+    const a = await post(ROUTE, {})
     if (mine !== generation) return
-    const v = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-    if (!res || !res.ok) {
-      say.textContent = text(v.message) ? visible(text(v.message)) : 'The register didn’t load.'
+    if (!a.ok) {
+      say.textContent = a.message
       return
     }
     say.textContent = ''
-    paint(v)
+    paint(a.body)
   }
 
   const m = modal({
     kind: 'exceptions',
     title: 'Register of exceptions',
+    docs: 'working-in-a-session',
     body: [
       el('p', 'small', 'Every exception to the usual rules in one place, read only: pushes you allowed with a reason, verdicts you overrode, flagged files and commits you allowed, hosts you added to the network allowlist and the allow rules Claude Code saved. Decisions come from the engine’s audit file, newest first.'),
       say, body,

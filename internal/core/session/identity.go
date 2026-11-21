@@ -32,7 +32,7 @@ type IdentityStore interface {
 
 type IdentityPage interface {
 	Identity() (CommitIdentity, error)
-	SetIdentity(name, email string) error
+	SetIdentity(name, email string) (bool, error)
 }
 
 func plainName(s string) bool {
@@ -48,11 +48,11 @@ func CheckIdentity(name, email string) (CommitIdentity, error) {
 	name, email = strings.TrimSpace(name), strings.TrimSpace(email)
 	switch {
 	case name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > MaxIdentityName:
-		return CommitIdentity{}, explained(invalid("name"), "The name agents commit with needs 1 to 100 characters.")
+		return CommitIdentity{}, onField("name", invalid("name", "Needs 1 to 100 characters."))
 	case !plainName(name) || strings.HasPrefix(name, "-"):
-		return CommitIdentity{}, explained(invalid("name"), "The name can't hold line breaks, control or invisible characters, < or >, or start with a hyphen.")
+		return CommitIdentity{}, onField("name", invalid("name", "Can't hold < or >, line breaks or start with a hyphen."))
 	case len(email) > MaxIdentityEmail || strings.HasPrefix(email, "-") || strings.Contains(email, "..") || !emailShape.MatchString(email):
-		return CommitIdentity{}, explained(invalid("email"), "The email needs the shape name@example.com, at most 254 characters with no spaces, such as GitHub's 12345+you@users.noreply.github.com.")
+		return CommitIdentity{}, onField("email", invalid("email", "Needs an address like you@example.com."))
 	}
 	return CommitIdentity{Name: name, Email: email}, nil
 }
@@ -80,7 +80,7 @@ func (i *Identities) Identity() (CommitIdentity, error) {
 	defer i.mu.Unlock()
 	c, err := i.store.Load()
 	if err != nil {
-		return CommitIdentity{}, explained(conflict("state"), "The engine couldn't read the name and email agents commit with.")
+		return CommitIdentity{}, conflict("state", "The engine couldn't read the name and email agents commit with.")
 	}
 	return c, nil
 }
@@ -94,23 +94,26 @@ func (i *Identities) Current() CommitIdentity {
 	return c
 }
 
-func (i *Identities) SetIdentity(name, email string) error {
+func (i *Identities) SetIdentity(name, email string) (bool, error) {
 	if i == nil || i.store == nil {
-		return explained(conflict("no state"), "This engine keeps no settings, so it can't save the name and email agents commit with.")
+		return false, conflict("no state", "This engine keeps no settings, so it can't save the name and email agents commit with.")
 	}
 	c, err := CheckIdentity(name, email)
 	if err != nil {
-		return err
+		return false, err
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if was, err := i.store.Load(); err == nil && was == c {
+		return false, nil
+	}
 	if err := i.store.Save(c); err != nil {
-		return explained(conflict("state"), "The engine couldn't save the name and email agents commit with.")
+		return false, conflict("state", "The engine couldn't save the name and email agents commit with.")
 	}
 	i.logger.Info("commit identity", "event", "saved")
-	return nil
+	return true, nil
 }
 
 func noIdentity() *Error {
-	return explained(conflict(NoIdentity), "No session starts or wakes until you set the name and email agents commit with, because an agent with none may commit with the email of its sign-in, which a push makes public. Set them with Name and email for commits in the Account menu, then try again.")
+	return conflict(NoIdentity, "No session starts or wakes until you set the name and email agents commit with, because an agent with none may commit with the email of its sign-in, which a push makes public. Set them with Git name and email in the Account menu, then try again.")
 }

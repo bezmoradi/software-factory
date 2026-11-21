@@ -1,4 +1,5 @@
 import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
+import { field } from '../lib/form.ts'
 import { scrolledText } from './cards.ts'
 import { saidOf } from '../lib/json.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
@@ -165,7 +166,6 @@ class SfForgePanel extends HTMLElement {
         line.setAttribute('aria-label', `The line that looks like a secret, ${shown(f.secretAt)}`)
         box.append(line)
       }
-      const label = el('label', 'check small')
       const input = el('input')
       input.type = 'checkbox'
       input.checked = this.#confirmed.has(key)
@@ -176,8 +176,7 @@ class SfForgePanel extends HTMLElement {
         else this.#confirmed.delete(key)
         sync()
       })
-      label.append(input, 'I checked it: this isn\'t a secret, and it can go to the git host')
-      box.append(label)
+      box.append(field('I checked it: this isn\'t a secret, and it can go to the git host', input, { kind: 'check' }))
       check = input
       why = el('p', 'small warn forge-why', 'Tick the box above to continue.')
       why.id = `forge-why-${encodeURIComponent(f.card)}`
@@ -194,17 +193,16 @@ class SfForgePanel extends HTMLElement {
     return parts
   }
 
-  #draftBox(f: SessionForge, off: boolean): HTMLLabelElement {
-    const label = el('label', 'check small')
+  #draftBox(f: SessionForge, off: boolean): HTMLDivElement {
     const box = el('input')
     box.type = 'checkbox'
     box.checked = this.#drafts.get(f.card) ?? true
     box.disabled = off
     box.dataset.key = `draft:${f.card}`
     box.addEventListener('change', () => this.#drafts.set(f.card, box.checked))
-    label.title = 'A draft pull request starts no review requests; you mark it ready on GitHub. If GitHub doesn\'t offer drafts for this repository, it opens ready for review.'
-    label.append(box, 'Open as a draft')
-    return label
+    const draft = field('Open as a draft', box, { kind: 'check' })
+    draft.title = 'A draft pull request starts no review requests; you mark it ready on GitHub. If GitHub doesn\'t offer drafts for this repository, it opens ready for review.'
+    return draft
   }
 
   #matches(f: SessionForge): HTMLElement {

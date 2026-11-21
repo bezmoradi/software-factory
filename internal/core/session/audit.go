@@ -138,11 +138,11 @@ func NewAuditLog(reader AuditReader, targets, held func(sid string) (PushTarget,
 func (a *AuditLog) View(sid string) (AuditView, error) {
 	t, ok := targetOrHeld(a.targets, a.held, sid)
 	if !ok {
-		return AuditView{}, explained(conflict("not started here"), "Only a session this engine started has an audit view here.")
+		return AuditView{}, conflict("not started here", "Only a session this engine started has an audit view here.")
 	}
 	entries, err := a.reader.Read(t.Name, t.Branch, MaxAuditShown)
 	if err != nil {
-		return AuditView{}, explained(conflict("audit"), "The engine couldn't read its audit file.")
+		return AuditView{}, conflict("audit", "The engine couldn't read its audit file.")
 	}
 	a.mu.Lock()
 	counts := map[string]int{}

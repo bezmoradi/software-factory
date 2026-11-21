@@ -103,14 +103,14 @@ func ViewedPath(path string) bool {
 
 func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) error {
 	if v.cfg.Targets == nil {
-		return explained(conflict("not started here"), "Only a session this engine started has a changes view here.")
+		return conflict("not started here", "Only a session this engine started has a changes view here.")
 	}
 	t, ok := v.cfg.Targets(sid)
 	if !ok {
 		return notStartedHere(v.cfg.Doubled, sid, "Only a session this engine started has a changes view here.")
 	}
 	if !ViewedPath(path) || !changeCommit.MatchString(blob) {
-		return explained(invalid("fields"), "A viewed mark needs the file's path and its blob hash.")
+		return invalid("fields", "A viewed mark needs the file's path and its blob hash.")
 	}
 	if on {
 		if err := v.onBranch(ctx, t, path, blob); err != nil {
@@ -121,7 +121,7 @@ func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) erro
 	defer v.mu.Unlock()
 	v.loadLocked()
 	if v.broken {
-		return explained(conflict("not read"), "The engine couldn't read its file of viewed marks, so it doesn't write over it. Its log says why.")
+		return conflict("not read", "The engine couldn't read its file of viewed marks, so it doesn't write over it. Its log says why.")
 	}
 	m := v.marks[sid]
 	files := maps.Clone(m.Files)
@@ -130,7 +130,7 @@ func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) erro
 	}
 	if on {
 		if _, had := files[path]; !had && len(files) >= MaxViewedFiles {
-			return explained(limited("viewed"), "This session already has the most viewed marks the engine keeps. Clear some first.")
+			return limited("viewed", "This session already has the most viewed marks the engine keeps. Clear some first.")
 		}
 		files[path] = blob
 	} else {
@@ -160,14 +160,14 @@ func (v *Viewed) Mark(ctx context.Context, sid, path, blob string, on bool) erro
 		delete(next, oldest)
 	}
 	if viewedSize(next) > MaxViewedBytes {
-		return explained(limited("viewed"), "This session's viewed marks would take more room than the engine keeps. Clear some first.")
+		return limited("viewed", "This session's viewed marks would take more room than the engine keeps. Clear some first.")
 	}
 	if v.cfg.Store != nil {
 		if err := v.cfg.Store.Save(next); err != nil {
 			if v.cfg.Logger != nil {
 				v.cfg.Logger.Warn("viewed", "event", "not-saved")
 			}
-			return explained(conflict("not saved"), "The engine couldn't save the mark. Try again.")
+			return conflict("not saved", "The engine couldn't save the mark. Try again.")
 		}
 	}
 	v.marks = next
@@ -185,13 +185,13 @@ func viewedSize(marks map[string]ViewedMarks) int {
 }
 
 func (v *Viewed) onBranch(ctx context.Context, t PushTarget, path, blob string) error {
-	off := explained(conflict("not on branch"), "That version of the file isn't one this session's branch changes, so the engine doesn't mark it viewed. Reload the Changes view and mark the file again.")
+	off := conflict("not on branch", "That version of the file isn't one this session's branch changes, so the engine doesn't mark it viewed. Reload the Changes view and mark the file again.")
 	if v.cfg.Heads == nil || v.cfg.Files == nil {
 		return off
 	}
 	head, err := v.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {
-		return explained(conflict("branch"), "The engine couldn't read the session's branch, so it doesn't mark the file viewed.")
+		return conflict("branch", "The engine couldn't read the session's branch, so it doesn't mark the file viewed.")
 	}
 	if at, err := v.cfg.Files.BlobAt(ctx, t.Repo, head, path); err == nil && at == blob {
 		return nil

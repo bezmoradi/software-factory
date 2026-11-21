@@ -10,11 +10,11 @@ func (w *Work) holdOf(name string) (HoldSettings, error) {
 	return st.Projects[name].Hold, err
 }
 
-const HoldRule = "A size limit is a whole number of files or lines, 0 to switch it off."
+const HoldRule = "A whole number of files or lines, 0 to switch it off."
 
 func (w *Work) SetHold(path string, h HoldSettings) error {
 	if field := h.Fault(); field != "" {
-		return onField(field, explained(invalid("hold"), HoldRule))
+		return onField(field, invalid("hold", HoldRule))
 	}
 	r, err := w.repoByPath(path)
 	if err != nil {

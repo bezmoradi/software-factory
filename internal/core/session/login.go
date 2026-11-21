@@ -88,7 +88,7 @@ func (l *keyLock) lockBy(ctx context.Context) bool {
 }
 
 func keyStepBusy() *Error {
-	return explained(limited("reviews"), "Another sign-in or key step for the reviewers is still running, so this one didn't start. Try again in a moment.")
+	return limited("reviews", "Another sign-in or key step for the reviewers is still running, so this one didn't start. Try again in a moment.")
 }
 
 func stepCtx(ctx context.Context, target string) context.Context {
@@ -153,16 +153,16 @@ func validLoginLink(link string) bool {
 
 func loginStep(ctx context.Context, host LoginHost, cmd Command, step, code string) (string, error) {
 	if host == nil {
-		return "", explained(conflict("login"), "This engine can't reach that container, so it can't sign Claude Code in there.")
+		return "", conflict("login", "This engine can't reach that container, so it can't sign Claude Code in there.")
 	}
 	switch step {
 	case "start", "cancel":
 	case "code":
 		if !ValidLoginCode(code) {
-			return "", explained(invalid("code"), loginCodeShape)
+			return "", onField("code", invalid("code", loginCodeShape))
 		}
 	default:
-		return "", explained(invalid("step"), "")
+		return "", invalid("step", "That isn't a step of the sign-in. Reload the page and try again.")
 	}
 	lctx, cancel := context.WithTimeout(ctx, loginFor)
 	defer cancel()
@@ -171,11 +171,11 @@ func loginStep(ctx context.Context, host LoginHost, cmd Command, step, code stri
 		return "", busy
 	}
 	if err != nil {
-		return "", explained(conflict("login"), hostMessage(err))
+		return "", conflict("login", hostMessage(err))
 	}
 	if step == "start" && !validLoginLink(link) {
 		_, _ = host.Login(lctx, cmd, "cancel", "")
-		return "", explained(conflict("login"), "Claude Code's login showed a link that isn't a claude.com or claude.ai sign-in, so the page doesn't open it.")
+		return "", conflict("login", "Claude Code's login showed a link that isn't a claude.com or claude.ai sign-in, so the page doesn't open it.")
 	}
 	return link, nil
 }
@@ -189,15 +189,15 @@ type boxLogin struct {
 
 func (d *Dispatcher) recordedBox(box string) (BoxRecord, error) {
 	if !ValidBox(box) {
-		return BoxRecord{}, explained(invalid("target"), "")
+		return BoxRecord{}, invalid("target", "That isn't a sign-in the engine knows. Reload the page and try again.")
 	}
 	list, err := d.loadBoxes()
 	if err != nil {
-		return BoxRecord{}, explained(conflict("state"), "The engine couldn't read its record of the sessions' containers.")
+		return BoxRecord{}, conflict("state", "The engine couldn't read its record of the sessions' containers.")
 	}
 	i := slices.IndexFunc(list, func(b BoxRecord) bool { return b.Box == box })
 	if i < 0 || d.cfg.BoxStore == nil {
-		return BoxRecord{}, explained(notFound("box"), "That session's container isn't one this engine records.")
+		return BoxRecord{}, notFound("box", "That session's container isn't one this engine records.")
 	}
 	return list[i], nil
 }
@@ -205,7 +205,7 @@ func (d *Dispatcher) recordedBox(box string) (BoxRecord, error) {
 func (d *Dispatcher) boxLogin(ctx context.Context, target string) (boxLogin, error) {
 	b, err := d.boxKeyLogin(ctx, target)
 	if err == nil && d.homeAsking(b.box) {
-		return boxLogin{}, explained(conflict("settings question"), "The session's wake is checking or waiting for your answer about the agent's changed settings, and Claude Code would load them, so the engine runs nothing in the container until you answer.")
+		return boxLogin{}, conflict("settings question", "The session's wake is checking or waiting for your answer about the agent's changed settings, and Claude Code would load them, so the engine runs nothing in the container until you answer.")
 	}
 	return b, err
 }
@@ -213,7 +213,7 @@ func (d *Dispatcher) boxLogin(ctx context.Context, target string) (boxLogin, err
 func (d *Dispatcher) boxKeyLogin(ctx context.Context, target string) (boxLogin, error) {
 	box, ok := TargetBox(target)
 	if !ok {
-		return boxLogin{}, explained(invalid("target"), "")
+		return boxLogin{}, invalid("target", "That isn't a sign-in the engine knows. Reload the page and try again.")
 	}
 	rec, err := d.recordedBox(box)
 	if err != nil {
@@ -221,10 +221,10 @@ func (d *Dispatcher) boxKeyLogin(ctx context.Context, target string) (boxLogin, 
 	}
 	spec, ok := findAgent(d.cfg.Agents, rec.Agent)
 	if !ok {
-		return boxLogin{}, explained(conflict("agent"), "That session's container runs an agent this engine doesn't know.")
+		return boxLogin{}, conflict("agent", "That session's container runs an agent this engine doesn't know.")
 	}
 	if !d.liveBox(box) {
-		return boxLogin{}, explained(conflict("box stopped"), "The session's container isn't running. Start or wake the session again to sign it in.")
+		return boxLogin{}, conflict("box stopped", "The session's container isn't running. Start or wake the session again to sign it in.")
 	}
 	if err := d.ConfirmBox(ctx, box); err != nil {
 		return boxLogin{}, err
@@ -234,20 +234,20 @@ func (d *Dispatcher) boxKeyLogin(ctx context.Context, target string) (boxLogin, 
 
 func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (string, *SignIn, error) {
 	if step == "code" && !ValidLoginCode(code) {
-		return "", nil, explained(invalid("code"), loginCodeShape)
+		return "", nil, onField("code", invalid("code", loginCodeShape))
 	}
 	var cmd Command
 	var host LoginHost
 	switch target {
 	case LoginReviewers:
 		if d.cfg.Reviews == nil {
-			return "", nil, explained(conflict("login"), "This engine runs no reviewer containers.")
+			return "", nil, conflict("login", "This engine runs no reviewer containers.")
 		}
 		ctx = stepCtx(ctx, target)
 		d.cfg.Reviews.signInChanging()
 		h, ok := d.cfg.Reviews.cfg.Host.(LoginHost)
 		if !ok {
-			return "", nil, explained(conflict("login"), "This engine can't sign Claude Code in for the reviewers.")
+			return "", nil, conflict("login", "This engine can't sign Claude Code in for the reviewers.")
 		}
 		cmd = d.cfg.Reviews.loginCommand()
 		host = h
@@ -258,10 +258,10 @@ func (d *Dispatcher) Login(ctx context.Context, target, step, code string) (stri
 		}
 		h, isLogin := b.host.(LoginHost)
 		if !b.spec.codeSignIn() {
-			return "", nil, explained(conflict("login"), b.spec.Name+" signs in with its own command in the session's container: "+b.spec.StepIn(b.box)+".")
+			return "", nil, conflict("login", b.spec.Name+" signs in with its own command in the session's container: "+b.spec.StepIn(b.box)+".")
 		}
 		if !isLogin {
-			return "", nil, explained(conflict("login"), "This engine can't sign Claude Code in to the session's container.")
+			return "", nil, conflict("login", "This engine can't sign Claude Code in to the session's container.")
 		}
 		cmd = Command{Argv: []string{b.spec.Command[0], "auth", "login"}, Dir: b.dir, Pass: b.spec.Pass, Timeout: loginFor}
 		host = h
@@ -298,7 +298,7 @@ func isBusy(err error) bool {
 }
 
 func signedInKeyKept() *Error {
-	return explained(limited("reviews"), "Claude Code signed the reviewers in, but every reviewer container stayed busy, so the engine couldn't remove the API key saved before, which Claude Code still prefers. Press Remove key once a review finishes.")
+	return limited("reviews", "Claude Code signed the reviewers in, but every reviewer container stayed busy, so the engine couldn't remove the API key saved before, which Claude Code still prefers. Press Remove key once a review finishes.")
 }
 
 func ValidAPIKey(key string) bool {
@@ -315,10 +315,10 @@ func ValidAPIKey(key string) bool {
 
 func (d *Dispatcher) KeyLogin(ctx context.Context, target, key string) (*SignIn, error) {
 	if !ValidLoginTarget(target) {
-		return nil, explained(invalid("target"), "")
+		return nil, invalid("target", "That isn't a sign-in the engine knows. Reload the page and try again.")
 	}
 	if !ValidAPIKey(key) {
-		return nil, explained(invalid("key"), "Paste the key exactly as the Claude Console or your gateway's team gives it: 20 to 512 characters, with no spaces or quotes.")
+		return nil, onField("key", invalid("key", "Needs 20 to 512 characters, no spaces or quotes."))
 	}
 	ctx = stepCtx(ctx, target)
 	err := d.sendKey(ctx, target, key)
@@ -342,7 +342,7 @@ func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
 	defer d.keyMu.Unlock()
 	host, established := d.gatewayOf(side)
 	if !established {
-		return explained(conflict("gateway"), "The engine couldn't read egress.json, so it can't tell whether Claude Code in the "+d.containerWords(target)+" would send this key to a gateway or to Anthropic, and it doesn't save the key. Fix or move egress.json and restart the engine first.")
+		return conflict("gateway", "The engine couldn't read egress.json, so it can't tell whether Claude Code in the "+d.containerWords(target)+" would send this key to a gateway or to Anthropic, and it doesn't save the key. Fix or move egress.json and restart the engine first.")
 	}
 	all, readable := d.keyRoutes()
 	before := d.cfg.Expected.Of(d.expectAgentOf(target))
@@ -350,7 +350,7 @@ func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
 		before = k.Before
 	}
 	if err := d.saveKeyRoute(target, KeyRoute{Saved: true, Gateway: host, Before: before}); err != nil {
-		return explained(conflict("state"), "The engine couldn't record where the key goes, so it didn't save the key.")
+		return conflict("state", "The engine couldn't record where the key goes, so it didn't save the key.")
 	}
 	return d.apiKey(ctx, target, "set", key)
 }
@@ -406,7 +406,7 @@ func (d *Dispatcher) keyHost(ctx context.Context, target string) (KeyHost, error
 				return host, nil
 			}
 		}
-		return nil, explained(conflict("login"), "This engine can't start a reviewer container, so it can't change the reviewers' API key.")
+		return nil, conflict("login", "This engine can't start a reviewer container, so it can't change the reviewers' API key.")
 	}
 	b, err := d.boxKeyLogin(ctx, target)
 	if err != nil {
@@ -414,7 +414,7 @@ func (d *Dispatcher) keyHost(ctx context.Context, target string) (KeyHost, error
 	}
 	host, ok := b.host.(KeyHost)
 	if !ok || !b.spec.codeSignIn() {
-		return nil, explained(conflict("login"), b.spec.Name+" in the session's container doesn't take an API key from the page.")
+		return nil, conflict("login", b.spec.Name+" in the session's container doesn't take an API key from the page.")
 	}
 	return host, nil
 }
@@ -444,7 +444,7 @@ func (d *Dispatcher) apiKey(ctx context.Context, target, step, key string) error
 		return busy
 	}
 	if err != nil {
-		return explained(conflict("login"), hostMessage(err))
+		return conflict("login", hostMessage(err))
 	}
 	return nil
 }
@@ -541,7 +541,7 @@ func (d *Dispatcher) boxSignIn(ctx context.Context, b boxLogin) (*SignIn, error)
 	spec := b.spec
 	checker, ok := b.host.(SignInChecker)
 	if spec.Status == nil || len(spec.Command) == 0 || !ok {
-		return nil, explained(conflict("sign-in check"), "")
+		return nil, conflict("sign-in check", "This agent has no sign-in check the engine can run in its container.")
 	}
 	sctx, cancel := context.WithTimeout(ctx, signInFor)
 	defer cancel()

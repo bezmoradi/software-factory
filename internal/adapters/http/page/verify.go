@@ -121,19 +121,19 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 	}
 	sid, okSID := viewSession(body)
 	if !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "start":
 		kind, okKind := body["kind"].(string)
 		if !keysWithin(body, "op", "sid", "kind") || !okKind || len(kind) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_, err := s.verify.Start(r.Context(), sid, session.VerifyKind(kind), session.VerifyByPage)
@@ -146,7 +146,7 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 	case "stop":
 		id, okID := body["id"].(string)
 		if !keysWithin(body, "op", "sid", "id") || !okID || !verifyRunID.MatchString(id) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.verify.Stop(r.Context(), sid, id)
@@ -160,7 +160,7 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 		id, okID := body["id"].(string)
 		name, okName := body["name"].(string)
 		if !keysWithin(body, "op", "sid", "id", "name") || !okID || !verifyRunID.MatchString(id) || !okName || name == "" || len(name) > 124 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		s.verifyAttachment(w, r, sid, id, name)
@@ -181,19 +181,19 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 func (s *Server) verifyMain(w http.ResponseWriter, r *http.Request, body map[string]any, op string) {
 	repo, okRepo := body["repo"].(string)
 	if _, hasSID := body["sid"]; hasSID || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "start":
 		kind, okKind := body["kind"].(string)
 		if !keysWithin(body, "op", "repo", "kind") || !okKind || len(kind) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

@@ -159,7 +159,7 @@ type PullsPage interface {
 	OpenPull(ctx context.Context, sid string) error
 	Ready(ctx context.Context, sid string) error
 	Settings(sid string) (string, FollowSettings, error)
-	SetSettings(sid string, s FollowSettings) error
+	SetSettings(sid string, s FollowSettings) (bool, error)
 	Findings(sid string) (FindingOffer, error)
 	OpenFindings(ctx context.Context, sid, commit string) (int, error)
 }
@@ -369,29 +369,33 @@ func (fl *Follows) Settings(sid string) (string, FollowSettings, error) {
 	return t.Name, fl.settingsOf(t.Name), nil
 }
 
-func (fl *Follows) SetSettings(sid string, s FollowSettings) error {
+func (fl *Follows) SetSettings(sid string, s FollowSettings) (bool, error) {
 	t, ok := fl.cfg.Forges.cfg.Targets(sid)
 	if !ok {
-		return notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started has pull request settings.")
+		return false, notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started has pull request settings.")
 	}
 	if len(s.Bots) > MaxFollowBots {
-		return explained(invalid("bots"), "A project lists at most "+strconv.Itoa(MaxFollowBots)+" bot logins.")
+		return false, onField("bots", invalid("bots", "A project lists at most "+strconv.Itoa(MaxFollowBots)+" bot logins."))
 	}
 	for _, b := range s.Bots {
 		if !BotLogin.MatchString(b) {
-			return explained(invalid("bots"), "Each bot login is a GitHub login: letters, digits and hyphens, at most 39 characters, optionally ending in [bot].")
+			return false, onField("bots", invalid("bots", "Needs GitHub logins, optionally ending in [bot]."))
 		}
 	}
 	s = cleanSettings(s)
 	id, ok := fl.projectID(t.Name)
 	if !ok {
-		return explained(conflict("repository"), "The project's repository isn't in the engine's list any more.")
+		return false, conflict("repository", "The project's repository isn't in the engine's list any more.")
 	}
 	fl.mu.Lock()
+	if was := fl.projects[id]; was.Auto == s.Auto && was.Assign == s.Assign && slices.Equal(was.Bots, s.Bots) {
+		fl.mu.Unlock()
+		return false, nil
+	}
 	if s.Auto || s.Assign || len(s.Bots) > 0 {
 		if _, known := fl.projects[id]; !known && len(fl.projects) >= MaxFollowed {
 			fl.mu.Unlock()
-			return explained(limited("projects"), "The engine keeps pull request settings for at most "+strconv.Itoa(MaxFollowed)+" projects.")
+			return false, limited("projects", "The engine keeps pull request settings for at most "+strconv.Itoa(MaxFollowed)+" projects.")
 		}
 		fl.projects[id] = s
 	} else {
@@ -409,7 +413,7 @@ func (fl *Follows) SetSettings(sid string, s FollowSettings) error {
 		fl.show(sid)
 	}
 	fl.cfg.Logger.Info("pull follow", "event", "settings", "bots", len(s.Bots), "auto", s.Auto, "assign", s.Assign)
-	return nil
+	return true, nil
 }
 
 func (fl *Follows) assignOn(project string) bool {
@@ -937,7 +941,7 @@ func (fl *Follows) Send(sid string) error {
 func (fl *Follows) send(sid, by string) error {
 	ft, why := fl.cfg.Forges.target(sid, NeedPulls)
 	if why != "" {
-		return explained(conflict("target"), why)
+		return conflict("target", why)
 	}
 	now := fl.cfg.Now()
 	settings := fl.settingsOf(ft.t.Name)
@@ -946,18 +950,18 @@ func (fl *Follows) send(sid, by string) error {
 	switch {
 	case fl.closed:
 		fl.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	case x == nil || x.saved.Number == 0 || x.saved.Done != "":
 		fl.mu.Unlock()
-		return explained(conflict("not followed"), "The engine follows no open pull request for this session.")
+		return conflict("not followed", "The engine follows no open pull request for this session.")
 	case by == ByPage && !fl.sends.allow(sid, now):
 		fl.mu.Unlock()
-		return explained(limited("send"), "What's new on the pull request was sent "+strconv.Itoa(FollowSendCalls)+" times in 10 minutes. Wait a few minutes.")
+		return limited("send", "What's new on the pull request was sent "+strconv.Itoa(FollowSendCalls)+" times in 10 minutes. Wait a few minutes.")
 	}
 	checksNew := x.failing && x.checkKey != "" && x.checkKey != x.saved.CheckSent
 	if !checksNew && len(x.pending) == 0 {
 		fl.mu.Unlock()
-		return explained(conflict("nothing new"), "Nothing new on the pull request waits to be sent.")
+		return conflict("nothing new", "Nothing new on the pull request waits to be sent.")
 	}
 	pending := slices.Clone(x.pending)
 	login := ""
@@ -980,17 +984,17 @@ func (fl *Follows) send(sid, by string) error {
 	request := randomHex(16)
 	if !ok {
 		fl.audit(sid, ft.t, ft.repo, by, ResultWithheld, request, "what's new on pull request #"+strconv.Itoa(number)+" held a token-shaped string, so the engine didn't send it")
-		return explained(conflict("withheld"), "What's new on the pull request holds what looks like a token, so the engine didn't send it to the session. Read it on the git host instead.")
+		return conflict("withheld", "What's new on the pull request holds what looks like a token, so the engine didn't send it to the session. Read it on the git host instead.")
 	}
 	if fl.cfg.Tell == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message.")
+		return conflict("no session", "This engine can't send the session a message.")
 	}
 	if err := fl.cfg.Tell(sid, strings.ReplaceAll(text, ft.repo.Token, "[token]")); err != nil {
 		fl.audit(sid, ft.t, ft.repo, by, ResultNotSent, request, "what's new on pull request #"+strconv.Itoa(number)+" couldn't reach the session")
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
-		return explained(conflict("not sent"), "What's new couldn't reach the session, which must be running and controlled from this page.")
+		return conflict("not sent", "What's new couldn't reach the session, which must be running and controlled from this page.")
 	}
 	fl.mu.Lock()
 	if fl.list[sid] == x {

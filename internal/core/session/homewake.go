@@ -68,7 +68,7 @@ func (d *Dispatcher) homeGate(ctx context.Context, r *run, consent Consent) erro
 	h, box := d.home, r.box
 	d.mu.Unlock()
 	if h == nil || h.Store == nil {
-		return explained(conflict("no settings record"), "This engine keeps no record of the agents' user settings, so it can't tell whether they changed and doesn't wake the session.")
+		return conflict("no settings record", "This engine keeps no record of the agents' user settings, so it can't tell whether they changed and doesn't wake the session.")
 	}
 	reader, _ := d.hostFor(box).(HomeReader)
 	rctx, cancel := context.WithTimeout(ctx, homeSettingsFor)
@@ -270,7 +270,7 @@ func (d *Dispatcher) RefuseWake(ctx context.Context, sid string) error {
 	}
 	d.mu.Unlock()
 	if !asking {
-		return explained(conflict("not asking"), "This session's wake isn't waiting for an answer about the agent's settings.")
+		return conflict("not asking", "This session's wake isn't waiting for an answer about the agent's settings.")
 	}
 	d.dropOnce(r.box)
 	if d.liveBox(r.box) {

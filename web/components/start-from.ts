@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { button, el, focusedKey, labelError, refocus, say, sayWhenShown, shown, statusLine, unspoofed, visible, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { field, fieldRow } from '../lib/form.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
 
@@ -21,7 +22,7 @@ function pointsOf(raw: unknown): StartPointsView | null {
 }
 
 export class StartFromField {
-  box = el('div', 'field start-from')
+  readonly box: HTMLDivElement
   select = el('select', 'textbox')
   said = el('p', 'small muted')
   #loading = option('', 'Loading branches and pull requests…')
@@ -30,8 +31,6 @@ export class StartFromField {
     const id = `start-from-${++serial}`
     this.select.id = id
     this.select.name = 'from'
-    const name = el('label', 'small', 'Start from')
-    name.htmlFor = id
     this.select.append(option('', `main${main ? ` (${main})` : ''}, as fetched now`))
     const own = sessions.filter(s => s.startPoint)
     if (own.length) {
@@ -50,7 +49,8 @@ export class StartFromField {
     this.#loading.disabled = true
     this.select.append(this.#loading)
     if (at) this.select.value = SHA.test(forkAt) ? `sid:${fork}:${forkAt}` : `sid:${fork}`
-    this.box.append(name, this.select, this.said)
+    this.box = field('Start from', this.select, { cls: 'start-from' })
+    this.box.append(this.said)
     this.#explain()
     this.select.addEventListener('change', () => {
       labelError(this.select, '')
@@ -66,15 +66,14 @@ export class StartFromField {
   }
 
   async #load(path: string) {
-    const res = await api('/api/start-points', { path }).catch(() => null)
-    const body: unknown = res ? await res.json().catch(() => null) : null
+    const a = await request('/api/start-points', { path })
     this.#loading.remove()
-    if (!res?.ok) {
-      const message = body && typeof body === 'object' && typeof (body as { message?: unknown }).message === 'string' ? visible((body as { message: string }).message) : 'The engine couldn’t list the branches.'
+    if (!a.ok) {
+      const message = a.message
       this.select.append(Object.assign(option('', `Branches and pull requests aren’t listed: ${message}`), { disabled: true }))
       return
     }
-    const points = pointsOf(body)
+    const points = pointsOf(a.body)
     if (!points) return
     if (points.branches.length) {
       const group = el('optgroup')
@@ -105,16 +104,6 @@ export class StartFromField {
 }
 
 type MergedPull = { number: number; title: string; body?: string; author: string; url: string; base: string; head: string; merge: string; merged: number }
-
-async function pairCall(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const res = await api('/api/pair', body).catch(() => null)
-  const parsed = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-  return { ok: !!res && res.ok, body: parsed }
-}
-
-function told(body: Record<string, unknown>, fallback: string): string {
-  return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
-}
 
 export class BenchmarkField {
   box = el('details', 'issue-picker benchmark-picker')
@@ -160,10 +149,10 @@ export class BenchmarkField {
     if (this.#busy) return
     this.#busy = true
     say(this.#status, 'Reading the merged pull requests…', 'muted')
-    const a = await pairCall({ op: 'merged-list', path: this.#path, page })
+    const a = await request('/api/pair', { op: 'merged-list', path: this.#path, page })
     this.#busy = false
     if (!a.ok) {
-      say(this.#status, told(a.body, "The merged pull requests couldn't be read."), 'bad')
+      say(this.#status, a.message, 'bad')
       return
     }
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
@@ -201,10 +190,10 @@ export class BenchmarkField {
     if (this.#busy) return
     this.#busy = true
     say(this.#status, `Reading pull request #${number}…`, 'muted')
-    const a = await pairCall({ op: 'merged-read', path: this.#path, number })
+    const a = await request('/api/pair', { op: 'merged-read', path: this.#path, number })
     this.#busy = false
     if (!a.ok) {
-      say(this.#status, told(a.body, "The pull request couldn't be read."), 'bad')
+      say(this.#status, a.message, 'bad')
       return
     }
     this.#chosen = { pull: a.body.pull as MergedPull, refused: typeof a.body.refused === 'string' ? a.body.refused : '', clipped: a.body.clipped === true, hash: typeof a.body.hash === 'string' ? a.body.hash : '' }
@@ -250,26 +239,22 @@ export class PairField {
   constructor(starters: Starter[], models: [string, string][]) {
     this.#starters = starters.filter(a => a.enabled)
     const summary = el('summary', 'small', 'Start with both: two sessions on one task')
-    const check = el('label', 'check small')
+    this.message.name = 'message'
     this.on.type = 'checkbox'
-    check.append(this.on, ' Start a second session of the same agent beside the first, to compare them')
+    const check = field('Start a second session of the same agent beside the first, to compare them', this.on, { kind: 'check' })
     this.model.setAttribute('aria-label', 'Second model')
     for (const [value, text] of models) {
       const o = el('option', '', text)
       o.value = value
       this.model.append(o)
     }
-    const row = el('div', 'opts field-row')
-    row.append(this.model)
-    const id = `pair-message-${++serial}`
-    const name = el('label', 'small', 'First message, sent to both')
-    name.htmlFor = id
-    this.message.id = id
+    const row = fieldRow([this.model], 'opts field-row')
+    this.message.id = `pair-message-${++serial}`
     this.message.rows = 4
     this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
     this.message.addEventListener('input', () => labelError(this.message, ''))
     const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and both sessions' cost estimates; keep one and delete the other.")
-    this.box.append(summary, check, row, name, this.message, note, this.said)
+    this.box.append(summary, check, row, field('First message, sent to both', this.message), note, this.said)
   }
 
   follow(agent: string) {

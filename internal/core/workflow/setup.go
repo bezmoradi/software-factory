@@ -103,11 +103,12 @@ func (d Depth) Sized() bool {
 }
 
 const (
-	DepthRunsRule  = "a project sets repeated runs for at most 20 roles"
-	DepthRunRule   = "a role runs 1 to 3 times per commit"
-	DepthSizeRule  = "a size is a whole number of files or lines, 0 to switch it off, and roles above it run 1 to 3 times"
-	DepthCountRule = "a project names at most 5 advisory roles and 5 extra roles above the size"
-	DepthNameRule  = "each role is an agent name: letters, digits and . _ : @ -, at most 120 characters"
+	DepthRunsRule      = "At most 20 roles with repeated runs."
+	DepthRunRule       = "Each role runs 1 to 3 times per commit."
+	DepthSizeRule      = "A whole number of files or lines, 0 to switch it off."
+	DepthExtraRunsRule = "A whole number of runs, at most 3."
+	DepthCountRule     = "At most 5 roles."
+	DepthNameRule      = "Agent names: letters, digits and . _ : @ -, up to 120 each."
 )
 
 func (d Depth) Problem() (string, string) {
@@ -138,7 +139,7 @@ func (d Depth) Problem() (string, string) {
 	case d.MaxLines < 0 || d.MaxLines > MaxDepthSize:
 		return "maxLines", DepthSizeRule
 	case d.ExtraRuns < 0 || d.ExtraRuns > review.MaxRuns:
-		return "extraRuns", DepthSizeRule
+		return "extraRuns", DepthExtraRunsRule
 	}
 	return "", ""
 }

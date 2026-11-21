@@ -1,7 +1,8 @@
-import { api, upload } from './api.ts'
+import { request, upload } from './api.ts'
 import { current, say, scroller, sessions, state, toast, type Session } from './app-state.ts'
-import { button, byId, el, visible } from './lib/dom.ts'
+import { button, byId, el } from './lib/dom.ts'
 import { complete } from './lib/complete.ts'
+import { form } from './lib/form.ts'
 import { agentWord } from './lib/format.ts'
 import { icon } from './components/icon.ts'
 
@@ -27,6 +28,17 @@ interface Draft {
 async function sha256(data: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('')
 }
+
+function mountComposer(): void {
+  const parts = byId('composer-parts')
+  const box = form({ cls: 'composer', autocomplete: 'off', children: [...parts.childNodes] })
+  box.id = 'composer'
+  box.tabIndex = -1
+  box.hidden = true
+  parts.replaceWith(box)
+}
+
+mountComposer()
 
 export function startComposer({ send }: ComposerDeps): Composer {
   const drafts = new Map<string, Draft>()
@@ -117,10 +129,9 @@ export function startComposer({ send }: ComposerDeps): Composer {
   async function attachFile(file: File, key: string, sid: string) {
     const data = await file.arrayBuffer().catch(() => null)
     if (!data) return say(`The page couldn't read ${file.name}. For a folder, type its path with @ instead.`)
-    const res = await api('/api/file-match', { sid, name: file.name, size: file.size, sha256: await sha256(data) }).catch(() => null)
-    const found: { path?: unknown; message?: unknown } | null = res ? await res.json().catch(() => null) : null
-    if (res && !res.ok && typeof found?.message === 'string' && found.message) return say(visible(found.message))
-    if (res?.ok && typeof found?.path === 'string' && found.path) return mention(key, found.path)
+    const a = await request('/api/file-match', { sid, name: file.name, size: file.size, sha256: await sha256(data) })
+    if (!a.ok && a.status !== 0 && a.message) return say(a.message)
+    if (a.ok && typeof a.body.path === 'string' && a.body.path) return mention(key, a.body.path)
     const d = draftOf(key)
     d.files.push(file)
     toast({ id: `copy:${file.name}`, title: `${file.name} isn’t in this project`, description: `${agentWord(sessions.get(sid)?.info.agent)} gets a read-only copy, deleted when the session ends. Changes don’t reach your file.`, tone: 'info', timeout: 8000 })
@@ -218,10 +229,10 @@ export function startComposer({ send }: ComposerDeps): Composer {
     files: async q => {
       const s = current()
       if (!s) return { files: [], cut: false }
-      const res = await api('/api/files', { sid: s.sid, q })
-      const body: { files?: unknown; cut?: unknown } | null = res.ok ? await res.json() : null
-      const files = Array.isArray(body?.files) ? (body.files as unknown[]).filter((f): f is string => typeof f === 'string') : []
-      return { files, cut: body?.cut === true }
+      const a = await request('/api/files', { sid: s.sid, q })
+      const body = a.ok ? a.body : {}
+      const files = Array.isArray(body.files) ? (body.files as unknown[]).filter((f): f is string => typeof f === 'string') : []
+      return { files, cut: body.cut === true }
     },
   })
   const grow = () => {
@@ -270,10 +281,9 @@ export function startComposer({ send }: ComposerDeps): Composer {
     sending.add(key)
     let refused = ''
     const sent = async (blob: Blob, name = '') => {
-      const res = await upload(blob, s.sid, name).catch(() => null)
-      const body: { id?: unknown; message?: unknown } | null = res ? await res.json().catch(() => null) : null
-      if (res?.ok && typeof body?.id === 'string') return body.id
-      refused = typeof body?.message === 'string' ? visible(body.message) : ''
+      const a = await upload(blob, s.sid, name)
+      if (a.ok && typeof a.body.id === 'string') return a.body.id
+      refused = a.message
       return ''
     }
     const ids: string[] = []

@@ -74,7 +74,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), rulesFor)
@@ -83,7 +83,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	switch op {
 	case "list":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "remove":
@@ -94,19 +94,19 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 		if v, has := body["worktree"]; has {
 			t, ok := v.(string)
 			if !ok {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			worktree = t
 		}
 		if !keysWithin(body, "op", "repo", "box", "place", "worktree", "rule") || !okPlace || !okRule || !okBox || !session.ValidBox(box) || !session.ValidRuleText(rule) || len(worktree) > 64 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		switch session.RulePlace(place) {
 		case session.RuleInClone, session.RuleInUser, session.RuleInWorktree:
 		default:
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := rules.RemoveAllowRule(ctx, repo, box, session.RulePlace(place), worktree, rule)
@@ -236,7 +236,7 @@ func (s *Server) agentReport(w http.ResponseWriter, body map[string]any) {
 	reports := s.reports
 	s.mu.Unlock()
 	if op, ok := body["op"].(string); !ok || op != "read" || !keysWithin(body, "op") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if reports == nil {

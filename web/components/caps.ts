@@ -1,11 +1,12 @@
-import { api } from '../api.ts'
-import { busy, button, el, field, focusedKey, labelError, refocus, replaceKeeping, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { request } from '../api.ts'
+import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { actions, field, fieldRow, form } from '../lib/form.ts'
 import { continueBody, day, limitsAnswer, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
-import type { CapsValues, SessionLimits } from './usage.ts'
+import type { CapsValues, LimitsAnswer, SessionLimits } from './usage.ts'
 
 type CapKind = 'money' | 'time' | 'turns' | 'disk'
 
-type CapsAnswer = { problem: string; field: string; error: string }
+type CapsAnswer = LimitsAnswer
 
 const KINDS: { kind: CapKind; key: keyof CapsValues; label: string; unit: string }[] = [
   { kind: 'money', key: 'money', label: 'Spending cap (USD)', unit: '$' },
@@ -107,7 +108,7 @@ function fillKey(project: string): string {
 }
 
 class CapsInputs {
-  readonly box = el('div', 'caps-fields field-row')
+  readonly box = fieldRow([], 'caps-fields field-row')
   readonly inputs = new Map<keyof CapsValues, HTMLInputElement>()
   #key = ''
   #project = ''
@@ -122,6 +123,7 @@ class CapsInputs {
       input.inputMode = k.key === 'money' ? 'decimal' : 'numeric'
       input.placeholder = `${k.unit}: off`
       input.id = `caps-${k.key}-${++fieldSerial}`
+      input.name = k.key
       input.title = `${k.label}; empty or 0 is off`
       input.addEventListener('input', () => labelError(input, ''))
       this.inputs.set(k.key, input)
@@ -227,7 +229,7 @@ class SfProjectCaps extends HTMLElement {
   #inputs = new CapsInputs('Caps for new sessions in this project')
   #project = ''
   #said = statusLine()
-  #save = button('Save caps', 'small', () => void this.#store())
+  #save = button('Save caps', 'small', undefined, 'submit')
   #saving = false
   #built = false
   #stop = () => {}
@@ -236,8 +238,7 @@ class SfProjectCaps extends HTMLElement {
     if (!this.#built) {
       this.#built = true
       const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs; disk is the size of the session’s folder, measured every 2 minutes, which an agent can pass between measurements.')
-      this.#inputs.box.append(this.#save)
-      this.replaceChildren(el('h3', 'label', 'Caps'), note, this.#inputs.box, this.#said)
+      this.replaceChildren(el('h3', 'label', 'Caps'), note, form({ children: [this.#inputs.box, actions([this.#save])], onSubmit: () => void this.#store() }), this.#said)
     }
     this.#stop()
     this.#stop = watchLimits(this)
@@ -262,12 +263,11 @@ class SfProjectCaps extends HTMLElement {
     const v = this.#inputs.value()
     this.#inputs.mark('')
     this.#saving = true
-    const { problem, field: name } = await whileBusy(this.#save, () => limitsAnswer({ op: 'project', name: this.#project, ...v }))
+    const { problem, field: name, said, tone } = await whileBusy(this.#save, () => limitsAnswer({ op: 'project', name: this.#project, ...v }))
     this.#saving = false
     if (!problem) this.#inputs.fill(this.#project, true)
     const bad = this.#inputs.mark(name, problem)
-    this.#said.className = problem && !bad ? 'small warn' : 'small muted'
-    this.#said.textContent = bad ? '' : problem || 'Saved.'
+    say(this.#said, bad ? '' : problem || said, problem ? 'warn' : tone)
     bad?.focus()
   }
 }
@@ -282,12 +282,11 @@ class SfSessionLimits extends HTMLElement {
   #busyKey = ''
   #held = new WeakSet<HTMLButtonElement>()
   #dimmed = new WeakSet<HTMLButtonElement>()
-  #editSave = button('Save caps', 'small', () => void this.#saveEdit(), 'button', 'caps-save')
+  #editSave = button('Save caps', 'small', undefined, 'submit', 'caps-save')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
     this.setAttribute('aria-label', 'Caps and limits for this session')
-    if (!this.#edit.box.querySelector('button')) this.#edit.box.append(this.#editSave)
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -398,12 +397,16 @@ class SfSessionLimits extends HTMLElement {
       raise = { input, box: field(`New ${capName(kind)}`, input) }
       this.#raise.set(s.sid + s.reached, raise)
     }
-    const row = el('div', 'row field-row')
     const raised = raise.input
-    row.append(raise.box, button('Raise the cap', 'primary small', () => void this.#call({ op: 'raise', sid: s.sid, kind, value: Number(raised.value) }, 'raise', a => (a.field === 'value' || a.error === 'value' ? raised : null)), 'button', 'raise'))
-    if (kind === 'disk') row.append(button('Check again', 'small', () => void this.#call({ op: 'measure', sid: s.sid }, 'measure'), 'button', 'measure'))
-    row.append(stop)
-    box.append(row)
+    const buttons = [button('Raise the cap', 'primary small', undefined, 'submit', 'raise')]
+    if (kind === 'disk') buttons.push(button('Check again', 'small', () => void this.#call({ op: 'measure', sid: s.sid }, 'measure'), 'button', 'measure'))
+    buttons.push(stop)
+    box.append(form({
+      inline: true,
+      cls: 'field-row',
+      children: [raise.box, actions(buttons)],
+      onSubmit: () => void this.#call({ op: 'raise', sid: s.sid, kind, value: Number(raised.value) }, 'raise', a => (a.field === 'value' ? raised : null)),
+    }))
     return box
   }
 
@@ -414,7 +417,7 @@ class SfSessionLimits extends HTMLElement {
     box.append(el('p', '', `Looks stuck: ${what} in its last few calls.`))
     if (st.detail) box.append(el('code', 'caps-detail', visible(st.detail)))
     const interrupt = button('Interrupt', 'small', () => {
-      if (!this.#busy) void whileBusy(interrupt, () => api('/api/interrupt', { sid }).catch(() => null))
+      if (!this.#busy) void whileBusy(interrupt, () => request('/api/interrupt', { sid }))
     }, 'button', 'interrupt')
     box.append(interrupt)
     return box
@@ -450,7 +453,7 @@ class SfSessionLimits extends HTMLElement {
     })
     const summary = el('summary', '', s?.caps && capsSet(s.caps) ? 'Change caps' : 'Set caps')
     summary.dataset.key = 'caps-edit'
-    d.append(summary, this.#edit.box)
+    d.append(summary, form({ children: [this.#edit.box, actions([this.#editSave])], onSubmit: () => void this.#saveEdit() }))
     return d
   }
 
@@ -466,7 +469,7 @@ class SfSessionLimits extends HTMLElement {
   }
 
   async #call(body: Record<string, unknown>, key: string, mark: (a: CapsAnswer) => HTMLInputElement | null = () => null): Promise<CapsAnswer> {
-    if (this.#busy) return { problem: '', field: '', error: '' }
+    if (this.#busy) return { problem: '', field: '', error: '', said: '', tone: 'ok' }
     this.#busy = true
     this.#busyKey = key
     this.#said.textContent = ''
@@ -474,7 +477,7 @@ class SfSessionLimits extends HTMLElement {
     const answer = await limitsAnswer(body)
     const bad = answer.problem ? mark(answer) : null
     if (bad) labelError(bad, answer.problem)
-    this.#said.textContent = bad ? '' : answer.problem
+    say(this.#said, bad ? '' : answer.problem || answer.said, answer.problem ? 'warn' : answer.tone)
     this.#busy = false
     busy(this.#editSave, false)
     this.paint()

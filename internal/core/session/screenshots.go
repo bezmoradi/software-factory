@@ -172,16 +172,16 @@ func (d *Dispatcher) DropStrayScreenshots(ctx context.Context, files ScreenshotF
 
 func (r *Registry) screenshotFiles(sid string) (ScreenshotFiles, string, error) {
 	if !sidPattern.MatchString(sid) {
-		return nil, "", invalid("sid")
+		return nil, "", invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.shots.files == nil {
-		return nil, "", explained(conflict("no screenshots"), "This engine has no workspace folder, so it shows no screenshots.")
+		return nil, "", conflict("no screenshots", "This engine has no workspace folder, so it shows no screenshots.")
 	}
 	a := r.admitted[sid]
 	if a == nil {
-		return nil, "", explained(notFound("session"), "Only a session this engine started shows screenshots.")
+		return nil, "", notFound("session", "Only a session this engine started shows screenshots.")
 	}
 	if !ValidBox(a.Box) {
 		return nil, "", oldLayout()
@@ -222,21 +222,21 @@ func (r *Registry) Screenshot(sid, name string) (Screenshot, error) {
 		return Screenshot{}, err
 	}
 	if !ScreenshotName(name) {
-		return Screenshot{}, explained(invalid("name"), "A screenshot is a .png, .jpg, .jpeg or .gif file directly in the session's screenshots folder.")
+		return Screenshot{}, invalid("name", "A screenshot is a .png, .jpg, .jpeg or .gif file directly in the session's screenshots folder.")
 	}
 	if !r.shots.decoding.TryLock() {
-		return Screenshot{}, explained(limited("busy"), "Another screenshot is being read. Try again in a moment.")
+		return Screenshot{}, limited("busy", "Another screenshot is being read. Try again in a moment.")
 	}
 	defer r.shots.decoding.Unlock()
 	data, err := files.Read(box, sid, name, MaxScreenshot)
 	if errors.Is(err, ErrScreenshotTooBig) {
-		return Screenshot{}, explained(invalid("too big"), "A screenshot may be at most 10 MiB.")
+		return Screenshot{}, invalid("too big", "A screenshot may be at most 10 MiB.")
 	}
 	if err != nil {
-		return Screenshot{}, explained(notFound("screenshot"), "That screenshot isn't in the session's screenshots folder.")
+		return Screenshot{}, notFound("screenshot", "That screenshot isn't in the session's screenshots folder.")
 	}
 	if len(data) > MaxScreenshot {
-		return Screenshot{}, explained(invalid("too big"), "A screenshot may be at most 10 MiB.")
+		return Screenshot{}, invalid("too big", "A screenshot may be at most 10 MiB.")
 	}
 	w, h, out, bad := reencoded(data)
 	if bad != nil {
@@ -263,7 +263,7 @@ func screenshotKind(data []byte) string {
 }
 
 func notImage() *Error {
-	return explained(invalid("not image"), "That file isn't a PNG, JPEG or GIF image the engine can read.")
+	return invalid("not image", "That file isn't a PNG, JPEG or GIF image the engine can read.")
 }
 
 func decodedBytes(kind string, cfg image.Config) int64 {
@@ -295,10 +295,10 @@ func reencoded(data []byte) (int, int, []byte, *Error) {
 		return 0, 0, nil, notImage()
 	}
 	if cfg.Width > MaxScreenshotSide || cfg.Height > MaxScreenshotSide {
-		return 0, 0, nil, explained(invalid("too large"), "A screenshot may be at most 8,192 pixels wide and 8,192 pixels high.")
+		return 0, 0, nil, invalid("too large", "A screenshot may be at most 8,192 pixels wide and 8,192 pixels high.")
 	}
 	if decodedBytes(kind, cfg) > maxScreenshotDecoded {
-		return 0, 0, nil, explained(invalid("too large"), "That screenshot would take more than 256 MiB to decode. Save a smaller one, or save it as a PNG with 8 bits per channel.")
+		return 0, 0, nil, invalid("too large", "That screenshot would take more than 256 MiB to decode. Save a smaller one, or save it as a PNG with 8 bits per channel.")
 	}
 	var img image.Image
 	switch kind {
@@ -321,7 +321,7 @@ func reencoded(data []byte) (int, int, []byte, *Error) {
 		return 0, 0, nil, notImage()
 	}
 	if out.Len() > maxScreenshotPNG {
-		return 0, 0, nil, explained(invalid("too large"), "That screenshot is more than 24 MiB as a PNG. Save a smaller one.")
+		return 0, 0, nil, invalid("too large", "That screenshot is more than 24 MiB as a PNG. Save a smaller one.")
 	}
 	return b.Dx(), b.Dy(), out.Bytes(), nil
 }

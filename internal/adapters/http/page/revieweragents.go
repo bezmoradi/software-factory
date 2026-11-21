@@ -57,7 +57,7 @@ func (s *Server) reviewerAgents(w http.ResponseWriter, body map[string]any) {
 	repo, okPath := body["path"].(string)
 	op, okOp := body["op"].(string)
 	if !okPath || repo == "" || len(repo) > session.MaxCwd || !okOp {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var v session.ReviewerAgentsView
@@ -65,14 +65,14 @@ func (s *Server) reviewerAgents(w http.ResponseWriter, body map[string]any) {
 	switch op {
 	case "list":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.ReviewerAgents.AgentFiles(repo)
 	case "add":
 		text, ok := body["text"].(string)
 		if !keysWithin(body, "op", "path", "text") || !ok {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if len(text) > session.MaxAgentFile {
@@ -83,7 +83,7 @@ func (s *Server) reviewerAgents(w http.ResponseWriter, body map[string]any) {
 	case "remove":
 		name, ok := body["name"].(string)
 		if !keysWithin(body, "op", "path", "name") || !ok || name == "" || len(name) > session.MaxAgentName {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.ReviewerAgents.RemoveAgentFile(repo, name)
@@ -91,7 +91,7 @@ func (s *Server) reviewerAgents(w http.ResponseWriter, body map[string]any) {
 		name, okName := body["name"].(string)
 		role, okRole := body["role"].(string)
 		if !keysWithin(body, "op", "path", "role", "name") || !okName || !okRole || len(name) > session.MaxAgentName || len(role) > 40 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = s.cfg.ReviewerAgents.PickAgentFile(repo, review.Role(role), name)

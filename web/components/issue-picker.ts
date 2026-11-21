@@ -1,21 +1,12 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
+import { field, fieldRow } from '../lib/form.ts'
 
 type Issue = { number: number; title: string; body?: string; url: string; author: string; labels: string[]; created: number; open: boolean }
 
 type Picked = { issue: Issue; refused: string; clipped: boolean; hash: string }
 
 let serial = 0
-
-async function call(body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const res = await api('/api/issues', body).catch(() => null)
-  const parsed = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-  return { ok: !!res && res.ok, body: parsed }
-}
-
-function said(body: Record<string, unknown>, fallback: string): string {
-  return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
-}
 
 const NAV_KEYS: Record<string, string[]> = { 'issues:newer': ['issues:older'], 'issues:older': ['issues:newer'] }
 
@@ -67,9 +58,6 @@ class SfIssuePicker extends HTMLElement {
     const id = `issue-label-${++serial}`
     const summary = el('summary', 'small', 'From an issue')
     const intro = el('p', 'small muted', "Lists the repository's open issues with your saved token, newest first. Pick one to read it in full; Start then sends it as the session's first message, framed as the author's task description, not as instructions.")
-    const row = el('div', 'opts field-row')
-    const name = el('label', 'small', 'Label (optional)')
-    name.htmlFor = id
     this.#label.id = id
     this.#label.placeholder = 'Any label'
     this.#label.addEventListener('keydown', e => {
@@ -77,7 +65,7 @@ class SfIssuePicker extends HTMLElement {
       e.preventDefault()
       this.#run(this.#listButton, () => this.#load(1))
     })
-    row.append(name, this.#label, this.#listButton)
+    const row = fieldRow([field('Label', this.#label, { kind: 'inline', cls: 'field-row', optional: true }), this.#listButton], 'opts field-row')
     this.#details.append(summary, intro, row, this.#status, this.#list, this.#picked)
     this.#details.addEventListener('toggle', () => {
       if (this.#details.open && !this.#loaded && !this.#busy) void this.#load(1)
@@ -107,11 +95,11 @@ class SfIssuePicker extends HTMLElement {
     this.#busy = true
     const gen = this.#gen
     say(this.#status, 'Reading the open issues…', 'muted')
-    const a = await call({ op: 'list', path: this.path, page, label: this.#label.value })
+    const a = await request('/api/issues', { op: 'list', path: this.path, page, label: this.#label.value })
     if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      say(this.#status, said(a.body, "The open issues couldn't be read."), 'bad')
+      say(this.#status, a.message, 'bad')
       return
     }
     this.#page = typeof a.body.page === 'number' ? a.body.page : page
@@ -151,11 +139,11 @@ class SfIssuePicker extends HTMLElement {
     this.#busy = true
     const gen = this.#gen
     say(this.#status, `Reading issue #${number}…`, 'muted')
-    const a = await call({ op: 'read', path: this.path, number })
+    const a = await request('/api/issues', { op: 'read', path: this.path, number })
     if (gen !== this.#gen) return
     this.#busy = false
     if (!a.ok) {
-      say(this.#status, said(a.body, "The issue couldn't be read."), 'bad')
+      say(this.#status, a.message, 'bad')
       return
     }
     const issue = a.body.issue as Issue

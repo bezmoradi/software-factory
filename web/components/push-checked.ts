@@ -3,6 +3,7 @@ import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { CheckedLine, PushCheckedBy, PushCheckedReviewer, PushCheckedRun, SessionPush } from '../types.ts'
+import { emptyState } from '../lib/page.ts'
 
 let made = 0
 
@@ -112,7 +113,7 @@ class SfPushChecked extends HTMLElement {
     else {
       if (checked.unreadable) parts.push(el('p', 'small warn', "The engine couldn't read its review records, so this list may be incomplete."))
       if (checked.reviewers.length) parts.push(list('Reviewers', checked.reviewers.map(reviewer)))
-      else parts.push(el('p', 'small muted', 'No reviewer was required, and none reviewed this commit.'))
+      else parts.push(emptyState('No reviewer was required, and none reviewed this commit.'))
       if (checked.runs.length) parts.push(list('Verification runs', checked.runs.map(run)))
     }
     const gate = el('p', 'small push-checked-gate')

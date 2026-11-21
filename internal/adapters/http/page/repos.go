@@ -27,14 +27,14 @@ func millis(t time.Time) int64 {
 
 func textFields(w http.ResponseWriter, body map[string]any, limit int, keys ...string) (map[string]string, bool) {
 	if !keysWithin(body, keys...) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return nil, false
 	}
 	out := map[string]string{}
 	for _, k := range keys {
 		v, ok := body[k].(string)
 		if !ok || len(v) > limit {
-			refuse(w, http.StatusBadRequest, k)
+			refuse(w, http.StatusBadRequest, k, "The engine needs text of at most "+sizeWords(int64(limit))+" here.")
 			return nil, false
 		}
 		out[k] = v

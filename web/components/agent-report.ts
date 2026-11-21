@@ -1,6 +1,7 @@
-import { api, signedIn } from '../api.ts'
+import { request, signedIn } from '../api.ts'
 import { el, visible } from '../lib/dom.ts'
 import { saidOf, type Said } from '../lib/json.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface SettingsReport {
   sid: string
@@ -133,11 +134,10 @@ class SfAgentReport extends HTMLElement {
     window.clearTimeout(this.#timer)
     this.#timer = 0
     const gen = ++this.#gen
-    const res = signedIn() ? await api('/api/agent-report', { op: 'read' }).catch(() => null) : null
+    const a = signedIn() ? await request('/api/agent-report', { op: 'read' }) : null
     if (gen !== this.#gen) return
-    if (res && res.ok) {
-      const r = readReport(await res.json().catch(() => null))
-      if (gen !== this.#gen) return
+    if (a?.ok) {
+      const r = readReport(a.body)
       if (r) this.#report = r
     }
     this.#paint()
@@ -147,7 +147,7 @@ class SfAgentReport extends HTMLElement {
   #settings(r: Report['settings']): HTMLElement[] {
     const out: HTMLElement[] = [el('h3', 'small', "The agents' user settings")]
     if (r.problem) out.push(el('p', 'small warn', visible(r.problem)))
-    else if (!r.sessions.length) out.push(el('p', 'small muted', 'No session is running. Each running session shows here with what changed in its own container since that session last started or woke.'))
+    else if (!r.sessions.length) out.push(emptyState('No session is running. Each running session shows here with what changed in its own container since that session last started or woke.'))
     for (const s of r.sessions) out.push(el('h4', 'small', `Session ${visible(s.session || s.sid)}`), ...this.#session(s))
     out.push(el('p', 'small muted', "At each start agent-host lists and hashes the agents' user-level settings in that session's container (Claude Code's settings, agents, skills, commands, hooks and instructions, user MCP servers as claude mcp list prints them, git config, shell start-up files and auto-memory folders), and the engine compares the list with that container's list from its last start. This is an agent report from inside the session's container: it catches changes made by an honest session or a third party, not by a hostile agent, which can change agent-host's answer too. It never reads Claude Code's account file or a sign-in file, and it compares ~/.npmrc and ~/.ssh by size and time only."))
     return out

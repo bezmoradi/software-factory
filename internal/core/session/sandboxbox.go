@@ -136,20 +136,20 @@ func routedAt(listed map[string]BoxInfo, known BoxInfo) bool {
 
 func (d *Dispatcher) ConfirmBox(ctx context.Context, box string) error {
 	if !d.boxed() || !ValidBox(box) {
-		return explained(conflict("box stopped"), "The session's container isn't running.")
+		return conflict("box stopped", "The session's container isn't running.")
 	}
 	known, ok := d.cfg.Routes.Info(box)
 	if !ok {
-		return explained(conflict("box stopped"), "The session's container isn't running. Wake or start the session again.")
+		return conflict("box stopped", "The session's container isn't running. Wake or start the session again.")
 	}
 	listed, err := d.seenBoxes(ctx)
 	if err != nil {
-		return explained(conflict("box helper"), "The box helper didn't answer, so the engine can't confirm which container answers at the session's address, and it doesn't reach it.")
+		return conflict("box helper", "The box helper didn't answer, so the engine can't confirm which container answers at the session's address, and it doesn't reach it.")
 	}
 	if !routedAt(listed, known) {
 		d.cfg.Routes.Down(box)
 		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "stale-route-dropped", "box", box)
-		return explained(conflict("box stopped"), "The session's container isn't running at the address the engine had for it, so the engine dropped that route. Wake or start the session again.")
+		return conflict("box stopped", "The session's container isn't running at the address the engine had for it, so the engine dropped that route. Wake or start the session again.")
 	}
 	return nil
 }

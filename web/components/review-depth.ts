@@ -1,5 +1,7 @@
-import { api } from '../api.ts'
-import { button, el, field, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { request, savedTone } from '../api.ts'
+import { button, el, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { actions, field, form, showAnswer } from '../lib/form.ts'
+import { emptyState } from '../lib/page.ts'
 
 interface DepthView {
   advisory: string[]
@@ -22,11 +24,6 @@ function text(value: string): string {
   return visible(unspoofed(value))
 }
 
-async function problemOf(res: Response | null): Promise<{ text: string; field: string }> {
-  if (!res) return { text: 'The engine didn\'t answer. Try again.', field: '' }
-  const body = await res.json().catch(() => null) as { message?: unknown; field?: unknown } | null
-  return { text: typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.', field: typeof body?.field === 'string' ? body.field : '' }
-}
 
 function isDepth(v: unknown): v is DepthView {
   const d = v as DepthView | null
@@ -63,8 +60,9 @@ class SfReviewDepth extends HTMLElement {
   #lines = el('input', 'textbox')
   #extra = el('input', 'textbox')
   #extraRuns: HTMLSelectElement = runSelect('', 1, 1)
-  #save = button('Save review settings', 'small', () => void this.#store(), 'button', 'depth-save')
+  #save = button('Save review settings', 'small', undefined, 'submit', 'depth-save')
   #said = statusLine()
+  #form: HTMLFormElement | null = null
   #again = button('Read again', 'link small', () => {
     if (this.#reading) return
     say(this.#said, '')
@@ -80,15 +78,17 @@ class SfReviewDepth extends HTMLElement {
     this.#built = true
     this.#n = ++serial
     this.#summary.setAttribute('aria-live', 'polite')
-    const ids: [HTMLInputElement, string, string][] = [[this.#advisory, 'advisory', 'knackpack:security-reviewer'], [this.#files, 'files', '0'], [this.#lines, 'lines', '0'], [this.#extra, 'extra', 'knackpack:architecture-reviewer']]
-    for (const [input, id, holder] of ids) {
+    const ids: [HTMLInputElement, string, string, string][] = [[this.#advisory, 'advisory', 'advisory', 'knackpack:security-reviewer'], [this.#files, 'files', 'maxFiles', '0'], [this.#lines, 'lines', 'maxLines', '0'], [this.#extra, 'extra', 'extra', 'knackpack:architecture-reviewer']]
+    for (const [input, id, name, holder] of ids) {
       input.id = `depth-${id}-${this.#n}`
+      input.name = name
       input.placeholder = holder
       input.spellcheck = false
       input.autocomplete = 'off'
     }
     for (const input of [this.#files, this.#lines]) input.inputMode = 'numeric'
     this.#extraRuns.id = `depth-extra-runs-${this.#n}`
+    this.#extraRuns.name = 'extraRuns'
     for (const input of [this.#advisory, this.#files, this.#lines, this.#extra]) input.addEventListener('input', () => labelError(input, ''))
     this.#extraRuns.addEventListener('change', () => labelError(this.#extraRuns, ''))
     this.replaceChildren(
@@ -97,14 +97,19 @@ class SfReviewDepth extends HTMLElement {
       this.#summary,
       el('h4', 'label', 'Runs per commit'),
       el('p', 'small muted', 'A role run more than once reviews the same commit separately each time. Their findings are pooled: one blocking run blocks the push, and an override clears every blocking run of that role on that commit.'),
-      this.#runs,
-      field('Advisory roles', this.#advisory, 'Agents that review with the required ones but only warn: their block shows as a warning and never holds the push, the push hold or an automatic findings send. Name agents from an installed plugin or your own agents folder, separated by commas, at most 5.'),
-      el('h4', 'label', 'Deeper review for larger changes'),
-      field('Above this many changed files', this.#files, 'Counted as the push hold counts them: the files the branch changes against the remote\'s main branch. 0 is off.'),
-      field('Or above this many changed lines', this.#lines, 'Added and removed lines in that change. 0 is off. A change the engine can\'t count gets the deeper review.'),
-      field('Extra roles above the size', this.#extra, 'Required for a change above the size, filled the way required roles are, separated by commas, at most 5.'),
-      field('Every required role above the size runs', this.#extraRuns, 'Repeated runs for every required role of a larger change.'),
-      this.#save,
+      this.#form = form({
+        children: [
+          this.#runs,
+          field('Advisory roles', this.#advisory, { help: 'Agents that review with the required ones but only warn: their block shows as a warning and never holds the push, the push hold or an automatic findings send. Name agents from an installed plugin or your own agents folder, separated by commas, at most 5.' }),
+          el('h4', 'label', 'Deeper review for larger changes'),
+          field('Above this many changed files', this.#files, { help: 'Counted as the push hold counts them: the files the branch changes against the remote\'s main branch. 0 is off.' }),
+          field('Or above this many changed lines', this.#lines, { help: 'Added and removed lines in that change. 0 is off. A change the engine can\'t count gets the deeper review.' }),
+          field('Extra roles above the size', this.#extra, { help: 'Required for a change above the size, filled the way required roles are, separated by commas, at most 5.' }),
+          field('Every required role above the size runs', this.#extraRuns, { help: 'Repeated runs for every required role of a larger change.' }),
+          actions([this.#save]),
+        ],
+        onSubmit: () => void this.#store(),
+      }),
       this.#said,
     )
     if (this.#path && this.#loaded !== this.#path) void this.#load()
@@ -129,13 +134,9 @@ class SfReviewDepth extends HTMLElement {
     v.agents.forEach((agent, i) => {
       const s = runSelect(`depth-run-${this.#n}-${i}`, v.runs[agent] ?? 1, max)
       s.dataset.agent = agent
-      const box = el('div', 'row field-row')
-      const label = el('label', 'small', text(agent))
-      label.htmlFor = s.id
-      box.append(label, el('span', 'spacer'), s)
-      this.#runs.append(box)
+      this.#runs.append(field(text(agent), s, { kind: 'inline', cls: 'field-row depth-run' }))
     })
-    if (!v.agents.length) this.#runs.append(el('p', 'small muted', 'This project names no review roles yet.'))
+    if (!v.agents.length) this.#runs.append(emptyState('This project names no review roles yet.'))
     this.#advisory.value = v.advisory.join(', ')
     this.#extra.value = v.extra.join(', ')
     this.#files.value = String(v.maxFiles)
@@ -149,13 +150,13 @@ class SfReviewDepth extends HTMLElement {
     this.#reading++
     this.#again.setAttribute('aria-disabled', 'true')
     try {
-      const res = await api('/api/review-depth', { op: 'read', path }).catch(() => null)
+      const a = await request('/api/review-depth', { op: 'read', path })
       if (path !== this.#path) return
-      if (!res || !res.ok) {
-        say(this.#said, (await problemOf(res)).text, 'warn')
+      if (!a.ok) {
+        say(this.#said, a.message, 'warn')
         return this.#retry(true)
       }
-      const body: unknown = await res.json().catch(() => null)
+      const body: unknown = a.body
       if (!isDepth(body)) {
         say(this.#said, 'The engine\'s answer couldn\'t be read. Try again.', 'warn')
         return this.#retry(true)
@@ -186,23 +187,12 @@ class SfReviewDepth extends HTMLElement {
       if (s.dataset.agent) runs[s.dataset.agent] = s.value
     }
     const extraRuns = this.#extraRuns.value
-    const inputs: Record<string, HTMLInputElement | HTMLSelectElement> = { advisory: this.#advisory, extra: this.#extra, maxFiles: this.#files, maxLines: this.#lines, extraRuns: this.#extraRuns }
-    for (const input of Object.values(inputs)) labelError(input, '')
     say(this.#said, '')
-    const res = await whileBusy(this.#save, () => api('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }).catch(() => null))
-    if (!res || !res.ok) {
-      const { text, field } = await problemOf(res)
-      const own = Object.hasOwn(inputs, field) ? inputs[field] : undefined
-      if (own) {
-        labelError(own, visible(text))
-        return own.focus()
-      }
-      say(this.#said, text, 'warn')
-      return
-    }
-    const body: unknown = await res.json().catch(() => null)
+    const a = await whileBusy(this.#save, () => request('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }))
+    if (this.#form && !showAnswer(this.#form, a, this.#said, { tone: 'warn' })) return
+    const body: unknown = a.body
     if (isDepth(body)) this.#show(body)
-    say(this.#said, 'Saved. The next review uses them.', 'muted')
+    say(this.#said, a.message, savedTone(a))
   }
 }
 

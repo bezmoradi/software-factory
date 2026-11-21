@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 401
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: token }
+        "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.body.why"]
@@ -39,7 +39,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]", "$.body.why"]
@@ -59,7 +59,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
           absent: ["$.body.why"]
 
   - id: EVS-003
@@ -76,7 +76,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: origin }
+            "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
 
   - id: EVS-004
     name: "The event stream refuses a cross-site fetch, even with the page key"
@@ -92,7 +92,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: site }
+            "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
 
   - id: EVS-005
     name: "The event stream refuses a query string, so the key never travels in a URL"
@@ -109,7 +109,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: query }
+            "$.body": { error: query, message: "The engine's routes take no query string." }
 
   - id: EVS-006
     name: "The event stream refuses another Host, even with the page key"
@@ -125,7 +125,7 @@ scenarios:
           equal:
             "$.status": 421
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: host }
+            "$.body": { error: host, message: "The engine answers only at the address it serves the page on. Open the page at that address." }
 
   - id: EVS-007
     name: "A POST to the event stream's route is refused, since the stream is GET only"
@@ -142,7 +142,7 @@ scenarios:
           equal:
             "$.status": 405
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: method }
+            "$.body": { error: method, message: "The engine doesn't take that method on this route." }
         no_state_check: "refused with 405 before the stream or any handler runs, so nothing changed; no read shows the stream's subscribers, and an http.frames step, which needs an open stream, isn't counted as an http request's state check"
 
   - id: EVS-008
@@ -255,7 +255,7 @@ scenarios:
             "$.status": 429
             "$.open": false
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: streams }
+            "$.body": { error: streams, message: "The page holds two live streams at once, and both are open. Close another tab of the page, then reload this one." }
       - id: first-still-open
         do: http.frames
         on: first
@@ -511,7 +511,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token, why: replaced }
+            "$.body": { error: token, why: replaced, message: "The page signed in again in another tab or browser, which ended this tab's key. Reload the page to use it here." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]

@@ -157,6 +157,7 @@ export function openFlow(title: string, model: FlowModel): FlowDialog {
   const m = modal({
     kind: 'flow-dialog',
     title,
+    docs: 'reviews-and-the-push-gate',
     closeButton: true,
     body: [diagram],
     focus: 'heading',

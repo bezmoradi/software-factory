@@ -772,10 +772,10 @@ func (p *Pushes) claim(sid string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closing {
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if p.busy[sid] {
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	p.busy[sid] = true
 	return nil
@@ -818,31 +818,31 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 	h := p.held[sid]
 	if h == nil || h.card != card || h.commit != commit {
 		p.mu.Unlock()
-		return explained(conflict("card"), "That push card isn't the one waiting any more. Press Push again.")
+		return conflict("card", "That push card isn't the one waiting any more. Press Push again.")
 	}
 	if !now.Before(h.expires) {
 		delete(p.held, sid)
 		p.mu.Unlock()
 		p.showCleared(sid)
-		return explained(conflict("expired"), "That push card expired after 15 minutes. Press Push again.")
+		return conflict("expired", "That push card expired after 15 minutes. Press Push again.")
 	}
 	if p.closing {
 		p.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if p.busy[sid] {
 		p.mu.Unlock()
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	given := strings.TrimSpace(reason)
 	clean := gate.Reason(reason)
 	if given != "" && clean == "" {
 		p.mu.Unlock()
-		return explained(invalid("reason"), "A reason has at most 500 characters and no control characters.")
+		return onField("reason", invalid("reason", "At most 500 characters and no control characters."))
 	}
 	if allow && len(h.missing) > 0 && clean == "" {
 		p.mu.Unlock()
-		return explained(invalid("reason"), "Type your reason for allowing this push with items missing. The audit file keeps it.")
+		return onField("reason", invalid("reason", "Needs your reason, up to 500 characters."))
 	}
 	delete(p.held, sid)
 	answer := &gate.Answer{Allow: allow, Reason: clean, Commit: h.commit, Branch: h.branch, Remote: h.remote, Expires: h.expires}
@@ -884,33 +884,33 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	switch {
 	case h == nil || h.card != card || h.commit != commit:
 		p.mu.Unlock()
-		return explained(conflict("card"), "That push card isn't the one waiting any more. Press Push again.")
+		return conflict("card", "That push card isn't the one waiting any more. Press Push again.")
 	case !h.handoff:
 		p.mu.Unlock()
-		return explained(conflict("no handoff"), "Hand off is for a push held by a reviewer that reached this project's round limit, and this one isn't.")
+		return conflict("no handoff", "Hand off is for a push held by a reviewer that reached this project's round limit, and this one isn't.")
 	case !now.Before(h.expires):
 		delete(p.held, sid)
 		p.mu.Unlock()
 		p.showCleared(sid)
-		return explained(conflict("expired"), "That push card expired after 15 minutes. Press Push again.")
+		return conflict("expired", "That push card expired after 15 minutes. Press Push again.")
 	case p.closing:
 		p.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	case p.busy[sid]:
 		p.mu.Unlock()
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	p.busy[sid] = true
 	p.mu.Unlock()
 	defer p.release(sid)
 	if p.cfg.Tell == nil || p.cfg.Work == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message, so it can't hand off.")
+		return conflict("no session", "This engine can't send the session a message, so it can't hand off.")
 	}
 	if err := p.cfg.Tell(sid, HandoffCommand); err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
-		return explained(conflict("not sent"), "The handoff message couldn't reach the session, which must be running and controlled from this page, so the push wasn't denied. Try again once it is.")
+		return conflict("not sent", "The handoff message couldn't reach the session, which must be running and controlled from this page, so the push wasn't denied. Try again once it is.")
 	}
 	p.mu.Lock()
 	if p.held[sid] == h {
@@ -1377,16 +1377,16 @@ func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (Chang
 	}
 	head, err := p.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {
-		return ChangeView{}, explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return ChangeView{}, conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	main, err := p.cfg.Repos.Main(t.Name)
 	if err != nil {
-		return ChangeView{}, explained(conflict("records"), "The engine couldn't read the repository's record.")
+		return ChangeView{}, conflict("records", "The engine couldn't read the repository's record.")
 	}
 	fork := ""
 	if main != "" {
 		if fork, err = p.cfg.History.MergeBase(ctx, t.Repo, head, main); err != nil {
-			return ChangeView{}, explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the main branch: "+err.Error(), maxOutput))
+			return ChangeView{}, conflict("merge base", clip("The engine couldn't find where "+t.Branch+" leaves the main branch: "+err.Error(), maxOutput))
 		}
 	}
 	branch, err := p.branchWalk(ctx, t, head, fork)
@@ -1400,7 +1400,7 @@ func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (Chang
 	}
 	cs, err := p.cfg.Changes.Changes(ctx, t.Repo, base, head)
 	if err != nil {
-		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the change: "+err.Error(), maxOutput))
+		return ChangeView{}, conflict("changes", clip("The engine couldn't read the change: "+err.Error(), maxOutput))
 	}
 	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, From: at.From, Points: points, ChangeSet: maskChanges(cs)}, nil
 }

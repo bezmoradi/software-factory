@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
-import { busy, button, el, emit, field, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { request } from '../api.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { actions, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 
 interface PackSource {
@@ -73,13 +74,6 @@ function readView(body: unknown): PacksView | null {
   return { using: v.using, knackpack: { version: typeof k.version === 'string' ? k.version : '', commit: typeof k.commit === 'string' ? k.commit : '' }, packs: v.packs.map(readPack).filter((p): p is PackView => !!p), roleNames: record(v.roleNames), canAdd: v.canAdd === true, full: typeof v.full === 'string' ? v.full : '', kept: typeof v.kept === 'string' ? v.kept : '', uploadHelp: typeof v.uploadHelp === 'string' ? v.uploadHelp : '' }
 }
 
-async function problemOf(res: Response | null): Promise<{ text: string; error: string }> {
-  if (!res) return { text: 'The engine didn\'t answer. Try again.', error: '' }
-  const body = await res.json().catch(() => null) as { error?: unknown; message?: unknown } | null
-  const error = typeof body?.error === 'string' ? body.error : ''
-  if (typeof body?.message === 'string' && body.message) return { text: body.message, error }
-  return { text: res.status === 413 ? 'The engine refused the upload: it is over 2 MiB in all, the most a request to it carries.' : 'The engine refused the change. Try again.', error }
-}
 
 function digestText(d: string): string {
   return visible(d.slice(0, 12))
@@ -102,11 +96,13 @@ class SfPacks extends HTMLElement {
     super()
     this.#url.type = 'url'
     this.#url.id = 'pack-url'
+    this.#url.name = 'url'
     this.#url.dataset.key = 'pack-url'
     this.#url.autocomplete = 'off'
     this.#url.spellcheck = false
     this.#url.placeholder = 'https://github.com/owner/pack.git'
     this.#commit.id = 'pack-commit'
+    this.#commit.name = 'commit'
     this.#commit.dataset.key = 'pack-commit'
     this.#commit.autocomplete = 'off'
     this.#commit.spellcheck = false
@@ -158,19 +154,19 @@ class SfPacks extends HTMLElement {
     this.#busy = what
     this.#refused.clear()
     this.#paint()
-    const res = await api('/api/packs', { ...body, path: project }).catch(() => null)
+    const a = await request('/api/packs', { ...body, path: project })
     this.#busy = ''
     if (project !== this.#target?.project) return null
-    if (!res || !res.ok) {
-      const { text, error } = await problemOf(res)
-      const input = body.op === 'fetch' ? (error === 'url' ? this.#url : error === 'commit' ? this.#commit : null) : body.op === 'upload' && res ? this.#folder : null
-      if (input) this.#refused.set(input, visible(text))
+    if (!a.ok) {
+      const text = a.message
+      const input = body.op === 'fetch' ? [this.#url, this.#commit].find(i => i.name === a.field) ?? null : body.op === 'upload' && a.status !== 0 ? this.#folder : null
+      if (input) this.#refused.set(input, text)
       say(this.#status, input ? '' : text, 'warn')
       this.#paint()
       input?.focus()
       return null
     }
-    return await res.json().catch(() => null)
+    return a.body
   }
 
   async #call(what: string, body: Record<string, unknown>): Promise<boolean> {
@@ -245,8 +241,8 @@ class SfPacks extends HTMLElement {
     }
   }
 
-  #button(text: string, what: string, run: () => void, cls = 'ghost small'): HTMLButtonElement {
-    const b = button(text, cls, run, 'button', what)
+  #button(text: string, what: string, run: (() => void) | undefined, cls = 'ghost small', type: 'button' | 'submit' = 'button'): HTMLButtonElement {
+    const b = button(text, cls, run, type, what)
     if (this.#busy === what) busy(b, true)
     else b.disabled = !!this.#target?.disabled || !!this.#busy
     return b
@@ -339,20 +335,24 @@ class SfPacks extends HTMLElement {
     const full = !v.canAdd
     this.#url.disabled = this.#commit.disabled = target.disabled
     parts.push(el('p', 'small', 'Use a plugin from git'))
-    parts.push(field('Repository address (https)', this.#url, undefined, 'row field-row'), field('Commit', this.#commit, 'A pack is pinned by its commit, never a branch, so it changes only when you pick a new commit.', 'row field-row'))
+    const fetchButton = this.#button('Fetch and check', 'fetch', undefined, 'small', 'submit')
+    if (full) fetchButton.disabled = true
+    parts.push(form({
+      children: [
+        field('Repository address (https)', this.#url, { kind: 'inline', cls: 'field-row' }),
+        field('Commit', this.#commit, { kind: 'inline', cls: 'field-row', help: 'A pack is pinned by its commit, never a branch, so it changes only when you pick a new commit.' }),
+        ...(full ? [el('p', 'small muted', visible(v.full))] : []),
+        actions([fetchButton]),
+      ],
+      onSubmit: () => void this.#fetch(),
+    }))
     for (const input of [this.#url, this.#commit]) labelError(input, this.#refused.get(input) ?? '')
-    const fetchButton = this.#button('Fetch and check', 'fetch', () => void this.#fetch(), 'small')
-    if (full) {
-      fetchButton.disabled = true
-      parts.push(el('p', 'small muted', visible(v.full)))
-    }
-    parts.push(fetchButton)
     const folderHelp = el('p', 'small muted', visible(v.uploadHelp))
     folderHelp.id = 'pack-folder-help'
     this.#folder.disabled = target.disabled || full
     if (this.#busy) this.#folder.setAttribute('aria-disabled', 'true')
     else this.#folder.removeAttribute('aria-disabled')
-    parts.push(folderHelp, field('Upload a pack folder', this.#folder, undefined, 'row field-row'))
+    parts.push(form({ children: [folderHelp, field('Upload a pack folder', this.#folder, { kind: 'inline', cls: 'field-row' })] }))
     labelError(this.#folder, this.#refused.get(this.#folder) ?? '')
     const p = this.#preview
     if (p) {

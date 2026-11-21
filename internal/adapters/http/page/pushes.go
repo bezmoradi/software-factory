@@ -266,7 +266,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 	}
 	sid, ok := body["sid"].(string)
 	if !ok || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
@@ -278,7 +278,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		commit, okCommit := optionalString(body, "commit")
 		at, okAt := session.ChangePointOf(from, commit)
 		if !keysWithin(body, "sid", "from", "commit") || !okFrom || !okCommit || !okAt {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.Pushes.Changes(ctx, sid, at)
@@ -290,7 +290,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		send(w, http.StatusOK, map[string]any{"changes": changesOf(v, s.viewedMarks(sid))})
 	case pushPageRoute:
 		if !keysWithin(body, "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Push(ctx, sid)
@@ -304,13 +304,13 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		if raw, present := body["reason"]; present {
 			text, ok := raw.(string)
 			if !ok {
-				refuse(w, http.StatusBadRequest, "reason")
+				refuse(w, http.StatusBadRequest, "reason", saidFields)
 				return
 			}
 			reason = text
 		}
 		if !keysWithin(body, "sid", "card", "commit", "allow", "reason") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) || !okAllow {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Answer(ctx, sid, card, commit, allow, reason)
@@ -320,7 +320,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		card, okCard := body["card"].(string)
 		commit, okCommit := body["commit"].(string)
 		if !keysWithin(body, "sid", "card", "commit") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Handoff(ctx, sid, card, commit)
@@ -330,7 +330,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		card, okCard := body["card"].(string)
 		commit, okCommit := body["commit"].(string)
 		if !keysWithin(body, "sid", "card", "commit") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.SendFindings(ctx, sid, card, commit)

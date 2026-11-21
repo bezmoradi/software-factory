@@ -58,7 +58,7 @@ paths:
 
 # Hand checks for the gate and reviews
 
-Each check below tries one rule of the trust boundary or the gate (ARCHITECTURE.md "Trust boundary" and "Review, then push") and gives the refusal or result the code produces. Run them on your own Docker with your Software Factory stopped, as [Hand checks with Compose](compose-hand-checks.md) says, on the development overlay with its fakes, in the order below: the last ones restart the engine, which stops every session. Record what each gave in the description of the change that ran them; no test keeps a fixed bypass from coming back. The page's own refusals are in ARCHITECTURE.md "Page security checks", and the containers' isolation in [Hand checks with Compose](compose-hand-checks.md).
+Each check below tries one rule of the trust boundary or the gate (ARCHITECTURE.md "Trust boundary" and "Review, then push") and gives the refusal or result the code produces. Run them on your own Docker with your Software Factory stopped, as [Hand checks with Compose](compose-hand-checks.md) says, on the development overlay with its fakes, in the order below: the last ones restart the engine, which stops every session. Record what each gave in the description of the change that ran them; no test keeps a fixed bypass from coming back. The page's own refusals are in docs/reference/security-and-sign-in.md "Page security checks", and the containers' isolation in [Hand checks with Compose](compose-hand-checks.md).
 
 **Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session (work type `fix` unless named), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
 
@@ -90,7 +90,7 @@ sf /api/save-token '{"host":"gitserver.test:8443","token":"sf-dev-gitserver-toke
 sf /api/add-repo '{"url":"https://gitserver.test:8443/dev/demo.git"}'
 ```
 
-Go on once `sf /api/projects '{}'` lists `/workspace/base/demo`. A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (ARCHITECTURE.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
+Go on once `sf /api/projects '{}'` lists `/workspace/base/demo`. A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (docs/reference/security-and-sign-in.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
 
 **The agent listener names the sender and refuses what isn't its own.** Each request goes from one session's container to `engine-agents:8081`; the engine takes the container from the connection's address, never from the request.
 
@@ -119,7 +119,7 @@ curl -si -X POST -H 'Content-Type: application/json' -H 'Origin: http://example.
 logs engine 'msg="request refused" side=page why=origin'
 ```
 
-Expect 403, an `X-Sf-Request` header of 16 hex digits and `{"error":"origin"}`; the engine's line ends with `req=` and that id.
+Expect 403, an `X-Sf-Request` header of 16 hex digits and `{"error":"origin","message":"The engine takes requests only from its own page. Open the page at its own address."}`; the engine's line ends with `req=` and that id.
 
 **Egress refuses git hosts and IP addresses.**
 
@@ -225,7 +225,7 @@ After 2 minutes: `review event=finished role=bug-hunter state=failed why=timeout
 ```bash
 start f feature
 commit f .knackpack/feature.json '{"feature_directory": ".knackpack/t1"}'
-commit f .knackpack/t1/REQUIREMENTS.md '# Requirements: write hello.txt.'
+commit f .knackpack/t1/REQUIREMENTS.md "$(printf 'knackpack-requirements/1\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Write hello.txt\nAcceptance: hello.txt holds hello.\n\n### Open questions and risks\n- None.')"
 sf /api/approve-requirements "{\"sid\":\"$(sid f)\",$(gate f | sed -nE 's/.*"requirements":\{"path":"[^"]*",("text":"([^"\\]|\\.)*","hash":"[0-9a-f]{64}").*/\1/p')}"
 plan=$(commit f .knackpack/t1/PLAN.md '# Plan: write hello.txt.'); work=$(commit f hello.txt hello); review f
 docker exec -w "$(wt f)" "$(ctr f)" git reset -q --hard "$plan"
@@ -293,7 +293,7 @@ for r in /api/allow-file /allow-file /api/push-answer; do docker exec "$(ctr d)"
 - `d`: `proctor/specs/credentials.yaml` keeps kind `name`, its reason `its name is one that usually holds secrets; it is also a Proctor specification under proctor/, …`, and its Remove sends the revert message too (`flag event=asked kind=name`, and the event stream shows `Revert this branch's change to it: …`); `proctor/specs/x.yaml` is flagged `specification` with the reason ending `; this push deletes it`, and its Allow's audit line has `"blobs":["0000000000000000000000000000000000000000"]`. A rename (`git mv`) flags both paths, the old one as deleted. Remove logs `flag event=asked kind=…`, and for a `specification` file the session's message asks it to revert the branch's change, not to add it to `.gitignore`; the page says `The session was asked to revert the change to the file.`
 - Nothing on the agent listener allows a file: the three routes sent to `http://engine-agents:8081` from a session's container answer `{"error":"route"} 404`.
 
-**The change and its work type.** After the Proctor checks, so main holds `proctor/proctor.yaml` and `proctor/specs/x.yaml` with `X-001` and `X-002`. `tc <name>` prints the gate view's `typeChange` (ARCHITECTURE.md "Facts about the change"), and `facts` prints the `change-facts.md` of the reviewer container a review starts, while the `SLOW-REVIEW` file keeps it running. The work type is the one `start` sent from the page, or `/api/size` set.
+**The change and its work type.** After the Proctor checks, so main holds `proctor/proctor.yaml` and `proctor/specs/x.yaml` with `X-001` and `X-002`. `tc <name>` prints the gate view's `typeChange` (docs/reference/reviews-and-pushes.md "Facts about the change"), and `facts` prints the `change-facts.md` of the reviewer container a review starts, while the `SLOW-REVIEW` file keeps it running. The work type is the one `start` sent from the page, or `/api/size` set.
 
 ```bash
 tc() { gate $1 | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(json.dumps(json.loads(t[:t.rindex(" ")])["gate"].get("typeChange"), indent=1))'; }
@@ -311,7 +311,7 @@ team '{"version":1,"protect":["secret/**"]}'; start g; commit g secret/a.txt one
 - `g`, the protect list: a line `Files that match the protect list of the team file on main, …` with `{"path":"secret/a.txt","what":"matches secret/**"}`.
 - The push card shows the same section while the gate's `head` is the card's `commit`; none of it changes the push's result.
 
-**Packs: a git pack, an upload, No pack, a reviewer without a verdict, the refusals, and a session that keeps its pack** (ARCHITECTURE.md "Packs"). The dev git host's test pack `acme` is at `$URL`, one branch per case ([Hand checks with Compose](compose-hand-checks.md)); `ph <branch>` prints a branch's commit. `pk <op> [fields]` calls `/api/packs` for `demo`, `fetch <branch>` fetches that branch's commit, `pdig` prints the digest of the answer it reads, `up <folder> <name>` uploads a folder's files, `rpack <name>` prints each role of the session's latest review with its state, reason, pack, version and digest, `pallow <name> <reason>` answers the session's held card with Allow, and `ev <seconds>` records the event stream in the background. The upload folder `/tmp/sf-beta` holds the same four files as `make proctor`'s PCK-003. Leave the project on knackpack after these checks, since the ones below expect knackpack's reviewers.
+**Packs: a git pack, an upload, No pack, a reviewer without a verdict, the refusals, and a session that keeps its pack** (docs/reference/repositories-and-sessions.md "Packs"). The dev git host's test pack `acme` is at `$URL`, one branch per case ([Hand checks with Compose](compose-hand-checks.md)); `ph <branch>` prints a branch's commit. `pk <op> [fields]` calls `/api/packs` for `demo`, `fetch <branch>` fetches that branch's commit, `pdig` prints the digest of the answer it reads, `up <folder> <name>` uploads a folder's files, `rpack <name>` prints each role of the session's latest review with its state, reason, pack, version and digest, `pallow <name> <reason>` answers the session's held card with Allow, and `ev <seconds>` records the event stream in the background. The upload folder `/tmp/sf-beta` holds the same four files as `make proctor`'s PCK-003. Leave the project on knackpack after these checks, since the ones below expect knackpack's reviewers.
 
 ```bash
 URL=https://gitserver.test:8443/public/acme-pack.git
@@ -361,7 +361,7 @@ logs engine 'msg=push event='; audit; remote | grep "$(branch pz)"
 
 - The use: `"using":"none"`, and its audit reason `the developer picked no pack for demo on the page: nothing reviews its pushes, so each needs the developer's Allow with a reason`.
 - Review: `{"error":"no reviewer","message":"No reviewer is configured for this project, so nothing reviews this branch: every push needs your Allow with a reason."} 409`; `gate pz` has `"catalog":"off"` and `"reviewers":[]`.
-- The push is held with `the bug hunter role filled by an agent: none is set for this work type` and the same for the simplicity checker, and the card has `needsReason: true`. Allow with an empty reason: `{"error":"reason","message":"Type your reason for allowing this push with items missing. The audit file keeps it."} 400`, and the card stays. With the reason: `{"ok":true} 202`, `push event=pushed by=page`, the audit line `pushed` with that reason as `personReason` and both items in `missing`, and the git host has `$(branch pz)`.
+- The push is held with `the bug hunter role filled by an agent: none is set for this work type` and the same for the simplicity checker, and the card has `needsReason: true`. Allow with an empty reason: `{"error":"reason","message":"Needs your reason, up to 500 characters."} 400`, and the card stays. With the reason: `{"ok":true} 202`, `push event=pushed by=page`, the audit line `pushed` with that reason as `personReason` and both items in `missing`, and the git host has `$(branch pz)`.
 
 The refusals:
 
@@ -377,7 +377,7 @@ pk list; logs engine 'msg=pack event=(refused|upload-refused)'
 ```
 
 - Each branch: `400` `pack` with the message `make proctor`'s PCK-T04 lists for it, such as `The engine refused this pack: its software-factory-pack.json: the key "tools" isn't a pack's to set: the engine sets the reviewers' tools: read-only, the same for every pack.` for `refused-key`, logged `pack event=refused`.
-- The `http` address: `400` `url`; a branch name for the commit: `400` `commit`, `A pack is pinned by a full 40-character commit hash, never a branch or tag.`
+- The `http` address: `400` `url`; a branch name for the commit: `400` `commit`, `Needs a full 40-character commit hash.`
 - The upload with `hooks/hooks.json`: `{"error":"refused upload","message":"The engine refused this upload: The upload's hooks/hooks.json isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."} 400`; under the name `knackpack`: `400` `refused upload`, `… the name knackpack belongs to the engine's own plugins, so a pack can't take it.`; both log `pack event=upload-refused`.
 - A body over 2 MiB: `413`. The agent listener: `{"error":"route"} 404`, since `/api/packs` is on the page listener only.
 - `pk list` still lists only `acme`: nothing refused was kept.
@@ -440,7 +440,7 @@ docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserve
 - The Reviews panel: each session's latest review is back, and every passing role that isn't advisory carries `"unchecked":true` in the event stream, which the page shows as the role's "not rechecked" tag, with the panel's line at its top saying how many passes haven't been rechecked since the restart. `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
 - The update check: `update check event=newer`, from the engine before the restart or from the new one at start. If the restart logs `event=reused`, the stopping engine's line is the `newer` one, and the new engine logs another a minute after the stored check. Every `release-seen` line, for `/release-api/repos/bezmoradi/software-factory/tags` and `/release-api/repos/bezmoradi/software-factory/releases/tags/v9.9.9`, has `authorization=absent cookie=absent user-agent="software-factory-update-check"`, although the engine holds a token for this host (`gitserver.test:8443`, saved in Setup).
 
-**A verification run counts only for its commit, command and image, and only its exit code counts** (ARCHITECTURE.md "Verification runs"). Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running.
+**A verification run counts only for its commit, command and image, and only its exit code counts** (docs/reference/runs-and-operations.md "Verification runs"). Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running.
 
 ```bash
 check() { python3 -c 'import json,sys; print(json.dumps({"op":"set","name":"demo","check":sys.argv[1],"setup":"","image":sys.argv[2]}))' "$1" "${2-$IMG}" > /tmp/sf-cmd.json; sf /api/project-commands "$(cat /tmp/sf-cmd.json)"; }
@@ -476,7 +476,7 @@ check 'true'; push v; vwait v; push v; logs helper 'msg=verifier'
 - Two sessions at one commit (the second started from the first, `from: {sid}`): with the push slot taken, the second's agent push queues its run, the first's person presses Verify, and when the slot frees the second still runs its own copy (or is decided again when the first's run ends) and pushes.
 - `GOTOOLCHAIN=local` and `NODE_VERSION=26.13.0` are kept; a 64-hex `NODE_VERSION`, a 7-digit version group, a `PATH` with an empty part, `PYTHONUNBUFFERED=yes`, `TZ` and `NODE_ENV` are emptied.
 
-Browser checks (ARCHITECTURE.md "Verification runs", Browser checks) need the stack with the browser image (`COMPOSE_FILE=compose.yaml:compose.dev.yaml:compose.browser.yaml`, `SF_BROWSER_STAGE=dev-browser`) and that image, by its ID, as the project's image; set the command with `{"op":"set",…,"browser":"…"}` on `/api/project-commands` and start with `"kind":"browser"`:
+Browser checks (docs/reference/runs-and-operations.md "Verification runs", Browser checks) need the stack with the browser image (`COMPOSE_FILE=compose.yaml:compose.dev.yaml:compose.browser.yaml`, `SF_BROWSER_STAGE=dev-browser`) and that image, by its ID, as the project's image; set the command with `{"op":"set",…,"browser":"…"}` on `/api/project-commands` and start with `"kind":"browser"`:
 
 - `index.html` holding `<h1>ok</h1>` and `chromium --headless --dump-dom file://$PWD/index.html | grep -q '<h1>ok</h1>' && chromium --headless --window-size=800,600 --screenshot=$SF_OUT/home.png file://$PWD/index.html` is `passed` with one image, which `{"op":"attachment",…,"name":"home.png"}` answers as a PNG; `ok` changed to `no` in the grep is `failed` with exit 1, whatever images exist.
 - `ln -s /etc/passwd $SF_OUT/a.png; mkdir $SF_OUT/d; head -c 20000000 /dev/zero > $SF_OUT/big.png; echo x > $SF_OUT/n.png` keeps nothing and names `a.png (a link)`, `d (a folder)`, `big.png` (over 10 MiB) and `n.png` (not an image) in `fileNote`, and the run's state is the command's own.

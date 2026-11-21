@@ -98,7 +98,7 @@ func (fl *Follows) findingsAt(sid string) (PushTarget, string, []FindingItem, er
 		return PushTarget{}, "", nil, notStartedHere(fl.cfg.Forges.cfg.Doubled, sid, "Only a session this engine started can open issues from its findings.")
 	}
 	if fl.cfg.Reviews == nil {
-		return t, "", nil, explained(conflict("no reviews"), "This engine runs no reviews.")
+		return t, "", nil, conflict("no reviews", "This engine runs no reviews.")
 	}
 	commit := ""
 	for _, i := range fl.cfg.Sessions() {
@@ -111,7 +111,7 @@ func (fl *Follows) findingsAt(sid string) (PushTarget, string, []FindingItem, er
 	}
 	entries, err := fl.cfg.Reviews()
 	if err != nil {
-		return t, commit, nil, explained(conflict("records"), "The engine couldn't read its review records.")
+		return t, commit, nil, conflict("records", "The engine couldn't read its review records.")
 	}
 	var keys []review.Key
 	for k, e := range entries {
@@ -187,12 +187,12 @@ func (fl *Follows) OpenFindings(ctx context.Context, sid, commit string) (int, e
 		return 0, err
 	}
 	if at == "" || at != commit {
-		return 0, explained(conflict("commit"), "The review those findings came from isn't the session's latest any more. Read them again.")
+		return 0, conflict("commit", "The review those findings came from isn't the session's latest any more. Read them again.")
 	}
 	fl.mu.Lock()
 	if fl.offered[sid] == commit {
 		fl.mu.Unlock()
-		return 0, explained(conflict("offered"), "Issue cards for these findings were already offered. Answer them under Issues and pull requests.")
+		return 0, conflict("offered", "Issue cards for these findings were already offered. Answer them under Issues and pull requests.")
 	}
 	fl.mu.Unlock()
 	made, skipped := 0, 0
@@ -213,7 +213,7 @@ func (fl *Follows) OpenFindings(ctx context.Context, sid, commit string) (int, e
 		if last != nil {
 			return 0, last
 		}
-		return 0, explained(conflict("no findings"), "No finding that didn't block waits to become an issue.")
+		return 0, conflict("no findings", "No finding that didn't block waits to become an issue.")
 	}
 	fl.mu.Lock()
 	if len(fl.offered) >= MaxFollowed {
@@ -223,7 +223,7 @@ func (fl *Follows) OpenFindings(ctx context.Context, sid, commit string) (int, e
 	fl.mu.Unlock()
 	shared.For(ctx, fl.cfg.Logger).Info("pull follow", "event", "finding-cards", "made", made, "skipped", skipped)
 	if made < len(items)-skipped && last != nil {
-		return made, explained(conflict("partly"), strconv.Itoa(made)+" issue cards wait for you; the rest weren't made: "+errorText(last))
+		return made, conflict("partly", strconv.Itoa(made)+" issue cards wait for you; the rest weren't made: "+errorText(last))
 	}
 	return made, nil
 }

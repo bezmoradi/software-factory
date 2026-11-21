@@ -74,13 +74,13 @@ func ValidCapKind(k string) bool { return slices.Contains(capKinds, k) }
 func CapRefusal(kind string) string {
 	switch kind {
 	case CapMoney:
-		return "The spending cap is a number of US dollars from 0 to 100,000; 0 or empty is off."
+		return "Needs 0 to 100,000 US dollars; 0 or empty is off."
 	case CapTime:
-		return "The time cap is a whole number of minutes from 0 to 43,200; 0 or empty is off."
+		return "Needs whole minutes, 0 to 43,200; 0 or empty is off."
 	case CapTurns:
-		return "The turn cap is a whole number of turns from 0 to 10,000; 0 or empty is off."
+		return "Needs whole turns, 0 to 10,000; 0 or empty is off."
 	case CapDisk:
-		return "The disk cap is a whole number of GiB from 0 to 4,096; 0 or empty is off."
+		return "Needs whole GiB, 0 to 4,096; 0 or empty is off."
 	}
 	return "Each cap is a number from 0 up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB; minutes, turns and GiB are whole numbers."
 }
@@ -308,7 +308,7 @@ func (l *Limits) save() error {
 		l.mu.Lock()
 		l.unsaved = true
 		l.mu.Unlock()
-		return explained(conflict("state"), "This is in effect now, but the engine couldn't save it, so a restart of the engine forgets it.")
+		return conflict("state", "This is in effect now, but the engine couldn't save it, so a restart of the engine forgets it.")
 	}
 	return nil
 }
