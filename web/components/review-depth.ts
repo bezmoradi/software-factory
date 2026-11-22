@@ -1,7 +1,9 @@
-import { request, savedTone } from '../api.ts'
-import { button, el, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { request, savedTone, UNREAD, type EngineAnswer } from '../api.ts'
+import { button, el, labelError, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { actions, field, form, showAnswer } from '../lib/form.ts'
 import { emptyState } from '../lib/page.ts'
+import { textbox, dropdown, option } from '../lib/controls.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 interface DepthView {
   advisory: string[]
@@ -33,16 +35,12 @@ function isDepth(v: unknown): v is DepthView {
 
 function runOptions(s: HTMLSelectElement, value: number, max: number) {
   s.replaceChildren()
-  for (let n = 1; n <= max; n++) {
-    const o = el('option', '', n === 1 ? 'Once' : `${n} times`)
-    o.value = String(n)
-    s.append(o)
-  }
+  for (let n = 1; n <= max; n++) s.append(option(n === 1 ? 'Once' : `${n} times`, String(n)))
   s.value = String(value)
 }
 
 function runSelect(id: string, value: number, max: number): HTMLSelectElement {
-  const s = el('select', 'textbox')
+  const s = dropdown()
   s.id = id
   runOptions(s, value, max)
   return s
@@ -50,29 +48,26 @@ function runSelect(id: string, value: number, max: number): HTMLSelectElement {
 
 class SfReviewDepth extends HTMLElement {
   #path = ''
-  #loaded = ''
   #built = false
   #n = 0
   #summary = el('p', 'small muted')
   #runs = el('div', 'depth-runs')
-  #advisory = el('input', 'textbox')
-  #files = el('input', 'textbox')
-  #lines = el('input', 'textbox')
-  #extra = el('input', 'textbox')
+  #advisory = textbox()
+  #files = textbox({ inputMode: 'numeric' })
+  #lines = textbox({ inputMode: 'numeric' })
+  #extra = textbox()
   #extraRuns: HTMLSelectElement = runSelect('', 1, 1)
   #save = button('Save review settings', 'small', undefined, 'submit', 'depth-save')
   #said = statusLine()
   #form: HTMLFormElement | null = null
-  #again = button('Read again', 'link small', () => {
-    if (this.#reading) return
-    say(this.#said, '')
-    void whileBusy(this.#again, () => this.#load())
-  }, 'button', 'depth-again')
-  #reading = 0
+  #poll: WhileOpen | null = null
+  #failed = false
+  #dirty = false
+  #saving = false
 
   connectedCallback() {
     if (this.#built) {
-      if (this.#path && this.#loaded !== this.#path) void this.#load()
+      if (!this.#poll?.live) this.#watch()
       return
     }
     this.#built = true
@@ -86,7 +81,6 @@ class SfReviewDepth extends HTMLElement {
       input.spellcheck = false
       input.autocomplete = 'off'
     }
-    for (const input of [this.#files, this.#lines]) input.inputMode = 'numeric'
     this.#extraRuns.id = `depth-extra-runs-${this.#n}`
     this.#extraRuns.name = 'extraRuns'
     for (const input of [this.#advisory, this.#files, this.#lines, this.#extra]) input.addEventListener('input', () => labelError(input, ''))
@@ -112,14 +106,42 @@ class SfReviewDepth extends HTMLElement {
       }),
       this.#said,
     )
-    if (this.#path && this.#loaded !== this.#path) void this.#load()
+    for (const kind of ['input', 'change']) this.#form?.addEventListener(kind, () => {
+      this.#dirty = true
+    })
+    this.#watch()
   }
 
   set path(value: string) {
     if (value === this.#path) return
     this.#path = value
-    this.#loaded = ''
-    if (this.isConnected) void this.#load()
+    this.#dirty = false
+    this.#watch()
+  }
+
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const path = this.#path
+    if (!path || !this.isConnected || !this.#built) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => this.#typing(), read: () => request('/api/review-depth', { op: 'read', path }), show: a => this.#took(a), near: () => ['depth-save'] })
+  }
+
+  #typing(): boolean {
+    const a = document.activeElement
+    return this.#dirty || this.#saving || (a instanceof HTMLElement && !!this.#form?.contains(a) && a.matches('input, textarea, select'))
+  }
+
+  #took(a: EngineAnswer) {
+    const body: unknown = a.body
+    if (!a.ok || !isDepth(body)) {
+      this.#failed = true
+      say(this.#said, a.ok ? UNREAD : a.message, 'warn')
+      return
+    }
+    if (this.#failed) say(this.#said, '')
+    this.#failed = false
+    this.#show(body)
   }
 
   #show(v: DepthView) {
@@ -144,39 +166,6 @@ class SfReviewDepth extends HTMLElement {
     runOptions(this.#extraRuns, v.extraRuns || 1, max)
   }
 
-  async #load() {
-    const path = this.#path
-    if (!path) return
-    this.#reading++
-    this.#again.setAttribute('aria-disabled', 'true')
-    try {
-      const a = await request('/api/review-depth', { op: 'read', path })
-      if (path !== this.#path) return
-      if (!a.ok) {
-        say(this.#said, a.message, 'warn')
-        return this.#retry(true)
-      }
-      const body: unknown = a.body
-      if (!isDepth(body)) {
-        say(this.#said, 'The engine\'s answer couldn\'t be read. Try again.', 'warn')
-        return this.#retry(true)
-      }
-      this.#show(body)
-      this.#loaded = path
-      this.#retry(false)
-    } finally {
-      if (!--this.#reading) this.#again.removeAttribute('aria-disabled')
-    }
-  }
-
-  #retry(on: boolean) {
-    if (on === (this.#again.parentNode === this)) return
-    if (on) return this.#said.after(this.#again)
-    const focused = focusedKey(this)
-    this.#again.remove()
-    refocus(this, focused, () => ['depth-save'])
-  }
-
   async #store() {
     const advisory = this.#advisory.value
     const extra = this.#extra.value
@@ -188,8 +177,12 @@ class SfReviewDepth extends HTMLElement {
     }
     const extraRuns = this.#extraRuns.value
     say(this.#said, '')
+    this.#saving = true
     const a = await whileBusy(this.#save, () => request('/api/review-depth', { op: 'set', path: this.#path, advisory, runs, maxFiles, maxLines, extra, extraRuns }))
+    this.#saving = false
     if (this.#form && !showAnswer(this.#form, a, this.#said, { tone: 'warn' })) return
+    this.#failed = false
+    this.#dirty = false
     const body: unknown = a.body
     if (isDepth(body)) this.#show(body)
     say(this.#said, a.message, savedTone(a))

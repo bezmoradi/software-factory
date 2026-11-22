@@ -1,6 +1,7 @@
 import { request } from '../api.ts'
 import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { field, form } from '../lib/form.ts'
+import { dropdown, option } from '../lib/controls.ts'
 
 interface RoleModel {
   name: string
@@ -86,27 +87,13 @@ class SfReviewModels extends HTMLElement {
     const off = this.#target.disabled
     const parts: HTMLElement[] = [el('p', 'small', 'Model and effort for each review role'), el('p', 'small muted', 'The default passes no --model or --effort, so the role\'s agent file decides. Each review shows the model it ran with.')]
     for (const [role, r] of Object.entries(v.roles)) {
-      const model = el('select', 'textbox')
+      const model = dropdown({ options: [option('Model: the default', ''), ...v.models.map(m => option(visible(m.name), m.id))] })
       model.id = `review-model-${role}`
       model.dataset.key = `review-model:${role}`
-      const blank = el('option', '', 'Model: the default')
-      blank.value = ''
-      model.append(blank, ...v.models.map(m => {
-        const o = el('option', '', visible(m.name))
-        o.value = m.id
-        return o
-      }))
       model.value = v.models.some(m => m.id === r.model) ? r.model : ''
-      const effort = el('select', 'textbox')
+      const effort = dropdown({ options: [option('Effort: the default', ''), ...v.efforts.map(e => option(`Effort: ${visible(e)}`, e))] })
       effort.dataset.key = `review-effort:${role}`
       effort.setAttribute('aria-label', `Effort of the ${visible(r.name)} role`)
-      const none = el('option', '', 'Effort: the default')
-      none.value = ''
-      effort.append(none, ...v.efforts.map(e => {
-        const o = el('option', '', `Effort: ${visible(e)}`)
-        o.value = e
-        return o
-      }))
       effort.value = v.efforts.includes(r.effort) ? r.effort : ''
       const shownModel = model.value
       const shownEffort = effort.value

@@ -356,6 +356,19 @@ var pinSaid = map[string]Said{
 	"unchecked": {"Provenance not checked yet", "muted"},
 }
 
+var pluginSaid = map[string]Said{
+	PluginUpToDate: {"Up to date", "ok"},
+	PluginUpdated:  {"Updated", "ok"},
+	PluginKept:     {"Not updated", "warn"},
+	PluginMissing:  {"Not installed", "bad"},
+	PluginChecking: {"Checking", "muted"},
+	PluginCheckOff: {"Not checked", "muted"},
+}
+
+func PluginSaid(check string) Said {
+	return saidOf(pluginSaid, check, Said{"Not checked yet", "muted"})
+}
+
 func PinSaid(state string) Said {
 	return saidOf(pinSaid, state, Said{state, "muted"})
 }

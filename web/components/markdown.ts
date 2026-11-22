@@ -1,4 +1,5 @@
 import { el, emit, named, unspoofed } from '../lib/dom.ts'
+import { checkbox } from '../lib/controls.ts'
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
@@ -355,10 +356,8 @@ function list(parent: HTMLElement, lines: string[], i: number, exact: boolean): 
           p.replaceWith(...p.childNodes)
         }
     if (task) {
-      const box = el('input')
-      box.type = 'checkbox'
+      const box = checkbox({ checked: task[1] !== ' ' })
       box.disabled = true
-      box.checked = task[1] !== ' '
       box.toggleAttribute('checked', box.checked)
       box.setAttribute('aria-label', (li.textContent || '').trim().slice(0, 200) || 'Task')
       li.className = 'task'

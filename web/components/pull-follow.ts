@@ -3,6 +3,7 @@ import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping
 import type { Tone } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
+import { textbox, checkbox } from '../lib/controls.ts'
 
 type Answer = EngineAnswer
 
@@ -304,24 +305,17 @@ class SfPullFollow extends HTMLElement {
       return d
     }
     const botsId = `pull-bots-${v.sid}`
-    const bots = el('input', 'textbox')
+    const bots = textbox({ name: 'bots', value: draft.bots, placeholder: 'e.g. coderabbitai[bot], sonarcloud[bot]' })
     bots.id = botsId
-    bots.name = 'bots'
-    bots.value = draft.bots
-    bots.placeholder = 'e.g. coderabbitai[bot], sonarcloud[bot]'
     bots.dataset.key = `pull-bots:${v.sid}`
     bots.addEventListener('input', () => {
       draft.bots = bots.value
       if (this.#botsRefused.delete(v.sid)) labelError(bots, '')
     })
-    const auto = el('input')
-    auto.type = 'checkbox'
-    auto.checked = draft.auto
+    const auto = checkbox({ checked: draft.auto })
     auto.dataset.key = `pull-auto:${v.sid}`
     auto.addEventListener('change', () => { draft.auto = auto.checked })
-    const assign = el('input')
-    assign.type = 'checkbox'
-    assign.checked = draft.assign
+    const assign = checkbox({ checked: draft.assign })
     assign.dataset.key = `pull-assign:${v.sid}`
     assign.addEventListener('change', () => { draft.assign = assign.checked })
     const save = button('Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)

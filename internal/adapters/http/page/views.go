@@ -229,7 +229,7 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 	}
 	var gateway any
 	if v.Gateway != nil {
-		gateway = map[string]any{"host": v.Gateway.Host, "agents": v.Gateway.Agents, "reviewers": v.Gateway.Reviewers}
+		gateway = map[string]any{"host": v.Gateway.Host}
 	}
 	rules := make([]exceptionRulesJSON, 0, len(v.Rules))
 	for _, x := range v.Rules {

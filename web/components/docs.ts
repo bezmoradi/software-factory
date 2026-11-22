@@ -1,5 +1,6 @@
 import { button, el } from '../lib/dom.ts'
-import { pageHead } from '../lib/page.ts'
+import { dialogLink, docsId, pageHead } from '../lib/page.ts'
+import { DIALOGS, dialogOpenedFrom } from '../lib/dialog-docs.ts'
 import { headings } from './markdown.ts'
 import { icon } from './icon.ts'
 
@@ -11,7 +12,8 @@ type Entry = { id: string; button: HTMLButtonElement; target: () => HTMLElement 
 
 const SESSION = 'session'
 const PAGE_LINKS: Record<string, { view: string; text: string }> = {
-  'projects-and-new-sessions': { view: 'projects', text: 'Go to Projects' },
+  projects: { view: 'projects', text: 'Go to Projects' },
+  tokens: { view: 'projects', text: 'Go to Projects' },
   'working-in-a-session': { view: SESSION, text: 'Back to session' },
   'execution-path-with-knackpack': { view: SESSION, text: 'Back to session' },
 }
@@ -27,18 +29,16 @@ function pageLink(cls: string, view: string, text: string): HTMLAnchorElement {
 function addPageLinks(root: HTMLElement, session: string) {
   for (const h of root.querySelectorAll<HTMLElement>(':scope > sf-markdown > :is(h2, h3)')) {
     const had = h.querySelector<HTMLElement>('.docs-page')
-    const name = slug(h.dataset.title ?? h.textContent ?? '')
-    const to = Object.hasOwn(PAGE_LINKS, name) ? PAGE_LINKS[name] : undefined
     h.dataset.title ??= h.textContent ?? ''
+    const name = docsId(h.dataset.title)
+    const opens = dialogOpenedFrom(name)
+    if (opens && !h.querySelector('button[data-dialog]')) h.append(dialogLink({ title: DIALOGS[opens].title, dialog: opens }))
+    const to = Object.hasOwn(PAGE_LINKS, name) ? PAGE_LINKS[name] : undefined
     const view = to?.view === SESSION ? session : to?.view ?? ''
     if (had && had.dataset.view === view) continue
     had?.remove()
     if (to && view) h.append(pageLink('docs-page', view, to.text))
   }
-}
-
-function slug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 function sections(text: string): Section[] {
@@ -50,7 +50,7 @@ function sections(text: string): Section[] {
     const newline = part.indexOf('\n')
     const title = part.slice(3, newline < 0 ? undefined : newline).trim()
     const body = part
-    return { id: slug(title), title, body, subs: headings(body, 3) }
+    return { id: docsId(title), title, body, subs: headings(body, 3) }
   })
 }
 
@@ -219,7 +219,7 @@ class SfDocs extends HTMLElement {
         const ul = el('ul')
         s.subs.forEach((title, k) => {
           const sub = el('li')
-          sub.append(this.#entry(slug(title), title, () => part.querySelectorAll<HTMLElement>(':scope > sf-markdown > h3')[k] ?? null))
+          sub.append(this.#entry(docsId(title), title, () => part.querySelectorAll<HTMLElement>(':scope > sf-markdown > h3')[k] ?? null))
           ul.append(sub)
         })
         li.append(ul)

@@ -3,6 +3,7 @@ import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say,
 import { actions, field, fieldRow, form } from '../lib/form.ts'
 import { continueBody, day, limitsAnswer, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, LimitsAnswer, SessionLimits } from './usage.ts'
+import { textbox } from '../lib/controls.ts'
 
 type CapKind = 'money' | 'time' | 'turns' | 'disk'
 
@@ -118,12 +119,8 @@ class CapsInputs {
     this.box.setAttribute('role', 'group')
     this.box.setAttribute('aria-label', label)
     for (const k of KINDS) {
-      const input = el('input', 'textbox')
-      input.type = 'number'
-      input.inputMode = k.key === 'money' ? 'decimal' : 'numeric'
-      input.placeholder = `${k.unit}: off`
+      const input = textbox({ type: 'number', inputMode: k.key === 'money' ? 'decimal' : 'numeric', placeholder: `${k.unit}: off`, name: k.key })
       input.id = `caps-${k.key}-${++fieldSerial}`
-      input.name = k.key
       input.title = `${k.label}; empty or 0 is off`
       input.addEventListener('input', () => labelError(input, ''))
       this.inputs.set(k.key, input)
@@ -389,11 +386,8 @@ class SfSessionLimits extends HTMLElement {
     }
     let raise = this.#raise.get(s.sid + s.reached)
     if (!raise) {
-      const input = el('input', 'textbox')
-      input.type = 'number'
-      input.inputMode = kind === 'money' ? 'decimal' : 'numeric'
+      const input = textbox({ type: 'number', inputMode: kind === 'money' ? 'decimal' : 'numeric', value: s.raise ? String(s.raise.suggested) : '' })
       input.addEventListener('input', () => labelError(input, ''))
-      input.value = s.raise ? String(s.raise.suggested) : ''
       raise = { input, box: field(`New ${capName(kind)}`, input) }
       this.#raise.set(s.sid + s.reached, raise)
     }

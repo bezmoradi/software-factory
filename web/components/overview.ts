@@ -3,6 +3,7 @@ import { field } from '../lib/form.ts'
 import { agentWord, label, plural } from '../lib/format.ts'
 import { bySessionOrder, isRunning, sessionKey, sessionLink, sessionRow, sessionTable, titled } from './session-list.ts'
 import type { AskEvent, CardEvent, OverviewSession, PermissionEvent } from '../types.ts'
+import { textbox } from '../lib/controls.ts'
 
 const CARD_WORDS: Record<string, ((c: CardEvent) => string) | undefined> = { permission: c => `wants to run ${(c as PermissionEvent).tool}`, ask: c => `asks: ${(c as AskEvent).questions?.[0]?.question ?? 'a question'}`, plan: () => 'has a plan ready' }
 
@@ -53,7 +54,7 @@ class SfOverview extends HTMLElement {
   #query = ''
   #states = new Set<SessionFilter>()
   #tools = el('div', 'session-filter')
-  #search = el('input', 'textbox')
+  #search = textbox({ type: 'search', autocomplete: 'off', spellcheck: false, placeholder: 'Name, branch or project' })
   #chips = el('div', 'filter-chips')
   #clear = button('Clear', 'ghost small', () => this.clear(), 'button', 'filter:clear')
   #shown = statusLine('small muted filter-count')
@@ -64,11 +65,7 @@ class SfOverview extends HTMLElement {
     const from = readFragment()
     this.#query = from.query
     this.#states = from.states
-    this.#search.type = 'search'
     this.#search.id = 'session-search'
-    this.#search.autocomplete = 'off'
-    this.#search.spellcheck = false
-    this.#search.placeholder = 'Name, branch or project'
     this.#search.value = this.#query
     this.#search.dataset.key = 'filter:search'
     this.#search.addEventListener('input', () => this.#set(this.#search.value, this.#states))

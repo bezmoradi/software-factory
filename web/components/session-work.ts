@@ -5,6 +5,7 @@ import { shortSha } from '../lib/format.ts'
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
 import { typeChangeOf, typeChangeParts } from './push-facts.ts'
+import { textarea, dropdown, option } from '../lib/controls.ts'
 
 export interface AgentModel {
   id: string
@@ -64,24 +65,12 @@ function modelsOf(v: unknown): AgentModel[] {
 
 export function modelOptions(select: HTMLSelectElement, models: AgentModel[], first: string) {
   const keep = select.value
-  const blank = el('option', '', first)
-  blank.value = ''
-  select.replaceChildren(blank, ...models.map(m => {
-    const o = el('option', '', visible(m.name === m.id ? m.id : `${m.name} (${m.id})`))
-    o.value = m.id
-    return o
-  }))
+  select.replaceChildren(option(first, ''), ...models.map(m => option(visible(m.name === m.id ? m.id : `${m.name} (${m.id})`), m.id)))
   if (models.some(m => m.id === keep)) select.value = keep
 }
 
 export function effortOptions(select: HTMLSelectElement, first: string, efforts: string[]) {
-  const blank = el('option', '', first)
-  blank.value = ''
-  select.replaceChildren(blank, ...efforts.map(e => {
-    const o = el('option', '', `Effort: ${visible(e)}`)
-    o.value = e
-    return o
-  }))
+  select.replaceChildren(option(first, ''), ...efforts.map(e => option(`Effort: ${visible(e)}`, e)))
 }
 
 function readRun(v: unknown): CommandRun | null {
@@ -149,11 +138,11 @@ class SfSessionWork extends HTMLElement {
   #busy = false
   #busyKey = ''
   #status = statusLine()
-  #model = el('select', 'textbox')
-  #effort = el('select', 'textbox')
-  #add = el('textarea', 'textbox')
+  #model = dropdown()
+  #effort = dropdown()
+  #add = textarea({ rows: 2, name: 'text', placeholder: 'A message for after the current turn' })
   #editing = ''
-  #edit = el('textarea', 'textbox')
+  #edit = textarea({ rows: 3, name: 'text' })
   #bad: { input: HTMLElement; text: string } | null = null
   #loading = 0
   #key = ''
@@ -173,14 +162,9 @@ class SfSessionWork extends HTMLElement {
     this.#effort.setAttribute('aria-label', 'Effort from the next turn')
     this.#model.addEventListener('change', () => this.#fillEfforts())
     this.#add.id = 'work-queue-add'
-    this.#add.name = 'text'
     this.#add.dataset.key = 'work-queue-add'
-    this.#add.rows = 2
-    this.#add.placeholder = 'A message for after the current turn'
-    this.#edit.rows = 3
     this.#edit.dataset.key = 'work-queue-edit'
     this.#edit.id = 'work-queue-edit'
-    this.#edit.name = 'text'
     for (const input of [this.#add, this.#edit]) input.addEventListener('input', () => {
       if (this.#bad?.input !== input) return
       this.#bad = null

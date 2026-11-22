@@ -62,10 +62,8 @@ type AddedHost struct {
 }
 
 type Gateway struct {
-	URL       string
-	Host      string
-	Agents    bool
-	Reviewers bool
+	URL  string
+	Host string
 }
 
 type EgressSettings struct {
@@ -121,7 +119,7 @@ type EgressPage interface {
 	EgressView() (EgressView, error)
 	AddHost(ctx context.Context, name, expiry string, uploadsOk bool, reason string) error
 	RemoveHost(ctx context.Context, name string) error
-	SetGateway(ctx context.Context, rawURL string, agents, reviewers bool) (bool, error)
+	SetGateway(ctx context.Context, rawURL string) (bool, error)
 	EgressRefusals(ctx context.Context) ([]RefusalView, error)
 }
 
@@ -250,7 +248,7 @@ func (a *Allowlist) wantLocked(side string) EgressList {
 	for _, h := range agentHostsOf("claude") {
 		fixed[h] = true
 	}
-	if side == SideReviewers && s.Gateway.Reviewers && s.Gateway.Host != "" || side != SideReviewers && s.Gateway.Agents && s.Gateway.Host != "" {
+	if s.Gateway.Host != "" {
 		fixed[s.Gateway.Host] = true
 	}
 	expires := map[string]time.Time{}
@@ -266,7 +264,7 @@ func (a *Allowlist) wantLocked(side string) EgressList {
 			}
 		}
 	}
-	if gw := gatewayHostFor(s.Gateway, side); gw != "" {
+	if gw := s.Gateway.Host; gw != "" {
 		allow = slices.DeleteFunc(allow, func(h string) bool { return h != gw && ClaudeVendorHost(h) })
 		for h := range expires {
 			if !slices.Contains(allow, h) {
@@ -401,20 +399,19 @@ func (a *Allowlist) tend(ctx context.Context) bool {
 	return true
 }
 
-func (a *Allowlist) BaseURL(side string) string {
+func (a *Allowlist) BaseURL() string {
 	if a == nil {
 		return ""
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	g := a.settings.Gateway
-	if !a.saved || g.URL == "" || side == SideAgents && !g.Agents || side == SideReviewers && !g.Reviewers {
+	if !a.saved {
 		return ""
 	}
-	return g.URL
+	return a.settings.Gateway.URL
 }
 
-func (a *Allowlist) GatewayHost(side string) (string, bool) {
+func (a *Allowlist) GatewayHost() (string, bool) {
 	if a == nil {
 		return "", true
 	}
@@ -426,7 +423,7 @@ func (a *Allowlist) GatewayHost(side string) (string, bool) {
 	if !a.saved || a.settings.Gateway.URL == "" {
 		return "", true
 	}
-	return gatewayHostFor(a.settings.Gateway, side), true
+	return a.settings.Gateway.Host, true
 }
 
 func (a *Allowlist) HoldGateway() func() {
@@ -489,7 +486,7 @@ func (a *Allowlist) audit(what, words string) {
 
 func (a *Allowlist) refuseHost(name string) error {
 	if !ValidAllowEntry(name) {
-		return onField("host", invalid("host", "Needs a host like registry.npmjs.org or .example.com."))
+		return onField("host", invalid("host", "Not a host name."))
 	}
 	if d := DeniedBy(a.cfg.Deny, name); d != "" {
 		return conflict("git host", "Is or covers a git host; the engine pushes for agents.")
@@ -559,7 +556,7 @@ func (a *Allowlist) RemoveHost(ctx context.Context, raw string) error {
 	})
 }
 
-func (a *Allowlist) SetGateway(ctx context.Context, raw string, agents, reviewers bool) (bool, error) {
+func (a *Allowlist) SetGateway(ctx context.Context, raw string) (bool, error) {
 	next, words := Gateway{}, "gateway removed"
 	if strings.TrimSpace(raw) != "" {
 		u, host, err := CheckGatewayURL(raw)
@@ -569,10 +566,7 @@ func (a *Allowlist) SetGateway(ctx context.Context, raw string, agents, reviewer
 		if err := a.refuseHost(host); err != nil {
 			return false, onField("url", err)
 		}
-		if !agents && !reviewers {
-			return false, onField("agents", invalid("gateway", "Choose the agents, the reviewers or both for the gateway."))
-		}
-		next, words = Gateway{URL: u, Host: host, Agents: agents, Reviewers: reviewers}, "gateway "+host+sides(agents, reviewers)
+		next, words = Gateway{URL: u, Host: host}, "gateway "+host+" for agents and reviewers"
 	}
 	a.gwMu.Lock()
 	defer a.gwMu.Unlock()
@@ -605,10 +599,8 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 		return conflict("gateway", "This engine can't remove a key saved for Claude Code, so it doesn't change the gateway.")
 	}
 	var running []string
-	for _, side := range []string{SideAgents, SideReviewers} {
-		if gatewayHostFor(was, side) != gatewayHostFor(next, side) {
-			running = append(running, keys.RunningOn(side)...)
-		}
+	if was.Host != next.Host {
+		running = append(keys.RunningOn(SideAgents), keys.RunningOn(SideReviewers)...)
 	}
 	if len(running) > 0 {
 		return conflict("running", "Stop these sessions first: "+runningWords(running)+". They started with the old gateway setting, and Claude Code would send the next key you paste to the address they started with. Reviews finish by themselves; wait for them.")
@@ -624,21 +616,14 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	return nil
 }
 
-func gatewayHostFor(g Gateway, side string) string {
-	if side == SideAgents && g.Agents || side == SideReviewers && g.Reviewers {
-		return g.Host
-	}
-	return ""
-}
-
 func (a *Allowlist) dropKeys(ctx context.Context, next Gateway) error {
 	a.mu.Lock()
 	was, keys := a.current().Gateway, a.keys
 	a.mu.Unlock()
+	if was.Host == next.Host {
+		return nil
+	}
 	for _, side := range []string{SideAgents, SideReviewers} {
-		if gatewayHostFor(was, side) == gatewayHostFor(next, side) {
-			continue
-		}
 		if err := keys.ClearSide(ctx, side); err != nil {
 			why := "The gateway wasn't changed. Claude Code would send the key saved in the " + containerOf(side) + " to the new address, and it couldn't be removed first"
 			if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
@@ -659,16 +644,6 @@ func containerOf(side string) string {
 	return "sessions' containers"
 }
 
-func sides(agents, reviewers bool) string {
-	switch {
-	case agents && reviewers:
-		return " for agents and reviewers"
-	case agents:
-		return " for agents"
-	}
-	return " for reviewers"
-}
-
 func (a *Allowlist) EgressRefusals(ctx context.Context) ([]RefusalView, error) {
 	ctx, cancel := context.WithTimeout(ctx, egressSetFor)
 	defer cancel()
@@ -682,7 +657,7 @@ func (a *Allowlist) EgressRefusals(ctx context.Context) ([]RefusalView, error) {
 	}
 	a.mu.Lock()
 	agentsWant := a.wantLocked(SideAgents)
-	agentsGateway := a.saved && gatewayHostFor(a.settings.Gateway, SideAgents) != ""
+	agentsGateway := a.saved && a.settings.Gateway.Host != ""
 	a.mu.Unlock()
 	out := make([]RefusalView, 0, len(got))
 	for _, r := range got {

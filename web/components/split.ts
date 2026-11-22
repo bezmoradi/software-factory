@@ -5,6 +5,7 @@ import { actions, field, form } from '../lib/form.ts'
 import { label } from '../lib/format.ts'
 import { saidOf } from '../lib/json.ts'
 import type { SessionInfo, SplitCard } from '../types.ts'
+import { textbox, textarea } from '../lib/controls.ts'
 
 export interface SplitPanelView {
   sid: string
@@ -145,15 +146,10 @@ class SfSplit extends HTMLElement {
   }
 
   #editor(v: SplitPanelView, c: SplitCard, draft: { title: string; message: string }): HTMLElement {
-    const title = el('input', 'textbox')
-    title.name = 'title'
-    title.value = draft.title
+    const title = textbox({ name: 'title', value: draft.title })
     title.setAttribute('aria-required', 'true')
     title.dataset.key = `title:${c.card}`
-    const message = el('textarea', 'textbox')
-    message.name = 'message'
-    message.value = draft.message
-    message.rows = 8
+    const message = textarea({ rows: 8, name: 'message', value: draft.message })
     message.setAttribute('aria-required', 'true')
     message.dataset.key = `message:${c.card}`
     const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = { title, message }

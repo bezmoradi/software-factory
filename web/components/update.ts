@@ -193,7 +193,7 @@ export function openUpdate(): void {
   const m = modal({
     kind: 'update',
     title,
-    docs: 'maintenance',
+    docs: 'update-to-software-factory',
     closeButton: true,
     body: [
       para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),

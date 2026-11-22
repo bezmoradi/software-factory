@@ -28,7 +28,7 @@ type KeyRoutes interface {
 }
 
 type GatewayRoutes interface {
-	GatewayHost(side string) (string, bool)
+	GatewayHost() (string, bool)
 	HoldGateway() func()
 }
 
@@ -38,14 +38,14 @@ func (d *Dispatcher) UseGateways(g GatewayRoutes) {
 	d.gateways = g
 }
 
-func (d *Dispatcher) gatewayOf(side string) (string, bool) {
+func (d *Dispatcher) gatewayOf() (string, bool) {
 	d.mu.Lock()
 	g := d.gateways
 	d.mu.Unlock()
 	if g == nil {
 		return "", true
 	}
-	return g.GatewayHost(side)
+	return g.GatewayHost()
 }
 
 func (d *Dispatcher) holdGateway() func() {
@@ -56,13 +56,6 @@ func (d *Dispatcher) holdGateway() func() {
 		return func() {}
 	}
 	return g.HoldGateway()
-}
-
-func targetSide(target string) string {
-	if target == LoginReviewers {
-		return SideReviewers
-	}
-	return SideAgents
 }
 
 func (d *Dispatcher) expectAgentOf(target string) string {
@@ -167,7 +160,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	defer d.keyMu.Unlock()
 	all, readable := d.keyRoutes()
 	k, present := all[target]
-	host, established := d.gatewayOf(targetSide(target))
+	host, established := d.gatewayOf()
 	if !keyMisrouted(k, readable && present, host, established) {
 		return nil
 	}
@@ -188,7 +181,7 @@ func (d *Dispatcher) unreachedKey(target string) error {
 	defer d.keyMu.Unlock()
 	all, readable := d.keyRoutes()
 	k, present := all[target]
-	host, established := d.gatewayOf(targetSide(target))
+	host, established := d.gatewayOf()
 	if readable && (!present || !k.Saved || !keyMisrouted(k, true, host, established)) {
 		return nil
 	}

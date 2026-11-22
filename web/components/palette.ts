@@ -1,6 +1,8 @@
 import { button, el, settleFocus, statusLine, visible } from '../lib/dom.ts'
 import { modal, reopen } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { field, form } from '../lib/form.ts'
+import { textbox, checkbox } from '../lib/controls.ts'
 
 export interface PaletteItem {
   id: string
@@ -71,12 +73,8 @@ function keyCaps(keys: string[]): HTMLElement {
 export function openPalette(list: () => PaletteItem[]): void {
   if (reopen('palette')) return
   const items = list()
-  const input = el('input', 'textbox palette-input')
-  input.type = 'text'
+  const input = textbox({ type: 'text', autocomplete: 'off', spellcheck: false, placeholder: 'Search sessions, projects and commands', cls: 'palette-input' })
   input.id = 'palette-input'
-  input.autocomplete = 'off'
-  input.spellcheck = false
-  input.placeholder = 'Search sessions, projects and commands'
   input.setAttribute('role', 'combobox')
   input.setAttribute('aria-expanded', 'true')
   input.setAttribute('aria-controls', 'palette-list')
@@ -194,7 +192,7 @@ export function openPalette(list: () => PaletteItem[]): void {
     kind: 'palette',
     consent: false,
     title: 'Command palette',
-    docs: 'working-in-a-session',
+    docs: false,
     headingClass: 'sr-only',
     body: [head, listbox, none, said],
     focus: input,
@@ -252,9 +250,7 @@ export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) =>
     tbody.append(tr)
   }
   table.append(caption, thead, tbody)
-  const box = el('input')
-  box.type = 'checkbox'
-  box.checked = questionOn
+  const box = checkbox({ checked: questionOn })
   box.addEventListener('change', () => setQuestion(box.checked))
   const toggle = form({ children: [field('Open this list with the ? key', box, { kind: 'check' })] })
   const note = el('p', 'small muted', 'None of these replaces a key the browser or a screen reader uses: the palette key is the browser’s search shortcut only while this page has focus, and ? works only outside text fields. A screen reader in browse mode keeps every key it uses for itself.')
@@ -266,8 +262,7 @@ export function openShortcuts(questionOn: boolean, setQuestion: (on: boolean) =>
   wrap.append(table)
   const m = modal({
     kind: 'shortcuts',
-    title: 'Keyboard shortcuts',
-    docs: 'working-in-a-session',
+    ...dialogDocs('shortcuts'),
     body: [wrap, toggle, note],
     actions: [closeButton],
     focus: closeButton,

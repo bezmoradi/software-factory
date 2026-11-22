@@ -1,5 +1,6 @@
 import type { Prefs } from '../types.ts'
 import { field } from './form.ts'
+import { radio } from './controls.ts'
 
 const root = document.documentElement
 
@@ -33,12 +34,8 @@ export function scales(): string[] {
   return rules(/^:root\[data-scale="(\d+)"\]$/).map(({ value }) => value)
 }
 
-function option(group: string, value: string, label: Node): HTMLDivElement {
-  const input = document.createElement('input')
-  input.type = 'radio'
-  input.name = group
-  input.value = value
-  return field(label, input, { kind: 'option', labelCls: 'theme' })
+function themeOption(group: string, value: string, label: Node): HTMLDivElement {
+  return field(label, radio(group, value), { kind: 'option', labelCls: 'theme' })
 }
 
 function row(theme: { value: string; label: string; default: boolean }) {
@@ -50,13 +47,13 @@ function row(theme: { value: string; label: string; default: boolean }) {
     tag.textContent = '(default)'
     name.append(' ', tag)
   }
-  return option('theme', theme.value, name)
+  return themeOption('theme', theme.value, name)
 }
 
 function sideOption(value: string, words: string) {
   const name = document.createElement('span')
   name.textContent = words
-  return option('bar', value, name)
+  return themeOption('bar', value, name)
 }
 
 export function initPrefs(save: (prefs: Prefs) => void): void {

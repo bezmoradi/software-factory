@@ -1,31 +1,30 @@
-import { request, savedTone } from '../api.ts'
-import { button, el, focusedKey, labelError, refocus, say, statusLine, whileBusy } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { button, el, labelError, say, statusLine, whileBusy } from '../lib/dom.ts'
 import { actions, field, form, showAnswer } from '../lib/form.ts'
+import { textbox } from '../lib/controls.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 let serial = 0
 
 
 class SfProjectCommands extends HTMLElement {
   #project = ''
-  #check = el('input', 'textbox')
-  #setup = el('input', 'textbox')
-  #image = el('input', 'textbox')
-  #browser = el('input', 'textbox')
+  #check = textbox()
+  #setup = textbox()
+  #image = textbox()
+  #browser = textbox()
   #save = button('Save commands', 'small', undefined, 'submit', 'commands-save')
   #said = statusLine()
   #form: HTMLFormElement | null = null
-  #again = button('Read again', 'link small', () => {
-    if (this.#reading) return
-    say(this.#said, '')
-    void whileBusy(this.#again, () => this.#load())
-  }, 'button', 'commands-again')
-  #reading = 0
-  #loaded = ''
   #built = false
+  #poll: WhileOpen | null = null
+  #failed = false
+  #dirty = false
+  #saving = false
 
   connectedCallback() {
     if (this.#built) {
-      if (this.#project && this.#loaded !== this.#project) void this.#load()
+      if (!this.#poll?.live) this.#watch()
       return
     }
     this.#built = true
@@ -53,46 +52,45 @@ class SfProjectCommands extends HTMLElement {
       }),
       this.#said,
     )
-    if (this.#project && this.#loaded !== this.#project) void this.#load()
+    for (const kind of ['input', 'change']) this.#form?.addEventListener(kind, () => {
+      this.#dirty = true
+    })
+    this.#watch()
   }
 
   set project(name: string) {
     if (name === this.#project) return
     this.#project = name
-    this.#loaded = ''
-    if (this.isConnected) void this.#load()
+    this.#dirty = false
+    this.#watch()
   }
 
-  async #load() {
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
     const project = this.#project
-    if (!project) return
-    this.#reading++
-    this.#again.setAttribute('aria-disabled', 'true')
-    try {
-      const a = await request('/api/project-commands', { op: 'read', name: project })
-      if (project !== this.#project) return
-      if (!a.ok) {
-        say(this.#said, a.message, 'warn')
-        return this.#retry(true)
-      }
-      const body = a.body
-      this.#check.value = typeof body.check === 'string' ? body.check : ''
-      this.#setup.value = typeof body.setup === 'string' ? body.setup : ''
-      this.#image.value = typeof body.image === 'string' ? body.image : ''
-      this.#browser.value = typeof body.browser === 'string' ? body.browser : ''
-      this.#loaded = project
-      this.#retry(false)
-    } finally {
-      if (!--this.#reading) this.#again.removeAttribute('aria-disabled')
-    }
+    if (!project || !this.isConnected || !this.#built) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => this.#typing(), read: () => request('/api/project-commands', { op: 'read', name: project }), show: a => this.#took(a), near: () => ['commands-save'] })
   }
 
-  #retry(on: boolean) {
-    if (on === (this.#again.parentNode === this)) return
-    if (on) return this.#said.after(this.#again)
-    const focused = focusedKey(this)
-    this.#again.remove()
-    refocus(this, focused, () => ['commands-save'])
+  #typing(): boolean {
+    const a = document.activeElement
+    return this.#dirty || this.#saving || (a instanceof HTMLElement && !!this.#form?.contains(a) && a.matches('input, textarea, select'))
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) {
+      this.#failed = true
+      say(this.#said, a.message, 'warn')
+      return
+    }
+    if (this.#failed) say(this.#said, '')
+    this.#failed = false
+    const body = a.body
+    this.#check.value = typeof body.check === 'string' ? body.check : ''
+    this.#setup.value = typeof body.setup === 'string' ? body.setup : ''
+    this.#image.value = typeof body.image === 'string' ? body.image : ''
+    this.#browser.value = typeof body.browser === 'string' ? body.browser : ''
   }
 
   async #store() {
@@ -101,8 +99,12 @@ class SfProjectCommands extends HTMLElement {
     const image = this.#image.value
     const browser = this.#browser.value
     say(this.#said, '')
+    this.#saving = true
     const a = await whileBusy(this.#save, () => request('/api/project-commands', { op: 'set', name: this.#project, check, setup, image, browser }))
+    this.#saving = false
     if (this.#form && !showAnswer(this.#form, a, this.#said, { tone: 'warn' })) return
+    this.#failed = false
+    this.#dirty = false
     say(this.#said, a.message, savedTone(a))
   }
 }

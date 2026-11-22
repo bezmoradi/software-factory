@@ -3,6 +3,7 @@ import { actions, form } from '../lib/form.ts'
 import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
+import { textbox } from '../lib/controls.ts'
 
 const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attach}` : "This session is read-only on this page, so this can't be answered here.")
 const alsoThere = (attach?: string) => (attach ? ` You can also answer in Claude Code itself: ${attach}` : '')
@@ -144,7 +145,7 @@ interface NoteOptions {
 
 class NoteForm {
   form = form({ inline: true, cls: 'other' })
-  field = el('input', 'textbox')
+  field = textbox()
   send: HTMLButtonElement
   toggle: HTMLButtonElement | null = null
   onSend: (text: string) => void = () => {}

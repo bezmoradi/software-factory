@@ -295,7 +295,7 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
     no_state_check: "refused with 400 by the route's own check of the value before it saves, sends or starts anything, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
-    waive: { FIX-05: { rows: [msg_project_hold, msg_project_hold_lines, msg_gateway_url], reason: "each of these rows sends the route's fixed op name, hold or gateway, which a later row's error, the engine's fixed refusal code for that op, happens to repeat; neither can carry ${run.id}, and every row's 400 is answered from its own body before anything is read or saved, so no earlier run's data can make it match" } }
+    waive: { FIX-05: { rows: [msg_project_hold, msg_project_hold_lines], reason: "each of these rows sends the route's fixed op name, hold, which a later row's error, the engine's fixed refusal code for that op, happens to repeat; neither can carry ${run.id}, and every row's 400 is answered from its own body before anything is read or saved, so no earlier run's data can make it match" } }
     columns: ["case", "route", "body", "error", "field", "message"]
     rows:
       - ["msg_project_check_long", "/api/project-commands", { op: set, name: demo, check: "${fill(365)}", setup: "" }, "command", "check", "One line of at most 300 bytes, with no control characters."]
@@ -316,8 +316,7 @@ tables:
       - ["msg_project_hold_after", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: "yes", maxFiles: 0, maxLines: 0 } }, "hold", "afterBlock", "A whole number of files or lines, 0 to switch it off."]
       - ["msg_split_title_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: "", message: proctor }, "text", "title", "Is empty."]
       - ["msg_split_message_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: proctor, message: " " }, "text", "message", "Is empty."]
-      - ["msg_gateway_url", "/api/egress", { op: gateway, url: "http://llm-gateway.example.com", agents: true, reviewers: true }, "gateway", "url", "Needs an address like https://llm.example.com."]
-      - ["msg_gateway_sides", "/api/egress", { op: gateway, url: "https://llm-gateway.example.com", agents: false, reviewers: false }, "gateway", "agents", "Choose the agents, the reviewers or both for the gateway."]
+      - ["msg_gateway_url", "/api/egress", { op: gateway, url: "http://llm-gateway.example.com" }, "gateway", "url", "Needs an address like https://llm.example.com."]
       - ["msg_identity_name_empty", "/api/commit-identity", { op: set, name: "", email: "12345+proctor@users.noreply.github.com" }, "name", "name", "Needs 1 to 100 characters."]
       - ["msg_identity_name_long", "/api/commit-identity", { op: set, name: "${fill(401)}", email: "12345+proctor@users.noreply.github.com" }, "name", "name", "Needs 1 to 100 characters."]
       - ["msg_identity_email", "/api/commit-identity", { op: set, name: Proctor Run, email: not-an-email }, "email", "email", "Needs an address like you@example.com."]
@@ -895,7 +894,7 @@ scenarios:
           method: POST
           path: "/api/egress"
           headers: { Origin: "${page.origin}" }
-          body: { op: gateway, url: "", agents: false, reviewers: false }
+          body: { op: gateway, url: "" }
         expect:
           equal:
             "$.status": 200
@@ -910,13 +909,27 @@ scenarios:
           method: POST
           path: "/api/egress"
           headers: { Origin: "${page.origin}" }
-          body: { op: gateway, url: "", agents: false, reviewers: false }
+          body: { op: gateway, url: "" }
         expect:
           equal:
             "$.status": 200
             "$.body.message": "No change: no gateway is set."
             "$.body.tone": warn
         no_state_check: "saves nothing, since no gateway is set, as the answer's No change says; no declared read shows the company gateway: /api/egress answers it, but its op decides read or write (op gateway saves it), so it isn't declared a read, and /api/exceptions, which also lists it, isn't declared either; gateway-still-none reads it back"
+      - id: gateway-sides-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: gateway, url: "", agents: true, reviewers: true }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }
+        no_state_check: "refused with 400 fields before anything is read or saved, since a gateway always covers the agents and the reviewers and the gateway op takes only its URL; no declared read shows the company gateway (see gateway-none), and gateway-still-none reads it back"
       - id: gateway-still-none
         do: http.request
         identity: page

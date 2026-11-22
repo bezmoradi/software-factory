@@ -1,9 +1,10 @@
 import { busy, button, el, emit, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
-import { field } from '../lib/form.ts'
+import { actions, field } from '../lib/form.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
 import type { ChangeFile, ChangeFrom, Changes, LineCommentBody } from '../types.ts'
 import { emptyState } from '../lib/page.ts'
+import { textarea, dropdown, option, checkbox } from '../lib/controls.ts'
 
 const MARK: Record<string, string> = { added: 'A', changed: 'M', deleted: 'D' }
 const MAX_HIGHLIGHT = 20000
@@ -252,7 +253,7 @@ class SfChanges extends HTMLElement {
   #status = statusLine('sr-only', 'span')
   #panel = el('div', 'line-comments small')
   #target = el('p', 'small muted')
-  #box = el('textarea', 'textbox')
+  #box = textarea()
   #list = el('ul', 'list line-comment-list')
   #said = statusLine()
   #add = button('Add comment', 'ghost small', () => this.#addComment())
@@ -278,8 +279,7 @@ class SfChanges extends HTMLElement {
         this.#addComment()
       }
     })
-    const acts = el('div', 'row')
-    acts.append(this.#add, el('span', 'spacer'), this.#send)
+    const acts = actions([this.#send], [this.#add])
     this.#panel.append(el('h3', 'label', 'Line comments'), el('p', 'small muted', 'Choose a line in the diff, write a comment, then send them all to the agent as one message, each with its file and line.'), this.#target, this.#box, acts, this.#list, this.#said)
   }
 
@@ -480,40 +480,24 @@ class SfChanges extends HTMLElement {
     const bar = el('div', 'changes-tools')
     const from: ChangeFrom = value.from || 'fork'
     const points = value.points ?? { reviewed: '', reviewedAt: 0, turn: '' }
-    const pick = el('select', 'textbox small')
+    const pick = dropdown({ cls: 'small' })
     pick.id = 'changes-from'
     pick.dataset.key = 'changes-from'
     for (const k of Object.keys(POINTS) as ChangeFrom[]) {
       const sha = k === 'reviewed' ? points.reviewed : k === 'turn' ? points.turn : ''
       const missing = (k === 'reviewed' || k === 'turn') && !sha
-      const option = el('option', '', `${POINTS[k]}${sha ? ` (${shortSha(sha)})` : missing ? ' (none yet)' : ''}`)
-      option.value = k
-      option.disabled = missing && k !== from
-      option.selected = k === from
-      pick.append(option)
+      pick.append(option(`${POINTS[k]}${sha ? ` (${shortSha(sha)})` : missing ? ' (none yet)' : ''}`, k, { disabled: missing && k !== from, selected: k === from }))
     }
     const commits = this.#branchCommits.get(value.branch) ?? []
-    const commitPick = el('select', 'textbox small')
+    const commitPick = dropdown({ cls: 'small' })
     commitPick.id = 'changes-commit'
     commitPick.dataset.key = 'changes-commit'
     const chosen = from === 'commit' ? value.base : ''
     const preset = chosen || (commits[1] ?? commits[0])?.sha || ''
-    for (const c of commits) {
-      const option = el('option', '', `${shortSha(c.sha)} ${visible(c.subject)}`)
-      option.value = c.sha
-      option.selected = c.sha === preset
-      commitPick.append(option)
-    }
-    if (chosen && !commits.some(c => c.sha === chosen)) {
-      const option = el('option', '', shortSha(chosen))
-      option.value = chosen
-      option.selected = true
-      commitPick.prepend(option)
-    }
+    for (const c of commits) commitPick.append(option(`${shortSha(c.sha)} ${visible(c.subject)}`, c.sha, { selected: c.sha === preset }))
+    if (chosen && !commits.some(c => c.sha === chosen)) commitPick.prepend(option(shortSha(chosen), chosen, { selected: true }))
     if (!commits.length && !chosen) {
-      const option = el('option', '', 'No commit on the branch yet')
-      option.value = ''
-      commitPick.append(option)
+      commitPick.append(option('No commit on the branch yet', ''))
       commitPick.disabled = true
     }
     pick.addEventListener('change', () => {
@@ -536,9 +520,7 @@ class SfChanges extends HTMLElement {
     unified.setAttribute('aria-pressed', String(!this.#layout.split))
     split.setAttribute('aria-pressed', String(this.#layout.split))
     group.append(unified, split)
-    const box = el('input')
-    box.type = 'checkbox'
-    box.checked = this.#layout.highlight
+    const box = checkbox({ checked: this.#layout.highlight })
     box.dataset.key = 'layout:highlight'
     box.addEventListener('change', () => this.#setLayout({ highlight: box.checked }))
     bar.append(group, field('Highlight syntax', box, { kind: 'check' }))
@@ -558,9 +540,7 @@ class SfChanges extends HTMLElement {
     const skip = f.notDiffed ? f.notDiffedWhy ?? '' : ''
     if (skip) li.append(el('span', 'tag', `not diffed: ${skip}${f.size ? `, ${sizeWords(f.size)}` : ''}`))
     if (f.blob && SHA.test(f.blob)) {
-      const box = el('input')
-      box.type = 'checkbox'
-      box.checked = !!f.viewed
+      const box = checkbox({ checked: !!f.viewed })
       box.disabled = !!this.#readOnly
       box.dataset.key = `viewed:${f.path}`
       box.setAttribute('aria-label', `Viewed: ${visible(f.path)}`)

@@ -6,10 +6,12 @@ import { busy, button, byId, copyText, el, emit, fileLink, repoPath, shown, visi
 import { startComposer } from './composer.ts'
 import { initPrefs } from './lib/prefs.ts'
 import { field, form } from './lib/form.ts'
+import { option } from './lib/controls.ts'
 import { agentWord, baseName, isClaude, label, plural, setAgentNames, shortSha } from './lib/format.ts'
 import { paintPath } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
 import { isRecord } from './lib/json.ts'
+import { isDialog } from './lib/dialog-docs.ts'
 import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView } from './types.ts'
 import './components/changes.ts'
 import './components/overview.ts'
@@ -85,6 +87,8 @@ modelMenu.setAttribute('role', 'menuitem')
 modelMenu.hidden = true
 byId('menu-wake').after(modelMenu)
 let reviewer: ReviewerView | null = null
+let landedOn = ''
+let askSignIn = false
 let starterNames = new Map<string, string>()
 let projectsAt = 0
 
@@ -247,6 +251,11 @@ function paint() {
   byId('home').hidden = !!s
   byId('welcome').hidden = current.key !== 'overview'
   byId('projects').hidden = current.key !== 'projects'
+  if (current.key !== landedOn) {
+    landedOn = current.key
+    askSignIn = landedOn === 'projects'
+  }
+  askForSignIn()
   byId('docs').hidden = current.key !== 'docs'
   byId('file').hidden = !current.key.startsWith('f:')
   paintChangesTab()
@@ -596,12 +605,7 @@ function paintChecks(s: Session) {
   const focused = document.activeElement === size
   if (types.length && size.dataset.types !== typesKey && !focused) {
     size.dataset.types = typesKey
-    size.replaceChildren(...types.map(t => {
-      const o = document.createElement('option')
-      o.value = t.id
-      o.textContent = visible(t.name)
-      return o
-    }))
+    size.replaceChildren(...types.map(t => option(visible(t.name), t.id)))
   }
   const typeNow = gate?.workType ?? gate?.size
   if (typeNow && !focused && [...size.options].some(o => o.value === typeNow)) size.value = typeNow
@@ -809,7 +813,10 @@ async function loadProjects(force = false) {
   projectsAt = Date.now()
   const a = await request('/api/projects')
   const body = a.ok && Array.isArray(a.body.projects) ? (a.body as unknown as ProjectsView) : null
-  if (body) byId<HTMLElementTagNameMap['sf-projects']>('projects').view = body
+  if (body) {
+    byId<HTMLElementTagNameMap['sf-projects']>('projects').view = body
+    askForSignIn()
+  }
   if (body) byId('helper-notice').hidden = body.helper !== 'unreachable'
   if (body) {
     reviewer = body.reviewer ?? null
@@ -876,6 +883,12 @@ async function markViewed(s: Session | null, d: { path: string; blob: string; vi
 
 async function markSignIn() {
   if (await signInState(request)) void loadProjects(true)
+}
+
+function askForSignIn() {
+  if (!askSignIn || current.key !== 'projects' || !byId<HTMLElementTagNameMap['sf-projects']>('projects').needsSignIn || document.querySelector('dialog[open]')) return
+  askSignIn = false
+  openSignIn()
 }
 
 function openSignIn() {
@@ -1324,8 +1337,8 @@ byId('welcome').addEventListener('click', e => {
   if (start === 'diagnostics') openDiagnostics(request)
   if (start === 'session') go('projects')
 })
-byId('account-identity').addEventListener('click', () => {
-  byId('account').hidePopover()
+byId('identity-open').addEventListener('click', () => {
+  byId('prefs').hidePopover()
   openIdentity()
 })
 const projects = byId<HTMLElementTagNameMap['sf-projects']>('projects')
@@ -1497,7 +1510,17 @@ byId('rules').addEventListener('sf-rules-open', e => {
   projects.showPanel(p.path, 'rules')
 })
 
-startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
+const { openDialog } = startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
+byId('docs').addEventListener('click', e => {
+  const name = (e.target as Element).closest<HTMLElement>('button[data-dialog]')?.dataset.dialog
+  if (name && isDialog(name)) openDialog(name)
+})
+byId('prefs').addEventListener('click', e => {
+  const name = (e.target as Element).closest<HTMLElement>('button[data-dialog]')?.dataset.dialog
+  if (!name || !isDialog(name)) return
+  byId('prefs').hidePopover()
+  openDialog(name)
+})
 restoreTabs()
 byId<HTMLElementTagNameMap['sf-recap']>('recap').post = request
 onNotifyOpen(sid => {

@@ -1,6 +1,7 @@
-import { request } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { el, focusedKey, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 interface RoleNumbers {
   role: string
@@ -108,8 +109,12 @@ function plural(n: number, one: string, many = `${one}s`): string {
 class SfProjectMetrics extends HTMLElement {
   #project = ''
   #view: MetricsView | null = null
-  #busy = false
   #status = statusLine()
+  #poll: WhileOpen | null = null
+
+  connectedCallback() {
+    if (!this.#poll?.live) this.#watch()
+  }
 
   set project(value: string) {
     if (value === this.#project) return
@@ -117,19 +122,20 @@ class SfProjectMetrics extends HTMLElement {
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
-    if (value) void this.#read()
+    this.#watch()
   }
 
-  async #read() {
-    const project = this.#project
-    this.#busy = true
-    this.#paint()
-    const a = await request('/api/metrics', { op: 'read', repo: project })
-    if (project !== this.#project) return
-    this.#busy = false
-    if (!a.ok) {
-      say(this.#status, a.message, 'warn')
-    } else {
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const repo = this.#project
+    if (!repo || !this.isConnected) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, read: () => request('/api/metrics', { op: 'read', repo }), show: a => this.#took(a) })
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) say(this.#status, a.message, 'warn')
+    else {
       const v = readView(a.body)
       if (v) this.#view = v
       this.#status.textContent = ''
@@ -209,14 +215,12 @@ class SfProjectMetrics extends HTMLElement {
     const focused = focusedKey(this)
     const parts: HTMLElement[] = [el('h3', 'label', 'Delivery and reviewer numbers')]
     const v = this.#view
-    if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Counting…' : 'Nothing read yet.'))
+    if (!v) parts.push(el('p', 'small muted', 'Counting…'))
     else {
       parts.push(...this.#numbers(v), this.#roles(v), this.#after(v), this.#pulls(v), this.#cost(v))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
     }
-    const again = button('Count again', 'link small', () => void this.#read(), 'button', 'metrics-again')
-    if (this.#busy) busy(again, true)
-    parts.push(again, this.#status)
+    parts.push(this.#status)
     replaceKeeping(this, parts)
     refocus(this, focused)
   }

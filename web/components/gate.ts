@@ -4,18 +4,18 @@ import { actions, field, form } from '../lib/form.ts'
 import type { AsideRun, HoldSetting, HoldTyped, PlanApproval, ProjectAgents } from '../types.ts'
 import './markdown.ts'
 import { asideBox } from './aside-run.ts'
+import { textbox, dropdown, option, checkbox } from '../lib/controls.ts'
 
 class SfApproval extends HTMLElement {
   #view: PlanApproval | null = null
   #key = ''
   #open = new Map<string, boolean>()
-  #field = el('input', 'textbox')
+  #field = textbox({ name: 'note' })
   #fieldWords = document.createTextNode('What the agent should change in the plan')
   #fieldBox = field(this.#fieldWords, this.#field)
 
   constructor() {
     super()
-    this.#field.name = 'note'
     this.#field.dataset.key = 'note'
     this.#field.setAttribute('aria-required', 'true')
     this.#field.addEventListener('input', () => this.refuse(''))
@@ -165,21 +165,18 @@ class SfApproval extends HTMLElement {
 }
 
 class HoldFields {
-  #after = el('input')
-  #files = el('input', 'textbox')
-  #lines = el('input', 'textbox')
+  #after = checkbox()
+  #files = textbox({ type: 'number', inputMode: 'numeric' })
+  #lines = textbox({ type: 'number', inputMode: 'numeric' })
   #refused = new Map<HTMLInputElement, string>()
 
   constructor(changed: () => void) {
-    this.#after.type = 'checkbox'
     this.#after.id = 'project-hold-after'
     this.#after.dataset.key = 'hold-after'
     this.#after.setAttribute('aria-describedby', 'project-hold-help')
     for (const [input, id] of [[this.#files, 'project-hold-files'], [this.#lines, 'project-hold-lines']] as const) {
       input.id = id
       input.dataset.key = id
-      input.type = 'number'
-      input.inputMode = 'numeric'
       input.setAttribute('aria-describedby', 'project-hold-help')
       input.addEventListener('input', () => this.#clear(input))
     }
@@ -238,10 +235,10 @@ class HoldFields {
 class SfProjectAgents extends HTMLElement {
   #view: ProjectAgents | null = null
   #key = ''
-  #rounds = el('select', 'textbox')
-  #type = el('select', 'textbox')
-  #findings = el('input')
-  #comment = el('input')
+  #rounds = dropdown()
+  #type = dropdown()
+  #findings = checkbox()
+  #comment = checkbox()
   #hold = new HoldFields(() => {
     const v = this.#view
     if (v?.project) emit(this, 'sf-project-setting', { path: v.project, op: 'hold', hold: this.#hold.value })
@@ -249,7 +246,6 @@ class SfProjectAgents extends HTMLElement {
 
   constructor() {
     super()
-    this.#comment.type = 'checkbox'
     this.#comment.id = 'project-pr-comment'
     this.#comment.dataset.key = 'prComment'
     this.#comment.setAttribute('aria-describedby', 'project-pr-comment-help')
@@ -257,7 +253,6 @@ class SfProjectAgents extends HTMLElement {
       const v = this.#view
       if (v?.project) emit(this, 'sf-project-setting', { path: v.project, op: 'prComment', on: this.#comment.checked })
     })
-    this.#findings.type = 'checkbox'
     this.#findings.id = 'project-findings'
     this.#findings.dataset.key = 'findings'
     this.#findings.setAttribute('aria-describedby', 'project-findings-help')
@@ -304,17 +299,9 @@ class SfProjectAgents extends HTMLElement {
     if (!v) return this.replaceChildren()
     this.replaceChildren(el('p', 'small', 'This project\'s settings'))
     if (!v.project) return this.append(el('p', 'small muted', 'Add this repository on the Projects page to keep settings for it.'))
-    this.#type.replaceChildren(...[['', 'The team file\'s default, else Fix'], ...v.types].map(([value, label]) => {
-      const o = el('option', '', visible(label ?? ''))
-      o.value = value ?? ''
-      return o
-    }))
+    this.#type.replaceChildren(...[['', 'The team file\'s default, else Fix'], ...v.types].map(([value, label]) => option(visible(label ?? ''), value ?? '')))
     if (this.#rounds.options.length !== v.roundsMax) {
-      this.#rounds.replaceChildren(...Array.from({ length: v.roundsMax }, (_, i) => {
-        const o = el('option', '', String(i + 1))
-        o.value = String(i + 1)
-        return o
-      }))
+      this.#rounds.replaceChildren(...Array.from({ length: v.roundsMax }, (_, i) => option(String(i + 1), String(i + 1))))
     }
     this.#rounds.value = String(v.rounds)
     this.#type.value = v.types.some(([id]) => id === v.type) ? v.type : ''

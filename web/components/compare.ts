@@ -63,7 +63,7 @@ function elapsed(from: number | undefined): string {
 }
 
 export function confirmBoth(): Promise<boolean> {
-  return confirmDialog('Start both sessions?', 'projects-and-new-sessions', [
+  return confirmDialog('Start both sessions?', 'projects', [
     el('p', 'small', 'Starting both runs two sessions on the same task at once, which doubles usage, even on a subscription: each agent spends its own sign-in or key. Each start still shows its own start-up files and cost checks.'),
   ], 'Start both', 'primary')
 }

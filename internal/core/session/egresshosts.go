@@ -14,7 +14,7 @@ const (
 	MaxHostName       = 253
 	MaxGatewayURL     = 512
 	maxGatewayPath    = 256
-	GatewayKeyNote    = "Paste the gateway's key or token with its address for the reviewers; for Claude Code sessions, paste it in each session's sign-in panel, since each session runs in its own container. The engine passes it only to the container it was pasted for, which saves it for Claude Code's apiKeyHelper, as with a pasted API key, and the page never shows it again. Claude Code sends it in both the Authorization (Bearer) and x-api-key headers. Turning the gateway on for a side, changing its host, turning a side off or removing the gateway first removes the key saved there, an API key included, so no key reaches an address it wasn't pasted for."
+	GatewayKeyNote    = "Paste its key or token here for the reviewers, and in each session's sign-in panel for that session."
 	UploadsWarning    = "also accepts uploads, such as publishing a package, so an agent could send your code out through it."
 	PyPIReadHostsNote = "For installs from PyPI, add only its read hosts, pypi.org and files.pythonhosted.org; upload.pypi.org takes uploads."
 )

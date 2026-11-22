@@ -1286,8 +1286,8 @@
   title: "The gateway's host isn't checked against the deny list"
   edits:
     - file: "internal/core/session/egress.go"
-      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn onField(\"url\", err)\n\t\t}\n\t\tif !agents && !reviewers {"
-      replace: "\t\tif !agents && !reviewers {"
+      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn false, onField(\"url\", err)\n\t\t}\n\t\tnext, words = Gateway{URL: u, Host: host}"
+      replace: "\t\tnext, words = Gateway{URL: u, Host: host}"
 - id: SESS-045
   title: "registry.npmjs.org is no longer treated as an upload host"
   edits:

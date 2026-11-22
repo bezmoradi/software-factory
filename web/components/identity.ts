@@ -1,7 +1,9 @@
 import { UNREAD, savedTone, type EngineAnswer } from '../api.ts'
 import { button, el, labelError, say, statusLine, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { actions, field, form, showAnswer } from '../lib/form.ts'
+import { textbox, type TextType } from '../lib/controls.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -23,12 +25,8 @@ export async function identityState(post: Post): Promise<CommitIdentity | null |
   return a.ok ? identityOf(a.body.identity) : undefined
 }
 
-function textField(name: string, words: string, type: string, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
-  const input = el('input', 'textbox')
-  input.type = type
-  input.name = name
-  input.autocomplete = auto
-  input.spellcheck = false
+function textField(name: string, words: string, type: TextType, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
+  const input = textbox({ type, name, autocomplete: auto, spellcheck: false })
   input.setAttribute('aria-required', 'true')
   input.value = value
   return [field(words, input), input]
@@ -55,8 +53,7 @@ export function editIdentity(post: Post, current: CommitIdentity | null, saved: 
   })
   const m = modal({
     kind: 'identity',
-    title: 'Git name and email',
-    docs: 'usage',
+    ...dialogDocs('identity'),
     body: [
       el('p', 'small', 'Every agent commits with these, and pushes make them public. For GitHub, use your noreply address: ID+USERNAME@users.noreply.github.com. New sessions use them at once; a stopped session when you wake it.'),
       box,

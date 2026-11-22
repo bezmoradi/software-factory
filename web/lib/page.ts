@@ -15,6 +15,22 @@ export function docsLink(o: DocsLinkOptions): HTMLButtonElement {
   return link
 }
 
+export function docsId(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+export interface DialogLinkOptions {
+  title: string
+  dialog: string
+}
+
+export function dialogLink(o: DialogLinkOptions): HTMLButtonElement {
+  const link = button(`Open ${o.title}`, 'link small docs-open')
+  link.dataset.dialog = o.dialog
+  link.prepend(glyph('link'))
+  return link
+}
+
 export function crumbTrail(items: Node[] = []): HTMLElement {
   const nav = el('nav', 'crumbs')
   nav.setAttribute('aria-label', 'Breadcrumb')
@@ -50,6 +66,34 @@ export function pageHead(o: PageHeadOptions): HTMLElement[] {
   return o.intro ? [row, el('p', 'small muted page-intro', o.intro)] : [row]
 }
 
+export interface UsageMeterOptions {
+  label: string
+  percent: number
+  detail: string
+  warn?: boolean
+}
+
+export function usageMeter(o: UsageMeterOptions): HTMLElement {
+  const percent = Math.min(100, Math.max(0, Math.round(o.percent)))
+  const card = el('div', ['usage-meter', o.warn ? 'warn' : ''].filter(Boolean).join(' '))
+  const head = el('div', 'usage-meter-head')
+  head.append(el('span', 'usage-meter-label', o.label), el('span', 'usage-meter-value', `${percent}% used`))
+  const bar = el('div', 'usage-meter-bar')
+  bar.setAttribute('role', 'meter')
+  bar.setAttribute('aria-label', o.label)
+  bar.setAttribute('aria-valuemin', '0')
+  bar.setAttribute('aria-valuemax', '100')
+  bar.setAttribute('aria-valuenow', String(percent))
+  bar.setAttribute('aria-valuetext', `${percent}% used, ${o.detail}`)
+  bar.style.setProperty('--used', `${percent}%`)
+  bar.append(el('span', 'usage-meter-fill'))
+  const detail = el('p', 'usage-meter-detail', o.detail)
+  head.setAttribute('aria-hidden', 'true')
+  detail.setAttribute('aria-hidden', 'true')
+  card.append(head, bar, detail)
+  return card
+}
+
 export interface EmptyStateOptions {
   title?: string
   icon?: string
@@ -58,6 +102,13 @@ export interface EmptyStateOptions {
 }
 
 export function emptyState(text: string, o: EmptyStateOptions = {}): HTMLElement {
+  if (!o.title && !o.icon && !o.action) {
+    const line = el('p', 'small muted empty-state-line', text)
+    if (o.tag !== 'li') return line
+    const item = el('li', 'empty-state-item')
+    item.append(line)
+    return item
+  }
   const box = el('div', 'empty-state')
   if (o.icon) {
     const media = el('span', 'empty-state-icon')

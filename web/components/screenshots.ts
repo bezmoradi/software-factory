@@ -1,7 +1,8 @@
-import { request, UNREAD } from '../api.ts'
+import { request, UNREAD, type EngineAnswer } from '../api.ts'
 import { button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { pngBlob } from '../lib/files.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 export interface ScreenshotsTarget {
   sid: string
@@ -28,7 +29,7 @@ function size(n: number): string {
 class SfScreenshots extends HTMLElement {
   #target: ScreenshotsTarget | null = null
   #shots: Shot[] = []
-  #loading = 0
+  #poll: WhileOpen | null = null
   #opening = 0
   #reading = false
   #url = ''
@@ -46,16 +47,13 @@ class SfScreenshots extends HTMLElement {
     this.#img.decoding = 'async'
     this.#figure.append(this.#img, this.#caption)
     this.#figure.hidden = true
-    const refresh = button('Refresh', 'ghost small', () => {
-      const sid = this.#target?.sid
-      if (sid) void whileBusy(refresh, () => this.refresh(sid))
-    })
-    this.#details.append(this.#summary, el('p', 'small muted', 'Images the agent saved in its screenshots folder, newest first. The engine reads each one, checks it is a PNG, JPEG or GIF of at most 10 MiB and 8,192 pixels a side, and shows it again as a PNG.'), this.#list, refresh, this.#status, this.#figure)
+    this.#details.append(this.#summary, el('p', 'small muted', 'Images the agent saved in its screenshots folder, newest first. The engine reads each one, checks it is a PNG, JPEG or GIF of at most 10 MiB and 8,192 pixels a side, and shows it again as a PNG.'), this.#list, this.#status, this.#figure)
   }
 
   connectedCallback() {
     if (!this.#details.isConnected) this.append(this.#details)
     if (!this.#target) this.hidden = true
+    else if (!this.#poll?.live) this.#watch(this.#target.sid)
   }
 
   disconnectedCallback() {
@@ -69,6 +67,8 @@ class SfScreenshots extends HTMLElement {
     const before = this.#target
     this.#target = value
     if (!value?.sid) {
+      this.#poll?.stop()
+      this.#poll = null
       this.#shots = []
       this.#drop()
       this.hidden = true
@@ -79,15 +79,17 @@ class SfScreenshots extends HTMLElement {
       this.#drop()
       this.#status.textContent = ''
       this.hidden = true
-      void this.refresh(value.sid)
-    } else if (before?.busy && !value.busy) void this.refresh(value.sid)
+      this.#watch(value.sid)
+    } else if (before?.busy && !value.busy) void this.#poll?.now()
   }
 
-  async refresh(sid: string) {
+  #watch(sid: string) {
+    this.#poll?.stop()
+    this.#poll = this.isConnected ? whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, open: () => !!this.parentElement?.checkVisibility(), read: () => request('/api/screenshots', { sid }), show: a => this.#took(sid, a) }) : null
+  }
+
+  #took(sid: string, a: EngineAnswer) {
     if (sid !== this.#target?.sid) return
-    const n = ++this.#loading
-    const a = await request('/api/screenshots', { sid })
-    if (n !== this.#loading || sid !== this.#target?.sid) return
     if (!a.ok) {
       this.#status.textContent = this.#shots.length ? 'The screenshots couldn\'t be listed.' : ''
       return

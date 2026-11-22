@@ -3,15 +3,10 @@ import { button, el, focusedKey, labelError, refocus, say, sayWhenShown, shown, 
 import { field, fieldRow } from '../lib/form.ts'
 import { label, shortSha } from '../lib/format.ts'
 import type { SessionInfo, StartFrom, StartPointsView, Starter } from '../types.ts'
+import { textarea, dropdown, option, optionGroup, checkbox } from '../lib/controls.ts'
 
 const SHA = /^[0-9a-f]{40}$/
 let serial = 0
-
-function option(value: string, text: string): HTMLOptionElement {
-  const o = el('option', '', text)
-  o.value = value
-  return o
-}
 
 function pointsOf(raw: unknown): StartPointsView | null {
   if (!raw || typeof raw !== 'object') return null
@@ -23,29 +18,18 @@ function pointsOf(raw: unknown): StartPointsView | null {
 
 export class StartFromField {
   readonly box: HTMLDivElement
-  select = el('select', 'textbox')
+  select = dropdown({ name: 'from' })
   said = el('p', 'small muted')
-  #loading = option('', 'Loading branches and pull requests…')
+  #loading = option('Loading branches and pull requests…', '')
 
   constructor(path: string, main: string, sessions: SessionInfo[], fork: string, forkAt = '') {
     const id = `start-from-${++serial}`
     this.select.id = id
-    this.select.name = 'from'
-    this.select.append(option('', `main${main ? ` (${main})` : ''}, as fetched now`))
+    this.select.append(option(`main${main ? ` (${main})` : ''}, as fetched now`, ''))
     const own = sessions.filter(s => s.startPoint)
-    if (own.length) {
-      const group = el('optgroup')
-      group.label = 'A session’s latest commit'
-      for (const s of own) group.append(option(`sid:${s.sid}`, `Session ${visible(label(s))}`))
-      this.select.append(group)
-    }
+    if (own.length) this.select.append(optionGroup('A session’s latest commit', own.map(s => option(`Session ${visible(label(s))}`, `sid:${s.sid}`))))
     const at = own.find(s => s.sid === fork)
-    if (at && SHA.test(forkAt)) {
-      const group = el('optgroup')
-      group.label = 'A commit of a session'
-      group.append(option(`sid:${fork}:${forkAt}`, `Session ${visible(label(at))} at commit ${shortSha(forkAt)}`))
-      this.select.append(group)
-    }
+    if (at && SHA.test(forkAt)) this.select.append(optionGroup('A commit of a session', [option(`Session ${visible(label(at))} at commit ${shortSha(forkAt)}`, `sid:${fork}:${forkAt}`)]))
     this.#loading.disabled = true
     this.select.append(this.#loading)
     if (at) this.select.value = SHA.test(forkAt) ? `sid:${fork}:${forkAt}` : `sid:${fork}`
@@ -70,23 +54,14 @@ export class StartFromField {
     this.#loading.remove()
     if (!a.ok) {
       const message = a.message
-      this.select.append(Object.assign(option('', `Branches and pull requests aren’t listed: ${message}`), { disabled: true }))
+      this.select.append(option(`Branches and pull requests aren’t listed: ${message}`, '', { disabled: true }))
       return
     }
     const points = pointsOf(a.body)
     if (!points) return
-    if (points.branches.length) {
-      const group = el('optgroup')
-      group.label = 'A branch of the repository'
-      for (const b of points.branches) group.append(option(`branch:${b.commit}:${b.name}`, `Branch ${visible(b.name)} (${shortSha(b.commit)})`))
-      this.select.append(group)
-    }
-    if (points.pulls.length) {
-      const group = el('optgroup')
-      group.label = 'An open pull request’s branch'
-      for (const p of points.pulls) group.append(option(`pull:${p.commit}:${p.number}`, `#${p.number} ${visible(p.title)}${p.branch ? ` (${visible(p.branch)})` : ''}, at ${shortSha(p.commit)}`))
-      this.select.append(group)
-    } else if (points.pullsWhy) this.select.append(Object.assign(option('', `No pull requests listed: ${visible(points.pullsWhy)}`), { disabled: true }))
+    if (points.branches.length) this.select.append(optionGroup('A branch of the repository', points.branches.map(b => option(`Branch ${visible(b.name)} (${shortSha(b.commit)})`, `branch:${b.commit}:${b.name}`))))
+    if (points.pulls.length) this.select.append(optionGroup('An open pull request’s branch', points.pulls.map(p => option(`#${p.number} ${visible(p.title)}${p.branch ? ` (${visible(p.branch)})` : ''}, at ${shortSha(p.commit)}`, `pull:${p.commit}:${p.number}`))))
+    else if (points.pullsWhy) this.select.append(option(`No pull requests listed: ${visible(points.pullsWhy)}`, '', { disabled: true }))
   }
 
   value(): StartFrom | undefined {
@@ -230,28 +205,20 @@ export class BenchmarkField {
 
 export class PairField {
   box = el('details', 'pair-field')
-  on = el('input')
-  model = el('select', 'textbox')
-  message = el('textarea', 'textbox')
+  on = checkbox()
+  model = dropdown()
+  message = textarea({ rows: 4, name: 'message', placeholder: 'Not needed for a benchmark: its description is the first message' })
   said = statusLine('small bad status-slot')
   #starters: Starter[]
 
   constructor(starters: Starter[], models: [string, string][]) {
     this.#starters = starters.filter(a => a.enabled)
     const summary = el('summary', 'small', 'Start with both: two sessions on one task')
-    this.message.name = 'message'
-    this.on.type = 'checkbox'
     const check = field('Start a second session of the same agent beside the first, to compare them', this.on, { kind: 'check' })
     this.model.setAttribute('aria-label', 'Second model')
-    for (const [value, text] of models) {
-      const o = el('option', '', text)
-      o.value = value
-      this.model.append(o)
-    }
+    for (const [value, text] of models) this.model.append(option(text, value))
     const row = fieldRow([this.model], 'opts field-row')
     this.message.id = `pair-message-${++serial}`
-    this.message.rows = 4
-    this.message.placeholder = 'Not needed for a benchmark: its description is the first message'
     this.message.addEventListener('input', () => labelError(this.message, ''))
     const note = el('p', 'small muted', "Both sessions start on their own branches from the same commit, get this same first message, and run at once, which doubles usage, even on a subscription. Their changes touch the same files by design, so the overlap warning stays quiet between them. The first session shows the comparison: diffs, verdicts, time and both sessions' cost estimates; keep one and delete the other.")
     this.box.append(summary, check, row, field('First message, sent to both', this.message), note, this.said)

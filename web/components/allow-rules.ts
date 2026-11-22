@@ -1,6 +1,7 @@
-import { request } from '../api.ts'
-import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { around, busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 interface SavedRule {
   box: string
@@ -69,6 +70,12 @@ class SfAllowRules extends HTMLElement {
   #busy = ''
   #gen = 0
   #status = statusLine()
+  #poll: WhileOpen | null = null
+  #failed = false
+
+  connectedCallback() {
+    if (!this.#poll?.live) this.#watch()
+  }
 
   set repo(value: string) {
     if (value === this.#repo) return
@@ -78,7 +85,28 @@ class SfAllowRules extends HTMLElement {
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
-    if (value) void this.#call({ op: 'list', repo: value })
+    this.#watch()
+  }
+
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const repo = this.#repo
+    if (!repo || !this.isConnected) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => !!this.#busy, read: () => request('/api/allow-rules', { op: 'list', repo }), show: a => this.#took(a) })
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) {
+      this.#failed = true
+      say(this.#status, a.message, 'warn')
+    } else {
+      if (this.#failed) this.#status.textContent = ''
+      this.#failed = false
+      const v = readView(a.body)
+      if (v) this.#view = v
+    }
+    this.#paint()
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
@@ -106,6 +134,7 @@ class SfAllowRules extends HTMLElement {
     const body: Record<string, unknown> = { op: 'remove', repo: this.#repo, box: r.box, place: r.place, rule: r.rule }
     if (r.worktree) body.worktree = r.worktree
     if (await this.#call(body)) {
+      void this.#poll?.now()
       say(this.#status, `Removed ${visible(r.rule)} from ${visible(r.path)}. The next matching call shows a card again.`, 'ok')
       this.#paint()
     }
@@ -132,7 +161,7 @@ class SfAllowRules extends HTMLElement {
     const focused = focusedKey(this)
     const before = [...this.querySelectorAll<HTMLElement>('[data-key^="remove:"]')].map(b => b.dataset.key ?? '')
     const parts: HTMLElement[] = [
-      el('p', 'small', 'Saved "don\'t ask again" rules'),
+      el('h3', 'label', 'Saved allow rules'),
       el('p', 'small muted', 'The allow rules Claude Code saved when a card\'s "don\'t ask again" was chosen, in the session\'s worktree (.claude/settings.local.json), and those in the clone folder\'s .claude/settings.local.json, which a live run of Claude Code 2.1.322 didn\'t apply in a worktree, and the agents\' user settings, including any written there another way. Agents can write these files too, so this is a report of what is in them, not a control: an agent can add a rule again, and Remove changes only the file it names. Rules marked wide allow much more than one command.'),
     ]
     const v = this.#view
@@ -154,15 +183,9 @@ class SfAllowRules extends HTMLElement {
         parts.push(section)
       }
     }
-    const again = button('Read again', 'link small', () => {
-      if (this.#busy) return
-      this.#status.textContent = ''
-      void whileBusy(again, () => this.#call({ op: 'list', repo: this.#repo }))
-    }, 'button', 'rules-again')
-    if (this.#busy) again.setAttribute('aria-disabled', 'true')
-    parts.push(again, this.#status)
+    parts.push(this.#status)
     replaceKeeping(this, parts)
-    refocus(this, focused, key => [...around(before, key), 'rules-again'])
+    refocus(this, focused, key => around(before, key))
   }
 }
 

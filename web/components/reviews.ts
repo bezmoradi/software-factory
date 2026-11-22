@@ -9,6 +9,7 @@ import { asideBox } from './aside-run.ts'
 import { openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
 import { emptyState } from '../lib/page.ts'
+import { textbox } from '../lib/controls.ts'
 
 
 function text(value: string): string {
@@ -356,7 +357,7 @@ class SfReviews extends HTMLElement {
     if (running) busy(b, true)
     b.title = 'Asks Claude Code in a reviewer container of its own, with read-only tools, for steps to try by hand on this session branch\'s latest commit. It isn\'t a review: the push gate and the agent never see it'
     const head = el('div', 'row test-list-head')
-    head.append(el('span', 'small', 'Manual test list'), el('span', 'spacer'), b)
+    head.append(el('h4', 'label', 'Manual test list'), el('span', 'spacer'), b)
     box.append(head)
     if (!t) {
       box.append(el('p', 'small muted', 'On request, a reviewer run lists what to try by hand before you merge. It costs one run, and nothing reads it but you.'))
@@ -516,7 +517,7 @@ class SfReviews extends HTMLElement {
   }
 
   #override(role: ReviewRole, commit: string, value: ReviewsView): HTMLElement {
-    const input = el('input', 'textbox')
+    const input = textbox()
     input.id = `override-${role.agent.replace(/[^A-Za-z0-9-]/g, '-')}`
     input.dataset.key = input.id
     input.setAttribute('aria-required', 'true')

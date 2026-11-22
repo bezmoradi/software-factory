@@ -15,6 +15,13 @@ for f in web/*.ts web/components/*.ts web/lib/*.ts; do
 done >"$tmp/problems"
 
 for f in web/*.ts web/components/*.ts web/lib/*.ts; do
+	[ "$f" = web/lib/controls.ts ] && continue
+	grep -nE "(\bel|createElement)\([[:space:]]*['\"\`](input|select|textarea|option|optgroup)['\"\`]" "$f" | cut -d: -f1 | while IFS= read -r n; do
+		printf '%s:%s: creates a form control by hand; build it with textbox(), textarea(), dropdown(), option(), optionGroup(), checkbox(), radio() or filePicker() from web/lib/controls.ts\n' "$f" "$n"
+	done
+done >>"$tmp/problems"
+
+for f in web/*.ts web/components/*.ts web/lib/*.ts; do
 	[ "$f" = web/api.ts ] && continue
 	grep -nE '(^|[^.#[:alnum:]_$])fetch[[:space:]]*\(' "$f" | while IFS=: read -r n line; do
 		[ "$f" = web/stream.ts ] && printf '%s\n' "$line" | grep -qE '(^|[^.#[:alnum:]_$])fetch\(import\.meta\.url,' && continue
@@ -27,8 +34,8 @@ done >>"$tmp/problems"
 
 for f in web/*.ts web/components/*.ts web/lib/*.ts web/index.html; do
 	[ "$f" = web/lib/page.ts ] && continue
-	grep -nE '(page-head|page-intro|docs-link|empty-state)([^[:alnum:]_-]|$)|View in docs' "$f" | cut -d: -f1 | while IFS= read -r n; do
-		printf '%s:%s: builds a heading row, its intro, a View in docs link or an empty state by hand; use pageHead(), docsLink() or emptyState() from web/lib/page.ts\n' "$f" "$n"
+	grep -nE '(page-head|page-intro|docs-link|docs-open|empty-state)([^[:alnum:]_-]|$)|View in docs' "$f" | cut -d: -f1 | while IFS= read -r n; do
+		printf '%s:%s: builds a heading row, its intro, a View in docs link, an Open button in the docs or an empty state by hand; use pageHead(), docsLink(), dialogLink() or emptyState() from web/lib/page.ts\n' "$f" "$n"
 	done
 done >>"$tmp/problems"
 
@@ -83,7 +90,7 @@ fi
 
 if [ -s "$tmp/problems" ]; then
 	cat "$tmp/problems"
-	echo "$(wc -l <"$tmp/problems" | tr -d ' ') problem(s): every form, label and its spacing comes from web/lib/form.ts and the form rules in $css, and every heading row, View in docs link and empty state from web/lib/page.ts, and every request to the engine and reading of its answer from web/api.ts, and no component falls back to words of its own for an engine answer's message."
+	echo "$(wc -l <"$tmp/problems" | tr -d ' ') problem(s): every form, label and its spacing comes from web/lib/form.ts and the form rules in $css, every form control from web/lib/controls.ts, and every heading row, View in docs link, Open button in the docs and empty state from web/lib/page.ts, and every request to the engine and reading of its answer from web/api.ts, and no component falls back to words of its own for an engine answer's message."
 	exit 1
 fi
-echo "Forms: only web/lib/form.ts creates a <form> or <label>, and only the form rules in $css space forms, fields, labels and actions rows. Heading rows, View in docs links and empty states: only web/lib/page.ts builds them. Requests: only web/api.ts calls fetch or reads JSON, but for stream.ts loading its own module. Answers: no component falls back to words of its own for an engine answer's message."
+echo "Forms: only web/lib/form.ts creates a <form> or <label>, only web/lib/controls.ts creates an input, select, textarea, option or optgroup, and only the form rules in $css space forms, fields, labels and actions rows. Heading rows, View in docs links, Open buttons in the docs and empty states: only web/lib/page.ts builds them. Requests: only web/api.ts calls fetch or reads JSON, but for stream.ts loading its own module. Answers: no component falls back to words of its own for an engine answer's message."

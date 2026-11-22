@@ -53,7 +53,7 @@ func egressViewJSON(v session.EgressView) map[string]any {
 	}
 	var gateway any
 	if v.Gateway != nil {
-		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host, "agents": v.Gateway.Agents, "reviewers": v.Gateway.Reviewers}
+		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host}
 	}
 	return map[string]any{
 		"saved": v.Saved, "pending": v.Pending, "added": added, "gateway": gateway,
@@ -154,15 +154,13 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 		err = s.cfg.Egress.RemoveHost(ctx, host)
 	case "gateway":
 		u, okURL := body["url"].(string)
-		agents, okA := body["agents"].(bool)
-		reviewers, okR := body["reviewers"].(bool)
-		if !keysWithin(body, "op", "url", "agents", "reviewers") || !okURL || !okA || !okR {
+		if !keysWithin(body, "op", "url") || !okURL {
 			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(egressFor + writeFor))
 		var changed bool
-		changed, err = s.cfg.Egress.SetGateway(ctx, u, agents, reviewers)
+		changed, err = s.cfg.Egress.SetGateway(ctx, u)
 		done := saveSaid(changed, saidGatewaySaved, saidGatewayUnchanged)
 		if strings.TrimSpace(u) == "" {
 			done = saveSaid(changed, saidGatewayRemoved, saidGatewayNone)

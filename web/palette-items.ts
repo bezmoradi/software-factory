@@ -12,6 +12,7 @@ import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
 import { openBackup } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
+import type { DialogName } from './lib/dialog-docs.ts'
 import type { Project, ReviewsView } from './types.ts'
 
 interface PaletteDeps {
@@ -27,6 +28,17 @@ interface PaletteDeps {
 }
 
 export function startPalette({ reviewsOf, projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } }: PaletteDeps) {
+  const dialogs: Record<DialogName, () => void> = {
+    egress: () => openEgress(request),
+    workspace: () => openWorkspace(request, labelOfSid, forgetSession),
+    exceptions: () => openExceptions(request, labelOfSid),
+    backup: () => openBackup(request, sendState),
+    diagnostics: () => openDiagnostics(request),
+    identity: () => openIdentity(),
+    signIn: () => openSignIn(),
+    shortcuts: () => showShortcuts(),
+  }
+
   function openSessionPanel(which: 'changes' | 'rules') {
     const s = current()
     if (which === 'changes' && s) return openChanges(s)
@@ -90,16 +102,16 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     })
     panel('v:projects', 'Projects', () => go('projects'))
     panel('v:docs', 'Docs', () => openDocs(''))
-    panel('v:egress', 'Network access', () => openEgress(request), needsEngine)
-    panel('v:workspace', 'Workspace and disk space', () => openWorkspace(request, labelOfSid, forgetSession), needsEngine)
-    panel('v:exceptions', 'Register of exceptions', () => openExceptions(request, labelOfSid), needsEngine)
-    panel('v:backup', 'Export and import', () => openBackup(request, sendState), needsEngine)
-    panel('v:diagnostics', 'Diagnostics', () => openDiagnostics(request), needsEngine)
-    panel('v:identity', 'Git name and email', () => openIdentity(), needsEngine)
-    panel('v:signin', 'Reviewers’ sign-in', () => openSignIn(), needsEngine)
+    panel('v:egress', 'Network access', dialogs.egress, needsEngine)
+    panel('v:workspace', 'Workspace', dialogs.workspace, needsEngine)
+    panel('v:exceptions', 'Register of exceptions', dialogs.exceptions, needsEngine)
+    panel('v:backup', 'Export and import', dialogs.backup, needsEngine)
+    panel('v:diagnostics', 'Diagnostics', dialogs.diagnostics, needsEngine)
+    panel('v:identity', 'Git name and email', dialogs.identity, needsEngine)
+    panel('v:signin', 'Reviewers’ sign-in', dialogs.signIn, needsEngine)
     panel('v:away', 'Away mode', () => openAway(), needsEngine)
     panel('v:prefs', 'Settings', () => byId('prefs').showPopover())
-    items.push({ id: 'v:keys', group: 'Views and panels', label: 'Keyboard shortcuts', keys: document.documentElement.dataset.keys === 'off' ? undefined : ['?'], run: () => showShortcuts() })
+    items.push({ id: 'v:keys', group: 'Views and panels', label: 'Keyboard shortcuts', keys: document.documentElement.dataset.keys === 'off' ? undefined : ['?'], run: dialogs.shortcuts })
     return items
   }
 
@@ -135,4 +147,6 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     e.preventDefault()
     showShortcuts()
   })
+
+  return { openDialog: (name: DialogName) => dialogs[name]() }
 }

@@ -130,7 +130,7 @@ func (h *reviewerHosts) open(ctx context.Context, snapshot string, brief bool) (
 		return nil, reviewerProblem(reviewerHostCode, "the reviewer container's agent-host didn't take the key the engine made for it, so the engine removed the container")
 	}
 	log.Info("reviewer container", "event", "started", "run", run, "snapshot", snapshot != "")
-	return &reviewerLease{run: run, host: withGateway(client, h.allow, session.SideReviewers, h.dev), client: client, info: info}, nil
+	return &reviewerLease{run: run, host: withGateway(client, h.allow, h.dev), client: client, info: info}, nil
 }
 
 func (h *reviewerHosts) close(ctx context.Context, run string) {

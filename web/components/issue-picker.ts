@@ -1,6 +1,7 @@
 import { request } from '../api.ts'
 import { button, el, focusedKey, refocus, say, shown, statusLine, unspoofed, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { field, fieldRow } from '../lib/form.ts'
+import { textbox } from '../lib/controls.ts'
 
 type Issue = { number: number; title: string; body?: string; url: string; author: string; labels: string[]; created: number; open: boolean }
 
@@ -15,7 +16,7 @@ class SfIssuePicker extends HTMLElement {
   #gen = 0
   #stale = true
   #details = el('details', 'issue-picker')
-  #label = el('input', 'textbox')
+  #label = textbox()
   #list = el('div', 'issue-list')
   #picked = el('div', 'issue-picked')
   #status = statusLine('small muted')

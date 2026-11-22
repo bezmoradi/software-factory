@@ -1,8 +1,10 @@
 import type { EngineAnswer } from '../api.ts'
-import { actionButton, button, el, statusLine, visible } from '../lib/dom.ts'
+import { button, el, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { shortSha } from '../lib/format.ts'
 import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -59,7 +61,6 @@ function until(expires: number, now: number): string {
 }
 
 export function openExceptions(post: Post, labelOf: (sid: string) => string): void {
-  let generation = 0
   const say = statusLine()
   const body = el('div', 'exceptions-body')
 
@@ -97,9 +98,8 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
       const gw = v.gateway
       if (gw && typeof gw === 'object') {
         const g = gw as Record<string, unknown>
-        const sides = [g.agents === true && 'sessions', g.reviewers === true && 'reviewers'].filter(Boolean).join(' and ')
         const li = el('li', 'row')
-        li.append(el('span', 'small', 'Company LLM gateway '), el('code', '', visible(text(g.host))), el('span', 'small muted', sides ? `for the ${sides}` : 'for neither side'))
+        li.append(el('span', 'small', 'Company LLM gateway '), el('code', '', visible(text(g.host))), el('span', 'small muted', 'for the sessions and reviewers'))
         hosts.append(li)
       }
     }
@@ -108,6 +108,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     if (v.rulesKnown !== true) parts.push(el('p', 'small muted', 'This engine has no agent-host to list saved rules from.'))
     else {
       const repos = records(v.rules)
+      parts.push(el('p', 'small muted', 'Claude Code saved these from a card’s “don’t ask again”; they carry no reason. Remove one from its project on Projects.'))
       if (!repos.length) parts.push(emptyState('No projects.'))
       for (const r of repos) {
         const rules = records(r.rules).map(ruleOf)
@@ -125,16 +126,11 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
         }
         parts.push(el('h4', 'small', visible(text(r.repo))), ul)
       }
-      parts.push(el('p', 'small muted', 'Claude Code saved these from a card’s “don’t ask again”; they carry no reason. Remove one from its project on Projects.'))
     }
     body.replaceChildren(...parts)
   }
 
-  const reload = async () => {
-    const mine = ++generation
-    say.textContent = 'Loading…'
-    const a = await post(ROUTE, {})
-    if (mine !== generation) return
+  const show = (a: EngineAnswer) => {
     if (!a.ok) {
       say.textContent = a.message
       return
@@ -143,19 +139,16 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     paint(a.body)
   }
 
+  say.textContent = 'Loading…'
   const m = modal({
     kind: 'exceptions',
-    title: 'Register of exceptions',
-    docs: 'working-in-a-session',
+    ...dialogDocs('exceptions'),
     body: [
       el('p', 'small', 'Every exception to the usual rules in one place, read only: pushes you allowed with a reason, verdicts you overrode, flagged files and commits you allowed, hosts you added to the network allowlist and the allow rules Claude Code saved. Decisions come from the engine’s audit file, newest first.'),
       say, body,
     ],
-    lead: [actionButton('Refresh', 'ghost small', reload)],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
-  m.onClose(() => {
-    generation++
-  })
-  void reload()
+  const refresh = whileOpen({ root: body, read: () => post(ROUTE, {}), show, everyMs: CHEAP_EVERY_MS })
+  m.onClose(() => refresh.stop())
 }

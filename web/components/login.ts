@@ -1,6 +1,7 @@
 import { UNREAD, type EngineAnswer } from '../api.ts'
 import { busy, button, el, labelError, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { actions, field, form, showAnswer } from '../lib/form.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
@@ -8,6 +9,7 @@ import { secret } from './secret.ts'
 import { commandBlock } from './copy.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
+import { textbox } from '../lib/controls.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -52,11 +54,7 @@ function describe(s: SignIn | null, busy = false): string {
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
 
 function secretField(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
-  const input = el('input', 'textbox')
-  input.type = 'password'
-  input.name = name
-  input.autocomplete = autocomplete
-  input.spellcheck = false
+  const input = textbox({ type: 'password', name, autocomplete, spellcheck: false })
   input.setAttribute('aria-required', 'true')
   input.addEventListener('input', () => labelError(input, ''))
   return [field(words, secret(input, what), { cls: 'login-field' }), input]
@@ -78,6 +76,7 @@ class Row {
   private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
   private readonly linkSaid = statusLine('small muted status-slot login-link-said')
+  private readonly linkRow = el('div', 'row text-row')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly codeForm: HTMLFormElement
@@ -98,12 +97,13 @@ class Row {
     this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
+    this.linkRow.append(this.linkSaid, el('span', 'spacer'))
     const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
     this.codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(
       el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
-      this.linkSaid,
+      this.linkRow,
       this.codeForm,
       this.subscriptionSaid,
     )
@@ -112,7 +112,7 @@ class Row {
     this.key = key
     this.keyForm = this.form(keyLabel, this.keyGo, () => void this.finishKey())
     this.apiKey.append(
-      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
+      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
       this.keyForm,
       this.keySaid,
     )
@@ -157,7 +157,7 @@ class Row {
   private ready(href: string, quiet: boolean) {
     sayIfChanged(this.linkSaid, quiet ? '' : 'Sign-in link ready.')
     this.link.href = href
-    if (!this.link.parentNode) this.linkSaid.after(this.link)
+    if (!this.link.parentNode) this.linkRow.append(this.link)
   }
 
   private note(said: HTMLElement, text: string, bad = false) {
@@ -273,8 +273,7 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
   let again = 0
   const m = modal({
     kind: 'login',
-    title: 'Sign Claude Code in for the reviewers',
-    docs: 'run-it-with-docker',
+    ...dialogDocs('signIn'),
     body: [
       el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
       reviewers.node,
@@ -354,7 +353,7 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
     const m = modal({
       kind: 'login',
       title: `Sign ${visible(name)} in for this session`,
-      docs: 'run-it-with-docker',
+      docs: 'sign-claude-code-in-for-this-session',
       body: parts,
       actions: [button('Cancel', 'ghost small', () => done(false)), go],
     })

@@ -62,6 +62,12 @@ export function field(label: string | Node, control: HTMLElement, o: FieldOption
   return box
 }
 
+export function fieldset(legend: string, children: Node[], cls = ''): HTMLFieldSetElement {
+  const set = el('fieldset', cls)
+  set.append(el('legend', 'label', legend), ...children)
+  return set
+}
+
 export function fieldGroup(children: Node[], cls = ''): HTMLDivElement {
   const group = el('div', ['form', cls].filter(Boolean).join(' '))
   group.append(...children)

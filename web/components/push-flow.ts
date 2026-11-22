@@ -1,5 +1,6 @@
 import { el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
 import { modal, type Modal } from '../lib/dialog.ts'
+import { docsId } from '../lib/page.ts'
 import { icon } from './icon.ts'
 import type { FlowModel, FlowNode, FlowRoute, FlowZone } from '../types.ts'
 
@@ -157,7 +158,7 @@ export function openFlow(title: string, model: FlowModel): FlowDialog {
   const m = modal({
     kind: 'flow-dialog',
     title,
-    docs: 'reviews-and-the-push-gate',
+    docs: docsId(title),
     closeButton: true,
     body: [diagram],
     focus: 'heading',

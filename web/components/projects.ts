@@ -20,23 +20,20 @@ import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTabl
 import { placeMenu } from '../lib/menu.ts'
 import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
 import type { Cloning, Expect, PairAgent, Project, ProjectsView, ReadinessNotice, SessionInfo, Starter, TokenHost } from '../types.ts'
+import { textbox, dropdown, option } from '../lib/controls.ts'
 
 function modelChoices(starter: Starter | undefined): [string, string][] {
   return [['', 'Default model'], ...(starter?.models ?? []).map((m): [string, string] => [m.id, m.name])]
 }
 function options(select: HTMLSelectElement, list: [string, string][]) {
-  for (const [value, text] of list) {
-    const o = el('option', '', text)
-    o.value = value
-    select.append(o)
-  }
+  for (const [value, text] of list) select.append(option(text, value))
 }
 
 
 function readinessNotice(n: ReadinessNotice, host: EventTarget): HTMLElement {
-  const step = n.id === 'login' ? 'login' : 'identity'
-  const box = el('div', 'notice warn small projects-notice')
-  box.append(el('p', '', visible(n.text)), button(visible(n.action), 'ghost small', () => emit(host, 'sf-setup-step', step), 'button', `notice-${step}`))
+  const step = 'identity'
+  const box = el('div', 'notice warn small row text-row')
+  box.append(el('p', '', visible(n.text)), el('span', 'spacer'), button(visible(n.action), 'ghost small', () => emit(host, 'sf-setup-step', step), 'button', `notice-${step}`))
   return box
 }
 
@@ -137,14 +134,14 @@ function nearby(key: string): string[] {
 
 class DispatchForm {
   form = form({ cls: 'dispatch', autocomplete: 'off' })
-  agent = el('select', 'textbox')
+  agent = dropdown({ name: 'agent' })
   why = el('div', 'small muted')
-  name = el('input', 'textbox')
-  model = el('select', 'textbox')
-  effort = el('select', 'textbox')
+  name = textbox({ name: 'name', placeholder: 'Optional' })
+  model = dropdown({ name: 'model' })
+  effort = dropdown({ name: 'effort' })
   starter: Starter | undefined
-  kind = el('select', 'textbox')
-  expect = el('select', 'textbox')
+  kind = dropdown({ name: 'type' })
+  expect = dropdown()
   caps = el('sf-caps-fields', 'dispatch-caps')
   advanced = el('details', 'advanced-settings')
   issue = el('sf-issue-picker', 'dispatch-issue')
@@ -155,24 +152,16 @@ class DispatchForm {
 
   constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '', forkAt = '') {
     const path = p.path
-    this.name.name = 'name'
-    this.model.name = 'model'
-    this.name.placeholder = 'Optional'
     this.name.addEventListener('input', () => labelError(this.name, ''))
     this.model.setAttribute('aria-label', 'Model')
-    this.effort.name = 'effort'
     this.effort.setAttribute('aria-label', 'Effort')
     this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
-    this.kind.name = 'type'
     this.kind.setAttribute('aria-label', 'Work type')
     options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ...p.types.map((t): [string, string] => [t.id, visible(t.name)])])
-    this.agent.name = 'agent'
     this.agent.setAttribute('aria-label', 'Agent')
     const list = starters
     for (const a of list) {
-      const o = el('option', '', a.enabled ? a.name : `${a.name} (not available)`)
-      o.value = a.id
-      o.disabled = !a.enabled
+      const o = option(a.enabled ? a.name : `${a.name} (not available)`, a.id, { disabled: !a.enabled })
       if (a.off) o.title = a.off
       this.agent.append(o)
     }
@@ -304,13 +293,13 @@ class SfProjects extends HTMLElement {
   #rows = new Map<string, HTMLLIElement>()
   #said = new Map<string, HTMLParagraphElement>()
   #busy = false
-  #add = el('input', 'textbox')
+  #add = textbox({ type: 'url', placeholder: 'https://git.example.com/team/project.git', spellcheck: false, name: 'url' })
   #pending = new Map<'repo' | 'token', { key: string; after?: () => void }>()
   #addError = ''
-  #tokenHost = el('select', 'textbox')
-  #tokenValue = el('input', 'textbox')
+  #tokenHost = dropdown({ name: 'host' })
+  #tokenValue = textbox({ type: 'password', autocomplete: 'off', spellcheck: false, name: 'token' })
   #replacing = ''
-  #replaceValue = el('input', 'textbox')
+  #replaceValue = textbox({ type: 'password', autocomplete: 'off', spellcheck: false, name: 'token' })
   #hostField: HTMLElement
   #tokenField: HTMLElement
   #replaceField: HTMLElement
@@ -359,11 +348,7 @@ class SfProjects extends HTMLElement {
         this.#render()
       }
     })
-    this.#add.type = 'url'
     this.#add.id = 'repo-url'
-    this.#add.placeholder = 'https://git.example.com/team/project.git'
-    this.#add.spellcheck = false
-    this.#add.name = 'url'
     this.#add.setAttribute('aria-required', 'true')
     this.#add.addEventListener('input', () => {
       if (!this.#addError) return
@@ -371,19 +356,12 @@ class SfProjects extends HTMLElement {
       this.#render()
     })
     this.#tokenHost.id = 'token-host'
-    this.#tokenHost.name = 'host'
     this.#tokenHost.addEventListener('change', () => {
       labelError(this.#tokenHost, '')
       this.#hostEdited = true
       this.#render()
     })
-    for (const input of [this.#tokenValue, this.#replaceValue]) {
-      input.type = 'password'
-      input.autocomplete = 'off'
-      input.spellcheck = false
-      input.setAttribute('aria-required', 'true')
-      input.name = 'token'
-    }
+    for (const input of [this.#tokenValue, this.#replaceValue]) input.setAttribute('aria-required', 'true')
     this.#tokenValue.id = 'token-value'
     this.#replaceValue.id = 'token-replace'
     for (const input of [this.#tokenValue, this.#replaceValue]) {
@@ -426,8 +404,12 @@ class SfProjects extends HTMLElement {
     this.#render()
   }
 
+  get needsSignIn(): boolean {
+    return Array.isArray(this.#view.readiness) && this.#view.readiness.some(n => n && n.id === 'login')
+  }
+
   #readinessNotices(): HTMLElement[] {
-    const list = Array.isArray(this.#view.readiness) ? this.#view.readiness.filter(n => n && (n.id === 'identity' || n.id === 'login') && typeof n.text === 'string' && typeof n.action === 'string') : []
+    const list = Array.isArray(this.#view.readiness) ? this.#view.readiness.filter(n => n && n.id === 'identity' && typeof n.text === 'string' && typeof n.action === 'string') : []
     const out = list.map(n => {
       const key = `${n.id}\n${n.text}\n${n.action}`
       let box = this.#notices.get(key)
@@ -961,7 +943,7 @@ class SfProjects extends HTMLElement {
 
   #tokens(): HTMLElement[] {
     const hosts = this.#view.hosts ?? []
-    const parts: HTMLElement[] = pageHead({ title: 'Tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'git-host-tokens', key: 'token-docs' } })
+    const parts: HTMLElement[] = pageHead({ title: 'Tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'tokens', key: 'token-docs' } })
     const offered = this.#view.offerHosts ?? []
     if (this.#replacing) parts.push(...this.#tokenHelp(this.#replacing))
     for (const host of this.#hostRows.keys()) if (!hosts.some(h => h.host === host)) this.#hostRows.delete(host)
@@ -983,14 +965,7 @@ class SfProjects extends HTMLElement {
     }
     if (!offered.length) return parts
     const picked = this.#hostEdited && offered.includes(this.#tokenHost.value) ? this.#tokenHost.value : ''
-    const none = el('option', '', 'Select a git host')
-    none.value = ''
-    none.disabled = true
-    this.#tokenHost.replaceChildren(none, ...offered.map(h => {
-      const o = el('option', '', tokenHostHelp(h)?.label ?? 'Development git server')
-      o.value = h
-      return o
-    }))
+    this.#tokenHost.replaceChildren(option('Select a git host', '', { disabled: true }), ...offered.map(h => option(tokenHostHelp(h)?.label ?? 'Development git server', h)))
     this.#tokenHost.value = picked
     const cancel = hosts.length ? [button('Cancel', 'ghost', () => {
       this.#addingHost = false
@@ -1036,7 +1011,7 @@ class SfProjects extends HTMLElement {
     }
     const parts: HTMLElement[] = [
       ...this.#readinessNotices(),
-      ...pageHead({ title: 'Projects', crumb: true, intro: 'Your repositories. Each session works on its own branch, started from the latest main.', docs: { doc: 'projects-and-new-sessions', key: 'docs' } }),
+      ...pageHead({ title: 'Projects', crumb: true, intro: 'Your repositories. Each session works on its own branch, started from the latest main.', docs: { doc: 'projects', key: 'docs' } }),
     ]
     if (!empty && this.#addingRepo) parts.push(addControl(true))
     const message = this.#message.path === '' ? this.#message.text : ''

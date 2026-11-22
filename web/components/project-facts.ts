@@ -3,6 +3,8 @@ import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine,
 import { field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import type { WorkflowRun } from '../types.ts'
+import { checkbox } from '../lib/controls.ts'
+import { whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 interface Protection {
   state: string
@@ -83,6 +85,12 @@ class SfProjectFacts extends HTMLElement {
   #op = ''
   #gen = 0
   #status = statusLine()
+  #poll: WhileOpen | null = null
+  #opened = ''
+
+  connectedCallback() {
+    if (this.#repo && this.#opened !== this.#repo) this.#watch()
+  }
 
   get repo(): string {
     return this.#repo
@@ -96,10 +104,27 @@ class SfProjectFacts extends HTMLElement {
     this.#view = null
     this.#status.textContent = ''
     this.#paint()
-    if (value) void this.#call({ op: 'read', repo: value })
+    this.#watch()
+  }
+
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const repo = this.#repo
+    if (!repo || !this.isConnected) return
+    this.#opened = repo
+    const gen = this.#gen
+    this.#poll = whileOpen({ root: this, read: () => request('/api/project-facts', { op: 'read', repo }), show: a => {
+      if (gen !== this.#gen) return
+      if (!a.ok) say(this.#status, a.message, 'warn')
+      const v = a.ok ? readView(a.body) : null
+      if (v) this.#view = v
+      this.#paint()
+    } })
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
+    this.#poll?.stop()
     const gen = ++this.#gen
     const current = () => gen === this.#gen
     this.#busy = true
@@ -121,7 +146,7 @@ class SfProjectFacts extends HTMLElement {
 
   #readiness(v: FactsView): HTMLElement {
     const box = el('div')
-    box.append(el('p', 'small', 'What the repository gives the agents, read from the main branch\'s commit'))
+    box.append(el('h4', 'label', 'What the repository gives the agents'))
     box.append(el('p', 'small muted', 'Agents work much better with an instruction file, tests, CI, a linter and a check command. The engine reads these files from main with its own reader and runs nothing, except the check command on main\'s latest commit when you press Run on main, in a verification container with no network. Display only: nothing here holds or allows anything, and a run on main counts for no session\'s push.'))
     if (!v.readiness.length) {
       box.append(el('p', 'small muted', 'The engine sent no readiness report.'))
@@ -162,6 +187,7 @@ class SfProjectFacts extends HTMLElement {
   }
 
   async #runMain(): Promise<void> {
+    this.#poll?.stop()
     const gen = ++this.#gen
     const repo = this.#repo
     this.#busy = true
@@ -185,7 +211,7 @@ class SfProjectFacts extends HTMLElement {
 
   #workflows(v: FactsView): HTMLElement {
     const box = el('div')
-    box.append(el('p', 'small', 'CI workflows on the main branch that start on the agents\' pushes'))
+    box.append(el('h4', 'label', 'CI workflows on the agents’ pushes'))
     box.append(el('p', 'small muted', `Every push of a session branch (sf/<id>) starts the workflows below with the repository's secrets, running the branch's own Makefile, tests and scripts. GitHub runs them as they are on the pushed branch, so the push card lists them for each commit. Where one shouldn't run on the agents' branches, add branches-ignore: ['sf/**'] under its push: trigger on the main branch.`))
     if (v.workflowsProblem) {
       box.append(el('p', 'small warn', v.workflowsProblem))
@@ -215,7 +241,7 @@ class SfProjectFacts extends HTMLElement {
 
   #protection(p: Protection, branch: string): HTMLElement {
     const box = el('div')
-    box.append(el('p', 'small', `Whether ${branch ? `${branch}, ` : ''}the main branch, is protected`))
+    box.append(el('h4', 'label', `Protection of ${branch || 'the main branch'}`))
     box.append(el('p', 'small muted', 'The push gate stops at the session branch; whether a merge into main is safe rests on the git host\'s branch protection. The engine reads it with the saved token, reads only.'))
     const ul = el('ul', 'small list')
     const tone = (key: string) => typeof p.tones[key] === 'string' ? p.tones[key] : ''
@@ -228,10 +254,8 @@ class SfProjectFacts extends HTMLElement {
   }
 
   #lookups(v: FactsView): HTMLElement {
-    const box = el('input')
-    box.type = 'checkbox'
+    const box = checkbox({ checked: v.lookups })
     box.id = `lookups-${this.#repo}`
-    box.checked = v.lookups
     if (this.#busy) box.setAttribute('aria-disabled', 'true')
     box.dataset.key = 'lookups'
     box.addEventListener('click', e => {
@@ -249,18 +273,11 @@ class SfProjectFacts extends HTMLElement {
   #paint() {
     if (!this.#repo) return this.replaceChildren()
     const focused = focusedKey(this)
-    const parts: HTMLElement[] = []
+    const parts: HTMLElement[] = [el('h3', 'label', 'CI workflows and main’s protection')]
     const v = this.#view
-    if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Reading the workflows and the main branch\'s protection…' : 'Nothing read yet.'))
+    if (!v) parts.push(el('p', 'small muted', 'Reading the workflows and the main branch\'s protection…'))
     else parts.push(this.#readiness(v), this.#workflows(v), this.#protection(v.protection, v.branch), this.#lookups(v))
-    const again = button('Read again', 'link small', () => {
-      if (this.#busy) return
-      this.#status.textContent = ''
-      void this.#call({ op: 'read', repo: this.#repo })
-    }, 'button', 'facts-again')
-    if (this.#busy && this.#op === 'read') busy(again, true)
-    else if (this.#busy) again.setAttribute('aria-disabled', 'true')
-    parts.push(again, this.#status)
+    parts.push(this.#status)
     replaceKeeping(this, parts)
     refocus(this, focused)
   }

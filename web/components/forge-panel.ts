@@ -3,6 +3,7 @@ import { field } from '../lib/form.ts'
 import { scrolledText } from './cards.ts'
 import { saidOf } from '../lib/json.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
+import { checkbox } from '../lib/controls.ts'
 
 type ForgeAnswer = HTMLElementEventMap['sf-forge-answer']['detail']
 
@@ -166,9 +167,7 @@ class SfForgePanel extends HTMLElement {
         line.setAttribute('aria-label', `The line that looks like a secret, ${shown(f.secretAt)}`)
         box.append(line)
       }
-      const input = el('input')
-      input.type = 'checkbox'
-      input.checked = this.#confirmed.has(key)
+      const input = checkbox({ checked: this.#confirmed.has(key) })
       input.disabled = off
       input.dataset.key = `secret:${f.card}`
       input.addEventListener('change', () => {
@@ -194,9 +193,7 @@ class SfForgePanel extends HTMLElement {
   }
 
   #draftBox(f: SessionForge, off: boolean): HTMLDivElement {
-    const box = el('input')
-    box.type = 'checkbox'
-    box.checked = this.#drafts.get(f.card) ?? true
+    const box = checkbox({ checked: this.#drafts.get(f.card) ?? true })
     box.disabled = off
     box.dataset.key = `draft:${f.card}`
     box.addEventListener('change', () => this.#drafts.set(f.card, box.checked))

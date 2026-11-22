@@ -2,6 +2,7 @@ import { request, savedTone, type EngineAnswer } from '../api.ts'
 import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine, visible } from '../lib/dom.ts'
 import { actions, field, fieldGroup, showAnswer } from '../lib/form.ts'
 import { emptyState } from '../lib/page.ts'
+import { textbox, textarea } from '../lib/controls.ts'
 
 interface SavedPrompt {
   id: string
@@ -40,8 +41,8 @@ class SfSavedPrompts extends HTMLElement {
   #toggle = button('Saved prompts', 'ghost small', undefined, 'button', 'saved-prompts-toggle')
   #panel = el('div', 'saved-prompts surface')
   #status = statusLine()
-  #name = el('input', 'textbox')
-  #text = el('textarea', 'textbox')
+  #name = textbox({ name: 'name' })
+  #text = textarea({ rows: 5, name: 'text' })
   #nameField = field('Prompt name', this.#name)
   #textField = field('Prompt text', this.#text)
   #editor = fieldGroup([])
@@ -58,11 +59,8 @@ class SfSavedPrompts extends HTMLElement {
     this.#toggle.title = "Prompts saved for this project: insert one into the message box, or edit and delete them"
     this.#name.setAttribute('aria-required', 'true')
     this.#name.dataset.key = 'name'
-    this.#name.name = 'name'
-    this.#text.rows = 5
     this.#text.setAttribute('aria-required', 'true')
     this.#text.dataset.key = 'text'
-    this.#text.name = 'text'
     this.#text.placeholder = 'The text to insert into the message box'
     for (const input of [this.#name, this.#text]) input.addEventListener('input', () => labelError(input, ''))
     this.#name.addEventListener('keydown', e => {

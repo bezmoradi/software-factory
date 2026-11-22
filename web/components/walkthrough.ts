@@ -1,6 +1,7 @@
 import { el, emit, shown } from '../lib/dom.ts'
 import { field, form } from '../lib/form.ts'
 import type { WalkStep } from '../types.ts'
+import { checkbox } from '../lib/controls.ts'
 
 export interface WalkthroughView {
   commit: string
@@ -31,11 +32,9 @@ class SfWalkthrough extends HTMLElement {
 
   #step(commit: string, step: WalkStep, n: number, readOnly: boolean): HTMLLIElement {
     const li = el('li', 'walkthrough-step')
-    const box = el('input')
-    box.type = 'checkbox'
+    const box = checkbox({ checked: step.done })
     box.id = `walk-${commit.slice(0, 12)}-${n}`
     box.dataset.key = box.id
-    box.checked = step.done
     box.disabled = readOnly
     li.append(field(`Step ${n}: ${shown(step.do)}`, box, { kind: 'check', labelCls: 'walkthrough-do' }))
     if (step.expect) li.append(el('div', 'small', `Expected: ${shown(step.expect)}`))

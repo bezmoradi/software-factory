@@ -13,7 +13,7 @@ export interface ModalOptions {
   closeButton?: boolean
   focus?: 'heading' | HTMLElement
   single?: string
-  docs: string
+  docs: string | false
   searchOnly?: boolean
 }
 
@@ -76,8 +76,8 @@ export function modal(o: ModalOptions): Modal {
     else if (o.focus instanceof HTMLElement) o.focus.focus()
   }
   if (o.focus === 'heading') heading.tabIndex = -1
-  const docs = docsLink({ doc: o.docs, open: () => handle.close() })
-  let head: HTMLElement = pageHead({ title: heading, action: docs })[0]!
+  const docs = o.docs === false ? undefined : docsLink({ doc: o.docs, open: () => handle.close() })
+  let head: HTMLElement = pageHead({ title: heading, ...(docs ? { action: docs } : {}) })[0]!
   if (o.closeButton) {
     const cross = button('', 'ghost icon-button dialog-x', () => handle.close())
     cross.setAttribute('aria-label', 'Close')
@@ -86,7 +86,7 @@ export function modal(o: ModalOptions): Modal {
     mark.setAttribute('name', 'close')
     cross.append(mark)
     const wrap = el('div', 'dialog-head')
-    wrap.append(heading, docs, cross)
+    wrap.append(heading, ...(docs ? [docs] : []), cross)
     head = wrap
   }
   d.append(head, ...(o.body ?? []))

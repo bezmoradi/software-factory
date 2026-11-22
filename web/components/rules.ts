@@ -1,9 +1,10 @@
 import { request, type EngineAnswer } from '../api.ts'
-import { button, el, emit, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { button, el, emit, shown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
 import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 export type RulesLink = 'allow-rules' | 'egress' | 'team' | 'away' | 'exceptions'
 
@@ -45,20 +46,18 @@ class SfRules extends HTMLElement {
   #details = el('details', 'rules-panel')
   #body = el('div', 'rules-body')
   #status = statusLine('small muted')
-  #loaded = ''
-  #pending = ''
-  #gen = 0
+  #poll: WhileOpen | null = null
 
   constructor() {
     super()
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
-    const refresh = button('Refresh', 'ghost small', () => void whileBusy(refresh, () => this.#load(true)), 'button', 'rules:refresh')
     const head = el('div', 'row rules-head')
-    head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'), refresh)
+    head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'))
     this.#details.append(summary, head, this.#status, this.#body)
     this.#details.addEventListener('toggle', () => {
-      if (this.#details.open) void this.#load(false)
+      if (!this.#details.open) this.#stop()
+      else if (!this.#poll?.live) this.#load()
     })
   }
 
@@ -71,17 +70,15 @@ class SfRules extends HTMLElement {
     this.#view = v
     this.hidden = !v
     if (same) return
-    this.#gen++
-    this.#pending = ''
-    this.#loaded = ''
+    this.#stop()
     this.#body.replaceChildren()
     this.#status.textContent = ''
-    if (v && this.#details.open) void this.#load(false)
+    if (v && this.#details.open) this.#load()
   }
 
   open() {
     this.#details.open = true
-    void this.#load(false)
+    if (!this.#poll?.live) this.#load()
     this.scrollIntoView({ block: 'start' })
     this.querySelector<HTMLElement>('summary')?.focus()
   }
@@ -98,23 +95,35 @@ class SfRules extends HTMLElement {
     return s
   }
 
-  async #load(force: boolean) {
+  #stop() {
+    this.#poll?.stop()
+    this.#poll = null
+  }
+
+  #load() {
     const v = this.#view
-    if (!v || (!force && (this.#loaded === v.sid || this.#pending === v.sid))) return
-    const gen = ++this.#gen
-    this.#pending = v.sid
+    if (!v) return
+    this.#stop()
     this.#status.textContent = 'Reading what the engine holds…'
-    const [rules, egress, team, exceptions] = await Promise.all([
-      v.repo ? request('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve(OUTSIDE),
-      request('/api/egress', { op: 'read' }),
-      v.path ? request('/api/team', { path: v.path, op: 'read' }) : Promise.resolve(OUTSIDE),
-      request('/api/exceptions', {}),
-    ])
-    if (gen !== this.#gen || this.#view?.sid !== v.sid) return
-    this.#pending = ''
-    this.#loaded = v.sid
-    this.#status.textContent = `Read at ${when(Date.now())}.`
-    this.#body.replaceChildren(this.#fixed(v), this.#saved(v, rules), this.#hosts(egress), this.#limits(v, team), this.#away(v), this.#register(v, exceptions))
+    let team: Promise<Answer> | null = null
+    const current = () => this.#view === v && this.#details.open
+    this.#poll = whileOpen({
+      root: this.#body,
+      everyMs: CHEAP_EVERY_MS,
+      open: () => this.#details.open && this.checkVisibility(),
+      read: async () => {
+        team ??= v.path ? request('/api/team', { path: v.path, op: 'read' }) : Promise.resolve(OUTSIDE)
+        const [rules, egress, teamFile, exceptions] = await Promise.all([
+          v.repo ? request('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve(OUTSIDE),
+          request('/api/egress', { op: 'read' }),
+          team,
+          request('/api/exceptions', {}),
+        ])
+        if (current()) this.#status.textContent = `Read at ${when(Date.now())}.`
+        return { rules, egress, teamFile, exceptions }
+      },
+      show: a => this.#body.replaceChildren(this.#fixed(v), this.#saved(v, a.rules), this.#hosts(a.egress), this.#limits(v, a.teamFile), this.#away(v), this.#register(v, a.exceptions)),
+    })
   }
 
   #fixed(v: RulesView): HTMLElement {
@@ -169,7 +178,7 @@ class SfRules extends HTMLElement {
     }
     parts.push(ul)
     const gw = record(a.body.gateway)
-    if (text(gw.url)) parts.push(el('p', 'small warn', `A company LLM gateway, ${visible(text(gw.host))}, is set${gw.agents === true ? ' for the sessions' : ''}.`))
+    if (text(gw.url)) parts.push(el('p', 'small warn', `A company LLM gateway, ${visible(text(gw.host))}, is set for the sessions.`))
     parts.push(el('p', 'small muted', 'Every session shares this list; egress tells sessions apart only by their container.'), link)
     return this.#section('Hosts the session may reach', ...parts)
   }

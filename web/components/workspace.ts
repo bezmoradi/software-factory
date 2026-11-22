@@ -1,8 +1,10 @@
 import type { EngineAnswer } from '../api.ts'
 import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { saidOf, tagClass, type Said } from '../lib/json.ts'
-import { emptyState } from '../lib/page.ts'
+import { emptyState, usageMeter } from '../lib/page.ts'
+import { WALK_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -80,7 +82,7 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     space.replaceChildren()
     if (v.spaceKnown) {
       const used = v.total ? Math.round(((v.total - v.free) / v.total) * 100) : 0
-      space.append(el('p', 'small', `${bytes(v.free)} free of ${bytes(v.total)} on the workspace volume (${used}% used).`))
+      space.append(usageMeter({ label: 'Workspace volume', percent: used, detail: `${bytes(v.free)} free of ${bytes(v.total)}`, warn: v.low }))
       if (v.low) space.append(el('p', 'notice warn small', `Free space is low: under ${bytes(v.lowBelow)} or 5% of the volume. A clone, an install or a build can fail when it runs out. Delete sessions you no longer need below.`))
     } else space.append(el('p', 'small muted', 'The engine couldn’t read the workspace volume’s free space.'))
     list.replaceChildren()
@@ -109,14 +111,14 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     refocus(list, key)
   }
 
-  const reload = async (keepSaid = false) => {
-    if (!keepSaid) say.textContent = 'Counting…'
-    const a = await post(ROUTE, { op: 'view' })
+  let readSaid = ''
+  const show = (a: EngineAnswer) => {
+    const mine = !say.textContent || say.textContent === readSaid
     if (!a.ok) {
-      say.textContent = a.message
+      if (mine) say.textContent = readSaid = a.message
       return
     }
-    if (!keepSaid) say.textContent = ''
+    if (mine) say.textContent = readSaid = ''
     paint(viewOf(a.body))
   }
 
@@ -142,7 +144,7 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     if (a.ok) {
       say.textContent = 'Deleted, with its worktree.'
       deleted(r.sid)
-      await reload(true)
+      await refresh.now()
       return settle(r.sid, before, null)
     }
     const message = a.message
@@ -153,14 +155,13 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       anyway = actionButton('Delete anyway', 'ghost small', () => remove(r, next))
       say.replaceChildren(el('span', '', `${message} `), anyway)
     } else say.textContent = message
-    await reload(true)
+    await refresh.now()
     settle(r.sid, before, anyway)
   }
 
   const m = modal({
     kind: 'workspace',
-    title: 'Workspace',
-    docs: 'working-in-a-session',
+    ...dialogDocs('workspace'),
     body: [
       el('p', 'small', 'Clones and session worktrees share the workspace volume. Sizes count the files in each worktree without following links, and stop counting at 200,000 entries.'),
       space,
@@ -168,8 +169,9 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       el('p', 'small muted', 'A stopped session can be deleted here when its branch is pushed or on main, so nothing is lost. A session with commits that aren’t pushed can be deleted only from its own menu.'),
       list, say,
     ],
-    lead: [actionButton('Refresh', 'ghost small', () => reload())],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
-  void reload()
+  say.textContent = readSaid = 'Counting…'
+  const refresh = whileOpen({ root: list, read: () => post(ROUTE, { op: 'view' }), show, everyMs: WALK_EVERY_MS })
+  m.onClose(() => refresh.stop())
 }

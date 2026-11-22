@@ -2,6 +2,7 @@ import { request } from '../api.ts'
 import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
+import { textbox, filePicker } from '../lib/controls.ts'
 
 interface PackSource {
   kind: string
@@ -85,33 +86,22 @@ class SfPacks extends HTMLElement {
   #preview: PackView | null = null
   #busy = ''
   #confirmNone = false
-  #url = el('input', 'textbox')
-  #commit = el('input', 'textbox')
-  #folder = el('input')
+  #url = textbox({ type: 'url', name: 'url', autocomplete: 'off', spellcheck: false, placeholder: 'https://github.com/owner/pack.git' })
+  #commit = textbox({ name: 'commit', autocomplete: 'off', spellcheck: false, placeholder: '40-character commit hash' })
+  #folder = filePicker({ multiple: true })
   #status = statusLine()
   #refused = new Map<HTMLInputElement, string>()
   #key = ''
 
   constructor() {
     super()
-    this.#url.type = 'url'
     this.#url.id = 'pack-url'
-    this.#url.name = 'url'
     this.#url.dataset.key = 'pack-url'
-    this.#url.autocomplete = 'off'
-    this.#url.spellcheck = false
-    this.#url.placeholder = 'https://github.com/owner/pack.git'
     this.#commit.id = 'pack-commit'
-    this.#commit.name = 'commit'
     this.#commit.dataset.key = 'pack-commit'
-    this.#commit.autocomplete = 'off'
-    this.#commit.spellcheck = false
-    this.#commit.placeholder = '40-character commit hash'
-    this.#folder.type = 'file'
     this.#folder.id = 'pack-folder'
     this.#folder.dataset.key = 'pack-folder'
     this.#folder.webkitdirectory = true
-    this.#folder.multiple = true
     this.#folder.setAttribute('aria-describedby', 'pack-folder-help')
     this.#folder.addEventListener('click', e => {
       if (this.#busy) e.preventDefault()

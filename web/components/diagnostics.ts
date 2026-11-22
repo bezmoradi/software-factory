@@ -1,7 +1,9 @@
 import { UNREAD, type EngineAnswer } from '../api.ts'
-import { actionButton, button, el, statusLine } from '../lib/dom.ts'
+import { button, el, statusLine } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { saveFile } from '../lib/download.ts'
+import { whileOpen } from '../lib/refresh.ts'
 import './agent-report.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
@@ -15,7 +17,6 @@ function fileName(): string {
 }
 
 export function openDiagnostics(post: Post): void {
-  let generation = 0
   const say = statusLine()
   const shown = el('pre', 'diagnostics-text')
   shown.tabIndex = 0
@@ -27,12 +28,7 @@ export function openDiagnostics(post: Post): void {
     say.textContent = `Saved ${fileName()}. Nothing was sent anywhere.`
   })
   saveButton.disabled = true
-  const load = async () => {
-    const mine = ++generation
-    saveButton.disabled = true
-    say.textContent = 'Building the file…'
-    const a = await post(ROUTE, {})
-    if (mine !== generation) return
+  const show = (a: EngineAnswer) => {
     const got = a.body
     if (!a.ok || typeof got.text !== 'string') {
       say.textContent = a.ok ? UNREAD : a.message
@@ -43,21 +39,20 @@ export function openDiagnostics(post: Post): void {
     say.textContent = 'This is the whole file. Read it before you save it.'
     saveButton.disabled = false
   }
+  const fileRow = el('div', 'row text-row')
+  fileRow.append(say, el('span', 'spacer'), saveButton)
   const m = modal({
     kind: 'diagnostics',
-    title: 'Diagnostics',
-    docs: 'maintenance',
+    ...dialogDocs('diagnostics'),
     body: [
-      el('p', 'small', 'A text file to attach to a bug report: versions, image digests, the operating system and Docker, setting names with their values that aren’t secret, counts, and the last 500 events as time, part, event kind, error kind and request id.'),
-      el('p', 'small muted', 'It holds no repository name, host, path, address, token, prompt or log text, and the page never sends it anywhere: you save it and choose where it goes.'),
+      el('p', 'small', 'A text file to attach to a bug report. It holds no names, hosts, paths, tokens or prompts, and nothing is sent until you save it and share it yourself.'),
       document.createElement('sf-agent-report'),
-      say, shown,
+      el('h3', 'label', 'Diagnostics file'),
+      fileRow, shown,
     ],
-    lead: [saveButton, actionButton('Build again', 'ghost small', load)],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
-  m.onClose(() => {
-    generation++
-  })
-  void load()
+  say.textContent = 'Building the file…'
+  const build = whileOpen({ root: shown, read: () => post(ROUTE, {}), show })
+  m.onClose(() => build.stop())
 }

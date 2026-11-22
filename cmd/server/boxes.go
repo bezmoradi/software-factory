@@ -209,7 +209,7 @@ func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
 		b.Down(box)
 	}
 	b.mu.Lock()
-	b.hosts[info.Box] = boxEntry{info: info, host: withGateway(client, b.allow, session.SideAgents)}
+	b.hosts[info.Box] = boxEntry{info: info, host: withGateway(client, b.allow)}
 	l := b.listener
 	b.mu.Unlock()
 	if l != nil {

@@ -86,7 +86,7 @@ export function approveStartup(a: StartupApproval, name: string): Promise<boolea
   const watch: ResizeObserver[] = []
   const list = el('ul', 'list consent-files')
   for (const f of a.files) list.append(fileItem(f, watch))
-  return confirmDialog(`Approve ${visible(name)}'s start-up files`, 'projects-and-new-sessions', [
+  return confirmDialog(`Approve ${visible(name)}'s start-up files`, 'projects', [
     el('p', 'small', `${visible(name)} loads these files from ${visible(a.repo)} when it starts. They can change what it may do without asking you: permissions, hooks, MCP servers, plugins, agents, commands and endpoints. The worktree is at commit ${shortSha(a.commit)}. Characters that change text direction or hide are shown as ⟨U+…⟩, other invisible and control characters as \\u{…}, and long runs of blank lines or spaces as ⏎ ×n and ␠ ×n. Risky lines are marked for you to read; marking blocks nothing.`),
     list,
     ...(a.walk?.length ? [el('p', 'small warn', `The search of the worktree's subfolders stopped early, so a skill folder or instruction file further in isn't shown, and approving doesn't cover it: ${plain(a.walk)}.${a.skipped?.length ? ` It also skips ${plain(a.skipped)}.` : ''}`)] : []),
@@ -99,7 +99,7 @@ export function approveTrustFiles(a: StartupApproval, name: string): Promise<boo
   const watch: ResizeObserver[] = []
   const list = el('ul', 'list consent-files')
   for (const f of a.files) list.append(fileItem(f, watch))
-  return confirmDialog(`Approve the files ${visible(name)} loads from ${visible(a.repo)}'s clone folder`, 'projects-and-new-sessions', [
+  return confirmDialog(`Approve the files ${visible(name)} loads from ${visible(a.repo)}'s clone folder`, 'projects', [
     el('p', 'small', `Claude Code's trust question is asked in ${visible(a.repo)}'s clone folder, and once the folder is trusted ${visible(name)} loads these files from it. No commit put them there: they were written in the agents' container. They can change what it may do without asking you: permissions, hooks, MCP servers, plugins, agents, commands and endpoints. Characters that change text direction or hide are shown as ⟨U+…⟩, other invisible and control characters as \\u{…}, and long runs of blank lines or spaces as ⏎ ×n and ␠ ×n.`),
     list,
     el('p', 'small muted', 'Approving answers the trust question for this exact set. Cancel leaves the folder untrusted.'),
@@ -125,7 +125,7 @@ export function approveHomeSettings(h: HomeApproval, name: string): Promise<bool
     el('p', 'small muted', "Not compared: user MCP servers (kept in ~/.claude.json, which also holds account details), files these settings name outside the listed folders (a hook's script, a CLAUDE.md import), and Claude Code's auto-memory, which the Agents section lists. A “don't ask again” saved in the agent's user settings changes ~/.claude/settings.json too. To read an item first, open it in the session's container with docker exec."),
     el('p', 'small muted', "Approving wakes the session with these settings now, and later wakes compare with them. Any further change asks again. Don't wake stops the container: the session stays stopped and can be deleted, and its next wake asks again."),
   )
-  return confirmDialog('The agent’s user settings changed', 'projects-and-new-sessions', parts, 'Approve and wake', 'primary', undefined, 'Don’t wake')
+  return confirmDialog('The agent’s user settings changed', 'projects', parts, 'Approve and wake', 'primary', undefined, 'Don’t wake')
 }
 
 export function confirmCost(s: SignIn, what: string): Promise<boolean> {

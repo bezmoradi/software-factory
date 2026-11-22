@@ -1,9 +1,11 @@
-import { request } from '../api.ts'
-import { busy, button, el, focusedKey, labelError, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { busy, button, el, labelError, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
 import { emptyState } from '../lib/page.ts'
+import { dropdown, option } from '../lib/controls.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 interface LessonFinding {
   id: string
@@ -42,8 +44,6 @@ interface LessonsView {
   offered: number
 }
 
-const POLL_MS = 3000
-
 function text(value: string): string {
   return visible(unspoofed(value))
 }
@@ -58,19 +58,13 @@ class SfLessons extends HTMLElement {
   #view: LessonsView | null = null
   #said = statusLine()
   #body = el('div', 'lessons-body')
-  #again = button('Read again', 'link small', () => {
-    if (this.#reads) return
-    say(this.#said, '')
-    void whileBusy(this.#again, () => this.#call({ op: 'read', name: this.#project }))
-  }, 'button', 'lessons-again')
-  #timer = 0
   #busy = ''
   #doing = ''
   #chosen = new Map<string, string>()
   #pickRefused = new Map<string, string>()
   #built = false
-  #gen = 0
-  #reads = 0
+  #poll: WhileOpen | null = null
+  #failed = false
 
   connectedCallback() {
     if (!this.#built) {
@@ -85,39 +79,48 @@ class SfLessons extends HTMLElement {
         this.#said,
       )
     }
-    if (this.#project && !this.#view && !this.#reads) void this.#call({ op: 'read', name: this.#project })
-    else this.#poll()
-  }
-
-  disconnectedCallback() {
-    window.clearTimeout(this.#timer)
-    this.#timer = 0
+    if (!this.#poll?.live) this.#watch()
   }
 
   set project(name: string) {
     if (name === this.#project) return
     this.#project = name
     this.#view = null
-    if (this.isConnected) void this.#call({ op: 'read', name })
+    this.#paint()
+    this.#watch()
   }
 
-  #poll() {
-    window.clearTimeout(this.#timer)
-    this.#timer = 0
-    if (this.isConnected && this.#view?.run?.state === 'running') this.#timer = window.setTimeout(() => void this.#call({ op: 'read', name: this.#project }), POLL_MS)
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const name = this.#project
+    if (!name || !this.isConnected) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => this.#typing(), read: () => request('/api/lessons', { op: 'read', name }), show: a => this.#took(a), near: () => ['lessons-suggest', 'lessons-heading'] })
+  }
+
+  #typing(): boolean {
+    const a = document.activeElement
+    return !!this.#busy || (a instanceof HTMLElement && this.contains(a) && a.matches('input, textarea, select'))
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) {
+      this.#failed = true
+      say(this.#said, a.message, 'warn')
+      return
+    }
+    if (this.#failed) say(this.#said, '')
+    this.#failed = false
+    const v: unknown = a.body
+    if (isView(v)) this.#view = v
+    this.#paint()
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const project = this.#project
     if (!project) return false
-    const gen = ++this.#gen
-    const read = body.op === 'read'
-    if (read) this.#reads++
-    this.#hold()
     const a = await request('/api/lessons', body)
-    if (read) this.#reads--
-    this.#hold()
-    if (project !== this.#project || (read && gen !== this.#gen)) return false
+    if (project !== this.#project) return false
     this.#busy = ''
     if (!a.ok) {
       const needs = a.body.needs as Needs | undefined
@@ -130,33 +133,18 @@ class SfLessons extends HTMLElement {
       say(this.#said, pick ? '' : a.message, 'warn')
       this.#paint()
       if (pick) document.getElementById(`lesson-session-${pick}`)?.focus()
-      if (read) this.#retry(true)
       return false
     }
     if (body.op === 'suggest') {
       say(this.#said, 'The run started in a reviewer container. Its lines show here when it ends.', 'muted')
-      return this.#call({ op: 'read', name: project })
+      await this.#poll?.now()
+      return true
     }
     const v: unknown = a.body
-    if (project !== this.#project || (read && gen !== this.#gen)) return false
     if (isView(v)) this.#view = v
     this.#paint()
-    if (read && isView(v)) this.#retry(false)
-    this.#poll()
+    void this.#poll?.now()
     return true
-  }
-
-  #hold() {
-    if (this.#reads) this.#again.setAttribute('aria-disabled', 'true')
-    else this.#again.removeAttribute('aria-disabled')
-  }
-
-  #retry(on: boolean) {
-    if (on === (this.#again.parentNode === this)) return
-    if (on) return this.#said.after(this.#again)
-    const focused = focusedKey(this)
-    this.#again.remove()
-    refocus(this, focused, () => ['lessons-suggest', 'lessons-heading'])
   }
 
   #paint() {
@@ -222,17 +210,10 @@ class SfLessons extends HTMLElement {
     li.append(el('div', 'small', text(x.text)))
     const from = x.from.map(id => titles.get(id)).filter((f): f is LessonFinding => !!f).map(f => text(f.title))
     li.append(el('div', 'small muted', from.length ? `From: ${from.join('; ')}` : 'From findings no longer listed'))
-    const pick = el('select', 'textbox')
+    const pick = dropdown({ name: 'sid' })
     pick.id = `lesson-session-${x.id}`
-    pick.name = 'sid'
-    const none = el('option', '', v.sessions.length ? 'Pick a session' : 'No session of this project')
-    none.value = ''
-    pick.append(none)
-    for (const s of v.sessions) {
-      const o = el('option', '', `${text(s.name || s.sid)}${s.running ? '' : ' (stopped: the note waits for its next message)'}`)
-      o.value = s.sid
-      pick.append(o)
-    }
+    pick.append(option(v.sessions.length ? 'Pick a session' : 'No session of this project', ''))
+    for (const s of v.sessions) pick.append(option(`${text(s.name || s.sid)}${s.running ? '' : ' (stopped: the note waits for its next message)'}`, s.sid))
     pick.value = this.#chosen.get(x.id) ?? ''
     pick.addEventListener('change', () => {
       this.#chosen.set(x.id, pick.value)

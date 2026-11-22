@@ -333,14 +333,13 @@ func (d *Dispatcher) sendKey(ctx context.Context, target, key string) error {
 	if _, err := d.keyHost(ctx, target); err != nil {
 		return err
 	}
-	side := targetSide(target)
 	release := d.holdGateway()
 	defer release()
 	if !d.keyMu.lockBy(ctx) {
 		return keyStepBusy()
 	}
 	defer d.keyMu.Unlock()
-	host, established := d.gatewayOf(side)
+	host, established := d.gatewayOf()
 	if !established {
 		return conflict("gateway", "The engine couldn't read egress.json, so it can't tell whether Claude Code in the "+d.containerWords(target)+" would send this key to a gateway or to Anthropic, and it doesn't save the key. Fix or move egress.json and restart the engine first.")
 	}

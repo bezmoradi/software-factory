@@ -115,5 +115,5 @@ func (i *Identities) SetIdentity(name, email string) (bool, error) {
 }
 
 func noIdentity() *Error {
-	return conflict(NoIdentity, "No session starts or wakes until you set the name and email agents commit with, because an agent with none may commit with the email of its sign-in, which a push makes public. Set them with Git name and email in the Account menu, then try again.")
+	return conflict(NoIdentity, "No session starts or wakes until you set the name and email agents commit with, because an agent with none may commit with the email of its sign-in, which a push makes public. Set them with Git name and email under Settings (the gear), then try again.")
 }

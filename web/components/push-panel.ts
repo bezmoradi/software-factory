@@ -8,6 +8,7 @@ import { changeFacts } from './push-facts.ts'
 import { coverageFacts } from './push-coverage.ts'
 import './push-checked.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
+import { textbox } from '../lib/controls.ts'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
 const RECORD_ROUTE = '/api/push-record'
@@ -208,7 +209,7 @@ class SfPushPanel extends HTMLElement {
       } else li.append(el('code', '', text(f.shown)), ` is flagged: ${text(f.why)}${size}.`)
       if (!commit && this.#fileChanged.has(seen)) li.append(el('p', 'small warn', 'It changed on the branch since the page first showed it, so your reason was cleared: look at the change again before you allow it.'))
       if (!commit && f.link) li.append(el('p', 'small warn', "This symbolic link is one the hold can't follow, under proctor/ and pointing outside it or a root Makefile that is a link, so it can't be allowed and the engine refuses the push: only asking the agent to take it out of the branch clears it."))
-      const input = el('input', 'textbox')
+      const input = textbox()
       input.id = `flag-reason-${i}`
       input.dataset.key = `flag:${id}`
       input.setAttribute('aria-required', 'true')
@@ -258,7 +259,7 @@ class SfPushPanel extends HTMLElement {
     const box = el('div', 'push-result')
     box.id = 'push-result'
     box.tabIndex = -1
-    const head = el('div', 'push-line push-head')
+    const head = el('p', 'push-line push-head')
     const title = el('span', 'push-title')
     if (p.remote) title.append(`${lead} `, outLink(text(remote.name), remote.href, text(remote.shown)))
     else title.append(alone)
@@ -346,7 +347,7 @@ class SfPushPanel extends HTMLElement {
     if (p.expires) box.append(el('p', 'small muted', `Allow works until ${when(p.expires)}, once, for this commit only.`))
     if (this.#card !== p.card || !this.#reason) {
       this.#card = p.card
-      this.#reason = el('input', 'textbox push-reason')
+      this.#reason = textbox({ cls: 'push-reason' })
       this.#reason.dataset.key = 'reason'
       this.#reason.id = 'push-reason'
     }

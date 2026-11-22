@@ -2,6 +2,8 @@ import { request, savedTone, type EngineAnswer } from '../api.ts'
 import { around, busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 import { actions, answerControl, field, form } from '../lib/form.ts'
 import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { textbox, textarea, checkbox } from '../lib/controls.ts'
 
 
 interface Entry {
@@ -63,30 +65,24 @@ class SfDecisionLog extends HTMLElement {
   #doing = ''
   #editing = ''
   #status = statusLine()
-  #adding = el('textarea', 'textbox')
-  #name = el('input', 'textbox')
-  #text = el('textarea', 'textbox')
-  #hidden = el('input')
+  #adding = textarea({ rows: 2, name: 'text', placeholder: 'A decision for the next sessions, such as "Keep the public API stable until 2.0"' })
+  #name = textbox({ name: 'name', placeholder: 'What it was, such as "Sign-in by email"' })
+  #text = textarea({ rows: 3, name: 'text', placeholder: 'Your own wording; empty keeps the engine\'s line' })
+  #hidden = checkbox()
   #n = ++serial
   #order: string[] = []
   #formFor = ''
   #refused = ''
   #bad: { input: HTMLElement; text: string } | null = null
+  #poll: WhileOpen | null = null
+  #failed = false
+  #previewOpen = false
 
   constructor() {
     super()
-    this.#adding.rows = 2
     this.#adding.id = `decision-add-${this.#n}`
-    this.#adding.name = 'text'
-    this.#adding.placeholder = 'A decision for the next sessions, such as "Keep the public API stable until 2.0"'
     this.#name.id = `decision-name-${this.#n}`
-    this.#name.name = 'name'
-    this.#name.placeholder = 'What it was, such as "Sign-in by email"'
-    this.#text.rows = 3
     this.#text.id = `decision-text-${this.#n}`
-    this.#text.name = 'text'
-    this.#text.placeholder = 'Your own wording; empty keeps the engine\'s line'
-    this.#hidden.type = 'checkbox'
     this.#hidden.id = `decision-hidden-${this.#n}`
     this.#adding.dataset.key = 'decision-adding'
     this.#name.dataset.key = 'decision-name'
@@ -99,6 +95,10 @@ class SfDecisionLog extends HTMLElement {
     })
   }
 
+  connectedCallback() {
+    if (!this.#poll?.live) this.#watch()
+  }
+
   set project(value: string) {
     if (value === this.#project) return
     this.#project = value
@@ -106,7 +106,33 @@ class SfDecisionLog extends HTMLElement {
     this.#editing = ''
     this.#status.textContent = ''
     this.#paint()
-    if (value) void this.#call({ op: 'read', repo: value }, 'decision-again')
+    this.#watch()
+  }
+
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const repo = this.#project
+    if (!repo || !this.isConnected) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => this.#typing(), read: () => request('/api/decision-log', { op: 'read', repo }), show: a => this.#took(a), near: key => this.#near(key) })
+  }
+
+  #typing(): boolean {
+    const a = document.activeElement
+    return this.#busy || !!this.#editing || (a instanceof HTMLElement && this.contains(a) && a.matches('input, textarea, select'))
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) {
+      this.#failed = true
+      say(this.#status, a.message, 'warn')
+    } else {
+      if (this.#failed) this.#status.textContent = ''
+      this.#failed = false
+      const v = readView(a.body)
+      if (v) this.#view = v
+    }
+    this.#paint()
   }
 
   #hold(b: HTMLButtonElement): void {
@@ -135,6 +161,7 @@ class SfDecisionLog extends HTMLElement {
     const v = readView(a.body)
     if (v) this.#view = v
     this.#paint()
+    void this.#poll?.now()
     return a
   }
 
@@ -223,7 +250,7 @@ class SfDecisionLog extends HTMLElement {
     const id = cut < 0 ? this.#formFor : key.slice(cut + 1)
     const others = around(this.#order, id)
     const same = kind === 'decision-remove' ? kind : 'decision-edit'
-    return [`decision-edit:${id}`, ...others.flatMap(o => [`${same}:${o}`, `decision-edit:${o}`]), 'decision-again']
+    return [`decision-edit:${id}`, ...others.flatMap(o => [`${same}:${o}`, `decision-edit:${o}`])]
   }
 
   #paint() {
@@ -233,7 +260,7 @@ class SfDecisionLog extends HTMLElement {
     const parts: HTMLElement[] = [el('h3', 'label', 'Decision log')]
     parts.push(el('p', 'small muted', 'Built by the engine from its own records: requirements and plans you approved, by date and approval hash; verdicts you overrode, pushes you allowed or denied, with your reasons; and pull requests merged. It holds no agent text, so an approval shows only its kind and date until you name it. Each new session gets the log with its first message, as one engine note of at most 4 KiB, newest kept. Your names, wording, hidden entries and own entries are kept apart and survive each rebuild; a token-shaped reason is withheld.'))
     const v = this.#view
-    if (!v) parts.push(el('p', 'small muted', this.#busy ? 'Reading the log…' : 'Nothing read yet.'))
+    if (!v) parts.push(el('p', 'small muted', 'Reading the log…'))
     else {
       if (v.auditSince) parts.push(el('p', 'small muted', `The audit file goes back to ${day(v.auditSince)}; older decisions have rotated out.`))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
@@ -249,15 +276,15 @@ class SfDecisionLog extends HTMLElement {
       }
       if (v.orphans) parts.push(el('p', 'small muted', `${v.orphans} of your edits are for entries the audit file no longer holds; they are kept until space runs out.`))
       const preview = el('details')
+      preview.open = this.#previewOpen
+      preview.addEventListener('toggle', () => {
+        this.#previewOpen = preview.open
+      })
       preview.append(el('summary', 'small', v.note ? `What a new session gets (${new TextEncoder().encode(v.note).length} bytes${v.left ? `, ${v.left} older entries left out` : ''})` : 'What a new session gets: nothing, the log is empty'))
       if (v.note) preview.append(el('pre', 'small', shown(v.note)))
       parts.push(preview)
     }
-    const again = button('Read again', 'link small', () => {
-      if (!this.#busy) void this.#call({ op: 'read', repo: this.#project }, 'decision-again')
-    }, 'button', 'decision-again')
-    this.#hold(again)
-    parts.push(again, this.#status)
+    parts.push(this.#status)
     replaceKeeping(this, parts)
     for (const input of [this.#adding, this.#name, this.#text]) labelError(input, this.#bad?.input === input ? this.#bad.text : '')
     this.#order = v?.entries.map(e => e.id) ?? []

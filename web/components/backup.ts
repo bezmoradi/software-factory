@@ -1,8 +1,12 @@
 import { download, type EngineAnswer } from '../api.ts'
 import { actionButton, button, el, sayWhenShown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
 import { saveFile } from '../lib/download.ts'
 import { emptyState } from '../lib/page.ts'
+import { filePicker } from '../lib/controls.ts'
+import { actions } from '../lib/form.ts'
+import { CHEAP_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 type Send = (file: Blob) => Promise<EngineAnswer>
@@ -135,21 +139,19 @@ function fileName(disposition: string): string {
 }
 
 export function openBackup(post: Post, send: Send): void {
-  let generation = 0
+  const cloning = new Set<string>()
+  let readSaid = ''
   const say = statusLine()
   const body = el('div', 'backup-body')
   const exportButton = button('Export', 'primary small')
-  const picker = el('input')
-  picker.type = 'file'
-  picker.accept = '.gz,application/gzip'
-  picker.hidden = true
+  const picker = filePicker({ accept: '.gz,application/gzip', hidden: true })
   const importButton = button('Import…', 'ghost small', () => picker.click())
   const importWhy = el('p', 'small muted')
 
   const paint = (v: View) => {
     const parts: Node[] = []
     importButton.disabled = !v.canImport
-    importWhy.textContent = v.canImport ? 'An import goes only into an engine with no projects and no sessions, and the engine restarts to finish it.' : visible(v.why)
+    importWhy.textContent = v.canImport ? 'Import needs an engine with no projects or sessions, and restarts it.' : visible(v.why)
     if (v.needClone.length) {
       parts.push(el('h3', 'label', 'Projects that need a clone'), el('p', 'small muted', 'Save the git host’s token first if the repository is private, then clone each again from its recorded address.'))
       const ul = el('ul', 'list')
@@ -158,8 +160,12 @@ export function openBackup(post: Post, send: Send): void {
         const b = actionButton('Clone again', 'ghost small', async () => {
           const a = await post(CLONE, { name })
           say.textContent = a.ok ? `Cloning ${visible(name)}… It shows on Projects when it’s done.` : a.message
-          if (a.ok) b.disabled = true
+          if (a.ok) {
+            cloning.add(name)
+            b.disabled = true
+          }
         })
+        if (cloning.has(name)) b.disabled = true
         li.append(el('code', '', visible(name)), el('span', 'spacer'), b)
         ul.append(li)
       }
@@ -169,18 +175,14 @@ export function openBackup(post: Post, send: Send): void {
     if (!v.drops.length) parts.push(emptyState('No store has dropped old records.'))
     for (const x of v.drops) parts.push(el('p', 'small warn', droppedLine(x)))
     parts.push(el('h3', 'label', 'Copies from before a format change'))
-    if (!v.copies.length) parts.push(emptyState('None yet. Before an engine writes a store in a newer format, it copies the old file here, so the engine before it can read it after a rollback.'))
+    if (!v.copies.length) parts.push(emptyState('None yet.'))
     for (const c of v.copies) parts.push(el('p', 'small', `backup/${visible(c.version)}: ${c.files.map(visible).join(', ') || 'empty'} (${day(c.at)})`))
     if (v.last) parts.push(...reportNodes(v.last))
     body.replaceChildren(...parts)
   }
 
-  const reload = async () => {
-    const mine = ++generation
-    say.textContent = 'Loading…'
-    const { view, message } = await load(post)
-    if (mine !== generation) return
-    say.textContent = message
+  const show = ({ view, message }: { view: View | null; message: string }) => {
+    if (!say.textContent || say.textContent === readSaid) say.textContent = readSaid = message
     if (view) paint(view)
   }
 
@@ -211,29 +213,24 @@ export function openBackup(post: Post, send: Send): void {
         return
       }
       const report = reportOf(a.body.report)
-      generation++
+      refresh.stop()
       say.textContent = 'Imported. The engine restarts to finish; the page reconnects once it’s back.'
       importButton.disabled = true
       if (report) body.replaceChildren(...reportNodes(report))
     }))
   })
 
-  const transfer = el('div', 'row')
-  transfer.append(exportButton, importButton, picker)
+  const transfer = actions([importButton, exportButton])
   const m = modal({
     kind: 'backup',
-    title: 'Export and import',
-    docs: 'maintenance',
+    ...dialogDocs('backup'),
     body: [
-      el('p', 'small', 'Export saves the engine’s state to one file: projects, sessions, review records, settings and the audit. It holds no git host token, but it does hold the name and email agents commit with and every reason you typed, so keep it private.'),
-      el('p', 'small muted', 'An imported file counts as outside data. Review passes and approvals come back for display only and count for nothing until you approve again; added hosts, commands, reviewer agent files, automatic sends and review depth come back off; projects need a clone, and sessions are history only.'),
-      transfer, importWhy, say, body,
+      el('p', 'small', 'One file with the engine’s projects, sessions, review records, settings and audit. It holds your commit name and email and every reason you typed, so keep it private.'),
+      importWhy, transfer, picker, say, body,
     ],
-    lead: [actionButton('Refresh', 'ghost small', reload)],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
-  m.onClose(() => {
-    generation++
-  })
-  void reload()
+  say.textContent = readSaid = 'Loading…'
+  const refresh = whileOpen({ root: body, read: () => load(post), show, everyMs: CHEAP_EVERY_MS })
+  m.onClose(() => refresh.stop())
 }

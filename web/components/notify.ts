@@ -1,5 +1,6 @@
-import { el, statusLine, visible } from '../lib/dom.ts'
-import { field } from '../lib/form.ts'
+import { statusLine, visible } from '../lib/dom.ts'
+import { field, fieldset } from '../lib/form.ts'
+import { checkbox } from '../lib/controls.ts'
 
 const SETTING_KEY = 'sf-notify'
 const SEEN_KEY = 'sf-notified'
@@ -99,18 +100,14 @@ export function watchNotify(list: Watched[]): void {
 }
 
 class SfNotify extends HTMLElement {
-  #box = el('input')
+  #box = checkbox()
   #said = statusLine('small muted')
 
   connectedCallback() {
     if (this.childElementCount) return
-    this.#box.type = 'checkbox'
     this.#box.checked = on
     this.#box.addEventListener('change', () => void this.#change())
-    const legend = el('legend', 'label', 'Notifications')
-    const set = el('fieldset', 'themes')
-    set.append(legend, field('Desktop notifications', this.#box, { kind: 'check', cls: 'notify-pref' }), this.#said)
-    this.append(set)
+    this.append(fieldset('Notifications', [field('Desktop notifications', this.#box, { kind: 'check', cls: 'notify-pref' }), this.#said], 'themes'))
     if (!supported) {
       this.#box.disabled = true
       this.#said.textContent = 'This browser has no desktop notifications.'

@@ -1,6 +1,7 @@
 import { request, type EngineAnswer } from '../api.ts'
 import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { field, form } from '../lib/form.ts'
+import { dropdown, option, filePicker } from '../lib/controls.ts'
 
 interface AgentFileView {
   name: string
@@ -46,7 +47,7 @@ class SfReviewerAgents extends HTMLElement {
   #view: AgentFilesView | null = null
   #busy = false
   #removing = ''
-  #file = el('input')
+  #file = filePicker({ accept: '.md,text/markdown,text/plain' })
   #status = statusLine()
   #fileRefused = ''
   #loaded = ''
@@ -54,9 +55,7 @@ class SfReviewerAgents extends HTMLElement {
 
   constructor() {
     super()
-    this.#file.type = 'file'
     this.#file.id = 'reviewer-agent-file'
-    this.#file.accept = '.md,text/markdown,text/plain'
     this.#file.dataset.key = 'agent-file'
     this.#file.setAttribute('aria-describedby', 'reviewer-agent-help')
     this.#file.addEventListener('click', e => {
@@ -191,17 +190,9 @@ class SfReviewerAgents extends HTMLElement {
     if (v) {
       const roles: HTMLElement[] = []
       for (const role of Object.keys(v.roleNames)) {
-        const select = el('select', 'textbox')
+        const select = dropdown({ options: [option(v.defaults[role] ? `the pack's agent (${visible(v.defaults[role])})` : 'no agent: the project has no pack that fills it', ''), ...v.files.map(f => option(visible(f.name), f.name))] })
         select.id = `reviewer-role-${role}`
         select.dataset.key = `role:${role}`
-        const knack = el('option', '', v.defaults[role] ? `the pack's agent (${visible(v.defaults[role])})` : 'no agent: the project has no pack that fills it')
-        knack.value = ''
-        select.append(knack)
-        for (const f of v.files) {
-          const o = el('option', '', visible(f.name))
-          o.value = f.name
-          select.append(o)
-        }
         select.value = v.files.some(f => f.name === v.roles[role]) ? v.roles[role] ?? '' : ''
         const chosen = select.value
         select.disabled = target.disabled

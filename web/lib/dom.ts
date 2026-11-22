@@ -76,26 +76,12 @@ export function ensureId(node: HTMLElement): string {
 const TONES = ['bad', 'warn', 'ok', 'muted'] as const
 export type Tone = typeof TONES[number]
 
-function sideBySideRow(label: HTMLLabelElement): HTMLElement | null {
-  const holder = label.closest('.field')?.parentElement?.closest<HTMLElement>('.form, .form-row')
-  return holder?.matches('.form-inline, .form-row') ? holder : null
-}
-
-function labelName(label: HTMLLabelElement): string {
-  const name = label.cloneNode(true) as HTMLLabelElement
-  for (const part of name.querySelectorAll('.label-error, .muted, input, select, textarea, button')) part.remove()
-  return (name.textContent ?? '').trim()
-}
-
 export function labelError(input: HTMLElement, message: string): void {
   const id = `${ensureId(input)}-error`
   const root = input.getRootNode()
   const scope = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root : null
   const label = scope?.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) ?? null
   label?.querySelector('.label-error')?.remove()
-  const row = label ? sideBySideRow(label) : null
-  const lineId = `${id}-row`
-  for (const place of [row, scope]) place?.querySelector(`[id="${CSS.escape(lineId)}"]`)?.remove()
   const described = (input.getAttribute('aria-describedby') ?? '').split(' ').filter(d => d && d !== id)
   if (!message || !label) {
     input.removeAttribute('aria-invalid')
@@ -106,15 +92,16 @@ export function labelError(input: HTMLElement, message: string): void {
   const note = el('span', 'label-error', `(${message.trim().replace(/\.$/, '')})`)
   note.id = id
   note.setAttribute('aria-hidden', 'true')
-  if (row) {
-    const line = el('p', 'small row-error')
-    line.id = lineId
-    line.setAttribute('aria-hidden', 'true')
-    line.append(labelName(label), ' ', note)
-    row.append(line)
-  } else label.append(note)
+  label.append(note)
   input.setAttribute('aria-invalid', 'true')
   input.setAttribute('aria-describedby', [...described, id].join(' '))
+  const cleared = new AbortController()
+  const clear = () => {
+    cleared.abort()
+    if (note.isConnected) labelError(input, '')
+  }
+  input.addEventListener('input', clear, { signal: cleared.signal })
+  input.addEventListener('change', clear, { signal: cleared.signal })
 }
 
 export function statusLine(cls?: string): HTMLParagraphElement
