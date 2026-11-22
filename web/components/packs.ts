@@ -3,6 +3,7 @@ import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping
 import { actions, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { textbox, filePicker } from '../lib/controls.ts'
+import { toast, type Tone as ToastTone } from './toasts.ts'
 
 interface PackSource {
   kind: string
@@ -173,7 +174,7 @@ class SfPacks extends HTMLElement {
     const got = await this.#post('fetch', { op: 'fetch', url, commit }) as { pack?: unknown } | null
     const p = readPack(got?.pack)
     this.#preview = p
-    if (p) say(this.#status, `Fetched ${visible(p.name)} ${visible(p.version)}. Read what it holds below before you use it.`, 'ok')
+    if (p) this.#done(`Fetched ${visible(p.name)} ${visible(p.version)}. Read what it holds below before you use it.`)
     this.#paint()
   }
 
@@ -198,7 +199,7 @@ class SfPacks extends HTMLElement {
     }
     if (await this.#call('upload', { op: 'upload', name: '', files })) {
       const p = this.#view?.packs.find(k => k.digest === this.#view?.kept)
-      say(this.#status, `Uploaded ${visible(p?.name ?? '')}${p ? ` ${visible(p.version)}` : ''}${left ? `, leaving out ${left} file${left === 1 ? '' : 's'} outside agents/, skills/ and commands/` : ''}. Read what it holds below, then press Use.`, 'ok')
+      this.#done(`Uploaded ${visible(p?.name ?? '')}${p ? ` ${visible(p.version)}` : ''}${left ? `, leaving out ${left} file${left === 1 ? '' : 's'} outside agents/, skills/ and commands/` : ''}. Read what it holds below, then press Use.`)
       this.#paint()
     }
   }
@@ -219,16 +220,21 @@ class SfPacks extends HTMLElement {
 
   #used(pack: string, name: string) {
     this.#confirmNone = false
-    say(this.#status, pack === NONE ? 'No pack reviews this project now. Each push needs your Allow with a reason.' : `${visible(name)} reviews this project's pushes from the next review on.`, pack === NONE ? 'warn' : 'ok')
+    this.#done(pack === NONE ? 'No pack reviews this project now. Each push needs your Allow with a reason.' : `${visible(name)} reviews this project's pushes from the next review on.`, pack === NONE ? 'warn' : 'ok')
     emit(this, 'sf-packs-changed')
     this.#paint()
   }
 
   async #remove(p: PackView) {
     if (await this.#call(`remove:${p.digest}`, { op: 'remove', digest: p.digest })) {
-      say(this.#status, `Removed ${visible(p.name)} ${visible(p.version)} from the engine.`, 'ok')
+      this.#done(`Removed ${visible(p.name)} ${visible(p.version)} from the engine.`)
       this.#paint()
     }
+  }
+
+  #done(title: string, tone: ToastTone = 'ok') {
+    say(this.#status, '')
+    toast({ id: `packs:${this.#target?.project ?? ''}`, title, tone })
   }
 
   #button(text: string, what: string, run: (() => void) | undefined, cls = 'ghost small', type: 'button' | 'submit' = 'button'): HTMLButtonElement {

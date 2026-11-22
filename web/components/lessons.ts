@@ -3,9 +3,10 @@ import { busy, button, el, labelError, say, statusLine, unspoofed, visible, whil
 import { actions, field, form } from '../lib/form.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
-import { emptyState } from '../lib/page.ts'
+import { emptyState, pageHead } from '../lib/page.ts'
 import { dropdown, option } from '../lib/controls.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { toast } from './toasts.ts'
 
 interface LessonFinding {
   id: string
@@ -69,15 +70,13 @@ class SfLessons extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      const heading = el('h3', 'label', 'Lessons from reviews')
-      heading.tabIndex = -1
-      heading.dataset.key = 'lessons-heading'
-      this.replaceChildren(
-        heading,
-        el('p', 'small muted', 'The engine counts the blocking findings of this project\'s reviews by reviewer, file and title, with case, numbers and punctuation left out. That matching is approximate: two different findings can count as one, and a reworded finding counts as a new one. Nothing here changes a file or a review on its own.'),
-        this.#body,
-        this.#said,
-      )
+      const head = pageHead({ title: 'Lessons from reviews', level: 'h2', headingClass: 'label', intro: 'Blocking findings that keep coming back, and the instruction lines they suggest.', docs: { doc: 'lessons-from-reviews', key: 'lessons-docs' } })
+      const heading = head[0]?.querySelector<HTMLElement>('h2')
+      if (heading) {
+        heading.tabIndex = -1
+        heading.dataset.key = 'lessons-heading'
+      }
+      this.replaceChildren(...head, this.#body, this.#said)
     }
     if (!this.#poll?.live) this.#watch()
   }
@@ -175,7 +174,6 @@ class SfLessons extends HTMLElement {
         void this.#call({ op: 'suggest', name: this.#project })
       }, 'button', 'lessons-suggest')
       if (running) busy(b, true)
-      b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)
     }
     if (run && run.state !== 'running') {
@@ -187,8 +185,7 @@ class SfLessons extends HTMLElement {
     }
     const offered = v.lines.filter(x => x.state === 'offered')
     if (offered.length) {
-      parts.push(el('h4', 'label', 'Suggested lines'))
-      parts.push(el('p', 'small muted', 'Each line comes from a reviewer run that read text agents and reviewers wrote: read it before you approve it. An approved line goes to the session you pick as a note asking the agent to add it to the instruction file and commit it, which the usual reviews then cover. A declined line isn\'t offered again for the same findings.'))
+      parts.push(...pageHead({ title: 'Suggested lines', level: 'h3', headingClass: 'label', intro: 'Lines for the instruction file that a reviewer run proposed from these findings. Read each one before you approve or decline it.', docs: { doc: 'suggested-lines', key: 'suggested-docs' } }))
       const list = el('ul', 'list lessons-lines')
       for (const x of offered) list.append(this.#line(x, v, titles))
       parts.push(list)
@@ -200,7 +197,7 @@ class SfLessons extends HTMLElement {
         const s = v.sessions.find(y => y.sid === x.session)
         list.append(el('li', '', `${text(x.text)}: sent to ${s ? text(s.name || s.sid) : 'a session'} as a note`))
       }
-      parts.push(el('h4', 'label', 'Approved lines'), list)
+      parts.push(...pageHead({ title: 'Approved lines', level: 'h3', headingClass: 'label', intro: 'Lines you approved, each sent to a session as a note asking its agent to add it to the instruction file.', docs: { doc: 'approved-lines', key: 'approved-docs' } }), list)
     }
     this.#body.replaceChildren(...parts)
   }
@@ -229,7 +226,8 @@ class SfLessons extends HTMLElement {
       this.#doing = 'approve'
       void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
         if (!ok) return
-        say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
+        say(this.#said, '')
+        toast({ id: `lessons:${this.#project}`, title: 'Sent to the session as a note with its next message.', tone: 'ok' })
       })
     }
     const decline = button('Decline', 'small ghost', () => {
@@ -238,7 +236,8 @@ class SfLessons extends HTMLElement {
       this.#doing = 'decline'
       void whileBusy(decline, () => this.#call({ op: 'decline', name: this.#project, id: x.id })).then(ok => {
         if (!ok) return
-        say(this.#said, 'Declined. Nothing was sent or changed.', 'muted')
+        say(this.#said, '')
+        toast({ id: `lessons:${this.#project}`, title: 'Declined. Nothing was sent or changed.', tone: 'ok' })
       })
     }, 'button', `lessons-decline:${this.#project}:${x.id}`)
     if (held && this.#doing === 'approve') busy(approve, true)

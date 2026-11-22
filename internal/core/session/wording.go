@@ -149,14 +149,18 @@ func CoverageSaid(status string) (Said, bool) {
 }
 
 var readinessLabel = map[string]string{
-	"instructions": "Instruction file (CLAUDE.md or AGENTS.md)",
-	"tests":        "Test command",
-	"ci":           "CI workflows",
-	"lint":         "Lint configuration",
+	"instructions": "Instruction file",
+	"tests":        "Tests",
+	"ci":           "CI",
+	"lint":         "Linter",
 	"check":        "Check command",
-	"verified":     "Check passes on main",
-	"team":         "Team file (software-factory.json)",
-	"protection":   "Branch protection on main",
+	"verified":     "Check on main",
+}
+
+var readinessWord = map[string]string{"found": "Found", "missing": "Missing", "unknown": "Unknown"}
+
+func ReadinessWord(state string) string {
+	return readinessWord[state]
 }
 
 func ReadinessSaid(kind, state string) Said {
@@ -172,16 +176,6 @@ func ReadinessSaid(kind, state string) Said {
 		tone = "warn"
 	}
 	return Said{label, tone}
-}
-
-func ProtectionTone(state, good string) string {
-	switch state {
-	case good:
-		return "ok"
-	case "unknown", "":
-		return "muted"
-	}
-	return "warn"
 }
 
 var egressReason = map[string]string{
@@ -515,4 +509,55 @@ func PushMissing(p *PushView, r *ReviewView) []MissingItem {
 		out = append(out, item)
 	}
 	return out
+}
+
+func CloneWords(p CloneProgress, host string) string {
+	switch p.Phase() {
+	case CloneDownloading:
+		if p.Total > 0 {
+			return grouped(min(p.Objects, p.Total)) + " of " + grouped(p.Total) + " objects · " + byteWords(p.Received)
+		}
+		return byteWords(p.Received) + " received"
+	case ClonePreparing:
+		if p.Total > 0 && p.Checked > 0 {
+			return "Preparing files · " + grouped(min(p.Checked, p.Total)) + " of " + grouped(p.Total) + " objects"
+		}
+		return "Preparing files…"
+	}
+	if host == "" {
+		return "Waiting for the git host…"
+	}
+	return "Waiting for " + host + "…"
+}
+
+func grouped(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	if n < 0 {
+		return s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func byteWords(n int64) string {
+	units := []string{"bytes", "KiB", "MiB", "GiB", "TiB"}
+	v, i := float64(n), 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	if i == 0 {
+		return strconv.FormatInt(n, 10) + " " + units[0]
+	}
+	digits := 0
+	if v < 10 {
+		digits = 1
+	}
+	return strconv.FormatFloat(v, 'f', digits, 64) + " " + units[i]
 }

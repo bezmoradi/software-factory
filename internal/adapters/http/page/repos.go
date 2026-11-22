@@ -3,14 +3,35 @@ package page
 import (
 	"net/http"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 var repoRoutes = map[string]bool{"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true}
 
 type cloningJSON struct {
-	URL       string `json:"url"`
-	Name      string `json:"name"`
-	StartedAt int64  `json:"startedAt"`
+	URL       string             `json:"url"`
+	Name      string             `json:"name"`
+	StartedAt int64              `json:"startedAt"`
+	Progress  *cloneProgressJSON `json:"progress,omitempty"`
+}
+
+type cloneProgressJSON struct {
+	Phase   string `json:"phase"`
+	Percent *int   `json:"percent,omitempty"`
+	Said    string `json:"said"`
+}
+
+func cloningJSONOf(k session.Cloning) cloningJSON {
+	out := cloningJSON{URL: k.URL, Name: k.Name, StartedAt: millis(k.StartedAt)}
+	if k.Progress.Phase != "" {
+		p := &cloneProgressJSON{Phase: string(k.Progress.Phase), Said: k.Progress.Said}
+		if k.Progress.HasPercent {
+			p.Percent = &k.Progress.Percent
+		}
+		out.Progress = p
+	}
+	return out
 }
 
 type hostJSON struct {

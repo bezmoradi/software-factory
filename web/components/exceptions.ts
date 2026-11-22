@@ -108,7 +108,7 @@ export function openExceptions(post: Post, labelOf: (sid: string) => string): vo
     if (v.rulesKnown !== true) parts.push(el('p', 'small muted', 'This engine has no agent-host to list saved rules from.'))
     else {
       const repos = records(v.rules)
-      parts.push(el('p', 'small muted', 'Claude Code saved these from a card’s “don’t ask again”; they carry no reason. Remove one from its project on Projects.'))
+      parts.push(el('p', 'small muted', 'Claude Code saved these from a card’s “don’t ask again”; they carry no reason. Remove one in its session’s “What this session may and may not do”.'))
       if (!repos.length) parts.push(emptyState('No projects.'))
       for (const r of repos) {
         const rules = records(r.rules).map(ruleOf)

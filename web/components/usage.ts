@@ -241,7 +241,7 @@ export function windowLine(w: RateWindowView): HTMLElement {
 }
 
 export function expiryText(e: Expiry): string {
-  if (e.what === 'token') return `The token saved for ${visible(e.host)} expires ${when(e.until)}. Save a new one under Projects, Tokens, before then, or the engine can't push or open pull requests there.`
+  if (e.what === 'token') return `The token saved for ${visible(e.host)} expires ${when(e.until)}. Save a new one under Projects, Git host tokens, before then, or the engine can't push or open pull requests there.`
   return `${visible(e.label)} has a claude.ai sign-in that ends between ${day(e.from)} and ${day(e.until)}. Renewing it doesn't move those dates: sign in again before then (Reviewers’ sign-in in the command palette).`
 }
 

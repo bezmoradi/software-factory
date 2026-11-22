@@ -422,7 +422,7 @@ func workOff(in, out string, report *session.ImportReport) error {
 			report.Off = append(report.Off, name+": the comment on the pull request after each push is off")
 		}
 		if depthJSONOf(p.Depth) != nil {
-			report.Off = append(report.Off, name+": advisory roles, repeated runs and deeper review for larger changes are off; set them again to turn them on")
+			report.Off = append(report.Off, name+": added reviewers and deeper review of big changes are off; set them again to turn them on")
 		}
 		p.Findings, p.PRComment, p.Depth = false, false, workflow.Depth{}
 		st.Projects[name] = p

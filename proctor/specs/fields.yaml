@@ -136,6 +136,7 @@ tables:
       - ["fld_lessons_approve_sid_type", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lessons_approve_sid_shape", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: "a/b" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lessons_approve_no_sid", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_review_depth_old_shape", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field, with a message in words"
@@ -302,15 +303,19 @@ tables:
       - ["msg_project_setup_long", "/api/project-commands", { op: set, name: demo, check: "", setup: "${fill(365)}" }, "command", "setup", "One line of at most 300 bytes, with no control characters."]
       - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "browser", "One line of at most 300 bytes, with no control characters."]
       - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "image", "Needs a digest-pinned name like node@sha256:<64 hex>."]
-      - ["msg_review_depth_size", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: x, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "maxFiles", "A whole number of files or lines, 0 to switch it off."]
-      - ["msg_review_depth_lines", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: -1, extra: [], extraRuns: 0 }, "depth", "maxLines", "A whole number of files or lines, 0 to switch it off."]
-      - ["msg_review_depth_extra_runs", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 4 }, "depth", "extraRuns", "A whole number of runs, at most 3."]
-      - ["msg_review_depth_advisory_type", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: 1, runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "advisory", "Agent names, separated by commas."]
-      - ["msg_review_depth_advisory_typed", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: "a1, a2 a3,a4 a5  a6, a1", runs: {}, maxFiles: " 0 ", maxLines: "", extra: "", extraRuns: "1" }, "depth", "advisory", "At most 5 roles."]
-      - ["msg_review_depth_extra_type", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [1], extraRuns: 0 }, "depth", "extra", "Agent names, separated by commas."]
-      - ["msg_review_depth_advisory_count", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [a1, a2, a3, a4, a5, a6], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "advisory", "At most 5 roles."]
-      - ["msg_review_depth_extra_name", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: ["bad name"], extraRuns: 0 }, "depth", "extra", "Agent names: letters, digits and . _ : @ -, up to 120 each."]
-      - ["msg_review_depth_runs", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: { a1: 4 }, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "depth", "runs", "Each role runs 1 to 3 times per commit."]
+      - ["msg_review_depth_lines", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: -1, twice: false }, "depth", "maxLines", "A whole number of lines, 0 to switch it off."]
+      - ["msg_review_depth_lines_text", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: x, twice: false }, "depth", "maxLines", "A whole number of lines, 0 to switch it off."]
+      - ["msg_review_depth_twice", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: "yes" }, "depth", "twice", "Needs true or false."]
+      - ["msg_review_depth_reviewers_type", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: ["knackpack:security-reviewer"], maxLines: 0, twice: false }, "depth", "reviewers", "Needs always, big or warn for each reviewer."]
+      - ["msg_review_depth_mode", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:security-reviewer": sometimes }, maxLines: 0, twice: false }, "depth", "reviewers", "Needs always, big or warn for each reviewer."]
+      - ["msg_review_depth_count", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { a1: always, a2: big, a3: warn, a4: warn, a5: warn, a6: warn }, maxLines: " 0 ", twice: false }, "depth", "reviewers", "At most 5 added reviewers."]
+      - ["msg_review_depth_name", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "bad name": big }, maxLines: "", twice: false }, "depth", "reviewers", "Agent names: letters, digits and . _ : @ -, up to 120 each."]
+      - ["msg_review_depth_unlisted", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:not-installed-reviewer": warn }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
+      - ["msg_review_depth_helper", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:adjudicator": warn }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
+      - ["msg_review_depth_required", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:adversarial-reviewer": always }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs a reviewer that isn't already required."]
+      - ["msg_review_depth_big_unsized", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:security-reviewer": big }, maxLines: 0, twice: false }, "depth", "reviewers", "Needs a big-change size above 0 first."]
+      - ["msg_review_depth_twice_unsized", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: true }, "depth", "twice", "Needs a big-change size above 0 first."]
+      - ["msg_review_depth_big_unlisted", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { own-reviewer: big }, maxLines: 400, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
       - ["msg_project_hold", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: -1, maxLines: 0 } }, "hold", "maxFiles", "A whole number of files or lines, 0 to switch it off."]
       - ["msg_project_hold_lines", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: 0, maxLines: x } }, "hold", "maxLines", "A whole number of files or lines, 0 to switch it off."]
       - ["msg_project_hold_after", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: "yes", maxFiles: 0, maxLines: 0 } }, "hold", "afterBlock", "A whole number of files or lines, 0 to switch it off."]
@@ -664,13 +669,15 @@ scenarios:
           method: POST
           path: "/api/review-depth"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 400, maxLines: 0, extra: [], extraRuns: 0 }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 400, twice: true }
         expect:
           equal:
             "$.status": 200
             "$.body.message": "Saved. The next review uses them."
             "$.body.tone": ok
-            "$.body.maxFiles": 400
+            "$.body.maxLines": 400
+            "$.body.twice": true
+            "$.body.reviewers": {}
         no_state_check: "no declared read shows a project's review settings: only /api/review-depth answers them, and its op decides read or write (op set saves them), so it isn't declared a read; depth-same's answer shows them saved, and depth-back reads them back after depth-cleared"
       - id: depth-same
         do: http.request
@@ -679,13 +686,15 @@ scenarios:
           method: POST
           path: "/api/review-depth"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 400, maxLines: 0, extra: [], extraRuns: 0 }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 400, twice: true }
         expect:
           equal:
             "$.status": 200
             "$.body.message": "No change: these review settings are already saved."
             "$.body.tone": warn
-            "$.body.maxFiles": 400
+            "$.body.maxLines": 400
+            "$.body.twice": true
+            "$.body.reviewers": {}
         no_state_check: "saves nothing, since the settings are already these, as the answer's No change says; no declared read shows a project's review settings: only /api/review-depth answers them, and its op decides read or write (op set saves them), so it isn't declared a read; depth-back reads them back after depth-cleared"
       - id: depth-cleared
         do: http.request
@@ -694,7 +703,7 @@ scenarios:
           method: POST
           path: "/api/review-depth"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: false }
         expect:
           equal:
             "$.status": 200
@@ -712,8 +721,11 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body.maxFiles": 0
-          absent: ["$.body.message", "$.body.tone"]
+            "$.body.maxLines": 0
+            "$.body.twice": false
+            "$.body.reviewers": {}
+          present: ["$.body.available", "$.body.required"]
+          absent: ["$.body.message", "$.body.tone", "$.body.runs", "$.body.maxFiles", "$.body.extraRuns"]
         no_state_check: "op read changes nothing; /api/review-depth isn't declared a read, since op set on the same path saves the settings"
       - id: prompt-add
         do: http.request

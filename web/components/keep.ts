@@ -3,6 +3,7 @@ import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine,
 import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
+import { toast } from './toasts.ts'
 
 const ROUTE = '/api/keep'
 const SHA = /^[0-9a-f]{40}$/
@@ -204,7 +205,8 @@ class SfKeep extends HTMLElement {
     if (v) this.#view = v
     const back = v?.head || commit || v?.commit || ''
     const at = back ? ` at ${shortSha(back)}` : ''
-    say(this.#status, `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, 'ok')
+    say(this.#status, '')
+    toast({ id: `keep:${sid}`, title: `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, tone: 'ok' })
     this.#paint()
   }
 

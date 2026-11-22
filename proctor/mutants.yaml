@@ -3079,3 +3079,9 @@
     - file: "internal/core/session/fromissue.go"
       find: "\tif !ValidIssueHash(hash) {"
       replace: "\tif false {"
+- id: HAND-015
+  title: "A clone's progress shows from its start, so a fast clone shows a bar"
+  edits:
+    - file: "internal/core/session/cloneprogress.go"
+      find: "CloneShowAfter = time.Second"
+      replace: "CloneShowAfter = 0"

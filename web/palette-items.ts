@@ -88,6 +88,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
         go('projects')
         projects.reveal(p.path, true)
       } })
+      items.push({ id: `settings:${p.path}`, group: 'Projects', label: `Project settings: ${visible(p.name)}`, detail: 'Opens the project’s settings page', run: () => go(`p:${p.name}`) })
       items.push({ id: `start:${p.path}`, group: 'Projects', label: `Start a session in ${visible(p.name)}`, detail: 'Opens the new-session form', off: !state.connected ? 'the page isn’t connected to the engine' : '', run: () => {
         go('projects')
         projects.startIn(p.path)

@@ -6,6 +6,7 @@ import { label } from '../lib/format.ts'
 import { saidOf } from '../lib/json.ts'
 import type { SessionInfo, SplitCard } from '../types.ts'
 import { textbox, textarea } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 export interface SplitPanelView {
   sid: string
@@ -196,9 +197,8 @@ class SfSplit extends HTMLElement {
     this.#busy.delete(c.card)
     const onField = body.op === 'edit' && (a.field === 'title' || a.field === 'message') && a.message
     if (a.ok) {
-      const text = done ?? a.message
-      if (text) this.#notes.set(c.card, { text, tone: done === null ? savedTone(a) : 'muted' })
-      else this.#notes.delete(c.card)
+      this.#notes.delete(c.card)
+      toast({ id: `split:${c.card}`, title: done ?? a.message, tone: done === null ? savedTone(a) : 'ok' })
     } else if (onField) {
       this.#notes.delete(c.card)
       this.#refused.set(c.card, { field: a.field, text: a.message })
@@ -217,7 +217,7 @@ class SfSplit extends HTMLElement {
     this.paint()
     const a = await this.start(v.sid, c.card)
     this.#busy.delete(c.card)
-    if (a.ok) this.#notes.set(c.card, { text: 'Started. It gets this text as its first message once it connects.', tone: 'muted' })
+    if (a.ok) toast({ id: `split:${c.card}`, title: 'Started. It gets this text as its first message once it connects.', tone: 'ok' })
     else if (a.error === 'goal full') this.#notes.delete(c.card)
     else this.#notes.set(c.card, { text: a.message, tone: 'bad' })
     this.#key = ''

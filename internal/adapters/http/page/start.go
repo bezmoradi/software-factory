@@ -104,7 +104,7 @@ func (s *Server) projects(w http.ResponseWriter) {
 	}
 	cloning := make([]cloningJSON, 0, len(view.Cloning))
 	for _, k := range view.Cloning {
-		cloning = append(cloning, cloningJSON{URL: k.URL, Name: k.Name, StartedAt: millis(k.StartedAt)})
+		cloning = append(cloning, cloningJSONOf(k))
 	}
 	hosts := make([]hostJSON, 0, len(view.Hosts))
 	for _, h := range view.Hosts {

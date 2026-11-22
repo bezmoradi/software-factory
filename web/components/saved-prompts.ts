@@ -3,6 +3,7 @@ import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping
 import { actions, field, fieldGroup, showAnswer } from '../lib/form.ts'
 import { emptyState } from '../lib/page.ts'
 import { textbox, textarea } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 interface SavedPrompt {
   id: string
@@ -147,7 +148,8 @@ class SfSavedPrompts extends HTMLElement {
     const text = this.#text.value
     const a = await this.#call({ op: 'save', repo: v.repo, ...(e.id ? { id: e.id } : {}), name, text })
     if (!a.ok) return void (this.#refused === 'text' ? this.#text : this.#name).focus()
-    say(this.#status, a.message, savedTone(a))
+    say(this.#status, '')
+    toast({ id: `saved-prompts:${v.repo}`, title: a.message, tone: savedTone(a) })
     this.#editing = null
     this.#paint()
     this.#toggleFocus()
@@ -234,7 +236,8 @@ class SfSavedPrompts extends HTMLElement {
         if (this.#busy) return
         void this.#call({ op: 'remove', repo: v.repo, id: p.id }).then(a => {
           if (a.ok) {
-            say(this.#status, `Deleted “${visible(p.name)}”.`, 'ok')
+            say(this.#status, '')
+            toast({ id: `saved-prompts:${v.repo}`, title: `Deleted “${visible(p.name)}”.`, tone: 'ok' })
           }
           this.#deleting = ''
           this.#paint()

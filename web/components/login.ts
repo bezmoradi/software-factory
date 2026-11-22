@@ -10,6 +10,7 @@ import { commandBlock } from './copy.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
 import { textbox } from '../lib/controls.ts'
+import { WALK_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -76,7 +77,7 @@ class Row {
   private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
   private readonly linkSaid = statusLine('small muted status-slot login-link-said')
-  private readonly linkRow = el('div', 'row text-row')
+  private readonly linkRow = el('div', 'login-link')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
   private readonly codeForm: HTMLFormElement
@@ -97,7 +98,7 @@ class Row {
     this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
-    this.linkRow.append(this.linkSaid, el('span', 'spacer'))
+    this.linkRow.append(this.linkSaid)
     const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
     this.code = code
     this.codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
@@ -154,8 +155,8 @@ class Row {
     if (focused) this.code.focus({ preventScroll: true })
   }
 
-  private ready(href: string, quiet: boolean) {
-    sayIfChanged(this.linkSaid, quiet ? '' : 'Sign-in link ready.')
+  private ready(href: string) {
+    sayIfChanged(this.linkSaid, '')
     this.link.href = href
     if (!this.link.parentNode) this.linkRow.append(this.link)
   }
@@ -176,7 +177,7 @@ class Row {
       return this.note(this.subscriptionSaid, a.ok ? UNREAD : a.message, true)
     }
     this.waiting = true
-    this.ready(link, keepNote)
+    this.ready(link)
     if (!keepNote) this.note(this.subscriptionSaid, '')
   }
 
@@ -320,11 +321,11 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       done(true)
       tell(`${visible(name)} is signed in for this session with ${how}.`)
     }) : null
-    const check = async (): Promise<boolean | null> => {
-      say(status, 'Checking…')
-      const a = await post(ROUTE, { step: 'status', target })
+    const read = () => post(ROUTE, { step: 'status', target })
+    const apply = (a: EngineAnswer): boolean | null => {
       if (!a.ok) {
         say(status, a.message)
+        go.disabled = false
         return null
       }
       const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
@@ -332,12 +333,13 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       const s = signInOf(first.signIn)
       row?.show(s)
       const ready = signedIn(first.signIn)
-      if (ready === false) say(status, row ? 'Not signed in yet. Sign in above, then press Continue.' : `${describe(s)} Run the command below, then press Continue.`)
+      if (ready === false) say(status, row ? '' : `${describe(s)} Run the command below, then press Continue.`)
       else say(status, row ? '' : describe(s))
+      go.disabled = ready === false
       return ready
     }
     const proceed = async () => {
-      if (await check() !== false) done(true)
+      if (apply(await read()) !== false) done(true)
     }
     const parts: Node[] = [
       el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
@@ -350,6 +352,7 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
     }
     const go = button('Continue', 'primary small', () => void whileBusy(go, proceed))
+    go.disabled = true
     const m = modal({
       kind: 'login',
       title: `Sign ${visible(name)} in for this session`,
@@ -357,8 +360,13 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       body: parts,
       actions: [button('Cancel', 'ghost small', () => done(false)), go],
     })
+    const watch = whileOpen({ root: go, read, show: a => void apply(a), same: a => JSON.stringify(a, (k, v: unknown) => (k === 'checkedAt' ? undefined : v)), everyMs: WALK_EVERY_MS, open: () => !finished })
+    const back = () => void watch.now()
+    addEventListener('focus', back)
     m.onClose(() => {
       finished = true
+      watch.stop()
+      removeEventListener('focus', back)
       row?.cancel()
       resolve(answer)
     })

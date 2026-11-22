@@ -1,7 +1,9 @@
 import { request, savedTone, type EngineAnswer } from '../api.ts'
-import { button, el, labelError, say, statusLine, whileBusy } from '../lib/dom.ts'
-import { actions, field, form, showAnswer } from '../lib/form.ts'
+import { button, labelError, say, statusLine, whileBusy } from '../lib/dom.ts'
+import { actions, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { textbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
+import { pageHead } from '../lib/page.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
 let serial = 0
@@ -13,7 +15,7 @@ class SfProjectCommands extends HTMLElement {
   #setup = textbox()
   #image = textbox()
   #browser = textbox()
-  #save = button('Save commands', 'small', undefined, 'submit', 'commands-save')
+  #save = button('Save', 'primary small', undefined, 'submit', 'commands-save')
   #said = statusLine()
   #form: HTMLFormElement | null = null
   #built = false
@@ -38,14 +40,17 @@ class SfProjectCommands extends HTMLElement {
       input.addEventListener('input', () => labelError(input, ''))
     }
     this.replaceChildren(
-      el('h3', 'label', 'Check and setup commands'),
-      el('p', 'small muted', 'Both run in the agent container, in the session\'s own worktree, as the agents\' user, with the model keys cleared. They are what you type here, never anything read from the repository. Empty is off.'),
+      ...pageHead({ title: 'Check and setup commands', level: 'h2', headingClass: 'label', intro: 'The commands sessions and verification runs of this project run, as you type them here.', docs: { doc: 'check-and-setup-commands', key: 'commands-docs' } }),
       this.#form = form({
         children: [
-          field('Check command', this.#check, { help: 'Runs when the agent ends a turn, for at most 5 minutes. When it fails, Claude Code gets the end of its output and one more try in the same turn; the development ACP agent gets it as a note with your next message. The result shows on the session and never counts for a review or a push; a verification run of the same command, set up below, is the one a push can count.' }),
-          field('Setup command', this.#setup, { help: 'Runs once in each new session\'s worktree, for at most 15 minutes, after you approve the start-up card, never before it and never when it is refused. Messages you send while it runs wait in the session\'s queue. Its output shows on the session.' }),
-          field('Image for verification runs', this.#image, { help: 'A verification run runs the check command on a clean copy of a commit, in a container of this image with no network, no token and no sign-in; only its exit code counts. Name the image pinned by digest (name@sha256: and 64 hexadecimal digits), with the project\'s tools and dependencies in it, and pull it on the Docker host first. Software Factory ships no such image. The run keeps only the image\'s tooling variables (PATH, LANG, *_HOME, *_VERSION and the like), each only in the shape of its kind; a check command that needs another sets it itself, such as FOO=bar make check. Put no secret in the image, in a variable or a file: the code a run executes was written by an agent, which reads everything in the image, and whether the run passed, and so roughly when it ended, reaches the agent through whether and when its push goes out. Empty means this project can\'t run a verification.' }),
-          field('Browser command', this.#browser, { help: 'A browser check runs this command, never anything read from the repository, the same way as a verification run: on a clean copy of the commit, in its own container of the image above, with no network, so it starts the app under test itself and drives the browser in the image over loopback. Pass or fail is the command\'s own exit code. Files it saves to $SF_OUT (/out) are kept with the run: .png, .jpg, .jpeg and .gif images, re-encoded before the page shows them, and .zip traces, which the page only downloads. The image needs the browser (Chromium at /usr/bin/chromium, or Playwright\'s browsers, with PLAYWRIGHT_BROWSERS_PATH set in the command, since the run keeps no such variable) and a folder /out owned by user 10006. Playwright doesn\'t read CHROME_BIN: point its launchOptions.executablePath at the image\'s Chromium. Sign in as a test user from the repository\'s seed data, never with a real or production login. Empty is off.' }),
+          fieldRow([
+            field('Check command', this.#check, { optional: true }),
+            field('Setup command', this.#setup, { optional: true }),
+          ], 'halves'),
+          fieldRow([
+            field('Image for verification runs', this.#image, { optional: true }),
+            field('Browser command', this.#browser, { optional: true }),
+          ], 'halves'),
           actions([this.#save]),
         ],
         onSubmit: () => void this.#store(),
@@ -105,7 +110,7 @@ class SfProjectCommands extends HTMLElement {
     if (this.#form && !showAnswer(this.#form, a, this.#said, { tone: 'warn' })) return
     this.#failed = false
     this.#dirty = false
-    say(this.#said, a.message, savedTone(a))
+    toast({ id: `commands:${this.#project}`, title: a.message, tone: savedTone(a) })
   }
 }
 

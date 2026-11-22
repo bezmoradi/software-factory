@@ -783,10 +783,17 @@ export interface Starter {
   command?: string
 }
 
+export interface CloneProgress {
+  phase: 'waiting' | 'downloading' | 'preparing'
+  percent?: number
+  said: string
+}
+
 export interface Cloning {
   url: string
   name: string
   startedAt: number
+  progress?: CloneProgress
 }
 
 export interface TokenHost {
@@ -1362,10 +1369,11 @@ export type SessionEvent =
 
 export interface RepoEvent {
   type: 'repo'
-  state: 'cloning' | 'added' | 'failed'
+  state: 'cloning' | 'progress' | 'added' | 'failed'
   url: string
   name: string
   message?: string
+  progress?: CloneProgress
 }
 
 export interface ReviewerEvent extends SignIn {
@@ -1451,7 +1459,8 @@ declare global {
     'sf-markdown-painted': Event
     'sf-tool-path': Event
     'sf-repo': CustomEvent<{ op: 'add'; url: string } | { op: 'remove'; name: string }>
-    'sf-setup-step': CustomEvent<'identity' | 'login'>
+    'sf-project-page': CustomEvent<{ name: string }>
+    'sf-project-jump': CustomEvent<{ part: string }>
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-pair': CustomEvent<PairDispatch>

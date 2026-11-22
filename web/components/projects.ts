@@ -1,25 +1,18 @@
-import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, rovingKeys, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
 import type { EngineAnswer } from '../api.ts'
 import { actions as actionsRow, answerControl, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { emptyState, pageHead } from '../lib/page.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
 import { effortOptions } from './session-work.ts'
-import './allow-rules.ts'
-import './project-facts.ts'
-import './team-rules.ts'
 import './caps.ts'
 import './issue-picker.ts'
 import './usage.ts'
-import './project-commands.ts'
-import './metrics.ts'
-import './decision-log.ts'
-import './review-depth.ts'
-import './lessons.ts'
+import './progress.ts'
 import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './session-list.ts'
 import { placeMenu } from '../lib/menu.ts'
 import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
-import type { Cloning, Expect, PairAgent, Project, ProjectsView, ReadinessNotice, SessionInfo, Starter, TokenHost } from '../types.ts'
+import type { CloneProgress, Cloning, Expect, PairAgent, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 import { textbox, dropdown, option } from '../lib/controls.ts'
 
 function modelChoices(starter: Starter | undefined): [string, string][] {
@@ -27,14 +20,6 @@ function modelChoices(starter: Starter | undefined): [string, string][] {
 }
 function options(select: HTMLSelectElement, list: [string, string][]) {
   for (const [value, text] of list) select.append(option(text, value))
-}
-
-
-function readinessNotice(n: ReadinessNotice, host: EventTarget): HTMLElement {
-  const step = 'identity'
-  const box = el('div', 'notice warn small row text-row')
-  box.append(el('p', '', visible(n.text)), el('span', 'spacer'), button(visible(n.action), 'ghost small', () => emit(host, 'sf-setup-step', step), 'button', `notice-${step}`))
-  return box
 }
 
 function savedAt(ms: number): string {
@@ -288,7 +273,7 @@ class SfProjects extends HTMLElement {
   #removing = ''
   #message: { path: string; text: string; bad: boolean } = { path: '', text: '', bad: false }
   #messageLine = statusLine('small status-slot')
-  #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; said: HTMLSpanElement }>()
+  #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; bar: HTMLElementTagNameMap['sf-progress'] }>()
   #list = el('ul', 'boxlist projects')
   #rows = new Map<string, HTMLLIElement>()
   #said = new Map<string, HTMLParagraphElement>()
@@ -316,18 +301,8 @@ class SfProjects extends HTMLElement {
   #sessions: SessionInfo[] = []
   #sessionsKey = ''
   #expanded = new Map<string, boolean>()
-  #rules = new Map<string, HTMLElementTagNameMap['sf-allow-rules']>()
-  #facts = new Map<string, HTMLElementTagNameMap['sf-project-facts']>()
-  #caps = new Map<string, HTMLElementTagNameMap['sf-project-caps']>()
-  #team = new Map<string, HTMLElementTagNameMap['sf-team-rules']>()
   #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
-  #commands = new Map<string, HTMLElementTagNameMap['sf-project-commands']>()
-  #metrics = new Map<string, HTMLElementTagNameMap['sf-project-metrics']>()
-  #decisions = new Map<string, HTMLElementTagNameMap['sf-decision-log']>()
-  #depth = new Map<string, HTMLElementTagNameMap['sf-review-depth']>()
-  #lessons = new Map<string, HTMLElementTagNameMap['sf-lessons']>()
   #menuOpen = ''
-  #notices = new Map<string, HTMLElement>()
   #slot: HTMLElement | null = null
   #stale = false
   #starting: { path: string; before: Set<string>; id: string; late: boolean } | null = null
@@ -400,27 +375,16 @@ class SfProjects extends HTMLElement {
     this.#viewKey = key
     this.#view = value
     const kept = new Set(value.projects.map(p => p.path))
-    for (const m of [this.#rows, this.#said, this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
+    for (const m of [this.#rows, this.#said, this.#forms, this.#expanded, this.#expiry]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
     this.#render()
   }
 
-  get needsSignIn(): boolean {
-    return Array.isArray(this.#view.readiness) && this.#view.readiness.some(n => n && n.id === 'login')
+  get needsIdentity(): boolean {
+    return this.#needs('identity')
   }
 
-  #readinessNotices(): HTMLElement[] {
-    const list = Array.isArray(this.#view.readiness) ? this.#view.readiness.filter(n => n && n.id === 'identity' && typeof n.text === 'string' && typeof n.action === 'string') : []
-    const out = list.map(n => {
-      const key = `${n.id}\n${n.text}\n${n.action}`
-      let box = this.#notices.get(key)
-      if (!box) {
-        box = readinessNotice(n, this)
-        this.#notices.set(key, box)
-      }
-      return box
-    })
-    for (const [key, box] of this.#notices) if (!out.includes(box)) this.#notices.delete(key)
-    return out
+  #needs(id: string): boolean {
+    return Array.isArray(this.#view.readiness) && this.#view.readiness.some(n => n && n.id === id)
   }
 
   set sideSlot(value: HTMLElement | null) {
@@ -446,28 +410,6 @@ class SfProjects extends HTMLElement {
   #choosing(): boolean {
     const a = document.activeElement
     return (a instanceof HTMLSelectElement && this.contains(a)) || !!this.querySelector('.menu:popover-open')
-  }
-
-  showPanel(path: string, which: 'rules' | 'team') {
-    const p = this.#view.projects.find(x => x.path === path)
-    if (!p) return
-    if (which === 'rules' && !this.#rules.has(path)) {
-      const panel = el('sf-allow-rules', 'project-rules')
-      panel.repo = p.name
-      this.#rules.set(path, panel)
-    }
-    if (which === 'team' && !this.#team.has(path)) {
-      const panel = el('sf-team-rules', 'project-rules')
-      panel.path = p.path
-      this.#team.set(path, panel)
-    }
-    this.reveal(path)
-    const panel = which === 'rules' ? this.#rules.get(path) : this.#team.get(path)
-    panel?.scrollIntoView({ block: 'nearest' })
-    if (panel) {
-      panel.tabIndex = -1
-      panel.focus()
-    }
   }
 
   startIn(path: string) {
@@ -519,10 +461,6 @@ class SfProjects extends HTMLElement {
   startRefused(path: string, a: EngineAnswer): boolean {
     const form = this.#forms.get(path)
     return !!form?.form.isConnected && !!a.field && form.refuse(a)
-  }
-
-  verifiedOnMain(repo: string) {
-    for (const panel of this.#facts.values()) if (panel.repo === repo) panel.refresh()
   }
 
   say(path: string, text: string, bad = false) {
@@ -655,87 +593,7 @@ class SfProjects extends HTMLElement {
       b.append(mark, el('span', '', text))
       menu.append(b)
     }
-    item(this.#rules.has(p.path) ? 'Hide saved allow rules' : 'Saved allow rules', () => {
-      if (this.#rules.has(p.path)) this.#rules.delete(p.path)
-      else {
-        const panel = el('sf-allow-rules', 'project-rules')
-        panel.repo = p.name
-        this.#rules.set(p.path, panel)
-      }
-      this.#render()
-    }, 'warning')
-    item(this.#facts.has(p.path) ? 'Hide CI workflows and main\'s protection' : 'CI workflows and main\'s protection', () => {
-      if (this.#facts.has(p.path)) this.#facts.delete(p.path)
-      else {
-        const panel = el('sf-project-facts', 'project-rules')
-        panel.repo = p.name
-        this.#facts.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#team.has(p.path) ? 'Hide team rules from main' : 'Team rules from main', () => {
-      if (this.#team.has(p.path)) this.#team.delete(p.path)
-      else {
-        const panel = el('sf-team-rules', 'project-rules')
-        panel.path = p.path
-        this.#team.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#caps.has(p.path) ? 'Hide caps' : 'Caps', () => {
-      if (this.#caps.has(p.path)) this.#caps.delete(p.path)
-      else {
-        const panel = el('sf-project-caps', 'project-caps')
-        panel.project = p.name
-        this.#caps.set(p.path, panel)
-      }
-      this.#render()
-    }, 'warning')
-    item(this.#commands.has(p.path) ? 'Hide check and setup commands' : 'Check and setup commands', () => {
-      if (this.#commands.has(p.path)) this.#commands.delete(p.path)
-      else {
-        const panel = el('sf-project-commands', 'project-caps')
-        panel.project = p.name
-        this.#commands.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#metrics.has(p.path) ? 'Hide delivery and reviewer numbers' : 'Delivery and reviewer numbers', () => {
-      if (this.#metrics.has(p.path)) this.#metrics.delete(p.path)
-      else {
-        const panel = el('sf-project-metrics', 'project-caps')
-        panel.project = p.name
-        this.#metrics.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#decisions.has(p.path) ? 'Hide decision log' : 'Decision log', () => {
-      if (this.#decisions.has(p.path)) this.#decisions.delete(p.path)
-      else {
-        const panel = el('sf-decision-log', 'project-caps')
-        panel.project = p.name
-        this.#decisions.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#depth.has(p.path) ? 'Hide review depth' : 'Review depth', () => {
-      if (this.#depth.has(p.path)) this.#depth.delete(p.path)
-      else {
-        const panel = el('sf-review-depth', 'project-caps')
-        panel.path = p.path
-        this.#depth.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#lessons.has(p.path) ? 'Hide lessons from reviews' : 'Lessons from reviews', () => {
-      if (this.#lessons.has(p.path)) this.#lessons.delete(p.path)
-      else {
-        const panel = el('sf-lessons', 'project-caps')
-        panel.project = p.name
-        this.#lessons.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
+    item('Project settings', () => emit(this, 'sf-project-page', { name: p.name }), 'settings')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -817,10 +675,6 @@ class SfProjects extends HTMLElement {
       form.caps.project = p.name
       parts.push(form.form)
     }
-    for (const m of [this.#rules, this.#facts, this.#caps, this.#team, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) {
-      const panel = m.get(p.path)
-      if (panel) parts.push(panel)
-    }
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')
@@ -855,31 +709,45 @@ class SfProjects extends HTMLElement {
 
   #cloningRow(k: Cloning): HTMLElement {
     const kept = this.#cloning.get(k.name)
-    if (kept?.url === k.url) return kept.li
-    const c = kept ?? { url: k.url, li: el('li', 'boxlist-row'), row: el('div', 'row'), said: statusLine('acts small muted status-slot', 'span') }
+    if (kept?.url === k.url) {
+      drawProgress(kept.bar, k.progress)
+      return kept.li
+    }
+    const c = kept ?? { url: k.url, li: el('li', 'boxlist-row'), row: el('div', 'row'), bar: el('sf-progress', 'acts small muted') }
     c.url = k.url
+    c.bar.name = k.name
+    drawProgress(c.bar, k.progress)
     const who = el('div', 'project-id')
     const name = el('span', 'name')
     name.append(el('span', 'title', k.name))
     who.append(name, urlText(k.url))
-    replaceKeeping(c.row, [el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, c.said])
+    replaceKeeping(c.row, [el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, c.bar])
     if (!kept) {
       c.li.append(c.row)
       this.#cloning.set(k.name, c)
-      sayWhenShown(c.said, 'Cloning…', 'muted')
     }
     return c.li
+  }
+
+  cloneProgress(url: string, name: string, progress: CloneProgress) {
+    const k = (this.#view.cloning ?? []).find(c => c.url === url && c.name === name)
+    if (!k) return false
+    k.progress = progress
+    const row = this.#cloning.get(name)
+    if (row?.url === url) drawProgress(row.bar, progress)
+    return true
   }
 
   #hostRow(h: TokenHost): HTMLElement {
     const li = this.#hostRows.get(h.host) ?? el('li')
     this.#hostRows.set(h.host, li)
-    const shownHost = visible(hostName(h.host))
+    const label = tokenHostHelp(h.host)?.label ?? hostName(h.host)
+    const shownHost = visible(label)
     const row = el('div', 'host-row')
     const who = el('div', 'host-who')
     const name = el('span', 'host-name')
     name.title = h.host
-    const text = el('bdi', '', hostName(h.host))
+    const text = el('bdi', '', label)
     text.dir = 'ltr'
     name.append(text)
     who.append(name, el('span', 'host-saved', h.savedAt ? `Saved ${savedAt(h.savedAt)}` : 'Saved'))
@@ -918,7 +786,7 @@ class SfProjects extends HTMLElement {
       parts.push(confirm)
     }
     if (this.#replacing === h.host) {
-      this.#replaceWords.data = `New token for ${hostName(h.host)}`
+      this.#replaceWords.data = `New token for ${label}`
       replaceKeeping(this.#replaceForm, [this.#replaceField, ...actions(button('Cancel', 'ghost', () => {
         this.#replacing = ''
         blank(this.#replaceValue)
@@ -943,7 +811,7 @@ class SfProjects extends HTMLElement {
 
   #tokens(): HTMLElement[] {
     const hosts = this.#view.hosts ?? []
-    const parts: HTMLElement[] = pageHead({ title: 'Tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'tokens', key: 'token-docs' } })
+    const parts: HTMLElement[] = pageHead({ title: 'Git host tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'git-host-tokens', key: 'token-docs' } })
     const offered = this.#view.offerHosts ?? []
     if (this.#replacing) parts.push(...this.#tokenHelp(this.#replacing))
     for (const host of this.#hostRows.keys()) if (!hosts.some(h => h.host === host)) this.#hostRows.delete(host)
@@ -1010,7 +878,6 @@ class SfProjects extends HTMLElement {
       return card
     }
     const parts: HTMLElement[] = [
-      ...this.#readinessNotices(),
       ...pageHead({ title: 'Projects', crumb: true, intro: 'Your repositories. Each session works on its own branch, started from the latest main.', docs: { doc: 'projects', key: 'docs' } }),
     ]
     if (!empty && this.#addingRepo) parts.push(addControl(true))
@@ -1057,6 +924,12 @@ class SfProjects extends HTMLElement {
     else refocus(this, focusKey, nearby)
   }
 
+}
+
+function drawProgress(bar: HTMLElementTagNameMap['sf-progress'], p: CloneProgress | undefined) {
+  bar.hidden = !p
+  bar.percent = typeof p?.percent === 'number' ? p.percent : null
+  bar.label = typeof p?.said === 'string' ? p.said : ''
 }
 
 customElements.define('sf-projects', SfProjects)

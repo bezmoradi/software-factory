@@ -2,13 +2,14 @@ package page
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
@@ -19,7 +20,11 @@ const (
 	reviewDepthRoute = "/api/review-depth"
 	maxDepthAgent    = 120
 	maxProjectName   = 400
-	depthListRule    = "Agent names, separated by commas."
+	depthAlways      = "always"
+	depthBig         = "big"
+	depthWarn        = "warn"
+	depthModeRule    = "Needs always, big or warn for each reviewer."
+	depthTwiceRule   = "Needs true or false."
 )
 
 const (
@@ -208,37 +213,55 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 
 type depthJSON struct {
 	savedSaid
-	Advisory     []string       `json:"advisory"`
-	Runs         map[string]int `json:"runs"`
-	MaxFiles     int            `json:"maxFiles"`
-	MaxLines     int            `json:"maxLines"`
-	Extra        []string       `json:"extra"`
-	ExtraRuns    int            `json:"extraRuns"`
-	Agents       []string       `json:"agents"`
-	Type         string         `json:"type"`
-	RunsTotal    int            `json:"runsTotal"`
-	AboveRuns    int            `json:"aboveRuns"`
-	AdvisoryRuns int            `json:"advisoryRuns"`
-	MaxRuns      int            `json:"maxRuns"`
+	Reviewers    map[string]string `json:"reviewers"`
+	MaxLines     int               `json:"maxLines"`
+	Twice        bool              `json:"twice"`
+	Type         string            `json:"type"`
+	RunsTotal    int               `json:"runsTotal"`
+	AboveRuns    int               `json:"aboveRuns"`
+	AdvisoryRuns int               `json:"advisoryRuns"`
+	Available    []string          `json:"available"`
+	Required     []string          `json:"required"`
 }
 
-func agentList(v any) ([]string, bool) {
-	if typed, ok := v.(string); ok {
-		return workflow.AgentNames(typed), true
-	}
-	raw, ok := v.([]any)
+func depthOfReviewers(v any) (workflow.Depth, string, bool) {
+	raw, ok := v.(map[string]any)
 	if !ok {
-		return nil, false
+		return workflow.Depth{}, depthModeRule, false
 	}
-	out := make([]string, 0, len(raw))
-	for _, x := range raw {
-		a, ok := x.(string)
-		if !ok {
-			return nil, false
+	if len(raw) > workflow.MaxAdded {
+		return workflow.Depth{}, workflow.DepthCountRule, false
+	}
+	var d workflow.Depth
+	for _, a := range slices.Sorted(maps.Keys(raw)) {
+		if len(a) > maxDepthAgent || !workflow.AgentName(a) {
+			return workflow.Depth{}, workflow.DepthNameRule, false
 		}
-		out = append(out, a)
+		switch raw[a] {
+		case depthAlways:
+			d.Always = append(d.Always, a)
+		case depthBig:
+			d.Extra = append(d.Extra, a)
+		case depthWarn:
+			d.Advisory = append(d.Advisory, a)
+		default:
+			return workflow.Depth{}, depthModeRule, false
+		}
 	}
-	return out, true
+	return d, "", true
+}
+
+func reviewersOf(d workflow.Depth) map[string]string {
+	out := map[string]string{}
+	for _, list := range []struct {
+		mode   string
+		agents []string
+	}{{depthAlways, d.Always}, {depthBig, d.Extra}, {depthWarn, d.Advisory}} {
+		for _, a := range list.agents {
+			out[a] = list.mode
+		}
+	}
+	return out
 }
 
 func typedCount(v any) (int64, bool) {
@@ -272,46 +295,26 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 			return
 		}
 	case "set":
-		if !keysWithin(body, "op", "path", "advisory", "runs", "maxFiles", "maxLines", "extra", "extraRuns") {
+		if !keysWithin(body, "op", "path", "reviewers", "maxLines", "twice") {
 			refuseFields(w)
 			return
 		}
-		advisory, okAdvisory := agentList(body["advisory"])
-		extra, okExtra := agentList(body["extra"])
-		files, okFiles := typedCount(body["maxFiles"])
+		d, why, okReviewers := depthOfReviewers(body["reviewers"])
 		lines, okLines := typedCount(body["maxLines"])
-		extraRuns, okExtraRuns := typedCount(body["extraRuns"])
-		rawRuns, okRuns := body["runs"].(map[string]any)
+		twice, okTwice := body["twice"].(bool)
 		switch {
-		case !okAdvisory:
-			refuseDepth(w, "advisory", depthListRule)
-			return
-		case !okExtra:
-			refuseDepth(w, "extra", depthListRule)
-			return
-		case !okFiles || files < 0 || files > workflow.MaxDepthSize:
-			refuseDepth(w, "maxFiles", workflow.DepthSizeRule)
+		case !okReviewers:
+			refuseDepth(w, "reviewers", why)
 			return
 		case !okLines || lines < 0 || lines > workflow.MaxDepthSize:
 			refuseDepth(w, "maxLines", workflow.DepthSizeRule)
 			return
-		case !okExtraRuns || extraRuns < 0 || extraRuns > review.MaxRuns:
-			refuseDepth(w, "extraRuns", workflow.DepthExtraRunsRule)
-			return
-		case !okRuns || len(rawRuns) > 20:
-			refuseDepth(w, "runs", workflow.DepthRunsRule)
+		case !okTwice:
+			refuseDepth(w, "twice", depthTwiceRule)
 			return
 		}
-		runs := map[string]int{}
-		for a, v := range rawRuns {
-			n, ok := typedCount(v)
-			if !ok || n < 1 || n > review.MaxRuns || len(a) > maxDepthAgent || !workflow.AgentName(a) {
-				refuseDepth(w, "runs", workflow.DepthRunRule)
-				return
-			}
-			runs[a] = int(n)
-		}
-		changed, err := depth.SetReviewDepth(path, workflow.Depth{Advisory: advisory, Runs: runs, MaxFiles: int(files), MaxLines: int(lines), Extra: extra, ExtraRuns: int(extraRuns)})
+		d.MaxLines, d.Twice = int(lines), twice
+		changed, err := depth.SetReviewDepth(path, d)
 		s.logger.Info("project setting", "op", "review-depth", "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
@@ -329,10 +332,6 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 		send(w, code, p)
 		return
 	}
-	runs := v.Depth.Runs
-	if runs == nil {
-		runs = map[string]int{}
-	}
-	send(w, http.StatusOK, depthJSON{savedSaid: said, Advisory: nonNil(v.Depth.Advisory), Runs: runs, MaxFiles: v.Depth.MaxFiles, MaxLines: v.Depth.MaxLines, Extra: nonNil(v.Depth.Extra),
-		ExtraRuns: v.Depth.ExtraRuns, Agents: nonNil(v.Agents), Type: v.Type, RunsTotal: v.Runs, AboveRuns: v.AboveRuns, AdvisoryRuns: v.Advisory, MaxRuns: review.MaxRuns})
+	send(w, http.StatusOK, depthJSON{savedSaid: said, Reviewers: reviewersOf(v.Depth), MaxLines: v.Depth.MaxLines, Twice: v.Depth.Twice, Type: v.Type, RunsTotal: v.Runs, AboveRuns: v.AboveRuns,
+		AdvisoryRuns: v.Advisory, Available: nonNil(v.Available), Required: nonNil(v.Required)})
 }

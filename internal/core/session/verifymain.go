@@ -10,10 +10,6 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-const (
-	runOnMain = "press Run on main"
-)
-
 type MainRepos interface {
 	List() ([]Repository, error)
 	Main(name string) (string, error)
@@ -209,13 +205,13 @@ func (v *Verifier) MainLine(project, main string) ReadinessLine {
 	id, cmds, known := v.project(project)
 	switch {
 	case !known:
-		line.Note = "The engine has no record of this project's commands."
+		line.Value, line.Note = "can't run", "The engine has no record of this project's commands"
 		return line
 	case cmds.Check == "":
-		line.Note = "Set a check command first, under Check and setup commands; then " + runOnMain + "."
+		line.Value, line.Note, line.FixIn = "can't run", "Set a check command first", FixInCommands
 		return line
 	case VerifyDigest(cmds.Image) == "":
-		line.Note = "Set an image for verification runs first, pinned by digest under Check and setup commands; then " + runOnMain + "."
+		line.Value, line.Note, line.FixIn = "can't run", "Set an image for verification runs", FixInCommands
 		return line
 	}
 	v.mu.Lock()
@@ -223,62 +219,61 @@ func (v *Verifier) MainLine(project, main string) ReadinessLine {
 	cur, found := v.mainCurrentLocked(id, main, cmds)
 	if !found {
 		runs := v.mainRunsLocked(id)
-		switch {
-		case len(runs) == 0 && main == "":
-			line.Note = "Not run on main yet; " + runOnMain + "."
-			return line
-		case len(runs) == 0:
-			line.Note = "Not run on main's commit " + shortSHA(main) + "; " + runOnMain + "."
+		if len(runs) == 0 {
+			line.Value = "not run yet"
 			return line
 		}
 		last := runs[0]
 		if _, live := v.live[last.ID]; live || last.State == RunRunning {
-			line.Commit, line.Result, line.At = last.Commit, RunRunning, last.Started
-			line.Note = "Running on " + shortSHA(last.Commit) + "."
+			line.Commit, line.Result, line.At, line.Value = last.Commit, RunRunning, last.Started, "running"
 			return line
 		}
-		line.Note = mainStaleWhy(last, main) + " " + strings.ToUpper(runOnMain[:1]) + runOnMain[1:] + "."
+		line.Value = "not run yet"
+		line.Note = "The command or image changed since the last run"
+		if main != "" && last.Commit != main {
+			line.Note = "Main moved on since the last run"
+		}
 		return line
 	}
 	line.Commit = cur.Commit
 	if _, live := v.live[cur.ID]; live || cur.State == RunRunning {
-		line.Result, line.At, line.Note = RunRunning, cur.Started, "Running on "+shortSHA(cur.Commit)+"."
+		line.Result, line.At, line.Value = RunRunning, cur.Started, "running"
 		return line
 	}
 	line.At = cur.Ended
 	if cur.State == RunPassed {
-		line.State, line.Result, line.Found = ReadyFound, RunPassed, []string{"passed on " + shortSHA(cur.Commit)}
+		line.State, line.Result, line.Value = ReadyFound, RunPassed, "passed"
 		return line
 	}
 	line.State, line.Result, line.Code, line.Tail = ReadyMissing, RunFailed, cur.Code, cur.Tail
-	line.Note = mainFailure(cur)
+	line.Value, line.Note = mainFailure(cur)
 	return line
 }
 
-func mainFailure(r VerifyRun) string {
-	on := " on " + shortSHA(r.Commit)
-	var text string
+func mainFailure(r VerifyRun) (string, string) {
+	var value string
 	switch r.State {
 	case RunFailed:
-		text = "The check failed" + on + " with exit code " + strconv.Itoa(r.Code) + "."
+		value = "failed, exit code " + strconv.Itoa(r.Code)
 	case RunTimedOut:
-		text = "The check timed out" + on + "."
+		value = "timed out"
 	case VerifyOOM:
-		text = "The check ran out of memory" + on + ", exit code " + strconv.Itoa(r.Code) + "."
+		value = "ran out of memory"
 	case VerifyInterrupted:
-		text = "The run" + on + " was cut off by an engine restart, so it has no result; " + runOnMain + " again."
+		value = "cut off by an engine restart"
 	case VerifyStopped:
-		text = "The run" + on + " was stopped before it finished; " + runOnMain + " again."
+		value = "stopped before it finished"
 	default:
-		text = "The run" + on + " couldn't run."
+		value = "couldn't run"
 	}
+	var notes []string
 	if r.Reason != "" && (r.State == RunTimedOut || r.State == VerifyOOM || r.State == RunError) {
-		text += " " + r.Reason
+		notes = append(notes, strings.TrimSuffix(clip(r.Reason, 200), "."))
 	}
 	if r.Withheld {
-		text += " Its output held a token-shaped string, so the engine kept none of it."
+		notes = append(notes, "Its output held a token-shaped string, so none of it is kept")
 	}
-	return text
+	return value, strings.Join(notes, "; ")
 }
 
 func (v *Verifier) ForgetMain(id ProjectID) {

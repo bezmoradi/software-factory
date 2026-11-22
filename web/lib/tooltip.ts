@@ -156,3 +156,10 @@ export function tipTag(label: string, tone: string, text: string): HTMLElement[]
   trigger.append(tag)
   return tooltip(trigger, text)
 }
+
+export function tipText(text: string, tip: string, cls = ''): HTMLElement[] {
+  if (!tip) return [el('span', cls, text)]
+  const trigger = el('button', `tip-text ${cls}`.trim(), text)
+  trigger.type = 'button'
+  return tooltip(trigger, tip)
+}

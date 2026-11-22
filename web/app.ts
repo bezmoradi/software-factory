@@ -22,6 +22,7 @@ import './components/gate.ts'
 import './components/conversation.ts'
 import './components/intent.ts'
 import './components/projects.ts'
+import './components/project-page.ts'
 import './components/reviews.ts'
 import './components/saved-prompts.ts'
 import './components/reviewer-agents.ts'
@@ -61,7 +62,7 @@ import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, resto
 import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
 import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
-import { crumbTrail, emptyState, pageHead } from './lib/page.ts'
+import { crumbTrail, emptyState, pageHead, welcomeCrumb } from './lib/page.ts'
 
 const sessionCrumbs = crumbTrail()
 sessionCrumbs.id = 'crumbs'
@@ -88,7 +89,7 @@ modelMenu.hidden = true
 byId('menu-wake').after(modelMenu)
 let reviewer: ReviewerView | null = null
 let landedOn = ''
-let askSignIn = false
+let askIdentity = false
 let starterNames = new Map<string, string>()
 let projectsAt = 0
 
@@ -131,7 +132,7 @@ function onEvent(ev: StreamEvent) {
   if ((ev as { type?: unknown }).type === 'halt') return setHalt(ev)
   if ((ev as { type?: unknown }).type === 'session-work') return void sessionWork.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'keep') return void keepPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
-  if ((ev as { type?: unknown }).type === 'verify' && typeof (ev as { repo?: unknown }).repo === 'string') return void byId<HTMLElementTagNameMap['sf-projects']>('projects').verifiedOnMain(String((ev as { repo?: unknown }).repo))
+  if ((ev as { type?: unknown }).type === 'verify' && typeof (ev as { repo?: unknown }).repo === 'string') return void byId<HTMLElementTagNameMap['sf-project-page']>('project-page').verifiedOnMain(String((ev as { repo?: unknown }).repo))
   if ((ev as { type?: unknown }).type === 'verify') return void verifyPanel.refresh(String((ev as { sid?: unknown }).sid ?? ''))
   if ((ev as { type?: unknown }).type === 'limits') return setLimits(ev)
   if (ev.type === 'supervisor') {
@@ -171,13 +172,16 @@ function onEvent(ev: StreamEvent) {
     return
   }
   if (ev.type === 'repo') {
+    if (ev.state === 'progress') {
+      if (ev.progress && typeof ev.progress === 'object' && projects.cloneProgress(ev.url, ev.name, ev.progress)) return
+      return void loadProjects()
+    }
     const where = visible(ev.url)
+    projects.say('', '')
     if (ev.state === 'added') {
-      projects.say('', '')
       toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} is cloned.`, description: `Start a session in it from Projects. New sessions start from ${where}'s main branch.`, tone: 'ok' })
     }
     if (ev.state === 'failed') {
-      projects.say('', visible(ev.message ?? ''), true)
       toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} wasn't added`, description: visible(ev.message ?? ''), tone: 'bad', timeout: 0 })
     }
     return void loadProjects(true)
@@ -251,16 +255,17 @@ function paint() {
   byId('home').hidden = !!s
   byId('welcome').hidden = current.key !== 'overview'
   byId('projects').hidden = current.key !== 'projects'
+  paintProjectPage()
   if (current.key !== landedOn) {
     landedOn = current.key
-    askSignIn = landedOn === 'projects'
+    askIdentity = landedOn === 'projects'
   }
-  askForSignIn()
+  askForSetup()
   byId('docs').hidden = current.key !== 'docs'
   byId('file').hidden = !current.key.startsWith('f:')
   paintChangesTab()
   document.body.classList.toggle('editor', current.key.startsWith('f:') || current.key.startsWith('c:'))
-  document.body.dataset.view = current.key === 'projects' || current.key === 'docs' ? current.key : ''
+  document.body.dataset.view = current.key === 'projects' || current.key === 'docs' ? current.key : current.key.startsWith('p:') ? 'project-page' : ''
   byId<HTMLElementTagNameMap['sf-file']>('file').view = files.get(current.key) ?? null
   const sessionTab = (k: string) => k.startsWith('s/') && openTabs.includes(k)
   byId<HTMLElementTagNameMap['sf-docs']>('docs').session = recent.find(sessionTab) ?? [...openTabs].reverse().find(sessionTab) ?? ''
@@ -292,6 +297,7 @@ function paint() {
     tabs: openTabs.map(k => {
       if (k === 'overview') return { id: k, label: 'Welcome', closable: false, need: needs && !!s }
       if (k === 'projects' || k === 'docs') return { id: k, label: k === 'docs' ? 'Docs' : 'Projects', closable: true, need: false }
+      if (k.startsWith('p:')) return { id: k, label: `Settings: ${visible(k.slice(2))}`, closable: true, need: false }
       if (k.startsWith('f:')) return { id: k, label: visible(fileLabel(k)), title: files.get(k)?.path ?? '', closable: true, need: false }
       if (k.startsWith('c:')) {
         const c = sessions.get(k.slice(2))
@@ -777,6 +783,14 @@ function projectOf(info: SessionInfo): Project | null {
 
 let projectPaths: string[] = []
 let projectList: Project[] = []
+let projectsKnown = false
+
+function paintProjectPage() {
+  const page = byId<HTMLElementTagNameMap['sf-project-page']>('project-page')
+  const name = current.key.startsWith('p:') ? current.key.slice(2) : ''
+  page.hidden = !name
+  page.view = name ? { name, project: projectList.find(p => p.name === name) ?? null, known: projectsKnown } : null
+}
 let commitIdentity: CommitIdentity | null | undefined
 
 function paintCrumbs(s: Session) {
@@ -803,7 +817,7 @@ function paintCrumbs(s: Session) {
   here.append(el('h1', '', visible(label(s.info))))
   here.setAttribute('aria-current', 'page')
   const folder = home || cwd.replace(/\/+$/, '')
-  const parts = home ? [crumb('Projects', 'projects'), crumb(baseName(home), 'projects', home)] : [crumb('Welcome', 'overview'), ...(folder ? [crumb(baseName(folder))] : [])]
+  const parts = home ? [welcomeCrumb(), crumb('Projects', 'projects'), crumb(baseName(home), 'projects', home)] : [welcomeCrumb(), ...(folder ? [crumb(baseName(folder))] : [])]
   if (folder) parts[parts.length - 1]!.title = folder
   list.replaceChildren(...parts, here)
 }
@@ -815,7 +829,7 @@ async function loadProjects(force = false) {
   const body = a.ok && Array.isArray(a.body.projects) ? (a.body as unknown as ProjectsView) : null
   if (body) {
     byId<HTMLElementTagNameMap['sf-projects']>('projects').view = body
-    askForSignIn()
+    askForSetup()
   }
   if (body) byId('helper-notice').hidden = body.helper !== 'unreachable'
   if (body) {
@@ -827,6 +841,10 @@ async function loadProjects(force = false) {
   }
   if (body) projectPaths = body.projects.map(p => p.path)
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
+  if (body) {
+    projectsKnown = true
+    paintProjectPage()
+  }
 }
 
 function twinWords(i: SessionInfo): string {
@@ -885,10 +903,13 @@ async function markSignIn() {
   if (await signInState(request)) void loadProjects(true)
 }
 
-function askForSignIn() {
-  if (!askSignIn || current.key !== 'projects' || !byId<HTMLElementTagNameMap['sf-projects']>('projects').needsSignIn || document.querySelector('dialog[open]')) return
-  askSignIn = false
-  openSignIn()
+function askForSetup() {
+  if (current.key !== 'projects' || document.querySelector('dialog[open]')) return
+  const view = byId<HTMLElementTagNameMap['sf-projects']>('projects')
+  if (askIdentity && view.needsIdentity) {
+    askIdentity = false
+    openIdentity()
+  }
 }
 
 function openSignIn() {
@@ -1324,6 +1345,11 @@ for (const id of ['projects', 'projects-side']) byId(id).addEventListener('click
   const link = (e.target as Element).closest<HTMLElement>('button[data-doc]')
   if (link) openDocs(link.dataset.doc!, { view: 'projects', label: 'Projects' })
 })
+byId('project-page').addEventListener('click', e => {
+  const link = (e.target as Element).closest<HTMLElement>('button[data-doc]')
+  const name = byId<HTMLElementTagNameMap['sf-project-page']>('project-page').name
+  if (link && name) openDocs(link.dataset.doc!, { view: `p:${name}`, label: `${visible(name)} settings` })
+})
 byId('welcome').addEventListener('click', e => {
   const target = e.target as Element
   const walk = target.closest<HTMLElement>('[data-doc]')
@@ -1380,10 +1406,7 @@ async function changeTokenNow(detail: { op: 'save'; host: string; token: string 
   await loadProjects(true)
 }
 projects.addEventListener('sf-repo', e => void changeRepo(e.detail))
-projects.addEventListener('sf-setup-step', e => {
-  if (e.detail === 'identity') openIdentity()
-  else openSignIn()
-})
+projects.addEventListener('sf-project-page', e => go(`p:${e.detail.name}`))
 projects.addEventListener('sf-expect', e => void setExpect(e.detail.agent, e.detail.expect))
 projects.addEventListener('sf-token', e => void changeToken(e.detail))
 projects.addEventListener('sf-session-action', async e => {
@@ -1491,7 +1514,6 @@ byId('stop').addEventListener('click', () => {
 })
 byId('rules').addEventListener('sf-rules-open', e => {
   const s = current()
-  const p = s ? projectFor(s) : null
   if (e.detail.to === 'egress') return openEgress(request)
   if (e.detail.to === 'away') return openAway(true)
   if (e.detail.to === 'exceptions') return openExceptions(request, labelOfSid)
@@ -1503,11 +1525,7 @@ byId('rules').addEventListener('sf-rules-open', e => {
     }
     if (teamShown && teamFor === s.sid) return focusTeam()
     void teamOp('read').then(focusTeam)
-    return
   }
-  if (!p) return void toast({ title: 'Add this project first.', description: 'Saved allow rules are listed per project, under Projects.', tone: 'bad' })
-  go('projects')
-  projects.showPanel(p.path, 'rules')
 })
 
 const { openDialog } = startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })

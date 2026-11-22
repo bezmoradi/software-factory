@@ -84,62 +84,43 @@ func (q Requirement) RunCount() int {
 }
 
 const (
-	MaxAdvisory  = 5
-	MaxDeeper    = 5
+	MaxAdded     = 5
 	MaxDepthSize = 10000000
+	TwiceRuns    = 2
 )
 
 type Depth struct {
-	Advisory  []string
-	Runs      map[string]int
-	MaxFiles  int
-	MaxLines  int
-	Extra     []string
-	ExtraRuns int
+	Always   []string
+	Advisory []string
+	Extra    []string
+	MaxLines int
+	Twice    bool
 }
 
 func (d Depth) Sized() bool {
-	return (d.MaxFiles > 0 || d.MaxLines > 0) && (len(d.Extra) > 0 || d.ExtraRuns > 1)
+	return d.MaxLines > 0 && (len(d.Extra) > 0 || d.Twice)
+}
+
+func (d Depth) Added() []string {
+	return slices.Concat(d.Always, d.Extra, d.Advisory)
 }
 
 const (
-	DepthRunsRule      = "At most 20 roles with repeated runs."
-	DepthRunRule       = "Each role runs 1 to 3 times per commit."
-	DepthSizeRule      = "A whole number of files or lines, 0 to switch it off."
-	DepthExtraRunsRule = "A whole number of runs, at most 3."
-	DepthCountRule     = "At most 5 roles."
-	DepthNameRule      = "Agent names: letters, digits and . _ : @ -, up to 120 each."
+	DepthSizeRule  = "A whole number of lines, 0 to switch it off."
+	DepthCountRule = "At most 5 added reviewers."
+	DepthNameRule  = "Agent names: letters, digits and . _ : @ -, up to 120 each."
 )
 
 func (d Depth) Problem() (string, string) {
-	if len(d.Advisory) > MaxAdvisory {
-		return "advisory", DepthCountRule
+	added := d.Added()
+	if len(added) > MaxAdded {
+		return "reviewers", DepthCountRule
 	}
-	if len(d.Extra) > MaxDeeper {
-		return "extra", DepthCountRule
+	if slices.ContainsFunc(added, func(a string) bool { return !agentName.MatchString(a) }) {
+		return "reviewers", DepthNameRule
 	}
-	badName := func(a string) bool { return !agentName.MatchString(a) }
-	if slices.ContainsFunc(d.Advisory, badName) {
-		return "advisory", DepthNameRule
-	}
-	if slices.ContainsFunc(d.Extra, badName) {
-		return "extra", DepthNameRule
-	}
-	if len(d.Runs) > 20 {
-		return "runs", DepthRunsRule
-	}
-	for a, n := range d.Runs {
-		if !agentName.MatchString(a) || n < 1 || n > review.MaxRuns {
-			return "runs", DepthRunRule
-		}
-	}
-	switch {
-	case d.MaxFiles < 0 || d.MaxFiles > MaxDepthSize:
-		return "maxFiles", DepthSizeRule
-	case d.MaxLines < 0 || d.MaxLines > MaxDepthSize:
+	if d.MaxLines < 0 || d.MaxLines > MaxDepthSize {
 		return "maxLines", DepthSizeRule
-	case d.ExtraRuns < 0 || d.ExtraRuns > review.MaxRuns:
-		return "extraRuns", DepthExtraRunsRule
 	}
 	return "", ""
 }
@@ -159,22 +140,24 @@ func AgentNames(typed string) []string {
 }
 
 func Deepen(required []Requirement, d Depth, above bool, why string) []Requirement {
-	out := make([]Requirement, 0, len(required)+len(d.Extra))
-	for _, q := range required {
-		q.Runs = max(q.RunCount(), min(max(d.Runs[q.Agent], 1), review.MaxRuns))
-		out = append(out, q)
+	out := slices.Clone(required)
+	add := func(a, why string) {
+		if a != "" && !slices.ContainsFunc(out, func(x Requirement) bool { return x.Agent == a }) {
+			out = append(out, Requirement{Agent: a, Why: why})
+		}
+	}
+	for _, a := range d.Always {
+		add(a, "Required by this project on every change")
 	}
 	if !above || !d.Sized() {
 		return out
 	}
 	for _, a := range d.Extra {
-		if a != "" && !slices.ContainsFunc(out, func(x Requirement) bool { return x.Agent == a }) {
-			out = append(out, Requirement{Agent: a, Why: why, Runs: min(max(d.Runs[a], 1), review.MaxRuns)})
-		}
+		add(a, why)
 	}
-	if d.ExtraRuns > 1 {
+	if d.Twice {
 		for i := range out {
-			out[i].Runs = max(out[i].Runs, min(d.ExtraRuns, review.MaxRuns))
+			out[i].Runs = max(out[i].RunCount(), TwiceRuns)
 		}
 	}
 	return out

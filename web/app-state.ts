@@ -1,5 +1,5 @@
 import { byId } from './lib/dom.ts'
-import type { Toast } from './components/toasts.ts'
+import { toast } from './components/toasts.ts'
 import type { AgentInfo, Catalog, ChangeFrom, Changes, GateEvent, IntentRecord, PlanFileEvent, SessionAction, SessionInfo, WorkflowEvent } from './types.ts'
 
 export interface Session {
@@ -61,7 +61,7 @@ export interface AuditEntry {
 
 
 export const scroller = byId('scroller')
-export const toast = (t: Toast) => byId<HTMLElementTagNameMap['sf-toasts']>('toasts').show(t)
+export { toast }
 export const sessions = new Map<string, Session>()
 export const state = { connected: false, note: '', stream: '', supervisor: '', imageTypes: [] as string[] }
 export const armed = new Set<string>()

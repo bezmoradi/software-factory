@@ -75,10 +75,11 @@ type Tokens interface {
 }
 
 type CloneRequest struct {
-	URL   string
-	Token string
-	Name  string
-	Taken func(name string) bool
+	URL      string
+	Token    string
+	Name     string
+	Taken    func(name string) bool
+	Progress func(CloneProgress)
 }
 
 type Cloned struct {
@@ -116,6 +117,7 @@ type Cloning struct {
 	URL       string
 	Name      string
 	StartedAt time.Time
+	Progress  CloneShown
 }
 
 type RepoView struct {
@@ -546,7 +548,9 @@ func (c *Repos) clone(k Cloning) {
 		fail("clone-failed", "The engine couldn't read its saved tokens.")
 		return
 	}
-	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: c.taken})
+	watch := c.watchClone(k)
+	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: c.taken, Progress: watch.report})
+	watch.end()
 	if err != nil {
 		fail("clone-failed", "The clone of "+k.URL+" failed: "+clip(err.Error(), 600))
 		return
@@ -927,7 +931,9 @@ func (c *Repos) recloned(k Cloning) {
 		return
 	}
 	only := func(n string) bool { return n != k.Name }
-	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: only})
+	watch := c.watchClone(k)
+	done, err := c.cfg.Remote.Clone(ctx, CloneRequest{URL: k.URL, Token: token, Name: k.Name, Taken: only, Progress: watch.report})
+	watch.end()
 	if err != nil {
 		fail("The clone of " + k.URL + " failed: " + clip(err.Error(), 600))
 		return

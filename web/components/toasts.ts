@@ -102,6 +102,11 @@ class SfToasts extends HTMLElement {
 
 customElements.define('sf-toasts', SfToasts)
 
+export function toast(t: Toast): string {
+  const shelf = document.getElementById('toasts')
+  return t.title && shelf instanceof SfToasts ? shelf.show(t) : ''
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     'sf-toasts': SfToasts

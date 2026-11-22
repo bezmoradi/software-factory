@@ -6,6 +6,7 @@ import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
 import { typeChangeOf, typeChangeParts } from './push-facts.ts'
 import { textarea, dropdown, option } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 export interface AgentModel {
   id: string
@@ -238,7 +239,8 @@ class SfSessionWork extends HTMLElement {
       void this.#readLock(sid)
       return
     }
-    say(this.#status, op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', 'muted')
+    say(this.#status, '')
+    toast({ id: `work:${sid}`, title: op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', tone: 'ok' })
     await this.#readLock(sid)
     this.#paint()
   }
@@ -346,7 +348,8 @@ class SfSessionWork extends HTMLElement {
     }
     const v = readView(a.body)
     if (v) this.#view = v
-    say(this.#status, ok ?? a.message, ok === null ? savedTone(a) : 'muted')
+    say(this.#status, '')
+    toast({ id: `work:${sid}`, title: ok ?? a.message, tone: ok === null ? savedTone(a) : 'ok' })
     this.#paint()
     return true
   }
@@ -375,7 +378,7 @@ class SfSessionWork extends HTMLElement {
     }
     this.#model.disabled = off
     this.#effort.disabled = off
-    const go = button('Switch model', 'small', undefined, 'submit', 'work-switch')
+    const go = button('Switch model', 'primary small', undefined, 'submit', 'work-switch')
     go.disabled = !this.#held(go) && off
     parts.push(form({
       inline: true,
@@ -402,7 +405,7 @@ class SfSessionWork extends HTMLElement {
       q.items.forEach((m, i) => {
         const li = el('li')
         if (this.#editing === m.id) {
-          const save = button('Save', 'small', undefined, 'submit', `work-save:${m.id}`)
+          const save = button('Save', 'primary small', undefined, 'submit', `work-save:${m.id}`)
           const cancel = button('Cancel', 'ghost small', () => {
             this.#editing = ''
             this.#paint()
@@ -443,7 +446,7 @@ class SfSessionWork extends HTMLElement {
       parts.push(list)
     }
     this.#add.disabled = off || !q.canAdd
-    const add = button('Add to queue', 'small', undefined, 'submit', 'work-add')
+    const add = button('Add to queue', 'primary small', undefined, 'submit', 'work-add')
     add.disabled = !this.#held(add) && this.#add.disabled
     parts.push(form({
       children: [field('Add to the queue', this.#add), actions([add])],

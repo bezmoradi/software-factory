@@ -4,6 +4,8 @@ import { actions, field, fieldRow, form } from '../lib/form.ts'
 import { continueBody, day, limitsAnswer, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, LimitsAnswer, SessionLimits } from './usage.ts'
 import { textbox } from '../lib/controls.ts'
+import { pageHead } from '../lib/page.ts'
+import { toast } from './toasts.ts'
 
 type CapKind = 'money' | 'time' | 'turns' | 'disk'
 
@@ -226,7 +228,7 @@ class SfProjectCaps extends HTMLElement {
   #inputs = new CapsInputs('Caps for new sessions in this project')
   #project = ''
   #said = statusLine()
-  #save = button('Save caps', 'small', undefined, 'submit')
+  #save = button('Save', 'primary small', undefined, 'submit')
   #saving = false
   #built = false
   #stop = () => {}
@@ -234,8 +236,8 @@ class SfProjectCaps extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      const note = el('p', 'small muted', 'Each new session in this project gets these caps unless its start form sets its own. Empty or 0 is off. Money counts the agent’s own reported cost, so it can only stop work, never allow more; time is the engine’s clock while the session runs; disk is the size of the session’s folder, measured every 2 minutes, which an agent can pass between measurements.')
-      this.replaceChildren(el('h3', 'label', 'Caps'), note, form({ children: [this.#inputs.box, actions([this.#save])], onSubmit: () => void this.#store() }), this.#said)
+      const head = pageHead({ title: 'Caps', level: 'h2', headingClass: 'label', intro: 'The caps each new session in this project starts with, unless its start form sets its own.', docs: { doc: 'caps', key: 'caps-docs' } })
+      this.replaceChildren(...head, form({ children: [this.#inputs.box, actions([this.#save])], onSubmit: () => void this.#store() }), this.#said)
     }
     this.#stop()
     this.#stop = watchLimits(this)
@@ -264,7 +266,8 @@ class SfProjectCaps extends HTMLElement {
     this.#saving = false
     if (!problem) this.#inputs.fill(this.#project, true)
     const bad = this.#inputs.mark(name, problem)
-    say(this.#said, bad ? '' : problem || said, problem ? 'warn' : tone)
+    say(this.#said, bad ? '' : problem, 'warn')
+    if (!problem) toast({ id: `project-caps:${this.#project}`, title: said, tone })
     bad?.focus()
   }
 }
@@ -279,7 +282,7 @@ class SfSessionLimits extends HTMLElement {
   #busyKey = ''
   #held = new WeakSet<HTMLButtonElement>()
   #dimmed = new WeakSet<HTMLButtonElement>()
-  #editSave = button('Save caps', 'small', undefined, 'submit', 'caps-save')
+  #editSave = button('Save caps', 'primary small', undefined, 'submit', 'caps-save')
 
   connectedCallback() {
     this.setAttribute('role', 'region')
@@ -471,7 +474,8 @@ class SfSessionLimits extends HTMLElement {
     const answer = await limitsAnswer(body)
     const bad = answer.problem ? mark(answer) : null
     if (bad) labelError(bad, answer.problem)
-    say(this.#said, bad ? '' : answer.problem || answer.said, answer.problem ? 'warn' : answer.tone)
+    say(this.#said, bad ? '' : answer.problem, 'warn')
+    if (!answer.problem) toast({ id: `limits:${key}`, title: answer.said, tone: answer.tone })
     this.#busy = false
     busy(this.#editSave, false)
     this.paint()

@@ -2,6 +2,7 @@ import { request } from '../api.ts'
 import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { field, form } from '../lib/form.ts'
 import { dropdown, option } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 interface RoleModel {
   name: string
@@ -75,7 +76,8 @@ class SfReviewModels extends HTMLElement {
     const v = readView(a.body)
     if (v) this.#view = v
     if (ok) {
-      say(this.#status, ok, 'ok')
+      say(this.#status, '')
+      toast({ id: `review-models:${project}`, title: ok, tone: 'ok' })
     }
     this.#paint()
   }

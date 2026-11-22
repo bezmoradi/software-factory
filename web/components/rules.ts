@@ -1,12 +1,13 @@
 import { request, type EngineAnswer } from '../api.ts'
-import { button, el, emit, shown, statusLine, visible } from '../lib/dom.ts'
+import { button, el, emit, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
 import { emptyState } from '../lib/page.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { toast } from './toasts.ts'
 
-export type RulesLink = 'allow-rules' | 'egress' | 'team' | 'away' | 'exceptions'
+export type RulesLink = 'egress' | 'team' | 'away' | 'exceptions'
 
 export interface RulesView {
   sid: string
@@ -46,6 +47,7 @@ class SfRules extends HTMLElement {
   #details = el('details', 'rules-panel')
   #body = el('div', 'rules-body')
   #status = statusLine('small muted')
+  #removeSaid = statusLine('small')
   #poll: WhileOpen | null = null
 
   constructor() {
@@ -53,7 +55,7 @@ class SfRules extends HTMLElement {
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
     const head = el('div', 'row rules-head')
-    head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'))
+    head.append(el('p', 'small muted', 'What the engine holds for this session now. Remove a saved rule here; each other item you can change links to where it changes, and the fixed refusals have no such link.'))
     this.#details.append(summary, head, this.#status, this.#body)
     this.#details.addEventListener('toggle', () => {
       if (!this.#details.open) this.#stop()
@@ -141,19 +143,34 @@ class SfRules extends HTMLElement {
   }
 
   #saved(v: RulesView, a: Answer): HTMLElement {
-    const link = this.#link('Change on Projects', 'allow-rules', 'the saved allow rules of this project')
-    if (!a.ok) return this.#section('Saved “don’t ask again” rules', failed(a), link)
+    const title = 'Saved “don’t ask again” rules'
+    if (!a.ok) return this.#section(title, failed(a))
     const mine = records(a.body.rules).filter(r => text(r.rule) && (text(r.place) === 'clone' || (!!v.box && text(r.box) === v.box)))
     const ul = el('ul', 'list rules-list')
     if (!mine.length) ul.append(emptyState(a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.', { tag: 'li' }))
     for (const r of mine) {
-      const li = el('li', 'small')
-      li.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${visible(text(r.placeLabel) || text(r.place))}`))
+      const li = el('li', 'row text-row')
+      const what = el('span', 'small')
+      what.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${visible(text(r.placeLabel) || text(r.place))}`))
       const wide = strings(r.wide)
-      if (wide.length) li.append(' ', el('span', 'tag warn', 'wide'), el('span', 'small warn', ` ${wide.map(visible).join('; ')}`))
+      if (wide.length) what.append(' ', el('span', 'tag warn', 'wide'), el('span', 'small warn', ` ${wide.map(visible).join('; ')}`))
+      const key = `rules:remove:${text(r.box)}:${text(r.place)}:${text(r.worktree)}:${text(r.rule)}`
+      const remove = button('Remove', 'ghost small', () => void this.#remove(v, r, remove), 'button', key)
+      remove.setAttribute('aria-label', `Remove the rule ${visible(text(r.rule))} from ${visible(text(r.path))}`)
+      li.append(what, el('span', 'spacer'), remove)
       ul.append(li)
     }
-    return this.#section('Saved “don’t ask again” rules', ul, link)
+    return this.#section(title, ul, this.#removeSaid)
+  }
+
+  async #remove(v: RulesView, r: Record<string, unknown>, b: HTMLButtonElement) {
+    const body: Record<string, unknown> = { op: 'remove', repo: v.repo, box: text(r.box), place: text(r.place), rule: text(r.rule) }
+    if (text(r.worktree)) body.worktree = text(r.worktree)
+    say(this.#removeSaid, '')
+    const a = await whileBusy(b, () => request('/api/allow-rules', body))
+    if (!a.ok) return say(this.#removeSaid, a.message, 'warn')
+    toast({ id: `allow-rules:${v.repo}`, title: `Removed ${visible(text(r.rule))} from ${visible(text(r.path))}. The next matching call shows a card again.`, tone: 'ok' })
+    void this.#poll?.now()
   }
 
   #hosts(a: Answer): HTMLElement {

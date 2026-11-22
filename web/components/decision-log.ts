@@ -1,9 +1,10 @@
 import { request, savedTone, type EngineAnswer } from '../api.ts'
 import { around, busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, shown, statusLine } from '../lib/dom.ts'
 import { actions, answerControl, field, form } from '../lib/form.ts'
-import { emptyState } from '../lib/page.ts'
+import { emptyState, pageHead } from '../lib/page.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 import { textbox, textarea, checkbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 
 interface Entry {
@@ -77,6 +78,7 @@ class SfDecisionLog extends HTMLElement {
   #poll: WhileOpen | null = null
   #failed = false
   #previewOpen = false
+  #head = pageHead({ title: 'Decision log', level: 'h2', headingClass: 'label', intro: 'Your decisions on this project, which each new session gets with its first message.', docs: { doc: 'decision-log', key: 'decisions-docs' } })
 
   constructor() {
     super()
@@ -170,7 +172,8 @@ class SfDecisionLog extends HTMLElement {
     if (this.#busy) return
     if ((await this.#call({ op: 'add', repo: this.#project, text }, 'decision-add'))?.ok) {
       this.#adding.value = ''
-      say(this.#status, 'Added. New sessions get it with their first message.', 'muted')
+      say(this.#status, '')
+      toast({ id: `decisions:${this.#project}`, title: 'Added. New sessions get it with their first message.', tone: 'ok' })
     } else this.#adding.focus()
   }
 
@@ -192,13 +195,14 @@ class SfDecisionLog extends HTMLElement {
     const a = await this.#call({ op: 'set', repo: this.#project, id: e.id, name, text, hidden: this.#hidden.checked }, `decision-save:${e.id}`)
     if (a?.ok) {
       this.#editing = ''
-      say(this.#status, a.message, savedTone(a))
+      say(this.#status, '')
+      toast({ id: `decisions:${this.#project}`, title: a.message, tone: savedTone(a) })
       this.#paint()
     } else (this.#refused === 'name' ? this.#name : this.#text).focus()
   }
 
   #form(e: Entry): HTMLElement {
-    const save = button('Save', 'small', undefined, 'submit', `decision-save:${e.id}`)
+    const save = button('Save', 'primary small', undefined, 'submit', `decision-save:${e.id}`)
     const cancel = button('Cancel', 'link small', () => {
       if (this.#busy) return
       this.#editing = ''
@@ -257,17 +261,16 @@ class SfDecisionLog extends HTMLElement {
     if (!this.#project) return this.replaceChildren()
     const focused = focusedKey(this)
     const near = focused ? this.#near(focused) : []
-    const parts: HTMLElement[] = [el('h3', 'label', 'Decision log')]
-    parts.push(el('p', 'small muted', 'Built by the engine from its own records: requirements and plans you approved, by date and approval hash; verdicts you overrode, pushes you allowed or denied, with your reasons; and pull requests merged. It holds no agent text, so an approval shows only its kind and date until you name it. Each new session gets the log with its first message, as one engine note of at most 4 KiB, newest kept. Your names, wording, hidden entries and own entries are kept apart and survive each rebuild; a token-shaped reason is withheld.'))
+    const parts: HTMLElement[] = [...this.#head]
     const v = this.#view
     if (!v) parts.push(el('p', 'small muted', 'Reading the log…'))
     else {
-      if (v.auditSince) parts.push(el('p', 'small muted', `The audit file goes back to ${day(v.auditSince)}; older decisions have rotated out.`))
+      if (v.auditSince) parts.push(el('p', 'small muted', `Decisions since ${day(v.auditSince)}.`))
       for (const p of v.problems) parts.push(el('p', 'small warn', p))
-      const add = button('Add', 'small', undefined, 'submit', 'decision-add')
+      const add = button('Add', 'primary small', undefined, 'submit', 'decision-add')
       this.#hold(add)
       parts.push(form({ children: [field('Add an entry', this.#adding), actions([add])], onSubmit: () => void this.#add() }))
-      if (!v.entries.length) parts.push(emptyState('No decisions in the window yet.'))
+      if (!v.entries.length) parts.push(emptyState('No decisions yet.'))
       else {
         const ul = el('ul', 'small list')
         for (const e of v.entries) ul.append(this.#entry(e))
@@ -275,14 +278,15 @@ class SfDecisionLog extends HTMLElement {
         if (v.more) parts.push(el('p', 'small muted', `${v.more} older entries aren't shown.`))
       }
       if (v.orphans) parts.push(el('p', 'small muted', `${v.orphans} of your edits are for entries the audit file no longer holds; they are kept until space runs out.`))
-      const preview = el('details')
-      preview.open = this.#previewOpen
-      preview.addEventListener('toggle', () => {
-        this.#previewOpen = preview.open
-      })
-      preview.append(el('summary', 'small', v.note ? `What a new session gets (${new TextEncoder().encode(v.note).length} bytes${v.left ? `, ${v.left} older entries left out` : ''})` : 'What a new session gets: nothing, the log is empty'))
-      if (v.note) preview.append(el('pre', 'small', shown(v.note)))
-      parts.push(preview)
+      if (v.note) {
+        const preview = el('details')
+        preview.open = this.#previewOpen
+        preview.addEventListener('toggle', () => {
+          this.#previewOpen = preview.open
+        })
+        preview.append(el('summary', 'small', `What a new session gets${v.left ? ` (${v.left} older entries left out)` : ''}`), el('pre', 'small', shown(v.note)))
+        parts.push(preview)
+      }
     }
     parts.push(this.#status)
     replaceKeeping(this, parts)

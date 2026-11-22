@@ -3,6 +3,7 @@ import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, stat
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { pngBlob, saveBlob } from '../lib/files.ts'
+import { toast } from './toasts.ts'
 
 const ROUTE = '/api/verify'
 const SHA = /^[0-9a-f]{40}$/
@@ -213,7 +214,8 @@ class SfVerify extends HTMLElement {
     }
     const v = readView(a.body)
     if (v) this.#view = v
-    say(this.#status, said, 'muted')
+    say(this.#status, '')
+    toast({ id: `verify:${sid}`, title: said, tone: 'ok' })
     this.#paint()
   }
 
@@ -265,7 +267,8 @@ class SfVerify extends HTMLElement {
       return
     }
     saveBlob(new Blob([blob], { type: 'application/octet-stream' }), f.name)
-    say(this.#status, `Saved ${f.name}. The page doesn’t open it; open it with Playwright’s trace viewer, which runs it as the test’s own data.`, 'muted')
+    say(this.#status, '')
+    toast({ id: `verify:${sid}`, title: `Saved ${f.name}. The page doesn’t open it; open it with Playwright’s trace viewer, which runs it as the test’s own data.`, tone: 'ok' })
     this.#paint()
   }
 

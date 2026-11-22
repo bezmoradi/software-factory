@@ -1,4 +1,5 @@
 import { button, el } from './dom.ts'
+import { tipText } from './tooltip.ts'
 
 export interface DocsLinkOptions {
   doc?: string
@@ -40,17 +41,26 @@ export function crumbTrail(items: Node[] = []): HTMLElement {
   return nav
 }
 
+export function welcomeCrumb(): HTMLElement {
+  const li = el('li')
+  const a = el('a', '', 'Welcome')
+  a.href = './'
+  a.dataset.view = 'overview'
+  li.append(a)
+  return li
+}
+
 function crumb(text: string): HTMLElement {
   const li = el('li')
   li.setAttribute('aria-current', 'page')
   li.append(el('h1', '', text))
-  return crumbTrail([li])
+  return crumbTrail([welcomeCrumb(), li])
 }
 
 export interface PageHeadOptions {
   title: string | Node
   crumb?: boolean
-  level?: 'h1' | 'h2' | 'h3'
+  level?: 'h1' | 'h2' | 'h3' | 'h4'
   headingClass?: string
   intro?: string
   docs?: DocsLinkOptions
@@ -122,6 +132,59 @@ export function emptyState(text: string, o: EmptyStateOptions = {}): HTMLElement
   const item = el('li')
   item.append(box)
   return item
+}
+
+export type CheckState = 'found' | 'missing' | 'unknown'
+
+export interface CheckRowOptions {
+  state: CheckState
+  word?: string
+  label: string
+  value?: string
+  tip?: string
+  detail?: string | Node
+  action?: Node
+  below?: Node[]
+}
+
+const CHECK_MARK: Record<CheckState, [string, string]> = { found: ['check', 'ok'], missing: ['warning', 'warn'], unknown: ['info', 'muted'] }
+
+export function checkRow(o: CheckRowOptions): HTMLLIElement {
+  const li = el('li', 'row text-row check-row')
+  const [name, tone] = CHECK_MARK[o.state]
+  const mark = el('span', `check-mark ${tone}`)
+  mark.append(glyph(name))
+  const text = el('p', 'check-text')
+  if (o.word) text.append(el('span', 'sr-only', `${o.word}: `))
+  text.append(o.label)
+  if (o.value) text.append(el('span', 'muted', ' — '), ...tipText(o.value, o.tip ?? '', 'muted'))
+  if (o.detail) {
+    text.append(el('span', 'muted', ' · '))
+    text.append(typeof o.detail === 'string' ? el('span', 'muted', o.detail) : o.detail)
+  }
+  li.append(mark, text)
+  if (o.action) li.append(el('span', 'spacer'), o.action)
+  if (o.below) li.append(...o.below)
+  return li
+}
+
+export interface Fact {
+  label: string
+  value: string
+  tip?: string
+  tone?: string
+}
+
+export function factGrid(facts: Fact[]): HTMLDListElement {
+  const dl = el('dl', 'small fact-grid')
+  for (const f of facts) {
+    const item = el('div', 'fact')
+    const dd = el('dd', f.tone ?? '')
+    dd.append(...tipText(f.value, f.tip ?? ''))
+    item.append(el('dt', 'muted', f.label), dd)
+    dl.append(item)
+  }
+  return dl
 }
 
 function glyph(name: string): HTMLElement {

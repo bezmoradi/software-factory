@@ -9,6 +9,7 @@ import { coverageFacts } from './push-coverage.ts'
 import './push-checked.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 import { textbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
 const RECORD_ROUTE = '/api/push-record'
@@ -305,7 +306,8 @@ class SfPushPanel extends HTMLElement {
       }
       const name = recordName(got.disposition, commit)
       saveFile(blob, name)
-      said.textContent = `Saved ${name}. Nothing was sent anywhere.`
+      said.textContent = ''
+      toast({ id: `push-record:${sid}`, title: `Saved ${name}. Nothing was sent anywhere.`, tone: 'ok' })
     }, 'button', 'push-record')
     download.setAttribute('aria-label', `Download the record of the push of commit ${shortSha(commit)}`)
     download.title = 'One JSON file built from the engine’s own records: the commit, each review with its versions, the approvals, overrides and Allows with your reasons, the verification run, and the checks the agent reported, labelled as such'

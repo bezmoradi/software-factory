@@ -31,7 +31,7 @@ const spots = new Map<string, Spot | null>()
 
 const TABS_KEY = 'sf-tabs'
 const MAX_TAB_LINE = 10_000_000
-const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
+const TAB_KEY = /^(?:projects|docs|p:[\w.-]{1,100}|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
 
 export function saveTabs() {
   try {

@@ -5,6 +5,7 @@ import { langFor, newState, tokens, type LexState, type Token } from '../lib/hig
 import type { ChangeFile, ChangeFrom, Changes, LineCommentBody } from '../types.ts'
 import { emptyState } from '../lib/page.ts'
 import { textarea, dropdown, option, checkbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 const MARK: Record<string, string> = { added: 'A', changed: 'M', deleted: 'D' }
 const MAX_HIGHLIGHT = 20000
@@ -381,7 +382,8 @@ class SfChanges extends HTMLElement {
           const kept = (this.#comments.get(branch) ?? []).filter(c => !mine.includes(c))
           if (kept.length) this.#comments.set(branch, kept)
           else this.#comments.delete(branch)
-          this.#said.textContent = kept.length ? `Sent to the agent as one message. ${kept.length} ${plural(kept.length, 'comment')} added since ${kept.length === 1 ? 'is' : 'are'} kept here.` : 'Sent to the agent as one message.'
+          this.#said.textContent = ''
+          toast({ id: `comments:${branch}`, title: kept.length ? `Sent to the agent as one message. ${kept.length} ${plural(kept.length, 'comment')} added since ${kept.length === 1 ? 'is' : 'are'} kept here.` : 'Sent to the agent as one message.', tone: 'ok' })
         } else this.#said.textContent = refused ? `${refused} The comments are kept here.` : 'The comments weren’t sent; they are kept here.'
         this.#paintList()
       },

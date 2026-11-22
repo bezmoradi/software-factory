@@ -285,3 +285,96 @@ scenarios:
             "$.body.afterCi": 0
             "$.body.afterComments": 0
             "$.body.pullsOpened": 0
+
+  - id: REP-007
+    name: "A clone that ends within a second sends its cloning and added frames on the event stream and no progress frame, since the engine shows a clone's progress only after its first second; the dev git host's demo repository clones in well under that"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+      - id: add
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/demo.git" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true, url: "https://gitserver.test:8443/demo.git", name: demo }
+        waive: { FIX-05: "the dev git host serves only fixed repositories, so the URL can't carry ${run.id}; REP-003 removed the copy it added, and this scenario removes the one it adds" }
+      - id: cloned
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git", branch: main }
+          none:
+            "$.body.cloning": { url: "https://gitserver.test:8443/demo.git" }
+      - id: framed
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: repo, json.state: cloning, json.url: "https://gitserver.test:8443/demo.git", json.name: demo }
+              - { json.type: repo, json.state: added, json.url: "https://gitserver.test:8443/demo.git", json.name: demo-2 }
+      - id: no-progress
+        do: http.frames
+        on: events
+        consistently: { for: 1500ms, every: 250ms }
+        expect:
+          none:
+            "$.frames": { json.type: repo, json.state: progress, json.url: "https://gitserver.test:8443/demo.git" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { name: demo-2 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          none:
+            "$.body.projects": { url: "https://gitserver.test:8443/demo.git" }
+          any:
+            "$.body.projects": { name: demo }

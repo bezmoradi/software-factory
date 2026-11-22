@@ -13,7 +13,8 @@ type Entry = { id: string; button: HTMLButtonElement; target: () => HTMLElement 
 const SESSION = 'session'
 const PAGE_LINKS: Record<string, { view: string; text: string }> = {
   projects: { view: 'projects', text: 'Go to Projects' },
-  tokens: { view: 'projects', text: 'Go to Projects' },
+  'project-settings': { view: 'projects', text: 'Go to Projects' },
+  'git-host-tokens': { view: 'projects', text: 'Go to Projects' },
   'working-in-a-session': { view: SESSION, text: 'Back to session' },
   'execution-path-with-knackpack': { view: SESSION, text: 'Back to session' },
 }
@@ -120,10 +121,14 @@ class SfDocs extends HTMLElement {
   show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null) {
     this.#want = id
     this.#back = back
-    const index = id ? this.#entries.findIndex(e => e.id === id) : -1
-    const target = index >= 0 ? this.#entries[index]!.target() : null
+    let index = id ? this.#entries.findIndex(e => e.id === id) : -1
+    let target = index >= 0 ? this.#entries[index]!.target() : null
+    if (!target && id) {
+      target = this.#deep(id)
+      if (target) index = this.#owner(target)
+    }
     this.querySelector('.docs-back')?.remove()
-    const heading = !target ? null : target.matches('h2, h3') ? target : target.querySelector<HTMLElement>('h2, h3')
+    const heading = !target ? null : target.matches('h2, h3, h4, h5') ? target : target.querySelector<HTMLElement>('h2, h3')
     if (heading && back && !heading.querySelector(`.docs-page[data-view="${CSS.escape(back.view)}"]`)) {
       const link = pageLink('docs-back', back.view, `Back to ${back.label}`)
       link.addEventListener('click', () => {
@@ -136,6 +141,23 @@ class SfDocs extends HTMLElement {
       target.scrollIntoView({ block: 'start' })
       this.#jumped(index)
     } else if (!id) this.closest<HTMLElement>('.scroller')?.scrollTo({ top: 0 })
+  }
+
+  #deep(id: string): HTMLElement | null {
+    for (const h of this.querySelectorAll<HTMLElement>('.docs-section > sf-markdown > :is(h4, h5)')) {
+      h.dataset.title ??= h.textContent ?? ''
+      if (docsId(h.dataset.title) === id) return h
+    }
+    return null
+  }
+
+  #owner(node: HTMLElement): number {
+    let at = -1
+    this.#entries.forEach((e, i) => {
+      const t = e.target()
+      if (t && (t === node || t.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)) at = i
+    })
+    return at
   }
 
   #jumped(index: number) {

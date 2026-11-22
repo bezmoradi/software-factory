@@ -79,6 +79,7 @@ function placeSide() {
   document.body.classList.toggle('wide', now)
   byId<HTMLElementTagNameMap['sf-docs']>('docs').navSlot = now ? byId('docs-side') : null
   byId<HTMLElementTagNameMap['sf-projects']>('projects').sideSlot = now ? byId('projects-side') : null
+  byId<HTMLElementTagNameMap['sf-project-page']>('project-page').navSlot = now ? byId('project-page-side') : null
 }
 
 export function paintSide(s: Session | null) {
@@ -135,11 +136,19 @@ export function startLayout({ jumpLatest }: { jumpLatest: () => void }) {
   new MutationObserver(measureFrame).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
   placeSide()
   byId('frame').addEventListener('wheel', e => {
-    const side = e.target instanceof Element ? e.target.closest<HTMLElement>('.page-side') : null
-    const still = !!side && side.scrollHeight <= side.clientHeight
+    const target = e.target instanceof Element ? e.target : null
+    const side = target?.closest<HTMLElement>('.page-side') ?? null
+    const still = !!target && !!side && !scrollsWithin(target, side)
     if (e.target !== e.currentTarget && !still) return
     scroller.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * scroller.clientHeight : e.deltaY
   }, { passive: true })
+}
+
+function scrollsWithin(node: Element, root: Element): boolean {
+  for (let n: Element | null = node; n; n = n === root ? null : n.parentElement) {
+    if (n.scrollHeight > n.clientHeight && /auto|scroll/.test(getComputedStyle(n).overflowY)) return true
+  }
+  return false
 }
 
 export function startTopBar() {

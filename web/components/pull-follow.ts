@@ -4,6 +4,7 @@ import type { Tone } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
 import { textbox, checkbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 type Answer = EngineAnswer
 
@@ -96,7 +97,8 @@ class SfPullFollow extends HTMLElement {
     this.#paint()
     const a = await request(path, body)
     this.#busy = ''
-    this.#say(v.sid, a.ok ? ok ?? a.message : own(a) ? '' : a.message, !a.ok ? 'bad' : ok === null ? savedTone(a) : 'muted')
+    if (!a.ok) this.#say(v.sid, own(a) ? '' : a.message, 'bad')
+    else toast({ id: `pull-follow:${v.sid}`, title: ok ?? a.message, tone: ok === null ? savedTone(a) : 'ok' })
     this.#paint()
     return a
   }
@@ -318,7 +320,7 @@ class SfPullFollow extends HTMLElement {
     const assign = checkbox({ checked: draft.assign })
     assign.dataset.key = `pull-assign:${v.sid}`
     assign.addEventListener('change', () => { draft.assign = assign.checked })
-    const save = button('Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)
+    const save = button('Save', 'primary small', undefined, 'submit', `pull-save:${v.sid}`)
     save.setAttribute('aria-disabled', String(this.#off()))
     if (this.#busy === 'settings') busy(save, true)
     const settings = form({

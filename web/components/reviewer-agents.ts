@@ -2,6 +2,7 @@ import { request, type EngineAnswer } from '../api.ts'
 import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
 import { field, form } from '../lib/form.ts'
 import { dropdown, option, filePicker } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 interface AgentFileView {
   name: string
@@ -125,7 +126,7 @@ class SfReviewerAgents extends HTMLElement {
       return this.#paint()
     }
     if (await this.#call({ op: 'add', text })) {
-      say(this.#status, `Added ${visible(file.name)}. Pick it for a role below; reviews run with it from the next review on.`, 'ok')
+      this.#done(`Added ${visible(file.name)}. Pick it for a role below; reviews run with it from the next review on.`)
       this.#paint()
     }
   }
@@ -135,16 +136,21 @@ class SfReviewerAgents extends HTMLElement {
     const done = await this.#call({ op: 'remove', name })
     this.#removing = ''
     if (done) {
-      say(this.#status, `Removed ${visible(name)}. Its roles fall back to the project's pack.`, 'ok')
+      this.#done(`Removed ${visible(name)}. Its roles fall back to the project's pack.`)
       this.#paint()
     }
   }
 
   async #pick(role: string, name: string) {
     if (await this.#call({ op: 'role', role, name })) {
-      say(this.#status, name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses the project's pack again.`, 'ok')
+      this.#done(name ? `The ${this.#view?.roleNames[role] ?? role} role uses ${visible(name)} from the next review on.` : `The ${this.#view?.roleNames[role] ?? role} role uses the project's pack again.`)
       this.#paint()
     }
+  }
+
+  #done(title: string) {
+    say(this.#status, '')
+    toast({ id: `reviewer-agents:${this.#target?.project ?? ''}`, title, tone: 'ok' })
   }
 
   #paint() {

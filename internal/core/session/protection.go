@@ -21,17 +21,28 @@ const (
 	NeedAdministration = "Administration: Read-only"
 	MaxLookupProjects  = 1000
 	protectionFor      = 20 * time.Second
-	maxProtectionNotes = 6
 	maxCheckNames      = 30
 )
 
 type Protection struct {
-	State      string
-	Reviews    string
-	Approvals  int
-	Checks     string
-	CheckNames []string
-	Notes      []string
+	State       string
+	Reviews     string
+	Approvals   int
+	AtLeast     bool
+	CodeOwners  bool
+	PullRequest bool
+	Checks      string
+	CheckNames  []string
+	Why         string
+}
+
+type ProtectionRow struct {
+	Kind   string
+	Label  string
+	State  string
+	Value  string
+	Detail string
+	Names  []string
 }
 
 type ProtectionReader interface {
@@ -56,13 +67,13 @@ type ProjectFactsView struct {
 	Workflows        []WorkflowRun
 	WorkflowsProblem string
 	Protection       Protection
-	Lookups          bool
 	Readiness        []ReadinessLine
 }
 
 type ProjectFactsPage interface {
 	ProjectFacts(ctx context.Context, repo string) (ProjectFactsView, error)
-	SetLookups(repo string, on bool) error
+	Lookups(repo string) (bool, error)
+	SetLookups(repo string, on bool) (bool, error)
 }
 
 type ProjectFactsConfig struct {
@@ -198,19 +209,37 @@ func (f *ProjectFacts) LookupsOn(project string) bool {
 	return f.on[project]
 }
 
-func (f *ProjectFacts) SetLookups(repo string, on bool) error {
+func (f *ProjectFacts) Lookups(repo string) (bool, error) {
 	if f.cfg.Repos == nil || f.cfg.Lookups == nil {
-		return conflict("not-yet", "This engine keeps no project settings.")
+		return false, conflict("not-yet", "This engine keeps no project settings.")
 	}
 	if _, err := f.cfg.Repos.record(repo); err != nil {
-		return notFound("project", "That project is no longer in the list.")
+		return false, notFound("project", "That project is no longer in the list.")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.loadLocked() != nil {
-		return conflict("records", "The engine couldn't read its package lookup setting.")
+		return false, conflict("records", "The engine couldn't read its package lookup setting.")
+	}
+	return f.on[repo], nil
+}
+
+func (f *ProjectFacts) SetLookups(repo string, on bool) (bool, error) {
+	if f.cfg.Repos == nil || f.cfg.Lookups == nil {
+		return false, conflict("not-yet", "This engine keeps no project settings.")
+	}
+	if _, err := f.cfg.Repos.record(repo); err != nil {
+		return false, notFound("project", "That project is no longer in the list.")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.loadLocked() != nil {
+		return false, conflict("records", "The engine couldn't read its package lookup setting.")
 	}
 	f.settleLocked()
+	if f.on[repo] == on {
+		return false, nil
+	}
 	next := map[string]bool{}
 	maps.Copy(next, f.on)
 	if on {
@@ -219,10 +248,10 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 		delete(next, repo)
 	}
 	if len(next) > MaxLookupProjects {
-		return conflict("full", "The package lookup is on for too many projects.")
+		return false, conflict("full", "The package lookup is on for too many projects.")
 	}
 	if err := f.cfg.Lookups.Save(LookupState{Projects: next, Removed: slices.Clone(f.removed)}); err != nil {
-		return conflict("records", "The engine couldn't save the package lookup setting.")
+		return false, conflict("records", "The engine couldn't save the package lookup setting.")
 	}
 	f.on = next
 	if f.cfg.Audit != nil {
@@ -234,7 +263,7 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) error {
 			f.cfg.Logger.Warn("project facts", "event", "audit-not-written")
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFactsView, error) {
@@ -250,7 +279,7 @@ func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFa
 		return ProjectFactsView{}, notFound("project", "That project is no longer in the list.")
 	}
 	r := list[i]
-	out := ProjectFactsView{Repo: r.Name, Branch: r.Branch, Lookups: f.LookupsOn(r.Name), Protection: Protection{State: ProtectionUnknown, Reviews: ProtectionUnknown, Checks: ProtectionUnknown}}
+	out := ProjectFactsView{Repo: r.Name, Branch: r.Branch, Protection: Protection{State: ProtectionUnknown, Reviews: ProtectionUnknown, Checks: ProtectionUnknown}}
 	main, err := f.cfg.Repos.Main(r.Name)
 	var files []WorkflowFile
 	switch {
@@ -271,51 +300,43 @@ func (f *ProjectFacts) ProjectFacts(ctx context.Context, repo string) (ProjectFa
 		}
 	}
 	out.Protection = f.protection(ctx, r)
-	out.Readiness = f.readiness(r, main, files, out.WorkflowsProblem, out.Protection)
+	out.Readiness = f.readiness(r, main, files, out.WorkflowsProblem)
 	return out, nil
 }
 
 func (f *ProjectFacts) protection(ctx context.Context, r Repository) Protection {
 	unknown := Protection{State: ProtectionUnknown, Reviews: ProtectionUnknown, Checks: ProtectionUnknown}
 	if f.cfg.Protection == nil {
-		unknown.Notes = []string{"This engine doesn't read branch protection."}
+		unknown.Why = "This engine doesn't read branch protection"
 		return unknown
 	}
 	raw, token, branch, err := f.cfg.Repos.ForgeTarget(r.Name)
 	if err != nil {
-		unknown.Notes = []string{"The engine couldn't read the repository's record or its saved token."}
+		unknown.Why = "Couldn't read the repository's record or its token"
 		return unknown
 	}
 	host, owner, name, ok := ForgeRepoOf(raw)
 	if !ok || !f.cfg.Protection.Supports(host) {
-		unknown.Notes = []string{"The engine reads branch protection only from GitHub's API (github.com or a GitHub Enterprise server)."}
+		unknown.Why = "Read only from GitHub"
 		return unknown
 	}
 	if token == "" {
-		unknown.Notes = []string{"No token is saved for " + strings.TrimPrefix(host, "https://") + ", so the engine can't ask."}
+		unknown.Why = "No token is saved for " + strings.TrimPrefix(host, "https://")
 		return unknown
 	}
 	if branch == "" {
-		unknown.Notes = []string{"The engine doesn't know the main branch's name yet; start a session to fetch it."}
+		unknown.Why = readyNotFetched
 		return unknown
 	}
 	ctx, cancel := context.WithTimeout(ctx, protectionFor)
 	defer cancel()
 	p, err := f.cfg.Protection.Protection(ctx, ForgeRepo{Host: host, Owner: owner, Name: name, Token: token}, branch)
 	if err != nil {
-		msg := err.Error()
-		if token != "" {
-			msg = strings.ReplaceAll(msg, token, "[token]")
-		}
-		unknown.Notes = []string{clip(maskSecrets(msg), 400)}
+		msg := strings.ReplaceAll(err.Error(), token, "[token]")
+		unknown.Why = strings.TrimSuffix(clip(maskSecrets(msg), 200), ".")
 		return unknown
 	}
-	for i, n := range p.Notes {
-		p.Notes[i] = clip(strings.ReplaceAll(n, token, "[token]"), 400)
-	}
-	if len(p.Notes) > maxProtectionNotes {
-		p.Notes = p.Notes[:maxProtectionNotes]
-	}
+	p.Why = clip(strings.ReplaceAll(p.Why, token, "[token]"), 200)
 	if len(p.CheckNames) > maxCheckNames {
 		p.CheckNames = p.CheckNames[:maxCheckNames]
 	}
@@ -323,4 +344,52 @@ func (f *ProjectFacts) protection(ctx context.Context, r Repository) Protection 
 		p.CheckNames[i] = CleanLine(c, 200)
 	}
 	return p
+}
+
+func ProtectionRows(p Protection) []ProtectionRow {
+	state := func(v, yes string) string {
+		switch v {
+		case yes:
+			return ReadyFound
+		case ProtectionUnknown, "":
+			return ReadyUnknown
+		}
+		return ReadyMissing
+	}
+	value := map[string]string{ReadyFound: "yes", ReadyMissing: "no", ReadyUnknown: "unknown"}
+	rows := []ProtectionRow{
+		{Kind: "protected", Label: "Protected", State: state(p.State, ProtectionOn)},
+		{Kind: "reviews", Label: "Reviews required", State: state(p.Reviews, RequiredYes)},
+		{Kind: "checks", Label: "Status checks required", State: state(p.Checks, RequiredYes)},
+	}
+	why := p.Why
+	for i := range rows {
+		r := &rows[i]
+		r.Value = value[r.State]
+		if r.State == ReadyUnknown && why != "" {
+			r.Detail, why = why, ""
+		}
+	}
+	if rows[1].State == ReadyFound {
+		least := ""
+		if p.AtLeast {
+			least = "at least "
+		}
+		switch {
+		case p.Approvals > 0 && p.CodeOwners:
+			rows[1].Value += ", " + least + countOf(p.Approvals, "approval", "approvals") + " and code owners"
+		case p.Approvals > 0:
+			rows[1].Value += ", " + least + countOf(p.Approvals, "approval", "approvals")
+		case p.CodeOwners:
+			rows[1].Value += ", code owners"
+		}
+	}
+	if rows[1].State == ReadyMissing && p.PullRequest {
+		rows[1].Detail = "A pull request is required, with no approval"
+	}
+	if rows[2].State == ReadyFound && len(p.CheckNames) > 0 {
+		rows[2].Value += ", " + countOf(len(p.CheckNames), "check", "checks")
+		rows[2].Names = slices.Clone(p.CheckNames)
+	}
+	return rows
 }
