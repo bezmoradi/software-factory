@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	GroupGoal = "goal"
+
 	MaxSplitTasks   = 8
 	MaxGoalRunning  = 3
 	MaxSplitTitle   = 120

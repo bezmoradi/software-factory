@@ -110,12 +110,8 @@ func SessionStatus(i Info) Status {
 		return Status{"stopped: " + i.StopReason, ToneOff}
 	case !i.Running && i.State == "done":
 		return Status{"done", ToneDone}
-	case !i.Running && (i.State == "" || i.State == "stopped"):
-		return Status{"stopped", ""}
-	case !i.Running && i.State == "blocked":
-		return Status{"stopped, waiting for your answer", ""}
 	case !i.Running:
-		return Status{"stopped, was " + i.State, ""}
+		return Status{"stopped", ""}
 	case !i.Live && i.WaitingFor != "":
 		return Status{"waiting for " + i.WaitingFor, ""}
 	case !i.Live:
@@ -187,7 +183,6 @@ func SessionControl(i Info) Control {
 	case Sleeping(i) && bypass:
 		c.Text = "This session is stopped, in bypass permissions mode: its tools run without asking."
 	case Sleeping(i):
-		c.Text = "This session is stopped."
 	case !i.Running:
 		c.Text = "This session isn’t running."
 	case !i.Live:

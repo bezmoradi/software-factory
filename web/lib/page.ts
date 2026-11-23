@@ -1,5 +1,5 @@
 import { button, el } from './dom.ts'
-import { tipText } from './tooltip.ts'
+import { tipText, tooltip } from './tooltip.ts'
 
 export interface DocsLinkOptions {
   doc?: string
@@ -185,6 +185,35 @@ export function factGrid(facts: Fact[]): HTMLDListElement {
     dl.append(item)
   }
   return dl
+}
+
+export interface PickRowOptions {
+  text: string
+  tip: string
+  name: string
+  on: boolean
+  key: string
+  onPick: (b: HTMLButtonElement) => void
+}
+
+export function pickRow(o: PickRowOptions): HTMLLIElement {
+  const li = el('li', 'row pick-row')
+  const text = el('p', 'pick-text')
+  text.append(...tipText(o.text, o.tip))
+  const b = button('', 'small pick', () => o.onPick(b), 'button', o.key)
+  b.setAttribute('aria-pressed', String(o.on))
+  const word = el('span', 'pick-word', 'Select')
+  if (!o.on) {
+    b.append(word, el('span', 'sr-only', ` ${o.name}`))
+    li.append(b, text)
+    return li
+  }
+  word.setAttribute('aria-hidden', 'true')
+  const mark = glyph('check')
+  mark.classList.add('pick-mark')
+  b.append(word, mark, el('span', 'sr-only', `Selected ${o.name}`))
+  li.append(...tooltip(b, 'Clear the choice'), text)
+  return li
 }
 
 function glyph(name: string): HTMLElement {

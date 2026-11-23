@@ -85,10 +85,6 @@ export function working(s: Session): boolean {
 }
 
 
-export function pickingSize(s: Session) {
-  return !!(state.connected && s.gate && s.gate.chosen === false && s.view.blank && allowed(s, 'control'))
-}
-
 export const UNLISTED = 'The engine no longer lists this session.'
 
 export function allowed(s: Session | null | undefined, action: SessionAction): boolean {

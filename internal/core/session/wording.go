@@ -416,21 +416,6 @@ func RunSaid(state string) Said {
 	return Said{w, tone}
 }
 
-var levelSaid = map[string]Said{"locked": {"Locked", ""}, "held": {"Held", "warn"}, "stopped": {"Stopped", "bad"}}
-
-func LevelSaid(level string, sandboxed, done bool) *Said {
-	if done {
-		return &Said{"Done", ""}
-	}
-	if level == "locked" && !sandboxed {
-		return &Said{"Locked, not sandboxed", "warn"}
-	}
-	if s, ok := levelSaid[level]; ok {
-		return &s
-	}
-	return nil
-}
-
 var pushSaid = map[string]Said{"held": {"Held", "warn"}, "denied": {"Denied", "bad"}, "refused": {"Not pushed", "bad"}}
 
 func PushResultSaid(result string) *Said {

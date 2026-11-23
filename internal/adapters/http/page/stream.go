@@ -31,7 +31,6 @@ type sessionJSON struct {
 	ModeLabel    string      `json:"modeLabel"`
 	Step         string      `json:"step,omitempty"`
 	Checkpointed bool        `json:"checkpointSaved,omitempty"`
-	LevelSaid    *saidJSON   `json:"levelSaid,omitempty"`
 	Busy         bool        `json:"busy"`
 	Login        bool        `json:"login"`
 	Needs        int         `json:"needs"`
@@ -319,7 +318,6 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			ModeLabel:    session.ModeLabel(s.Mode),
 			Step:         s.Step,
 			Checkpointed: s.CheckpointSaved,
-			LevelSaid:    saidPtr(session.LevelSaid(string(s.Level), s.Sandboxed, !s.Running && s.State == "done")),
 			Summary:      statusJSON(session.SessionStatus(s)),
 			Warnings:     session.SessionWarnings(s),
 			Control:      controlOf(s),

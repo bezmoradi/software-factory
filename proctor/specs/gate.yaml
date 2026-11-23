@@ -12,7 +12,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -34,6 +34,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: ask-protected
         do: http.request
         identity: page
@@ -775,7 +801,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -797,6 +823,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: ask-pinned
         do: http.request
         identity: page
@@ -1936,7 +1988,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-003
-    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, claude remote-control and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request and /split-request it is refused with 401 connection"
+    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, claude remote-control and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request, /split-request and /work-type-request it is refused with 401 connection"
     steps:
       - id: start
         do: http.request
@@ -1946,7 +1998,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -1968,6 +2020,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: ask-commands
         do: http.request
         identity: page
@@ -1987,7 +2065,7 @@ scenarios:
           method: POST
           path: "/api/message"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: gate key ${run.id}\nkey-at: k_check conn POST /check {\"tool\":\"Read\",\"input\":{},\"top\":\"\",\"paths\":[]}\nkey-at: k_check_as_push push POST /check {\"tool\":\"Read\"}\nkey-at: k_poll conn GET /poll\nkey-at: k_events conn POST /events {\"events\":[]}\nkey-at: k_wait conn GET /wait?card=0123456789abcdef0123456789abcdef\nkey-at: k_wake conn POST /wake?card=0123456789abcdef0123456789abcdef {}\nkey-at: k_image conn GET /image?id=x\nkey-at: k_turn_check conn POST /turn-check {}\nkey-at: k_session_model conn GET /session-model\nkey-at: k_push push POST /push-request {}\nkey-at: k_forge push POST /forge-request {\"kind\":\"issue\",\"title\":\"x\",\"body\":\"x\"}\nkey-at: k_checks push POST /checks-request {}\nkey-at: k_comments push POST /comments-request {}\nkey-at: k_split push POST /split-request {\"tasks\":[{\"title\":\"x\",\"message\":\"x\"}]}" }
+          body: { sid: "${sid}", text: "say: gate key ${run.id}\nkey-at: k_check conn POST /check {\"tool\":\"Read\",\"input\":{},\"top\":\"\",\"paths\":[]}\nkey-at: k_check_as_push push POST /check {\"tool\":\"Read\"}\nkey-at: k_poll conn GET /poll\nkey-at: k_events conn POST /events {\"events\":[]}\nkey-at: k_wait conn GET /wait?card=0123456789abcdef0123456789abcdef\nkey-at: k_wake conn POST /wake?card=0123456789abcdef0123456789abcdef {}\nkey-at: k_image conn GET /image?id=x\nkey-at: k_turn_check conn POST /turn-check {}\nkey-at: k_session_model conn GET /session-model\nkey-at: k_push push POST /push-request {}\nkey-at: k_forge push POST /forge-request {\"kind\":\"issue\",\"title\":\"x\",\"body\":\"x\"}\nkey-at: k_checks push POST /checks-request {}\nkey-at: k_comments push POST /comments-request {}\nkey-at: k_split push POST /split-request {\"tasks\":[{\"title\":\"x\",\"message\":\"x\"}]}\nkey-at: k_work_type push POST /work-type-request {\"type\":\"fix\",\"reason\":\"x\"}" }
         expect:
           equal:
             "$.status": 202
@@ -1999,12 +2077,12 @@ scenarios:
           method: POST
           path: "/api/file-check"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", paths: ["gate-answers/k_split.txt"] }
+          body: { sid: "${sid}", paths: ["gate-answers/k_work_type.txt"] }
         eventually: { within: 60s, every: 500ms }
         expect:
           equal:
             "$.status": 200
-            "$.body": { found: ["gate-answers/k_split.txt"] }
+            "$.body": { found: ["gate-answers/k_work_type.txt"] }
       - id: stop
         do: http.request
         identity: page
@@ -3051,6 +3129,30 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { path: "gate-answers/k_split.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
+      - id: k-work-type-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_work_type.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_work_type.json", text: "{\"error\":\"connection\"}\n" }
+      - id: k-work-type-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/k_work_type.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/k_work_type.txt", text: "status 401: sent the check-only key as x-sf-push\n" }
       - id: commands-counted
         do: http.request
         identity: page
@@ -3129,7 +3231,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -3151,6 +3253,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: feature }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": feature
       - id: ask-feature
         do: http.request
         identity: page
@@ -3424,7 +3552,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: docs }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -3446,6 +3574,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: docs }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": docs
       - id: ask-docs
         do: http.request
         identity: page
@@ -3695,14 +3849,13 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: incident }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; incident-gate reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -3718,6 +3871,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: incident }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": incident
       - id: incident-gate
         do: http.request
         identity: page
@@ -3970,7 +4149,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -3992,6 +4171,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: feature }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": feature
       - id: blocked
         do: http.request
         identity: page
@@ -4747,7 +4952,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}", type: feature }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -4769,6 +4974,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: feature }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": feature
       - id: older
         do: http.request
         identity: page
@@ -4906,6 +5137,472 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-009
+    name: "A session with no work type: /check holds its first write with the reason that asks for factory_work_type and the type ids, and the fake writes nothing; factory_work_type refuses a type the project doesn't offer (the engine), a reason of two lines or over 200 characters and a type that isn't a string (agent-host's MCP server), and holds a good suggestion, which /api/gate shows as the card's typeAsk with the agent's reason as given; /api/size refuses an unknown type and leaves the card, then sets Fix, which clears the card, and the same write then lands; no hold is counted"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: untyped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": false
+          absent: ["$.body.gate.typeAsk"]
+      - id: try-untyped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate untyped ${run.id}\ntry: u_src src/u-${run.id}.go" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: untyped-tried
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/u_src.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/u_src.txt"] }
+      - id: card-held
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": false
+            "$.body.gate.typeAsk": { text: "Development ACP agent wants to change a file, and this session has no work type yet. The work type decides which steps and reviews apply, so the change waits until you pick one." }
+      - id: ask-untyped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate suggests ${run.id}\nask-tool: u_unknown factory_work_type {\"type\":\"nope\",\"reason\":\"proctor ${run.id}\"}\nask-tool: u_lines factory_work_type {\"type\":\"fix\",\"reason\":\"one\\ntwo\"}\nask-tool: u_long factory_work_type {\"type\":\"fix\",\"reason\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}\nask-tool: u_types factory_work_type {\"type\":1,\"reason\":\"x\"}\nask-tool: u_ok factory_work_type {\"type\":\"fix\",\"reason\":\"the issue is a crash ${run.id}\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: untyped-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/u_ok.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/u_ok.txt"] }
+      - id: card-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": false
+            "$.body.gate.workType": fix
+            "$.body.gate.typeAsk": { text: "Development ACP agent wants to change a file, and this session has no work type yet. The work type decides which steps and reviews apply, so the change waits until you pick one.", suggests: "Development ACP agent suggests Fix, and says why:", type: fix, reason: "the issue is a crash ${run.id}", use: "Use Fix" }
+      - id: size-unknown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: nope }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: type, message: "That work type isn't one this project offers." }
+      - id: card-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": false
+            "$.body.gate.typeAsk.type": fix
+      - id: size-fix
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; typed and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
+          absent: ["$.body.gate.typeAsk"]
+      - id: ask-typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate typed ${run.id}\ntry: u_src_typed src/u-${run.id}.go" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: typed-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/u_src_typed.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/u_src_typed.txt"] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: u-src-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_src.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/u-${run.id}.go can't change yet: this session has no work type, and the work type decides which steps and reviews apply. Suggest one with the factory_work_type tool, giving type, one of feature, fix, incident, docs, explore, and reason, one line saying why it fits. Then end your turn: the developer picks the work type on the software factory page, and your next message says when you can go on. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: u-src-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_src.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_src.txt", text: "engine 200: refused\n" }
+      - id: u-unknown-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_unknown.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_unknown.json", text: "{\"content\":[{\"text\":\"Refused: nope isn't one of this project's work types, which are feature, fix, incident, docs, explore; suggest one of them.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"nope isn't one of this project's work types, which are feature, fix, incident, docs, explore; suggest one of them\",\"result\":\"refused\"}}\n" }
+      - id: u-unknown-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_unknown.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_unknown.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-lines-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_lines.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_lines.json", text: "{\"content\":[{\"text\":\"The reason must be one line of 1 to 200 characters.\",\"type\":\"text\"}],\"isError\":true}\n" }
+      - id: u-lines-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_lines.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_lines.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-long-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_long.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_long.json", text: "{\"content\":[{\"text\":\"The reason must be one line of 1 to 200 characters.\",\"type\":\"text\"}],\"isError\":true}\n" }
+      - id: u-long-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_long.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_long.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-types-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_types.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_types.json", text: "{\"content\":[{\"text\":\"type and reason must both be strings.\",\"type\":\"text\"}],\"isError\":true}\n" }
+      - id: u-types-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_types.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_types.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-ok-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_ok.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_ok.json", text: "{\"content\":[{\"text\":\"Held: Software Factory's page shows your suggestion of Fix to the developer, who picks the work type; end your turn now, and your next message says when you can go on.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"Software Factory's page shows your suggestion of Fix to the developer, who picks the work type; end your turn now, and your next message says when you can go on\",\"result\":\"held\"}}\n" }
+      - id: u-ok-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_ok.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_ok.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-src-typed-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_src_typed.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_src_typed.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: u-src-typed-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_src_typed.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_src_typed.txt", text: "engine 200: allowed, wrote\n" }
+      - id: typed-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["src/u-${run.id}.go"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["src/u-${run.id}.go"] }
+      - id: untyped-not-counted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.refusals": { cloud-refused: 3, protected-write: 43, push-refused: 9, remote-held: 5 }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
       - id: gone
         do: http.request
         identity: page

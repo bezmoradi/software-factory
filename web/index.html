@@ -111,7 +111,6 @@
     <sf-recap id="recap" class="notice small recap" hidden></sf-recap>
     <sf-session-facts id="session-facts" hidden></sf-session-facts>
     <sf-lineage id="lineage" hidden></sf-lineage>
-    <sf-compare id="compare" hidden></sf-compare>
     <sf-session-work id="session-work" hidden></sf-session-work>
     <sf-screenshots id="screenshots" class="session-screenshots" hidden></sf-screenshots>
     <sf-keep id="keep" hidden></sf-keep>
@@ -168,16 +167,7 @@
     <span id="stall-said" class="sr-only" role="status"></span><div id="stall" class="control small nudge" hidden><span><strong>No news for a while.</strong> <span id="stall-text"></span></span> <button type="button" class="ghost small" id="stall-dismiss">Dismiss</button> <button type="button" class="ghost small" id="stall-copy" hidden>Copy attach command</button> <button type="button" class="primary small" id="stall-stop">Stop the turn</button></div>
     <p class="small warn" id="upload-warning" hidden></p>
     <div class="attachments" id="attachments" hidden></div>
-    <div class="size-pick" id="size-pick" hidden>
-      <p class="small">What is this session for? Pick one before the first message. You can change it later under Work type.</p>
-      <div class="size-options">
-        <button type="button" class="size-option" data-size="feature"><span>Feature</span><span class="muted small">A plan you approve, then the adversarial and slop reviews</span></button>
-        <button type="button" class="size-option" data-size="fix"><span>Fix</span><span class="muted small">The adversarial and slop reviews</span></button>
-        <button type="button" class="size-option" data-size="incident"><span>Incident</span><span class="muted small">A production failure: a root cause you approve before the fix, then the adversarial and slop reviews</span></button>
-        <button type="button" class="size-option" data-size="docs"><span>Docs only</span><span class="muted small">The slop review, for documentation changes</span></button>
-        <button type="button" class="size-option" data-size="explore"><span>Exploring</span><span class="muted small">Questions and trying things out. Nothing is pushed</span></button>
-      </div>
-    </div>
+    <sf-work-type-card id="work-type-card" hidden></sf-work-type-card>
     <div class="strip">
       <span class="dots" id="working" role="img" aria-label="Claude is working" hidden><i></i><i></i><i></i></span>
       <span class="strip-note small muted compacting" id="strip-note" role="status"></span>

@@ -322,12 +322,6 @@
     - file: "internal/adapters/http/page/keep.go"
       find: "okCommit = okCommit && op == \"restore\" && flagCommit.MatchString(commit)"
       replace: "okCommit = okCommit && op == \"restore\""
-- id: PAGE-042
-  title: "The cap on agents in a pair is removed"
-  edits:
-    - file: "internal/adapters/http/page/pair.go"
-      find: "if !ok || len(list) != 1 {"
-      replace: "if !ok || len(list) == 0 {"
 - id: PAGE-043
   title: "Dismissed task cards stay in the session's view"
   edits:
@@ -3034,42 +3028,6 @@
     - file: "internal/core/session/split.go"
       find: "s.start(start, goal, queue[0], Consent{}, true)"
       replace: "s.start(start, goal, queue[0], Consent{CostOK: true}, true)"
-- id: SESS-662
-  title: "Start caps equal to the project's become the session's own, so it stops following the project's"
-  edits:
-    - file: "internal/core/session/capspage.go"
-      find: "&& clean == l.ProjectCaps(k.project) {"
-      replace: "&& false {"
-- id: SESS-663
-  title: "A pair's first session starts without the caps the person typed"
-  edits:
-    - file: "internal/core/session/pair.go"
-      find: "From: from, Box: q.Box, Caps: q.Caps,"
-      replace: "From: from, Box: q.Box,"
-- id: SESS-664
-  title: "A pair's second session starts without the caps the person typed"
-  edits:
-    - file: "internal/core/session/pair.go"
-      find: "Box: box, Caps: caps, pinned: &at,"
-      replace: "Box: box, pinned: &at,"
-- id: SESS-665
-  title: "The engine builds a pair's second session without the second model the person chose"
-  edits:
-    - file: "internal/core/session/pair.go"
-      find: "list = append(list, PairAgent{Agent: q.Agent.Agent, Model: q.SecondModel})"
-      replace: "list = append(list, PairAgent{Agent: q.Agent.Agent})"
-- id: SESS-666
-  title: "A benchmark takes a start point beside the merged pull request's base"
-  edits:
-    - file: "internal/core/session/pair.go"
-      find: "case q.Bench != 0 && q.From.chosen() > 0:"
-      replace: "case false:"
-- id: SESS-667
-  title: "A pair's second session starts in a new container instead of the one waiting for the person's answer"
-  edits:
-    - file: "internal/core/session/pair.go"
-      find: "groupKind: GroupPair, asked: \"pair:\" + id})"
-      replace: "groupKind: GroupPair})"
 - id: PAGE-152
   title: "A start takes an issue hash that isn't 64 hex digits"
   edits:
@@ -3079,9 +3037,111 @@
     - file: "internal/core/session/fromissue.go"
       find: "\tif !ValidIssueHash(hash) {"
       replace: "\tif false {"
+- id: PAGE-153
+  title: "An issue number typed with # is refused"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "var issueNumberText = regexp.MustCompile(`^#?[0-9]{1,10}$`)"
+      replace: "var issueNumberText = regexp.MustCompile(`^[0-9]{1,10}$`)"
+- id: PAGE-154
+  title: "A typed issue number isn't trimmed"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "\t\ttext := strings.TrimSpace(n)"
+      replace: "\t\ttext := n"
+- id: PAGE-155
+  title: "A typed issue number above the highest is taken"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "if err != nil || number < 1 || number > session.MaxIssueNumber {"
+      replace: "if err != nil || number < 1 {"
+- id: PAGE-156
+  title: "A JSON issue number out of range gets the generic fields refusal instead of the number field's"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "\t\tnumber, ok := wholeNumber(n, 1, session.MaxIssueNumber)\n\t\treturn number, ok, true"
+      replace: "\t\tnumber, ok := wholeNumber(n, 1, session.MaxIssueNumber)\n\t\treturn number, ok, ok"
 - id: HAND-015
   title: "A clone's progress shows from its start, so a fast clone shows a bar"
   edits:
     - file: "internal/core/session/cloneprogress.go"
       find: "CloneShowAfter = time.Second"
       replace: "CloneShowAfter = 0"
+- id: FLOW-019
+  title: "A session with no work type changes files before the person picks one"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "\tcase f.Untyped:\n\t\treturn untypedHold(path, f.Offered)\n"
+      replace: ""
+- id: SESS-662
+  title: "The edit hold counts a session with no work type as typed"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "UsesArtifacts: g.docs.held, Untyped: !g.ws.chosen}"
+      replace: "UsesArtifacts: g.docs.held, Untyped: false}"
+- id: SESS-663
+  title: "factory_work_type takes a type the project doesn't offer"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tt, ok := typeIn(setup.setup.Types, id)\n\tif !ok {"
+      replace: "\tt, ok := typeIn(setup.setup.Types, id)\n\tif !ok && id == \"\" {"
+- id: SESS-664
+  title: "A held edit leaves no card when the agent hasn't suggested a type"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "if g.ws.chosen || a == nil || !a.held && a.typeID == \"\" {"
+      replace: "if g.ws.chosen || a == nil || a.typeID == \"\" {"
+- id: SESS-665
+  title: "Picking a work type leaves the card showing"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "s.typeID, s.chosen, s.ask = id, true, nil"
+      replace: "s.typeID, s.chosen = id, true"
+- id: SESS-666
+  title: "/api/size sets a work type the project doesn't offer"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tt, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id)\n\tif !ok {\n\t\treturn invalid(\"type\", \"That work type isn't one this project offers.\")"
+      replace: "\tt, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id)\n\tif !ok && id == \"\" {\n\t\treturn invalid(\"type\", \"That work type isn't one this project offers.\")"
+- id: PAGE-157
+  title: "/api/dispatch takes a work type again"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "if !keysWithin(body, \"path\", \"name\", \"model\", \"mode\", \"agent\", \"approve\","
+      replace: "if !keysWithin(body, \"path\", \"name\", \"model\", \"mode\", \"agent\", \"type\", \"approve\","
+- id: HOST-014
+  title: "agent-host's factory_work_type passes a reason of several lines to the engine"
+  edits:
+    - file: "internal/adapters/agenthost/mcpworktype.go"
+      find: " || strings.ContainsAny(reason, \"\\r\\n\") {"
+      replace: " {"
+- id: PAGE-158
+  title: "The new-session form's Claude Code model starts on Sonnet instead of Opus"
+  edits:
+    - file: "internal/core/session/sessionwork.go"
+      find: "return ModelChoice{Model: \"opus\", Effort: \"high\"}"
+      replace: "return ModelChoice{Model: \"sonnet\", Effort: \"high\"}"
+- id: PAGE-159
+  title: "The new-session form's Claude Code effort starts on medium instead of high"
+  edits:
+    - file: "internal/core/session/sessionwork.go"
+      find: "return ModelChoice{Model: \"opus\", Effort: \"high\"}"
+      replace: "return ModelChoice{Model: \"opus\", Effort: \"medium\"}"
+- id: SESS-667
+  title: "The suggested session name joins its words with an underscore instead of a hyphen"
+  edits:
+    - file: "internal/core/session/names.go"
+      find: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"-\" + nameNouns[rand.IntN(len(nameNouns))]"
+      replace: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"_\" + nameNouns[rand.IntN(len(nameNouns))]"
+- id: SESS-668
+  title: "The suggested session name puts the noun before the adjective"
+  edits:
+    - file: "internal/core/session/names.go"
+      find: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"-\" + nameNouns[rand.IntN(len(nameNouns))]"
+      replace: "name = nameNouns[rand.IntN(len(nameNouns))] + \"-\" + nameAdjectives[rand.IntN(len(nameAdjectives))]"
+- id: PAGE-160
+  title: "/api/session-name takes a field it doesn't read"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tsessionNameRoute: {},\n"
+      replace: ""

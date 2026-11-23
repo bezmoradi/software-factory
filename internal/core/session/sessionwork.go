@@ -398,6 +398,13 @@ func AgentModels(agent string) []AgentModel {
 	return agentModels(agent)
 }
 
+func AgentStartDefaults(agent string) ModelChoice {
+	if agent == "claude" {
+		return ModelChoice{Model: "opus", Effort: "high"}
+	}
+	return ModelChoice{}
+}
+
 func AgentEfforts(agent string) []string {
 	if agent == "claude" {
 		return ClaudeEfforts

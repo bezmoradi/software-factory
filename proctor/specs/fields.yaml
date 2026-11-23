@@ -28,15 +28,17 @@ tables:
       - ["fld_session", "/api/session", { proctorUnknownField: true }, "body", "Signing in takes an empty JSON object. Reload the page."]
       - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs", "The engine saves only a theme and a text size the page offers. Reload the page and pick again."]
       - ["fld_message", "/api/message", { proctorUnknownField: true }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_issues_number_type", "/api/issues", { op: read, path: /workspace/base/demo, number: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_number_list", "/api/issues", { op: read, path: /workspace/base/demo, number: ["42"] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_number_missing", "/api/issues", { op: read, path: /workspace/base/demo }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_caps", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, disk: 0 } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_list_label", "/api/issues", { op: list, path: /workspace/base/demo, label: bug }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_read_extra", "/api/issues", { op: read, path: /workspace/base/demo, number: "abc", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_dispatch_caps_extra", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, proctorUnknownField: true } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_dispatch_caps_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_pair_two_agents", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }, { agent: dev-acp }], double: true, message: proctor }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_pair_no_agent", "/api/pair", { op: start, path: /workspace/base/demo, agents: [], double: true, message: proctor }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_pair_from_shape", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, from: { branch: proctor } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_pair_second_model_type", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, secondModel: 1 }, "secondModel", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, type: fix }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_from_shape", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, from: { branch: proctor } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_wake_home_short", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: abc }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
@@ -67,6 +69,8 @@ tables:
       - ["fld_review", "/api/review", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_override", "/api/override", { sid: "00000000-0000-4000-8000-000000000000", agent: "knackpack:adversarial-reviewer", commit: abc, reason: proctor }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_size_number", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_size_shape", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: "Not a type" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op", "That op isn't one this route takes. Reload the page and try again."]
@@ -267,6 +271,9 @@ tables:
       - ["fld_limits_project_disk_negative", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
       - ["fld_limits_project_disk_fraction", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
       - ["fld_limits_project_disk_over", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_money_negative", { op: project, name: demo, money: -1, minutes: 0, turns: 0, disk: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["fld_limits_project_turns_fraction", { op: project, name: demo, money: 0, minutes: 0, turns: 1.5, disk: 0 }, "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
+      - ["fld_limits_project_minutes_text", { op: project, name: demo, money: 0, minutes: "60", turns: 0 }, "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
       - ["fld_limits_session_no_money", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
       - ["fld_limits_money_negative", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
       - ["fld_limits_money_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
@@ -335,9 +342,18 @@ tables:
       - ["msg_login_code_empty", "/api/claude-login", { step: code, target: reviewers, code: "" }, "code", "code", "Paste the code exactly as claude.com shows it."]
       - ["msg_message_revise_empty", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: " \n\t " } }, "note", "note", "Type what should change first."]
       - ["msg_message_revise_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: "${fill(2001)}" } }, "note", "note", "At most 2,000 characters."]
+      - ["msg_issues_number_text", "/api/issues", { op: read, path: /workspace/base/demo, number: "abc" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_zero", "/api/issues", { op: read, path: /workspace/base/demo, number: "0" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_negative", "/api/issues", { op: read, path: /workspace/base/demo, number: "-3" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_above", "/api/issues", { op: read, path: /workspace/base/demo, number: "1000000001" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_inner_space", "/api/issues", { op: read, path: /workspace/base/demo, number: "4 2" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_hash_space", "/api/issues", { op: read, path: /workspace/base/demo, number: "# 42" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_empty", "/api/issues", { op: read, path: /workspace/base/demo, number: "" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_json_zero", "/api/issues", { op: read, path: /workspace/base/demo, number: 0 }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_json_fraction", "/api/issues", { op: read, path: /workspace/base/demo, number: 4.5 }, "number", "number", "Needs an issue number like 123."]
 
   - id: FLD-T10
-    name: "A start refuses an issue or a benchmark the page didn't read, a benchmark beside a start point, an issue or a message, an issue beside a message, and caps out of range, naming the field, so the page marks that field instead of checking it itself"
+    name: "A start refuses an issue the page didn't read, naming the field, so the page marks that field instead of checking it itself"
     do: http.request
     identity: page
     with:
@@ -350,27 +366,37 @@ tables:
         "$.status": 400
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
-    no_state_check: "refused with 400 by the route's own field check, or by Pairs.Start's checks of the body, before it reads an issue or a pull request, opens a container or starts a session, so nothing changed; /api/dispatch and /api/pair aren't declared reads, and no single read shows what a refused start would have started"
+    no_state_check: "refused with 400 by the route's own field check before it reads an issue or a pull request, opens a container or starts a session, so nothing changed; /api/dispatch isn't a declared read, and no single read shows what a refused start would have started"
     columns: ["case", "route", "body", "error", "field", "message"]
     rows:
       - ["start_dispatch_issue_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1, issueHash: abc }, "issue", "issue", "Read the issue again before starting from it."]
       - ["start_dispatch_issue_no_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1 }, "issue", "issue", "Read the issue again before starting from it."]
       - ["start_dispatch_issue_number", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 0, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "issue", "issue", "That isn't an issue number."]
-      - ["start_dispatch_caps_money", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: -1, minutes: 0, turns: 0, disk: 0 } }, "fields", "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
-      - ["start_dispatch_caps_disk", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, disk: 4097 } }, "fields", "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
-      - ["start_pair_issue_hash", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, issue: 1, issueHash: abc }, "issue", "issue", "Read the issue again before starting from it."]
-      - ["start_pair_caps_turns", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, caps: { money: 0, minutes: 0, turns: 1.5, disk: 0 } }, "fields", "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
-      - ["start_pair_caps_minutes", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, caps: { money: 0, minutes: "60", turns: 0 } }, "fields", "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
-      - ["start_pair_bench_from", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, from: { branch: proctor, commit: "0123456789abcdef0123456789abcdef01234567" } }, "from", "from", "Set it back to main for a benchmark."]
-      - ["start_pair_bench_issue", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, issue: 1, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "issue", "issue", "Clear it for a benchmark."]
-      - ["start_pair_bench_message", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: "0123456789abcdef0123456789abcdef01234567" }, message: proctor }, "message", "message", "Clear it for a benchmark."]
-      - ["start_pair_bench_hash", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: abc, base: "0123456789abcdef0123456789abcdef01234567" } }, "benchmark", "benchmark", "Read the pull request again before starting from it."]
-      - ["start_pair_bench_base", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], benchmark: { number: 1, hash: "0000000000000000000000000000000000000000000000000000000000000000", base: abc } }, "benchmark", "benchmark", "Read the pull request again before starting from it."]
-      - ["start_pair_issue_message", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: proctor, issue: 1, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "message", "message", "Clear it, or clear the issue."]
-      - ["start_pair_message_empty", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], double: true, message: " " }, "message", "message", "Needs up to 20,000 characters, not starting with !."]
+
+  - id: FLD-T12
+    name: "/api/issues reads an issue number typed as text, trimmed and with or without #, as it reads a JSON number, so the page sends what the person typed and the engine decides"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/issues"
+      headers: { Origin: "${page.origin}" }
+      body: { op: read, path: "/workspace/base/absent-${run.id}", number: "${row.number}" }
+    expect:
+      equal:
+        "$.status": 404
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: project, message: "That project is no longer in the list." }
+    no_state_check: "the page adapter takes the number and IssueStarts.Read answers 404 because no project has this path, before it asks the git host for anything, so the route read nothing and changed nothing; /api/issues isn't a declared read, since its op decides what it reads"
+    columns: ["case", "number"]
+    rows:
+      - ["issues_number_typed", "42"]
+      - ["issues_number_typed_hash", "#42"]
+      - ["issues_number_typed_spaces", " 42 "]
+      - ["issues_number_typed_highest", "1000000000"]
 
   - id: FLD-T11
-    name: "A start of two sessions without the usage confirmation, and taking out of the queue or dismissing a task card that isn't there, are refused with 409 and a message"
+    name: "Taking out of the queue or dismissing a task card that isn't there is refused with 409 and a message"
     do: http.request
     identity: page
     with:
@@ -383,10 +409,9 @@ tables:
         "$.status": 409
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.body": { error: "${row.error}", message: "${row.message}" }
-    no_state_check: "refused with 409 by Pairs.Start before it starts a session, or by Splits.Unqueue and Splits.Dismiss because no goal session with this id holds that card, so nothing changed; /api/pair and /api/split aren't declared reads, since their op decides read or write"
+    no_state_check: "refused with 409 by Splits.Unqueue and Splits.Dismiss because no goal session with this id holds that card, so nothing changed; /api/split isn't a declared read, since its op decides read or write"
     columns: ["case", "route", "body", "error", "message"]
     rows:
-      - ["pair_second_model_unconfirmed", "/api/pair", { op: start, path: /workspace/base/demo, agents: [{ agent: dev-acp }], secondModel: proctor, message: proctor }, "double", "Starting both runs two sessions on the same task, which doubles usage, even on a subscription. Confirm it to start them."]
       - ["split_unqueue_unknown", "/api/split", { op: unqueue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't in the queue any more."]
       - ["split_dismiss_unknown", "/api/split", { op: dismiss, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't waiting any more."]
 
@@ -440,6 +465,7 @@ tables:
       - ["unk_message_revise_plan", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: plan, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_revise_cause", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: root-cause, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_ask_define", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define }, "Only a session this engine started has a workflow here."]
+      - ["unk_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: fix }, "Only a session this engine started has a work type here."]
       - ["unk_message_ask_fix", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: fix }, "Only a session this engine started has a workflow here."]
 
   - id: FLD-T05

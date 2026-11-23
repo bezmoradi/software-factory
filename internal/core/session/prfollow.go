@@ -75,7 +75,7 @@ type PullAPI interface {
 	CheckStates(ctx context.Context, r ForgeRepo, commit string) (CheckReport, error)
 	MarkReady(ctx context.Context, r ForgeRepo, nodeID string) (bool, error)
 	AssignTo(ctx context.Context, r ForgeRepo, number int, login string) error
-	OpenIssues(ctx context.Context, r ForgeRepo, label string, page int) ([]IssueFound, bool, error)
+	OpenIssues(ctx context.Context, r ForgeRepo, page int) ([]IssueFound, bool, error)
 	IssueByNumber(ctx context.Context, r ForgeRepo, number int) (IssueFound, error)
 	Rate(host string) HostRate
 }

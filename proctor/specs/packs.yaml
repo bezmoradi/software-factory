@@ -202,7 +202,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "packs ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "packs ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -224,6 +224,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: stop
         do: http.request
         identity: page
@@ -656,7 +682,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "packs beta ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "packs beta ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -682,6 +708,32 @@ scenarios:
           none:
             "$.body.entries": { kind: pack, result: added, reason: "the developer uploaded the pack beta 1.1.0 (2 files), on the page" }
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: on-beta
         do: http.request
         identity: page

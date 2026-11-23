@@ -110,7 +110,8 @@ button.stack > span { grid-area: 1 / 1; }
 button.stack > span.off { visibility: hidden; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: .1rem; border-radius: 4px; }
 .icon-button .icon { width: 1rem; height: 1rem; }
-:is(button.small, .textbox) ~ .icon-button { min-width: var(--compact-height); min-height: var(--compact-height); border-radius: var(--compact-radius); }
+:is(button.small, .textbox) ~ .icon-button, .icon-button[aria-haspopup="menu"] { min-width: var(--compact-height); min-height: var(--compact-height); border-radius: var(--compact-radius); }
+.icon-button[aria-haspopup="menu"] { width: var(--compact-height); height: var(--compact-height); }
 .link { padding: 0; border: 0; border-radius: 0; background: none; font: inherit; color: var(--link); text-align: left; cursor: pointer; }
 .link:not(:disabled, [aria-disabled="true"]):hover { text-decoration: underline; }
 a.link { text-decoration: none; }
@@ -182,11 +183,17 @@ label:has(> .label-error) > .muted { display: none; }
 .form:first-child { margin-block-start: 0; }
 .form:last-child { margin-block-end: 0; }
 .form > p { margin: 0; }
-.form:has(> p:empty:last-child) { margin-block-end: -.5rem; }
+.form:has(> p:empty:last-child:not(.hint)) { margin-block-end: -.5rem; }
 :is(.form-inline, .form-row) { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
 .form-inline > .field { flex: 1 1 12rem; }
 .form-row.halves > .field { flex: 1 1 14rem; }
 .form-row.caps-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+.form-row.columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(11rem, (100% - 1rem) / 3), 1fr)); }
+.form-row.columns > sf-issue-picker { grid-column: 1 / -1; }
+.form-row.columns > :nth-child(1 of .line-start:not([hidden])) { grid-column-start: 1; }
+.issue-number { display: flex; gap: .5rem; min-width: 0; }
+.issue-number > .textbox { flex: 1 1 auto; min-width: 0; }
+.issue-number > button { flex: none; }
 .field { display: grid; align-content: start; gap: .2rem; min-width: 0; }
 .field > p { margin: 0; }
 .form > :is(h3, h4):has(+ :is(.field, .form-row, .form-inline)) { margin-block-end: calc(var(--heading-gap) - .5rem); line-height: 1.2; }
@@ -199,15 +206,19 @@ label:has(> .label-error) > .muted { display: none; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; margin-block-start: .75rem; }
 .form > .form-actions { margin-block-start: .75rem; }
 .form-actions > button:not(.link, .icon-button) { min-height: var(--compact-height); padding: .1rem .6rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
+.form-actions > .form-actions { margin-block-start: 0; }
 :is(.form-inline, .form-row) > .form-actions { margin-block-start: 0; }
 .field > .textbox { min-width: 0; }
 :is(.form-inline, .form-row) > .field > .textbox { width: 100%; }
-.field-row > button, .field-row > :is(.dispatch-picks, .dispatch-actions) > button, :is(.form-inline, .form-row) > .form-actions > button { box-sizing: border-box; min-height: var(--compact-height); font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
-.field-row > button, .field-row > .dispatch-actions > button { padding: 0 .75rem; }
+.field-row > button, :is(.form-inline, .form-row) > .form-actions > button { box-sizing: border-box; min-height: var(--compact-height); font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
+.field-row > button { padding: 0 .75rem; }
 @supports (appearance: base-select) {
   select.textbox, select.textbox::picker(select) { appearance: base-select; }
   select.textbox { display: inline-flex; align-items: center; gap: .5rem; }
   select.textbox::picker-icon { color: var(--soft); }
+  select.textbox > button { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; padding: 0; color: inherit; font: inherit; background: none; border: 0; }
+  select.textbox selectedcontent { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  select.textbox::picker-icon { flex: none; }
   select.textbox::picker(select) { margin: 4px 0; padding: .3rem; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgb(0 0 0 / .25); }
   select.textbox option { display: flex; align-items: center; gap: .4rem; padding: .2rem .5rem; font-size: .875rem; border-radius: 6px; }
   select.textbox option:hover { background: var(--hover); }
@@ -458,7 +469,7 @@ dialog > .page-head { min-height: 24px; margin: 0; }
 dialog > .page-head > h2.label { line-height: 1; }
 sf-changes { margin-bottom: 1.6rem; }
 #side > :is(section, sf-reviews, sf-push-panel, sf-verify, sf-forge-panel, sf-split, sf-pull-follow, sf-intent, sf-rules) { margin-bottom: var(--section-gap); }
-#side > :is(section, sf-reviews, sf-push-panel, sf-verify, sf-forge-panel, sf-split, sf-pull-follow, sf-intent):has(> :is(p:not(:empty), :is(ul, ol):not(.list), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only)), > :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter):nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(p:not(:empty), :is(ul, ol):not(.list)):last-child) { margin-bottom: calc(var(--section-gap) - .1875rem); }
+#side > :is(section, sf-reviews, sf-push-panel, sf-verify, sf-forge-panel, sf-split, sf-pull-follow, sf-intent):has(> :is(p:not(:empty), :is(ul, ol):not(.list), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only)), > :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter):nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(p:not(:empty), :is(ul, ol):not(.list)):last-child) { margin-bottom: calc(var(--section-gap) - .1875rem); }
 sf-push-panel .push-result { display: grid; row-gap: .15rem; padding-left: 1.5rem; }
 sf-push-panel .push-result:focus { outline: none; }
 sf-push-panel .push-result:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
@@ -651,15 +662,10 @@ button[aria-busy="true"][data-busy-shown]::before { animation: spin .8s linear i
 .list.flat > li { padding-block: .15rem; border-bottom: 0; }
 .list.flat > li > p { margin-block: .3rem 0; }
 .stacked .field > label { color: var(--ink); }
-.stacked :is(.textbox, button:not(.link)) { width: 100%; }
-.stacked .textbox { font-family: var(--mono); }
-.stacked button:not(.link) { min-height: var(--compact-height); padding: .25rem .75rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
+.stacked .textbox { width: 100%; font-family: var(--mono); }
 .stacked > button.link { justify-self: start; }
 :is(.stacked > button.link, button.add-more) { min-height: 24px; padding: 0; }
 .token-help { display: inline-block; }
-button.add-host { width: 100%; min-height: var(--compact-height); padding: .25rem .75rem; font-size: var(--compact-font); line-height: var(--compact-line); border-radius: var(--compact-radius); }
-.stacked .form-actions > button:not(.link) { flex: none; width: auto; padding: .25rem .9rem; }
-.stacked .form-actions > button.primary { flex: 1 1 auto; }
 sf-secret { position: relative; display: flex; min-width: 0; }
 sf-secret > .textbox, .stacked sf-secret > .textbox { flex: 1 1 auto; width: auto; min-width: 0; padding-inline-end: 2.5rem; }
 sf-secret:focus-within > .textbox { border-color: var(--focus, var(--accent)); }
@@ -736,16 +742,12 @@ sf-intent li { margin-bottom: .25rem; }
 .control.nudge { padding: .4rem .4rem .4rem .8rem; color: var(--ink); background: color-mix(in srgb, var(--warn) 9%, var(--card)); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .control.nudge strong { color: var(--ink); }
 .control.nudge.alert { background: color-mix(in srgb, var(--warn) 16%, var(--card)); border-color: var(--warn); }
-.composer.picking :is(#checkpoint, #stall) { display: none; }
-.composer.picking :is(.field, .attachments) { display: none; }
-.size-pick { display: grid; gap: .5rem; }
-.size-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; }
-.size-option { display: grid; gap: .15rem; text-align: start; padding: .55rem .8rem; }
-.size-option:hover { border-color: var(--accent); }
+.work-type-card { display: grid; gap: .5rem; margin: 0; max-height: 40dvh; overflow-y: auto; }
+.work-type-card .agent-words { margin: 0; padding: .3rem .6rem; border-inline-start: 3px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .hint:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .strip { position: relative; display: flex; align-items: center; gap: .4rem; min-height: max(24px, 1.375rem); pointer-events: none; }
 .strip-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.composer-main:not(:has(> :is(#control, #checkpoint, #stall, #attachments, #size-pick):not([hidden]))) > .strip { position: absolute; bottom: calc(100% + .5rem); left: 0; right: 0; }
+.composer-main:not(:has(> :is(#control, #checkpoint, #stall, #attachments, #work-type-card):not([hidden]))) > .strip { position: absolute; bottom: calc(100% + .5rem); left: 0; right: 0; }
 .jump { display: flex; gap: .4rem; margin-left: auto; pointer-events: auto; }
 .jump button { min-height: max(24px, 1.375rem); padding: 0 .6rem; font-size: .75rem; background: var(--card); box-shadow: 0 2px 8px rgb(0 0 0 / .2); }
 .dots { display: flex; align-items: center; gap: 4px; }
@@ -774,41 +776,37 @@ sf-toasts { position: fixed; top: 2.5rem; left: 50%; z-index: 5; display: flex; 
 .brand { color: var(--ink); font-weight: 600; text-decoration: none; }
 .brand + strong { font-weight: 400; color: var(--soft); }
 .view { max-width: 70rem; margin: 0 auto; padding: 0 1.25rem 1.5rem; }
-.sessions a { display: grid; grid-template-columns: var(--dot) minmax(0, min(22rem, 45%)) minmax(0, 1fr) auto; gap: .75rem; align-items: center; color: inherit; text-decoration: none; }
-.sessions a:hover { background: var(--hover); }
-.sessions a:hover :is(.what, .secondary, .tag):not(.ok, .warn, .bad, .busy, .need, .stopped, .off),
-.session-table .sessions > li.with-menu:hover :is(.what, .secondary, .tag, .muted):not(.ok, .warn, .bad, .busy, .need, .stopped, .off),
+.sessions > li > a { display: grid; grid-template-columns: var(--dot) minmax(0, min(22rem, 45%)) minmax(0, 1fr) auto; gap: .75rem; align-items: center; color: inherit; text-decoration: none; }
+.sessions > li > a:hover { background: var(--hover); }
+.sessions > li > a:hover :is(.what, .secondary, .tag):not(.ok, .warn, .bad, .busy, .need, .stopped, .off),
 .projects > li.boxlist-row:not(:has(.project-sessions:hover)):hover :is(.secondary, .tag, .notice, .muted):not(.ok, .warn, .bad) { color: var(--ink); }
 .sessions .name { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .35rem; min-width: 0; overflow: hidden; white-space: nowrap; }
 .sessions .name .title { flex: 0 1 auto; min-width: min(6rem, 100%); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .sessions .name .tag { flex: none; }
-.sessions .name .usage-line { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: .75rem; }
 .session-table .sessions .name { font-size: inherit; font-weight: inherit; line-height: inherit; }
 .sessions .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions .when, .sessions-head .when { white-space: nowrap; text-align: end; }
 .sessions .mode { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sessions a:has(> .open-cta), .sessions-head { grid-template-columns: minmax(0, min(22rem, 40%)) minmax(0, 1fr) minmax(0, 9rem) 2.5rem 3.5rem; }
+.sessions .session-cells { display: grid; gap: .75rem; align-items: center; }
+.sessions .session-cells, .sessions-head { grid-template-columns: minmax(0, min(22rem, 40%)) minmax(0, 1fr) minmax(0, 9rem) 2.5rem 3.5rem; }
 .sessions .what.busy { color: var(--good-ink); }
 .sessions .what:is(.need, .stopped) { color: var(--warn-ink); }
 .sessions .what.off { color: var(--bad-ink); }
-.session-table { margin: 0 0 1.5rem; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.session-table { margin: 0 0 1.5rem; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .session-table > .sessions { margin: 0; padding: 0; list-style: none; }
-.session-table .sessions a:focus-visible { outline-offset: -2px; }
 .session-table > .sessions > li { border-top: 1px solid var(--line); }
+.session-table > .sessions > li:hover { background: var(--hover); }
 .session-table .boxlist-row { border-radius: 0; }
 .session-table .sessions > li.with-menu { display: grid; grid-template-columns: minmax(0, 1fr) 2rem; align-items: center; padding-right: .3rem; }
-.session-table .sessions > li.with-menu:hover { background: var(--hover); }
-.session-table .sessions > li.with-menu > a:hover { background: none; }
 .with-menu > .sessions-head { padding-right: calc(.8rem + 2rem); }
-.sessions-head { display: grid; gap: .75rem; padding: .3rem .5rem .3rem .75rem; font-size: .75rem; background: var(--paper); }
-.open-cta { justify-self: end; padding: .1rem .6rem; font-size: .8125rem; line-height: 1.25; border-radius: 4px; color: var(--button-ink); background: var(--button); }
-.sessions a:hover .open-cta { color: var(--button-ink); background: var(--button-hover); }
+.sessions-head { display: grid; align-items: center; gap: .75rem; min-height: calc(var(--compact-height) + .6rem); box-sizing: border-box; padding: .3rem .5rem .3rem .75rem; font-size: .75rem; background: color-mix(in srgb, var(--card), var(--ink) 6%); }
+.session-open { justify-self: end; }
 .ended > summary { margin-bottom: .5rem; }
 @container (max-width: 36rem) {
-  .sessions a { grid-template-columns: var(--dot) minmax(0, 1fr) auto; }
+  .sessions > li > a { grid-template-columns: var(--dot) minmax(0, 1fr) auto; }
   .sessions .what { grid-column: 2 / -1; grid-row: 2; white-space: normal; }
-  .sessions a:has(> .open-cta), .sessions-head { grid-template-columns: minmax(0, 1fr) minmax(0, min(9rem, 25%)) 2.5rem 3.5rem; }
-  .sessions a:has(> .open-cta) .what { grid-column: 1 / -1; }
+  .sessions .session-cells, .sessions-head { grid-template-columns: minmax(0, 1fr) minmax(0, min(9rem, 25%)) 2.5rem 3.5rem; }
+  .sessions .session-cells .what { grid-column: 1 / -1; }
   .sessions-head > :nth-child(2) { display: none; }
 }
 
@@ -920,26 +918,17 @@ ul.changes .deleted code { color: var(--deleted-ink); }
 
 .projects > li.boxlist-row:not(:has(.project-sessions:hover)):hover { background: var(--hover); }
 .projects .row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; min-width: 0; min-height: 24px; line-height: 1.4; }
-.projects .folder { flex: none; width: 1.25rem; height: 1.25rem; color: var(--soft); }
+.projects .folder { flex: none; width: var(--compact-height); height: var(--compact-height); margin-inline-start: calc(var(--compact-height) / -16); color: var(--soft); }
 .project-id { display: flex; align-items: baseline; gap: .6rem; flex: 1 1 12rem; min-width: 0; }
-.project-count { flex: none; }
+.project-count { display: inline-flex; flex: none; align-items: center; gap: .25rem; }
 .project-count.link { color: var(--soft); font-size: .8125rem; }
-.project-toggle { display: grid; place-items: center; flex: none; width: max(24px, 1.375rem); height: max(24px, 1.375rem); padding: 0; border: 0; border-radius: 4px; color: var(--soft); }
-.project-toggle:hover { background: var(--hover); color: var(--ink); }
-.project-toggle sf-icon { width: 1rem; height: 1rem; transition: transform .1s; }
-.project-toggle[aria-expanded="true"] sf-icon { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .project-toggle sf-icon { transition: none; } }
+.project-count.link:hover { text-decoration: underline; }
+.project-count .count-chevron { width: .85rem; height: .85rem; transition: transform .15s; }
+.project-count[aria-expanded="true"] .count-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .project-count .count-chevron { transition: none; } }
 .projects > li.boxlist-row { padding-inline: .5rem; }
-.project-toggle-space { display: none; flex: none; width: 24px; }
-sf-projects:has(.project-toggle) .project-toggle-space { display: block; }
-sf-projects:not(:has(.project-toggle)) .projects .folder { margin-inline-start: calc(-1.25rem / 16); }
-.project-sessions { margin: .5rem 0 .2rem 24px; }
-.project-id .name { font-size: .875rem; }
+.project-sessions { margin: .5rem 0 .2rem; }
 .projects .name { flex: 0 0 auto; max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-path { flex: 0 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.boxlist .project-link { font-size: .8125rem; line-height: 1.4; color: var(--soft); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
-.projects > li.boxlist-row:hover .project-link { color: var(--ink); }
-.projects > li.boxlist-row .project-link:is(:hover, :focus-visible) { color: var(--link); text-decoration-color: currentColor; }
 .projects .acts { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; flex: 0 1 auto; margin-left: auto; }
 .projects > li > p { margin: .5rem 0 0; }
 .projects .notice { margin: .5rem 0 0; }
@@ -949,18 +938,7 @@ sf-projects:not(:has(.project-toggle)) .projects .folder { margin-inline-start: 
 .row-menu button:focus-visible { outline-offset: -2px; }
 .row-menu .mark { display: inline-flex; flex: none; width: 1rem; }
 .row-menu .mark .icon { width: 1rem; height: 1rem; }
-:is(form.dispatch > details, form.dispatch > sf-issue-picker > details)[open] { padding-bottom: .25rem; }
-form.dispatch .opts input { flex: 1 1 12rem; min-width: 0; }
-form.dispatch .opts > .field { flex: 1 1 12rem; }
-form.dispatch .opts select { flex: none; max-width: 100%; }
-form.dispatch :is(.dispatch-picks, .dispatch-actions) { display: grid; grid-auto-flow: column; gap: .5rem; flex: none; max-width: 100%; }
-form.dispatch .dispatch-picks { grid-auto-columns: minmax(0, 1fr); }
-form.dispatch .dispatch-picks > select { width: 100%; min-width: 10.5em; }
-form.dispatch .dispatch-actions { grid-auto-columns: minmax(5.5rem, 1fr); margin-inline-start: auto; }
-form.dispatch .dispatch-actions > button { width: 100%; }
-@container (max-width: 22rem) {
-  form.dispatch .dispatch-picks { grid-auto-flow: row; flex: 1 1 100%; }
-}
+form.dispatch :is(.issue-list, .issue-picked):empty { display: none; }
 #size { flex: 1; min-width: 0; justify-content: space-between; }
 .team-row, .team-view { margin: 0 0 .75rem; }
 .team-text { max-block-size: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1016,16 +994,17 @@ sf-projects > .label { margin-top: .5rem; }
 .welcome :is(.start, .recent, .welcome-right) > h2 { margin: 0 0 .35rem; font-size: 1.5em; font-weight: 600; line-height: 1.3; color: var(--ink); }
 sf-accordion { display: grid; border: 1px solid var(--line); border-radius: 6px; }
 .accordion-item + .accordion-item { border-top: 1px solid var(--line); }
-.accordion-head { display: flex; align-items: center; gap: .5rem; min-height: 2.25rem; padding: .35rem .7rem; list-style: none; }
+.accordion-head { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .5rem; min-height: 2.25rem; padding: .35rem .7rem; padding-inline-start: 2.05rem; list-style: none; }
 .accordion-head::-webkit-details-marker { display: none; }
 .accordion-head:hover { background: var(--hover); }
 .accordion-item:first-child .accordion-head { border-radius: 5px 5px 0 0; }
 .accordion-item:last-child:not([open]) .accordion-head { border-radius: 0 0 5px 5px; }
 .accordion-item:only-child:not([open]) .accordion-head { border-radius: 5px; }
-.accordion-chevron { flex: none; width: .85rem; height: .85rem; color: var(--soft); transition: transform .15s; }
+.accordion-chevron { position: absolute; inset-inline-start: .7rem; top: 50%; translate: 0 -50%; width: .85rem; height: .85rem; color: var(--soft); transition: transform .15s; }
 .accordion-item[open] .accordion-chevron { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .accordion-chevron { transition: none; } }
 .accordion-title { color: var(--ink); font-size: .875rem; font-weight: 600; }
+.accordion-head > .muted { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
 .accordion-panel { display: grid; gap: .5rem; justify-items: start; padding: 0 .7rem .8rem 2.05rem; }
 .setup-code { position: relative; box-sizing: border-box; max-width: 100%; padding: .6rem 2.75rem .6rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
 .setup-code code { padding: 0; font-family: var(--mono); font-size: .75rem; line-height: 1.5; color: var(--ink); background: none; border: 0; border-radius: 0; overflow-wrap: anywhere; user-select: all; }
@@ -1163,10 +1142,12 @@ dialog.login { width: min(34rem, calc(100vw - 2rem)); max-height: calc(100dvh - 
 dialog.login .login-row p { margin: .35rem 0; }
 dialog.login .login-code .form-actions > button { box-sizing: border-box; min-height: var(--compact-height); }
 dialog.login .login-code .textbox { min-width: 0; font-family: var(--mono); }
+dialog.login .login-code .textbox::placeholder { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 dialog.login p.bad { color: var(--bad-ink); }
 dialog.login .login-kinds { margin: .6rem 0 .35rem; }
 dialog.login .login-panel p { margin: 0; }
 dialog.login .login-panel > form { justify-self: stretch; }
+dialog.login .login-link { display: flex; justify-content: center; justify-self: stretch; }
 dialog.identity { width: min(32rem, calc(100vw - 2rem)); margin-block: 8vh auto; }
 dialog.identity p { margin: .35rem 0; }
 dialog.identity .identity-form .textbox { min-width: 0; }
@@ -1310,7 +1291,7 @@ sf-changes .line-comment-list li { overflow-wrap: anywhere; }
 dialog.workspace .list li, dialog.exceptions .list li { overflow-wrap: anywhere; }
 dialog.workspace .row, dialog.exceptions .row { flex-wrap: wrap; gap: .4rem; }
 dialog.exceptions .exception-row p { margin: .15rem 0 0; }
-sf-usage, sf-session-limits, sf-token-expiry, sf-caps-fields, sf-project-caps { display: block; }
+sf-usage, sf-session-limits, sf-token-expiry, sf-project-caps { display: block; }
 sf-usage { margin-top: 1.5rem; }
 .usage-window { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(5rem, 10rem) minmax(0, auto); gap: .6rem; align-items: center; margin: .2rem 0; font-size: .8125rem; }
 .usage-window > .usage-name { min-width: 0; overflow-wrap: anywhere; }
@@ -1341,10 +1322,6 @@ sf-token-expiry > .notice { margin: .5rem 0 0; }
 .saved-prompt-text { margin: .2rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .team-rule-list { margin: .2rem 0 .4rem; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
 sf-lineage { display: block; }
-.dispatch .start-from { max-width: 28rem; }
-.dispatch .start-from select { width: 100%; }
-form.dispatch .advanced-settings { display: block; }
-form.dispatch .advanced-settings > :not(summary) { margin-top: .5rem; }
 sf-pull-follow { display: block; }
 body.side-full #side > sf-pull-follow { padding-top: 1.25rem; border-top: 1px solid var(--line); }
 sf-pull-follow .pull-head { gap: .4rem; align-items: baseline; flex-wrap: wrap; margin: .3rem 0; }
@@ -1356,12 +1333,17 @@ sf-pull-follow .forge-body, sf-issue-picker .forge-body { max-height: 20rem; ove
 sf-pull-follow .pull-findings { margin-top: .6rem; padding-top: .5rem; border-top: 1px solid var(--line); }
 sf-pull-follow .pull-settings { margin-top: .8rem; }
 sf-pull-follow .pull-settings-form .textbox { min-width: 0; }
-sf-issue-picker { display: block; }
-sf-issue-picker .issue-items { margin: .3rem 0; }
-sf-issue-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }
-sf-issue-picker .issue-items button[aria-pressed="true"] { font-weight: 600; }
-sf-issue-picker .issue-title { max-height: 6rem; font-weight: 600; }
-sf-issue-picker .issue-picked { margin-top: .4rem; }
+sf-issue-picker { display: grid; gap: .5rem; min-width: 0; }
+sf-issue-picker .issue-items { margin: 0; }
+sf-issue-picker .issue-items > li:first-child { padding-block-start: 0; }
+.issue-items:has(.pick-row) { contain: inline-size; }
+.issue-items > .pick-row { flex-wrap: nowrap; }
+.pick-row > .pick-text > .tip-text { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-row > button.pick { position: relative; flex: none; }
+.pick-row > .pick-text { flex: 1 1 auto; min-width: 0; margin-block: 0; }
+.pick-row > button.pick[aria-pressed="true"] > .pick-word { visibility: hidden; }
+.pick-row > button.pick > .pick-mark { position: absolute; inset: 0; width: 1rem; height: 1rem; margin: auto; color: var(--good-ink); }
+.issue-items:has(button.pick[aria-pressed="true"]) .pick-row:has(> button.pick[aria-pressed="false"]) > .pick-text { color: var(--soft); }
 sf-session-work { display: block; margin: 0 0 1rem; }
 sf-session-work .queued-text { flex: 1 1 12rem; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 sf-session-work .command-tail { max-block-size: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1376,13 +1358,6 @@ sf-screenshots .screenshot-view img { display: block; max-width: 100%; height: a
 sf-verify { display: block; }
 sf-verify .screenshot-view { margin: .5rem 0 0; }
 sf-verify .screenshot-view img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
-form.dispatch .benchmark-picker, form.dispatch .pair-field { display: block; }
-form.dispatch .benchmark-picker .issue-items { margin: .3rem 0; }
-form.dispatch .benchmark-picker .issue-items button.link { text-align: start; overflow-wrap: anywhere; }
-form.dispatch .benchmark-picker .issue-items button[aria-pressed="true"] { font-weight: 600; }
-form.dispatch .benchmark-picker .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
-form.dispatch .benchmark-picker .issue-title { max-height: 6rem; font-weight: 600; }
-form.dispatch .pair-field textarea { inline-size: 100%; }
 sf-split { display: block; }
 sf-split .split-head { gap: .5rem; align-items: baseline; flex-wrap: wrap; }
 sf-split .forge-card { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
@@ -1391,13 +1366,6 @@ sf-split .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap;
 sf-split .split-title { max-height: 4rem; font-weight: 600; }
 sf-split .split-edit textarea, sf-split .split-edit input { inline-size: 100%; }
 sf-split .split-started { gap: .5rem; align-items: baseline; margin-top: .3rem; }
-sf-compare { display: block; }
-sf-compare .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .75rem; margin-top: .5rem; }
-sf-compare .compare-col { min-width: 0; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; }
-sf-compare .compare-col > h3 { margin: 0 0 .3rem; }
-sf-compare .compare-head { gap: .4rem; align-items: baseline; flex-wrap: wrap; }
-sf-compare .compare-facts, sf-compare .compare-files { margin: .3rem 0; overflow-wrap: anywhere; }
-sf-compare .forge-body { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; margin: .3rem 0 0; }
 dialog.backup .list li, dialog.backup p { overflow-wrap: anywhere; }
 dialog.backup .row { flex-wrap: wrap; gap: .4rem; }
 .state-notices { margin-top: 1rem; }
@@ -1482,19 +1450,19 @@ sf-changes .diff-gap { display: none; }
 :is(.page-head, .dialog-head, .row:has(> :is(h2.label, h3, h4))):has(+ :is(p, .page-intro, .list, .text-row)) { min-height: 0; margin-block-end: 0; padding-block-end: 0; }
 :is(.page-head, .dialog-head):has(+ :is(p, .page-intro, .list)) > :is(h1, h2, h3, .crumbs), :is(.page-head, .dialog-head):has(+ :is(p, .page-intro, .list)) > .crumbs > ol { margin-block: 0; line-height: 1.2; }
 .dialog-head:has(+ :is(p, .page-intro, .list)) > .dialog-x { margin-block-end: -10px; }
-:is(h2.label, h3, h4):not(sf-markdown *):has(+ :is(p, .list, .text-row, ul, ol, h3, h4), + :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter) > :is(p, h3, h4):first-child), .row:has(> :is(h2.label, h3, h4)):has(+ :is(p, .list, .text-row)) > :is(h2.label, h3, h4) { min-height: 0; margin-block-end: 0; line-height: 1.2; }
-:is(.page-head, .dialog-head, h2.label, h3, h4, .row:has(> :is(h2.label, h3, h4))):not(sf-markdown *) + :is(p, .page-intro, .list, .text-row), :is(h2.label, h3, h4):not(sf-markdown *) + :is(ul, ol, :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter):has(> p:first-child)) { margin-block-start: var(--heading-gap); }
-:is(h2.label, h3, h4):not(sf-markdown *) + :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter) > p:first-child { margin-block-start: 0; }
+:is(h2.label, h3, h4):not(sf-markdown *):has(+ :is(p, .list, .text-row, ul, ol, h3, h4), + :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter) > :is(p, h3, h4):first-child), .row:has(> :is(h2.label, h3, h4)):has(+ :is(p, .list, .text-row)) > :is(h2.label, h3, h4) { min-height: 0; margin-block-end: 0; line-height: 1.2; }
+:is(.page-head, .dialog-head, h2.label, h3, h4, .row:has(> :is(h2.label, h3, h4))):not(sf-markdown *) + :is(p, .page-intro, .list, .text-row), :is(h2.label, h3, h4):not(sf-markdown *) + :is(ul, ol, :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter):has(> p:first-child)) { margin-block-start: var(--heading-gap); }
+:is(h2.label, h3, h4):not(sf-markdown *) + :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter) > p:first-child { margin-block-start: 0; }
 :is(.page-head, .dialog-head, h2.label, h3, h4, .row:has(> :is(h2.label, h3, h4))):not(sf-markdown *) + .list > li:first-child, .page-intro + .list > li:first-child { padding-block-start: 0; }
 .row:has(> :is(h2.label, h3, h4)):has(> button.small) { row-gap: .5rem; }
 :is(.page-head, .dialog-head, .row:has(> :is(h2.label, h3, h4))):has(+ :is(p, .page-intro, .list, .text-row)) > .docs-link { margin-block: calc(-1 * var(--heading-gap) - .1rem); }
-:is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):where(:not(:nth-child(1 of :not([hidden], .sr-only)))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: var(--section-gap); }
-:where(:is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))), :is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))) + p:empty, :is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))) + p:empty + p:empty) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .1875rem); }
-:where(h2.label, h3, h4, details:not([open]):has(> summary.label)):not(.sr-only) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .05rem); }
-.form > * + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .5rem); }
-.form > :has(> p:last-child) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .5rem - .1875rem); }
+:is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):where(:not(:nth-child(1 of :not([hidden], .sr-only)))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: var(--section-gap); }
+:where(:is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))), :is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))) + p:empty, :is(p:not(:empty), .list:not(:has(> li:last-child :is(button, input, select, textarea))), :is(ul, ol):not(.list, .boxlist), summary, details:not([open], :has(> summary.label)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :is(p:not(:empty), :is(ul, ol):not(.list, .boxlist), details:not([open])):nth-last-child(1 of :not(p:empty, [hidden], .sr-only))), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, .session-table):has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > :is(.list, p:not(:empty)):last-child):not(:has(> :nth-last-child(1 of :not(p:empty, [hidden], .sr-only)) > .list:last-child > li:last-child :is(button, input, select, textarea)))) + p:empty + p:empty) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .1875rem); }
+:where(h2.label, h3, h4, details:not([open]):has(> summary.label)):not(.sr-only) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .05rem); }
+.form > * + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .5rem); }
+.form > :has(> p:last-child) + :is(h2.label, h3, h4, :is(.row, .page-head):has(> :is(h2.label, h3, h4)), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child))):not(sf-markdown *, .card *, .meta + *, .empty-state *) { margin-block-start: calc(var(--section-gap) - .5rem - .1875rem); }
 .form > :has(+ :is(h3, h4)) > p:last-child { margin-block-end: 0; }
-* + :is(h2.label, h3, h4):not(sf-markdown *, .card *, .meta + *), :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .compare-col, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child)) > :is(h2.label, h3, h4, summary.label):first-child { line-height: 1.2; }
+* + :is(h2.label, h3, h4):not(sf-markdown *, .card *, .meta + *), :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown, sf-markdown *, .card *, .meta + *, #side > *, dialog, [popover]):is(:has(> :is(h2.label, h3, h4, summary.label):first-child), :has(> :not(.card, .empty-state, .push-facts, .forge-card, .notice, .path-card, .usage-meter, sf-markdown):first-child > :is(h3, h4):first-child), :not(.page-side):has(> .page-head:first-child > h2.label:first-child)) > :is(h2.label, h3, h4, summary.label):first-child { line-height: 1.2; }
 details:not([open]) > summary.label { margin-block-end: 0; }
 .empty-state-line { margin-block: 0 .5rem; }
 .list > li.empty-state-item { padding: 0; border-bottom: 0; }

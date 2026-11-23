@@ -56,18 +56,15 @@ type Dispatch struct {
 	IssueHash string
 	Effort    string
 	Box       string
-	Caps      *Caps
 
-	pinned    *startPoint
 	group     string
 	groupKind string
 	asked     string
 }
 
 type Started struct {
-	SID         string
-	ID          string
-	CapsRefused string
+	SID string
+	ID  string
 }
 
 type Offer struct {
@@ -85,6 +82,7 @@ type Starter interface {
 	Remove(ctx context.Context, sid string, offer *Offer) (*Offer, error)
 	Expect(agent string, x Expect) error
 	Expectations() map[string]Expect
+	SessionName() string
 }
 
 type DispatcherConfig struct {
@@ -364,7 +362,11 @@ func (d *Dispatcher) dispatch(ctx context.Context, q Dispatch) (Started, error) 
 	}
 	base := at.commit
 	short := randomHex(4)
-	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: strings.TrimSpace(q.Name), check: check, typ: q.Type, at: d.reg.now()}
+	display := strings.TrimSpace(q.Name)
+	if display == "" {
+		display = d.SessionName()
+	}
+	r := &run{spec: spec, repo: repo.Name, repoPath: repo.Path, base: base, name: "sf-" + short, branch: "sf/" + short, id: short, display: display, check: check, typ: q.Type, at: d.reg.now()}
 	r.box, r.clone = box, BoxClone(d.cfg.Workspace, box, repo.Name)
 	r.origin = at.origin
 	r.from = startFromOf(q)
@@ -428,7 +430,7 @@ func (d *Dispatcher) launch(ctx context.Context, r *run, q Dispatch, kept *bool)
 		return Started{SID: r.sid, ID: r.id}, err
 	}
 	d.audited(ctx, r)
-	return Started{SID: r.sid, ID: r.id, CapsRefused: d.startCaps(r.sid, q.Caps)}, nil
+	return Started{SID: r.sid, ID: r.id}, nil
 }
 
 func utf8Valid(s string) bool {

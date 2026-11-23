@@ -54,11 +54,11 @@ function describe(s: SignIn | null, busy = false): string {
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
 
-function secretField(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
-  const input = textbox({ type: 'password', name, autocomplete, spellcheck: false })
+function secretField(name: string, words: string, what: string, autocomplete: AutoFill, inBox = false): [HTMLElement, HTMLInputElement] {
+  const input = textbox({ type: 'password', name, autocomplete, spellcheck: false, ...(inBox ? { placeholder: words } : {}) })
   input.setAttribute('aria-required', 'true')
   input.addEventListener('input', () => labelError(input, ''))
-  return [field(words, secret(input, what), { cls: 'login-field' }), input]
+  return [field(words, secret(input, what), { cls: 'login-field', ...(inBox ? { kind: 'hidden' as const } : {}) }), input]
 }
 
 function sending(input: HTMLInputElement, on: boolean) {
@@ -99,7 +99,7 @@ class Row {
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
     this.linkRow.append(this.linkSaid)
-    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
+    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code', true)
     this.code = code
     this.codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(

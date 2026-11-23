@@ -86,7 +86,6 @@ type Server struct {
 	branchCopy session.KeepPage
 	verify     session.VerifyPage
 
-	pairs  session.PairsPage
 	splits *session.Splits
 
 	backups session.BackupPage
@@ -190,14 +189,14 @@ var pageRoutes = map[string]bool{
 	projectFactsRoute: true,
 	planReviewRoute:   true, explainRoute: true,
 	savedPromptsRoute: true,
-	bringMainRoute:    true, startPointsRoute: true,
+	bringMainRoute:    true, startPointsRoute: true, sessionNameRoute: true,
 	pullRoute: true, issuesRoute: true, findingIssuesRoute: true,
 	sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true,
 	screenshotsRoute: true, screenshotRoute: true,
 	metricsRoute: true, decisionLogRoute: true,
 	keepRoute: true, verifyRoute: true,
-	pairRoute: true, splitPageRoute: true,
-	exportRoute: true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
+	splitPageRoute: true,
+	exportRoute:    true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
 	reviewReplyRoute: true,
 	diagnosticsRoute: true,
@@ -480,10 +479,6 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.verifyAPI(w, r, body)
 		return
 	}
-	if r.URL.Path == pairRoute {
-		s.pairAPI(w, r, body)
-		return
-	}
 	if r.URL.Path == splitPageRoute {
 		s.splitPage(w, r, body)
 		return
@@ -688,6 +683,7 @@ var apiFields = map[string][]string{
 	"/api/release":   {"sid"},
 	"/api/projects":  {},
 	"/api/docs":      {},
+	sessionNameRoute: {},
 }
 
 func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
@@ -742,6 +738,8 @@ func (s *Server) api(w http.ResponseWriter, path string, body map[string]any) {
 		s.projects(w)
 	case "/api/docs":
 		send(w, http.StatusOK, map[string]any{"text": guide()})
+	case sessionNameRoute:
+		s.sessionName(w)
 	case "/api/audit":
 		s.audit(w, body)
 	default:

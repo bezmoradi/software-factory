@@ -12,7 +12,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -20,7 +20,6 @@ scenarios:
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; the gate step that expects it reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -39,6 +38,32 @@ scenarios:
           any:
             "$.body.entries": { kind: session-start, by: page, result: started, session: "${sid}", branch: "sf/${id}", from: main }
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: helper-image
         do: docker.container
         with: { name: sf-proctor-helper-1 }
@@ -610,7 +635,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "disk ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "disk ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -633,6 +658,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: caps-without-disk
         do: http.request
         identity: page
@@ -1032,14 +1083,14 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor home ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor home ${run.id}" }
         expect:
           equal:
             "$.status": 202
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "agent is the development agent's fixed id, dev-acp, and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -1055,6 +1106,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: plant
         do: http.request
         identity: page
@@ -1515,7 +1592,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor verify ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor verify ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -1536,6 +1613,32 @@ scenarios:
             "$.body.entries[0].kind": session-start
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: fix }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": fix
       - id: helper-image
         do: docker.container
         with: { name: sf-proctor-helper-1 }
@@ -2077,3 +2180,48 @@ scenarios:
             "$.body.runs[0].image": "proctor@${helper_image}"
             "$.body.why": "The check command or the project's verification image changed since the last run, so it doesn't count."
         no_state_check: "op read changes nothing; /api/verify isn't declared a read, since op start on the same path starts a run"
+
+  - id: SES-006
+    name: "The new-session form's suggested name is an adjective and a noun from the engine's two lists, lowercase and joined by a hyphen, with a number after a second hyphen only when every pick was taken; one answer's adjective and another's noun are each matched against their whole list, since one pattern holding both lists is over Proctor's 1,024 bytes; the route takes no field"
+    steps:
+      - id: adjective-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.headers.cache-control": ["no-store"]
+          matches: { "$.body.name": '(agile|amber|arcane|astute|audacious|azure|balanced|beaming|bold|brave|bright|brilliant|calm|careful|celestial|cheerful|clever|cosmic|crafty|curious|daring|dazzling|deep|determined|dynamic|eager|electric|elegant|emerald|energetic|epic|fearless|fierce|focused|fortunate|friendly|frosty|gentle|glowing|golden|graceful|grand|happy|heroic|hidden|honest|humble|infinite|ingenious|inspired|keen|kind|lively|lucky|luminous|magnetic|majestic|mighty|mindful|mystic|nimble|noble|optimal|patient|peaceful|playful|polished|powerful|precise|primal|radiant|rapid|reliable|resilient|robust|rugged|savvy|serene|sharp|silent|silver|sleek|smart|soaring|solid|spirited|steady|stellar|strategic|subtle|sunny|swift|tenacious|tranquil|unified|valiant|vibrant|vivid|wise|zen)-[a-z]+(-[0-9]+)?' }
+      - id: noun-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.headers.cache-control": ["no-store"]
+          matches: { "$.body.name": '[a-z]+-(albatross|anvil|badger|beacon|bison|bluejay|boulder|bridge|canyon|captain|cascade|castle|cheetah|circuit|comet|compass|condor|coral|cougar|crystal|dolphin|dragon|eagle|eclipse|falcon|feather|ferret|firefly|fjord|flamingo|forge|fox|gazelle|gecko|glacier|glider|griffin|hammer|harbor|heron|horizon|ibex|island|jaguar|kestrel|kingfisher|lantern|leopard|lightning|lynx|marble|meadow|meteor|monarch|mongoose|mountain|nebula|nightingale|oasis|octopus|orchid|otter|owl|panther|paradox|phoenix|pioneer|planet|prism|puma|quartz|raven|reef|rocket|sailor|satellite|scarab|scout|shark|sparrow|sphinx|spider|squirrel|starling|summit|thunder|tiger|tortoise|trident|turbine|turtle|vanguard|voyager|walrus|warbler|whale|wolf|wombat|zenith|zephyr)(-[0-9]+)?' }
+      - id: unknown-field
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }

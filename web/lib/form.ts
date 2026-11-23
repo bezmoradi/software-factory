@@ -83,7 +83,14 @@ export function fieldRow(children: Node[], cls = ''): HTMLDivElement {
 export function actions(buttons: Node[], lead: Node[] = []): HTMLDivElement {
   const row = el('div', 'form-actions')
   const submits = buttons.filter(b => b instanceof HTMLButtonElement && b.type === 'submit')
-  row.append(...lead, ...(lead.length ? [el('span', 'spacer')] : []), ...buttons.filter(b => !submits.includes(b)), ...submits)
+  const ordered = [...buttons.filter(b => !submits.includes(b)), ...submits]
+  if (!lead.length) {
+    row.append(...ordered)
+    return row
+  }
+  const end = el('div', 'form-actions')
+  end.append(...ordered)
+  row.append(...lead, el('span', 'spacer'), end)
   return row
 }
 

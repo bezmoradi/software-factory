@@ -24,6 +24,8 @@ type Facts struct {
 	Artifacts     []string
 	ArtifactsOnly bool
 	Brief         BriefCheck
+	Untyped       bool
+	Offered       []string
 }
 
 type ActionKind string
@@ -151,6 +153,8 @@ func approveCause(f Facts, a Action) string {
 
 func editHold(f Facts, path string) string {
 	switch {
+	case f.Untyped:
+		return untypedHold(path, f.Offered)
 	case f.Profile == CodeReview:
 		return "This session's work type is Code review, which doesn't change files: " + path + " stays as it is. To fix what the review found, the developer picks Fix on the software factory page. " + noDetour
 	case f.Profile == Docs && !DocFile(path):
@@ -167,6 +171,14 @@ func editHold(f Facts, path string) string {
 		until = "Until then only this step's own files can change: " + strings.Join(f.Artifacts[:min(len(f.Artifacts), 8)], ", ") + "."
 	}
 	return path + " can't change yet: " + needs + " the developer's approval on the software factory page first. " + order + " " + until + " " + noDetour
+}
+
+func untypedHold(path string, offered []string) string {
+	ids := make([]string, 0, min(len(offered), 12))
+	for _, id := range offered[:min(len(offered), 12)] {
+		ids = append(ids, clip(id, 40))
+	}
+	return path + " can't change yet: this session has no work type, and the work type decides which steps and reviews apply. Suggest one with the factory_work_type tool, giving type, one of " + strings.Join(ids, ", ") + ", and reason, one line saying why it fits. Then end your turn: the developer picks the work type on the software factory page, and your next message says when you can go on. " + noDetour
 }
 
 type Build struct {

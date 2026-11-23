@@ -17,7 +17,7 @@ done >"$tmp/problems"
 for f in web/*.ts web/components/*.ts web/lib/*.ts; do
 	[ "$f" = web/lib/controls.ts ] && continue
 	grep -nE "(\bel|createElement)\([[:space:]]*['\"\`](input|select|textarea|option|optgroup)['\"\`]" "$f" | cut -d: -f1 | while IFS= read -r n; do
-		printf '%s:%s: creates a form control by hand; build it with textbox(), textarea(), dropdown(), option(), optionGroup(), checkbox(), radio() or filePicker() from web/lib/controls.ts\n' "$f" "$n"
+		printf '%s:%s: creates a form control by hand; build it with textbox(), textarea(), dropdown(), option(), checkbox(), radio() or filePicker() from web/lib/controls.ts\n' "$f" "$n"
 	done
 done >>"$tmp/problems"
 

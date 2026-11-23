@@ -226,12 +226,6 @@ func (l *Limits) KeepProjects(names []string) {
 	})
 }
 
-func (l *Limits) ProjectCaps(name string) Caps {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.projects[name]
-}
-
 func (l *Limits) SetProject(name string, c Caps) (bool, error) {
 	clean, ok := CheckCaps(c)
 	if !ok || name == "" || len(name) > 400 {
@@ -313,29 +307,6 @@ func (l *Limits) SetSession(sid string, c Caps) (bool, error) {
 	}
 	l.flush(true)
 	return changed, err
-}
-
-func (l *Limits) StartCaps(sid string, c Caps) error {
-	var k limitsSession
-	if clean, ok := CheckCaps(c); ok && l.reg.admittedProject(sid, &k) && clean == l.ProjectCaps(k.project) {
-		return nil
-	}
-	_, err := l.SetSession(sid, c)
-	return err
-}
-
-func (d *Dispatcher) startCaps(sid string, c *Caps) string {
-	if c == nil || sid == "" {
-		return ""
-	}
-	err := d.reg.Limits().StartCaps(sid, *c)
-	if err == nil {
-		return ""
-	}
-	if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
-		return e.Message
-	}
-	return "The engine couldn't save the session's caps."
 }
 
 func (r *Registry) admittedProject(sid string, out *limitsSession) bool {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -140,6 +143,27 @@ func wholeNumber(v any, low, high int) (int, bool) {
 	return int(f), true
 }
 
+var issueNumberText = regexp.MustCompile(`^#?[0-9]{1,10}$`)
+
+func issueNumber(v any) (int, bool, bool) {
+	switch n := v.(type) {
+	case float64:
+		number, ok := wholeNumber(n, 1, session.MaxIssueNumber)
+		return number, ok, true
+	case string:
+		text := strings.TrimSpace(n)
+		if !issueNumberText.MatchString(text) {
+			return 0, false, true
+		}
+		number, err := strconv.Atoi(strings.TrimPrefix(text, "#"))
+		if err != nil || number < 1 || number > session.MaxIssueNumber {
+			return 0, false, true
+		}
+		return number, true, true
+	}
+	return 0, false, false
+}
+
 func (s *Server) pullRequest(ctx context.Context, w http.ResponseWriter, pulls session.PullsPage, body map[string]any) {
 	op, okOp := body["op"].(string)
 	sid, okSID := viewSession(body)
@@ -236,18 +260,9 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 	}
 	switch op {
 	case "list":
-		if !keysWithin(body, "op", "path", "label", "page") {
+		if !keysWithin(body, "op", "path", "page") {
 			refuseFields(w)
 			return
-		}
-		label := ""
-		if v, has := body["label"]; has {
-			l, ok := v.(string)
-			if !ok {
-				refuseFields(w)
-				return
-			}
-			label = l
 		}
 		page := 1
 		if v, has := body["page"]; has {
@@ -258,7 +273,7 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 			}
 			page = n
 		}
-		v, err := issues.List(ctx, path, label, page)
+		v, err := issues.List(ctx, path, page)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -268,11 +283,15 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 		for _, i := range v.Issues {
 			list = append(list, issueOf(i))
 		}
-		send(w, http.StatusOK, map[string]any{"repo": v.Repo, "label": v.Label, "page": v.Page, "more": v.More, "issues": list})
+		send(w, http.StatusOK, map[string]any{"repo": v.Repo, "page": v.Page, "more": v.More, "issues": list})
 	case "read":
-		number, okNumber := wholeNumber(body["number"], 1, session.MaxIssueNumber)
-		if !keysWithin(body, "op", "path", "number") || !okNumber {
+		number, okNumber, typed := issueNumber(body["number"])
+		if !keysWithin(body, "op", "path", "number") || !typed {
 			refuseFields(w)
+			return
+		}
+		if !okNumber {
+			send(w, http.StatusBadRequest, problem{Error: "number", Field: "number", Message: "Needs an issue number like 123."})
 			return
 		}
 		v, err := issues.Read(ctx, path, number)

@@ -3,7 +3,6 @@ package page
 import (
 	"context"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
@@ -17,10 +16,7 @@ const (
 	maxFromBranch    = 255
 )
 
-var (
-	branchingRoutes = map[string]bool{bringMainRoute: true, startPointsRoute: true}
-	agentID         = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-)
+var branchingRoutes = map[string]bool{bringMainRoute: true, startPointsRoute: true}
 
 type remoteRefJSON struct {
 	Name   string `json:"name"`

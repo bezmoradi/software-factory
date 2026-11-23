@@ -359,8 +359,6 @@ func (a Archive) transform(in, out string, report *session.ImportReport) error {
 			}
 		case name == reviewsFile:
 			err = displayReviews(in, shown)
-		case name == pairsFile:
-			err = pairsHistory(in, out, report)
 		case name == lessonsFile:
 			err = lessonsShown(in, out, report)
 		case row.class == classDisplay:
@@ -443,20 +441,6 @@ func workOff(in, out string, report *session.ImportReport) error {
 		report.Off = append(report.Off, plural(approvals, "session")+" had requirement, plan or flagged-file approvals or locked tests, kept for display only")
 	}
 	return NewWork(out).Save(st)
-}
-
-func pairsHistory(in, out string, report *session.ImportReport) error {
-	list, err := NewPairs(in).Load()
-	if err != nil {
-		return err
-	}
-	for i := range list {
-		list[i].History = true
-	}
-	if n := len(list); n > 0 {
-		report.Off = append(report.Off, plural(n, "pair or benchmark")+" kept for display only: this engine starts no second session for them and keeps no choice between them")
-	}
-	return NewPairs(out).Save(list)
 }
 
 func lessonsShown(in, out string, report *session.ImportReport) error {

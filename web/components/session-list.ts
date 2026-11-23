@@ -18,12 +18,12 @@ export function bySessionOrder(a: SessionInfo, b: SessionInfo): number {
 }
 
 export function sessionKey(list: SessionInfo[], now = Date.now()): string {
-  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.level, s.levelReason, s.sandboxed, s.lineage?.group, s.lineage?.groupKind, s.summary?.word, s.summary?.tone, s.modeLabel, s.levelSaid?.label, s.levelSaid?.tone, s.actions?.manage, age(s.startedAt, now)]))
+  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.lineage?.group, s.lineage?.groupKind, s.summary?.word, s.summary?.tone, s.modeLabel, s.actions?.manage, age(s.startedAt, now)]))
 }
 
 function groupOf(s: SessionInfo, all: SessionInfo[]): string {
   const l = s.lineage
-  if (l?.group && (l.groupKind === 'pair' || l.groupKind === 'goal')) return `${l.groupKind}:${l.group}`
+  if (l?.group && l.groupKind === 'goal') return `goal:${l.group}`
   return all.some(o => o.lineage?.groupKind === 'goal' && o.lineage.group === s.sid) ? `goal:${s.sid}` : ''
 }
 
@@ -47,12 +47,6 @@ export function grouped(list: SessionInfo[]): SessionInfo[] {
 
 function groupTag(s: SessionInfo, all: SessionInfo[]): HTMLElement | null {
   const l = s.lineage
-  if (l?.groupKind === 'pair' && l.group) {
-    const others = all.filter(o => o.sid !== s.sid && o.lineage?.groupKind === 'pair' && o.lineage.group === l.group).map(label)
-    const tag = el('span', 'tag', 'pair')
-    tag.title = visible(others.length ? `Started on the same task as ${others.join(', ')}` : 'Started as one of a pair, or on a merged pull request as a benchmark')
-    return tag
-  }
   if (l?.groupKind === 'goal' && l.group) {
     const goal = all.find(o => o.sid === l.group)
     const tag = el('span', 'tag', 'task')
@@ -138,27 +132,24 @@ export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDi
 
 export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu = false): HTMLLIElement {
   const name = titled(visible(label(s)))
-  const level = s.levelSaid
-  if (level) {
-    const tag = el('span', level.tone ? `tag ${level.tone}` : 'tag', level.label)
-    tag.title = visible(`${s.levelReason ?? ''}${s.levelDropped ? ' This dropped from Locked after the fact.' : ''}`)
-    name.append(tag)
-  }
   if (s.running && !s.live) name.append(el('span', 'tag', 'not connected'))
   else if (s.live && !s.controlled) name.append(el('span', 'tag', 'read-only'))
   if (s.mode === 'bypassPermissions') name.append(el('span', 'tag bad', 'bypass permissions'))
   const group = groupTag(s, all)
   if (group) name.append(group)
-  const usage = el('sf-usage-line', 'usage-line')
-  usage.sid = s.sid
-  name.append(usage)
-  const open = el('span', 'open-cta', 'Open')
-  open.setAttribute('aria-hidden', 'true')
   const tone = s.summary?.tone ?? ''
   const mode = el('span', 'mode secondary', s.mode ? `${s.modeLabel || s.mode} mode` : '')
   mode.title = mode.textContent ?? ''
-  const row = sessionLink(s.sid, key, [name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open])
-  ;(row.firstChild as HTMLAnchorElement).title = s.cwd || ''
+  const open = el('a', 'button primary small session-open', 'Open')
+  open.href = '/'
+  open.dataset.view = `s/${s.sid}`
+  open.dataset.key = key
+  open.setAttribute('aria-label', `Open ${visible(label(s))}`)
+  const cells = el('div', 'boxlist-row session-cells')
+  cells.title = s.cwd || ''
+  cells.append(name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open)
+  const row = el('li')
+  row.append(cells)
   if (menu) {
     row.classList.add('with-menu')
     row.append(...sessionMenu(s, row))

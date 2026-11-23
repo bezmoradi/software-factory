@@ -34,7 +34,6 @@ export interface SessionInfo {
   controlled?: boolean
   mode?: string
   modeLabel?: string
-  levelSaid?: { label: string; tone: string }
   checkpointSaved?: boolean
   step?: string
   busy?: boolean
@@ -43,11 +42,6 @@ export interface SessionInfo {
   lastSeq?: number
   login?: boolean
   claims?: string[]
-  level?: string
-  levelReason?: string
-  levelDropped?: boolean
-  levelLost?: boolean
-  sandboxed?: boolean
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
@@ -120,7 +114,7 @@ export interface Lineage {
   origin?: string
   from: string
   group?: string
-  groupKind?: 'pair' | 'goal'
+  groupKind?: 'goal'
 }
 
 export interface StartFrom {
@@ -742,7 +736,6 @@ export type OverviewSession = SessionInfo & { waiting: CardEvent[] }
 export interface Project {
   path: string
   name: string
-  types: { id: string; name: string; startWarning?: string }[]
   url?: string
   branch?: string
   addedAt?: number
@@ -779,6 +772,8 @@ export interface Starter {
   default?: boolean
   models: { id: string; name: string }[]
   efforts: string[]
+  defaultModel?: string
+  defaultEffort?: string
   fields?: { model: boolean; effort: boolean; expect: boolean }
   command?: string
 }
@@ -826,33 +821,10 @@ export interface Dispatch extends Consent {
   name: string
   model: string
   mode: string
-  type?: string
-  caps?: { money: number; minutes: number; turns: number; disk: number }
   from?: StartFrom
   issue?: number
   issueHash?: string
   effort?: string
-}
-
-export interface PairAgent {
-  agent: string
-  model?: string
-  effort?: string
-}
-
-export interface PairDispatch {
-  path: string
-  name: string
-  type: string
-  agents: [PairAgent]
-  secondModel?: string
-  double?: boolean
-  message?: string
-  benchmark?: { number: number; hash: string; base: string }
-  from?: StartFrom
-  issue?: number
-  issueHash?: string
-  caps?: { money: number; minutes: number; turns: number; disk: number }
 }
 
 export interface HelloEvent {
@@ -1093,6 +1065,15 @@ export interface GateEvent {
   pushed?: boolean
   path?: GatePath
   flow?: FlowModel | null
+  typeAsk?: TypeAsk | null
+}
+
+export interface TypeAsk {
+  text: string
+  suggests?: string
+  type?: string
+  reason?: string
+  use?: string
 }
 
 export interface FlowLook {
@@ -1463,7 +1444,6 @@ declare global {
     'sf-project-jump': CustomEvent<{ part: string }>
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
-    'sf-pair': CustomEvent<PairDispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
@@ -1489,5 +1469,6 @@ declare global {
     'sf-commit-ask': Event
     'sf-session-deleted': CustomEvent<{ sid: string }>
     'sf-packs-changed': Event
+    'sf-work-type': CustomEvent<{ type: string; done: (refusal: string) => void }>
   }
 }

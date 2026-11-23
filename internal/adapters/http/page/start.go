@@ -19,25 +19,28 @@ const (
 )
 
 const (
-	reviewRoute   = "/api/review"
-	overrideRoute = "/api/override"
+	reviewRoute      = "/api/review"
+	overrideRoute    = "/api/override"
+	sessionNameRoute = "/api/session-name"
 )
 
 var starting = map[string]bool{"/api/dispatch": true, "/api/wake": true, "/api/stop-session": true, "/api/remove-session": true}
 
 type starterJSON struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Method  string            `json:"method"`
-	Enabled bool              `json:"enabled"`
-	Off     string            `json:"off,omitempty"`
-	Install bool              `json:"install,omitempty"`
-	Expect  string            `json:"expect"`
-	Default bool              `json:"default,omitempty"`
-	Models  []agentModelJSON  `json:"models"`
-	Efforts []string          `json:"efforts"`
-	Fields  starterFieldsJSON `json:"fields"`
-	Command string            `json:"command"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Method      string            `json:"method"`
+	Enabled     bool              `json:"enabled"`
+	Off         string            `json:"off,omitempty"`
+	Install     bool              `json:"install,omitempty"`
+	Expect      string            `json:"expect"`
+	Default     bool              `json:"default,omitempty"`
+	Models      []agentModelJSON  `json:"models"`
+	Efforts     []string          `json:"efforts"`
+	StartModel  string            `json:"defaultModel,omitempty"`
+	StartEffort string            `json:"defaultEffort,omitempty"`
+	Fields      starterFieldsJSON `json:"fields"`
+	Command     string            `json:"command"`
 }
 
 type starterFieldsJSON struct {
@@ -122,8 +125,9 @@ func (s *Server) projects(w http.ResponseWriter) {
 			}
 			first := a.Enabled && !chosen
 			chosen = chosen || first
+			start := session.AgentStartDefaults(a.ID)
 			starters = append(starters, starterJSON{ID: a.ID, Name: a.Name, Method: string(a.Method), Enabled: a.Enabled, Off: a.Off, Install: a.Install, Expect: string(x), Default: first,
-				Models: modelsJSONOf(session.AgentModels(a.ID)), Efforts: session.AgentEfforts(a.ID)})
+				Models: modelsJSONOf(session.AgentModels(a.ID)), Efforts: session.AgentEfforts(a.ID), StartModel: start.Model, StartEffort: start.Effort})
 			f := session.FieldsOf(a.Method)
 			starters[len(starters)-1].Fields, starters[len(starters)-1].Command = starterFieldsJSON{Model: f.Model, Effort: f.Effort, Expect: f.Expect}, session.StartCommand(a.Method, a.ID)
 		}
@@ -158,11 +162,11 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		rawFrom, hasFrom := body["from"]
 		from, okFrom := startFromOf(rawFrom, hasFrom)
 		box, okBox := boxOf(body)
-		if !keysWithin(body, "path", "name", "model", "mode", "agent", "type", "approve", "costOk", "from", "issue", "issueHash", "effort", "box", "caps") || !okFrom || !okBox {
+		if !keysWithin(body, "path", "name", "model", "mode", "agent", "approve", "costOk", "from", "issue", "issueHash", "effort", "box") || !okFrom || !okBox {
 			refuseFields(w)
 			return
 		}
-		for _, k := range []string{"path", "name", "model", "mode", "agent", "type", "effort"} {
+		for _, k := range []string{"path", "name", "model", "mode", "agent", "effort"} {
 			if v, ok := body[k]; ok {
 				if _, isText := v.(string); !isText {
 					refuse(w, http.StatusBadRequest, k, saidFields)
@@ -188,18 +192,13 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 		if !okIssue {
 			return
 		}
-		caps, okCaps := startCapsOf(w, body)
-		if !okCaps {
-			return
-		}
 		started, err := s.cfg.Starter.Dispatch(ctx, session.Dispatch{
-			Path: str(body["path"], session.MaxCwd+1), Agent: agent, Name: str(body["name"], 400), Model: str(body["model"], 40), Type: str(body["type"], 40), Consent: consent,
+			Path: str(body["path"], session.MaxCwd+1), Agent: agent, Name: str(body["name"], 400), Model: str(body["model"], 40), Consent: consent,
 			From:      from,
 			Issue:     issue,
 			IssueHash: issueHash,
 			Effort:    str(body["effort"], 21),
 			Box:       box,
-			Caps:      caps,
 		})
 		shared.For(r.Context(), s.logger).Info("dispatch", "agent", agent, "issue", issue > 0, "resumed", box != "", "ok", err == nil)
 		if err != nil {
@@ -265,12 +264,16 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, body map[string]
 	}
 }
 
-func startAnswer(started session.Started) map[string]any {
-	out := map[string]any{"ok": true, "id": started.ID, "sid": started.SID}
-	if started.CapsRefused != "" {
-		out["capsRefused"] = started.CapsRefused
+func (s *Server) sessionName(w http.ResponseWriter) {
+	if s.cfg.Starter == nil {
+		send(w, http.StatusNotImplemented, problem{Error: "not-yet", Message: "This engine has no agent-host, so it can't start or manage sessions."})
+		return
 	}
-	return out
+	send(w, http.StatusOK, map[string]string{"name": s.cfg.Starter.SessionName()})
+}
+
+func startAnswer(started session.Started) map[string]any {
+	return map[string]any{"ok": true, "id": started.ID, "sid": started.SID}
 }
 
 func startIssueOf(w http.ResponseWriter, body map[string]any) (int, string, bool) {
@@ -290,23 +293,6 @@ func startIssueOf(w http.ResponseWriter, body map[string]any) (int, string, bool
 		return 0, "", false
 	}
 	return n, h, true
-}
-
-func startCapsOf(w http.ResponseWriter, body map[string]any) (*session.Caps, bool) {
-	raw, has := body["caps"]
-	if !has {
-		return nil, true
-	}
-	m, ok := raw.(map[string]any)
-	if !ok || !keysWithin(m, "money", "minutes", "turns", "disk") {
-		refuseFields(w)
-		return nil, false
-	}
-	c, ok := checkedCaps(w, m)
-	if !ok {
-		return nil, false
-	}
-	return &c, true
 }
 
 func (s *Server) review(w http.ResponseWriter, r *http.Request, body map[string]any) {

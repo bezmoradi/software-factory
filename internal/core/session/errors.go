@@ -69,7 +69,7 @@ func onField(field string, err error) error {
 	return &named
 }
 
-var startFields = []string{"name", "from", "message", "issue", "benchmark"}
+var startFields = []string{"name", "from", "issue"}
 
 func onStartField(err error) error {
 	var e *Error

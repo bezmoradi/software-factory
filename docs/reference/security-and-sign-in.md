@@ -14,6 +14,7 @@ Run these against the published port after any change to `internal/adapters/http
 | `/api/events` or a POST route with a made-up key of the key's length, or the page key under `Basic` | 401 `{"error":"token"}`, with no `why` |
 | `/api/disconnect`, the route the page's Disconnect used, even with the page key | 404 `route` |
 | `/api/agent-models` and `/api/handover`, routes since removed, even with the page key | 404 `route` |
+| `/api/pair`, the route of two sessions on one task, since removed, even with the page key | 404 `route` |
 | `/api/egress` with `op: "agents"`, Network access's removed agents choice | 400 `op` |
 | `/api/events` or a POST route with a key a newer sign-in replaced | 401 `{"error":"token","why":"replaced"}` |
 | `/api/events` or a POST route with a key that ended after 15 minutes with no stream | 401 `{"error":"token","why":"ended"}` |
@@ -68,11 +69,14 @@ Run these against the published port after any change to `internal/adapters/http
 | `/api/wake` with a `home` that isn't 64 lowercase hexadecimal digits, a `refuse` that isn't `true`, or `refuse` with a field other than `sid` | 400 `fields` |
 | `/api/message` with a `home` that isn't 64 lowercase hexadecimal digits | 400 `text` |
 | `/api/dispatch` with a `home` | 400 `fields` |
-| A start (`/api/dispatch`, `/api/pair`) with a bad `issueHash`, or a `benchmark` beside `from`, `issue` or `message` | 400 `issue`, `benchmark`, `from` or `message`, with `field` |
+| `/api/dispatch` with a `type` (the work type is picked in the session) | 400 `fields` |
+| A start (`/api/dispatch`) with a bad `issueHash` | 400 `issue`, with `field` |
 | `/api/wake` `{sid, refuse: true}` for a session whose wake isn't waiting on the settings question | 409 `not asking` |
 | `/api/wake` with `approve` set to the settings question's `digest` | 409 `needs approval` with the same `needs.home` |
 | `/api/diagnostics` with any field in the body | 400 `fields` |
-| `/api/limits` `session`, `project` or `check`, or a start's `caps`, with a cap that is negative, over its range, fractional where it must be whole, or not a number | 400 `fields`, with `field` naming it and a `message` giving its range |
+| `/api/session-name` with any field in the body | 400 `fields` |
+| `/api/session-name` with `{}` | 200 JSON with `name`, an adjective and a noun from the engine's lists joined by a hyphen, sometimes with `-<number>` after it |
+| `/api/limits` `session`, `project` or `check` with a cap that is negative, over its range, fractional where it must be whole, or not a number | 400 `fields`, with `field` naming it and a `message` giving its range |
 | `/api/limits` `session`, `project` or `check` with another field; `measure` with a field other than `sid` | 400 `fields` |
 | `/api/project-commands` `set`, `/api/review-depth` `set`, `/api/project` `hold`, `/api/split` `edit` or `/api/egress` `gateway` with a value its rule doesn't take | 400 with the route's code (`command`, `browser`, `image`, `depth`, `agent`, `hold`, `text`, `gateway`; a gateway host egress refuses keeps its own code and status, with `field` `url`), `field` naming the body's field (`check`, `setup`, `browser`, `image`, `reviewers`, `maxFiles`, `maxLines`, `twice`, `afterBlock`, `title`, `message`, `url`) and a `message` |
 | `/api/lessons` `approve` with an empty `sid`, or one that isn't a session of the project | 409 `session`, with `field` `sid`; a `sid` that isn't a string or isn't a session id's shape stays 400 `fields` |

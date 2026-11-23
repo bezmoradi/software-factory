@@ -1,18 +1,17 @@
 import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, rovingKeys, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
+import { request } from '../api.ts'
 import type { EngineAnswer } from '../api.ts'
 import { actions as actionsRow, answerControl, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { emptyState, pageHead } from '../lib/page.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
-import { effortOptions } from './session-work.ts'
-import './caps.ts'
 import './issue-picker.ts'
 import './usage.ts'
 import './progress.ts'
 import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './session-list.ts'
 import { placeMenu } from '../lib/menu.ts'
-import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
-import type { CloneProgress, Cloning, Expect, PairAgent, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
+import { StartFromField } from './start-from.ts'
+import type { CloneProgress, Cloning, Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 import { textbox, dropdown, option } from '../lib/controls.ts'
 
 function modelChoices(starter: Starter | undefined): [string, string][] {
@@ -78,37 +77,9 @@ function stacked(...children: HTMLElement[]): HTMLFormElement {
   return form({ cls: 'stacked', autocomplete: 'off', children })
 }
 
-function webAddress(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : ''
-  } catch {
-    return ''
-  }
-}
-
-function urlText(url: string): HTMLElement {
-  const href = webAddress(url)
-  const text = el('bdi', '', url)
-  text.dir = 'ltr'
-  if (!href) {
-    const span = el('span', 'project-path secondary')
-    span.title = url
-    span.append(text)
-    return span
-  }
-  const a = el('a', 'project-path project-link')
-  a.href = href
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  a.title = `Open ${url} in a new tab`
-  a.append(text)
-  return a
-}
-
 function nearby(key: string): string[] {
   const row = /^row:(.*):[a-z]+$/.exec(key)
-  if (row) return ['confirm', 'keep', 'toggle', 'count', 'new', 'more', 'remove'].map(a => `row:${row[1]}:${a}`)
+  if (row) return ['confirm', 'keep', 'count', 'new', 'more', 'remove'].map(a => `row:${row[1]}:${a}`)
   const host = /^host:(.*):[a-z]+$/.exec(key)
   if (host) return [`host:${host[1]}:replace`, 'token-more', 'token-save']
   if (key.startsWith('token-')) return ['token-more', 'token-save']
@@ -117,33 +88,31 @@ function nearby(key: string): string[] {
 }
 
 
+let dispatchSerial = 0
+
 class DispatchForm {
   form = form({ cls: 'dispatch', autocomplete: 'off' })
   agent = dropdown({ name: 'agent' })
   why = el('div', 'small muted')
-  name = textbox({ name: 'name', placeholder: 'Optional' })
+  name = textbox({ name: 'name' })
   model = dropdown({ name: 'model' })
   effort = dropdown({ name: 'effort' })
   starter: Starter | undefined
-  kind = dropdown({ name: 'type' })
   expect = dropdown()
-  caps = el('sf-caps-fields', 'dispatch-caps')
-  advanced = el('details', 'advanced-settings')
-  issue = el('sf-issue-picker', 'dispatch-issue')
+  task = dropdown()
+  issue = el('sf-issue-picker')
   start = button('Start', 'primary small', undefined, 'submit')
   from: StartFromField
-  pair: PairField
-  bench: BenchmarkField
+  #agentField: HTMLDivElement
+  #modelField: HTMLDivElement
+  #effortField: HTMLDivElement
+  #expectField: HTMLDivElement
 
   constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '', forkAt = '') {
     const path = p.path
+    const n = ++dispatchSerial
+    this.name.id = `dispatch-name-${n}`
     this.name.addEventListener('input', () => labelError(this.name, ''))
-    this.model.setAttribute('aria-label', 'Model')
-    this.effort.setAttribute('aria-label', 'Effort')
-    this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
-    this.kind.setAttribute('aria-label', 'Work type')
-    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ...p.types.map((t): [string, string] => [t.id, visible(t.name)])])
-    this.agent.setAttribute('aria-label', 'Agent')
     const list = starters
     for (const a of list) {
       const o = option(a.enabled ? a.name : `${a.name} (not available)`, a.id, { disabled: !a.enabled })
@@ -152,118 +121,113 @@ class DispatchForm {
     }
     const first = list.find(a => a.default)
     if (first) this.agent.value = first.id
-    this.agent.hidden = list.length < 2
-    this.expect.setAttribute('aria-label', 'The sign-in you expect of this agent')
-    this.expect.title = 'The engine checks the agent\'s own sign-in before it starts, and refuses a start that differs from what you expect'
-    options(this.expect, [['any', 'Expect any sign-in'], ['subscription', 'Expect a subscription'], ['api-key', 'Expect an API key']])
+    options(this.expect, [['any', 'Any sign-in'], ['subscription', 'A subscription'], ['api-key', 'An API key']])
     this.expect.addEventListener('change', () => {
       const chosen = list.find(a => a.id === this.agent.value)
       if (chosen) chosen.expect = this.expect.value as Expect
       emit(this.form, 'sf-expect', { agent: this.agent.value, expect: this.expect.value as Expect })
     })
-    const picks = el('span', 'dispatch-picks')
-    picks.append(this.agent, this.model)
-    const go = el('span', 'dispatch-actions')
-    go.append(button('Cancel', 'ghost small', onCancel), this.start)
-    const row = fieldRow([field('Session name', this.name), picks, go], 'opts field-row')
-    const more = fieldRow([this.effort, this.kind, this.expect], 'opts field-row')
-    const note = el('p', 'small muted')
-    const command = el('code', '')
-    note.append('Fetches ', el('code', '', p.branch || 'the main branch'), ' from ', el('code', '', p.url || p.name), ', then runs ', command, " in a new worktree that starts there, once you've approved the repository files that agent loads at start and its own sign-in check passed. The session shows in this project's list when it connects; open it there to write its first message. This page controls it from the start. It starts in the agent's own asking mode, so it asks before it acts; auto and bypass modes can't be chosen here.")
+    this.#agentField = field('Agent', this.agent)
+    this.#agentField.hidden = list.length < 2
+    this.#modelField = field('Model', this.model)
+    this.#effortField = field('Effort', this.effort)
+    this.#expectField = field('Expected sign-in', this.expect)
     const off = list.filter(a => a.install && a.off)
     this.why.replaceChildren(...off.map(a => el('p', '', `${a.name}: ${a.off}`)))
     this.why.hidden = !off.length
     const sync = () => {
       const chosen = list.find(a => a.id === this.agent.value)
-      command.textContent = visible(chosen?.command ?? '')
       const model = chosen?.fields?.model === true
-      this.model.hidden = !model
+      this.#modelField.hidden = !model
       if (!model) this.model.value = ''
       this.choices(chosen)
       this.start.disabled = !chosen?.enabled
       this.expect.value = chosen?.expect ?? 'any'
-      this.expect.hidden = chosen?.fields?.expect !== true
-      this.pair.follow(this.agent.value)
+      this.#expectField.hidden = chosen?.fields?.expect !== true
     }
     this.agent.addEventListener('change', sync)
-    this.caps.project = p.name
     this.from = new StartFromField(path, p.branch ?? '', sessions, fork, forkAt)
     this.issue.path = path
-    this.pair = new PairField(list, modelChoices(list.find(a => a.models.length)))
     sync()
-    this.bench = new BenchmarkField(path)
-    const deployed = el('p', 'small warn')
-    deployed.hidden = true
-    this.kind.addEventListener('change', () => {
-      const warning = p.types.find(t => t.id === this.kind.value)?.startWarning
-      deployed.textContent = typeof warning === 'string' ? visible(warning) : ''
-      deployed.hidden = !deployed.textContent
-      if (!deployed.hidden) this.advanced.open = true
-    })
-    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, deployed, this.from.box, this.caps, note)
-    this.advanced.open = !!this.from.value()
-    this.form.append(row, this.why, this.advanced)
-    this.form.append(this.issue)
-    this.form.append(this.pair.box, this.bench.box)
+    options(this.task, [['', 'A blank session'], ['issue', 'An issue']])
+    this.task.addEventListener('change', () => this.#showIssue())
+    this.issue.hidden = true
+    this.issue.numberField.hidden = true
+    this.form.append(
+      fieldRow([
+        this.from.box, this.#agentField, this.#modelField, this.#effortField, this.#expectField,
+        field('Session name', this.name, { optional: true, cls: 'line-start' }), field('Begin with', this.task), this.issue.numberField,
+        this.issue,
+      ], 'columns'),
+      this.why,
+      actionsRow([button('Cancel', 'ghost small', onCancel), this.start]),
+    )
     this.form.addEventListener('submit', () => {
       if (this.start.disabled) return
       this.unrefuse()
-      const caps = this.caps.value
       const from = this.from.value()
-      const issue = this.issue.chosen()
-      const bench = this.bench.chosen()
-      const pair = this.pair.value(!!bench)
-      const first: PairAgent = { agent: this.agent.value, ...(this.model.value ? { model: this.model.value } : {}), ...(this.effort.value ? { effort: this.effort.value } : {}) }
-      if (pair || bench) return void emit(this.form, 'sf-pair', { path, name: this.name.value, type: this.kind.value, agents: [first], ...(pair ? { double: true, secondModel: pair.model } : {}), ...(pair?.message ? { message: pair.message } : {}), ...(bench ? { benchmark: bench } : {}), ...(from ? { from } : {}), ...(issue ?? {}), caps })
-      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, caps, ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
+      const issue = this.issue.hidden ? null : this.issue.chosen()
+      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
     })
     this.model.addEventListener('change', () => this.efforts())
   }
 
+  #showIssue() {
+    const on = this.task.value === 'issue'
+    this.issue.hidden = !on
+    this.issue.numberField.hidden = !on
+    if (on) this.issue.opened()
+    else this.issue.reset()
+  }
+
   refuse(a: EngineAnswer): boolean {
     if (!a.message) return false
-    if (a.field === 'issue') return this.issue.refuse(a.message)
-    if (a.field === 'benchmark') return this.bench.refuse(a.message)
-    if (a.field === 'secondModel') {
-      this.pair.say(a.message)
-      return true
+    if (a.field === 'issue') {
+      this.task.value = 'issue'
+      this.#showIssue()
+      return this.issue.refuse(a.message)
     }
     const input = answerControl(this.form, a)
     if (!input) return false
-    for (let box = input.closest('details'); box; box = box.parentElement?.closest('details') ?? null) box.open = true
-    if (this.caps.contains(input)) return this.caps.refuse(a.field, a.message)
     showAnswer(this.form, a)
     return true
   }
 
   unrefuse() {
-    for (const input of [this.name, this.from.select, this.pair.message]) labelError(input, '')
-    this.caps.clear()
+    for (const input of [this.name, this.from.select]) labelError(input, '')
   }
 
   choices(starter: Starter | undefined) {
+    const fresh = this.starter !== starter
     this.starter = starter
-    this.effort.hidden = starter?.fields?.effort !== true
+    this.#effortField.hidden = starter?.fields?.effort !== true
     if (starter?.fields?.model === true) {
-      const keep = this.model.value
+      const keep = fresh ? starter.defaultModel ?? '' : this.model.value
       const models = modelChoices(starter)
       this.model.replaceChildren()
       options(this.model, models)
       if (models.some(([v]) => v === keep)) this.model.value = keep
     }
-    this.efforts()
+    this.efforts(fresh)
   }
 
-  efforts() {
+  efforts(fresh = false) {
     if (this.starter?.fields?.effort !== true) return this.effort.replaceChildren()
-    const keep = this.effort.value
-    effortOptions(this.effort, 'Default effort', this.starter?.efforts ?? [])
+    const keep = fresh ? this.starter.defaultEffort ?? '' : this.effort.value
+    this.effort.replaceChildren()
+    options(this.effort, [['', 'Default effort'], ...(this.starter?.efforts ?? []).map((e): [string, string] => [e, visible(e)])])
     if ([...this.effort.options].some(o => o.value === keep)) this.effort.value = keep
   }
 
   busy(on: boolean) {
     this.start.disabled = !!this.agent.selectedOptions[0]?.disabled
     busy(this.start, on)
+  }
+
+  async suggestName(open: () => boolean) {
+    const a = await request('/api/session-name')
+    const name = a.ok && typeof a.body.name === 'string' ? a.body.name : ''
+    if (name && open() && !this.name.value) this.name.value = name
   }
 }
 
@@ -417,7 +381,7 @@ class SfProjects extends HTMLElement {
     this.#expanded.set(path, true)
     if (this.#forms.has(path)) {
       this.#render()
-      this.#forms.get(path)?.name.focus()
+      this.#forms.get(path)?.from.select.focus()
       return
     }
     this.#open(path)
@@ -564,9 +528,9 @@ class SfProjects extends HTMLElement {
     for (const root of [this.#slot, this]) root?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus()
   }
 
-  #who(title: HTMLElement, p: Project): Element[] {
+  #who(title: HTMLElement): Element[] {
     const who = el('div', 'project-id')
-    who.append(title, urlText(p.url || p.path))
+    who.append(title)
     return [icon('folder', 'icon folder'), who]
   }
 
@@ -628,17 +592,12 @@ class SfProjects extends HTMLElement {
       this.#expanded.set(p.path, !open)
       this.#render()
     }
-    if (list.length) {
-      const chevron = button('', 'ghost project-toggle', toggle, 'button', `row:${p.path}:toggle`)
-      chevron.append(icon('chevron'))
-      chevron.setAttribute('aria-expanded', String(open))
-      chevron.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} the sessions in ${p.name}`)
-      head.append(chevron)
-    } else head.append(el('span', 'project-toggle-space'))
-    head.append(...this.#who(name, p))
+    head.append(...this.#who(name))
     if (list.length && this.#removing !== p.path) {
       const counted = button(count ? `${count} running` : `${list.length} stopped`, 'link project-count secondary', toggle, 'button', `row:${p.path}:count`)
+      counted.append(icon('chevron', 'icon count-chevron'))
       counted.setAttribute('aria-expanded', String(open))
+      counted.setAttribute('aria-label', `${count ? `${count} running` : `${list.length} stopped`}: ${open ? 'hide' : 'show'} the sessions in ${p.name}`)
       head.append(counted)
     }
     const acts = el('span', 'acts')
@@ -671,10 +630,7 @@ class SfProjects extends HTMLElement {
     sayIfChanged(said, mine ? this.#message.text : '', mine && this.#message.bad ? 'bad' : 'muted')
     parts.push(said)
     const form = this.#forms.get(p.path)
-    if (form) {
-      form.caps.project = p.name
-      parts.push(form.form)
-    }
+    if (form && this.#removing !== p.path) parts.push(form.form)
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')
@@ -690,7 +646,7 @@ class SfProjects extends HTMLElement {
     this.#forms.delete(path)
     this.#expanded.set(path, true)
     this.#open(path, sid, commit)
-    this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:toggle`)}"]`)?.scrollIntoView({ block: 'nearest' })
+    this.#rows.get(path)?.scrollIntoView({ block: 'nearest' })
   }
 
   #open(path: string, fork = '', forkAt = '') {
@@ -702,9 +658,10 @@ class SfProjects extends HTMLElement {
     }, this.#sessionsIn(path), fork, forkAt)
     form.busy(this.#busy)
     this.#forms.set(path, form)
+    void form.suggestName(() => this.#forms.get(path) === form)
     if (this.#message.path === path) this.#message = { path: '', text: '', bad: false }
     this.#render()
-    form.name.focus()
+    form.from.select.focus()
   }
 
   #cloningRow(k: Cloning): HTMLElement {
@@ -720,8 +677,8 @@ class SfProjects extends HTMLElement {
     const who = el('div', 'project-id')
     const name = el('span', 'name')
     name.append(el('span', 'title', k.name))
-    who.append(name, urlText(k.url))
-    replaceKeeping(c.row, [el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, c.bar])
+    who.append(name)
+    replaceKeeping(c.row, [icon('folder', 'icon folder'), who, c.bar])
     if (!kept) {
       c.li.append(c.row)
       this.#cloning.set(k.name, c)
@@ -819,7 +776,8 @@ class SfProjects extends HTMLElement {
     if (hosts.length) parts.push(this.#hostList)
     if (hosts.length && !this.#addingHost) {
       if (this.#replacing || this.#forgetting || !offered.length) return parts
-      const more = button('Add another host', 'primary add-host', () => {
+      const more = el('div', 'projects-actions')
+      more.append(button('+ Add another host', 'link small add-more', () => {
         this.#addingHost = true
         this.#replacing = ''
         this.#forgetting = ''
@@ -827,7 +785,7 @@ class SfProjects extends HTMLElement {
         blank(this.#tokenValue)
         this.#render()
         this.#tokenHost.focus()
-      }, 'button', 'token-more')
+      }, 'button', 'token-more'))
       parts.push(more)
       return parts
     }

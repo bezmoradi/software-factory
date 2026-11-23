@@ -45,7 +45,7 @@ var (
 	calls   int
 )
 
-var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split"}
+var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split", "factory_work_type"}
 
 const noteMarker = "[Software Factory] "
 
@@ -81,6 +81,12 @@ func toolArgs(tool, text string) map[string]any {
 	if tool == "factory_split" {
 		return splitArgs(text)
 	}
+	if tool == "factory_work_type" {
+		_, after, _ := strings.Cut(text, tool)
+		line, _, _ := strings.Cut(after, "\n")
+		id, reason, _ := strings.Cut(line, "|")
+		return map[string]any{"type": strings.TrimSpace(id), "reason": strings.TrimSpace(reason)}
+	}
 	if tool != "factory_issue" && tool != "factory_pull_request" {
 		return map[string]any{}
 	}
@@ -97,6 +103,23 @@ func toolArgs(tool, text string) map[string]any {
 }
 
 func callTool(tool string, args map[string]any) string {
+	m, problem := callToolReply(tool, args)
+	if problem != "" {
+		return problem
+	}
+	res, _ := m["result"].(map[string]any)
+	content, _ := res["content"].([]any)
+	if len(content) > 0 {
+		if c, ok := content[0].(map[string]any); ok {
+			text, _ := c["text"].(string)
+			return text
+		}
+	}
+	b, _ := json.Marshal(m)
+	return "no answer from " + tool + ": " + string(b)
+}
+
+func callToolReply(tool string, args map[string]any) (map[string]any, string) {
 	for _, s := range stdio {
 		if s.Name != "software-factory" {
 			continue
@@ -111,7 +134,7 @@ func callTool(tool string, args map[string]any) string {
 		in, _ := cmd.StdinPipe()
 		outPipe, _ := cmd.StdoutPipe()
 		if err := cmd.Start(); err != nil {
-			return "the MCP server didn't start: " + err.Error()
+			return nil, "the MCP server didn't start: " + err.Error()
 		}
 		defer func() {
 			_ = in.Close()
@@ -139,19 +162,9 @@ func callTool(tool string, args map[string]any) string {
 		ask(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fake","version":"0"}}}`)
 		_, _ = io.WriteString(in, `{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n")
 		call, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
-		m := ask(string(call))
-		res, _ := m["result"].(map[string]any)
-		content, _ := res["content"].([]any)
-		if len(content) > 0 {
-			if c, ok := content[0].(map[string]any); ok {
-				text, _ := c["text"].(string)
-				return text
-			}
-		}
-		b, _ := json.Marshal(m)
-		return "no answer from " + tool + ": " + string(b)
+		return ask(string(call)), ""
 	}
-	return "no software-factory MCP server was given"
+	return nil, "no software-factory MCP server was given"
 }
 
 const session = "sess-fake-1"

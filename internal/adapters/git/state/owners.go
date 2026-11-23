@@ -33,7 +33,6 @@ var ownedRecords = map[string][]ownedPart{
 	prFollowFile:        {{path: []string{"settings", "[]"}}},
 	sessionsFile:        {{path: []string{"sessions", "[]"}}},
 	deniedFile:          {{path: []string{"denied", "[]"}}},
-	pairsFile:           {{path: []string{"pairs", "[]"}}},
 }
 
 func StampOwners(dir string) ([]string, error) {

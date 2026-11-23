@@ -15,6 +15,7 @@ import { isDialog } from './lib/dialog-docs.ts'
 import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView } from './types.ts'
 import './components/changes.ts'
 import './components/overview.ts'
+import './components/work-type-card.ts'
 import './components/docs.ts'
 import './components/file.ts'
 import './components/check.ts'
@@ -50,13 +51,12 @@ import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
 import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
 import { agentName, setBranchStarters } from './components/lineage.ts'
-import { confirmBoth } from './components/compare.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
 import { initUpdates } from './components/update.ts'
 import { sendState } from './api.ts'
-import { allowed, armed, changesSession, current, inTurn, offWhy, pickingSize, say, schedulePaint, sessions, setPainter, state, toast, waitingOf, working, type AuditEntry, type HistoryLine, type Session } from './app-state.ts'
+import { allowed, armed, changesSession, current, inTurn, offWhy, schedulePaint, sessions, setPainter, state, toast, waitingOf, working, type AuditEntry, type HistoryLine, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
@@ -176,10 +176,9 @@ function onEvent(ev: StreamEvent) {
       if (ev.progress && typeof ev.progress === 'object' && projects.cloneProgress(ev.url, ev.name, ev.progress)) return
       return void loadProjects()
     }
-    const where = visible(ev.url)
     projects.say('', '')
     if (ev.state === 'added') {
-      toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} is cloned.`, description: `Start a session in it from Projects. New sessions start from ${where}'s main branch.`, tone: 'ok' })
+      toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} cloned`, tone: 'ok' })
     }
     if (ev.state === 'failed') {
       toast({ id: `repo:${ev.url}`, title: `${visible(ev.name)} wasn't added`, description: visible(ev.message ?? ''), tone: 'bad', timeout: 0 })
@@ -279,10 +278,8 @@ function paint() {
   byId('live-view').hidden = !s
   byId('composer').hidden = !s
   composer.paint(s, !!s && waitingOf(s).length > 0, s?.info.readOnly ?? '')
-  const picking = !!s && pickingSize(s)
-  byId('size-pick').hidden = !picking
-  if (picking) paintTeamPicks(s)
-  byId('composer').classList.toggle('picking', picking)
+  const ask = s && state.connected ? s.gate?.typeAsk ?? null : null
+  byId<HTMLElementTagNameMap['sf-work-type-card']>('work-type-card').view = s && ask ? { sid: s.sid, ask, types: (s.gate?.types ?? []).map(t => ({ id: t.id, name: t.name })), disabled: !allowed(s, 'control') } : null
   if (document.body.classList.contains('live') !== !!s) {
     document.body.classList.toggle('live', !!s)
     queueBarFit()
@@ -354,7 +351,6 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
     byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
-    byId<HTMLElementTagNameMap['sf-compare']>('compare').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => ({ sid: x.sid, info: x.info, cost: x.cost, total: x.total })), disabled: stageOff(s) } : null
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
     const rulesProject = projectFor(s)
     byId<HTMLElementTagNameMap['sf-rules']>('rules').view = state.connected && s.info.verified ? { sid: s.sid, name: label(s.info), claude: isClaude(s.info), repo: rulesProject?.name ?? s.info.project ?? '', path: rulesProject?.path ?? '', box: s.info.box ?? '' } : null
@@ -375,7 +371,6 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = null
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = null
     byId<HTMLElementTagNameMap['sf-split']>('split').view = null
-    byId<HTMLElementTagNameMap['sf-compare']>('compare').view = null
     barStatus(state.connected ? '' : state.note)
     byId('usage').textContent = ''
     byId('stop').hidden = true
@@ -604,7 +599,7 @@ function paintChecks(s: Session) {
   }
   const turn = { busy: state.connected && inTurn(s) }
   paintPath(byId('path'), gate?.path ?? null, byId('path-card'))
-  byId('path-section').hidden = !s.gate || pickingSize(s)
+  byId('path-section').hidden = !s.gate
   const size = byId<HTMLSelectElement>('size')
   const types = gate?.types ?? []
   const typesKey = JSON.stringify(types.map(t => [t.id, t.name]))
@@ -781,7 +776,6 @@ function projectOf(info: SessionInfo): Project | null {
 }
 
 
-let projectPaths: string[] = []
 let projectList: Project[] = []
 let projectsKnown = false
 
@@ -795,7 +789,7 @@ let commitIdentity: CommitIdentity | null | undefined
 
 function paintCrumbs(s: Session) {
   const cwd = s.info.cwd || ''
-  const home = projectPaths.filter(p => cwd === p || cwd.startsWith(`${p}/`)).sort((a, b) => b.length - a.length)[0] ?? ''
+  const project = projectOf(s.info)
   const crumb = (text: string, view = '', reveal = '') => {
     const li = el('li')
     if (!view) {
@@ -810,15 +804,15 @@ function paintCrumbs(s: Session) {
     return li
   }
   const list = byId('crumbs-list')
-  const key = JSON.stringify([cwd, home, label(s.info)])
+  const key = JSON.stringify([cwd, project?.name, project?.path, label(s.info)])
   if (list.dataset.key === key) return
   list.dataset.key = key
   const here = el('li')
   here.append(el('h1', '', visible(label(s.info))))
   here.setAttribute('aria-current', 'page')
-  const folder = home || cwd.replace(/\/+$/, '')
-  const parts = home ? [welcomeCrumb(), crumb('Projects', 'projects'), crumb(baseName(home), 'projects', home)] : [welcomeCrumb(), ...(folder ? [crumb(baseName(folder))] : [])]
-  if (folder) parts[parts.length - 1]!.title = folder
+  const folder = cwd.replace(/\/+$/, '')
+  const parts = project ? [welcomeCrumb(), crumb('Projects', 'projects'), crumb(project.name, 'projects', project.path)] : [welcomeCrumb(), ...(folder ? [crumb(baseName(folder))] : [])]
+  if (!project && folder) parts[parts.length - 1]!.title = folder
   list.replaceChildren(...parts, here)
 }
 
@@ -839,7 +833,6 @@ async function loadProjects(force = false) {
     setBranchStarters(body.starters)
     schedulePaint()
   }
-  if (body) projectPaths = body.projects.map(p => p.path)
   if (body) projectList = body.projects.map(p => ({ ...p, agents: Array.isArray(p.agents) ? p.agents.filter(a => typeof a === 'string') : [] }))
   if (body) {
     projectsKnown = true
@@ -997,35 +990,14 @@ byId('path').addEventListener('click', e => {
   const step = b.dataset.ask || ''
   return once(current(), step, () => whileBusy(b, () => ask(step)).finally(schedulePaint))
 })
-let teamPicks = ''
-
-function paintTeamPicks(s: Session) {
-  const types = s.gate?.types ?? []
-  const own = types.filter(t => !t.builtin)
-  const key = JSON.stringify(types.map(t => [t.id, t.name, t.steps]))
-  if (key === teamPicks) return
-  teamPicks = key
-  const box = byId('size-pick').querySelector('.size-options')!
-  for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-size]:not([data-team])')) b.hidden = !!types.length && !types.some(t => t.id === b.dataset.size)
-  for (const b of box.querySelectorAll('button[data-team]')) b.remove()
-  for (const t of own) {
-    const b = el('button', 'size-option')
-    b.type = 'button'
-    b.dataset.size = t.id
-    b.dataset.team = 'yes'
-    b.append(el('span', '', visible(t.name)), el('span', 'muted small', `From the team file: ${t.steps.join(', ')}`))
-    box.append(b)
-  }
-}
-
-byId('size-pick').addEventListener('click', async e => {
-  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-size]')
+byId('work-type-card').addEventListener('sf-work-type', async e => {
   const s = current()
-  if (!b || !s || byId('size-pick').querySelector('button[aria-busy="true"]')) return
-  const picked = b.dataset.size ?? ''
-  const res = await whileBusy(b, () => request('/api/size', { sid: s.sid, size: picked }))
-  if (!res.ok) return say(res.message)
-  if (s.gate) s.gate = { ...s.gate, workType: picked, chosen: true }
+  if (!s) return e.detail.done('')
+  const picked = e.detail.type
+  const res = await request('/api/size', { sid: s.sid, size: picked })
+  if (!res.ok) return e.detail.done(res.message)
+  if (s.gate) s.gate = { ...s.gate, workType: picked, chosen: true, typeAsk: null }
+  e.detail.done('')
   void loadGate(s, true)
   paint()
   byId('text').focus()
@@ -1163,23 +1135,14 @@ byId('changes').addEventListener('sf-fork-commit', e => {
   go('projects')
   projects.fork(p.path, s.sid, e.detail.sha)
 })
-for (const id of ['split', 'compare']) {
-  byId(id).addEventListener('sf-open-session', e => {
-    if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
-  })
-}
+byId('split').addEventListener('sf-open-session', e => {
+  if (sessions.has(e.detail.sid)) go(`s/${e.detail.sid}`)
+})
 byId<HTMLElementTagNameMap['sf-split']>('split').start = (sid, card) => {
   const goal = sessions.get(sid)
   const name = starterNames.get(goal?.info.agent || 'claude') ?? 'The agent'
   return withConsent(name, 'the session', consent => request('/api/split', { op: 'start', sid, card, ...consent }))
 }
-byId<HTMLElementTagNameMap['sf-compare']>('compare').next = startSecond
-byId('compare').addEventListener('sf-delete-session', async e => {
-  const s = sessions.get(e.detail.sid)
-  if (!s) return
-  const problem = await whilePressed(() => manage(s, '/api/remove-session', {}))
-  if (problem) toast({ id: `delete:${s.sid}`, title: `${label(s.info)} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 })
-})
 byId('menu-wake').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
@@ -1421,11 +1384,6 @@ projects.addEventListener('sf-session-action', async e => {
   const problem = await manage(s, e.detail.action === 'stop' ? '/api/stop-session' : '/api/remove-session', {})
   projects.say(project.path, problem, !!problem)
 })
-function capsRefused(body: Record<string, unknown>) {
-  if (typeof body.capsRefused !== 'string' || !body.capsRefused) return
-  const sid = typeof body.sid === 'string' ? body.sid : ''
-  toast({ id: `caps:${sid}`, title: 'The session started without its caps', description: visible(body.capsRefused), tone: 'warn', timeout: 0 })
-}
 projects.addEventListener('sf-dispatch', async e => {
   const detail = e.detail
   const { path } = detail
@@ -1442,43 +1400,6 @@ projects.addEventListener('sf-dispatch', async e => {
   }
   byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
   projects.started(path, typeof body.id === 'string' ? body.id : '')
-  capsRefused(body)
-})
-async function startSecond(pair: string, agent: string): Promise<string> {
-  const name = starterNames.get(agent) ?? 'The agent'
-  const a = await withConsent(name, 'the session', consent => request('/api/pair', { op: 'next', pair, ...consent }), true)
-  const { ok, body } = a
-  if (!ok) {
-    secondNotStarted(pair, a.message)
-    return ''
-  }
-  capsRefused(body)
-  return typeof body.sid === 'string' ? body.sid : ''
-}
-function secondNotStarted(pair: string, message: string) {
-  toast({ id: `pair:${pair}`, title: "The second session of the pair didn't start", description: `${message} Start it from the comparison in the first session.`, tone: 'bad', timeout: 0 })
-}
-projects.addEventListener('sf-pair', async e => {
-  const detail = e.detail
-  const { path } = detail
-  if (detail.double && !(await confirmBoth())) return
-  projects.starting(path)
-  const name = starterNames.get(detail.agents[0].agent) ?? 'The agent'
-  const a = await withConsent(name, 'the session', consent => request('/api/pair', { op: 'start', ...detail, ...consent }), true)
-  const { ok, body } = a
-  if (!ok) {
-    projects.failed()
-    if (projects.startRefused(path, a)) return
-    toast({ id: `start:${path}`, title: `No session started in ${baseName(path)}`, description: a.message, tone: 'bad', timeout: 0, action: identityAction(a) })
-    return void loadProjects(true)
-  }
-  byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`start:${path}`)
-  projects.started(path, typeof body.id === 'string' ? body.id : '')
-  capsRefused(body)
-  if (body.next !== true || typeof body.pair !== 'string') return
-  const refused = body.secondRefused && typeof body.secondRefused === 'object' ? (body.secondRefused as Record<string, unknown>) : {}
-  if (refused.needs) await startSecond(body.pair, detail.agents[0].agent)
-  else secondNotStarted(body.pair, typeof refused.message === 'string' ? visible(refused.message) : '')
 })
 byId('tabs').addEventListener('sf-close', e => closeTab(e.detail.id))
 byId('tabs').addEventListener('sf-move', e => moveTab(e.detail.id, e.detail.index))

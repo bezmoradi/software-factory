@@ -82,6 +82,10 @@ export function labelError(input: HTMLElement, message: string): void {
   const scope = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root : null
   const label = scope?.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) ?? null
   label?.querySelector('.label-error')?.remove()
+  if (label?.dataset.shownForError) {
+    label.classList.replace('small', 'sr-only')
+    delete label.dataset.shownForError
+  }
   const described = (input.getAttribute('aria-describedby') ?? '').split(' ').filter(d => d && d !== id)
   if (!message || !label) {
     input.removeAttribute('aria-invalid')
@@ -93,6 +97,7 @@ export function labelError(input: HTMLElement, message: string): void {
   note.id = id
   note.setAttribute('aria-hidden', 'true')
   label.append(note)
+  if (label.classList.replace('sr-only', 'small')) label.dataset.shownForError = 'yes'
   input.setAttribute('aria-invalid', 'true')
   input.setAttribute('aria-describedby', [...described, id].join(' '))
   const cleared = new AbortController()

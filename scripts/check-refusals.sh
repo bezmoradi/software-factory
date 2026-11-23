@@ -45,7 +45,7 @@ FNR == 1 { fn = ""; held = ""; depth = 0 }
 '
 
 core_allowed="Register Poll Report Wait Wake FromBox PushSession checking Image"
-page_allowed="agent register agentReject agentRefuse agentError busy pushRequest check forgeRequest checksRequest commentsRequest splitRequest forgeSession turnCheck sessionModel image"
+page_allowed="agent register agentReject agentRefuse agentError busy pushRequest check forgeRequest checksRequest commentsRequest splitRequest workTypeRequest forgeSession turnCheck sessionModel image"
 
 run() {
 	allowed=$1
@@ -123,7 +123,7 @@ function summed(line, pat,   rest, i, c, depth, quoted, lit, total, shown) {
 {
 	if (FILENAME ~ /^internal\/core\//) {
 		if ($0 ~ /onField[(]/) summed($0, "(invalid|conflict|notFound|limited|full)[(]\"[^\"]*\", ")
-		else summed($0, "(invalid|conflict|notFound|limited|full)[(]\"(from|message|issue|benchmark)\", ")
+		else summed($0, "(invalid|conflict|notFound|limited|full)[(]\"(from|issue)\", ")
 		summed($0, "(^|[^A-Za-z_.])(refusal|bad|withName)[(]")
 	}
 	if (FILENAME ~ /^internal\/adapters\/http\/page\//) {

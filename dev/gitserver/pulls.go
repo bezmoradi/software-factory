@@ -29,18 +29,6 @@ func (a api) assigneesJSON(names []string) []map[string]any {
 	return out
 }
 
-func hasLabels(i apiIssue, want string) bool {
-	if want == "" {
-		return true
-	}
-	for name := range strings.SplitSeq(want, ",") {
-		if !slices.ContainsFunc(i.Labels, func(l string) bool { return strings.EqualFold(l, strings.TrimSpace(name)) }) {
-			return false
-		}
-	}
-	return true
-}
-
 func nodeID(n int) string { return "PR_dev_" + strconv.Itoa(n) }
 
 func (a api) livePull(host string, i apiIssue) map[string]any {
@@ -54,7 +42,8 @@ func (a api) livePull(host string, i apiIssue) map[string]any {
 	out["head"] = map[string]any{"ref": i.Head, "sha": head, "label": devOwner + ":" + i.Head}
 	out["node_id"] = nodeID(i.Number)
 	out["merged"] = i.Merged
-	if i.Merged && i.MergedAt.IsZero() {
+	out["merged_at"] = nil
+	if i.Merged {
 		out["merged_at"] = time.Now().UTC().Format(time.RFC3339)
 	}
 	out["assignees"] = a.assigneesJSON(i.Assignees)
@@ -283,7 +272,7 @@ func pullCommand(root string, args []string) error {
 			if i.State != "open" {
 				return fmt.Errorf("pull request #%d isn't open", i.Number)
 			}
-			i.State, i.Merged, i.MergedAt = "closed", true, time.Now().UTC()
+			i.State, i.Merged = "closed", true
 			return nil
 		})
 	case "close":
@@ -307,7 +296,7 @@ func pullCommand(root string, args []string) error {
 		return issue(args[1], args[2], labels)
 	case "issue-edit":
 		if len(args) != 3 {
-			return errors.New("usage: sf-gitserver issue-edit <issue or pr> <body>")
+			return errors.New("usage: sf-gitserver issue-edit <issue> <body>")
 		}
 		n, err := number(args[1])
 		if err != nil {
@@ -315,12 +304,12 @@ func pullCommand(root string, args []string) error {
 		}
 		return withState(root, true, func(st *apiState) error {
 			for k := range st.Issues {
-				if st.Issues[k].Number == n {
+				if !st.Issues[k].Pull && st.Issues[k].Number == n {
 					st.Issues[k].Body = args[2]
 					return nil
 				}
 			}
-			return fmt.Errorf("no issue or pull request #%d", n)
+			return fmt.Errorf("no issue #%d", n)
 		})
 	case "issue-token":
 		if len(args) != 2 && len(args) != 3 {
@@ -331,16 +320,6 @@ func pullCommand(root string, args []string) error {
 			labels = split(args[2])
 		}
 		return issue(args[1], "Set up the deploy.\n\nThe deploy token is "+fakeToken()+" for now.", labels)
-	case "merged":
-		if len(args) != 3 {
-			return errors.New("usage: sf-gitserver merged <title> <body>")
-		}
-		return mergedPull(root, args[1], args[2])
-	case "merged-token":
-		if len(args) != 2 {
-			return errors.New("usage: sf-gitserver merged-token <title>")
-		}
-		return mergedPull(root, args[1], "Rotate the deploy key.\n\nThe old token was "+fakeToken()+".")
 	}
 	return errUsage
 }

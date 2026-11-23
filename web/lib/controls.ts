@@ -74,9 +74,22 @@ export function textarea(o: TextareaOptions = {}): HTMLTextAreaElement {
   return area
 }
 
+const customSelect = typeof CSS !== 'undefined' && CSS.supports('appearance', 'base-select')
+
+function shownValue(pick: HTMLSelectElement): void {
+  const face = el('button')
+  face.type = 'button'
+  face.append(el('selectedcontent'))
+  pick.prepend(face)
+  new MutationObserver(() => {
+    if (!face.isConnected || face.parentNode !== pick) pick.prepend(face)
+  }).observe(pick, { childList: true })
+}
+
 export function dropdown(o: DropdownOptions = {}): HTMLSelectElement {
   const pick = el('select', boxClass(o.cls))
   if (o.name !== undefined) pick.name = o.name
+  if (customSelect) shownValue(pick)
   if (o.options) pick.append(...o.options)
   return pick
 }
@@ -87,13 +100,6 @@ export function option(text: string, value?: string, o: OptionState = {}): HTMLO
   if (o.disabled !== undefined) item.disabled = o.disabled
   if (o.selected !== undefined) item.selected = o.selected
   return item
-}
-
-export function optionGroup(label: string, options: Node[] = []): HTMLOptGroupElement {
-  const group = el('optgroup')
-  group.label = label
-  group.append(...options)
-  return group
 }
 
 function choice(type: 'checkbox' | 'radio', o: CheckOptions): HTMLInputElement {

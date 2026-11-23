@@ -142,8 +142,6 @@ func (d *Dispatcher) sources() (StartSources, bool) {
 
 func (d *Dispatcher) startAt(ctx context.Context, repo Repository, q Dispatch, main string) (startPoint, error) {
 	switch {
-	case q.pinned != nil:
-		return *q.pinned, nil
 	case q.From.SID != "":
 		return d.forkPoint(ctx, repo, q.From.SID, q.From.Commit)
 	case q.From.Branch != "":

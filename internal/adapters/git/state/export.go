@@ -25,6 +25,7 @@ const (
 	maxPrefsFile   = 4096
 	prefsFile      = "prefs.json"
 	KeepFolder     = "keep"
+	pairsFile      = "pairs.json"
 )
 
 type storeClass string
@@ -72,7 +73,6 @@ var stores = map[string]storeRow{
 	prFollowFile:        {class: classOff, version: 1, label: "pull request follows, send on its own and assign"},
 	lookupsFile:         {class: classOff, version: 1, label: "public-registry lookups"},
 	signInFile:          {class: classOff, version: 1, label: "the expected sign-in methods, reset to the default"},
-	pairsFile:           {class: classDisplay, version: 1, label: "sessions started together and benchmarks, for display only"},
 	lessonsFile:         {class: classDisplay, version: 1, label: "lessons from repeated findings, for display only; suggested lines not yet approved are dropped"},
 	waitingFile:         {class: classDropped, version: 1, label: "automatic pushes waiting on reviews"},
 	splitsFile:          {class: classDropped, version: 1, label: "tasks an agent proposed from a goal, waiting for the person"},
@@ -108,6 +108,7 @@ var stores = map[string]storeRow{
 	repliesFolder:       {class: classOut, label: "reviewers' whole replies stay with the engine that ran them; each review record keeps its 4,000-character summary"},
 	backupFolder:        {class: classOut, label: "this engine's copies from before a format change"},
 	stagingFolder:       {class: classOut, label: "an import this engine hasn't applied"},
+	pairsFile:           {class: classOut, label: "sessions started together, which this engine no longer keeps"},
 }
 
 func ImportedReviews(dir string) func() ([]session.ReviewEntry, error) {
@@ -208,8 +209,6 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewViewed(d).Load)
 	case decisionLogFile:
 		err = loaded(NewDecisionLog(d).Load)
-	case pairsFile:
-		err = loaded(NewPairs(d).Load)
 	case lessonsFile:
 		err = loaded(NewLessons(d).Load)
 	case dropsFile:

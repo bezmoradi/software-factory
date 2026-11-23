@@ -1,23 +1,11 @@
 package state
 
-import (
-	"regexp"
-
-	"github.com/bezmoradi/software-factory/internal/core/session"
-)
+import "github.com/bezmoradi/software-factory/internal/core/session"
 
 const maxOrigin = 200
 
-var pairID = regexp.MustCompile(`^[0-9a-f]{16}$`)
-
 func groupOK(group, kind string) bool {
-	switch kind {
-	case session.GroupPair:
-		return pairID.MatchString(group)
-	case session.GroupGoal:
-		return sessionID.MatchString(group)
-	}
-	return false
+	return kind == session.GroupGoal && sessionID.MatchString(group)
 }
 
 func lineageInto(v *session.SavedRun, r runJSON) {

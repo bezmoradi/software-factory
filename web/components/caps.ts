@@ -176,54 +176,6 @@ export function capsSet(c: CapsValues | null): boolean {
   return !!c && (c.money > 0 || c.minutes > 0 || c.turns > 0 || c.disk > 0)
 }
 
-class SfCapsFields extends HTMLElement {
-  #inputs = new CapsInputs('Caps for this session')
-  #project = ''
-  #built = false
-
-  #note = statusLine('small muted')
-  #refused: HTMLInputElement | null = null
-
-  connectedCallback() {
-    if (!this.#built) {
-      this.#built = true
-      this.#invalid('')
-      this.replaceChildren(this.#inputs.box, this.#note)
-    }
-    this.#fill()
-  }
-
-  #invalid(problem: string) {
-    this.#note.className = problem ? 'small warn' : 'small muted'
-    this.#note.textContent = problem || 'Caps for this session: money from the agent’s own reported cost, time by the engine’s clock while it runs, turns, and disk, the size of the session’s folder, which the engine measures every 2 minutes. At a cap the engine interrupts the turn and asks you. Empty is off; the project’s caps fill these in.'
-  }
-
-  refuse(name: string, problem: string): boolean {
-    this.#refused = this.#inputs.mark(name, problem)
-    this.#invalid(this.#refused ? '' : problem)
-    this.#refused?.focus()
-    return !!this.#refused
-  }
-
-  clear() {
-    this.#refused = this.#inputs.mark('')
-    this.#invalid('')
-  }
-
-  set project(name: string) {
-    this.#project = name
-    this.#fill()
-  }
-
-  #fill() {
-    this.#inputs.fill(this.#project)
-  }
-
-  get value(): CapsValues {
-    return this.#inputs.value()
-  }
-}
-
 class SfProjectCaps extends HTMLElement {
   #inputs = new CapsInputs('Caps for new sessions in this project')
   #project = ''
@@ -236,7 +188,7 @@ class SfProjectCaps extends HTMLElement {
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      const head = pageHead({ title: 'Caps', level: 'h2', headingClass: 'label', intro: 'The caps each new session in this project starts with, unless its start form sets its own.', docs: { doc: 'caps', key: 'caps-docs' } })
+      const head = pageHead({ title: 'Caps', level: 'h2', headingClass: 'label', intro: 'The caps each new session in this project starts with.', docs: { doc: 'caps', key: 'caps-docs' } })
       this.replaceChildren(...head, form({ children: [this.#inputs.box, actions([this.#save])], onSubmit: () => void this.#store() }), this.#said)
     }
     this.#stop()
@@ -484,13 +436,11 @@ class SfSessionLimits extends HTMLElement {
   }
 }
 
-customElements.define('sf-caps-fields', SfCapsFields)
 customElements.define('sf-project-caps', SfProjectCaps)
 customElements.define('sf-session-limits', SfSessionLimits)
 
 declare global {
   interface HTMLElementTagNameMap {
-    'sf-caps-fields': SfCapsFields
     'sf-project-caps': SfProjectCaps
     'sf-session-limits': SfSessionLimits
   }

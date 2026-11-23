@@ -94,25 +94,27 @@ type WorkStore interface {
 }
 
 type WorkConfig struct {
-	Targets    func(sid string) (PushTarget, bool)
-	Doubled    func(sid string) bool
-	Held       func(sid string) (PushTarget, bool)
-	Heads      Heads
-	History    History
-	Files      WorkFiles
-	Bounded    BoundedFiles
-	Blobs      ChangeBlobs
-	Repos      WorkRepos
-	Reported   func(sid string) (Workflow, bool)
-	Reviews    ReviewEntries
-	Store      WorkStore
-	Installed  func() []string
-	Contents   PushContents
-	Audit      Audit
-	Tell       func(sid, text string) error
-	Now        func() time.Time
-	DocsInRepo bool
-	Logger     shared.Logger
+	Targets     func(sid string) (PushTarget, bool)
+	Doubled     func(sid string) bool
+	Held        func(sid string) (PushTarget, bool)
+	Heads       Heads
+	History     History
+	Files       WorkFiles
+	Bounded     BoundedFiles
+	Blobs       ChangeBlobs
+	Repos       WorkRepos
+	Reported    func(sid string) (Workflow, bool)
+	Reviews     ReviewEntries
+	Store       WorkStore
+	Installed   func() []string
+	Contents    PushContents
+	Audit       Audit
+	Tell        func(sid, text string) error
+	Note        func(sid, text string)
+	HistoryOnly func(sid string) error
+	Now         func() time.Time
+	DocsInRepo  bool
+	Logger      shared.Logger
 
 	RoleAgents  RoleAgents
 	Packs       ProjectPacks
@@ -139,6 +141,7 @@ type workSession struct {
 	plan    *workApproval
 	allowed map[string]map[string]bool
 	lock    *TestLock
+	ask     *typeAsk
 }
 
 type Work struct {
@@ -226,6 +229,7 @@ type GateView struct {
 	Lock          LockView
 	Change        *TypeChange
 	Started       BranchStart
+	Ask           *TypeAsk
 }
 
 type BranchStart string
@@ -303,6 +307,7 @@ type WorkPage interface {
 	AllowCommit(ctx context.Context, sid, commit string, field CommitField, reason string) error
 	AskRewrite(ctx context.Context, sid, commit string, field CommitField) error
 	EditHold(ctx context.Context, sid, top string, paths []string) string
+	SuggestType(sid, id, reason string) TypeAnswer
 	Guarded(sid, top string, paths []string) string
 	LockTests(ctx context.Context, sid, head string) error
 	UnlockTests(sid string) error
@@ -667,22 +672,28 @@ func (w *Work) session(sid string) (workSession, bool) {
 }
 
 func (w *Work) SetType(ctx context.Context, sid, id string) error {
-	if err := heldBranch(w.cfg.Doubled, sid); err != nil {
+	if err := w.unusable(sid); err != nil {
 		return err
 	}
 	ws, ok := w.session(sid)
 	if !ok {
 		return conflict("not started here", "Only a session this engine started has a work type here.")
 	}
-	if _, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id); !ok {
+	t, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id)
+	if !ok {
 		return invalid("type", "That work type isn't one this project offers.")
 	}
+	asked := false
 	w.mu.Lock()
 	if s := w.sessions[sid]; s != nil {
-		s.typeID, s.chosen = id, true
+		asked = s.ask != nil
+		s.typeID, s.chosen, s.ask = id, true, nil
 	}
 	w.mu.Unlock()
 	w.persist(sid)
+	if asked && w.cfg.Note != nil {
+		w.cfg.Note(sid, typeTold(t.Name))
+	}
 	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("work type", "type", id)
 	return nil
@@ -1037,7 +1048,10 @@ func (w *Work) currentOf(ctx context.Context, sid string, lookup func(sid string
 
 func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
 	f := workflow.Facts{Profile: g.chosen.Profile(), Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
-		UsesArtifacts: g.docs.held}
+		UsesArtifacts: g.docs.held, Untyped: !g.ws.chosen}
+	for _, t := range g.setup.setup.Types {
+		f.Offered = append(f.Offered, t.ID)
+	}
 	if g.docs.req != nil {
 		f.ReqHash = g.docs.req.Hash
 		f.Brief = w.briefCheck(g.adapter, g.docs.req.Text)
@@ -1184,6 +1198,9 @@ func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) st
 			continue
 		}
 		if why := workflow.Decide(f, workflow.Action{Kind: workflow.EditFile, Path: filepath.ToSlash(rel)}); why != "" {
+			if f.Untyped {
+				w.heldForType(sid)
+			}
 			return why
 		}
 	}
@@ -1401,6 +1418,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	v.Lock = w.lockView(ctx, g)
 	v.Flagged, v.FlagsRead = g.flags, g.flagsRead
 	v.Started = startedOf(g)
+	v.Ask = w.typeAskOf(g)
 	if g.head != "" {
 		if tc := w.typeChange(g.t.Repo, g.chosen, g.setup.setup.Protect, g.specs, g.base, g.head, g.net, g.listed); len(tc.Lines) > 0 {
 			v.Change = &tc

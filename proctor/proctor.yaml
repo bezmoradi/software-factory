@@ -14,12 +14,13 @@ drivers:
         - { method: POST, path: /api/docs }
         - { method: POST, path: /api/file, shows: [/api/message] }
         - { method: POST, path: /api/file-check, shows: [/api/message] }
-        - { method: POST, path: /api/gate, shows: [/api/approve-plan, /api/approve-requirements, /api/dispatch, /api/lock-tests, /api/packs, /api/remove-session] }
+        - { method: POST, path: /api/gate, shows: [/api/approve-plan, /api/approve-requirements, /api/dispatch, /api/lock-tests, /api/packs, /api/remove-session, /api/size] }
         - { method: POST, path: /api/metrics }
         - { method: POST, path: /api/projects, shows: [/api/add-repo, /api/remove-repo, /api/save-token, /api/session] }
         - { method: POST, path: /api/review-reply }
         - { method: POST, path: /api/screenshot }
         - { method: POST, path: /api/screenshots, shows: [/api/dispatch] }
+        - { method: POST, path: /api/session-name }
       destructive:
         - { method: POST, path: /api/packs }
         - { method: POST, path: /api/remove-repo }

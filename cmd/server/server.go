@@ -360,7 +360,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, func(sid string) error { return d.HistoryOnly(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -600,10 +600,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	useAgentReports(sends, srv, parts, cfg, logger)
 	useViews(srv, parts, cfg, reg, ws, logger)
 	useSavedPrompts(srv, parts, cfg, logger)
-	issues := usePulls(sends, srv, reg, parts, cfg, logger)
+	usePulls(sends, srv, reg, parts, cfg, logger)
 	useProjectViews(srv, parts, cfg, reg, logger)
 	useKeep(srv, reg, parts, cfg, logger)
-	useStarts(sends, srv, reg, parts, issues, cfg, logger)
+	useStarts(sends, srv, reg, parts, cfg, logger)
 	restart := &restartHook{}
 	useBackups(srv, parts, cfg, begun, restart, logger)
 	useReviewExtras(srv, reg, parts, cfg, logger)

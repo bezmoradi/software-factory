@@ -11,14 +11,14 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, packs *session.Packs, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
+func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, reviews *session.Reviews, pins *npm.Plugins, packs *session.Packs, catalogs *session.Catalogs, targets func(string) (session.PushTarget, bool), doubled func(string) bool, held func(string) (session.PushTarget, bool), history func(string) error, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Work, error) {
 	if repos == nil {
 		return nil, nil
 	}
 	wc := session.WorkConfig{
 		Targets: targets, Doubled: doubled, Held: held, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
-		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), DocsInRepo: true,
+		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), Note: reg.NoteFor("work-type"), HistoryOnly: history, DocsInRepo: true,
 		Changes: files.Reader{}, Level: reg.PushLevel,
 	}
 	if reviews != nil {

@@ -299,40 +299,6 @@ class SfUsage extends HTMLElement {
   }
 }
 
-class SfUsageLine extends HTMLElement {
-  #sid = ''
-  #stop = () => {}
-
-  set sid(value: string) {
-    this.#sid = SID.test(value) ? value : ''
-    this.paint()
-  }
-
-  connectedCallback() {
-    this.#stop = watchLimits(this)
-    this.paint()
-  }
-
-  disconnectedCallback() {
-    this.#stop()
-  }
-
-  paint() {
-    const m = this.#sid ? view.meter.find(x => x.sid === this.#sid) : undefined
-    const windows = m?.windows ?? []
-    this.hidden = !windows.length
-    if (!m || !windows.length) {
-      this.replaceChildren()
-      return
-    }
-    const near = windows.some(w => w.near)
-    const said = windows.map(w => `${visible(w.short || w.name)} ${Math.round(w.utilization * 100)}%${w.status === 'rejected' ? ' used up' : ''}`).join(' · ')
-    const line = el('span', near ? 'warn' : 'secondary', `${visible(m.label)}: ${said}${near ? ' · automatic work paused, open the session to answer' : ''}`)
-    this.title = windows.map(w => `${visible(w.name)}: ${Math.round(w.utilization * 100)}% used${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`).join('\n')
-    this.replaceChildren(line)
-  }
-}
-
 class SfTokenExpiry extends HTMLElement {
   #url = ''
   #stop = () => {}
@@ -363,13 +329,11 @@ class SfTokenExpiry extends HTMLElement {
 }
 
 customElements.define('sf-usage', SfUsage)
-customElements.define('sf-usage-line', SfUsageLine)
 customElements.define('sf-token-expiry', SfTokenExpiry)
 
 declare global {
   interface HTMLElementTagNameMap {
     'sf-usage': SfUsage
-    'sf-usage-line': SfUsageLine
     'sf-token-expiry': SfTokenExpiry
   }
 }

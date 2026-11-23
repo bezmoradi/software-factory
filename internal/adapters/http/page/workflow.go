@@ -110,6 +110,7 @@ type gateJSON struct {
 	Pushed       bool               `json:"pushed"`
 	Path         pathJSON           `json:"path"`
 	Flow         *flowJSON          `json:"flow"`
+	TypeAsk      *typeCardJSON      `json:"typeAsk,omitempty"`
 }
 
 type pathActionJSON struct {
@@ -378,6 +379,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		g.Review, g.Pushed = offerOf(info, v), session.HeadPushed(info, v.Head)
 		g.Path = pathOf(session.Path(info, v, g.Pushed))
 		g.Flow = flowOf(session.LiveFlow(info, v, g.Pushed))
+		g.TypeAsk = typeCardOf(session.WorkTypeCard(info, v))
 		send(w, http.StatusOK, map[string]any{"gate": g})
 	case "/api/size":
 		size, ok := body["size"].(string)

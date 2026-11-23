@@ -60,7 +60,7 @@ paths:
 
 Each check below tries one rule of the trust boundary or the gate (ARCHITECTURE.md "Trust boundary" and "Review, then push") and gives the refusal or result the code produces. Run them on your own Docker with your Software Factory stopped, as [Hand checks with Compose](compose-hand-checks.md) says, on the development overlay with its fakes, in the order below: the last ones restart the engine, which stops every session. Record what each gave in the description of the change that ran them; no test keeps a fixed bypass from coming back. The page's own refusals are in docs/reference/security-and-sign-in.md "Page security checks", and the containers' isolation in [Hand checks with Compose](compose-hand-checks.md).
 
-**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session (work type `fix` unless named), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
+**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session and picks its work type with `/api/size` (`fix` unless named; `none` leaves it unpicked, so its first file change is held for a work type), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
 
 ```bash
 export SF_DEV_UPDATE_API=https://gitserver.test:8443/release-api SF_DEV_REVIEW_MINUTES=2
@@ -70,7 +70,7 @@ P=http://127.0.0.1:7799
 key() { curl -sS -X POST -H 'Content-Type: application/json' -H "Origin: $P" "$P/api/session" -d '{}' | sed -E 's/.*"token":"([^"]+)".*/\1/' > /tmp/sf-key; }
 sf() { curl -sS -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P$1" -d "$2"; }
 events() { curl -sS -N -m 5 -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P/api/events" 2>/dev/null | head -n 1; }
-start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\",\"type\":\"${2:-fix}\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-$1; cat /tmp/sf-$1; }
+start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); [ "${2:-fix}" = none ] || sf /api/size "{\"sid\":\"${r%% *}\",\"size\":\"${2:-fix}\"}" >/dev/null; sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-$1; cat /tmp/sf-$1; }
 sid() { cut -d' ' -f1 /tmp/sf-$1; }
 branch() { echo sf/$(cut -d' ' -f2 /tmp/sf-$1); }
 wt() { cut -d' ' -f3 /tmp/sf-$1; }
@@ -387,7 +387,7 @@ An uploaded pack, and a session that keeps it across Stop and Wake after the pro
 ```bash
 B=$(up /tmp/sf-beta beta | tee /dev/stderr | pdig); pk use ",\"pack\":\"$B\""
 start pb; gate pb
-sf /api/dispatch '{"path":"/workspace/base/demo","agent":"dev-acp","name":"bf","type":"feature"}'
+sf /api/dispatch '{"path":"/workspace/base/demo","agent":"dev-acp","name":"bf"}'
 pk use ',"pack":"knackpack"'; gate pb; pk remove ",\"digest\":\"$B\""
 sf /api/stop-session "{\"sid\":\"$(sid pb)\"}"; sleep 6; ev 30; sleep 1; sf /api/wake "{\"sid\":\"$(sid pb)\"}"; sleep 10
 grep '"type":"versions"' /tmp/sf-events; gate pb

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
@@ -27,7 +26,7 @@ const (
 )
 
 type IssuesPage interface {
-	List(ctx context.Context, path, label string, page int) (IssueList, error)
+	List(ctx context.Context, path string, page int) (IssueList, error)
 	Read(ctx context.Context, path string, number int) (IssueView, error)
 }
 
@@ -53,7 +52,6 @@ type IssueStarts struct {
 
 type IssueList struct {
 	Repo   string
-	Label  string
 	Page   int
 	More   bool
 	Issues []IssueFound
@@ -127,15 +125,7 @@ func (s *IssueStarts) allow(path string) error {
 	return nil
 }
 
-func ValidLabel(label string) bool {
-	return utf8.ValidString(label) && utf8.RuneCountInString(label) <= MaxIssueLabel && CleanLine(label, MaxIssueLabel) == label && strings.TrimSpace(label) == label
-}
-
-func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (IssueList, error) {
-	label = strings.TrimSpace(label)
-	if !ValidLabel(label) {
-		return IssueList{}, invalid("label", "A label is one line of at most 50 characters.")
-	}
+func (s *IssueStarts) List(ctx context.Context, path string, page int) (IssueList, error) {
 	if page < 1 || page > MaxIssuePage {
 		return IssueList{}, invalid("page", "The page is a number from 1 to 100.")
 	}
@@ -148,11 +138,11 @@ func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (I
 	}
 	ctx, cancel := context.WithTimeout(ctx, ForgeFor)
 	defer cancel()
-	list, more, err := s.cfg.Follows.cfg.API.OpenIssues(ctx, repo, label, page)
+	list, more, err := s.cfg.Follows.cfg.API.OpenIssues(ctx, repo, page)
 	if err != nil {
 		return IssueList{}, conflict("host", s.cfg.Follows.cfg.Forges.clean(repo.Token, "The engine couldn't list the open issues: "+forgeWhy(err, strings.TrimSuffix(NeedIssues, " and write"))+"."))
 	}
-	out := IssueList{Repo: repo.Host + "/" + repo.Slug(), Label: label, Page: page, More: more}
+	out := IssueList{Repo: repo.Host + "/" + repo.Slug(), Page: page, More: more}
 	for _, i := range list {
 		i.Body = ""
 		i.Title, i.Author, i.URL = CleanLine(i.Title, MaxForgeTitle), CleanLine(i.Author, 100), CleanLine(i.URL, 300)
