@@ -166,6 +166,8 @@ type run struct {
 	homeClear bool
 	homeGated bool
 	pack      SessionPack
+
+	pidPendingSince time.Time
 }
 
 type Dispatcher struct {
@@ -558,6 +560,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	r.id = foundID
 	r.sid = sid
 	r.running = true
+	r.pidPendingSince = d.reg.now()
 	d.booted(r)
 	d.reg.Admit(sid, launched(d.admission(r, true)))
 	d.observeStart(sid, r.check)
@@ -988,6 +991,7 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 		}
 		d.mu.Lock()
 		r.running = true
+		r.pidPendingSince = d.reg.now()
 		r.rmDone = false
 		d.mu.Unlock()
 		d.reg.Admit(sid, d.admission(r, true))

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path"
 	"regexp"
 	"slices"
@@ -527,6 +528,33 @@ func (d *Dispatcher) clearBox(ctx context.Context, box string) {
 	}
 }
 
+func (d *Dispatcher) clearGone(box string) bool {
+	if !d.boxed() {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), boxCallFor)
+	defer cancel()
+	d.cfg.Logger.Info("boxes", "event", "started-to-clear", "box", box)
+	if err := d.cfg.Folders.Make(box); err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "folders-not-made", "box", box)
+		return false
+	}
+	if err := d.cfg.Boxes.Create(ctx, box); err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "not-created", "box", box)
+		return false
+	}
+	up := d.upBox(ctx, box) == nil
+	if up {
+		d.clearBox(ctx, box)
+	}
+	d.cfg.Routes.Down(box)
+	if err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {
+		d.cfg.Logger.Warn("boxes", "event", "not-removed", "box", box)
+		return false
+	}
+	return up && d.cfg.Folders.Remove(box) == nil
+}
+
 func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	if !ValidBox(box) {
 		return false
@@ -545,7 +573,7 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	}
 	folders := true
 	if d.cfg.Folders != nil {
-		if err := d.cfg.Folders.Remove(box); err != nil {
+		if err := d.cfg.Folders.Remove(box); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {
 			folders = false
 			d.cfg.Logger.Warn("boxes", "event", "folders-not-removed", "box", box)
 		}

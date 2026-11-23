@@ -115,7 +115,7 @@ func (s *Server) addWorktree(ctx context.Context, q worktreeJSON) (string, *prob
 	}
 	s.wtMu.Lock()
 	defer s.wtMu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
 		return "", fail(http.StatusInternalServerError, "worktree", "agent-host couldn't create the worktrees folder.")
 	}
 	if _, err := os.Lstat(path); err == nil || !errors.Is(err, os.ErrNotExist) {

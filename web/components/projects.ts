@@ -263,6 +263,8 @@ class SfProjects extends HTMLElement {
   #hostEdited = false
   #addingRepo = false
   #sessions: SessionInfo[] = []
+  #acting = new Set<string>()
+  #asking: { sid: string; action: 'stop' | 'remove' } | null = null
   #sessionsKey = ''
   #expanded = new Map<string, boolean>()
   #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
@@ -280,6 +282,12 @@ class SfProjects extends HTMLElement {
       this.#render()
     })
     this.addEventListener('focusout', settle)
+    this.addEventListener('sf-session-ask', e => {
+      const { sid, action } = e.detail
+      this.#asking = action ? { sid, action } : null
+      this.#render()
+      this.#focus(action ? `ask:${sid}:confirm` : `more:${sid}`)
+    })
     this.addEventListener('toggle', settle, true)
     this.addEventListener('change', e => {
       if (e.target instanceof HTMLSelectElement && this.#stale) {
@@ -425,6 +433,15 @@ class SfProjects extends HTMLElement {
   startRefused(path: string, a: EngineAnswer): boolean {
     const form = this.#forms.get(path)
     return !!form?.form.isConnected && !!a.field && form.refuse(a)
+  }
+
+  acting(sid: string, on: boolean) {
+    if (on) this.#acting.add(sid)
+    else {
+      this.#acting.delete(sid)
+      if (this.#asking?.sid === sid) this.#asking = null
+    }
+    this.#render()
   }
 
   say(path: string, text: string, bad = false) {
@@ -622,7 +639,7 @@ class SfProjects extends HTMLElement {
     head.append(acts)
     const parts: HTMLElement[] = [head]
     if (open) {
-      parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
+      parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true, this.#acting.has(s.sid), this.#asking?.sid === s.sid ? this.#asking.action : '')), 'project-sessions with-menu', `Sessions in ${p.name}`))
     }
     const said = this.#said.get(p.path) ?? statusLine('small status-slot')
     this.#said.set(p.path, said)

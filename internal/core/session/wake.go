@@ -18,6 +18,7 @@ const (
 	StatesEvery = 10 * time.Second
 	daemonFor   = 10 * time.Second
 	maxState    = 200
+	firstPidFor = time.Minute
 )
 
 var daemonPid = regexp.MustCompile(`(?m)^pid:\s+(\d+)\s*$`)
@@ -282,6 +283,14 @@ func (d *Dispatcher) refreshStates(ctx context.Context) {
 	}
 }
 
+func claudeEnded(state string) bool {
+	return state == "done" || state == "failed" || state == "stopped"
+}
+
+func (d *Dispatcher) comingUp(r *run, state string) bool {
+	return !r.pidPendingSince.IsZero() && d.reg.now().Sub(r.pidPendingSince) < firstPidFor && !claudeEnded(state)
+}
+
 func (d *Dispatcher) refreshBox(ctx context.Context, box, dir string, mine map[string]*run, live map[string]bool, states map[string]AgentState) (string, bool) {
 	host := d.hostFor(box)
 	lctx, cancel := context.WithTimeout(ctx, claudeList)
@@ -298,7 +307,10 @@ func (d *Dispatcher) refreshBox(ctx context.Context, box, dir string, mine map[s
 			}
 			states[row.SessionID] = AgentState{State: shortWord(row.State), Status: shortWord(row.Status), WaitingFor: shortWord(row.WaitingFor)}
 			d.mu.Lock()
-			gone := r.running && !r.busy && row.Pid <= 0 && !live[row.SessionID]
+			if row.Pid > 0 {
+				r.pidPendingSince = time.Time{}
+			}
+			gone := r.running && !r.busy && row.Pid <= 0 && !live[row.SessionID] && !d.comingUp(r, row.State)
 			if gone {
 				r.running = false
 			}

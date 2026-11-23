@@ -1445,6 +1445,7 @@ declare global {
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
+    'sf-session-ask': CustomEvent<{ sid: string; action: '' | 'stop' | 'remove' }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event

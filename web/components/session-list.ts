@@ -1,4 +1,4 @@
-import { button, el, emit, say, shown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, shown, visible } from '../lib/dom.ts'
 import { placeMenu } from '../lib/menu.ts'
 import { icon } from './icon.ts'
 import { age, label, plural } from '../lib/format.ts'
@@ -74,9 +74,6 @@ export function sessionLink(sid: string, key: string, parts: (Node | string)[]) 
 function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
   if (s.actions?.manage !== '') return [el('span')]
   const action = s.running ? 'stop' : 'remove'
-  const words = action === 'stop' ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
-  const armedSaid = action === 'stop' ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.'
-  const said = statusLine('sr-only', 'span')
   const more = button('', 'ghost icon-button', undefined, 'button', `more:${s.sid}`)
   more.setAttribute('aria-label', `More actions for ${visible(label(s))}`)
   more.setAttribute('aria-haspopup', 'menu')
@@ -86,18 +83,10 @@ function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
   menu.setAttribute('role', 'menu')
   menu.setAttribute('aria-label', `Actions for ${visible(label(s))}`)
   more.popoverTargetElement = menu
-  const text = el('span', '', words[0])
+  const text = el('span', '', action === 'stop' ? 'Stop session' : 'Delete session')
   const item = button('', '', () => {
-    if (item.dataset.armed !== 'yes') {
-      item.dataset.armed = 'yes'
-      item.classList.add('danger')
-      text.textContent = words[1] ?? ''
-      say(said, armedSaid)
-      return
-    }
     menu.hidePopover()
-    more.focus()
-    emit(li, 'sf-session-action', { sid: s.sid, action })
+    emit(li, 'sf-session-ask', { sid: s.sid, action })
   })
   item.setAttribute('role', 'menuitem')
   const mark = el('span', 'mark')
@@ -105,17 +94,20 @@ function sessionMenu(s: SessionInfo, li: HTMLLIElement): HTMLElement[] {
   item.append(mark, text)
   menu.append(item)
   menu.addEventListener('toggle', e => {
-    if ((e as ToggleEvent).newState !== 'open') {
-      delete item.dataset.armed
-      item.classList.remove('danger')
-      text.textContent = words[0] ?? ''
-      say(said, '')
-      return
-    }
+    if ((e as ToggleEvent).newState !== 'open') return
     placeMenu(more, menu)
     item.focus()
   })
-  return [more, menu, said]
+  return [more, menu]
+}
+
+function sessionAsk(s: SessionInfo, li: HTMLLIElement, action: 'stop' | 'remove', acting: boolean): HTMLElement {
+  const name = visible(label(s))
+  const go = button(action === 'stop' ? 'Stop' : 'Delete', 'ghost small danger', () => emit(li, 'sf-session-action', { sid: s.sid, action }), 'button', `ask:${s.sid}:confirm`)
+  if (acting) busy(go, true)
+  const ask = el('span', 'acts session-ask')
+  ask.append(el('span', 'small muted', action === 'stop' ? `Stop ${name}? Wake brings it back.` : `Delete ${name} and its worktree?`), button('Cancel', 'ghost small', () => emit(li, 'sf-session-ask', { sid: s.sid, action: '' }), 'button', `ask:${s.sid}:keep`), go)
+  return ask
 }
 
 export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDivElement {
@@ -130,7 +122,7 @@ export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDi
   return table
 }
 
-export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu = false): HTMLLIElement {
+export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu = false, acting = false, asking: '' | 'stop' | 'remove' = ''): HTMLLIElement {
   const name = titled(visible(label(s)))
   if (s.running && !s.live) name.append(el('span', 'tag', 'not connected'))
   else if (s.live && !s.controlled) name.append(el('span', 'tag', 'read-only'))
@@ -147,8 +139,14 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   open.setAttribute('aria-label', `Open ${visible(label(s))}`)
   const cells = el('div', 'boxlist-row session-cells')
   cells.title = s.cwd || ''
-  cells.append(name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open)
   const row = el('li')
+  if (menu && asking) {
+    cells.append(name, sessionAsk(s, row, asking, acting))
+    row.classList.add('with-menu', 'asking')
+    row.append(cells)
+    return row
+  }
+  cells.append(name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open)
   row.append(cells)
   if (menu) {
     row.classList.add('with-menu')

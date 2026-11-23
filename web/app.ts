@@ -1340,11 +1340,13 @@ async function changeRepo(detail: { op: 'add'; url: string } | { op: 'remove'; n
 }
 async function changeRepoNow(detail: { op: 'add'; url: string } | { op: 'remove'; name: string }) {
   const a = detail.op === 'add' ? await request('/api/add-repo', { url: detail.url }) : await request('/api/remove-repo', { name: detail.name })
-  if (!a.ok) {
-    const problem = a.message
-    return detail.op === 'add' && a.field === 'url' ? projects.addFailed(problem) : projects.say('', problem, true)
+  if (!a.ok && detail.op === 'remove') {
+    projects.say('', '')
+    return void toast({ id: `repo-remove:${detail.name}`, title: `${visible(detail.name)} wasn't removed`, description: a.message, tone: 'bad', timeout: 0 })
   }
+  if (!a.ok) return a.field === 'url' ? projects.addFailed(a.message) : projects.say('', a.message, true)
   if (detail.op === 'add') projects.added()
+  else toast({ id: `repo-remove:${detail.name}`, title: `${visible(detail.name)} removed.`, tone: 'ok' })
   projects.say('', '')
   await loadProjects(true)
 }
@@ -1374,15 +1376,16 @@ projects.addEventListener('sf-expect', e => void setExpect(e.detail.agent, e.det
 projects.addEventListener('sf-token', e => void changeToken(e.detail))
 projects.addEventListener('sf-session-action', async e => {
   const s = sessions.get(e.detail.sid)
-  const project = s && projectOf(s.info)
-  if (!s || !project) {
+  if (!s) {
     toast({ id: `manage:${e.detail.sid}`, title: e.detail.action === 'stop' ? "The session wasn't stopped" : "The session wasn't deleted", description: 'This page lost track of it. Reload the page and try again.', tone: 'bad', timeout: 0 })
     return
   }
-  const name = label(s.info)
-  projects.say(project.path, e.detail.action === 'stop' ? `Stopping ${name}…` : `Deleting ${name}…`)
-  const problem = await manage(s, e.detail.action === 'stop' ? '/api/stop-session' : '/api/remove-session', {})
-  projects.say(project.path, problem, !!problem)
+  const name = visible(label(s.info))
+  const stop = e.detail.action === 'stop'
+  projects.acting(s.sid, true)
+  const problem = await manage(s, stop ? '/api/stop-session' : '/api/remove-session', {})
+  projects.acting(s.sid, false)
+  toast(problem ? { id: `manage:${s.sid}`, title: stop ? `${name} wasn't stopped` : `${name} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 } : { id: `manage:${s.sid}`, title: stop ? `${name} is stopping.` : `${name} was deleted.`, tone: 'ok' })
 })
 projects.addEventListener('sf-dispatch', async e => {
   const detail = e.detail

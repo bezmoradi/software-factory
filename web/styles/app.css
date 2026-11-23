@@ -801,12 +801,15 @@ sf-toasts { position: fixed; top: 2.5rem; left: 50%; z-index: 5; display: flex; 
 .with-menu > .sessions-head { padding-right: calc(.8rem + 2rem); }
 .sessions-head { display: grid; align-items: center; gap: .75rem; min-height: calc(var(--compact-height) + .6rem); box-sizing: border-box; padding: .3rem .5rem .3rem .75rem; font-size: .75rem; background: color-mix(in srgb, var(--card), var(--ink) 6%); }
 .session-open { justify-self: end; }
+.sessions .session-ask { grid-column: 2 / -1; justify-content: flex-end; }
+.session-table .sessions > li.asking > .session-cells { grid-column: 1 / -1; padding-right: calc(2rem - var(--compact-height)); }
 .ended > summary { margin-bottom: .5rem; }
 @container (max-width: 36rem) {
   .sessions > li > a { grid-template-columns: var(--dot) minmax(0, 1fr) auto; }
   .sessions .what { grid-column: 2 / -1; grid-row: 2; white-space: normal; }
   .sessions .session-cells, .sessions-head { grid-template-columns: minmax(0, 1fr) minmax(0, min(9rem, 25%)) 2.5rem 3.5rem; }
   .sessions .session-cells .what { grid-column: 1 / -1; }
+  .sessions .session-ask { grid-column: 1 / -1; }
   .sessions-head > :nth-child(2) { display: none; }
 }
 
