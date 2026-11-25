@@ -9,14 +9,14 @@ func savedApproval(a *workApproval) *SavedApproval {
 	if a == nil {
 		return nil
 	}
-	return &SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Text: a.Text}
+	return &SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Text: a.Text, Plan: a.Plan}
 }
 
 func workApprovalOf(a *SavedApproval) *workApproval {
 	if a == nil {
 		return nil
 	}
-	v := &workApproval{Hash: a.Hash, Commit: a.Commit, At: a.At}
+	v := &workApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Plan: a.Plan}
 	if a.Text != "" && textHash(a.Text) == a.Hash {
 		v.Text = a.Text
 	}
@@ -30,7 +30,7 @@ func (w *Work) saved(sid string) *SavedWork {
 	if s == nil {
 		return nil
 	}
-	v := SavedWork{Repo: s.repo, Type: s.typeID, Chosen: s.chosen, Requirements: savedApproval(s.req), Plan: savedApproval(s.plan), Lock: s.lock}
+	v := SavedWork{Repo: s.repo, Type: s.typeID, Chosen: s.chosen, Requirements: savedApproval(s.req), Plan: savedApproval(s.plan), Lock: s.lock, Ran: slices.Clone(s.ran)}
 	if len(s.allowed) > 0 {
 		v.Allowed = map[string][]string{}
 		for p, set := range s.allowed {
@@ -66,7 +66,7 @@ func (w *Work) Restore(sids []string) {
 		if !keep[sid] || w.sessions[sid] != nil {
 			continue
 		}
-		s := &workSession{repo: v.Repo, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements), plan: workApprovalOf(v.Plan), lock: testLockOf(v.Lock)}
+		s := &workSession{repo: v.Repo, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements), plan: workApprovalOf(v.Plan), lock: testLockOf(v.Lock), ran: firstStepsRan(v.Ran)}
 		if len(v.Allowed) > 0 {
 			s.allowed = map[string]map[string]bool{}
 			for p, blobs := range v.Allowed {

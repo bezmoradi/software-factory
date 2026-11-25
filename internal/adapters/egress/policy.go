@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
 const (
@@ -26,13 +28,16 @@ const (
 	ReasonNoSNI          = "no_sni"
 	ReasonECH            = "ech"
 	ReasonNotTLS         = "not_tls"
+	ReasonOwnNetwork     = "own_network"
 )
 
 var gitHosts = []string{"github.com", "githubusercontent.com", "gitlab.com", "bitbucket.org"}
 
 type Policy struct {
 	allow   []string
+	ports   []string
 	deny    []string
+	git     []string
 	expires map[string]time.Time
 }
 
@@ -43,19 +48,56 @@ type Source interface {
 func (p Policy) Current() Policy { return p }
 
 func (p Policy) WithAllow(allow []string, expires map[string]time.Time) (Policy, error) {
+	return p.withGrant(allow, nil, nil, expires)
+}
+
+func (p Policy) withGrant(allow, ports, git []string, expires map[string]time.Time) (Policy, error) {
 	out := Policy{deny: slices.Clone(p.deny), expires: map[string]time.Time{}}
+	opened := map[string]bool{}
+	for _, entry := range ports {
+		host, _, ok := session.SplitPortTarget(entry)
+		if !ok || !session.ValidPortEntry(entry) || normalize(host) != host {
+			return Policy{}, fmt.Errorf("egress: a port grant names %q, which isn't a host and port egress forwards", entry)
+		}
+		out.ports = append(out.ports, entry)
+	}
+	out.ports = sortedUnique(out.ports)
+	for _, entry := range git {
+		if slices.Contains(out.ports, entry) {
+			opened[entry] = true
+			out.git = append(out.git, entry)
+			continue
+		}
+		name, err := entryName(entry)
+		if err != nil || !slices.ContainsFunc(allow, func(a string) bool { return normalize(strings.TrimSpace(a)) == name }) {
+			return Policy{}, fmt.Errorf("egress: a git grant names %q, which isn't in the allowlist", entry)
+		}
+		opened[name] = true
+		out.git = append(out.git, name)
+	}
+	out.git = sortedUnique(out.git)
+	for _, entry := range out.ports {
+		host, _, _ := session.SplitPortTarget(entry)
+		if _, err := netip.ParseAddr(host); err != nil && gitHost(out.deny, host) && !opened[entry] {
+			return Policy{}, fmt.Errorf("egress: a port grant names %q, a refused git host, without a git grant", entry)
+		}
+	}
 	for _, entry := range allow {
 		name, err := entryName(entry)
 		if err != nil {
 			return Policy{}, fmt.Errorf("egress: allowlist: %w", err)
 		}
-		if gitHost(out.deny, name) {
+		if gitHost(out.deny, name) && !opened[name] {
 			return Policy{}, fmt.Errorf("egress: allowlist: %q names or covers a refused git host", entry)
 		}
 		out.allow = append(out.allow, name)
 	}
 	out.allow = sortedUnique(out.allow)
 	for entry, t := range expires {
+		if slices.Contains(out.ports, entry) && !t.IsZero() {
+			out.expires[entry] = t
+			continue
+		}
 		name, err := entryName(entry)
 		if err != nil || !slices.Contains(out.allow, name) || t.IsZero() {
 			return Policy{}, fmt.Errorf("egress: an expiry names %q, which isn't in the allowlist", entry)
@@ -111,6 +153,33 @@ func (p Policy) Deny() []string {
 	return slices.Clone(p.deny)
 }
 
+func (p Policy) Git() []string {
+	return slices.Clone(p.git)
+}
+
+func (p Policy) Ports() []string {
+	return slices.Clone(p.ports)
+}
+
+func (p Policy) portAllowed(target string) bool {
+	if !p.exact(p.ports, target) {
+		return false
+	}
+	host, _, _ := session.SplitPortTarget(target)
+	if _, err := netip.ParseAddr(host); err == nil || !p.denied(host) {
+		return true
+	}
+	return p.exact(p.git, target)
+}
+
+func (p Policy) exact(list []string, entry string) bool {
+	if !slices.Contains(list, entry) {
+		return false
+	}
+	t, ok := p.expires[entry]
+	return !ok || time.Now().Before(t)
+}
+
 func (p Policy) Check(host string) string {
 	name := normalize(host)
 	if _, err := netip.ParseAddr(name); err == nil {
@@ -141,8 +210,16 @@ func (p Policy) denied(name string) bool {
 }
 
 func (p Policy) allowed(name string) bool {
+	return p.covered(p.allow, name)
+}
+
+func (p Policy) gitAllowed(name string) bool {
+	return p.covered(p.git, name)
+}
+
+func (p Policy) covered(list []string, name string) bool {
 	now := time.Now()
-	for _, a := range p.allow {
+	for _, a := range list {
 		if t, ok := p.expires[a]; ok && !now.Before(t) {
 			continue
 		}

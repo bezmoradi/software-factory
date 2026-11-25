@@ -303,14 +303,14 @@ func (r *Registry) workSeen(c *conn, kind string, ev map[string]any) {
 	}
 }
 
-func (r *Registry) workDivert(sid, text string, attached bool) (bool, error) {
+func (r *Registry) workDivert(sid, text string, attached, typed bool) (bool, error) {
 	r.mu.Lock()
 	w := r.work
 	r.mu.Unlock()
 	if w == nil {
 		return false, nil
 	}
-	return w.divert(sid, text, attached)
+	return w.divert(sid, text, attached, typed)
 }
 
 func (w *SessionWork) turnBegan(sid string) {

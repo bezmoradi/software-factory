@@ -65,6 +65,7 @@ export { toast }
 export const sessions = new Map<string, Session>()
 export const state = { connected: false, note: '', stream: '', supervisor: '', imageTypes: [] as string[] }
 export const armed = new Set<string>()
+export const waking = new Map<string, number>()
 let paintQueued = false
 let painter: () => void = () => {}
 

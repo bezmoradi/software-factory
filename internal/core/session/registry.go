@@ -138,6 +138,9 @@ type Info struct {
 	Review          *ReviewView
 	Push            *PushView
 	Forge           []ForgeView
+	Access          []AccessCard
+	AccessMarker    string
+	AccessNotes     []AccessNote
 	SignIn          *SignIn
 	State           string
 	Status          string
@@ -203,6 +206,9 @@ type admitted struct {
 	review       *ReviewView
 	push         *PushView
 	forge        []ForgeView
+	access       []AccessCard
+	accessMarker string
+	accessNotes  []AccessNote
 	follow       *FollowView
 	splits       []SplitView
 	splitGoal    *SplitGoal
@@ -271,6 +277,7 @@ type Registry struct {
 	limits      *Limits
 	work        *SessionWork
 	branchCopy  *Keep
+	firstSteps  FirstSteps
 }
 
 var (
@@ -1302,6 +1309,11 @@ func (r *Registry) info(sid string, now time.Time) Info {
 			info.Forge = slices.Clone(a.forge)
 			info.Needs += forgeWaiting(a.forge)
 		}
+		if len(a.access) > 0 {
+			info.Access = slices.Clone(a.access)
+			info.Needs += len(a.access)
+		}
+		info.AccessMarker, info.AccessNotes = a.accessMarker, slices.Clone(a.accessNotes)
 		if a.follow != nil {
 			info.Follow = a.follow.clone()
 		}
@@ -1410,80 +1422,102 @@ func shellLine(text string) *Error {
 }
 
 func (r *Registry) Message(sid, text string, confirm bool, images, files []string) error {
+	return r.message(sid, text, false, confirm, images, files)
+}
+
+func (r *Registry) PersonMessage(sid, text string, confirm bool, images, files []string) error {
+	return r.message(sid, text, true, confirm, images, files)
+}
+
+func (r *Registry) message(sid, text string, typed, confirm bool, images, files []string) error {
 	text = strings.TrimSpace(text)
 	if why := r.limitsMessageHeld(sid); why != "" {
 		return conflict("cap", why)
 	}
-	if held, err := r.workDivert(sid, text, len(images) > 0 || len(files) > 0); held {
+	if held, err := r.workDivert(sid, text, len(images) > 0 || len(files) > 0, typed); held {
 		return err
 	}
+	var first FirstStep
+	if typed {
+		first = r.firstStepFor(sid, text, len(images) > 0 || len(files) > 0)
+	}
+	used, err := r.sendTyped(sid, text, confirm, images, files, first)
+	if first.Step != "" && used == "" {
+		r.unclaimStep(sid, first.Step)
+	}
+	return err
+}
+
+func (r *Registry) sendTyped(sid, text string, confirm bool, images, files []string, first FirstStep) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
 	c, err := r.controllable(sid, true, now)
 	if err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Reason == "read-only" {
-			return explained(e, "This session is read-only on this page.")
+			return "", explained(e, "This session is read-only on this page.")
 		}
-		return err
+		return "", err
 	}
 	attached := len(images) > 0 || len(files) > 0
 	switch {
 	case text == "" && !attached:
-		return invalid("text", "Type a message first.")
+		return "", invalid("text", "Type a message first.")
 	case utf16Len(text) > MaxText || !utf8.ValidString(text):
-		return invalid("text", "A message holds at most 20,000 characters.")
+		return "", invalid("text", "A message holds at most 20,000 characters.")
 	case strings.HasPrefix(text, "!"):
-		return shellLine(text)
+		return "", shellLine(text)
 	case attached && commandName(text) != "":
-		return invalid("command", "A command can't carry images or files. Send them in a message of their own.")
+		return "", invalid("command", "A command can't carry images or files. Send them in a message of their own.")
 	case len(images) > 0 && r.uploads.noImage[sid]:
-		return conflict("no images", noImages)
+		return "", conflict("no images", noImages)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return invalid("command", r.commandRefusedLocked(sid))
+		return "", invalid("command", r.commandRefusedLocked(sid))
 	}
 	if c.mode == "bypassPermissions" && !confirm {
-		return conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
+		return "", conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
 	}
 	ims, err := r.takeUploads(sid, images, true)
 	if err != nil {
-		return err
+		return "", err
 	}
 	fs, err := r.takeUploads(sid, files, false)
 	if err != nil {
-		return err
+		return "", err
 	}
 	r.markSent(ims)
 	r.markSent(fs)
 	msg, _ := uploadFields(ims, fs)
 	msg["kind"] = "prompt"
-	sent, noted := r.noted(sid, text)
+	q := r.queued[sid]
+	if q != nil && len(q.msgs) >= maxQueued {
+		return "", limited("queue", "Twenty messages already wait for this session to wake.")
+	}
+	sent, noted, step := r.stepTextLocked(sid, text, first)
 	msg["text"] = sent
 	asked := r.checkpointAsked(sid, text)
-	if q := r.queued[sid]; q != nil {
-		if len(q.msgs) >= maxQueued {
-			return limited("queue", "Twenty messages already wait for this session to wake.")
-		}
+	if q != nil {
 		q.msgs = append(q.msgs, msg)
+		q.marked = withStep(q.marked, step)
 		if noted {
 			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
-		return nil
+		return step, nil
 	}
 	r.tell(c, msg, now)
 	if noted {
 		r.dropNotesLocked(sid)
 	}
-	if asked {
+	if asked || step != "" {
 		r.announce(now)
 	}
 	if commandName(text) == "" {
 		r.limitsMessage(sid)
 		r.startTurnLocked(sid, now)
 	}
-	return nil
+	return step, nil
 }
 
 func (r *Registry) Interrupt(sid string) error {

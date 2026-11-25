@@ -232,35 +232,45 @@ func pathPart(s string) string {
 }
 
 func (d *Docker) logTail(ctx context.Context, id string, keep int, limit int64) ([]byte, error) {
-	q := url.Values{"stdout": {"1"}, "stderr": {"1"}, "tail": {"400"}}
+	out, _, err := d.logTailOf(ctx, id, keep, limit, "400")
+	return out, err
+}
+
+func (d *Docker) logTailOf(ctx context.Context, id string, keep int, limit int64, lines string) ([]byte, bool, error) {
+	q := url.Values{"stdout": {"1"}, "stderr": {"1"}, "tail": {lines}}
 	resp, err := d.send(ctx, d.client, http.MethodGet, "/containers/"+pathPart(id)+"/logs", q, nil, true)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
-		return nil, readDockerError(resp)
+		return nil, false, readDockerError(resp)
 	}
 	body := io.LimitReader(resp.Body, limit)
 	var out []byte
 	var header [8]byte
+	cut := false
 	for {
 		if _, err := io.ReadFull(body, header[:]); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				break
 			}
-			return nil, fmt.Errorf("the container's log couldn't be read: %w", err)
+			return nil, false, fmt.Errorf("the container's log couldn't be read: %w", err)
 		}
 		size := int64(binary.BigEndian.Uint32(header[4:8]))
 		chunk := make([]byte, min(size, int64(keep)))
 		skip := size - int64(len(chunk))
 		if skip > 0 {
+			cut = true
 			if _, err := io.CopyN(io.Discard, body, skip); err != nil {
 				break
 			}
 		}
 		n, err := io.ReadFull(body, chunk)
 		out = append(out, chunk[:n]...)
+		if len(out) > keep {
+			cut = true
+		}
 		if len(out) > 2*keep {
 			out = append([]byte(nil), out[len(out)-keep:]...)
 		}
@@ -271,5 +281,5 @@ func (d *Docker) logTail(ctx context.Context, id string, keep int, limit int64) 
 	if len(out) > keep {
 		out = out[len(out)-keep:]
 	}
-	return out, nil
+	return out, cut, nil
 }

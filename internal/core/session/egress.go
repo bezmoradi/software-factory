@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -33,7 +34,9 @@ var ExpiryChoices = []ExpiryChoice{{Value: "never", Label: "No expiry"}, {Value:
 
 type EgressList struct {
 	Allow   []string
+	Ports   []string
 	Expires map[string]time.Time
+	Git     []string
 }
 
 type EgressLists struct {
@@ -52,6 +55,14 @@ type EgressState struct {
 	Starting bool
 	Lists    EgressLists
 	Deny     []string
+	Grants   map[netip.Prefix]EgressList
+}
+
+type SubnetRefusal struct {
+	Subnet netip.Prefix
+	Host   string
+	Count  int
+	Last   time.Time
 }
 
 type AddedHost struct {
@@ -294,7 +305,8 @@ func (a *Allowlist) syncLocked(ctx context.Context) error {
 }
 
 func SameList(want, got EgressList) bool {
-	if !slices.Equal(sortedHosts(want.Allow), sortedHosts(got.Allow)) || len(want.Expires) != len(got.Expires) {
+	if !slices.Equal(sortedHosts(want.Allow), sortedHosts(got.Allow)) || !slices.Equal(sortedHosts(want.Ports), sortedHosts(got.Ports)) ||
+		!slices.Equal(sortedHosts(want.Git), sortedHosts(got.Git)) || len(want.Expires) != len(got.Expires) {
 		return false
 	}
 	for h, t := range want.Expires {

@@ -31,6 +31,7 @@ scenarios:
             "$.container.ports": [{ container_port: "8080/tcp", host_ip: "127.0.0.1", host_port: "${page.port}" }]
             "$.container.tmpfs": ["/tmp"]
             "$.container.mounts":
+              - { type: volume, destination: /actions, read_only: false, volume: sf-proctor_actions, subpath: null, source: null }
               - { type: volume, destination: /opt/sf-dev/git-ca, read_only: true, volume: sf-proctor_gitserver-ca, subpath: null, source: null }
               - { type: volume, destination: /opt/software-factory/agents, read_only: false, volume: sf-proctor_agents, subpath: null, source: null }
               - { type: volume, destination: /reviews, read_only: false, volume: sf-proctor_reviews, subpath: null, source: null }
@@ -201,7 +202,7 @@ scenarios:
             "$.network.members": { in_scope: false }
 
   - id: STK-003
-    name: "The stack's key and upload volumes are tmpfs, so their contents never reach disk, and the workspace, engine state and verification volumes are plain local volumes"
+    name: "The stack's key, upload and actions volumes are tmpfs, so their contents never reach disk, and the workspace, engine state and verification volumes are plain local volumes"
     steps:
       - id: uploads
         do: docker.volume
@@ -214,6 +215,17 @@ scenarios:
             "$.volume.option_keys": [device, o, type]
           any:
             "$.volume.labels": { key: com.docker.compose.volume, value: uploads }
+      - id: actions
+        do: docker.volume
+        with: { name: sf-proctor_actions }
+        expect:
+          equal:
+            "$.found": true
+            "$.volume.driver": local
+            "$.volume.type_option": tmpfs
+            "$.volume.option_keys": [device, o, type]
+          any:
+            "$.volume.labels": { key: com.docker.compose.volume, value: actions }
       - id: egress-key
         do: docker.volume
         with: { name: sf-proctor_egress-key }

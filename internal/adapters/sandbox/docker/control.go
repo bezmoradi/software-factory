@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -24,18 +25,22 @@ import (
 )
 
 const (
-	StatusVersion    = "2"
-	ControlKeyHeader = "X-SF-Control-Key"
-	maxSides         = 4
-	maxSideEntries   = 256
-	maxRefused       = 256 << 10
+	StatusVersion     = "2"
+	ControlKeyHeader  = "X-SF-Control-Key"
+	maxSides          = 4
+	maxSideEntries    = session.MaxEgressEntries
+	maxRefused        = 4 << 20
+	maxGrantSubnets   = 4096
+	maxSubnetRefusals = 32
 )
 
 var reasonPattern = regexp.MustCompile(`^[a-z_]{1,32}$`)
 
 type sideJSON struct {
 	Allow   []string         `json:"allow"`
+	Ports   []string         `json:"ports,omitempty"`
 	Expires map[string]int64 `json:"expires"`
+	Git     []string         `json:"git,omitempty"`
 }
 
 type statusJSON struct {
@@ -44,6 +49,7 @@ type statusJSON struct {
 	Set     bool                `json:"set"`
 	Deny    []string            `json:"deny"`
 	Sides   map[string]sideJSON `json:"sides"`
+	Grants  map[string]sideJSON `json:"grants"`
 }
 
 type setJSON struct {
@@ -61,6 +67,7 @@ type seenJSON struct {
 type refusedJSON struct {
 	Version string                `json:"version"`
 	Sides   map[string][]seenJSON `json:"sides"`
+	Subnets map[string][]seenJSON `json:"subnets"`
 }
 
 type errPart string
@@ -68,10 +75,15 @@ type errPart string
 func (e errPart) Error() string { return string(e) }
 
 func listOf(s sideJSON) (session.EgressList, bool) {
-	if s.Allow == nil || len(s.Allow) > maxSideEntries || len(s.Expires) > maxSideEntries {
+	if s.Allow == nil || len(s.Allow) > maxSideEntries || len(s.Ports) > maxSideEntries || len(s.Expires) > 2*maxSideEntries || len(s.Git) > 2*maxSideEntries {
 		return session.EgressList{}, false
 	}
-	out := session.EgressList{Allow: sortedCopy(s.Allow), Expires: map[string]time.Time{}}
+	for _, g := range s.Git {
+		if !slices.Contains(s.Allow, g) && !slices.Contains(s.Ports, g) {
+			return session.EgressList{}, false
+		}
+	}
+	out := session.EgressList{Allow: sortedCopy(s.Allow), Ports: sortedCopy(s.Ports), Expires: map[string]time.Time{}, Git: sortedCopy(s.Git)}
 	for h, t := range s.Expires {
 		if t <= 0 {
 			return session.EgressList{}, false
@@ -83,6 +95,12 @@ func listOf(s sideJSON) (session.EgressList, bool) {
 
 func sideOf(l session.EgressList) sideJSON {
 	out := sideJSON{Allow: sortedCopy(l.Allow), Expires: map[string]int64{}}
+	if len(l.Ports) > 0 {
+		out.Ports = sortedCopy(l.Ports)
+	}
+	if len(l.Git) > 0 {
+		out.Git = sortedCopy(l.Git)
+	}
 	for h, t := range l.Expires {
 		out.Expires[h] = t.Unix()
 	}
@@ -114,7 +132,27 @@ func readStatusFrom(ctx context.Context, client *http.Client, tc *tls.Config, ad
 	if !okA || !okR {
 		return session.EgressState{}, errPart("the egress proxy's status couldn't be read")
 	}
-	return session.EgressState{Starting: !st.Set, Lists: session.EgressLists{Agents: agents, Reviewers: reviewers}, Deny: sortedCopy(st.Deny)}, nil
+	grants, ok := grantsOf(st.Grants)
+	if !ok {
+		return session.EgressState{}, errPart("the egress proxy's status couldn't be read")
+	}
+	return session.EgressState{Starting: !st.Set, Lists: session.EgressLists{Agents: agents, Reviewers: reviewers}, Deny: sortedCopy(st.Deny), Grants: grants}, nil
+}
+
+func grantsOf(raw map[string]sideJSON) (map[netip.Prefix]session.EgressList, bool) {
+	if len(raw) > maxGrantSubnets {
+		return nil, false
+	}
+	out := map[netip.Prefix]session.EgressList{}
+	for key, s := range raw {
+		p, err := netip.ParsePrefix(key)
+		l, ok := listOf(s)
+		if err != nil || !ok {
+			return nil, false
+		}
+		out[p] = l
+	}
+	return out, true
 }
 
 func (c *Checker) readStatus(ctx context.Context) (session.EgressState, error) {
@@ -191,18 +229,31 @@ func (c *Control) Set(ctx context.Context, lists session.EgressLists) error {
 }
 
 type boxesJSON struct {
-	Version   string   `json:"version"`
-	Subnets   []string `json:"subnets"`
-	Reviewers []string `json:"reviewers"`
+	Version   string              `json:"version"`
+	Subnets   []string            `json:"subnets"`
+	Reviewers []string            `json:"reviewers"`
+	Actions   []string            `json:"actions,omitempty"`
+	Grants    map[string]sideJSON `json:"grants"`
+	Stack     []string            `json:"stack,omitempty"`
+	Git       []string            `json:"git,omitempty"`
 }
 
-func (c *Control) SetBoxes(ctx context.Context, subnets, reviewers []netip.Prefix) error {
-	q := boxesJSON{Version: StatusVersion, Subnets: make([]string, 0, len(subnets)), Reviewers: make([]string, 0, len(reviewers))}
+func (c *Control) SetBoxes(ctx context.Context, subnets, reviewers, actions []netip.Prefix, grants map[netip.Prefix]session.EgressList, stack []netip.Prefix, git []string) error {
+	q := boxesJSON{Version: StatusVersion, Subnets: make([]string, 0, len(subnets)), Reviewers: make([]string, 0, len(reviewers)), Grants: map[string]sideJSON{}, Git: git[:min(len(git), maxSideEntries)]}
+	for _, p := range stack {
+		q.Stack = append(q.Stack, p.String())
+	}
+	for p, l := range grants {
+		q.Grants[p.String()] = sideOf(l)
+	}
 	for _, p := range subnets {
 		q.Subnets = append(q.Subnets, p.String())
 	}
 	for _, p := range reviewers {
 		q.Reviewers = append(q.Reviewers, p.String())
+	}
+	for _, p := range actions {
+		q.Actions = append(q.Actions, p.String())
 	}
 	body, err := json.Marshal(q)
 	if err != nil {
@@ -216,6 +267,34 @@ func (c *Control) SetBoxes(ctx context.Context, subnets, reviewers []netip.Prefi
 		return errors.New("egress refused the session containers' subnets with HTTP " + strconv.Itoa(code))
 	}
 	return nil
+}
+
+func (c *Control) SubnetRefused(ctx context.Context) ([]session.SubnetRefusal, error) {
+	data, code, err := c.do(ctx, http.MethodGet, "/refused", nil, maxRefused)
+	if err != nil {
+		return nil, err
+	}
+	var rep refusedJSON
+	if code != http.StatusOK || json.Unmarshal(data, &rep) != nil || rep.Version != StatusVersion || len(rep.Subnets) > maxGrantSubnets {
+		return nil, errors.New("egress's record of refusals couldn't be read")
+	}
+	var out []session.SubnetRefusal
+	for key, list := range rep.Subnets {
+		p, err := netip.ParsePrefix(key)
+		if err != nil {
+			continue
+		}
+		if len(list) > maxSubnetRefusals {
+			list = list[:maxSubnetRefusals]
+		}
+		for _, e := range list {
+			if !hostLike(e.Host) || e.Reason != "not_allowlisted" || e.Count < 1 || e.Last <= 0 {
+				continue
+			}
+			out = append(out, session.SubnetRefusal{Subnet: p, Host: e.Host, Count: e.Count, Last: time.Unix(e.Last, 0)})
+		}
+	}
+	return out, nil
 }
 
 func (c *Control) Refused(ctx context.Context) ([]session.EgressRefusal, error) {

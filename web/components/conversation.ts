@@ -106,6 +106,10 @@ class SfConversation extends HTMLElement {
     return [...this.#cards.values()].flatMap(n => (n.source && !answering(n) ? [n.source] : []))
   }
 
+  get empty(): boolean {
+    return !this.#timeline?.childElementCount && !this.#cards.size
+  }
+
   get pinned(): boolean {
     return this.#pinned
   }

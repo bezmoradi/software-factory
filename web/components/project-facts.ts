@@ -5,6 +5,7 @@ import type { WorkflowRun } from '../types.ts'
 import { whileOpen, type WhileOpen } from '../lib/refresh.ts'
 import { checkRow, emptyState, pageHead, type CheckState, type PageHeadOptions } from '../lib/page.ts'
 import { toast } from './toasts.ts'
+import { codeBlock } from './code-block.ts'
 
 interface ProtectionRow {
   kind: string
@@ -224,11 +225,8 @@ class SfProjectFacts extends HTMLElement {
     if (facts) detail.append(facts)
     const below: HTMLElement[] = []
     if (r.result === 'failed' && r.tail) {
-      const pre = el('pre', 'small command-tail', visibleCommand(r.tail))
-      pre.tabIndex = 0
-      pre.setAttribute('role', 'region')
-      pre.setAttribute('aria-label', `End of the output of the run on main's commit ${shortSha(r.commit)}`)
-      below.push(pre)
+      const tail = visibleCommand(r.tail)
+      below.push(codeBlock({ text: tail, label: `End of the output of the run on main's commit ${shortSha(r.commit)}`, copy: { text: tail, label: 'Copy the output' }, keep: 'end', wrap: true, size: 'small', tone: 'bad' }))
     }
     const running = r.result === 'running'
     const go = button('Run on main', 'small', () => {

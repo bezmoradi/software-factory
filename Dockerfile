@@ -42,17 +42,23 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/s
 
 FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS base
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && apt-get install -y --no-install-recommends ca-certificates curl git netcat-openbsd openssh-client rsync sshpass \
  && rm -rf /var/lib/apt/lists/* \
  && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh /opt/yarn-* \
  && userdel --remove node \
  && groupadd --gid 10000 sf \
+ && chgrp sf /usr/bin/nc.openbsd /usr/bin/rsync /usr/bin/scp /usr/bin/sftp /usr/bin/ssh /usr/bin/sshpass \
+ && chmod 0750 /usr/bin/nc.openbsd /usr/bin/rsync /usr/bin/scp /usr/bin/sftp /usr/bin/ssh /usr/bin/sshpass \
+ && install -d -m 0755 /etc/ssh/ssh_config.d \
+ && printf '%s\n' 'IdentityAgent /run/sf/ssh-agent.sock' 'ForwardAgent no' > /etc/ssh/ssh_config.d/software-factory.conf \
+ && chmod 0644 /etc/ssh/ssh_config.d/software-factory.conf \
  && useradd --uid 10001 --gid sf --no-create-home --home-dir /var/lib/software-factory --shell /usr/sbin/nologin engine \
  && useradd --uid 10002 --gid sf --no-create-home --home-dir /home/agent --shell /bin/bash agent \
  && groupadd --gid 10003 egress \
  && useradd --uid 10003 --gid egress --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin egress \
  && useradd --uid 10004 --user-group --no-create-home --home-dir /home/reviewer --shell /bin/bash reviewer \
  && useradd --uid 10005 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin helper \
+ && useradd --uid 10007 --user-group --no-create-home --home-dir /home/action --shell /usr/sbin/nologin action \
  && install -d -o engine -g sf -m 0700 /var/lib/software-factory \
  && install -d -o engine -g sf -m 2775 /workspace /workspace/repos /workspace/worktrees \
  && install -d -o engine -g sf -m 0755 /workspace/s \
@@ -61,6 +67,8 @@ RUN apt-get update \
  && install -d -o reviewer -g reviewer -m 0700 /home/reviewer \
  && install -d -o engine -g sf -m 0755 /reviews \
  && install -d -o engine -g sf -m 0755 /verify \
+ && install -d -o engine -g sf -m 0710 /actions \
+ && install -d -o action -g action -m 0700 /home/action \
  && install -d -m 0755 /usr/share/doc/software-factory/node
 COPY --from=go /out/software-factory /usr/local/bin/software-factory
 COPY --chown=root:root --chmod=a=rX,u+w plugin/.claude-plugin/plugin.json /opt/software-factory/plugin/.claude-plugin/plugin.json

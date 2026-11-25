@@ -9,11 +9,27 @@ import (
 
 	"github.com/bezmoradi/software-factory/cmd/server"
 	"github.com/bezmoradi/software-factory/configs"
+	"github.com/bezmoradi/software-factory/internal/adapters/access/actions"
+	"github.com/bezmoradi/software-factory/internal/adapters/access/sshsign"
 	"github.com/bezmoradi/software-factory/internal/adapters/loggers/slog"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
 func main() {
+	if actions.Askpassing() {
+		if actions.Askpass(os.Stdout) != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "action-run" {
+		_ = actions.Run(os.Stderr)
+		os.Exit(127)
+	}
+	if len(os.Args) > 1 && os.Args[1] == actions.AgentRole {
+		_ = actions.Agent(sshsign.Keys{})
+		os.Exit(1)
+	}
 	logger := slog.New()
 	if len(os.Args) > 1 && (os.Args[1] == "mcp" || os.Args[1] == "sandbox-probe") {
 		logger = slog.New("/dev/stderr")

@@ -1,8 +1,8 @@
 import { answerOf, type EngineAnswer } from '../api.ts'
-import { actionButton, button, el, statusLine } from '../lib/dom.ts'
+import { actionButton, button, el, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
-import { commandBlock } from './copy.ts'
+import { codeBlock } from './code-block.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -110,18 +110,8 @@ function code(text: string): HTMLElement {
   return el('code', '', text)
 }
 
-function oneLine(command: string, what: string): HTMLElement {
-  const block = commandBlock(command, `Copy the ${what}`)
-  block.classList.add('update-oneline')
-  const text = block.querySelector('code')
-  if (!text) return block
-  const scroll = el('div', 'update-scroll')
-  scroll.tabIndex = 0
-  scroll.setAttribute('role', 'region')
-  scroll.setAttribute('aria-label', `The ${what}`)
-  text.replaceWith(scroll)
-  scroll.append(text)
-  return block
+function command(text: string, what: string, wrap = true): HTMLElement {
+  return codeBlock({ text: visible(text), label: `The ${what}`, copy: { text, label: `Copy the ${what}` }, look: 'terminal', wrap })
 }
 
 function releaseSteps(version: string): HTMLElement {
@@ -130,16 +120,16 @@ function releaseSteps(version: string): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const download = el('li')
-  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'download command'))
+  download.append(para('', 'Download it:'), command(`curl -fsSLO ${script}`, 'download command', false))
   const verify = el('li')
-  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command'))
+  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), command(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command', false))
   const run = el('li')
-  run.append(para('', 'Run it:'), commandBlock('sh install.sh', 'Copy the run command'))
+  run.append(para('', 'Run it:'), command('sh install.sh', 'run command'))
   steps.append(download, verify, run)
   box.append(
     el('h3', 'update-subhead', 'If you installed a release'),
     para('small', `Run release ${version}’s install command in a terminal:`),
-    oneLine(`curl -fsSL ${script} | sh`, 'install command'),
+    command(`curl -fsSL ${script} | sh`, 'install command', false),
     para('small', 'Or check the script before it runs, with a signed-in gh:'),
     steps,
     para('small muted', 'Either way, the script replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
@@ -151,9 +141,9 @@ function sourceSteps(development: boolean): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const pull = el('li')
-  pull.append(para('', 'Get the new code:'), commandBlock('git pull', 'Copy the pull command'))
+  pull.append(para('', 'Get the new code:'), command('git pull', 'pull command'))
   const up = el('li')
-  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up', 'Copy the rebuild command'))
+  up.append(para('', 'Rebuild and restart the stack:'), command('make up', 'rebuild command'))
   steps.append(pull, up)
   box.append(
     el('h3', 'update-subhead', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
@@ -194,7 +184,6 @@ export function openUpdate(): void {
     kind: 'update',
     title,
     docs: 'update-to-software-factory',
-    closeButton: true,
     body: [
       para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
       para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),

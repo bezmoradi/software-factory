@@ -19,18 +19,17 @@ import (
 )
 
 const (
-	AllowFor        = 15 * time.Minute
-	PushCalls       = 5
-	PushWindow      = 10 * time.Minute
-	PushFor         = 2 * time.Minute
-	DefaultWorkType = "fix"
-	ByAgent         = "agent"
-	ByPage          = "page"
-	ByReviews       = "agent, after reviews"
-	ByEngine        = "engine"
-	ByStart         = "engine, at start"
-	ByReset         = "engine, at reset"
-	AgentReplyFor   = 55 * time.Second
+	AllowFor      = 15 * time.Minute
+	PushCalls     = 5
+	PushWindow    = 10 * time.Minute
+	PushFor       = 2 * time.Minute
+	ByAgent       = "agent"
+	ByPage        = "page"
+	ByReviews     = "agent, after reviews"
+	ByEngine      = "engine"
+	ByStart       = "engine, at start"
+	ByReset       = "engine, at reset"
+	AgentReplyFor = 55 * time.Second
 
 	ResultUpToDate gate.Result = "up-to-date"
 
@@ -266,12 +265,9 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 		return nil, errors.New("pushes: need the pusher, the reader, the repositories, the audit file, the sessions and their levels")
 	}
 	cfg.Audit = masking(cfg.Audit)
-	kind, ok := workType(DefaultWorkType)
+	kind := workflow.TypeOr(workflow.Builtin, workflow.DefaultType)
 	if cfg.WorkType != nil {
-		kind, ok = *cfg.WorkType, true
-	}
-	if !ok {
-		return nil, errors.New("pushes: no default work type")
+		kind = *cfg.WorkType
 	}
 	if cfg.Agents == nil {
 		cfg.Agents = DefaultReviewers
@@ -296,14 +292,6 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 	p.loadDenials()
 	p.loadWaiting()
 	return p, nil
-}
-
-func workType(id string) (workflow.WorkType, bool) {
-	i := slices.IndexFunc(workflow.Builtin, func(t workflow.WorkType) bool { return t.ID == id })
-	if i < 0 {
-		return workflow.WorkType{}, false
-	}
-	return workflow.Builtin[i], true
 }
 
 func (p *Pushes) Wait() { p.wg.Wait() }
@@ -1318,7 +1306,7 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 		f.Type, f.Required, f.Items, f.NeedsApproval = wf.Type, wf.Required, slices.Clone(wf.Items), wf.NeedsApproval
 		limit = roundLimit(wf.Rounds)
 	} else {
-		roles := workflow.MinimumRoles(p.kind.Edits)
+		roles := workflow.MinimumRoles()
 		for _, role := range p.kind.Roles {
 			if !slices.Contains(roles, role) {
 				roles = append(roles, role)

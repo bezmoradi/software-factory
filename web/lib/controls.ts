@@ -82,7 +82,7 @@ function shownValue(pick: HTMLSelectElement): void {
   face.append(el('selectedcontent'))
   pick.prepend(face)
   new MutationObserver(() => {
-    if (!face.isConnected || face.parentNode !== pick) pick.prepend(face)
+    if (face.parentNode !== pick) pick.prepend(face)
   }).observe(pick, { childList: true })
 }
 

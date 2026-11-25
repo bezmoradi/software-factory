@@ -45,7 +45,7 @@ FNR == 1 { fn = ""; held = ""; depth = 0 }
 '
 
 core_allowed="Register Poll Report Wait Wake FromBox PushSession checking Image"
-page_allowed="agent register agentReject agentRefuse agentError busy pushRequest check forgeRequest checksRequest commentsRequest splitRequest workTypeRequest forgeSession turnCheck sessionModel image"
+page_allowed="agent register agentReject agentRefuse agentError busy pushRequest check forgeRequest checksRequest commentsRequest splitRequest workTypeRequest accessRequest actionRequest sshSign forgeSession turnCheck sessionModel image"
 
 run() {
 	allowed=$1

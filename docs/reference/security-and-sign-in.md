@@ -87,7 +87,7 @@ Run these against the published port after any change to `internal/adapters/http
 | `/api/update` with a field other than `later` (`check`, the removed **Check for updates** setting, included), or a `later` that isn't a string of 1 to 40 bytes | 400 `fields` |
 | `/api/update` with `{}` | 200 JSON with `running`, `forced`, `unreadable`, `development`, `result`, `checked` and `update` (`null`, or `version`), and no URL |
 | `/api/update` with `{later}` naming a version the page doesn't show | 409 `update`, with the reason in `message` |
-| `/api/packs` with an `op` other than `list`, `fetch`, `add`, `add-use`, `remove` and `use` | 400 `op` |
+| `/api/packs` with an `op` other than `list`, `fetch`, `add`, `add-use`, `remove`, `use` and `upload` | 400 `op` |
 | `/api/packs` with no `path`, a missing, empty or wrong-typed field of the op, or another field | 400 `fields` |
 | `/api/packs` with a body over 2 MiB | 413 |
 | `/api/packs` `upload` with a path outside `agents/`, `skills/<skill>/` and `commands/` (such as `hooks/hooks.json` or `agents/../bin/x`), a file that isn't UTF-8 or holds a NUL, more than 200 files, a file over 256 KiB or more than 2 MiB in all, or the name `knackpack` | 400 `refused upload`, naming the file and the reason |
@@ -96,6 +96,18 @@ Run these against the published port after any change to `internal/adapters/http
 | `/api/packs` `add` with a digest that isn't the commit's reviewers' digest | 409 `digest`, naming both |
 | `/api/packs` `remove` of a pack a project uses | 409 `in use`, naming the projects |
 | `/api/packs` on the agent listener (`engine-agents:8081`), from a session's container | 404, as every page route there |
+| `/api/access` with an `op` other than `read`, `check`, `allow`, `refuse`, `apply`, `revoke`, `revoke-all`, `action-run` and `action-stop`, or none | 400 `op` |
+| `/api/access` with no `sid` or one over 80 bytes, another field of the op, a `check` naming both or neither of `host` and `credential`, or a `port` with a `credential`, an `allow` naming not exactly one of `card`, `host` and `credential`, a `card`, `preset`, `grant` or `action` that isn't 32 hex digits, or an `action-stop` `run` that isn't 16 | 400 `fields` |
+| `/api/access` for a session the engine didn't start | 409 `not started here` |
+| `/api/access` `check` with `host` `127.0.0.1` and a `port`, or another address no grant reaches | 409 `never`, with `field` `host` |
+| `/api/access` `refuse`, `apply` or `revoke` of a card, preset or grant that isn't there | 404 `card`, `preset` or `grant` |
+| `/api/access` `action-run` with an argument starting with `/` or `~`, or holding a `..` part | 400 `args`, its reason clipped to 60 bytes |
+| `/api/access` or `/api/credentials` on an engine with no control channel to egress | 501 `not-yet` |
+| `/api/credentials` with an `op` other than `read`, `save`, `delete`, `preset-save`, `preset-check`, `preset-delete`, `action-save` and `action-delete`, or none | 400 `op` |
+| `/api/credentials` with another field of the op, a `save` whose `credential` holds a field it doesn't take or one over its limit, or a `delete`, `preset-delete` or `action-delete` whose `id` isn't 32 hex digits | 400 `fields` |
+| `/api/credentials` `save` with `sk-ant-` in any secret field, or bound to a host of Claude Code's vendor | 409 `model credential`, or 409 `vendor` with `field` `bound` |
+| `/api/credentials` `save` of a 33rd credential | 429 `credentials` |
+| `/api/credentials` `{op: "read"}` | 200 JSON whose `credentials` carry `id`, `name`, `type`, `typeLabel`, `bound`, `tags`, `saved` and `grants`, and no `value`, `secretKey`, `privateKey`, `password`, `contents` or `vars` |
 | `/api/push-record` with another field, no `sid`, or a `commit` that isn't 40 or 64 lowercase hex digits | 400 `fields` |
 | `/api/push-record` for a session the engine didn't start | 409 `not started here` |
 | `/api/push-record` for a commit of a live session that was held, denied or never pushed | 404 `push` |

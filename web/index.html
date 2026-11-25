@@ -47,6 +47,7 @@
   <div class="prefs-links" role="group" aria-label="Manage">
     <button type="button" class="start-link link" id="identity-open"><sf-icon class="icon" name="person"></sf-icon><span>Git name and email</span></button>
     <button type="button" class="start-link link" data-dialog="egress"><sf-icon class="icon" name="link"></sf-icon><span>Network access</span></button>
+    <button type="button" class="start-link link" data-dialog="credentials"><sf-icon class="icon" name="key"></sf-icon><span>Credentials</span></button>
     <button type="button" class="start-link link" data-dialog="workspace"><sf-icon class="icon" name="folder"></sf-icon><span>Workspace</span></button>
     <button type="button" class="start-link link" data-dialog="exceptions"><sf-icon class="icon" name="info"></sf-icon><span>Register of exceptions</span></button>
     <button type="button" class="start-link link" data-dialog="backup"><sf-icon class="icon" name="folder"></sf-icon><span>Export and import</span></button>
@@ -74,6 +75,7 @@
         <li><button type="button" class="start-link link" data-start="docs"><sf-icon class="icon" name="book"></sf-icon><span>Guides and how-tos</span></button></li>
         <li><button type="button" class="start-link link" data-start="session"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1.5C8 1.22386 7.77614 1 7.5 1C7.22386 1 7 1.22386 7 1.5V7H1.5C1.22386 7 1 7.22386 1 7.5C1 7.77614 1.22386 8 1.5 8H7V13.5C7 13.7761 7.22386 14 7.5 14C7.77614 14 8 13.7761 8 13.5V8H13.5C13.7761 8 14 7.77614 14 7.5C14 7.22386 13.7761 7 13.5 7H8V1.5Z"/></svg><span>New session</span></button></li>
         <li><button type="button" class="start-link link" data-start="egress"><sf-icon class="icon" name="link"></sf-icon><span>Network access</span></button></li>
+        <li><button type="button" class="start-link link" data-start="credentials"><sf-icon class="icon" name="key"></sf-icon><span>Credentials</span></button></li>
         <li><button type="button" class="start-link link" data-start="workspace"><sf-icon class="icon" name="folder"></sf-icon><span>Workspace</span></button></li>
         <li><button type="button" class="start-link link" data-start="exceptions"><sf-icon class="icon" name="info"></sf-icon><span>Register of exceptions</span></button></li>
         <li><button type="button" class="start-link link" data-start="backup"><sf-icon class="icon" name="folder"></sf-icon><span>Export and import</span></button></li>
@@ -111,11 +113,10 @@
     <sf-recap id="recap" class="notice small recap" hidden></sf-recap>
     <sf-session-facts id="session-facts" hidden></sf-session-facts>
     <sf-lineage id="lineage" hidden></sf-lineage>
-    <sf-session-work id="session-work" hidden></sf-session-work>
     <sf-screenshots id="screenshots" class="session-screenshots" hidden></sf-screenshots>
-    <sf-keep id="keep" hidden></sf-keep>
     <sf-session-limits id="session-limits" class="session-limits" hidden></sf-session-limits>
     <div id="conversations"></div>
+    <div id="session-state" hidden></div>
   </main>
 
   <aside id="side">
@@ -124,19 +125,19 @@
     <div id="team-row" class="small team-row" hidden><p id="team-note" class="small warn" hidden></p> <button type="button" class="ghost small" id="team-open" aria-controls="team-view" aria-expanded="false">Review the team file</button></div>
     <div id="team-view" class="small team-view" hidden><p class="small muted" id="team-path"></p><p class="small muted" id="team-remote"></p><pre id="team-text" class="team-text" tabindex="0" role="region" aria-label="Team file"></pre><ul id="team-problems" class="small warn"></ul><div id="team-setup" class="small team-setup"></div><div class="row team-actions"><button type="button" class="primary small" id="team-approve">Approve this team file</button><button type="button" class="ghost small" id="team-forget">Stop using a team file</button></div></div>
     <section id="path-section">
-      <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"><span></span></div><p class="path-card-detail small muted"></p><button type="button" class="primary path-card-open" id="side-open">Open execution path</button></div>
+      <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"><span></span></div><p class="path-card-detail small muted"></p><button type="button" class="primary small path-card-open" id="side-open">Open execution path</button></div>
       <div id="size-row"><select id="size" class="textbox" title="Sets what a push needs; the steps below show it"></select></div>
       <p id="size-note" class="small warn" hidden></p>
       <p id="path-busy" class="small muted" hidden>Step buttons are available when Claude finishes.</p>
       <ol id="path" class="path">
-        <li data-stage="define"><span class="mark" aria-hidden="true"></span><div><strong>Define</strong> <button type="button" class="link stage" data-ask="define">Start</button><p class="small muted stage-detail" id="define-detail"></p><sf-approval id="req-approval" hidden></sf-approval></div></li>
-        <li data-stage="plan"><span class="mark" aria-hidden="true"></span><div><strong>Plan</strong> <button type="button" class="link stage" data-ask="plan">Start</button><p class="small muted stage-detail" id="plan-detail"></p><sf-approval id="approval" hidden></sf-approval></div></li>
+        <li data-stage="define"><span class="mark" aria-hidden="true"></span><div><strong>Define</strong> <button type="button" class="link stage" data-ask="define">Start</button><p class="small muted stage-detail"></p><sf-approval id="req-approval" hidden></sf-approval></div></li>
+        <li data-stage="plan"><span class="mark" aria-hidden="true"></span><div><strong>Plan</strong> <button type="button" class="link stage" data-ask="plan">Start</button><p class="small muted stage-detail"></p><sf-approval id="approval" hidden></sf-approval></div></li>
         <li data-stage="triage" hidden><span class="mark" aria-hidden="true"></span><div><strong>Triage</strong> <button type="button" class="link stage" data-ask="triage">Start</button><p class="small muted stage-detail"></p></div></li>
         <li data-stage="reproduce" hidden><span class="mark" aria-hidden="true"></span><div><strong>Reproduce</strong> <button type="button" class="link stage" data-ask="reproduce">Continue</button><p class="small muted stage-detail"></p></div></li>
         <li data-stage="cause" hidden><span class="mark" aria-hidden="true"></span><div><strong>Root cause</strong> <button type="button" class="link stage" data-ask="cause">Continue</button><p class="small muted stage-detail"></p><sf-approval id="cause-approval" hidden></sf-approval></div></li>
         <li data-stage="implement"><span class="mark" aria-hidden="true"></span><div><strong>Implement</strong> <button type="button" class="link stage" data-ask="fix" hidden>Start</button> <button type="button" class="link stage" data-ask="commit" title="Asks this session to commit every uncommitted change, and to ask you about any file that shouldn't be committed">Commit</button><p class="small muted stage-detail"></p></div></li>
         <li data-stage="verify"><span class="mark" aria-hidden="true"></span><div><strong>Code review</strong><p class="small muted stage-detail" id="verify-detail"></p><ul id="checks" class="list"></ul><sf-project-agents id="project-agents" hidden></sf-project-agents><sf-packs id="packs" hidden></sf-packs><sf-reviewer-agents id="reviewer-agents" hidden></sf-reviewer-agents></div></li>
-        <li data-stage="deliver"><span class="mark" aria-hidden="true"></span><div><strong>Deliver</strong> <button type="button" class="link stage" data-ask="issues">Issues</button> <button type="button" class="link stage" data-ask="handoff">Handoff</button> <button type="button" class="link stage" data-ask="incident-review" hidden>Incident review</button><p class="small muted stage-detail"></p><ul class="small muted missing"></ul><div class="small muted exceptions" id="exceptions" hidden></div></div></li>
+        <li data-stage="deliver"><span class="mark" aria-hidden="true"></span><div><strong>Deliver</strong> <button type="button" class="link stage" data-ask="incident-review" hidden>Write the incident review</button><p class="small muted stage-detail"></p><ul class="small muted missing"></ul><div class="small muted exceptions" id="exceptions" hidden></div></div></li>
       </ol>
     </section>
     <sf-reviews id="reviews" hidden></sf-reviews>
@@ -158,6 +159,7 @@
 <div class="page-side" id="docs-side"></div>
 <div class="page-side" id="projects-side"></div>
 <div class="page-side" id="project-page-side"></div>
+<div class="page-side" id="path-rail"></div>
 </div>
 
 <div id="composer-parts" hidden>
@@ -165,14 +167,16 @@
     <div id="control" class="control small session-notice" hidden><span id="control-text"></span> <button type="button" class="ghost small stack" id="control-button"><span></span><span class="off"></span></button> <button type="button" class="ghost small" id="control-cancel" hidden>Cancel</button></div>
     <span id="checkpoint-said" class="sr-only" role="status"></span><div id="checkpoint" class="control small nudge" hidden><span><strong>Long conversation.</strong> <span id="checkpoint-text"></span></span> <button type="button" class="ghost small" id="checkpoint-cancel">Cancel</button> <button type="button" class="primary small" id="checkpoint-button">Save a checkpoint</button></div>
     <span id="stall-said" class="sr-only" role="status"></span><div id="stall" class="control small nudge" hidden><span><strong>No news for a while.</strong> <span id="stall-text"></span></span> <button type="button" class="ghost small" id="stall-dismiss">Dismiss</button> <button type="button" class="ghost small" id="stall-copy" hidden>Copy attach command</button> <button type="button" class="primary small" id="stall-stop">Stop the turn</button></div>
+    <span id="needs-said" class="sr-only" role="status"></span><div id="needs-settings" class="control small nudge" hidden><span><strong id="needs-title"></strong> <span id="needs-text"></span></span> <button type="button" class="ghost small" id="needs-open">Open settings</button></div>
     <p class="small warn" id="upload-warning" hidden></p>
     <div class="attachments" id="attachments" hidden></div>
     <sf-work-type-card id="work-type-card" hidden></sf-work-type-card>
+    <div id="access-marker" class="control small session-notice warn" hidden><span id="access-marker-text"></span> <button type="button" class="ghost small" id="access-marker-open">Access</button></div>
+    <sf-access-cards id="access-cards" hidden></sf-access-cards>
     <div class="strip">
       <span class="dots" id="working" role="img" aria-label="Claude is working" hidden><i></i><i></i><i></i></span>
       <span class="strip-note small muted compacting" id="strip-note" role="status"></span>
       <span class="jump" id="jump"><button type="button" class="ghost" id="jump-start" hidden>↑ Start</button><button type="button" class="ghost" id="jump-latest" hidden>↓ Latest</button></span>
-      <sf-saved-prompts id="saved-prompts" class="saved-prompts-host" hidden></sf-saved-prompts>
     </div>
     <div class="field">
       <ul id="complete" class="complete surface" role="listbox" aria-label="Suggestions" hidden></ul>
@@ -181,10 +185,21 @@
     </div>
     <div class="session-foot small" id="session-foot" hidden>
       <span class="session-foot-text" id="foot-text"></span>
-      <span class="session-foot-acts" id="manage" hidden><button type="button" class="ghost small" id="manage-cancel" hidden>Cancel</button> <button type="button" class="ghost small stack" id="manage-button"><span></span><span class="off"></span></button> <button type="button" class="ghost small" id="force-button" hidden></button></span>
+      <span class="session-foot-acts" id="foot-ask" hidden><button type="button" class="ghost small" id="ask-cancel">Cancel</button> <button type="button" class="ghost small danger" id="ask-confirm"></button></span>
+      <sf-saved-prompts id="saved-prompts" hidden></sf-saved-prompts>
       <button type="button" class="ghost icon-button" id="session-more" aria-label="More actions for this session" aria-haspopup="menu" popovertarget="session-menu"><sf-icon class="icon" name="more"></sf-icon></button>
     </div>
-    <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions"><button type="button" role="menuitem" id="menu-readonly">Make it read-only</button><button type="button" role="menuitem" id="menu-wake" hidden>Wake it without a message</button><button type="button" role="menuitem" id="menu-bring-main" hidden>Bring in the latest main</button><button type="button" role="menuitem" id="menu-fork" hidden>Fork here</button><button type="button" role="menuitem" class="mono" data-copy="logs"></button><button type="button" role="menuitem" class="mono" data-copy="attach"></button></div>
+    <div id="session-menu" class="menu row-menu surface" popover role="menu" aria-label="Session actions">
+      <button type="button" role="menuitem" id="menu-settings"><span class="mark"><sf-icon class="icon" name="settings"></sf-icon></span><span>Session settings</span></button>
+      <hr role="separator" id="menu-sep-actions">
+      <button type="button" role="menuitem" id="menu-bring-main" hidden><span class="mark"><sf-icon class="icon" name="download"></sf-icon></span><span>Bring in the latest main</span></button>
+      <button type="button" role="menuitem" id="menu-issues" data-ask="issues" hidden><span class="mark"><sf-icon class="icon" name="edit"></sf-icon></span><span id="menu-issues-text"></span></button>
+      <button type="button" role="menuitem" id="menu-fork" hidden><span class="mark"><sf-icon class="icon" name="branch"></sf-icon></span><span>New session from this one</span></button>
+      <button type="button" role="menuitem" id="menu-access" hidden><span class="mark"><sf-icon class="icon" name="link"></sf-icon></span><span>Access</span></button>
+      <button type="button" role="menuitem" id="menu-terminal" hidden><span class="mark"><sf-icon class="icon" name="terminal"></sf-icon></span><span>Open in terminal</span></button>
+      <hr role="separator" id="menu-sep-manage">
+      <button type="button" role="menuitem" id="menu-manage" hidden><span class="mark"><sf-icon class="icon" name="stop"></sf-icon></span><span id="menu-manage-text"></span></button>
+    </div>
   </div>
   <p class="muted small hint" id="hint" role="status"></p>
 </div>

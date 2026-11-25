@@ -216,7 +216,7 @@ func SessionActions(i Info) map[string]string {
 		ActionModel:     off(i.Agent == "claude" && i.Controlled && !i.Doubled, "only a Claude Code session this page controls switches its model here"),
 		ActionBringMain: off(owned && i.Project != "" && i.Running && i.Live && i.Controlled, "only a running background session this page controls brings in the latest main"),
 		ActionFork:      off(owned && i.Project != "", "only a background session this engine started in a project of your list starts others from its commits"),
-		ActionCopy:      off(i.Kind == "background", "only a background session has these commands"),
+		ActionCopy:      off(i.Kind == "background" && (i.Running || Sleeping(i)), "only a running background session, or a stopped one Wake brings back, has these commands"),
 		ActionReview:    off(i.Verified && i.Project != "", "reviews and pushes run for a session this engine started in a project of your list"),
 		ActionRules:     off(i.Verified, "only a session this engine started has this view"),
 	}

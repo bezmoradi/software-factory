@@ -22,23 +22,24 @@ var StepOrder = []Step{Define, Plan, Implement, Review, Deliver}
 type Edits string
 
 const (
-	AnyEdits  Edits = "any"
-	DocsEdits Edits = "docs"
-	NoEdits   Edits = "none"
+	AnyEdits Edits = "any"
+	NoEdits  Edits = "none"
 )
 
 type Profile string
 
 const (
-	Feature    Profile = "feature"
-	Fix        Profile = "fix"
-	Docs       Profile = "docs"
-	Exploring  Profile = "explore"
+	Change     Profile = "change"
+	Direct     Profile = "direct"
+	Explore    Profile = "explore"
 	CodeReview Profile = "review"
 	Incident   Profile = "incident"
 )
 
-const IncidentType = "incident"
+const (
+	DefaultType  = "change"
+	IncidentType = "incident"
+)
 
 const incidentUploadWarning = "Logs and screenshots go to Anthropic with the rest of the session. Remove customer data and secrets first."
 
@@ -68,12 +69,12 @@ type WorkType struct {
 	Builtin bool
 }
 
+var codeChange = WorkType{ID: DefaultType, Name: "Code change", Steps: []Step{Define, Plan, Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true}
+
 var Builtin = []WorkType{
-	{ID: "feature", Name: "Feature", Steps: []Step{Define, Plan, Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
-	{ID: "fix", Name: "Fix", Steps: []Step{Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
+	codeChange,
 	{ID: IncidentType, Name: "Incident", Steps: []Step{Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
-	{ID: "docs", Name: "Docs only", Steps: []Step{Implement, Review, Deliver}, Edits: DocsEdits, Push: true, Roles: []review.Role{review.Simplicity}, Builtin: true},
-	{ID: "explore", Name: "Exploring", Steps: []Step{Implement}, Edits: AnyEdits, Roles: []review.Role{}, Builtin: true},
+	{ID: "explore", Name: "Explore", Steps: []Step{Implement}, Edits: AnyEdits, Roles: []review.Role{}, Builtin: true},
 }
 
 func builtinType(id string) (WorkType, bool) {
@@ -85,10 +86,21 @@ func builtinType(id string) (WorkType, bool) {
 	return WorkType{}, false
 }
 
-func MinimumRoles(e Edits) []review.Role {
-	if e == DocsEdits {
-		return []review.Role{review.Simplicity}
+func TypeOr(types []WorkType, id string) WorkType {
+	if i := slices.IndexFunc(types, func(t WorkType) bool { return t.ID == id }); i >= 0 {
+		return types[i]
 	}
+	if i := slices.IndexFunc(types, func(t WorkType) bool { return t.ID == DefaultType }); i >= 0 {
+		return types[i]
+	}
+	return codeChange
+}
+
+func (t WorkType) Plans() bool {
+	return t.Profile() == Change && slices.Contains(t.Steps, Plan)
+}
+
+func MinimumRoles() []review.Role {
 	return []review.Role{review.BugHunter, review.Simplicity}
 }
 
@@ -97,15 +109,13 @@ func (t WorkType) Profile() Profile {
 	case t.Edits == NoEdits:
 		return CodeReview
 	case !t.Push:
-		return Exploring
+		return Explore
 	case t.Builtin && t.ID == IncidentType:
 		return Incident
-	case slices.Contains(t.Steps, Plan):
-		return Feature
-	case t.Edits == DocsEdits:
-		return Docs
+	case slices.Contains(t.Steps, Define):
+		return Change
 	}
-	return Fix
+	return Direct
 }
 
 func TypeProblems(t WorkType) []string {
@@ -129,9 +139,6 @@ func TypeProblems(t WorkType) []string {
 	if len(t.Steps) == 0 {
 		say("a work type needs at least one step")
 	}
-	if seen[Define] && !seen[Plan] {
-		say("define needs a plan step after it")
-	}
 	if seen[Plan] && !seen[Define] {
 		say("plan needs a define step before it, since a plan is approved against agreed requirements")
 	}
@@ -148,7 +155,7 @@ func TypeProblems(t WorkType) []string {
 				say("a work type that pushes needs " + article + " " + string(s) + " step")
 			}
 		}
-		for _, r := range MinimumRoles(t.Edits) {
+		for _, r := range MinimumRoles() {
 			if !slices.Contains(t.Roles, r) {
 				say("a work type that pushes needs the " + string(r) + " role")
 			}
@@ -160,18 +167,12 @@ func TypeProblems(t WorkType) []string {
 		if seen[Deliver] {
 			say("deliver needs a work type that pushes")
 		}
-		if t.Edits == DocsEdits {
-			say("a documentation-only work type must push, as Docs only does; one that doesn't push changes any file, as Exploring does")
-		}
 		if t.Edits == AnyEdits && (seen[Define] || seen[Plan] || seen[Review]) {
-			say("a work type that changes files and doesn't push has only an implement step, as Exploring does")
+			say("a work type that changes files and doesn't push has only an implement step, as Explore does")
 		}
 	}
 	if t.Edits == NoEdits && (seen[Implement] || seen[Plan] || seen[Define]) {
 		say("a work type that changes no file has no define, plan or implement step")
-	}
-	if t.Edits == DocsEdits && seen[Plan] {
-		say("a documentation-only work type has no plan step")
 	}
 	return out
 }

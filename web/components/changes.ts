@@ -602,8 +602,8 @@ class SfChanges extends HTMLElement {
       const li = el('li', 'small')
       li.append(el('code', '', shortSha(c.sha)), ' ', visible(c.subject))
       if (this.#forkable && SHA.test(c.sha)) {
-        const fork = button('Fork from here', 'ghost small', () => emit(this, 'sf-fork-commit', { sha: c.sha }), 'button', `fork:${c.sha}`)
-        fork.setAttribute('aria-label', `Fork from commit ${shortSha(c.sha)}: start a new session at it`)
+        const fork = button('New session from here', 'ghost small', () => emit(this, 'sf-fork-commit', { sha: c.sha }), 'button', `fork:${c.sha}`)
+        fork.setAttribute('aria-label', `New session from commit ${shortSha(c.sha)}`)
         li.append(' ', fork)
       }
       return li

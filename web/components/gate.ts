@@ -5,6 +5,7 @@ import type { AsideRun, HoldSetting, HoldTyped, PlanApproval, ProjectAgents } fr
 import './markdown.ts'
 import { asideBox } from './aside-run.ts'
 import { textbox, dropdown, option, checkbox } from '../lib/controls.ts'
+import { codeBlock } from './code-block.ts'
 
 class SfApproval extends HTMLElement {
   #view: PlanApproval | null = null
@@ -50,12 +51,10 @@ class SfApproval extends HTMLElement {
     if (!lines) return el('p', 'small muted', 'The requirements are too long to compare here. Read them again in full.')
     const { text, added, removed } = diffText(lines)
     if (!added && !removed) return el('p', 'small muted', 'Only invisible changes, such as spacing at the ends of lines. Read them again in full.')
-    const pre = el('pre', 'diff small', visible(text))
-    pre.tabIndex = 0
-    pre.setAttribute('aria-label', 'What changed in the requirements since you approved them, as lines added and removed')
+    const diff = codeBlock({ text: visible(text), label: 'What changed in the requirements since you approved them, as lines added and removed', diff: true, wrap: true })
     const summary = el('summary', 'small', `What changed since you approved them: ${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`)
     summary.dataset.key = 'changes'
-    return remembered(this.#open, `changes:${v.hash}`, true, summary, pre)
+    return remembered(this.#open, `changes:${v.hash}`, true, summary, diff)
   }
 
   #planBox: HTMLElement | null = null
@@ -121,16 +120,22 @@ class SfApproval extends HTMLElement {
       this.#planBox = this.#planReview(v)
       parts.push(this.#planBox)
     }
-    if (v.approved) return this.#quiet(parts)
-    const approve = button(reqs ? 'Approve requirements' : cause ? 'Approve root cause' : 'Approve plan', 'ghost', () => {
+    if (v.approved) {
+      if (reqs && v.planSwitch) parts.push(this.#planSwitch(v, v.planSwitch))
+      return this.#quiet(parts)
+    }
+    const approveButton = (label: string, key: string, plan?: boolean) => button(label, 'ghost', () => {
       if (!this.#open.has(v.hash)) {
         details.open = true
         this.#why.textContent = `Read this version of ${what} first: it is open above. Then approve.`
         summary.focus()
         return
       }
-      if (!v.hold) emit(this, 'sf-approve', { hash: v.hash })
-    }, 'button', 'approve')
+      if (!v.hold) emit(this, 'sf-approve', plan === undefined ? { hash: v.hash } : { hash: v.hash, plan })
+    }, 'button', key)
+    const approves = reqs && v.planChoice
+      ? [approveButton('Approve and plan', 'approve-plan', true), approveButton('Approve and implement', 'approve-implement', false)]
+      : [approveButton(reqs ? 'Approve requirements' : cause ? 'Approve root cause' : 'Approve plan', 'approve')]
     const ask = button('Ask for changes', 'ghost', undefined, 'submit', 'ask')
     const revise = form({
       inline: true,
@@ -141,19 +146,28 @@ class SfApproval extends HTMLElement {
         emit(this, 'sf-revise', { note: this.#field.value })
       },
     })
-    for (const control of [approve, ask, this.#field]) control.disabled = v.disabled
-    if (v.hold) approve.setAttribute('aria-disabled', 'true')
+    for (const control of [...approves, ask, this.#field]) control.disabled = v.disabled
+    if (v.hold) for (const approve of approves) approve.setAttribute('aria-disabled', 'true')
     const row = el('div', 'choices field-row')
-    row.append(approve)
+    row.append(...approves)
     parts.push(row)
     if (v.note) parts.push(el('p', 'small muted', v.note))
     const why = v.refused || v.hold || ''
     this.#why.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-approval-why`
     this.#noteWhy.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-note-why`
-    if (why) approve.setAttribute('aria-describedby', this.#why.id)
+    if (why) for (const approve of approves) approve.setAttribute('aria-describedby', this.#why.id)
     this.#why.classList.remove('status-slot')
     replaceKeeping(this, [...parts, this.#why, revise, this.#noteWhy])
     if (this.#why.textContent !== why) this.#why.textContent = why
+  }
+
+  #planSwitch(v: PlanApproval, offered: 'add' | 'skip'): HTMLElement {
+    const add = offered === 'add'
+    const change = button(add ? 'Add a plan' : 'Skip the plan', 'ghost small', () => emit(this, 'sf-approve', { hash: v.hash, plan: add }), 'button', 'plan-switch')
+    change.disabled = v.disabled
+    const row = el('div', 'choices field-row')
+    row.append(change)
+    return row
   }
 
   #quiet(parts: HTMLElement[]) {
@@ -299,7 +313,7 @@ class SfProjectAgents extends HTMLElement {
     if (!v) return this.replaceChildren()
     this.replaceChildren(el('p', 'small', 'This project\'s settings'))
     if (!v.project) return this.append(el('p', 'small muted', 'Add this repository on the Projects page to keep settings for it.'))
-    this.#type.replaceChildren(...[['', 'The team file\'s default, else Fix'], ...v.types].map(([value, label]) => option(visible(label ?? ''), value ?? '')))
+    this.#type.replaceChildren(...[['', 'The team file\'s default, else Code change'], ...v.types].map(([value, label]) => option(visible(label ?? ''), value ?? '')))
     if (this.#rounds.options.length !== v.roundsMax) {
       this.#rounds.replaceChildren(...Array.from({ length: v.roundsMax }, (_, i) => option(String(i + 1), String(i + 1))))
     }

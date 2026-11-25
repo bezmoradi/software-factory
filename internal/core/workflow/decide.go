@@ -5,13 +5,9 @@ import (
 	"strings"
 )
 
-type Change struct {
-	Path   string
-	Status string
-}
-
 type Facts struct {
 	Profile       Profile
+	PlanChosen    bool
 	Head          string
 	PlanFile      string
 	ReqHash       string
@@ -46,12 +42,12 @@ type Action struct {
 }
 
 const (
-	order    = "In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver."
+	order    = "In a Code change the developer approves the requirements first, and chooses there whether a plan follows, which they then approve too, before Implement."
 	noDetour = "Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push."
 )
 
 func Decide(f Facts, a Action) string {
-	feature := f.Profile == Feature
+	change := f.Profile == Change
 	switch a.Kind {
 	case StartDefine:
 		return ""
@@ -66,12 +62,18 @@ func Decide(f Facts, a Action) string {
 		}
 		return briefHold(f.Brief)
 	case StartPlan:
-		if feature && !f.ReqOk {
+		switch {
+		case change && !f.ReqOk:
 			return "Plan can't start until the developer approves the requirements on the software factory page. " + order
+		case change && !f.PlanChosen:
+			return "Plan doesn't run: the developer approved the requirements without a plan. To plan, they press Add a plan on the approved requirements, or, once work is committed, approve changed requirements with a plan."
 		}
 		return ""
 	case StartImplement:
-		if feature && !f.PlanOk {
+		switch {
+		case change && !f.ReqOk:
+			return "Implement can't start until the developer approves the requirements on the software factory page. " + order
+		case change && f.PlanChosen && !f.PlanOk:
 			return "Implement can't start until the developer approves the plan on the software factory page. " + order
 		}
 		return ""
@@ -116,11 +118,14 @@ func approvePlan(f Facts, a Action) string {
 	if f.Profile == Incident {
 		return approveCause(f, a)
 	}
-	if f.Profile != Feature {
+	if f.Profile != Change {
 		return ""
 	}
 	if !f.ReqOk || f.ReqBaseline == "" {
 		return "The plan wasn't approved: approve the requirements first."
+	}
+	if !f.PlanChosen {
+		return "The plan wasn't approved: you approved the requirements without a plan. To plan, press Add a plan on the approved requirements, or, once work is committed, approve changed requirements with a plan."
 	}
 	if a.Hash != f.PlanHash {
 		return "The plan changed before your approval arrived, so it wasn't approved. Read the new version and approve it again."
@@ -156,15 +161,13 @@ func editHold(f Facts, path string) string {
 	case f.Untyped:
 		return untypedHold(path, f.Offered)
 	case f.Profile == CodeReview:
-		return "This session's work type is Code review, which doesn't change files: " + path + " stays as it is. To fix what the review found, the developer picks Fix on the software factory page. " + noDetour
-	case f.Profile == Docs && !DocFile(path):
-		return "This session's work type is Docs only, which changes documentation only, and " + path + " isn't documentation. Pick Fix or Feature on the software factory page to change it. " + noDetour
-	case f.Profile != Feature || f.PlanOk || (f.UsesArtifacts && artifactPath(path, f.Artifacts)):
+		return "This session's work type is Code review, which doesn't change files: " + path + " stays as it is. To fix what the review found, the developer picks Code change on the software factory page. " + noDetour
+	case f.Profile != Change || f.ReqOk && (!f.PlanChosen || f.PlanOk) || (f.UsesArtifacts && artifactPath(path, f.Artifacts)):
 		return ""
 	}
-	needs := "the plan needs"
+	needs := "the plan, which the developer chose, needs"
 	if !f.ReqOk {
-		needs = "the requirements and then the plan need"
+		needs = "the requirements, and then the plan if the developer chooses one, need"
 	}
 	until := "Write notes, the requirements brief and the plan in your scratchpad, not in the repository."
 	if f.UsesArtifacts && len(f.Artifacts) > 0 {
@@ -184,6 +187,8 @@ func untypedHold(path string, offered []string) string {
 type Build struct {
 	Profile     Profile
 	Head        bool
+	ReqOk       bool
+	PlanChosen  bool
 	PlanOk      bool
 	Built       bool
 	Commits     int
@@ -193,7 +198,7 @@ type Build struct {
 
 func ImplementWait(w Build) string {
 	switch {
-	case w.Profile == CodeReview || w.Profile == Exploring:
+	case w.Profile == CodeReview || w.Profile == Explore:
 		return ""
 	case !w.Head:
 		return "the gate couldn't read the current commit"
@@ -201,13 +206,16 @@ func ImplementWait(w Build) string {
 		return "approve the root cause first"
 	case w.Profile == Incident && !w.Built:
 		return "commit the fix made since the root cause was approved"
-	case w.Profile == Feature && !w.PlanOk:
+	case w.Profile == Change && !w.ReqOk:
+		return "approve the requirements first"
+	case w.Profile == Change && w.PlanChosen && !w.PlanOk:
 		return "approve the plan first"
-	case w.Profile == Feature:
-		if w.Built {
-			return ""
-		}
+	case w.Profile == Change && w.Built:
+		return ""
+	case w.Profile == Change && w.PlanChosen:
 		return "commit the work made since the plan was approved"
+	case w.Profile == Change:
+		return "commit the work made since the requirements were approved"
 	case w.NoBase:
 		return ""
 	case !w.CommitsRead:

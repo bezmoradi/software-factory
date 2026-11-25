@@ -1,8 +1,8 @@
 import { busy, button, el, emit, remembered, shown, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
 import { actions, form } from '../lib/form.ts'
-import { plural } from '../lib/format.ts'
 import type { Answer, AskEvent, PermissionEvent, PlanEvent } from '../types.ts'
 import './markdown.ts'
+import { codeBlock } from './code-block.ts'
 import { textbox } from '../lib/controls.ts'
 
 const readOnlyText = (attach?: string) => (attach ? `This session is read-only on this page, so answer in Claude Code itself: ${attach}` : "This session is read-only on this page, so this can't be answered here.")
@@ -74,7 +74,7 @@ function sentFrom(control: HTMLButtonElement | HTMLInputElement, from: HTMLButto
 function lock(host: HTMLElement, locked: boolean) {
   const from = sending.get(host)
   for (const control of host.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
-    if (control.closest('sf-markdown')) continue
+    if (control.closest('sf-markdown, sf-code')) continue
     if (from && control instanceof HTMLButtonElement && sentFrom(control, from.button)) {
       control.disabled = false
       busy(control, locked)
@@ -82,32 +82,13 @@ function lock(host: HTMLElement, locked: boolean) {
   }
 }
 
-const watching = new WeakMap<HTMLElement, ResizeObserver>()
-
-export function scrolledText(text: string, name: string, cls: string): [HTMLPreElement, HTMLParagraphElement, ResizeObserver] {
-  const box = el('pre', cls, visibleCommand(text))
-  box.tabIndex = 0
-  box.setAttribute('aria-label', name)
-  const more = el('p', 'small warn more')
-  more.hidden = true
-  const update = () => {
-    const left = box.scrollHeight - box.clientHeight - box.scrollTop
-    const line = parseFloat(getComputedStyle(box).lineHeight) || 20
-    const lines = Math.ceil(left / line)
-    more.hidden = box.clientHeight === 0 || lines < 1
-    more.textContent = `${lines} more ${plural(lines, 'line')} below; scroll the box to read them`
-  }
-  const observer = new ResizeObserver(update)
-  observer.observe(box)
-  box.addEventListener('scroll', update, { passive: true })
-  return [box, more, observer]
-}
+const commands = new WeakMap<HTMLElement, { text: string; block: HTMLElementTagNameMap['sf-code'] }>()
 
 function showCommand(host: HTMLElement, text: string, name: string) {
-  watching.get(host)?.disconnect()
-  const [box, more, observer] = scrolledText(text, name, 'sum')
-  watching.set(host, observer)
-  host.append(box, more)
+  const kept = commands.get(host)
+  const block = kept?.text === text ? kept.block : codeBlock({ text: visibleCommand(text), label: name, wrap: true })
+  commands.set(host, { text, block })
+  host.append(block)
 }
 
 function reply(host: HTMLElement, id: string, answer: Answer, from: HTMLButtonElement) {

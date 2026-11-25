@@ -8,8 +8,7 @@ type Flag struct {
 }
 
 type Progress struct {
-	Chosen          Profile
-	Effective       WorkType
+	Type            WorkType
 	Adapter         AdapterID
 	Commands        map[Step]string
 	FilesListed     bool
@@ -18,10 +17,11 @@ type Progress struct {
 	Flagged         []Flag
 	ReqOk           bool
 	ReqWasApproved  bool
+	PlanChosen      bool
 	PlanFile        string
 	PlanOk          bool
 	PlanWasApproved bool
-	PlanBase        string
+	Base            string
 	Built           bool
 	ChangesCode     bool
 }
@@ -34,8 +34,9 @@ func Items(p Progress) ([]string, bool) {
 		say(s)
 		unapproved = true
 	}
-	feature := p.Effective.Profile() == Feature
-	incident := p.Effective.Profile() == Incident && !p.PlanOk && p.ChangesCode
+	change := p.Type.Profile() == Change
+	planned := change && p.PlanChosen
+	incident := p.Type.Profile() == Incident && !p.PlanOk && p.ChangesCode
 	if !p.FilesListed {
 		note := ""
 		if p.FilesNote != "" {
@@ -55,15 +56,19 @@ func Items(p Progress) ([]string, bool) {
 			say("the developer's decision on " + clip(f.Path, 200) + ", because " + f.Why + ": they allow it on the page, or it comes out of every commit on the branch that holds it, since removing it in a new commit still pushes the earlier ones")
 		}
 	}
-	if p.Chosen == Feature && !p.ReqOk {
+	if change && !p.ReqOk {
 		if p.ReqWasApproved {
 			ask("the developer's approval of the requirements again, since they changed after they approved them")
 		} else {
 			ask("the developer's approval of the requirements, on the page")
 		}
 	}
-	if p.PlanBase != "" && !p.Built {
-		say("the work committed on top of commit " + p.PlanBase[:min(len(p.PlanBase), 7)] + ", where the plan was approved")
+	if p.Base != "" && !p.Built {
+		where := "the requirements were"
+		if planned {
+			where = "the plan was"
+		}
+		say("the work committed on top of commit " + p.Base[:min(len(p.Base), 7)] + ", where " + where + " approved")
 	}
 	commands := Adapters[Knackpack].Commands
 	if a, ok := Adapters[p.Adapter]; ok {
@@ -79,17 +84,17 @@ func Items(p Progress) ([]string, bool) {
 		ask("the developer's approval of the root cause again, since this branch changes code: the root cause isn't approved, because " + RootCauseFile + " changed after they approved it")
 	case incident:
 		ask("the developer's approval of the root cause, on the page, since this branch changes code: the root cause isn't approved")
-	case feature && p.PlanFile == "":
+	case planned && p.PlanFile == "":
 		from := commands[Plan]
 		if from == "" {
 			from = "the Plan step"
 		}
 		say("a plan from " + from + ", which only the developer can start")
-	case feature && !p.PlanOk:
+	case planned && !p.PlanOk:
 		switch {
 		case p.PlanWasApproved:
 			ask("the developer's approval of the plan again, since it changed after they approved it")
-		case p.Chosen == Feature && !p.ReqOk:
+		case !p.ReqOk:
 			ask("the developer's approval of the plan, after they approve the requirements")
 		default:
 			ask("the developer's approval of the plan, on the page")

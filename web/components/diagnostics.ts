@@ -5,6 +5,7 @@ import { dialogDocs } from '../lib/dialog-docs.ts'
 import { saveFile } from '../lib/download.ts'
 import { whileOpen } from '../lib/refresh.ts'
 import './agent-report.ts'
+import { codeBlock } from './code-block.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -18,9 +19,8 @@ function fileName(): string {
 
 export function openDiagnostics(post: Post): void {
   const say = statusLine()
-  const shown = el('pre', 'diagnostics-text')
-  shown.tabIndex = 0
-  shown.setAttribute('aria-label', 'The whole diagnostics file')
+  const shown = codeBlock({ text: '', label: 'The whole diagnostics file' })
+  shown.hidden = true
   let text = ''
   const saveButton = button('Save as a file', 'primary small', () => {
     if (!text) return
@@ -35,7 +35,8 @@ export function openDiagnostics(post: Post): void {
       return
     }
     text = got.text
-    shown.textContent = text
+    shown.show({ text, label: 'The whole diagnostics file', copy: { text, label: 'Copy the diagnostics file' }, wrap: true })
+    shown.hidden = false
     say.textContent = 'This is the whole file. Read it before you save it.'
     saveButton.disabled = false
   }
@@ -53,6 +54,6 @@ export function openDiagnostics(post: Post): void {
     actions: [button('Close', 'ghost small', () => m.close())],
   })
   say.textContent = 'Building the file…'
-  const build = whileOpen({ root: shown, read: () => post(ROUTE, {}), show })
+  const build = whileOpen({ root: m.dialog, read: () => post(ROUTE, {}), show })
   m.onClose(() => build.stop())
 }

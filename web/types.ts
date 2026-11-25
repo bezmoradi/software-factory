@@ -45,6 +45,9 @@ export interface SessionInfo {
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
+  access?: AccessCard[]
+  accessMarker?: string
+  accessNotes?: AccessNote[]
   signIn?: SignIn
   unbacked?: TurnMarks[]
   stopReason?: string
@@ -279,6 +282,16 @@ export interface TypeLine {
 export interface TypeChange {
   type: string
   lines: TypeLine[]
+}
+
+export type SettingsSection = 'model' | 'queue' | 'setup' | 'check' | 'caps' | 'ports' | 'backup'
+
+export interface Attention {
+  section: SettingsSection
+  rank: number
+  title: string
+  text: string
+  alert: boolean
 }
 
 export interface LockedTests {
@@ -1028,6 +1041,8 @@ export interface GateEvent {
   branch: string
   adapter: string
   define: boolean
+  planChoice?: boolean
+  planSwitch?: PlanSwitch
   plan: string
   planHash?: string
   planDoc?: WorkflowDoc | null
@@ -1037,7 +1052,6 @@ export interface GateEvent {
   missing: string[]
   size?: Size
   chosen?: boolean
-  effective?: Size
   uploadWarning?: string
   sizeNote?: string
   approved?: boolean
@@ -1066,6 +1080,46 @@ export interface GateEvent {
   path?: GatePath
   flow?: FlowModel | null
   typeAsk?: TypeAsk | null
+}
+
+export interface GrantChoice {
+  value: string
+  label: string
+}
+
+export interface AccessRisk {
+  scope: string
+  expires: string
+  level: string
+  label: string
+  says: string[]
+  accept?: string
+  git: string[]
+}
+
+export interface AccessNote {
+  id: string
+  text: string
+}
+
+export interface AccessCard {
+  id?: string
+  kind: string
+  host: string
+  port?: number
+  credential: string
+  title: string
+  why?: string
+  reason?: string
+  asked: number
+  risks: AccessRisk[]
+  scopes: GrantChoice[]
+  expiries: GrantChoice[]
+  action?: string
+  command?: string
+  target?: string
+  files?: boolean
+  minutes?: number
 }
 
 export interface TypeAsk {
@@ -1131,12 +1185,16 @@ export interface CheckedLine {
   tags: { label: string; tone: string }[]
 }
 
+export interface PathAction { ask: string; label: string; title: string }
+
 export interface GatePath {
-  stages: { id: string; name: string; state: string; active: boolean; detail: string; actions: { ask: string; label: string; title: string; hold?: string }[] }[]
+  stages: { id: string; name: string; state: string; active: boolean; detail: string; actions: PathAction[] }[]
+  line: { text: string; actions: PathAction[] } | null
   card: { step: string; count: string; detail: string; done: number }
   missing: string[]
   reviewsActive: boolean
   required: string[]
+  asks: PathAction[]
 }
 
 export interface WorkflowDoc {
@@ -1189,7 +1247,7 @@ export interface TeamView {
   remote: { branch: string; present: boolean; same: boolean }[]
 }
 
-export type Size = 'feature' | 'fix' | 'incident' | 'docs' | 'explore' | 'review'
+export type Size = 'change' | 'direct' | 'incident' | 'explore' | 'review'
 
 export interface PlanFileEvent extends Stamped {
   type: 'planfile'
@@ -1205,8 +1263,12 @@ export interface LineCommentBody {
   text: string
 }
 
+export type PlanSwitch = '' | 'add' | 'skip'
+
 export interface PlanApproval {
   kind?: 'plan' | 'requirements' | 'root-cause'
+  planChoice?: boolean
+  planSwitch?: PlanSwitch
   path: string
   text: string
   hash: string
@@ -1432,7 +1494,7 @@ declare global {
     'sf-open': CustomEvent<{ id: string }>
     'sf-close': CustomEvent<{ id: string }>
     'sf-move': CustomEvent<{ id: string; index: number }>
-    'sf-approve': CustomEvent<{ hash: string }>
+    'sf-approve': CustomEvent<{ hash: string; plan?: boolean }>
     'sf-revise': CustomEvent<{ note: string }>
     'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldTyped }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
@@ -1471,5 +1533,6 @@ declare global {
     'sf-session-deleted': CustomEvent<{ sid: string }>
     'sf-packs-changed': Event
     'sf-work-type': CustomEvent<{ type: string; done: (refusal: string) => void }>
+    'sf-attention': Event
   }
 }

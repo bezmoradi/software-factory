@@ -1,5 +1,6 @@
 import { request, savedTone } from '../api.ts'
 import { actionButton, el, focusedKey, refocus, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { actions } from '../lib/form.ts'
 
 export interface CapsValues {
   money: number
@@ -277,7 +278,7 @@ class SfUsage extends HTMLElement {
         heads.set(`continue:${m.side}:${w.kind}`, `side:${m.side}`)
         if (w.near) {
           const ask = el('div', 'usage-ask small')
-          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`))
+          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actions([actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`)]))
           box.append(ask)
         } else if (w.continued) box.append(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
       }

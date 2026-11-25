@@ -1,4 +1,4 @@
-import { el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
 import { modal, type Modal } from '../lib/dialog.ts'
 import { docsId } from '../lib/page.ts'
 import { icon } from './icon.ts'
@@ -159,8 +159,8 @@ export function openFlow(title: string, model: FlowModel): FlowDialog {
     kind: 'flow-dialog',
     title,
     docs: docsId(title),
-    closeButton: true,
     body: [diagram],
+    actions: [button('Close', 'ghost small', () => m.close())],
     focus: 'heading',
   })
   return { modal: m, diagram }

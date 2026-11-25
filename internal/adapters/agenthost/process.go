@@ -103,6 +103,9 @@ func (s *Server) prepare(ctx context.Context, c commandJSON) (*exec.Cmd, *proble
 	if s.cfg.PluginSocket != "" {
 		set[SocketVariable] = s.cfg.PluginSocket
 	}
+	if file, ok := s.accessEnv(); ok {
+		set[ClaudeEnvFile] = file
+	}
 	if s.cfg.AgentsBin != "" {
 		set["PATH"] = PathWith(s.cfg.Environ, s.cfg.AgentsBin)
 	}

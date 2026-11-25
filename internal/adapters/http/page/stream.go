@@ -12,45 +12,48 @@ const (
 )
 
 type sessionJSON struct {
-	SID          string      `json:"sid"`
-	Cwd          string      `json:"cwd"`
-	StartedAt    int64       `json:"startedAt"`
-	Name         string      `json:"name"`
-	ID           string      `json:"id"`
-	Kind         string      `json:"kind"`
-	Agent        string      `json:"agent,omitempty"`
-	Project      string      `json:"project,omitempty"`
-	Verified     bool        `json:"verified"`
-	Running      bool        `json:"running"`
-	Live         bool        `json:"live"`
-	Disputed     bool        `json:"disputed"`
-	Claims       []string    `json:"claims,omitempty"`
-	Outdated     bool        `json:"outdated"`
-	Controlled   bool        `json:"controlled"`
-	Mode         string      `json:"mode"`
-	ModeLabel    string      `json:"modeLabel"`
-	Step         string      `json:"step,omitempty"`
-	Checkpointed bool        `json:"checkpointSaved,omitempty"`
-	Busy         bool        `json:"busy"`
-	Login        bool        `json:"login"`
-	Needs        int         `json:"needs"`
-	Epoch        string      `json:"epoch"`
-	LastSeq      int64       `json:"lastSeq"`
-	Level        string      `json:"level"`
-	LevelReason  string      `json:"levelReason"`
-	LevelDropped bool        `json:"levelDropped"`
-	LevelLost    bool        `json:"levelLost,omitempty"`
-	Sandboxed    bool        `json:"sandboxed"`
-	Review       *reviewJSON `json:"review,omitempty"`
-	Push         *pushJSON   `json:"push,omitempty"`
-	Forge        []forgeJSON `json:"forge,omitempty"`
-	SignIn       *signInJSON `json:"signIn,omitempty"`
-	State        string      `json:"state,omitempty"`
-	Status       string      `json:"status,omitempty"`
-	WaitingFor   string      `json:"waitingFor,omitempty"`
-	Queued       int         `json:"queued,omitempty"`
-	Unbacked     []turnJSON  `json:"unbacked,omitempty"`
-	StopReason   string      `json:"stopReason,omitempty"`
+	SID          string           `json:"sid"`
+	Cwd          string           `json:"cwd"`
+	StartedAt    int64            `json:"startedAt"`
+	Name         string           `json:"name"`
+	ID           string           `json:"id"`
+	Kind         string           `json:"kind"`
+	Agent        string           `json:"agent,omitempty"`
+	Project      string           `json:"project,omitempty"`
+	Verified     bool             `json:"verified"`
+	Running      bool             `json:"running"`
+	Live         bool             `json:"live"`
+	Disputed     bool             `json:"disputed"`
+	Claims       []string         `json:"claims,omitempty"`
+	Outdated     bool             `json:"outdated"`
+	Controlled   bool             `json:"controlled"`
+	Mode         string           `json:"mode"`
+	ModeLabel    string           `json:"modeLabel"`
+	Step         string           `json:"step,omitempty"`
+	Checkpointed bool             `json:"checkpointSaved,omitempty"`
+	Busy         bool             `json:"busy"`
+	Login        bool             `json:"login"`
+	Needs        int              `json:"needs"`
+	Epoch        string           `json:"epoch"`
+	LastSeq      int64            `json:"lastSeq"`
+	Level        string           `json:"level"`
+	LevelReason  string           `json:"levelReason"`
+	LevelDropped bool             `json:"levelDropped"`
+	LevelLost    bool             `json:"levelLost,omitempty"`
+	Sandboxed    bool             `json:"sandboxed"`
+	Review       *reviewJSON      `json:"review,omitempty"`
+	Push         *pushJSON        `json:"push,omitempty"`
+	Forge        []forgeJSON      `json:"forge,omitempty"`
+	Access       []accessCardJSON `json:"access,omitempty"`
+	AccessMarker string           `json:"accessMarker,omitempty"`
+	AccessNotes  []accessNoteJSON `json:"accessNotes,omitempty"`
+	SignIn       *signInJSON      `json:"signIn,omitempty"`
+	State        string           `json:"state,omitempty"`
+	Status       string           `json:"status,omitempty"`
+	WaitingFor   string           `json:"waitingFor,omitempty"`
+	Queued       int              `json:"queued,omitempty"`
+	Unbacked     []turnJSON       `json:"unbacked,omitempty"`
+	StopReason   string           `json:"stopReason,omitempty"`
 
 	Uncommitted *uncommittedJSON `json:"uncommitted,omitempty"`
 	Overlaps    []overlapJSON    `json:"overlaps,omitempty"`
@@ -294,6 +297,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Review: reviewOf(s.Review),
 			Push:   pushOf(s.Push, s.Checks, s.Review),
 			Forge:  forgeOf(s.Forge),
+			Access: accessCardsOf(s.Access), AccessMarker: s.AccessMarker, AccessNotes: accessNotesOf(s.AccessNotes),
 			SignIn: signInOf(s.SignIn),
 			State:  s.State, Status: s.Status, WaitingFor: s.WaitingFor, Queued: s.Queued,
 			Unbacked:   unbackedOf(s.Unbacked),

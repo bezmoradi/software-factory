@@ -8,11 +8,12 @@ import { initPrefs } from './lib/prefs.ts'
 import { field, form } from './lib/form.ts'
 import { option } from './lib/controls.ts'
 import { agentWord, baseName, isClaude, label, plural, setAgentNames, shortSha } from './lib/format.ts'
-import { paintPath } from './lib/path.ts'
+import { paintPath, paintSteps } from './lib/path.ts'
 import { placeMenu } from './lib/menu.ts'
+import { tooltip } from './lib/tooltip.ts'
 import { isRecord } from './lib/json.ts'
 import { isDialog } from './lib/dialog-docs.ts'
-import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, StreamEvent, TeamView } from './types.ts'
+import type { CardHost, Changes, Check, Expect, GateEvent, Project, ProjectsView, PushPanelView, ForgePanelView, Reviewer, ReviewerView, ReviewsView, SessionInfo, SessionReview, SettingsSection, StreamEvent, TeamView } from './types.ts'
 import './components/changes.ts'
 import './components/overview.ts'
 import './components/work-type-card.ts'
@@ -49,18 +50,23 @@ import { notify, onNotifyOpen, watchNotify } from './components/notify.ts'
 import './components/recap.ts'
 import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
-import { loadLimits, setLimits, setLimitsSession } from './components/usage.ts'
+import { loadLimits, setLimits, setLimitsSession, watchLimits } from './components/usage.ts'
+import { capsAttention } from './components/caps.ts'
+import { openSessionSettings } from './components/session-settings.ts'
+import { openTerminal } from './components/terminal.ts'
+import './components/access-card.ts'
+import { openAccess } from './components/access.ts'
 import { agentName, setBranchStarters } from './components/lineage.ts'
 import './components/split.ts'
 import { openBackup, stateNotices } from './components/backup.ts'
 import { openDiagnostics } from './components/diagnostics.ts'
 import { initUpdates } from './components/update.ts'
 import { sendState } from './api.ts'
-import { allowed, armed, changesSession, current, inTurn, offWhy, schedulePaint, sessions, setPainter, state, toast, waitingOf, working, type AuditEntry, type HistoryLine, type Session } from './app-state.ts'
+import { allowed, armed, changesSession, current, inTurn, offWhy, schedulePaint, sessions, setPainter, state, toast, waitingOf, waking, working, type AuditEntry, type HistoryLine, type Session } from './app-state.ts'
 import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
-import { answerAsking, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
+import { answerAsking, askToManage, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, footAsk, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
 import { startPalette } from './palette-items.ts'
 import { crumbTrail, emptyState, pageHead, welcomeCrumb } from './lib/page.ts'
 
@@ -68,6 +74,8 @@ const sessionCrumbs = crumbTrail()
 sessionCrumbs.id = 'crumbs'
 sessionCrumbs.querySelector('ol')!.id = 'crumbs-list'
 byId('warnings').before(...pageHead({ title: sessionCrumbs, docs: { doc: 'working-in-a-session', id: 'session-docs' } }))
+const issuesTip = tooltip(byId('menu-issues'), '')[1]!
+byId('menu-issues').after(issuesTip)
 
 setPainter(paint)
 
@@ -77,16 +85,12 @@ function checkOf(r: Reviewer): Check {
 }
 const RESET_NOTE = 'The session restarted, so what came before this point is shown only as far as the agent kept it.'
 
-const sessionWork = byId<HTMLElementTagNameMap['sf-session-work']>('session-work')
-const keepPanel = byId<HTMLElementTagNameMap['sf-keep']>('keep')
+const sessionWork = el('sf-session-work')
+const keepPanel = el('sf-keep')
 const verifyPanel = byId<HTMLElementTagNameMap['sf-verify']>('verify')
 const reviewModels = el('sf-review-models')
 reviewModels.hidden = true
 byId('reviewer-agents').after(reviewModels)
-const modelMenu = button('Switch model…', '')
-modelMenu.setAttribute('role', 'menuitem')
-modelMenu.hidden = true
-byId('menu-wake').after(modelMenu)
 let reviewer: ReviewerView | null = null
 let landedOn = ''
 let askIdentity = false
@@ -280,6 +284,9 @@ function paint() {
   composer.paint(s, !!s && waitingOf(s).length > 0, s?.info.readOnly ?? '')
   const ask = s && state.connected ? s.gate?.typeAsk ?? null : null
   byId<HTMLElementTagNameMap['sf-work-type-card']>('work-type-card').view = s && ask ? { sid: s.sid, ask, types: (s.gate?.types ?? []).map(t => ({ id: t.id, name: t.name })), disabled: !allowed(s, 'control') } : null
+  byId<HTMLElementTagNameMap['sf-access-cards']>('access-cards').view = s && state.connected && s.info.verified && s.info.access?.length ? { sid: s.sid, cards: s.info.access, disabled: !!s.info.readOnly } : null
+  byId('access-marker-text').textContent = visible(s?.info.accessMarker ?? '')
+  byId('access-marker').hidden = !s || !s.info.accessMarker
   if (document.body.classList.contains('live') !== !!s) {
     document.body.classList.toggle('live', !!s)
     queueBarFit()
@@ -307,7 +314,7 @@ function paint() {
     active: current.key,
   }
   if (s) {
-    barStatus(state.connected ? [shown(s.info.summary?.word ?? ''), s.info.mode ? `${s.info.modeLabel || s.info.mode} mode` : 'mode unknown', s.sid.slice(0, 8)].join(' · ') : state.note)
+    barStatus(state.connected ? [shown(s.info.summary?.word ?? ''), s.info.mode ? `${s.info.modeLabel || s.info.mode} mode` : '', s.sid.slice(0, 8)].filter(Boolean).join(' · ') : state.note)
     byId('title').title = s.info.cwd || ''
     paintCrumbs(s)
     byId('usage').textContent = usageText(s)
@@ -316,8 +323,10 @@ function paint() {
     byId('working').hidden = !working(s) || !!waitingOf(s).length
     if (byId('strip-note').textContent !== s.compacting) byId('strip-note').textContent = s.compacting
     paintControl(s)
-    paintManage(s)
-    byId('session-foot').hidden = !byId('foot-text').textContent && byId('manage').hidden && byId('session-more').hidden
+    paintState(s)
+    paintFoot(s)
+    paintNeeds()
+    byId('session-foot').hidden = !byId('foot-text').textContent && byId('foot-ask').hidden && byId('session-more').hidden && byId('saved-prompts').hidden
     const notes = state.connected ? s.info.warnings ?? [] : []
     byId('warnings').replaceChildren(...notes.map(t => el('p', '', visible(t))))
     byId('warnings').hidden = !notes.length
@@ -326,12 +335,9 @@ function paint() {
     paintStall(s)
     const off = stageOff(s)
     if (inTurn(s)) for (const k of [...stepping.keys()]) if (k.startsWith(`${s.sid}:`)) stepping.delete(k)
-    for (const b of byId('path').querySelectorAll<HTMLButtonElement>('button.stage')) {
-      const stage = b.closest<HTMLElement>('li[data-stage]')?.dataset.stage
-      const hold = s.gate?.path?.stages.find(x => x.id === stage)?.actions.find(x => x.ask === b.dataset.ask)?.hold ?? ''
-      b.setAttribute('aria-disabled', String(!!off || !!hold || b.getAttribute('aria-busy') === 'true'))
+    for (const b of byId('path-section').querySelectorAll<HTMLButtonElement>('button.stage')) {
+      b.setAttribute('aria-disabled', String(!!off || b.getAttribute('aria-busy') === 'true'))
       if (off) b.setAttribute('aria-describedby', 'path-busy')
-      else if (hold) b.setAttribute('aria-describedby', `${stage}-detail`)
       else b.removeAttribute('aria-describedby')
     }
     if (byId('path-busy').textContent !== off) byId('path-busy').textContent = off
@@ -377,7 +383,8 @@ function paint() {
     byId('working').hidden = true
     paintSide(null)
   }
-  watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0 })))
+  for (const x of list) for (const n of x.info.accessNotes ?? []) notify(x.sid, label(x.info), n.text, `access-note:${x.sid}:${n.id}`)
+  watchNotify(list.map(x => ({ sid: x.sid, name: label(x.info), cards: [...waitingOf(x).map(c => c.id).filter(id => typeof id === 'string'), ...(x.info.access ?? []).flatMap(c => (c.id ? [c.id] : []))], pushHeld: x.info.push?.result === 'held' && !x.info.push.running ? x.info.push.at || 0 : 0 })))
   byId<HTMLElementTagNameMap['sf-recap']>('recap').show(state.connected && s?.info.verified ? s.sid : '', !document.hidden, !!s?.info.doubled)
   document.title = needs ? 'Needs you · Software Factory' : 'Software Factory'
   saveTabs()
@@ -413,21 +420,11 @@ function paintControl(s: Session) {
   const action = c.action
   byId('control').classList.toggle('alert', !!c.alert)
   const commands = allowed(s, 'copy') ? i.commands : undefined
-  const menu = byId('session-menu')
-  for (const b of menu.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
-    const command = b.dataset.copy === 'attach' ? commands?.attach : commands?.logs
-    b.textContent = command ? `Copy ${command}` : ''
-    b.hidden = !command
-  }
-  const notice = !!action && action !== 'read-only'
-  byId('menu-readonly').hidden = action !== 'read-only'
-  byId('menu-wake').hidden = !allowed(s, 'wake') || action === 'wake'
+  const boxed = action === 'wake'
+  const notice = !!action && action !== 'read-only' && !boxed
   paintBranchMenu(s)
-  byId('session-more').hidden = !commands?.attach && action !== 'read-only'
-  modelMenu.hidden = !allowed(s, 'model')
-  if (!modelMenu.hidden) byId('session-more').hidden = false
-  if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
-  byId('foot-text').textContent = notice ? '' : text
+  byId('menu-terminal').hidden = !commands?.attach && !commands?.logs
+  byId('foot-text').textContent = notice || boxed ? '' : text
   byId('foot-text').classList.toggle('bad', c.tone === 'bad')
   byId('control-text').textContent = text
   button.dataset.action = action === 'wake' || action === 'release' ? action : 'control'
@@ -442,44 +439,116 @@ function paintControl(s: Session) {
   byId('control').hidden = !notice
 }
 
-function paintManage(s: Session) {
+const WAKE_WAIT = 120000
+let opened = ''
+let wokeOnOpen = ''
+
+function wakeOnOpen(s: Session) {
+  if (opened !== current.key) {
+    opened = current.key
+    wokeOnOpen = ''
+  }
+  if (wokeOnOpen === s.sid || waking.has(s.sid) || !state.connected || !allowed(s, 'wake')) return
+  wokeOnOpen = s.sid
+  setTimeout(() => void wakeSession(s, true))
+}
+
+function paintState(s: Session) {
+  const box = byId('session-state')
+  const started = waking.get(s.sid)
+  if (started !== undefined && (s.info.live || Date.now() - started > WAKE_WAIT)) waking.delete(s.sid)
+  wakeOnOpen(s)
+  const now = waking.has(s.sid) ? 'waking' : state.connected && allowed(s, 'wake') ? 'stopped' : ''
+  box.hidden = !now
+  box.parentElement!.classList.toggle('state-only', !!now && s.view.empty)
+  if (box.dataset.state === `${s.sid}:${now}`) return
+  const kept = box.dataset.state?.startsWith(`${s.sid}:`) ? box.firstElementChild as HTMLElement | null : null
+  box.dataset.state = `${s.sid}:${now}`
+  if (!now) return void box.replaceChildren()
+  const panel = kept ?? statePanel(s)
+  if (!kept) box.replaceChildren(panel)
+  const waitingNow = now === 'waking'
+  panel.querySelector('.empty-state-title')!.textContent = waitingNow ? 'Waking the session…' : 'This session is stopped'
+  panel.querySelector(':scope > p')!.textContent = waitingNow ? 'Its conversation comes back once it reconnects. This takes a few seconds.' : 'Its conversation comes back when it wakes. Send a message to wake it, or wake it now.'
+  busy(panel.querySelector('button')!, waitingNow)
+}
+
+function statePanel(s: Session): HTMLElement {
+  const wake = button('Wake it', 'primary small', () => {
+    if (!waking.has(s.sid)) void wakeSession(s)
+  }, 'button', 'wake-it')
+  return emptyState('', { title: ' ', icon: 'stop', action: wake })
+}
+
+function paintFoot(s: Session) {
   const i = s.info
-  const box = byId('manage')
   const managed = allowed(s, 'manage') && state.connected
-  box.hidden = !managed
-  if (!managed) return
-  const removal = removals.get(s.sid)
-  const button = byId<HTMLButtonElement>('manage-button')
-  const force = byId<HTMLButtonElement>('force-button')
   const stop = !!i.running
   let pending = busyManage.get(s.sid)
   if (pending && (Date.now() - pending.at > 30000 || (pending.action === 'stop' && !stop))) {
     busyManage.delete(s.sid)
     pending = undefined
   }
-  button.dataset.action = stop ? 'stop' : 'remove'
-  const labels = stop ? ['Stop session', 'Confirm stop'] : ['Delete session', 'Confirm delete']
-  const shown = armed.has(`${s.sid}:${button.dataset.action}`) ? 1 : 0
-  busy(button, !!pending && !pending.force)
-  busy(force, !!pending?.force)
-  ;[...button.children].forEach((span, i) => {
-    span.textContent = labels[i] ?? ''
-    span.classList.toggle('off', i !== shown)
-  })
-  button.classList.toggle('danger', shown === 1)
-  force.classList.toggle('danger', armed.has(`${s.sid}:force`))
-  button.disabled = !!pending?.force
-  force.disabled = !!pending && !pending.force
-  const note = shown === 1 ? (stop ? 'Press Confirm stop to stop this session. It keeps the conversation; Wake brings it back.' : 'Press Confirm delete to delete this session and its worktree.') : armed.has(`${s.sid}:force`) && removal?.offer ? `Press the button again to ${removal.offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${removal.offer.value}.` : removal?.message || ''
-  if (note) {
-    byId('foot-text').textContent = note
-    byId('foot-text').classList.remove('bad')
+  const asked = footAsk.get(s.sid)
+  if (asked && (!managed || (asked === 'stop') !== stop)) footAsk.delete(s.sid)
+  const offer = managed && !stop ? removals.get(s.sid)?.offer ?? null : null
+  const ask = footAsk.get(s.sid) ?? (offer ? 'force' : '')
+  const manage = byId<HTMLButtonElement>('menu-manage')
+  manage.hidden = !managed
+  manage.disabled = !!pending
+  manage.querySelector('sf-icon')!.setAttribute('name', stop ? 'stop' : 'trash')
+  byId('menu-manage-text').textContent = stop ? 'Stop session' : 'Delete session'
+  byId('menu-settings').hidden = !state.connected
+  byId('menu-access').hidden = !state.connected || !i.verified
+  const settings = !byId('menu-settings').hidden
+  const acts = ['menu-issues', 'menu-bring-main', 'menu-fork', 'menu-access', 'menu-terminal'].some(id => !byId(id).hidden)
+  byId('menu-sep-actions').hidden = !settings || !acts
+  byId('menu-sep-manage').hidden = !managed || (!settings && !acts)
+  const menu = byId('session-menu')
+  byId('session-more').hidden = !!ask || (!settings && !acts && !managed)
+  if (byId('session-more').hidden && menu.matches(':popover-open')) menu.hidePopover()
+  byId('foot-ask').hidden = !ask
+  const go = byId<HTMLButtonElement>('ask-confirm')
+  busy(go, !!ask && !!pending)
+  if (!ask) return
+  const name = visible(label(i))
+  const text = byId('foot-text')
+  text.classList.remove('bad')
+  text.textContent = ask === 'stop' ? `Stop ${name}? Wake brings it back.` : ask === 'remove' ? `Delete ${name} and its worktree?` : removals.get(s.sid)?.message ?? ''
+  const words = ask === 'stop' ? 'Stop' : ask === 'remove' ? 'Delete' : offer?.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer?.value ?? ''})`
+  if (go.textContent !== words) go.textContent = words
+  byId<HTMLButtonElement>('ask-cancel').disabled = !!pending
+}
+
+function paintNeeds() {
+  const s = current()
+  const box = byId('needs-settings')
+  const top = s && state.connected ? [sessionWork.attention, keepPanel.attention, capsAttention()].filter(a => a !== null).sort((a, b) => a.rank - b.rank)[0] ?? null : null
+  if (!top) {
+    box.hidden = true
+    byId('needs-said').textContent = ''
+    return
   }
-  button.title = stop ? 'Stopping keeps the conversation; Wake brings it back.' : 'Deleting removes the session and its worktree. Claude Code refuses if the worktree has unpushed commits.'
-  const offer = !stop && removal?.offer
-  force.hidden = !offer
-  byId('manage-cancel').hidden = !!pending || (shown !== 1 && !(offer && armed.has(`${s.sid}:force`)))
-  if (offer && !pending?.force) force.textContent = armed.has(`${s.sid}:force`) ?`Confirm: ${offer.flag === 'discard' ? 'discard' : 'remove the folder of'} ${offer.value}` : offer.flag === 'discard' ? `Discard the unpushed work (${offer.value}) and delete` : `Delete the worktree folder anyway (${offer.value})`
+  const said = `${top.title} ${top.text}`
+  if (box.hidden || byId('needs-said').textContent !== said) byId('needs-said').textContent = said
+  byId('needs-title').textContent = top.title
+  byId('needs-text').textContent = top.text
+  box.dataset.section = top.section
+  box.classList.toggle('alert', top.alert)
+  box.hidden = false
+}
+
+function openSettings(section: SettingsSection | '' = '') {
+  const s = current()
+  if (s && state.connected) openSessionSettings({ work: sessionWork, keep: keepPanel }, s.sid, section)
+}
+
+async function stopOrDelete(s: Session, action: 'stop' | 'remove', body: Record<string, unknown> = {}, onPage = false): Promise<void> {
+  const name = visible(label(s.info))
+  const stop = action === 'stop'
+  const problem = await manage(s, stop ? '/api/stop-session' : '/api/remove-session', body)
+  if (problem && onPage && !stop && removals.get(s.sid)?.offer) return
+  toast(problem ? { id: `manage:${s.sid}`, title: stop ? `${name} wasn't stopped` : `${name} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 } : { id: `manage:${s.sid}`, title: stop ? `${name} is stopping.` : `${name} was deleted.`, tone: 'ok' })
 }
 
 function paintCheckpoint(s: Session) {
@@ -615,19 +684,20 @@ function paintChecks(s: Session) {
   byId('size-note').textContent = gate?.sizeNote ?? ''
   byId('size-note').hidden = !gate?.sizeNote
   const doc = gate?.planDoc
-  const plan = doc && gate?.effective === 'feature' ? doc : null
+  const plan = doc && gate?.size === 'change' ? doc : null
   byId<HTMLElementTagNameMap['sf-approval']>('approval').view = plan && { note: plan.note ?? '', path: plan.path, text: plan.text, hash: plan.hash, approved: !!plan.approved, changed: !!plan.changed, draft: turn.busy && !plan.approved, disabled: disabled || waiting(s.asked.plan, plan.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === plan.hash ? s.refused.plan.text : '', commit: plan.commit ?? '', approvedAt: plan.approvedAt ?? '', reported: !!plan.reported, onBase: !!plan.onBase, status: plan.status ?? '' }
-  const cause = doc && gate?.effective === 'incident' ? doc : null
+  const cause = doc && gate?.size === 'incident' ? doc : null
   byId<HTMLElementTagNameMap['sf-approval']>('cause-approval').view = cause && { kind: 'root-cause', note: cause.note ?? '', path: cause.path, text: cause.text, hash: cause.hash, approved: !!cause.approved, changed: !!cause.changed, draft: turn.busy && !cause.approved, disabled: disabled || waiting(s.asked.plan, cause.hash), hold: gate?.holds?.approvePlan ?? '', refused: s.refused.plan?.hash === cause.hash ? s.refused.plan.text : '', commit: cause.commit ?? '', approvedAt: cause.approvedAt ?? '', reported: !!cause.reported, onBase: !!cause.onBase, status: cause.status ?? '' }
   byId<HTMLElementTagNameMap['sf-approval']>('approval').planReview = plan ? { run: s.info.review?.planReview ?? null, asking: planAsking.has(s.sid) } : null
-  const reqs = gate?.size === 'feature' && gate.requirements?.hash ? gate.requirements : null
-  byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', note: reqs.note ?? '', path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase, status: reqs.status ?? '' }
+  const reqs = gate?.size === 'change' && gate.requirements?.hash ? gate.requirements : null
+  byId<HTMLElementTagNameMap['sf-approval']>('req-approval').view = reqs && { kind: 'requirements', planChoice: !!gate?.planChoice, planSwitch: gate?.planSwitch ?? '', note: reqs.note ?? '', path: reqs.path, text: reqs.text, hash: reqs.hash, approved: !!reqs.approved, changed: !!reqs.changed, draft: turn.busy && !reqs.approved, disabled: disabled || waiting(s.asked.requirements, reqs.hash), hold: gate?.holds?.approveRequirements ?? '', refused: s.refused.requirements?.hash === reqs.hash ? s.refused.requirements.text : '', previous: reqs.previous ?? '', commit: reqs.commit ?? '', approvedAt: reqs.approvedAt ?? '', reported: !!reqs.reported, onBase: !!reqs.onBase, status: reqs.status ?? '' }
   paintExceptions(s)
   const project = projectFor(s)
   byId<HTMLElementTagNameMap['sf-project-agents']>('project-agents').view = gate ? { project: project?.path ?? '', rounds: project?.rounds ?? 0, roundsMax: project?.roundsMax ?? 0, prComment: !!project?.prComment, type: project?.type ?? '', types: types.map((t): [string, string] => [t.id, t.name]), autoFindings: project?.autoFindings ?? false, disabled, hold: project?.hold } : null
   byId<HTMLElementTagNameMap['sf-packs']>('packs').view = gate && project?.path ? { project: project.path, disabled } : null
   byId<HTMLElementTagNameMap['sf-reviewer-agents']>('reviewer-agents').view = gate && project?.path ? { project: project.path, disabled } : null
   reviewModels.view = gate && project?.path ? { project: project.path, disabled } : null
+  paintSteps(byId('path-rail'), byId('path'), [{ title: 'Project settings', target: byId('project-agents') }])
 }
 
 function projectFor(s: Session): Project | null {
@@ -984,8 +1054,8 @@ byId('changes-open').addEventListener('click', () => {
   if (s) openChanges(s)
 })
 byId('reviews').addEventListener('sf-override', e => void sessionAsk(current(), '/api/override', e.detail, "The verdict wasn't overridden.", 'You overrode the verdict for this commit. Press Push to push it.', reasonRefused(m => byId<HTMLElementTagNameMap['sf-reviews']>('reviews').refuse(`override-${e.detail.agent.replace(/[^A-Za-z0-9-]/g, '-')}`, m))))
-byId('path').addEventListener('click', e => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
+byId('path-section').addEventListener('click', e => {
+  const b =(e.target as HTMLElement).closest<HTMLButtonElement>('button.stage')
   if (!b || b.getAttribute('aria-disabled') === 'true') return
   const step = b.dataset.ask || ''
   return once(current(), step, () => whileBusy(b, () => ask(step)).finally(schedulePaint))
@@ -1017,7 +1087,7 @@ byId('size').addEventListener('change', async () => {
 byId('team-open').addEventListener('click', () => void openTeam())
 byId('team-approve').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-approve'), () => teamOp('approve')))
 byId('team-forget').addEventListener('click', () => void whileBusy(byId<HTMLButtonElement>('team-forget'), () => teamOp('forget')))
-byId('req-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('requirements', e.detail.hash)))
+byId('req-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('requirements', e.detail.hash, e.detail.plan)))
 byId('req-approval').addEventListener('sf-revise', e => revise('req-approval', 'requirements', e.detail.note))
 byId('approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
 byId('cause-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
@@ -1080,25 +1150,17 @@ byId('session-menu').addEventListener('toggle', e => {
   if ((e as ToggleEvent).newState !== 'open') return
   const menu = byId('session-menu')
   placeMenu(byId('session-more'), menu)
-  menu.querySelector<HTMLButtonElement>('button:not([hidden])')?.focus()
+  menu.querySelector<HTMLButtonElement>('button:not([hidden], :disabled)')?.focus()
 })
 byId('session-menu').addEventListener('keydown', e => {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
-  const items = [...byId('session-menu').querySelectorAll<HTMLButtonElement>('button:not([hidden])')]
+  const items = [...byId('session-menu').querySelectorAll<HTMLButtonElement>('button:not([hidden], :disabled)')]
   if (!items.length) return
   e.preventDefault()
   const at = items.indexOf(document.activeElement as HTMLButtonElement)
   const down = e.key === 'ArrowDown'
   const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : at < 0 ? (down ? 0 : items.length - 1) : (at + (down ? 1 : items.length - 1)) % items.length
   items[next]!.focus()
-})
-byId('menu-readonly').addEventListener('click', async () => {
-  const s = current()
-  byId('session-menu').hidePopover()
-  byId('session-more').focus()
-  if (!s || !s.info.controlled) return
-  const res = await request('/api/control', { sid: s.sid, on: false, confirm: true })
-  if (!res.ok) toast({ title: 'The page could not make this session read-only.', description: res.message, tone: 'bad' })
 })
 function usageText(s: Session): string {
   const parts: string[] = []
@@ -1112,7 +1174,22 @@ function usageText(s: Session): string {
 function paintBranchMenu(s: Session) {
   byId('menu-bring-main').hidden = !(state.connected && allowed(s, 'bringMain'))
   byId('menu-fork').hidden = !forkable(s)
+  const item = byId<HTMLButtonElement>('menu-issues')
+  const offered = state.connected ? s.gate?.path?.asks?.find(a => a.ask === item.dataset.ask) ?? null : null
+  item.hidden = !offered
+  if (!offered) return
+  if (byId('menu-issues-text').textContent !== offered.label) byId('menu-issues-text').textContent = offered.label
+  if (issuesTip.textContent !== offered.title) issuesTip.textContent = offered.title
+  item.disabled = !!stageOff(s)
 }
+
+byId('menu-issues').addEventListener('click', () => {
+  const s = current()
+  const step = byId('menu-issues').dataset.ask ?? ''
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  once(s, step, () => ask(step).finally(schedulePaint))
+})
 
 byId('menu-bring-main').addEventListener('click', () => {
   const s = current()
@@ -1143,46 +1220,71 @@ byId<HTMLElementTagNameMap['sf-split']>('split').start = (sid, card) => {
   const name = starterNames.get(goal?.info.agent || 'claude') ?? 'The agent'
   return withConsent(name, 'the session', consent => request('/api/split', { op: 'start', sid, card, ...consent }))
 }
-byId('menu-wake').addEventListener('click', () => {
+byId('menu-settings').addEventListener('click', () => {
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  openSettings()
+})
+byId('needs-open').addEventListener('click', () => openSettings((byId('needs-settings').dataset.section ?? '') as SettingsSection | ''))
+byId('menu-access').addEventListener('click', () => {
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  const s = current()
+  if (s && state.connected) openAccess(request, s.sid, () => openDialog('egress'), () => openDialog('credentials'))
+})
+byId('access-marker-open').addEventListener('click', () => {
+  const s = current()
+  if (s && state.connected) openAccess(request, s.sid, () => openDialog('egress'), () => openDialog('credentials'))
+})
+byId('menu-terminal').addEventListener('click', async () => {
+  byId('session-menu').hidePopover()
+  byId('session-more').focus()
+  const s = current()
+  const commands = s && allowed(s, 'copy') ? s.info.commands : undefined
+  if (!s || !commands) return
+  const woke = allowed(s, 'wake')
+  if (woke && !(await wakeSession(s, true))) return
+  openTerminal(commands, woke || s.info.control?.action === 'read-only' ? () => readOnly(s.sid) : undefined)
+})
+async function readOnly(sid: string): Promise<string> {
+  if (sessions.get(sid)?.info.control?.action === 'control') return ''
+  const res = await request('/api/control', { sid, on: false, confirm: true })
+  return res.ok ? '' : res.message
+}
+byId('menu-manage').addEventListener('click', () => {
   const s = current()
   byId('session-menu').hidePopover()
-  byId('session-more').focus()
-  if (s && allowed(s, 'wake')) void wakeSession(s)
+  if (s) askToManage(s)
 })
-modelMenu.addEventListener('click', () => {
-  byId('session-menu').hidePopover()
-  sessionWork.focusModel()
-})
-byId('session-menu').addEventListener('click', async e => {
-  const b = (e.target as Element).closest<HTMLButtonElement>('button[data-copy]')
-  if (!b) return
-  byId('session-menu').hidePopover()
-  byId('session-more').focus()
-  await copy((b.textContent || '').replace(/^Copy /, ''))
-})
+sessionWork.addEventListener('sf-attention', paintNeeds)
+keepPanel.addEventListener('sf-attention', paintNeeds)
+watchLimits({ paint: paintNeeds })
 
 async function copy(command: string) {
   const ok = await copyText(command)
   toast(ok ? { id: 'copy', title: `Copied ${command}`, description: 'Run it in a terminal on this computer, in the folder that holds compose.yaml.', tone: 'ok' } : { id: 'copy', title: 'The browser did not allow copying.', description: `Type ${command} in a terminal on this computer, in the folder that holds compose.yaml.`, tone: 'bad' })
 }
-byId('manage-button').addEventListener('click', () => {
+byId('ask-confirm').addEventListener('click', async () => {
   const s = current()
-  const action = byId('manage-button').dataset.action
-  if (!s || !confirmed(`${s.sid}:${action}`)) return
-  void manage(s, action === 'stop' ? '/api/stop-session' : '/api/remove-session', {})
+  const go = byId<HTMLButtonElement>('ask-confirm')
+  if (!s || go.getAttribute('aria-busy') === 'true') return
+  const asked = footAsk.get(s.sid)
+  const offer = !asked && !s.info.running ? removals.get(s.sid)?.offer : null
+  if (!asked && !offer) return
+  await stopOrDelete(s, asked ?? 'remove', offer ? { flag: offer.flag, value: offer.value } : {}, true)
+  footAsk.delete(s.sid)
+  paint()
+  if (document.activeElement === go || document.activeElement === document.body) {
+    if (!go.closest('[hidden]') && !byId('foot-ask').hidden) go.focus()
+    else if (!byId('session-more').hidden) byId('session-more').focus()
+  }
 })
-byId('force-button').addEventListener('click', () => {
-  const s = current()
-  const offer = s && removals.get(s.sid)?.offer
-  if (!s || !offer || !confirmed(`${s.sid}:force`)) return
-  void manage(s, '/api/remove-session', { flag: offer.flag, value: offer.value })
-})
-byId('manage-cancel').addEventListener('click', () => {
+byId('ask-cancel').addEventListener('click', () => {
   const s = current()
   if (!s) return
-  for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
+  if (!footAsk.delete(s.sid)) removals.delete(s.sid)
   paint()
-  byId('manage-button').focus()
+  byId('session-more').focus()
 })
 byId('control-cancel').addEventListener('click', () => {
   const s = current()
@@ -1320,6 +1422,7 @@ byId('welcome').addEventListener('click', e => {
   const start = target.closest<HTMLElement>('[data-start]')?.dataset.start
   if (start === 'docs') openDocs('')
   if (start === 'egress') openEgress(request)
+  if (start === 'credentials') openDialog('credentials')
   if (start === 'workspace') openWorkspace(request, labelOfSid, forgetSession)
   if (start === 'exceptions') openExceptions(request, labelOfSid)
   if (start === 'backup') openBackup(request, sendState)
@@ -1380,12 +1483,9 @@ projects.addEventListener('sf-session-action', async e => {
     toast({ id: `manage:${e.detail.sid}`, title: e.detail.action === 'stop' ? "The session wasn't stopped" : "The session wasn't deleted", description: 'This page lost track of it. Reload the page and try again.', tone: 'bad', timeout: 0 })
     return
   }
-  const name = visible(label(s.info))
-  const stop = e.detail.action === 'stop'
   projects.acting(s.sid, true)
-  const problem = await manage(s, stop ? '/api/stop-session' : '/api/remove-session', {})
+  await stopOrDelete(s, e.detail.action)
   projects.acting(s.sid, false)
-  toast(problem ? { id: `manage:${s.sid}`, title: stop ? `${name} wasn't stopped` : `${name} wasn't deleted`, description: problem, tone: 'bad', timeout: 0 } : { id: `manage:${s.sid}`, title: stop ? `${name} is stopping.` : `${name} was deleted.`, tone: 'ok' })
 })
 projects.addEventListener('sf-dispatch', async e => {
   const detail = e.detail
@@ -1452,7 +1552,7 @@ byId('rules').addEventListener('sf-rules-open', e => {
   }
 })
 
-const { openDialog } = startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } })
+const { openDialog } = startPalette({ reviewsOf, projectList: () => projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush, send } })
 byId('docs').addEventListener('click', e => {
   const name = (e.target as Element).closest<HTMLElement>('button[data-dialog]')?.dataset.dialog
   if (name && isDialog(name)) openDialog(name)

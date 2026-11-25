@@ -112,7 +112,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
 	if cfg.PluginSocket != "" {
 		relay, err := agenthost.Relay(cfg.Engine, logger)
 		if err != nil {
@@ -126,6 +126,18 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 		}
 		defer func() { _ = os.Remove(cfg.PluginSocket) }()
 		go func() { errs <- agenthost.ServeRelay(ctx, sock, relay) }()
+		signer, err := agenthost.SSHAgent(cfg.Engine, logger)
+		if err != nil {
+			_ = ln.Close()
+			return err
+		}
+		keys, err := agenthost.ListenSSHAgent(session.SSHAgentSocket)
+		if err != nil {
+			_ = ln.Close()
+			return err
+		}
+		defer func() { _ = os.Remove(session.SSHAgentSocket) }()
+		go func() { errs <- agenthost.ServeSSHAgent(ctx, keys, signer) }()
 	}
 	srv := &http.Server{
 		Handler:           bodyDeadline(host.Handler()),
@@ -142,7 +154,7 @@ func ServeAgentHost(ctx context.Context, args []string, logger shared.Logger) er
 	if cfg.Review {
 		mode = "review"
 	}
-	logger.Info("agent-host listening", "mode", mode, "control", ln.Addr().String(), "plugin_socket", socket, "version", Version)
+	logger.Info("agent-host listening", "mode", mode, "control", ln.Addr().String(), "plugin_socket", socket, "ssh_agent", cfg.PluginSocket != "", "version", Version)
 	var serveErr error
 	select {
 	case serveErr = <-errs:

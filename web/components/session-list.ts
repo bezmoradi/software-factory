@@ -18,7 +18,7 @@ export function bySessionOrder(a: SessionInfo, b: SessionInfo): number {
 }
 
 export function sessionKey(list: SessionInfo[], now = Date.now()): string {
-  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.lineage?.group, s.lineage?.groupKind, s.summary?.word, s.summary?.tone, s.modeLabel, s.actions?.manage, age(s.startedAt, now)]))
+  return JSON.stringify(list.map(s => [s.sid, s.name, s.cwd, s.kind, s.running, s.live, s.verified, s.disputed, s.outdated, s.controlled, s.mode, s.state, s.status, s.waitingFor, s.queued, s.busy, s.needs, s.login, s.lineage?.group, s.lineage?.groupKind, s.summary?.word, s.summary?.tone, s.actions?.manage, age(s.startedAt, now)]))
 }
 
 function groupOf(s: SessionInfo, all: SessionInfo[]): string {
@@ -113,7 +113,7 @@ function sessionAsk(s: SessionInfo, li: HTMLLIElement, action: 'stop' | 'remove'
 export function sessionTable(rows: HTMLLIElement[], cls = '', name = ''): HTMLDivElement {
   const head = el('div', 'sessions-head secondary')
   head.setAttribute('aria-hidden', 'true')
-  head.append(el('span', '', 'Session'), el('span', '', 'Status'), el('span', '', 'Mode'), el('span', 'when', 'Age'), el('span'))
+  head.append(el('span', '', 'Session'), el('span', '', 'Status'), el('span', 'when', 'Age'), el('span'))
   const ul = el('ul', 'sessions')
   if (name) ul.setAttribute('aria-label', name)
   ul.append(...rows)
@@ -130,8 +130,6 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
   const group = groupTag(s, all)
   if (group) name.append(group)
   const tone = s.summary?.tone ?? ''
-  const mode = el('span', 'mode secondary', s.mode ? `${s.modeLabel || s.mode} mode` : '')
-  mode.title = mode.textContent ?? ''
   const open = el('a', 'button primary small session-open', 'Open')
   open.href = '/'
   open.dataset.view = `s/${s.sid}`
@@ -146,7 +144,7 @@ export function sessionRow(s: SessionInfo, all: SessionInfo[], key: string, menu
     row.append(cells)
     return row
   }
-  cells.append(name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), mode, el('span', 'when secondary', age(s.startedAt)), open)
+  cells.append(name, el('span', `what secondary${tone ? ` ${tone}` : ''}`, shown(s.summary?.word ?? '')), el('span', 'when secondary', age(s.startedAt)), open)
   row.append(cells)
   if (menu) {
     row.classList.add('with-menu')

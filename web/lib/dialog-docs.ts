@@ -4,6 +4,7 @@ export const GATEWAY_HEADING = 'Company LLM gateway'
 
 export const DIALOGS = {
   egress: { title: 'Network access', inside: [GATEWAY_HEADING] },
+  credentials: { title: 'Credentials', inside: [] },
   workspace: { title: 'Workspace', inside: [] },
   exceptions: { title: 'Register of exceptions', inside: [] },
   backup: { title: 'Export and import', inside: [] },

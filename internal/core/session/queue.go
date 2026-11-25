@@ -23,9 +23,10 @@ const (
 )
 
 type QueuedMessage struct {
-	ID   string
-	Text string
-	At   time.Time
+	ID    string
+	Text  string
+	At    time.Time
+	Typed bool
 }
 
 type QueueState struct {
@@ -67,7 +68,7 @@ func (w *SessionWork) loadQueues() {
 		q := &sessionQueue{stopped: clip(st.Stopped, 300)}
 		for _, m := range st.Items {
 			if text, ok := queueText(m.Text); ok && len(q.items) < MaxQueue && cardID.MatchString(m.ID) {
-				q.items = append(q.items, QueuedMessage{ID: m.ID, Text: text, At: m.At})
+				q.items = append(q.items, QueuedMessage{ID: m.ID, Text: text, At: m.At, Typed: m.Typed})
 			}
 		}
 		if len(q.items) == 0 {
@@ -174,14 +175,14 @@ func (w *SessionWork) QueueAdd(sid, text string) error {
 	if err := w.admitted(sid); err != nil {
 		return err
 	}
-	if err := w.push(sid, t); err != nil {
+	if err := w.push(sid, t, true); err != nil {
 		return err
 	}
 	go w.pump(sid, "")
 	return nil
 }
 
-func (w *SessionWork) push(sid, text string) error {
+func (w *SessionWork) push(sid, text string, typed bool) error {
 	w.mu.Lock()
 	q := w.queueOf(sid)
 	if full := QueueFull(len(q.items)); full != "" {
@@ -192,7 +193,7 @@ func (w *SessionWork) push(sid, text string) error {
 		w.mu.Unlock()
 		return limited("queue", "The engine keeps queues for at most 1,000 sessions.")
 	}
-	q.items = append(q.items, QueuedMessage{ID: randomHex(16), Text: text, At: w.cfg.Now()})
+	q.items = append(q.items, QueuedMessage{ID: randomHex(16), Text: text, At: w.cfg.Now(), Typed: typed})
 	w.mu.Unlock()
 	w.saveQueues()
 	w.changed(sid)
@@ -277,7 +278,7 @@ func (w *SessionWork) QueueResume(sid string) error {
 	return nil
 }
 
-func (w *SessionWork) divert(sid, text string, attached bool) (bool, error) {
+func (w *SessionWork) divert(sid, text string, attached, typed bool) (bool, error) {
 	w.mu.Lock()
 	rs := w.runs[sid]
 	setting := rs != nil && rs.setting
@@ -292,7 +293,7 @@ func (w *SessionWork) divert(sid, text string, attached bool) (bool, error) {
 	if err != nil {
 		return true, conflict("setup", "The setup command is still running in this session's worktree, and this message can't wait in the queue. Send it once setup has finished.")
 	}
-	return true, w.push(sid, t)
+	return true, w.push(sid, t, typed)
 }
 
 func (w *SessionWork) cardShown(sid string) {
@@ -355,7 +356,11 @@ func (w *SessionWork) pump(sid, ended string) {
 	w.mu.Unlock()
 	why := w.blocked(sid, ended)
 	if why == "" {
-		if err := w.reg.Message(sid, first.Text, false, nil, nil); err != nil {
+		send := w.reg.Message
+		if first.Typed {
+			send = w.reg.PersonMessage
+		}
+		if err := send(sid, first.Text, false, nil, nil); err != nil {
 			why = queueRefused(err)
 		}
 	}

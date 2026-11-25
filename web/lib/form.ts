@@ -1,5 +1,5 @@
 import type { EngineAnswer } from '../types.ts'
-import { el, ensureId, labelError, say, type Tone } from './dom.ts'
+import { button, el, ensureId, labelError, say, type Tone } from './dom.ts'
 
 export interface FormOptions {
   cls?: string
@@ -122,4 +122,39 @@ export function showAnswer(container: HTMLElement, answer: EngineAnswer, line?: 
   }
   if (line) say(line, answer.message, o.tone ?? 'bad')
   return false
+}
+
+export interface Reveal {
+  node: HTMLDivElement
+  open(from?: HTMLElement): void
+  close(): void
+}
+
+export function reveal(label: string, children: Node[], key = ''): Reveal {
+  const add = button(label, 'small', () => r.open(), 'button', key)
+  const row = actions([], [add])
+  const box = el('div')
+  box.hidden = true
+  box.append(...children)
+  const node = el('div')
+  node.append(row, box)
+  let back: HTMLElement | null = null
+  const r: Reveal = {
+    node,
+    open: from => {
+      back = from ?? null
+      row.hidden = true
+      box.hidden = false
+      box.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')?.focus()
+    },
+    close: () => {
+      const was = !box.hidden
+      box.hidden = true
+      row.hidden = false
+      const to = back?.isConnected && back.checkVisibility() ? back : add
+      back = null
+      if (was) to.focus()
+    },
+  }
+  return r
 }

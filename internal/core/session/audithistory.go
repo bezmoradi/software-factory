@@ -72,7 +72,7 @@ type HistoryLine struct {
 	Tone string
 }
 
-var lifecycleWords = map[string]string{"session-start": "Session started", "session-wake": "Session woken", "session-stop": "Session stopped", "session-fork": "Session forked", "session-delete": "Session deleted"}
+var lifecycleWords = map[string]string{"session-start": "Session started", "session-wake": "Session woken", "session-stop": "Session stopped", "session-fork": "New session", "session-delete": "Session deleted"}
 
 var startFromWords = map[string]string{"main": "from main", "branch": "from branch", "pull-request": "from pull request #", "fork": "from a commit of session", "pinned": "from a pinned commit"}
 
@@ -140,6 +140,12 @@ func historyText(e AuditEntry) (string, string) {
 		}
 		return line, ""
 	}
+	if e.Kind == AuditAccess {
+		return accessHistory(e), "warn"
+	}
+	if e.Kind == AuditAction {
+		return actionHistory(e), "warn"
+	}
 	kind := e.Kind
 	if kind == "push" {
 		kind = ""
@@ -199,6 +205,34 @@ func historyText(e AuditEntry) (string, string) {
 		return line, "warn"
 	}
 	return line, ""
+}
+
+var accessResults = map[string]string{ResultGranted: "Network access allowed", ResultNotGranted: "Network access not allowed", ResultExpired: "Network access expired", ResultGrantEnded: "Network access ended", ResultTakenBack: "Network access taken back"}
+
+var actionResults = map[string]string{ResultGranted: "Action allowed again", ResultNotGranted: "Action not run", ResultExpired: "Action grant expired", ResultGrantEnded: "Action grant ended", ResultTakenBack: "Action grant taken back", "ran": "Action ran"}
+
+func actionHistory(e AuditEntry) string {
+	line, ok := actionResults[e.Result]
+	if !ok {
+		line = "Action " + e.Result
+	}
+	line += historyBy[e.By]
+	if e.Reason != "" {
+		line += ": " + e.Reason
+	}
+	return line
+}
+
+func accessHistory(e AuditEntry) string {
+	line, ok := accessResults[e.Result]
+	if !ok {
+		line = "Network access " + e.Result
+	}
+	line += historyBy[e.By]
+	if e.Reason != "" {
+		line += ": " + e.Reason
+	}
+	return line
 }
 
 func HistoryLines(entries []AuditEntry) []HistoryLine {

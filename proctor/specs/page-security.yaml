@@ -45,6 +45,8 @@ tables:
       - ["t01_diagnostics", "/api/diagnostics"]
       - ["t01_dispatch", "/api/dispatch"]
       - ["t01_egress", "/api/egress"]
+      - ["t01_access", "/api/access"]
+      - ["t01_credentials", "/api/credentials"]
       - ["t01_exceptions", "/api/exceptions"]
       - ["t01_explain", "/api/explain"]
       - ["t01_export", "/api/export"]
@@ -186,6 +188,8 @@ tables:
       - ["t02_diagnostics", "/api/diagnostics"]
       - ["t02_dispatch", "/api/dispatch"]
       - ["t02_egress", "/api/egress"]
+      - ["t02_access", "/api/access"]
+      - ["t02_credentials", "/api/credentials"]
       - ["t02_exceptions", "/api/exceptions"]
       - ["t02_explain", "/api/explain"]
       - ["t02_export", "/api/export"]
@@ -328,6 +332,8 @@ tables:
       - ["t03_diagnostics", "/api/diagnostics"]
       - ["t03_dispatch", "/api/dispatch"]
       - ["t03_egress", "/api/egress"]
+      - ["t03_access", "/api/access"]
+      - ["t03_credentials", "/api/credentials"]
       - ["t03_exceptions", "/api/exceptions"]
       - ["t03_explain", "/api/explain"]
       - ["t03_export", "/api/export"]
@@ -470,6 +476,8 @@ tables:
       - ["t04_diagnostics", "/api/diagnostics"]
       - ["t04_dispatch", "/api/dispatch"]
       - ["t04_egress", "/api/egress"]
+      - ["t04_access", "/api/access"]
+      - ["t04_credentials", "/api/credentials"]
       - ["t04_exceptions", "/api/exceptions"]
       - ["t04_explain", "/api/explain"]
       - ["t04_export", "/api/export"]
@@ -611,6 +619,8 @@ tables:
       - ["t05_diagnostics", "/api/diagnostics"]
       - ["t05_dispatch", "/api/dispatch"]
       - ["t05_egress", "/api/egress"]
+      - ["t05_access", "/api/access"]
+      - ["t05_credentials", "/api/credentials"]
       - ["t05_exceptions", "/api/exceptions"]
       - ["t05_explain", "/api/explain"]
       - ["t05_export", "/api/export"]
@@ -752,6 +762,8 @@ tables:
       - ["t06_diagnostics", "/api/diagnostics", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_dispatch", "/api/dispatch", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_egress", "/api/egress", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_access", "/api/access", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_credentials", "/api/credentials", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_exceptions", "/api/exceptions", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_explain", "/api/explain", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_export", "/api/export", "The engine takes this request as JSON only, sent with Content-Type application/json."]
@@ -892,6 +904,8 @@ tables:
       - ["t07_diagnostics", "/api/diagnostics"]
       - ["t07_dispatch", "/api/dispatch"]
       - ["t07_egress", "/api/egress"]
+      - ["t07_access", "/api/access"]
+      - ["t07_credentials", "/api/credentials"]
       - ["t07_exceptions", "/api/exceptions"]
       - ["t07_explain", "/api/explain"]
       - ["t07_export", "/api/export"]
@@ -1060,6 +1074,8 @@ tables:
       - ["t09_diagnostics", "/api/diagnostics"]
       - ["t09_dispatch", "/api/dispatch"]
       - ["t09_egress", "/api/egress"]
+      - ["t09_access", "/api/access"]
+      - ["t09_credentials", "/api/credentials"]
       - ["t09_exceptions", "/api/exceptions"]
       - ["t09_explain", "/api/explain"]
       - ["t09_export", "/api/export"]
@@ -1205,6 +1221,8 @@ tables:
       - ["t10_dispatch", "/api/dispatch"]
       - ["t10_docs", "/api/docs"]
       - ["t10_egress", "/api/egress"]
+      - ["t10_access", "/api/access"]
+      - ["t10_credentials", "/api/credentials"]
       - ["t10_exceptions", "/api/exceptions"]
       - ["t10_explain", "/api/explain"]
       - ["t10_export", "/api/export"]
@@ -1323,6 +1341,8 @@ tables:
           - t11_put_dispatch
           - t11_put_docs
           - t11_put_egress
+          - t11_put_access
+          - t11_put_credentials
           - t11_put_exceptions
           - t11_put_explain
           - t11_put_export
@@ -1413,6 +1433,8 @@ tables:
           - t11_delete_dispatch
           - t11_delete_docs
           - t11_delete_egress
+          - t11_delete_access
+          - t11_delete_credentials
           - t11_delete_exceptions
           - t11_delete_explain
           - t11_delete_export
@@ -1503,6 +1525,8 @@ tables:
           - t11_patch_dispatch
           - t11_patch_docs
           - t11_patch_egress
+          - t11_patch_access
+          - t11_patch_credentials
           - t11_patch_exceptions
           - t11_patch_explain
           - t11_patch_export
@@ -1596,6 +1620,8 @@ tables:
       - ["t11_put_dispatch", "/api/dispatch", "PUT"]
       - ["t11_put_docs", "/api/docs", "PUT"]
       - ["t11_put_egress", "/api/egress", "PUT"]
+      - ["t11_put_access", "/api/access", "PUT"]
+      - ["t11_put_credentials", "/api/credentials", "PUT"]
       - ["t11_put_exceptions", "/api/exceptions", "PUT"]
       - ["t11_put_explain", "/api/explain", "PUT"]
       - ["t11_put_export", "/api/export", "PUT"]
@@ -1686,6 +1712,8 @@ tables:
       - ["t11_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t11_delete_docs", "/api/docs", "DELETE"]
       - ["t11_delete_egress", "/api/egress", "DELETE"]
+      - ["t11_delete_access", "/api/access", "DELETE"]
+      - ["t11_delete_credentials", "/api/credentials", "DELETE"]
       - ["t11_delete_exceptions", "/api/exceptions", "DELETE"]
       - ["t11_delete_explain", "/api/explain", "DELETE"]
       - ["t11_delete_export", "/api/export", "DELETE"]
@@ -1776,6 +1804,8 @@ tables:
       - ["t11_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t11_patch_docs", "/api/docs", "PATCH"]
       - ["t11_patch_egress", "/api/egress", "PATCH"]
+      - ["t11_patch_access", "/api/access", "PATCH"]
+      - ["t11_patch_credentials", "/api/credentials", "PATCH"]
       - ["t11_patch_exceptions", "/api/exceptions", "PATCH"]
       - ["t11_patch_explain", "/api/explain", "PATCH"]
       - ["t11_patch_export", "/api/export", "PATCH"]
@@ -1892,6 +1922,8 @@ tables:
           - t12_put_dispatch
           - t12_put_docs
           - t12_put_egress
+          - t12_put_access
+          - t12_put_credentials
           - t12_put_exceptions
           - t12_put_explain
           - t12_put_export
@@ -1982,6 +2014,8 @@ tables:
           - t12_delete_dispatch
           - t12_delete_docs
           - t12_delete_egress
+          - t12_delete_access
+          - t12_delete_credentials
           - t12_delete_exceptions
           - t12_delete_explain
           - t12_delete_export
@@ -2072,6 +2106,8 @@ tables:
           - t12_patch_dispatch
           - t12_patch_docs
           - t12_patch_egress
+          - t12_patch_access
+          - t12_patch_credentials
           - t12_patch_exceptions
           - t12_patch_explain
           - t12_patch_export
@@ -2165,6 +2201,8 @@ tables:
       - ["t12_put_dispatch", "/api/dispatch", "PUT"]
       - ["t12_put_docs", "/api/docs", "PUT"]
       - ["t12_put_egress", "/api/egress", "PUT"]
+      - ["t12_put_access", "/api/access", "PUT"]
+      - ["t12_put_credentials", "/api/credentials", "PUT"]
       - ["t12_put_exceptions", "/api/exceptions", "PUT"]
       - ["t12_put_explain", "/api/explain", "PUT"]
       - ["t12_put_export", "/api/export", "PUT"]
@@ -2255,6 +2293,8 @@ tables:
       - ["t12_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t12_delete_docs", "/api/docs", "DELETE"]
       - ["t12_delete_egress", "/api/egress", "DELETE"]
+      - ["t12_delete_access", "/api/access", "DELETE"]
+      - ["t12_delete_credentials", "/api/credentials", "DELETE"]
       - ["t12_delete_exceptions", "/api/exceptions", "DELETE"]
       - ["t12_delete_explain", "/api/explain", "DELETE"]
       - ["t12_delete_export", "/api/export", "DELETE"]
@@ -2345,6 +2385,8 @@ tables:
       - ["t12_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t12_patch_docs", "/api/docs", "PATCH"]
       - ["t12_patch_egress", "/api/egress", "PATCH"]
+      - ["t12_patch_access", "/api/access", "PATCH"]
+      - ["t12_patch_credentials", "/api/credentials", "PATCH"]
       - ["t12_patch_exceptions", "/api/exceptions", "PATCH"]
       - ["t12_patch_explain", "/api/explain", "PATCH"]
       - ["t12_patch_export", "/api/export", "PATCH"]
@@ -2457,6 +2499,8 @@ tables:
       - ["t13_diagnostics", "/api/diagnostics"]
       - ["t13_dispatch", "/api/dispatch"]
       - ["t13_egress", "/api/egress"]
+      - ["t13_access", "/api/access"]
+      - ["t13_credentials", "/api/credentials"]
       - ["t13_exceptions", "/api/exceptions"]
       - ["t13_explain", "/api/explain"]
       - ["t13_export", "/api/export"]

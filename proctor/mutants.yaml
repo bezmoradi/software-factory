@@ -272,8 +272,8 @@
   title: "Approving requirements approves the plan and the other way round"
   edits:
     - file: "internal/adapters/http/page/workflow.go"
-      find: "s.cfg.Work.Approve(r.Context(), sid, path == \"/api/approve-plan\", hash, text)"
-      replace: "s.cfg.Work.Approve(r.Context(), sid, path != \"/api/approve-plan\", hash, text)"
+      find: "s.cfg.Work.Approve(r.Context(), sid, plan, hash, text, choice)"
+      replace: "s.cfg.Work.Approve(r.Context(), sid, !plan, hash, text, choice)"
 - id: PAGE-034
   title: "Approving the team file doesn't check the sha's form"
   edits:
@@ -422,8 +422,8 @@
   title: "Project caps can be set for a project the engine doesn't have"
   edits:
     - file: "internal/adapters/http/page/limits.go"
-      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\terr = l.SetProject(name, c)"
-      replace: "\t\terr = l.SetProject(name, c)"
+      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\tvar changed bool\n\t\tchanged, err = l.SetProject(name, c)"
+      replace: "\t\tvar changed bool\n\t\tchanged, err = l.SetProject(name, c)"
 - id: PAGE-061
   title: "A forge answer without confirmed counts as confirmed"
   edits:
@@ -701,7 +701,7 @@
       find: "case l.Level == level.Stopped && l.Sandboxed:"
       replace: "case l.Level == level.Stopped:"
 - id: GATE-016
-  title: "Only work types that change no file are refused a push, so Exploring (push false) can push"
+  title: "Only work types that change no file are refused a push, so Explore (push false) can push"
   edits:
     - file: "internal/core/gate/decision.go"
       find: "if !f.Type.Push {"
@@ -869,17 +869,17 @@
       find: "if f.Head == \"\" || (f.Head != f.ReqBaseline && !f.ArtifactsOnly) {"
       replace: "if f.Head == \"\" {"
 - id: FLOW-004
-  title: "Implement may start once the requirements are approved, before the plan is"
+  title: "Implement may start once the requirements are approved, before the plan the developer chose is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "if feature && !f.PlanOk {"
-      replace: "if feature && !f.ReqOk {"
+      find: "case change && f.PlanChosen && !f.PlanOk:"
+      replace: "case change && f.PlanChosen && !f.ReqOk:"
 - id: FLOW-005
-  title: "A Feature's edits are allowed once the requirements are approved, before the plan is"
+  title: "A Code change's edits are allowed once the requirements are approved, before the plan the developer chose is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "case f.Profile != Feature || f.PlanOk ||"
-      replace: "case f.Profile != Feature || f.ReqOk ||"
+      find: "case f.Profile != Change || f.ReqOk && (!f.PlanChosen || f.PlanOk) ||"
+      replace: "case f.Profile != Change || f.ReqOk ||"
 - id: FLOW-006
   title: "Agent instruction files (CLAUDE.md, .claude/...) count as documentation"
   edits:
@@ -1112,14 +1112,14 @@
   title: "Deleting a session doesn't remove its container"
   edits:
     - file: "internal/core/session/boxsessions.go"
-      find: "if err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
-      replace: "if err := error(nil); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      find: "\t\td.cfg.Routes.Down(box)\n\t\tif err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      replace: "\t\td.cfg.Routes.Down(box)\n\t\tif err := error(nil); err != nil && !errors.Is(err, ErrBoxUnknown) {"
 - id: SESS-016
   title: "Deleting a session leaves its folder in the workspace"
   edits:
     - file: "internal/core/session/boxsessions.go"
-      find: "if err := d.cfg.Folders.Remove(box); err != nil {"
-      replace: "if err := error(nil); err != nil {"
+      find: "if err := d.cfg.Folders.Remove(box); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {"
+      replace: "if err := error(nil); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {"
 - id: SESS-017
   title: "At start the engine doesn't stop session containers left running"
   edits:
@@ -1172,8 +1172,8 @@
   title: "A session at a cap accepts new own caps instead of Raise"
   edits:
     - file: "internal/core/session/capspage.go"
-      find: "\tif s.reached != \"\" {\n\t\tl.mu.Unlock()\n\t\treturn conflict(\"reached\","
-      replace: "\tif false {\n\t\tl.mu.Unlock()\n\t\treturn conflict(\"reached\","
+      find: "\tif s.reached != \"\" {\n\t\tl.mu.Unlock()\n\t\treturn false, conflict(\"reached\","
+      replace: "\tif false {\n\t\tl.mu.Unlock()\n\t\treturn false, conflict(\"reached\","
 - id: SESS-027
   title: "Raise the cap raises a kind the session didn't reach"
   edits:
@@ -1532,8 +1532,8 @@
   title: "A held push card stays valid for 15 hours instead of 15 minutes"
   edits:
     - file: "internal/core/session/pushes.go"
-      find: "AllowFor        = 15 * time.Minute"
-      replace: "AllowFor        = 15 * time.Hour"
+      find: "AllowFor      = 15 * time.Minute"
+      replace: "AllowFor      = 15 * time.Hour"
 - id: SESS-504
   title: "Allowing a push with exactly one missing item needs no reason"
   edits:
@@ -1730,8 +1730,8 @@
   title: "A plan approval counts against requirements that changed after their approval"
   edits:
     - file: "internal/core/session/work.go"
-      find: "(!feature || g.reqOk)"
-      replace: "(!feature || ws.req != nil)"
+      find: "(!change || g.reqOk && g.planChosen)"
+      replace: "(!change || ws.req != nil && g.planChosen)"
 - id: SESS-537
   title: "An approval keeps counting after its document changes"
   edits:
@@ -2138,14 +2138,14 @@
   title: "The default memory limit of a session's and a reviewer container is 8 GiB instead of 2 GiB"
   edits:
     - file: "internal/adapters/sandbox/boxes/config.go"
-      find: "DefaultMemory   = 2 << 30"
-      replace: "DefaultMemory   = 8 << 30"
+      find: "DefaultMemory        = 2 << 30"
+      replace: "DefaultMemory        = 8 << 30"
 - id: BOX-022
   title: "The default CPU limit of a session's and a reviewer container is 16 CPUs instead of 2"
   edits:
     - file: "internal/adapters/sandbox/boxes/config.go"
-      find: "DefaultNanoCPUs = 2_000_000_000"
-      replace: "DefaultNanoCPUs = 16_000_000_000"
+      find: "DefaultNanoCPUs      = 2_000_000_000"
+      replace: "DefaultNanoCPUs      = 16_000_000_000"
 - id: BOX-023
   title: "A reviewer container mounts its snapshot read-write, so the reviewer can change what it reviews (touch /reviews/<id>/x succeeds)"
   edits:
@@ -2366,8 +2366,8 @@
   title: "Egress no longer cuts an open tunnel when its host leaves the allowlist (Network access remove, or an expiry), so the tunnel lives until idle or the hour limit"
   edits:
     - file: "internal/adapters/egress/proxy.go"
-      find: "if policy.Check(tn.host) != \"\" {"
-      replace: "if policy.Check(tn.host) == ReasonIPLiteral {"
+      find: "case p.check(policy, tn.subnet, tn.host) != \"\":"
+      replace: "case p.check(policy, tn.subnet, tn.host) == ReasonIPLiteral:"
 - id: EGR-012
   title: "When the engine drops a session's subnet (its container stopped), egress keeps that subnet's open connections instead of closing them"
   edits:
@@ -3089,8 +3089,8 @@
   title: "A held edit leaves no card when the agent hasn't suggested a type"
   edits:
     - file: "internal/core/session/worktypeask.go"
-      find: "if g.ws.chosen || a == nil || !a.held && a.typeID == \"\" {"
-      replace: "if g.ws.chosen || a == nil || a.typeID == \"\" {"
+      find: "if a == nil || !a.held && a.typeID == \"\" {"
+      replace: "if a == nil || a.typeID == \"\" {"
 - id: SESS-665
   title: "Picking a work type leaves the card showing"
   edits:
@@ -3139,6 +3139,54 @@
     - file: "internal/core/session/names.go"
       find: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"-\" + nameNouns[rand.IntN(len(nameNouns))]"
       replace: "name = nameNouns[rand.IntN(len(nameNouns))] + \"-\" + nameAdjectives[rand.IntN(len(nameAdjectives))]"
+- id: SESS-669
+  title: "factory_work_type takes a suggestion once the session has a work type"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tif ws.chosen {\n\t\treturn refuse(\"this session's work type is already \""
+      replace: "\tif false {\n\t\treturn refuse(\"this session's work type is already \""
+- id: SESS-671
+  title: "Continue defining shows before Define has run"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "if !m.complete() && t.ran[id] && !t.busy && !produced"
+      replace: "if !m.complete() && !t.busy && !produced"
+- id: SESS-670
+  title: "An untyped session's card doesn't name the type the agent suggested"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tif a.Type != \"\" {\n\t\tc.Suggests,"
+      replace: "\tif a.Type == \"\" {\n\t\tc.Suggests,"
+- id: SESS-672
+  title: "Approve requirements without a plan choice is taken as Approve and implement"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase !plan && g.chosen.Plans() && choice == PlanUnstated:\n"
+      replace: "\tcase false:\n"
+- id: SESS-673
+  title: "Add a plan is taken while work made since the approval is uncommitted"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase choice == PlanWanted && !g.planChosen && g.worked:\n"
+      replace: "\tcase false:\n"
+- id: SESS-674
+  title: "Skip the plan is taken once the plan is approved"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase choice == PlanSkipped && g.planOk:\n"
+      replace: "\tcase false:\n"
+- id: SESS-675
+  title: "A Code change's first typed message goes to the agent as typed, not as Define's command"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\tcase workflow.Change:\n\t\treturn AskDefine\n"
+      replace: "\tcase workflow.Change:\n\t\treturn \"\"\n"
+- id: SESS-676
+  title: "Write the incident review is offered before the fix is committed on the approved root cause"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if incident && v.FixCommitted {"
+      replace: "if incident {"
 - id: PAGE-160
   title: "/api/session-name takes a field it doesn't read"
   edits:

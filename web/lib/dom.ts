@@ -31,11 +31,40 @@ export function shown(text: string): string {
   return visible(unspoofed(text))
 }
 
-export function visibleCommand(text: string): string {
-  return visible(text)
-    .replace(/(?:\n[ \t]*){4,}/g, run => `\n⏎ ×${run.split('\n').length - 2}\n`)
+export interface NumberedLine {
+  text: string
+  line: number
+}
+
+const BLANK_RUN = /(?:\n[ \t]*){4,}/g
+
+function shortSpaces(line: string): string {
+  return line
     .replace(/(\S) {8,}/g, (run, before: string) => `${before} ␠ ×${run.length - before.length} `)
-    .replace(/^ {32,}/gm, run => `␠ ×${run.length} `)
+    .replace(/^ {32,}/, run => `␠ ×${run.length} `)
+}
+
+export function visibleCommandLines(text: string): NumberedLine[] {
+  const shown = visible(text)
+  const out: NumberedLine[] = []
+  const add = (part: string, first: number) => part.split('\n').forEach((t, i) => out.push({ text: shortSpaces(t), line: first + i }))
+  let from = 0
+  let line = 1
+  for (const run of shown.matchAll(BLANK_RUN)) {
+    const part = shown.slice(from, run.index)
+    add(part, line)
+    line += part.split('\n').length - 1
+    const breaks = run[0].split('\n').length - 1
+    out.push({ text: `⏎ ×${breaks - 1}`, line: line + 1 })
+    line += breaks
+    from = run.index + run[0].length
+  }
+  add(shown.slice(from), line)
+  return out
+}
+
+export function visibleCommand(text: string): string {
+  return visibleCommandLines(text).map(l => l.text).join('\n')
 }
 
 export function focusedKey(root: HTMLElement): string {

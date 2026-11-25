@@ -219,7 +219,7 @@ func (r *Registry) uploadTargetLocked(sid string, image bool) error {
 	return nil
 }
 
-const NeedsRunning = "Images and files need a running session. Send a text message first, which wakes it, or choose Wake it without a message in the ⋯ menu."
+const NeedsRunning = "Images and files need a running session. Send a text message first, which wakes it."
 
 const noImages = "This agent doesn't take images in its messages (it doesn't offer ACP's image prompt capability), so send the text alone, or with files: the agent gets those as paths it can read."
 

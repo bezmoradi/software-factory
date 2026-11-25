@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
@@ -76,6 +77,8 @@ type Server struct {
 	rulesMu  sync.Mutex
 	commands int
 	key      []byte
+	handMu   sync.Mutex
+	fwd      *forwards
 }
 
 type commandJSON struct {
@@ -163,7 +166,9 @@ func New(cfg Config) (*Server, error) {
 	if log == nil {
 		log = quiet{}
 	}
-	return &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID()}, nil
+	s := &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID(), fwd: newForwards(session.PortProxy, log)}
+	s.prepareAccess()
+	return s, nil
 }
 
 func randomID() string {
@@ -299,6 +304,7 @@ var routes = map[string]string{
 	projectCommandRoute:    http.MethodPost,
 	screenshotsRemoveRoute: http.MethodPost,
 	clearRoute:             http.MethodPost,
+	handoverRoute:          http.MethodPost,
 }
 
 func (s *Server) keyed(r *http.Request) bool {
@@ -506,6 +512,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		send(w, http.StatusOK, worktreeRemoveReply{OK: true, SetAside: aside})
 	case clearRoute:
 		s.clear(w, r)
+	case handoverRoute:
+		var q handoverJSON
+		if p := decodeWithin(w, r, &q, maxHandoverBody); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.handover(q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
 	case screenshotsRemoveRoute:
 		var q screenshotsRemoveJSON
 		if p := decode(w, r, &q); p != nil {

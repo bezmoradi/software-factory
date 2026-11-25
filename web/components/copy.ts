@@ -1,4 +1,4 @@
-import { button, copyText, el, statusLine, visible } from '../lib/dom.ts'
+import { button, copyText, statusLine } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 const COPIED_FOR_MS = 1500
@@ -8,7 +8,7 @@ const FAILED = 'Couldn’t copy: select the text and copy it'
 class SfCopy extends HTMLElement {
   text = ''
 
-  readonly #button = button('', 'setup-copy')
+  readonly #button = button('', 'code-copy')
   readonly #status = statusLine('sr-only', 'span')
   #revert: ReturnType<typeof setTimeout> | undefined
   #tries = 0
@@ -70,13 +70,4 @@ declare global {
   interface HTMLElementTagNameMap {
     'sf-copy': SfCopy
   }
-}
-
-export function commandBlock(command: string, label?: string): HTMLElement {
-  const block = el('div', 'setup-code')
-  const copy = document.createElement('sf-copy')
-  copy.text = command
-  if (label) copy.label = label
-  block.append(el('code', '', visible(command)), copy)
-  return block
 }

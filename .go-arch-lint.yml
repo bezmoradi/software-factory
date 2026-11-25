@@ -23,6 +23,7 @@ components:
   install:    { in: internal/adapters/install/* }
   git:        { in: internal/adapters/git/* }
   http:       { in: internal/adapters/http/* }
+  access:     { in: internal/adapters/access/* }
   agenthost:  { in: internal/adapters/agenthost }
   egress:     { in: internal/adapters/egress }
   loggers:    { in: internal/adapters/loggers/* }
@@ -62,6 +63,9 @@ deps:
   http:
     mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
     anyVendorDeps: true
+  access:
+    mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
+    anyVendorDeps: true
   agenthost:
     mayDependOn: [shared, session, gate, review, push, workflow, level, agent]
     anyVendorDeps: true
@@ -76,8 +80,8 @@ deps:
     anyVendorDeps: true
 
   cmd:
-    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, agenthost, egress, loggers, configs, tools, cmd-server, agent]
+    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, access, agenthost, egress, loggers, configs, tools, cmd-server, agent]
     anyVendorDeps: true
   cmd-server:
-    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, agenthost, egress, loggers, configs, tools, agent]
+    mayDependOn: [shared, session, gate, review, push, workflow, level, engines, sandbox, install, git, http, access, agenthost, egress, loggers, configs, tools, agent]
     anyVendorDeps: true

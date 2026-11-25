@@ -4,8 +4,9 @@ import { actions, field, fieldRow, form } from '../lib/form.ts'
 import { continueBody, day, limitsAnswer, limitsNow, limitsSession, meterFor, watchLimits, when, windowLine } from './usage.ts'
 import type { CapsValues, LimitsAnswer, SessionLimits } from './usage.ts'
 import { textbox } from '../lib/controls.ts'
-import { pageHead } from '../lib/page.ts'
-import { toast } from './toasts.ts'
+import { pageHead, sectionHead } from '../lib/page.ts'
+import { outcome, toast } from './toasts.ts'
+import type { Attention } from '../types.ts'
 
 type CapKind = 'money' | 'time' | 'turns' | 'disk'
 
@@ -105,16 +106,11 @@ function savedCaps(project: string): CapsValues | null {
   return limitsNow().projects.get(project) ?? null
 }
 
-function fillKey(project: string): string {
-  const c = savedCaps(project)
-  return JSON.stringify([project, c ? [c.money, c.minutes, c.turns, c.disk] : null])
-}
-
 class CapsInputs {
   readonly box = fieldRow([], 'caps-fields field-row')
   readonly inputs = new Map<keyof CapsValues, HTMLInputElement>()
   #key = ''
-  #project = ''
+  #owner = ''
   #raw = ''
 
   constructor(label: string) {
@@ -138,13 +134,17 @@ class CapsInputs {
   }
 
   fill(project: string, force = false) {
-    const key = fillKey(project)
+    this.load(project, savedCaps(project), force)
+  }
+
+  load(owner: string, c: CapsValues | null, force = false) {
+    const key = JSON.stringify([owner, c ? [c.money, c.minutes, c.turns, c.disk] : null])
     if (key === this.#key && !force) return
-    const edited = !force && project === this.#project && this.#rawNow() !== this.#raw
+    const edited = !force && owner === this.#owner && this.#rawNow() !== this.#raw
     this.#key = key
-    this.#project = project
+    this.#owner = owner
     if (edited) return
-    this.set(savedCaps(project))
+    this.set(c)
     this.#raw = this.#rawNow()
   }
 
@@ -174,6 +174,40 @@ class CapsInputs {
 
 export function capsSet(c: CapsValues | null): boolean {
   return !!c && (c.money > 0 || c.minutes > 0 || c.turns > 0 || c.disk > 0)
+}
+
+function capBit(k: typeof KINDS[number], s: SessionLimits, cap: number, warn: string): string {
+  if (k.kind !== 'disk') return `${usedAmount(k.kind, usedOf(k.kind, s))} of ${amount(k.kind, cap)}${warn}`
+  if (!s.used?.diskAt) return `disk not measured yet, cap ${amount(k.kind, cap)}`
+  return `${s.used.diskMore ? 'at least ' : ''}${usedAmount(k.kind, usedOf(k.kind, s))} of ${amount(k.kind, cap)} on disk, measured ${when(s.used.diskAt)}${warn}`
+}
+
+function warnOf(level: string): string {
+  return level === 'warn90' ? ' (over 90%)' : level === 'warn75' ? ' (over 75%)' : ''
+}
+
+export function capsAttention(): Attention | null {
+  const sid = limitsSession()
+  const s = sid ? limitsNow().sessions.get(sid) : undefined
+  if (!s) return null
+  if (s.reached) {
+    const kind = kindOf(s.reached)
+    const cap = kind && s.caps ? capOf(kind, s.caps) : 0
+    return { section: 'caps', rank: 0, title: 'Caps.', text: kind && cap ? `This session reached its ${capName(kind)} of ${amount(kind, cap)}.` : 'This session reached a cap.', alert: true }
+  }
+  if (!s.caps) return null
+  const bits: string[] = []
+  let top = ''
+  for (const k of KINDS) {
+    const cap = capOf(k.kind, s.caps)
+    const level = s.levels[k.kind] ?? ''
+    if (!cap || (level !== 'warn75' && level !== 'warn90')) continue
+    if (level === 'warn90') top = level
+    else top ||= level
+    bits.push(capBit(k, s, cap, warnOf(level)))
+  }
+  if (!bits.length) return null
+  return { section: 'caps', rank: top === 'warn90' ? 4 : 5, title: 'Caps.', text: bits.join(' · '), alert: false }
 }
 
 class SfProjectCaps extends HTMLElement {
@@ -225,20 +259,24 @@ class SfProjectCaps extends HTMLElement {
 }
 
 class SfSessionLimits extends HTMLElement {
+  caps = false
   #stop = () => {}
   #said = statusLine('small warn status-slot')
   #raise = new Map<string, { input: HTMLInputElement; box: HTMLDivElement }>()
   #edit = new CapsInputs('Caps for this session')
-  #editing = false
   #busy = false
   #busyKey = ''
   #held = new WeakSet<HTMLButtonElement>()
   #dimmed = new WeakSet<HTMLButtonElement>()
   #editSave = button('Save caps', 'primary small', undefined, 'submit', 'caps-save')
+  #editForm = form({ children: [this.#edit.box, actions([this.#editSave])], onSubmit: () => void this.#saveEdit() })
+  #head = sectionHead('Caps', 'caps')
 
   connectedCallback() {
-    this.setAttribute('role', 'region')
-    this.setAttribute('aria-label', 'Caps and limits for this session')
+    if (!this.caps) {
+      this.setAttribute('role', 'region')
+      this.setAttribute('aria-label', 'Limits for this session')
+    }
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -257,10 +295,29 @@ class SfSessionLimits extends HTMLElement {
     const v = limitsNow()
     this.#prune(v.sessions)
     const s = sid ? v.sessions.get(sid) : undefined
-    const parts: Node[] = []
+    const parts: Node[] = this.caps ? this.#capsParts(sid, s) : this.#notices(sid, s)
+    this.hidden = !sid || (!this.caps && !parts.length && !this.#said.textContent)
+    parts.push(this.#said)
+    replaceKeeping(this, parts)
+    this.#hold()
+    refocus(this, focused, key => [...(LIMIT_NEXT[key] ?? []), 'caps-save'])
+  }
+
+  #capsParts(sid: string, s: SessionLimits | undefined): Node[] {
+    const parts: Node[] = [this.#head]
     if (s?.reached) parts.push(this.#reached(s))
-    if (s?.stuck) parts.push(this.#stuck(sid, s))
     if (s?.caps && capsSet(s.caps)) parts.push(this.#caps(s))
+    if (sid && !s?.reached) {
+      this.#edit.load(sid, s?.caps ?? null)
+      parts.push(this.#editForm)
+    }
+    return parts
+  }
+
+  #notices(sid: string, s: SessionLimits | undefined): Node[] {
+    const v = limitsNow()
+    const parts: Node[] = []
+    if (s?.stuck) parts.push(this.#stuck(sid, s))
     if (s?.signInUntil) parts.push(el('p', 'notice warn small', `This agent's claude.ai sign-in ends between ${day(s.signInFrom)} and ${day(s.signInUntil)}. Renewing it doesn't move those dates: sign in again before then (Reviewers’ sign-in in the command palette).`))
     let pausedShown = false
     for (const p of v.paused) {
@@ -268,7 +325,7 @@ class SfSessionLimits extends HTMLElement {
       const w = meterFor(p.side, sid)?.windows.find(x => x.kind === p.kind)
       if (!w) continue
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind), 'continue'), 'button', 'continue'))
+      box.append(el('p', '', `At ${when(p.at)} the engine paused an automatic ${p.what === 'findings' ? 'Send findings' : 'review'} of this session: ${visible(w.name)} is ${Math.round(w.utilization * 100)}% used. Press Review to run one yourself, or let automatic work go on until the limit resets.`), windowLine(w), actions([button('Keep automatic work running', 'ghost small', () => void this.#call(continueBody(p.side, sid, p.kind), 'continue'), 'button', 'continue')]))
       parts.push(box)
       pausedShown = true
       break
@@ -277,24 +334,19 @@ class SfSessionLimits extends HTMLElement {
     const near = pausedShown ? undefined : own?.windows.find(w => w.near)
     if (own && near) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind), 'continue'), 'button', 'continue'))
+      box.append(el('p', '', `${visible(near.name)} is ${Math.round(near.utilization * 100)}% used, so the engine starts no automatic review and no automatic Send findings for this session. Your own messages and the Review button still work.`), windowLine(near), actions([button('Keep them running', 'ghost small', () => void this.#call(continueBody(own.side, sid, near.kind), 'continue'), 'button', 'continue')]))
       parts.push(box)
     }
     if (s?.wakeAt) {
       const box = el('div', 'notice small')
-      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false }, 'wake-cancel'), 'button', 'wake-cancel'))
+      box.append(el('p', '', `The engine wakes this session at ${when(s.wakeAt)}, a minute after its usage limit resets.`), actions([button('Cancel', 'ghost small', () => void this.#call({ op: 'wake', sid, on: false }, 'wake-cancel'), 'button', 'wake-cancel')]))
       parts.push(box)
     } else if (s?.wakeOffer) {
       const box = el('div', 'notice warn small')
-      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true }, 'wake'), 'button', 'wake'))
+      box.append(el('p', '', `This session's agent used up a usage limit, which resets ${when(s.wakeOffer)}.`), actions([button('Wake at reset', 'small', () => void this.#call({ op: 'wake', sid, on: true }, 'wake'), 'button', 'wake')]))
       parts.push(box)
     }
-    if (sid && !s?.reached) parts.push(this.#editor(s))
-    parts.push(this.#said)
-    this.hidden = !sid
-    replaceKeeping(this, parts)
-    this.#hold()
-    refocus(this, focused, key => [...(LIMIT_NEXT[key] ?? []), 'caps-edit'])
+    return parts
   }
 
   #hold() {
@@ -368,7 +420,7 @@ class SfSessionLimits extends HTMLElement {
     const interrupt = button('Interrupt', 'small', () => {
       if (!this.#busy) void whileBusy(interrupt, () => request('/api/interrupt', { sid }))
     }, 'button', 'interrupt')
-    box.append(interrupt)
+    box.append(actions([interrupt]))
     return box
   }
 
@@ -379,31 +431,13 @@ class SfSessionLimits extends HTMLElement {
     for (const k of KINDS) {
       const cap = capOf(k.kind, s.caps!)
       if (!cap) continue
-      const used = usedOf(k.kind, s)
       const level = s.levels[k.kind] ?? ''
       if (level) tone = 'warn'
-      const warn = level === 'warn90' ? ' (over 90%)' : level === 'warn75' ? ' (over 75%)' : ''
-      if (k.kind === 'disk') {
-        if (!s.used?.diskAt) bits.push(`disk not measured yet, cap ${amount(k.kind, cap)}`)
-        else bits.push(`${s.used.diskMore ? 'at least ' : ''}${usedAmount(k.kind, used)} of ${amount(k.kind, cap)} on disk, measured ${when(s.used.diskAt)}${warn}`)
-      } else bits.push(`${usedAmount(k.kind, used)} of ${amount(k.kind, cap)}${warn}`)
+      bits.push(capBit(k, s, cap, warnOf(level)))
     }
     box.className = `small caps-line ${tone}`
     box.textContent = `Caps${s.own ? '' : ' from the project'}: ${bits.join(' · ')}`
     return box
-  }
-
-  #editor(s: SessionLimits | undefined): HTMLElement {
-    const d = el('details', 'caps-edit small')
-    d.open = this.#editing
-    d.addEventListener('toggle', () => {
-      this.#editing = d.open
-      if (d.open) this.#edit.set(s?.caps ?? null)
-    })
-    const summary = el('summary', '', s?.caps && capsSet(s.caps) ? 'Change caps' : 'Set caps')
-    summary.dataset.key = 'caps-edit'
-    d.append(summary, form({ children: [this.#edit.box, actions([this.#editSave])], onSubmit: () => void this.#saveEdit() }))
-    return d
   }
 
   async #saveEdit() {
@@ -412,7 +446,7 @@ class SfSessionLimits extends HTMLElement {
     this.#edit.mark('')
     const { problem } = await this.#call({ op: 'session', sid, ...this.#edit.value() }, 'caps-save', a => this.#edit.mark(a.field, a.problem))
     if (!problem) {
-      this.#editing = false
+      this.#edit.load(sid, limitsNow().sessions.get(sid)?.caps ?? null, true)
       this.paint()
     }
   }
@@ -427,7 +461,7 @@ class SfSessionLimits extends HTMLElement {
     const bad = answer.problem ? mark(answer) : null
     if (bad) labelError(bad, answer.problem)
     say(this.#said, bad ? '' : answer.problem, 'warn')
-    if (!answer.problem) toast({ id: `limits:${key}`, title: answer.said, tone: answer.tone })
+    if (!answer.problem) outcome(this, this.#said, { id: `limits:${key}`, title: answer.said, tone: answer.tone })
     this.#busy = false
     busy(this.#editSave, false)
     this.paint()

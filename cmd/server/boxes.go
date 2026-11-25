@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
+	"github.com/bezmoradi/software-factory/internal/adapters/egress"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
@@ -28,6 +30,7 @@ const (
 type boxEntry struct {
 	info session.BoxInfo
 	host agentHost
+	up   time.Time
 }
 
 type boxRoutes struct {
@@ -35,6 +38,7 @@ type boxRoutes struct {
 	sendMu   sync.Mutex
 	hosts    map[string]boxEntry
 	reviews  map[string]netip.Prefix
+	actions  map[string]actionRoute
 	listener *page.BoxListener
 	control  *docker.Control
 	reg      *session.Registry
@@ -43,12 +47,16 @@ type boxRoutes struct {
 	pool     []netip.Prefix
 	ping     func(context.Context) error
 	down     bool
+	grants   *session.Grants
+	sent     map[netip.Prefix]session.EgressList
+	refusing bool
+	known    *egress.Known
 }
 
 var _ session.BoxRoutes = (*boxRoutes)(nil)
 
 func newBoxRoutes(reg *session.Registry, allow *session.Allowlist, control *docker.Control, pool []netip.Prefix, ping func(context.Context) error, logger shared.Logger) *boxRoutes {
-	b := &boxRoutes{hosts: map[string]boxEntry{}, reviews: map[string]netip.Prefix{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger}
+	b := &boxRoutes{hosts: map[string]boxEntry{}, reviews: map[string]netip.Prefix{}, actions: map[string]actionRoute{}, reg: reg, allow: allow, control: control, pool: pool, ping: ping, logger: logger, known: egress.NewKnown()}
 	if allow != nil {
 		allow.OnRestart(func() { go b.resend() })
 	}
@@ -172,10 +180,21 @@ func (b *boxRoutes) sendSubnets(ctx context.Context) error {
 	defer b.sendMu.Unlock()
 	b.mu.Lock()
 	subnets, reviews := b.subnetsLocked(), b.reviewSubnetsLocked()
+	acts, lists := b.actionSubnetsLocked()
 	b.mu.Unlock()
+	grants := b.grantLists()
+	sent := maps.Clone(grants)
+	maps.Copy(grants, lists)
 	sctx, cancel := context.WithTimeout(ctx, subnetsFor)
 	defer cancel()
-	return b.control.SetBoxes(sctx, subnets, reviews)
+	if err := b.control.SetBoxes(sctx, subnets, reviews, acts, grants, b.ownNetworks(), b.gitNames()); err != nil {
+		return err
+	}
+	grants = sent
+	b.mu.Lock()
+	b.sent = grants
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
@@ -209,7 +228,7 @@ func (b *boxRoutes) Up(ctx context.Context, info session.BoxInfo) error {
 		b.Down(box)
 	}
 	b.mu.Lock()
-	b.hosts[info.Box] = boxEntry{info: info, host: withGateway(client, b.allow)}
+	b.hosts[info.Box] = boxEntry{info: info, host: withGateway(client, b.allow), up: time.Now()}
 	l := b.listener
 	b.mu.Unlock()
 	if l != nil {
@@ -238,6 +257,9 @@ func (b *boxRoutes) Down(box string) {
 	}
 	if err := b.sendSubnets(context.Background()); err != nil {
 		b.logger.Warn("boxes", "event", "egress-not-set", "box", box)
+	}
+	if g := b.grantsOf(); g != nil && had {
+		go g.Tend(context.Background())
 	}
 }
 
@@ -286,7 +308,7 @@ func (b *boxRoutes) watch(ctx context.Context) {
 			b.checkHelper(ctx)
 		case <-t.C:
 			b.mu.Lock()
-			n := len(b.hosts) + len(b.reviews)
+			n := len(b.hosts) + len(b.reviews) + len(b.actions)
 			b.mu.Unlock()
 			if n > 0 {
 				if err := b.sendSubnets(ctx); err != nil {

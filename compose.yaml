@@ -37,6 +37,7 @@ services:
       SF_AGENT_ADDRESS: 0.0.0.0:8081
       SF_REVIEWS: /reviews
       SF_VERIFY: /verify
+      SF_ACTIONS: /actions
       SF_REVIEWER_PROXY: egress-review:3128
       SF_EGRESS_PROXY: egress:3130
       SF_EGRESS_STATUS: egress-control:3129
@@ -64,6 +65,7 @@ services:
       - agents:/opt/software-factory/agents
       - reviews:/reviews
       - verify:/verify
+      - actions:/actions
       - uploads:/uploads
       - egress-key:/run/sf-egress
       - helper-key:/run/sf-helper
@@ -167,6 +169,12 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: size=320m,uid=10001,gid=10000,mode=0710
+  actions:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=16m,uid=10001,gid=10000,mode=0710
   egress-key:
     driver: local
     driver_opts:

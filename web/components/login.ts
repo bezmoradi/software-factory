@@ -6,7 +6,7 @@ import { actions, field, form, showAnswer } from '../lib/form.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
 import { secret } from './secret.ts'
-import { commandBlock } from './copy.ts'
+import { codeBlock } from './code-block.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
 import { textbox } from '../lib/controls.ts'
@@ -368,7 +368,7 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       parts.push(row.node, status)
     } else {
       parts.push(status)
-      if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
+      if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), codeBlock({ text: visible(needs.step), label: 'The sign-in command', copy: { text: needs.step, label: 'Copy the command' }, look: 'terminal', wrap: true }))
     }
     const m = modal({
       kind: 'login',

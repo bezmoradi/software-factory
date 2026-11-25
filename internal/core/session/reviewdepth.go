@@ -130,10 +130,7 @@ func (w *Work) ReviewDepth(path string) (DepthView, error) {
 	}
 	d := w.depthOf(r.Name)
 	setup := w.setupFor(r.Name)
-	kind, ok := typeIn(setup.setup.Types, w.defaultType(setup.setup))
-	if !ok {
-		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
-	}
+	kind := workflow.TypeOr(setup.setup.Types, setup.setup.DefaultType)
 	required := workflow.Required(setup.setup, kind, nil)
 	base := workflow.Deepen(required, d, false, "")
 	v := DepthView{Depth: d, Type: kind.Name, Runs: workflow.RunTotal(base), Advisory: len(workflow.Advisory(base, d)), Available: w.reviewersFor(r.Name), Required: w.requiredFor(r.Name)}

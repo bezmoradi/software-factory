@@ -2,7 +2,7 @@ version: 2
 suite: gate
 scenarios:
   - id: GATE-001
-    name: "The fake agent's Write, Edit, MultiEdit and NotebookEdit calls ask /check from a Fix session's container as Claude Code's plugin does; every path the write check protects (.agents and .codex as any segment, in any case, after .. and repeated slashes, as an absolute path, and through the real path of a linked folder; .env as the last segment in any case) is refused, counted once each and not written, and writes that leave .agents, sit in a sibling folder that only starts with the worktree's name, or are outside the worktree aren't protected"
+    name: "The fake agent's Write, Edit, MultiEdit and NotebookEdit calls ask /check from an Explore session's container as Claude Code's plugin does; every path the write check protects (.agents and .codex as any segment, in any case, after .. and repeated slashes, as an absolute path, and through the real path of a linked folder; .env as the last segment in any case) is refused, counted once each and not written, and writes that leave .agents, sit in a sibling folder that only starts with the worktree's name, or are outside the worktree aren't protected"
     steps:
       - id: start
         do: http.request
@@ -41,12 +41,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: fix }
+          body: { sid: "${sid}", size: explore }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -59,7 +59,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": fix
+            "$.body.gate.workType": explore
       - id: ask-protected
         do: http.request
         identity: page
@@ -830,12 +830,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: fix }
+          body: { sid: "${sid}", size: explore }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -848,7 +848,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": fix
+            "$.body.gate.workType": explore
       - id: ask-pinned
         do: http.request
         identity: page
@@ -1988,7 +1988,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-003
-    name: "Command and tool rules /check answers from a Fix session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, claude remote-control and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request, /split-request and /work-type-request it is refused with 401 connection"
+    name: "Command and tool rules /check answers from an Explore session's container: git push, git -C, bash -c, send-pack, a hidden git, gh pr create, Monitor and an MCP push tool are refused as pushes, claude --remote, claude remote-control and --teleport as cloud hand-offs, each counted; rm -rf /, git reset --hard, curl | sh and a child claude ask; remote tools, a remote Agent or Task and a Projects write wait and are counted; gh pr comment, echo git push, git status, rm -rf build, a local Agent, MCP reads and WebFetch are allowed. The check-only key the development agent gets answers only at /check: as X-SF-Conn on /poll, /events, /wait, /wake, /image, /turn-check and /session-model, as X-SF-Push on /check, /push-request, /forge-request, /checks-request, /comments-request, /split-request and /work-type-request it is refused with 401 connection"
     steps:
       - id: start
         do: http.request
@@ -2027,12 +2027,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: fix }
+          body: { sid: "${sid}", size: explore }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -2045,7 +2045,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": fix
+            "$.body.gate.workType": explore
       - id: ask-commands
         do: http.request
         identity: page
@@ -3221,7 +3221,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-004
-    name: "A Feature session before any approval: /check holds every write, documentation included, with the Feature hold's whole reason, the fake writes neither file and the hold isn't counted, while a protected path and a push in the same turn are still refused and counted, the lowercase tool name write isn't held, and a shell write lands"
+    name: "A Code change session before any approval: the person's first typed message goes to the agent as Define's command followed by the engine's notes and the text, which the fake answers by committing the lines after the command's line as .knackpack/fake-feature/REQUIREMENTS.md: the note that the developer set Code change, with its rules, then the text as typed, and the next message goes as typed, so the fake runs its script and the requirements stay as they were; /check holds every write, documentation included, with the Code change hold's whole reason, the fake writes neither file and the hold isn't counted, while a protected path and a push in the same turn are still refused and counted, the lowercase tool name write isn't held, and a shell write lands"
     steps:
       - id: start
         do: http.request
@@ -3260,12 +3260,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: feature }
+          body: { sid: "${sid}", size: change }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -3278,8 +3278,38 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": feature
-      - id: ask-feature
+            "$.body.gate.workType": change
+      - id: first-message
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "Export the orders\nOnly a manager's own organization" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: first-defined
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.approved": false
+          matches:
+            "$.body.gate.requirements.text": "\n\\[Software Factory\\] The developer set this session's work type to Code change on the software factory page: the developer approves the requirements, and chooses whether a plan follows, on the page before you change files other than knackpack's own; the engine sends you the next step after each approval\\.\n\nExport the orders\nOnly a manager's own organization\n"
+            "$.body.gate.requirements.hash": "[0-9a-f]{64}"
+        save: { reqhash: "$.body.gate.requirements.hash" }
+      - id: second-message
         do: http.request
         identity: page
         with:
@@ -3342,6 +3372,20 @@ scenarios:
         eventually: { within: 30s, every: 1s }
         expect:
           equal: { "$.found": false }
+      - id: requirements-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "${reqhash}"
+            "$.body.gate.requirements.approved": false
       - id: f-src-answer
         do: http.request
         identity: page
@@ -3353,7 +3397,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/f_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/feature-${run.id}.txt can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/f_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/feature-${run.id}.txt can't change yet: the requirements, and then the plan if the developer chooses one, need the developer's approval on the software factory page first. In a Code change the developer approves the requirements first, and chooses there whether a plan follows, which they then approve too, before Implement. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
       - id: f-src-obeyed
         do: http.request
         identity: page
@@ -3377,7 +3421,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/f_docs.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"docs/feature-${run.id}.md can't change yet: the requirements and then the plan need the developer's approval on the software factory page first. In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/f_docs.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"docs/feature-${run.id}.md can't change yet: the requirements, and then the plan if the developer chooses one, need the developer's approval on the software factory page first. In a Code change the developer approves the requirements first, and chooses there whether a plan follows, which they then approve too, before Implement. Until then only this step's own files can change: .knackpack/*/REQUIREMENTS.md, .knackpack/feature.json. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
       - id: f-docs-obeyed
         do: http.request
         identity: page
@@ -3541,305 +3585,8 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
-  - id: GATE-005
-    name: "A Docs only session: /check allows documentation, holds a source file and CLAUDE.md with the Docs only reason, the fake writes only what was allowed, and the hold isn't counted"
-    steps:
-      - id: start
-        do: http.request
-        identity: page
-        timeout: 110s
-        with:
-          method: POST
-          path: "/api/dispatch"
-          headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
-        expect:
-          equal:
-            "$.status": 202
-            "$.body.ok": true
-          present: ["$.body.id", "$.body.sid"]
-        save: { sid: "$.body.sid", id: "$.body.id" }
-      - id: audited
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/audit"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body.entries[0].kind": session-start
-            "$.body.entries[0].session": "${sid}"
-          present: ["$.body.entries[0].box"]
-        save: { box: "$.body.entries[0].box" }
-      - id: typed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/size"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: docs }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
-      - id: typed-shown
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/gate"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body.gate.chosen": true
-            "$.body.gate.workType": docs
-      - id: ask-docs
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/message"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: gate docs ${run.id}\ntry: d_doc docs/gw-${run.id}.md\ntry: d_notes notes-${run.id}.md\ntry: d_src src/gw-${run.id}.go\ntry: d_claude_md CLAUDE.md\nwrite: docs-control-${run.id}.txt" }
-        expect:
-          equal:
-            "$.status": 202
-            "$.body": { ok: true }
-      - id: docs-asked
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file-check"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", paths: ["gate-answers/d_claude_md.txt"] }
-        eventually: { within: 60s, every: 500ms }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { found: ["gate-answers/d_claude_md.txt"] }
-      - id: stop
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/stop-session"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 202
-            "$.body": { ok: true }
-      - id: box-gone
-        do: docker.container
-        with: { name: "sf-proctor-box-${box}" }
-        eventually: { within: 30s, every: 1s }
-        expect:
-          equal: { "$.found": false }
-      - id: stopped
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/audit"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        eventually: { within: 30s, every: 500ms }
-        expect:
-          equal:
-            "$.status": 200
-          any:
-            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
-      - id: network-gone
-        do: docker.network
-        with: { name: "sf-proctor-box-${box}" }
-        eventually: { within: 30s, every: 1s }
-        expect:
-          equal: { "$.found": false }
-      - id: d-doc-answer
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_doc.json" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_doc.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
-      - id: d-doc-obeyed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_doc.txt" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_doc.txt", text: "engine 200: allowed, wrote\n" }
-      - id: d-notes-answer
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_notes.json" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_notes.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
-      - id: d-notes-obeyed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_notes.txt" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_notes.txt", text: "engine 200: allowed, wrote\n" }
-      - id: d-src-answer
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_src.json" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"This session's work type is Docs only, which changes documentation only, and src/gw-${run.id}.go isn't documentation. Pick Fix or Feature on the software factory page to change it. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
-      - id: d-src-obeyed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_src.txt" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_src.txt", text: "engine 200: refused\n" }
-      - id: d-claude-md-answer
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_claude_md.json" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_claude_md.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"This session's work type is Docs only, which changes documentation only, and CLAUDE.md isn't documentation. Pick Fix or Feature on the software factory page to change it. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
-      - id: d-claude-md-obeyed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", path: "gate-answers/d_claude_md.txt" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { path: "gate-answers/d_claude_md.txt", text: "engine 200: refused\n" }
-      - id: docs-landed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/file-check"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", paths: ["docs/gw-${run.id}.md", "notes-${run.id}.md", "src/gw-${run.id}.go", "CLAUDE.md", "docs-control-${run.id}.txt"] }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { found: ["docs/gw-${run.id}.md", "notes-${run.id}.md", "docs-control-${run.id}.txt"] }
-      - id: docs-not-counted
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/audit"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body.refusals": { cloud-refused: 3, protected-write: 43, push-refused: 9, remote-held: 5 }
-      - id: remove-dirty
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/remove-session"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 409
-            "$.body.error": dirty
-            "$.body.offer": { flag: worktree, value: "sf-${id}" }
-      - id: not-yet-removed
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/gate"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body.gate.branch": "sf/${id}"
-      - id: remove
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/remove-session"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
-        expect:
-          equal:
-            "$.status": 200
-            "$.body": { ok: true }
-      - id: home-gone
-        do: docker.volume
-        with: { name: "sf-proctor-home-${box}" }
-        eventually: { within: 30s, every: 1s }
-        expect:
-          equal: { "$.found": false }
-      - id: gone
-        do: http.request
-        identity: page
-        with:
-          method: POST
-          path: "/api/audit"
-          headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}" }
-        expect:
-          equal:
-            "$.status": 409
-            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-006
-    name: "An Incident session: the gate offers and reports the Incident type with no root cause, refuses an approval with none committed, reads ROOT-CAUSE.md from the fake's commits as the session's plan document, refuses to approve it until its Status is CONFIRMED, and then approves it"
+    name: "An Incident session: the gate offers and reports the Incident type with no root cause, refuses an approval with none committed, reads ROOT-CAUSE.md from the fake's commits as the session's plan document, refuses to approve it until its Status is CONFIRMED, and then approves it; the gate view has no effective type; Write the incident review is refused with 409 step while the approved root cause has no fix committed on it, and once the fix the engine asks for is committed, Deliver offers it"
     steps:
       - id: start
         do: http.request
@@ -3883,7 +3630,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -3910,9 +3657,9 @@ scenarios:
             "$.status": 200
             "$.body.gate.workType": incident
             "$.body.gate.size": incident
-            "$.body.gate.effective": incident
             "$.body.gate.planDoc": null
             "$.body.gate.waiting": "approve the root cause first"
+          absent: ["$.body.gate.effective"]
           any:
             "$.body.gate.types": { id: incident, name: Incident, builtin: true, push: true, roles: [bug-hunter, simplicity] }
       - id: approve-none
@@ -4083,6 +3830,58 @@ scenarios:
             "$.status": 200
           any:
             "$.body.entries": { kind: approve-plan, hash: "1f969cd992d5e428372645d2d30554ffb6ac689ab7a36e400d08a49599a1e568", session: "${sid}" }
+      - id: review-not-offered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.path.stages[5].id": deliver
+            "$.body.gate.path.stages[5].actions": []
+      - id: review-early
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", ask: incident-review }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: step, message: "This session's workflow doesn't offer that step now." }
+      - id: fix
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", ask: fix }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: fixed
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.waiting": ""
+            "$.body.gate.path.stages[5].id": deliver
+            "$.body.gate.path.stages[5].actions": [{ ask: incident-review, label: "Write the incident review", title: "Sends /knackpack:incident-review to this session, which commits a draft incident review" }]
       - id: stop
         do: http.request
         identity: page
@@ -4114,6 +3913,8 @@ scenarios:
             "$.status": 200
           count:
             "$.body.changes.commits": { where: { subject: "docs(knackpack): root cause for fake-incident" }, is: 3 }
+          any:
+            "$.body.changes.commits": { subject: "Fix the fake export's failure" }
       - id: remove
         do: http.request
         identity: page
@@ -4139,7 +3940,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-007
-    name: "A Feature session's requirements brief in the checked format, knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md: the engine reads it and refuses Approve requirements with the reason the gate's holds.approveRequirements showed before the press, for a blocking open question, including one after a fence line indented four spaces, which opens no fence, and for each invalid brief (a requirement without Acceptance, a question without exactly one Blocking marker, a duplicate requirement or question ID, a level-4 heading under the requirements that isn't a requirement, a Q- bullet that isn't a question, a section heading twice, the marker line twice, a missing section, no requirement, and no questions section, reported before no requirement), and approves a ready brief whose fenced examples don't count"
+    name: "A Code change session's requirements brief in the checked format, knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md: the engine reads it and refuses Approve requirements with the reason the gate's holds.approveRequirements showed before the press, for a blocking open question, including one after a fence line indented four spaces, which opens no fence, and for each invalid brief (a requirement without Acceptance, a question without exactly one Blocking marker, a duplicate requirement or question ID, a level-4 heading under the requirements that isn't a requirement, a Q- bullet that isn't a question, a section heading twice, the marker line twice, a missing section, no requirement, and no questions section, reported before no requirement), and approves a ready brief whose fenced examples don't count, choosing a plan (Approve and plan); every approval names the plan choice, which a type with a Plan step requires"
     steps:
       - id: start
         do: http.request
@@ -4178,12 +3979,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: feature }
+          body: { sid: "${sid}", size: change }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -4196,7 +3997,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": feature
+            "$.body.gate.workType": change
       - id: blocked
         do: http.request
         identity: page
@@ -4243,7 +4044,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "b0c5b8b20f86a6c47afe44811702889b42b5297522a1d59419b619cd316b04ba", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: yes\n" }
+          body: { sid: "${sid}", plan: true, hash: "b0c5b8b20f86a6c47afe44811702889b42b5297522a1d59419b619cd316b04ba", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: yes\n" }
         expect:
           equal:
             "$.status": 409
@@ -4294,7 +4095,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "1098a000440a011f38209cf8c9123cde9f9ac233a771e94b6b03620b96812bb4", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "1098a000440a011f38209cf8c9123cde9f9ac233a771e94b6b03620b96812bb4", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4332,7 +4133,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "f58dca8ca9b4fcb155ebd2347b721635b34ffa4a0c613778d1ec30e595103150", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "f58dca8ca9b4fcb155ebd2347b721635b34ffa4a0c613778d1ec30e595103150", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4370,7 +4171,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "7a8cead4031b22b4c58448d21f859b541d7802737ad32eca88ca25655cdf9922", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: yes Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "7a8cead4031b22b4c58448d21f859b541d7802737ad32eca88ca25655cdf9922", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: yes Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4408,7 +4209,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "162373294523b52c48d75fd5ee5e84cde3f1f471aca45fd991b07b6d81e1325d", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-01: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "162373294523b52c48d75fd5ee5e84cde3f1f471aca45fd991b07b6d81e1325d", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-01: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4446,7 +4247,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "7c35800cbb586cd7955890ee8cc9391c8005c78ec381351d232e5b0d27e96b10", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-01: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "7c35800cbb586cd7955890ee8cc9391c8005c78ec381351d232e5b0d27e96b10", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-01: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4484,7 +4285,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "af399a79a2f199789053597cd177144317c81796f7125294017b8cacb9acfb7b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### Notes\nExports are slow.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "af399a79a2f199789053597cd177144317c81796f7125294017b8cacb9acfb7b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### Notes\nExports are slow.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4522,7 +4323,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "3f954d6aa9b4d12202f3a1789b4425b58f0ad2b06b878afb9842c9a60402cb58", text: "knackpack-requirements/1\n\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "3f954d6aa9b4d12202f3a1789b4425b58f0ad2b06b878afb9842c9a60402cb58", text: "knackpack-requirements/1\n\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4560,7 +4361,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "d8694ac6b68b1a116066bb00f5b0ecadf57a4199ee067cedd30e905dc8d0fae6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "d8694ac6b68b1a116066bb00f5b0ecadf57a4199ee067cedd30e905dc8d0fae6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4598,7 +4399,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "a922ece78f57df71b6b6be5caa1c765f41aa25ad9a3a363803eacb53dfed880b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "a922ece78f57df71b6b6be5caa1c765f41aa25ad9a3a363803eacb53dfed880b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4636,7 +4437,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "d2f10f6fc05adaaf9e167b532ce6eb1a9356436c37f34731bd8f58e09121dd59", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n" }
+          body: { sid: "${sid}", plan: true, hash: "d2f10f6fc05adaaf9e167b532ce6eb1a9356436c37f34731bd8f58e09121dd59", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n" }
         expect:
           equal:
             "$.status": 409
@@ -4674,7 +4475,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "cb5704bebcb733001968df9f0b82d0ae694394f6e01cc99eeaf7f8b624ae808b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02 May support staff export across organizations? Blocking: no\n" }
+          body: { sid: "${sid}", plan: true, hash: "cb5704bebcb733001968df9f0b82d0ae694394f6e01cc99eeaf7f8b624ae808b", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02 May support staff export across organizations? Blocking: no\n" }
         expect:
           equal:
             "$.status": 409
@@ -4712,7 +4513,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "944b461962a0bc15047e82459845ba455c2ffce8c2f6b643bf42169b063735d9", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n### Requirements and acceptance criteria\n\n#### REQ-03: A manager sees when an export finished\nAcceptance: The export's row shows the time it finished.\n" }
+          body: { sid: "${sid}", plan: true, hash: "944b461962a0bc15047e82459845ba455c2ffce8c2f6b643bf42169b063735d9", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n### Requirements and acceptance criteria\n\n#### REQ-03: A manager sees when an export finished\nAcceptance: The export's row shows the time it finished.\n" }
         expect:
           equal:
             "$.status": 409
@@ -4750,7 +4551,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "3a1b3cd3a9ffd46e75d0fec24fb1089f59d51cc5fb1f12d6d1f5d4660cb545f6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n    ```\n- Q-03: Four spaces before the backticks open no fence, so this question counts. Blocking: yes\n    ```\n" }
+          body: { sid: "${sid}", plan: true, hash: "3a1b3cd3a9ffd46e75d0fec24fb1089f59d51cc5fb1f12d6d1f5d4660cb545f6", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n    ```\n- Q-03: Four spaces before the backticks open no fence, so this question counts. Blocking: yes\n    ```\n" }
         expect:
           equal:
             "$.status": 409
@@ -4788,7 +4589,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "a6bebbb95723a5e2f6804ddc62bc5a8f3591e07b6a4fafb4c24512c99ea84d6a", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n" }
+          body: { sid: "${sid}", plan: true, hash: "a6bebbb95723a5e2f6804ddc62bc5a8f3591e07b6a4fafb4c24512c99ea84d6a", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\nNothing is required yet.\n" }
         expect:
           equal:
             "$.status": 409
@@ -4854,7 +4655,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "72ed8520494eb029307be5a414c92b045ac7157e22556d66b908e82bee2ba788", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n```\n- Q-09: An example inside a fence. Blocking: yes\n#### REQ-09: An example without an acceptance criterion\n```\n" }
+          body: { sid: "${sid}", plan: true, hash: "72ed8520494eb029307be5a414c92b045ac7157e22556d66b908e82bee2ba788", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nAcceptance: Exporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n- Q-02: May support staff export across organizations? Blocking: no\n\n```\n- Q-09: An example inside a fence. Blocking: yes\n#### REQ-09: An example without an acceptance criterion\n```\n" }
         expect:
           equal:
             "$.status": 200
@@ -4942,7 +4743,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-008
-    name: "A Feature session's requirements brief without the marker line knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md, in a knackpack session on a knackpack that writes the checked format (the stand-in at 0.40.0, RequirementsFormatSince and Knackpack.Floor; the owner's decision D1): the gate's holds.approveRequirements shows \"Written before the checked format; ask Claude to rewrite it.\" before the press, Approve requirements is refused with 409 held and that sentence, and nothing is approved or audited"
+    name: "A Code change session's requirements brief without the marker line knackpack-requirements/1, committed by the fake as .knackpack/fake-feature/REQUIREMENTS.md, in a knackpack session on a knackpack that writes the checked format (the stand-in at 0.40.0, RequirementsFormatSince and Knackpack.Floor; the owner's decision D1): the gate's holds.approveRequirements shows \"Written before the checked format; ask Claude to rewrite it.\" before the press, Approve requirements is refused with 409 held and that sentence, and nothing is approved or audited"
     steps:
       - id: start
         do: http.request
@@ -4981,12 +4782,12 @@ scenarios:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: feature }
+          body: { sid: "${sid}", size: change }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed-shown
         do: http.request
         identity: page
@@ -4999,7 +4800,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": feature
+            "$.body.gate.workType": change
       - id: older
         do: http.request
         identity: page
@@ -5061,7 +4862,7 @@ scenarios:
           method: POST
           path: "/api/approve-requirements"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", hash: "d144c547b72fa864a6ca070e3687d2c55e2224ec859afdba2618818350db22ef", text: "### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n" }
+          body: { sid: "${sid}", plan: true, hash: "d144c547b72fa864a6ca070e3687d2c55e2224ec859afdba2618818350db22ef", text: "### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n#### REQ-02: An export over 10,000 rows is refused with a message\nExporting 10,001 rows answers \"Too many rows; narrow the dates.\" and writes no file.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders?\n" }
         expect:
           equal:
             "$.status": 409
@@ -5150,7 +4951,7 @@ scenarios:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
   - id: GATE-009
-    name: "A session with no work type: /check holds its first write with the reason that asks for factory_work_type and the type ids, and the fake writes nothing; factory_work_type refuses a type the project doesn't offer (the engine), a reason of two lines or over 200 characters and a type that isn't a string (agent-host's MCP server), and holds a good suggestion, which /api/gate shows as the card's typeAsk with the agent's reason as given; /api/size refuses an unknown type and leaves the card, then sets Fix, which clears the card, and the same write then lands; no hold is counted"
+    name: "A session with no work type: /check holds its first write with the reason that asks for factory_work_type and the type ids, and the fake writes nothing; factory_work_type refuses a type the project doesn't offer (the engine), a reason of two lines or over 200 characters and a type that isn't a string (agent-host's MCP server), and holds a good suggestion, which /api/gate shows as the card's typeAsk with the agent's reason as given; /api/size refuses an unknown type and leaves the card, then sets Explore, which clears the card, shows Explore's line in place of steps, and the same write then lands; once the session has a type, factory_work_type refuses any suggestion, naming the type the developer picked, and shows no card; no hold is counted"
     steps:
       - id: start
         do: http.request
@@ -5241,7 +5042,7 @@ scenarios:
           method: POST
           path: "/api/message"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: gate suggests ${run.id}\nask-tool: u_unknown factory_work_type {\"type\":\"nope\",\"reason\":\"proctor ${run.id}\"}\nask-tool: u_lines factory_work_type {\"type\":\"fix\",\"reason\":\"one\\ntwo\"}\nask-tool: u_long factory_work_type {\"type\":\"fix\",\"reason\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}\nask-tool: u_types factory_work_type {\"type\":1,\"reason\":\"x\"}\nask-tool: u_ok factory_work_type {\"type\":\"fix\",\"reason\":\"the issue is a crash ${run.id}\"}" }
+          body: { sid: "${sid}", text: "say: gate suggests ${run.id}\nask-tool: u_unknown factory_work_type {\"type\":\"nope\",\"reason\":\"proctor ${run.id}\"}\nask-tool: u_lines factory_work_type {\"type\":\"explore\",\"reason\":\"one\\ntwo\"}\nask-tool: u_long factory_work_type {\"type\":\"explore\",\"reason\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}\nask-tool: u_types factory_work_type {\"type\":1,\"reason\":\"x\"}\nask-tool: u_ok factory_work_type {\"type\":\"explore\",\"reason\":\"the issue needs a look first ${run.id}\"}" }
         expect:
           equal:
             "$.status": 202
@@ -5271,8 +5072,8 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": false
-            "$.body.gate.workType": fix
-            "$.body.gate.typeAsk": { text: "Development ACP agent wants to change a file, and this session has no work type yet. The work type decides which steps and reviews apply, so the change waits until you pick one.", suggests: "Development ACP agent suggests Fix, and says why:", type: fix, reason: "the issue is a crash ${run.id}", use: "Use Fix" }
+            "$.body.gate.workType": change
+            "$.body.gate.typeAsk": { text: "Development ACP agent wants to change a file, and this session has no work type yet. The work type decides which steps and reviews apply, so the change waits until you pick one.", suggests: "Development ACP agent suggests Explore, and says why:", type: explore, reason: "the issue needs a look first ${run.id}", use: "Use Explore" }
       - id: size-unknown
         do: http.request
         identity: page
@@ -5297,20 +5098,20 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": false
-            "$.body.gate.typeAsk.type": fix
-      - id: size-fix
+            "$.body.gate.typeAsk.type": explore
+      - id: size-explore
         do: http.request
         identity: page
         with:
           method: POST
           path: "/api/size"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", size: fix }
+          body: { sid: "${sid}", size: explore }
         expect:
           equal:
             "$.status": 200
             "$.body": { ok: true }
-        waive: { FIX-05: "size is one of the fixed work types (fix, feature, docs, explore, incident) and can't carry ${run.id}; typed and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; typed and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
       - id: typed
         do: http.request
         identity: page
@@ -5323,7 +5124,9 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.chosen": true
-            "$.body.gate.workType": fix
+            "$.body.gate.workType": explore
+            "$.body.gate.path.stages": []
+            "$.body.gate.path.line": { text: "Changes files freely; nothing is pushed. Turn what you found into issues; you approve each one.", actions: [{ ask: issues, label: Draft issues, title: "The agent drafts issues from this session; you approve each one before it's opened" }] }
           absent: ["$.body.gate.typeAsk"]
       - id: ask-typed
         do: http.request
@@ -5350,6 +5153,45 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { found: ["gate-answers/u_src_typed.txt"] }
+      - id: ask-after
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate after ${run.id}\nask-tool: u_after factory_work_type {\"type\":\"change\",\"reason\":\"a bigger change ${run.id}\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: after-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/u_after.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/u_after.txt"] }
+      - id: no-card
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+          absent: ["$.body.gate.typeAsk"]
       - id: stop
         do: http.request
         identity: page
@@ -5379,7 +5221,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/u_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/u-${run.id}.go can't change yet: this session has no work type, and the work type decides which steps and reviews apply. Suggest one with the factory_work_type tool, giving type, one of feature, fix, incident, docs, explore, and reason, one line saying why it fits. Then end your turn: the developer picks the work type on the software factory page, and your next message says when you can go on. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+            "$.body": { path: "gate-answers/u_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"src/u-${run.id}.go can't change yet: this session has no work type, and the work type decides which steps and reviews apply. Suggest one with the factory_work_type tool, giving type, one of change, incident, explore, and reason, one line saying why it fits. Then end your turn: the developer picks the work type on the software factory page, and your next message says when you can go on. Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push.\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
       - id: u-src-obeyed
         do: http.request
         identity: page
@@ -5403,7 +5245,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/u_unknown.json", text: "{\"content\":[{\"text\":\"Refused: nope isn't one of this project's work types, which are feature, fix, incident, docs, explore; suggest one of them.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"nope isn't one of this project's work types, which are feature, fix, incident, docs, explore; suggest one of them\",\"result\":\"refused\"}}\n" }
+            "$.body": { path: "gate-answers/u_unknown.json", text: "{\"content\":[{\"text\":\"Refused: nope isn't one of this project's work types, which are change, incident, explore; suggest one of them.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"nope isn't one of this project's work types, which are change, incident, explore; suggest one of them\",\"result\":\"refused\"}}\n" }
       - id: u-unknown-obeyed
         do: http.request
         identity: page
@@ -5499,7 +5341,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { path: "gate-answers/u_ok.json", text: "{\"content\":[{\"text\":\"Held: Software Factory's page shows your suggestion of Fix to the developer, who picks the work type; end your turn now, and your next message says when you can go on.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"Software Factory's page shows your suggestion of Fix to the developer, who picks the work type; end your turn now, and your next message says when you can go on\",\"result\":\"held\"}}\n" }
+            "$.body": { path: "gate-answers/u_ok.json", text: "{\"content\":[{\"text\":\"Held: Software Factory's page shows your suggestion of Explore to the developer, who picks the work type; end your turn now, and your next message says when you can go on.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"Software Factory's page shows your suggestion of Explore to the developer, who picks the work type; end your turn now, and your next message says when you can go on\",\"result\":\"held\"}}\n" }
       - id: u-ok-obeyed
         do: http.request
         identity: page
@@ -5512,6 +5354,30 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { path: "gate-answers/u_ok.txt", text: "mcp: called factory_work_type\n" }
+      - id: u-after-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_after.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_after.json", text: "{\"content\":[{\"text\":\"Refused: this session's work type is already Explore, which the developer picked on the page, so there is nothing to suggest; go on with the work.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"this session's work type is already Explore, which the developer picked on the page, so there is nothing to suggest; go on with the work\",\"result\":\"refused\"}}\n" }
+      - id: u-after-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/u_after.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/u_after.txt", text: "mcp: called factory_work_type\n" }
       - id: u-src-typed-answer
         do: http.request
         identity: page
@@ -5603,6 +5469,804 @@ scenarios:
         eventually: { within: 30s, every: 1s }
         expect:
           equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-010
+    name: "Approve and implement in a Code change session (the event stream is read once, before Add a plan, to wait for the engine's read of the worktree after the turn): Approve requirements without saying whether a plan follows is refused with 400 fields naming plan and approves nothing; with plan false the requirements are approved and the audit line says without a plan, Plan shows Skipped, the gate waits only for work committed since the requirements were approved, and the session offers Add a plan; the agent's push on the implement text the engine sends is held for work committed on the approved requirements and the two reviews, with no plan in it; a write the gate held before now lands; while that work is uncommitted Add a plan is refused with 409 work, and once work is committed on the approved requirements the gate waits for nothing more and the push needs only the two reviews, the plan switch is gone, and Add a plan is refused with 409 built"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: change }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": change
+            "$.body.gate.planSwitch": ""
+            "$.body.gate.path.stages[0].id": define
+            "$.body.gate.path.stages[0].actions": []
+      - id: define
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: defined
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065"
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": ""
+            "$.body.gate.planSwitch": ""
+        save: { head: "$.body.gate.head" }
+      - id: none-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: approve-requirements }
+      - id: approve-unstated
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: fields, field: plan, message: "Choose whether a plan follows." }
+      - id: unstated-not-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.planSwitch": ""
+      - id: approve-implement
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: false, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: implement-shown
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planSwitch": add
+            "$.body.gate.planDoc": null
+            "$.body.gate.waiting": "commit the work made since the requirements were approved"
+            "$.body.gate.path.stages[1]": { id: plan, name: Plan, state: skipped, active: false, detail: "Skipped: you approved the requirements without a plan", actions: [] }
+      - id: implement-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: approve-requirements }, is: 1 }
+          any:
+            "$.body.entries": { kind: approve-requirements, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", session: "${sid}", commit: "${head}" }
+      - id: push-held
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": push
+            "$.body.entries[0].by": agent
+            "$.body.entries[0].result": held
+            "$.body.entries[0].session": "${sid}"
+            "$.body.entries[0].commit": "${head}"
+          absent: ["$.body.entries[0].missing[3]"]
+          matches:
+            "$.body.entries[0].missing[0]": "the work committed on top of commit [0-9a-f]{7}, where the requirements were approved"
+            "$.body.entries[0].missing[1]": "a review by knackpack:adversarial-reviewer of commit [0-9a-f]{7} on sf/[0-9a-f]{8}"
+            "$.body.entries[0].missing[2]": "a review by knackpack:slop-reviewer of commit [0-9a-f]{7} on sf/[0-9a-f]{8}"
+      - id: work-message
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate implement ${run.id}\ntry: i_src src/implement-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: work-tried
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/i_src.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/i_src.txt"] }
+      - id: work-pending
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planSwitch": ""
+      - id: work-settled
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].uncommitted.count": 3 }
+      - id: add-with-work
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: true, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: work, message: "Work has started since your last approval." }
+      - id: commit-message
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate commit ${run.id}\ncommit: src/export-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: built
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.waiting": ""
+            "$.body.gate.planSwitch": ""
+            "$.body.gate.planDoc": null
+          absent: ["$.body.gate.missing[2]"]
+          matches:
+            "$.body.gate.missing[0]": "a review by knackpack:adversarial-reviewer of commit [0-9a-f]{7} on sf/[0-9a-f]{8}"
+            "$.body.gate.missing[1]": "a review by knackpack:slop-reviewer of commit [0-9a-f]{7} on sf/[0-9a-f]{8}"
+      - id: add-after-built
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: true, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: built, message: "Work is committed since your last approval." }
+      - id: still-without-plan
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planDoc": null
+            "$.body.gate.path.stages[1]": { id: plan, name: Plan, state: skipped, active: false, detail: "Skipped: you approved the requirements without a plan", actions: [] }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: i-src-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/i_src.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/i_src.json", text: "{\"cloud\":\"\",\"guarded\":\"\",\"held\":\"\",\"irreversible\":false,\"kind\":\"edit\",\"protected\":\"\",\"pushes\":false,\"waits\":false}\n" }
+      - id: i-src-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/i_src.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/i_src.txt", text: "engine 200: allowed, wrote\n" }
+      - id: work-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["src/implement-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["src/implement-${run.id}.txt"] }
+      - id: work-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.changes.commits": { subject: "Add src/export-${run.id}.txt" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-011
+    name: "The plan switch in a Code change session: Approve and plan sends the plan step, whose plan the fake commits, and the session offers Skip the plan; Skip the plan (plan false on the same requirements) approves them without a plan, Plan shows Skipped and Add a plan is offered; Add a plan (plan true) chooses the plan again; once the plan is approved the switch is gone and Skip the plan is refused with 409 plan approved; each approval is one audit line"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: change }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": change
+            "$.body.gate.planSwitch": ""
+      - id: define
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "/knackpack:challenge-requirements\nknackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: defined
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": ".knackpack/fake-feature/REQUIREMENTS.md"
+            "$.body.gate.requirements.hash": "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065"
+            "$.body.gate.requirements.approved": false
+            "$.body.gate.holds.approveRequirements": ""
+            "$.body.gate.planSwitch": ""
+        save: { head: "$.body.gate.head" }
+      - id: approve-plan-choice
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: true, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: planned
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planDoc.path": ".knackpack/fake-feature/PLAN.md"
+            "$.body.gate.planDoc.hash": "0c88f88c7414c81b3f68c7234c9c887691c07cb6f6766b16fa86f028229f996e"
+            "$.body.gate.planDoc.approved": false
+            "$.body.gate.planSwitch": skip
+            "$.body.gate.waiting": "approve the plan first"
+      - id: skip
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: false, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: skipped
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planSwitch": add
+            "$.body.gate.waiting": "commit the work made since the requirements were approved"
+            "$.body.gate.path.stages[1]": { id: plan, name: Plan, state: skipped, active: false, detail: "Skipped: you approved the requirements without a plan", actions: [] }
+      - id: add
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: true, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: added
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planDoc.hash": "0c88f88c7414c81b3f68c7234c9c887691c07cb6f6766b16fa86f028229f996e"
+            "$.body.gate.planDoc.approved": false
+            "$.body.gate.planSwitch": skip
+            "$.body.gate.waiting": "approve the plan first"
+      - id: plan-not-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: approve-plan }
+      - id: approve-the-plan
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-plan"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", hash: "0c88f88c7414c81b3f68c7234c9c887691c07cb6f6766b16fa86f028229f996e", text: "# Plan: the fake export\n\n1. Write the export.\n2. Refuse an export over 10,000 rows.\n" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: plan-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.approved": true
+            "$.body.gate.planSwitch": ""
+            "$.body.gate.waiting": "commit the work made since the plan was approved"
+      - id: skip-approved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/approve-requirements"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", plan: false, hash: "c87aa267145465fb20e432eb1bf0cdcd9274d04fa15074f5875602c9ab45b065", text: "knackpack-requirements/1\n\n### Readiness\n- READY: nothing blocks.\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Managers can export their own organization's orders\nAcceptance: Given a manager of org A, when they export, the file holds only org A's orders.\n\n### Open questions and risks\n- Q-01: Should exports include archived orders? Blocking: no\n" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "plan approved", message: "The plan is approved, so it can't be skipped." }
+      - id: still-planned
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.approved": true
+            "$.body.gate.planDoc.approved": true
+      - id: approvals-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { kind: approve-requirements }, is: 3 }
+          any:
+            "$.body.entries": { kind: approve-plan, hash: "0c88f88c7414c81b3f68c7234c9c887691c07cb6f6766b16fa86f028229f996e", session: "${sid}" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: network-gone
+        do: docker.network
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: plan-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.changes.commits": { where: { subject: "docs(knackpack): plan for fake-feature" }, is: 1 }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
       - id: gone
         do: http.request
         identity: page

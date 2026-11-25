@@ -15,7 +15,7 @@ const (
 	maxTypeReason = 200
 )
 
-const workTypeDescription = "Suggest this session's work type, after Software Factory held a file change because the session has none. Give type, the id of one of the project's work types (the hold's message lists them; the built-in ones are feature, fix, incident, docs and explore), and reason, one line of at most 200 characters saying why it fits. It doesn't set the work type: the person reads your suggestion on Software Factory's page and picks that type or another, and your next message says when you can go on. A new suggestion replaces the last one. After held, end your turn and don't change files another way."
+const workTypeDescription = "Suggest this session's work type after Software Factory held a file change because the session has none. Give type, the id of one of the project's work types (the hold's message lists them; the built-in ones are change, incident and explore), and reason, one line of at most 200 characters saying why it fits. It doesn't set the work type: the person reads your suggestion on Software Factory's page and picks that type or another, and your next message says when you can go on. A new suggestion replaces the last one. After held, end your turn and don't change files another way."
 
 func workTypeToolDefinition() map[string]any {
 	return map[string]any{
@@ -25,7 +25,7 @@ func workTypeToolDefinition() map[string]any {
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"type":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxTypeID, "description": "A work type's id, such as fix"},
+				"type":   map[string]any{"type": "string", "minLength": 1, "maxLength": maxTypeID, "description": "A work type's id, such as change"},
 				"reason": map[string]any{"type": "string", "minLength": 1, "maxLength": maxTypeReason, "description": "One line of plain text"},
 			},
 			"required":             []string{"type", "reason"},
@@ -51,7 +51,7 @@ func workTypeArguments(raw json.RawMessage) (string, string, string) {
 		return "", "", "type and reason must both be strings."
 	}
 	if strings.TrimSpace(id) == "" || utf8.RuneCountInString(id) > maxTypeID {
-		return "", "", "type must be a work type's id, such as fix."
+		return "", "", "type must be a work type's id, such as change."
 	}
 	if strings.TrimSpace(reason) == "" || utf8.RuneCountInString(reason) > maxTypeReason || strings.ContainsAny(reason, "\r\n") {
 		return "", "", "The reason must be one line of 1 to 200 characters."

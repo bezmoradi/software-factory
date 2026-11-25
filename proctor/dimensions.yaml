@@ -1,6 +1,8 @@
 version: 1
 dimensions:
   post_routes:
+    - "/api/access"
+    - "/api/credentials"
     - "/api/add-repo"
     - "/api/agent-report"
     - "/api/allow-commit"

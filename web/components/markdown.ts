@@ -1,5 +1,7 @@
 import { el, emit, named, unspoofed } from '../lib/dom.ts'
 import { checkbox } from '../lib/controls.ts'
+import { langForInfo } from '../lib/highlight.ts'
+import { codeBlock, type CodeOptions } from './code-block.ts'
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
@@ -407,9 +409,8 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
       i++
       while (i < lines.length && !close.test(lines[i]!)) body.push(lines[i++]!.replace(new RegExp(`^ {0,${indent}}`), ''))
       i++
-      const info = m[2]!.trim()
-      if (exact && info) parent.append(el('p', 'small muted fence-info', info))
       const pre = el('pre')
+      pre.dataset.info = m[2]!.trim()
       pre.append(el('code', '', body.join('\n')))
       parent.append(pre)
     } else if ((m = HEADING.exec(line))) {
@@ -446,12 +447,41 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
   flush()
 }
 
-const SCROLLED = ':is(pre, .table)[role="region"]'
+const SCROLLED = '.table[role="region"]'
 const REACH = ['tabindex', 'role', 'aria-label']
+const sources = new WeakMap<Element, HTMLPreElement>()
+const DIFF_INFO = new Set(['diff', 'patch'])
+
+function codeOf(pre: HTMLPreElement): CodeOptions {
+  const info = pre.dataset.info ?? ''
+  const text = pre.textContent ?? ''
+  const diff = DIFF_INFO.has((info.trim().split(/[\s{,]/)[0] ?? '').toLowerCase())
+  return { text, label: info ? `Code: ${info}` : 'Code', title: info || undefined, wrapToggle: !!info, lang: diff ? null : langForInfo(info), diff, copy: { text, label: 'Copy the code' } }
+}
+
+function block(pre: HTMLPreElement): HTMLElement {
+  const code = codeBlock(codeOf(pre))
+  sources.set(code, pre)
+  return code
+}
+
+function upgraded(n: ChildNode): ChildNode {
+  if (n instanceof HTMLPreElement) return block(n)
+  if (n instanceof Element) for (const pre of n.querySelectorAll('pre')) pre.replaceWith(block(pre))
+  return n
+}
 
 function undecorated(n: ChildNode): Node {
-  if (!(n instanceof Element) || !n.matches(SCROLLED) && !n.querySelector(`.file-ref, ${SCROLLED}`)) return n
+  if (!(n instanceof Element)) return n
+  const source = sources.get(n)
+  if (source) return source
+  if (!n.matches(SCROLLED) && !n.querySelector(`.file-ref, ${SCROLLED}, sf-code`)) return n
   const copy = n.cloneNode(true) as Element
+  const blocks = [...n.querySelectorAll('sf-code')]
+  copy.querySelectorAll('sf-code').forEach((c, i) => {
+    const pre = sources.get(blocks[i]!)
+    if (pre) c.replaceWith(pre.cloneNode(true))
+  })
   for (const box of [copy, ...copy.querySelectorAll(SCROLLED)]) if (box.matches(SCROLLED)) for (const name of REACH) box.removeAttribute(name)
   for (const code of copy.querySelectorAll('.file-ref')) {
     code.classList.remove('file-ref')
@@ -491,8 +521,17 @@ function paint(node: HTMLElement, text: string, exact: boolean) {
   const fresh = [...next.childNodes]
   let same = 0
   while (same < old.length && same < fresh.length && undecorated(old[same]!).isEqualNode(fresh[same]!)) same++
+  const growing = old[same]
+  const was = growing instanceof Element ? sources.get(growing) : undefined
+  const now = fresh[same]
+  if (was && now instanceof HTMLPreElement && was.dataset.info === now.dataset.info) {
+    const code = growing as HTMLElementTagNameMap['sf-code']
+    code.show(codeOf(now))
+    sources.set(code, now)
+    same++
+  }
   for (const n of old.slice(same)) n.remove()
-  node.append(...fresh.slice(same))
+  node.append(...fresh.slice(same).map(upgraded))
 }
 
 class SfMarkdown extends HTMLElement {
@@ -540,13 +579,13 @@ class SfMarkdown extends HTMLElement {
   }
 
   #reach() {
-    for (const box of this.querySelectorAll<HTMLElement>('pre, .table')) {
+    for (const box of this.querySelectorAll<HTMLElement>('.table')) {
       const wide = box.scrollWidth > box.clientWidth
       if (wide === box.hasAttribute('role') || (!wide && box === document.activeElement)) continue
       if (wide) {
         box.tabIndex = 0
         box.setAttribute('role', 'region')
-        box.setAttribute('aria-label', box.matches('pre') ? 'Code' : 'Table')
+        box.setAttribute('aria-label', 'Table')
       } else for (const name of REACH) box.removeAttribute(name)
     }
   }

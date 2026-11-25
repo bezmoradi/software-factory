@@ -24,9 +24,10 @@ const (
 var daemonPid = regexp.MustCompile(`(?m)^pid:\s+(\d+)\s*$`)
 
 type queue struct {
-	msgs  []Fields
-	at    time.Time
-	until time.Time
+	msgs   []Fields
+	at     time.Time
+	until  time.Time
+	marked []string
 }
 
 type AgentState struct {
@@ -37,7 +38,7 @@ type AgentState struct {
 
 type MessageWaker interface {
 	Asleep(sid string) bool
-	WakeWithMessage(ctx context.Context, sid, text string, confirm bool, consent Consent) error
+	WakeWithMessage(ctx context.Context, sid, text string, typed, confirm bool, consent Consent) error
 }
 
 var _ MessageWaker = (*Dispatcher)(nil)
@@ -58,65 +59,89 @@ func (r *Registry) lastControl(sid string) bool {
 	return true
 }
 
-func (r *Registry) queueMessage(sid, text string, confirm bool) (bool, error) {
+func (r *Registry) queueMessage(sid, text string, typed, confirm bool) (*queue, error) {
 	text = strings.TrimSpace(text)
+	var first FirstStep
+	if typed {
+		first = r.firstStepFor(sid, text, false)
+	}
+	made, used, err := r.queueLocked(sid, text, confirm, first)
+	if first.Step != "" && used == "" {
+		r.unclaimStep(sid, first.Step)
+	}
+	return made, err
+}
+
+func (r *Registry) queueLocked(sid, text string, confirm bool, first FirstStep) (*queue, string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
 	a := r.admitted[sid]
 	switch {
 	case a == nil:
-		return false, conflict("unverified", "The engine didn't start this session, so it takes nothing for it from the page.")
+		return nil, "", conflict("unverified", "The engine didn't start this session, so it takes nothing for it from the page.")
 	case a.running || len(r.liveFor(sid, now)) > 0:
-		return false, conflict("not stopped", "The session is running again. Send the message once more.")
+		return nil, "", conflict("not stopped", "The session is running again. Send the message once more.")
 	case a.Kind != "background":
-		return false, conflict("not running", "The session isn't running. Wake it first.")
+		return nil, "", conflict("not running", "The session isn't running. Wake it first.")
 	case !r.lastControl(sid):
-		return false, conflict("asleep", "This session was read-only on this page when it stopped. Wake it without a message from the ⋯ menu first.")
+		return nil, "", conflict("asleep", "This session was read-only on this page when it stopped. Press Wake it above the message box first.")
 	case text == "":
-		return false, invalid("text", "Type a message first.")
+		return nil, "", invalid("text", "Type a message first.")
 	case utf16Len(text) > MaxText || !utf8.ValidString(text):
-		return false, invalid("text", "A message holds at most 20,000 characters.")
+		return nil, "", invalid("text", "A message holds at most 20,000 characters.")
 	case strings.HasPrefix(text, "!"):
-		return false, shellLine(text)
+		return nil, "", shellLine(text)
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
-		return false, invalid("command", commandRefused(a.Box, a.ID))
+		return nil, "", invalid("command", commandRefused(a.Box, a.ID))
 	}
 	if r.lastMode[sid] == "bypassPermissions" && !confirm {
-		return false, conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
+		return nil, "", conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
 	}
-	sent, noted := r.noted(sid, text)
+	q := r.queued[sid]
+	if q != nil && len(q.msgs) >= maxQueued {
+		return nil, "", limited("queue", "Twenty messages already wait for this session to wake.")
+	}
+	sent, noted, step := r.stepTextLocked(sid, text, first)
 	msg := Fields{"kind": "prompt", "text": sent}
-	if q := r.queued[sid]; q != nil {
-		if len(q.msgs) >= maxQueued {
-			return false, limited("queue", "Twenty messages already wait for this session to wake.")
-		}
+	if q != nil {
 		q.msgs = append(q.msgs, msg)
+		q.marked = withStep(q.marked, step)
 		if noted {
 			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
-		return true, nil
+		return nil, step, nil
 	}
-	r.queued[sid] = &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor)}
+	made := &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor), marked: withStep(nil, step)}
+	r.queued[sid] = made
 	if noted {
 		r.dropNotesLocked(sid)
 	}
 	r.announce(now)
-	return false, nil
+	return made, step, nil
 }
 
-func (r *Registry) unqueue(sid string) {
+func (r *Registry) unqueue(sid string, made *queue) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.queued[sid] != made {
+		r.mu.Unlock()
+		return
+	}
+	marked := made.marked
 	delete(r.queued, sid)
 	r.announce(r.now())
+	r.mu.Unlock()
+	for _, s := range marked {
+		r.unclaimStep(sid, s)
+	}
 }
 
 func (r *Registry) releaseQueued(now time.Time) {
 	for sid, q := range r.queued {
 		if now.After(q.until) {
+			r.unclaimLocked(sid, q.marked)
 			delete(r.queued, sid)
 			r.broadcast(Fields{"type": "dropped", "sid": sid, "why": "timeout", "count": float64(len(q.msgs))}, now)
 			continue
@@ -128,6 +153,7 @@ func (r *Registry) releaseQueued(now time.Time) {
 		}
 		delete(r.queued, sid)
 		if !c.controlled {
+			r.unclaimLocked(sid, q.marked)
 			r.broadcast(Fields{"type": "dropped", "sid": sid, "why": "read-only", "count": float64(len(q.msgs))}, now)
 			continue
 		}
@@ -167,13 +193,13 @@ func (d *Dispatcher) Asleep(sid string) bool {
 	return r != nil && !r.running && !r.busy
 }
 
-func (d *Dispatcher) WakeWithMessage(ctx context.Context, sid, text string, confirm bool, consent Consent) error {
-	added, err := d.reg.queueMessage(sid, text, confirm)
-	if err != nil || added {
+func (d *Dispatcher) WakeWithMessage(ctx context.Context, sid, text string, typed, confirm bool, consent Consent) error {
+	made, err := d.reg.queueMessage(sid, text, typed, confirm)
+	if err != nil || made == nil {
 		return err
 	}
 	if err := d.wakeFor(ctx, sid, consent, ByPage, "a message the person sent to the stopped session"); err != nil {
-		d.reg.unqueue(sid)
+		d.reg.unqueue(sid, made)
 		return err
 	}
 	shared.For(ctx, d.cfg.Logger).Info("message queued", "event", "woken")

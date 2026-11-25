@@ -32,6 +32,9 @@ func (h *Helper) Sweep(ctx context.Context) error {
 			if _, verifier := verifierLabelled(h.rec.project, c.Labels); verifier {
 				continue
 			}
+			if _, action := actionLabelled(h.rec.project, c.Labels); action {
+				continue
+			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "container", "name", name, "reason", "it carries the stack's label without every one of the helper's labels and names")
 			continue
 		}
@@ -56,6 +59,9 @@ func (h *Helper) Sweep(ctx context.Context) error {
 		box, ok := ownedName(h.rec.project, boxPrefix, n.Name, n.Labels)
 		if !ok {
 			if _, reviewer := ownedReviewer(h.rec.project, n.Name, n.Labels); reviewer {
+				continue
+			}
+			if _, action := ownedAction(h.rec.project, n.Name, n.Labels); action {
 				continue
 			}
 			h.logger.Warn("box sweep", "event", "left_alone", "kind", "network", "name", n.Name, "reason", "it carries the stack's label without every one of the helper's labels and names")
@@ -83,6 +89,7 @@ func (h *Helper) Sweep(ctx context.Context) error {
 	}
 	h.SweepReviewers(ctx, h.cfg.SweepDry)
 	h.SweepVerifiers(ctx, h.cfg.SweepDry)
+	h.SweepActions(ctx, h.cfg.SweepDry)
 	h.Reconnect(ctx)
 	return nil
 }
@@ -123,6 +130,7 @@ func (h *Helper) Reconnect(ctx context.Context) {
 		return
 	}
 	h.reconnectReviewers(ctx, m)
+	h.reconnectActions(ctx, m)
 	for _, box := range h.runningBoxes(ctx) {
 		unlock := h.locks.lock(box)
 		n, err := h.boxNetwork(ctx, box)
@@ -224,6 +232,7 @@ func (h *Helper) StopAll(ctx context.Context) {
 	}
 	wg.Go(func() { h.SweepReviewers(ctx, false) })
 	wg.Go(func() { h.SweepVerifiers(ctx, false) })
+	wg.Go(func() { h.SweepActions(ctx, false) })
 	wg.Wait()
 	h.logger.Info("box helper", "event", "stopped_every_box", "boxes", len(boxes))
 }

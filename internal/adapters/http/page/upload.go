@@ -355,7 +355,12 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 		return
 	}
 	confirm := body["confirm"] == true
-	err := s.reg.Message(sid, text, confirm, images, files)
+	typed := !hasRevise && !hasComments && !hasAsk
+	deliver := s.reg.Message
+	if typed {
+		deliver = s.reg.PersonMessage
+	}
+	err := deliver(sid, text, confirm, images, files)
 	waker, canWake := s.cfg.Starter.(session.MessageWaker)
 	if err != nil && stopped(err) && canWake && waker.Asleep(sid) {
 		if present(body["images"]) || present(body["files"]) {
@@ -365,7 +370,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request, body map[string
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
 		ctx, cancel := context.WithTimeout(r.Context(), manageFor)
 		defer cancel()
-		err = waker.WakeWithMessage(ctx, sid, text, confirm, consent)
+		err = waker.WakeWithMessage(ctx, sid, text, typed, confirm, consent)
 		shared.For(r.Context(), s.logger).Info("message", "woke", true, "ok", err == nil)
 		if err == nil {
 			send(w, http.StatusAccepted, map[string]bool{"ok": true, "woke": true})

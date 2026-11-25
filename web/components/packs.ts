@@ -255,7 +255,7 @@ class SfPacks extends HTMLElement {
     )
     const steps = Object.entries(p.steps).map(([step, cmd]) => `${visible(step)}: ${visible(cmd)}`)
     if (steps.length) box.append(el('p', 'muted', `Steps: ${steps.join(' · ')}`))
-    if (!p.documents) box.append(el('p', 'muted', 'It names no documents folder, so its sessions offer no Feature: the engine can\'t approve requirements or a plan it can\'t read from a commit.'))
+    if (!p.documents) box.append(el('p', 'muted', 'It names no documents folder, so its sessions get Code change without Define and Plan: the engine can\'t approve requirements or a plan it can\'t read from a commit.'))
     return box
   }
 

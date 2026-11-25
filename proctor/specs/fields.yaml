@@ -37,7 +37,7 @@ tables:
       - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
-      - ["fld_dispatch_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, type: fix }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, type: change }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_dispatch_from_shape", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, from: { branch: proctor } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
@@ -58,6 +58,7 @@ tables:
       - ["fld_message_comments_no_file", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: "", line: 1, removed: false, text: proctor }] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_message_comments_images", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: proctor }], images: ["0123456789abcdef01234567"] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_message_ask_type", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: 1 }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_handoff", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: handoff }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_message_ask_unknown", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: proctor }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_message_ask_and_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, ask: commit }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
       - ["fld_message_ask_and_revise", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define, revise: { kind: requirements, note: proctor } }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
@@ -73,6 +74,8 @@ tables:
       - ["fld_size_shape", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: "Not a type" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_requirements_plan_type", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: "no" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_plan_plan_choice", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op", "That op isn't one this route takes. Reload the page and try again."]
       - ["fld_lock_no_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lock_bad_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock, head: abc }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
@@ -141,6 +144,17 @@ tables:
       - ["fld_lessons_approve_sid_shape", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: "a/b" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lessons_approve_no_sid", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_review_depth_old_shape", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_credential", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", credential: github-ci, port: 22 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_fraction", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22.5 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_no_host", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", port: 22, scope: session, expires: hour }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_run_id", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "deploy-pi", args: {} }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_run_args", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "0123456789abcdef0123456789abcdef", args: ["v1"] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_stop_run", "/api/access", { op: action-stop, sid: "00000000-0000-4000-8000-000000000000", run: "0123456789abcdef0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_shape", "/api/credentials", { op: action-save, action: { name: 1 } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_files", "/api/credentials", { op: action-save, action: { name: deploy-pi, command: rsync, files: "yes" } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_delete_id", "/api/credentials", { op: action-delete, id: deploy-pi }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, git: example.org }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_preset_git", "/api/credentials", { op: preset-save, preset: { name: proctor, host: example.org, scope: session, expires: hour, project: demo, git: [1] } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field, with a message in words"
@@ -201,6 +215,8 @@ tables:
       - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
       - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
       - ["msg_split_op", "/api/split", { op: queue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "op", "A task card is edited, dismissed, started or taken out of the queue, nothing else."]
+      - ["msg_access_op", "/api/access", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, checks, allows, refuses, applies and takes back access grants, and runs and stops actions, nothing else."]
+      - ["msg_credentials_op", "/api/credentials", { op: write }, "op", "The engine reads, saves and deletes credentials, presets and actions, and checks a preset's risk, nothing else."]
       - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
 
   - id: FLD-T02R
@@ -465,8 +481,15 @@ tables:
       - ["unk_message_revise_plan", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: plan, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_revise_cause", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: root-cause, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_ask_define", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define }, "Only a session this engine started has a workflow here."]
-      - ["unk_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: fix }, "Only a session this engine started has a work type here."]
+      - ["unk_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: change }, "Only a session this engine started has a work type here."]
       - ["unk_message_ask_fix", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: fix }, "Only a session this engine started has a workflow here."]
+      - ["unk_access_read", "/api/access", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
+      - ["unk_access_revoke_all", "/api/access", { op: revoke-all, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
+      - ["unk_access_check_port", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22 }, "Only a session this engine started has access grants here."]
+      - ["unk_access_allow_port", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22, scope: session, expires: hour, confirmed: true }, "Only a session this engine started has access grants here."]
+      - ["unk_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, confirmed: true, git: [example.org] }, "Only a session this engine started has access grants here."]
+      - ["unk_access_action_run", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "0123456789abcdef0123456789abcdef", args: { tag: "v1" } }, "Only a session this engine started has access grants here."]
+      - ["unk_access_action_stop", "/api/access", { op: action-stop, sid: "00000000-0000-4000-8000-000000000000", run: "0123456789abcdef" }, "Only a session this engine started has access grants here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"

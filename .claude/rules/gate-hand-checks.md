@@ -60,17 +60,16 @@ paths:
 
 Each check below tries one rule of the trust boundary or the gate (ARCHITECTURE.md "Trust boundary" and "Review, then push") and gives the refusal or result the code produces. Run them on your own Docker with your Software Factory stopped, as [Hand checks with Compose](compose-hand-checks.md) says, on the development overlay with its fakes, in the order below: the last ones restart the engine, which stops every session. Record what each gave in the description of the change that ran them; no test keeps a fixed bypass from coming back. The page's own refusals are in docs/reference/security-and-sign-in.md "Page security checks", and the containers' isolation in [Hand checks with Compose](compose-hand-checks.md).
 
-**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, gives `main` a second commit so it can be rewound later, adds the project with its token and a commit identity. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session and picks its work type with `/api/size` (`fix` unless named; `none` leaves it unpicked, so its first file change is held for a work type), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
+**Setup.** Run it from the repository root in one shell; every check uses its functions. It starts the overlay with the update check pointed at the dev git host and reviewer runs timing out after 2 minutes instead of 20, adds the project with its token and a commit identity, gives it a team file with the work type `quick`, and then gives `main` a second commit, so it can be rewound later to a commit that still holds the team file. `quick` (Quick: Implement, Code review and Deliver, with both roles) has no Define step, so its profile is `direct`: it pushes once the reviews pass, with no approval, as the checks below need, and a Code change, which needs approved requirements before its push, is used only where a check names it. `team <json>` commits `software-factory.json` to the git host's main with `quick` added to its `workTypes`, so every team file a check writes keeps the type, and approves it on the page. `sf <route> <json>` calls the page and prints the answer and its status, which lands on a line of its own (a space, then `401`) when the answer ends with a newline, as the JSON answers do; `start <name> [type]` starts a development ACP session and picks its work type with `/api/size` (`quick` unless named; `none` leaves it unpicked, so its first file change is held for a work type), and `sid`, `branch`, `wt`, `box` and `ctr` print its id, branch, worktree, container id and container name; `commit <name> <path> <text>` commits one file in its worktree and prints the commit; `events` prints the first frame of the page's event stream, which holds every session with its review and push.
 
 ```bash
 export SF_DEV_UPDATE_API=https://gitserver.test:8443/release-api SF_DEV_REVIEW_MINUTES=2
 docker compose -f compose.yaml -f compose.dev.yaml up -d --build --wait --remove-orphans
-docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserver commit "second"
 P=http://127.0.0.1:7799
 key() { curl -sS -X POST -H 'Content-Type: application/json' -H "Origin: $P" "$P/api/session" -d '{}' | sed -E 's/.*"token":"([^"]+)".*/\1/' > /tmp/sf-key; }
 sf() { curl -sS -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P$1" -d "$2"; }
 events() { curl -sS -N -m 5 -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P/api/events" 2>/dev/null | head -n 1; }
-start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); [ "${2:-fix}" = none ] || sf /api/size "{\"sid\":\"${r%% *}\",\"size\":\"${2:-fix}\"}" >/dev/null; sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-$1; cat /tmp/sf-$1; }
+start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); [ "${2:-quick}" = none ] || sf /api/size "{\"sid\":\"${r%% *}\",\"size\":\"${2:-quick}\"}" >/dev/null; sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-$1; cat /tmp/sf-$1; }
 sid() { cut -d' ' -f1 /tmp/sf-$1; }
 branch() { echo sf/$(cut -d' ' -f2 /tmp/sf-$1); }
 wt() { cut -d' ' -f3 /tmp/sf-$1; }
@@ -90,7 +89,15 @@ sf /api/save-token '{"host":"gitserver.test:8443","token":"sf-dev-gitserver-toke
 sf /api/add-repo '{"url":"https://gitserver.test:8443/dev/demo.git"}'
 ```
 
-Go on once `sf /api/projects '{}'` lists `/workspace/base/demo`. A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (docs/reference/security-and-sign-in.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
+Once `sf /api/projects '{}'` lists `/workspace/base/demo`, give it the team file and `main` its second commit:
+
+```bash
+team() { python3 -I -c 'import sys,json; t=json.loads(sys.argv[1]); t.setdefault("workTypes",[]).append({"id":"quick","name":"Quick","steps":["implement","review","deliver"],"edits":"any","push":True,"roles":["bug-hunter","simplicity"]}); print(json.dumps(t))' "$1" | docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sh -c 'rm -rf /tmp/m && git clone -q /srv/git/demo.git /tmp/m && cat > /tmp/m/software-factory.json && cd /tmp/m && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm team && git push -q origin HEAD:main'; sf /api/team "{\"path\":\"/workspace/base/demo\",\"op\":\"approve\",\"sha\":\"$(sf /api/team '{"path":"/workspace/base/demo","op":"read"}' | grep -o '"sha":"[0-9a-f]\{64\}"' | head -n 1 | cut -d'"' -f4)\"}"; }
+team '{"version":1}'
+docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserver commit "second"
+```
+
+Go on once `sf /api/team '{"path":"/workspace/base/demo","op":"read"}'` answers an `approved` with `"same":true` and lists `quick` under `setup.types`. A review takes a few seconds, 45 with a `SLOW-REVIEW` file; before the step after `review`, wait until `logs engine 'msg=review event=finished'` shows `role=bug-hunter` and `role=simplicity` for it. A page push answers 202 and decides in the background: its outcome is a `push event=<result> by=page` line, `audit` prints its audit line and `remote` what the git host holds. One page key works at a time: `restart` takes a new one, and so do the browser in [Performance budgets](performance-budgets.md) and the page security checks (docs/reference/security-and-sign-in.md "Page security checks"), so run `key` after each; with a stale key `start` prints an empty line and every later `ctr` names no container.
 
 **The agent listener names the sender and refuses what isn't its own.** Each request goes from one session's container to `engine-agents:8081`; the engine takes the container from the connection's address, never from the request.
 
@@ -131,6 +138,46 @@ logs egress 'event=refused reason=(git_host|ip_literal)'
 ```
 
 Expect 403 from the proxy for both (curl says `CONNECT tunnel failed, response 403`), logged `egress event=refused reason=git_host host=github.com side=agents` and `reason=ip_literal host=140.82.112.3`. The direct dial gets no HTTP answer (exit 7 or 28): the container's network is internal.
+
+**A granted host that becomes a git host closes for its grant.** A host token saved for a host makes it a git host, as a project there does (`Repos.GitHosts`), and `example.org` gets no token check. `grants` prints egress's `/status` per-/28 lists, keyed by each session container's /28 (`x`'s is the only one with grants here), and `acc <name> <json>` calls `/api/access` for that session. The grants list is rebuilt every 15 seconds.
+
+```bash
+grants() { docker compose -f compose.yaml -f compose.dev.yaml exec -T engine curl -sSk --noproxy '*' https://egress-control:3129/status | python3 -I -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["grants"]))'; }
+acc() { sf /api/access "{\"sid\":\"$(sid $1)\",$2}"; }
+start x; acc x '"op":"allow","host":"example.org","scope":"session","expires":"hour"'
+sf /api/credentials '{"op":"preset-save","preset":{"name":"ex","host":"example.org","scope":"session","expires":"hour","project":"demo"}}'
+grants; docker exec "$(ctr x)" curl -sS -o /dev/null -w '%{http_code}\n' https://example.org
+sf /api/save-token '{"host":"example.org","token":"sf-dev-other-token"}'; sleep 16
+grants; docker exec "$(ctr x)" curl -sS -o /dev/null -w '%{http_code}\n' https://example.org; sleep 6; acc x '"op":"read"'
+acc x "\"op\":\"apply\",\"preset\":\"$(sf /api/credentials '{"op":"read"}' | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(next(p["id"] for p in json.loads(t[:t.rindex(" ")])["presets"] if p["name"]=="ex"))')\"
+acc x '"op":"check","host":"example.org"'; acc x '"op":"allow","host":"example.org","scope":"session","expires":"hour","confirmed":true'
+acc x '"op":"allow","host":"example.org","scope":"session","expires":"hour","git":["example.org"]'; acc x '"op":"allow","host":"example.org","scope":"session","expires":"hour","confirmed":true,"git":["example.org"]'
+grants; docker exec "$(ctr x)" curl -sS -o /dev/null -w '%{http_code}\n' https://example.org
+sf /api/remove-token '{"host":"example.org"}'
+```
+
+- Before the token: the /28's list has `"allow":["example.org"]` and no `git`, and the request gets a status from the host.
+- After it: the /28 has no list, egress refuses the `CONNECT` (`CONNECT tunnel failed, response 403`, logged `reason=not_allowlisted host=example.org`), no card appears for it, as for any git host, and `read` shows the grant with `closed` ("Egress refuses example.org for it: it became a git host after this grant was given. …") and no `git`. `apply` of the preset answers 409 `git host` ("example.org became a git host after the preset ex was saved, …").
+- `check` answers a card whose risks are high, each saying "The agent can push to any repository with any token it holds, …" with an `accept` and `"git":["example.org"]`; `allow` without `git`, as from a card shown before the token, is 409 `git host` ("example.org became a git host after this card was shown, so nothing was allowed. …") and makes no grant; with `git` but without `confirmed` it is 400 `confirm`; with both the /28 has `"allow":["example.org"],"git":["example.org"]`, the request goes through, the session shows the git-host line above its message box, and its container's next sandbox check (`logs engine 'sandbox check' | grep "box=$(box x)"`, at most 5 minutes later) passes.
+- Docker Desktop's host: `acc x '"op":"check","host":"192.168.65.254","port":7799'` answers 409 `never` with "Never reachable: on one of Software Factory's own networks.", since the engine counts the Docker host's addresses among them, and egress refuses them at the dial whatever its lists hold (`own_network`). On Linux the same holds for the gateway of each network Software Factory's containers are on, not for other bridges' gateways such as `docker0`'s `172.17.0.1`.
+
+**An action whose target becomes a git host doesn't run.** After the check above, with the token removed again. `aid` prints the saved action's id. The fake agent's `factory_action <name>` asks to run it.
+
+```bash
+aid() { sf /api/credentials '{"op":"read"}' | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(next(a["id"] for a in json.loads(t[:t.rindex(" ")])["actions"] if a["name"]==sys.argv[1]))' "$1"; }
+sf /api/credentials '{"op":"save","credential":{"name":"ex-token","type":"token","bound":"example.org","variable":"EX_TOKEN","value":"sf-dev-ex-value"}}'
+sf /api/credentials '{"op":"action-save","action":{"name":"ex-get","credential":"ex-token","target":"example.org","command":"curl\n-sS\n-o\n/dev/null\n-w\n%{http_code}\nhttps://example.org"}}'
+acc x "\"op\":\"action-run\",\"action\":\"$(aid ex-get)\",\"args\":{}"; sleep 15; acc x '"op":"read"' | grep -o '"said":"[^"]*"' | head -n 1
+sf /api/save-token '{"host":"example.org","token":"sf-dev-other-token"}'
+sf /api/credentials '{"op":"read"}' | grep -o '"broken":"[^"]*"'; acc x "\"op\":\"action-run\",\"action\":\"$(aid ex-get)\",\"args\":{}"
+sf /api/message "{\"sid\":\"$(sid x)\",\"text\":\"factory_action ex-get\"}"
+sf /api/credentials '{"op":"action-save","action":{"name":"ex-two","credential":"ex-token","target":"example.org","command":"curl\nhttps://example.org"}}'
+sf /api/remove-token '{"host":"example.org"}'; sf /api/credentials "{\"op\":\"delete\",\"id\":\"$(sf /api/credentials '{"op":"read"}' | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(next(c["id"] for c in json.loads(t[:t.rindex(" ")])["credentials"] if c["name"]=="ex-token"))')\"}"
+```
+
+- Before the token: the run passes, its `said` ending `it exited with code 0 after …`.
+- After it: the action's `broken` is "Its target example.org is a git host now, and an action never reaches one, so it can't run. Save it with another target."; Run from the Access dialog is refused 409 `git host` with "Its target example.org is a git host now, and an action never reaches one, so the action can't run. Save it with another target.", and `grants` lists no /28 for a run; the fake agent's reply shows `factory_action` refused with "the action ex-get can't run: its target example.org is a git host now, and an action never reaches one; tell the person", and no card appears. Saving another action against it answers 409 `git host`, "A git host; an action never reaches one.".
+- Egress drops such a list on its own too, for a run that started before the engine knew: the engine starts no run once it knows, but a running action keeps the list it started with, which the engine sends in every `PUT /boxes` until the run ends (`actionSubnetsLocked` in `cmd/server/actions.go`), so egress drops it at each send; that part is read from `PUT /boxes` in `internal/adapters/egress/status.go`, which drops an action /28's list whose one entry is among the `git` names it was sent, the deny list's or `session.ForgeSSHNames`, or an address it knows is a git host's, and logs `egress event=action-git-refused`.
 
 **The reviewers' key reaches no session's container.** The engine sends the reviewers' key step naming no session's container; a session's agent-host refuses it, and refuses a key for any other session's container too.
 
@@ -220,25 +267,25 @@ start t; commit t SLOW-REVIEW 200; review t
 
 After 2 minutes: `review event=finished role=bug-hunter state=failed why=timeout` and the same for `simplicity`, each run's reason `it didn't finish within 2 minutes`, and `gate t` lists `a review by knackpack:adversarial-reviewer that finishes: the last one failed or timed out, so it counts as not passed`, and the same for the slop reviewer. `logs helper 'msg=reviewer action=remove'` shows `outcome=ok` for both runs, logged as the runs time out: the fake stops with its reviewer container and logs nothing of its own, and `docker ps -a --filter label=dev.software-factory.reviewer` lists none.
 
-**A pass counts only for the approved texts it was given.** A Feature session: the requirements approved, then a plan and the work committed and reviewed before the plan's approval. The plan can be approved only at a commit whose changes since the requirements' approval are the plan's own files, so the branch goes back to the plan's commit for the approval and forward again.
+**A pass counts only for the approved texts it was given.** A Code change session: the requirements approved with **Approve and plan**, then a plan and the work committed and reviewed before the plan's approval. The plan can be approved only at a commit whose changes since the requirements' approval are the plan's own files, so the branch goes back to the plan's commit for the approval and forward again.
 
 ```bash
-start f feature
+start f change
 commit f .knackpack/feature.json '{"feature_directory": ".knackpack/t1"}'
 commit f .knackpack/t1/REQUIREMENTS.md "$(printf 'knackpack-requirements/1\n\n### Requirements and acceptance criteria\n\n#### REQ-01: Write hello.txt\nAcceptance: hello.txt holds hello.\n\n### Open questions and risks\n- None.')"
-sf /api/approve-requirements "{\"sid\":\"$(sid f)\",$(gate f | sed -nE 's/.*"requirements":\{"path":"[^"]*",("text":"([^"\\]|\\.)*","hash":"[0-9a-f]{64}").*/\1/p')}"
+R=$(gate f | sed -nE 's/.*"requirements":\{"path":"[^"]*",("text":"([^"\\]|\\.)*","hash":"[0-9a-f]{64}").*/\1/p')
+sf /api/approve-requirements "{\"sid\":\"$(sid f)\",$R}"; sf /api/approve-requirements "{\"sid\":\"$(sid f)\",$R,\"plan\":true}"
 plan=$(commit f .knackpack/t1/PLAN.md '# Plan: write hello.txt.'); work=$(commit f hello.txt hello); review f
 docker exec -w "$(wt f)" "$(ctr f)" git reset -q --hard "$plan"
 sf /api/approve-plan "{\"sid\":\"$(sid f)\",$(gate f | sed -nE 's/.*"planDoc":\{"path":"[^"]*",("text":"([^"\\]|\\.)*","hash":"[0-9a-f]{64}").*/\1/p')}"
 docker exec -w "$(wt f)" "$(ctr f)" git reset -q --hard "$work"; gate f
 ```
 
-Expect both approvals `{"ok":true} 200`, and `gate f` lists `a review by knackpack:adversarial-reviewer that counts: it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review`, and the same for the simplicity checker. `push f` is held with them; after `review f` passes again, `push f` pushes. A Fix session, such as `h`, never gets the item.
+Expect the requirements without `plan` refused with 400 `fields` on the field `plan` ("Choose whether a plan follows."), then both approvals `{"ok":true} 200`, and `gate f` lists `a review by knackpack:adversarial-reviewer that counts: it reviewed before the current approval of the requirements or the plan, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review`, and the same for the simplicity checker. `push f` is held with them; after `review f` passes again, `push f` pushes. A `quick` session, such as `h`, which has nothing to approve, never gets the item.
 
-**A pass counts only for the team rules it was given.** `team <json>` commits `software-factory.json` to the git host's main and approves it on the page.
+**A pass counts only for the team rules it was given.** `team` is the Setup's.
 
 ```bash
-team() { printf '%s\n' "$1" | docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sh -c 'rm -rf /tmp/m && git clone -q /srv/git/demo.git /tmp/m && cat > /tmp/m/software-factory.json && cd /tmp/m && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm team && git push -q origin HEAD:main'; sf /api/team "{\"path\":\"/workspace/base/demo\",\"op\":\"approve\",\"sha\":\"$(sf /api/team '{"path":"/workspace/base/demo","op":"read"}' | grep -o '"sha":"[0-9a-f]\{64\}"' | head -n 1 | cut -d'"' -f4)\"}"; }
 team '{"version":1,"fileRules":[{"pattern":"docs/**","instruction":"Rule A."},{"pattern":"src/**","instruction":"Rule B."}]}'
 start r; commit r src/a.txt one; review r
 team '{"version":1,"fileRules":[{"pattern":"docs/**","instruction":"Rule A2."},{"pattern":"src/**","instruction":"Rule B."}]}'; gate r
@@ -298,16 +345,14 @@ for r in /api/allow-file /allow-file /api/push-answer; do docker exec "$(ctr d)"
 ```bash
 tc() { gate $1 | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(json.dumps(json.loads(t[:t.rindex(" ")])["gate"].get("typeChange"), indent=1))'; }
 facts() { for i in $(seq 40); do c=$(docker ps -q --filter label=dev.software-factory.reviewer | head -n 1); [ -n "$c" ] && docker exec "$c" sh -c 'cat /reviews/*/change-facts.md' 2>/dev/null && return; sleep 1; done; }
-start o docs; commit o notes.md one; commit o main.go 'package main'; tc o
-sf /api/size "{\"sid\":\"$(sid o)\",\"size\":\"fix\"}"; tc o; sf /api/size "{\"sid\":\"$(sid o)\",\"size\":\"docs\"}"
-start x docs; docker exec -w "$(wt x)" "$(ctr x)" sh -c 'for i in $(seq -w 1 60); do echo x > f$i.go; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm many'; tc x
+start x; docker exec -w "$(wt x)" "$(ctr x)" sh -c 'mkdir -p proctor/many && for i in $(seq -w 1 60); do echo x > proctor/many/f$i.yaml; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm many'; tc x
 start u; commit u proctor/specs/x.yaml "$(printf 'version: 2\nscenarios:\n  - id: X-001\n    waive: { FIX-05: "fixed" }')"; commit u SLOW-REVIEW slow; tc u; review u; facts
+sf /api/size "{\"sid\":\"$(sid u)\",\"size\":\"explore\"}"; tc u
 team '{"version":1,"protect":["secret/**"]}'; start g; commit g secret/a.txt one; tc g
 ```
 
-- `o`, Docs only with `main.go`: `{"type":"Docs only","lines":[{"what":"Docs only is for documentation, and the branch changes files that aren't documentation, so it needs what a Feature needs: an approved plan and a Feature's reviews","files":[{"path":"main.go"}],"more":0}]}`, beside the gate's `effective` `feature`. Set to Fix, `tc o` prints `null`; the person's type is read at each view, not kept with the facts.
-- `x`, 60 such files: the line lists `f01.go` to `f50.go` and `"more": 10`; the page shows `and 10 more`.
-- `u`, a Fix: a line `Files under proctor/ or the root Makefile, …` listing `proctor/specs/x.yaml`, and a line `A Fix that loosens the specifications: …` listing it with `"what": "1 new waiver, 1 fewer scenarios or table rows"`. `facts` shows both under `## The change and its work type`, after `The session's work type, which the person set on the page: Fix.` A Docs only session that changes a file under `proctor/` lists it twice, as not documentation and under `proctor/`, and has no loosening line, which is a Fix's only.
+- `x`, 60 files under `proctor/`: the line `Files under proctor/ or the root Makefile, …` lists `proctor/many/f01.yaml` to `proctor/many/f50.yaml` and `"more": 10`; the page shows `and 10 more`.
+- `u`, a `quick` session: a line `Files under proctor/ or the root Makefile, …` listing `proctor/specs/x.yaml`, and a line `Work of type Quick that loosens the specifications: …` listing it with `"what": "1 new waiver, 1 fewer scenarios or table rows"` (a Code change's reads `A Code change that loosens …`). `facts` shows both under `## The change and its work type`, after `The session's work type, which the person set on the page: Quick.` Set to Explore, `tc u` has `"type":"Explore"` and only the `proctor/` line, since the loosening line is for a work type that pushes; the person's type is read at each view, not kept with the facts.
 - `g`, the protect list: a line `Files that match the protect list of the team file on main, …` with `{"path":"secret/a.txt","what":"matches secret/**"}`.
 - The push card shows the same section while the gate's `head` is the card's `commit`; none of it changes the push's result.
 
@@ -386,7 +431,7 @@ An uploaded pack, and a session that keeps it across Stop and Wake after the pro
 
 ```bash
 B=$(up /tmp/sf-beta beta | tee /dev/stderr | pdig); pk use ",\"pack\":\"$B\""
-start pb; gate pb
+start pb; gate pb; sf /api/size "{\"sid\":\"$(sid pb)\",\"size\":\"incident\"}"
 sf /api/dispatch '{"path":"/workspace/base/demo","agent":"dev-acp","name":"bf"}'
 pk use ',"pack":"knackpack"'; gate pb; pk remove ",\"digest\":\"$B\""
 sf /api/stop-session "{\"sid\":\"$(sid pb)\"}"; sleep 6; ev 30; sleep 1; sf /api/wake "{\"sid\":\"$(sid pb)\"}"; sleep 10
@@ -394,7 +439,7 @@ grep '"type":"versions"' /tmp/sf-events; gate pb
 ```
 
 - The upload: `200` with `beta` `1.0.0`, `source` `{"kind":"upload","url":"","commit":""}`, `agents` `["hunter","trimmer"]`, `codeFiles` `[]` and the digest `fc23c1888199af4b90323527b01b07d277290129951e50494ad8eb1842f556db`; the agents volume holds an engine-written `.claude-plugin/plugin.json` beside the uploaded files under `packs/<digest>/session/`, and only that `plugin.json` and `agents/` under `packs/<digest>/reviewers/`. Its audit reason is `the developer uploaded the pack beta 1.0.0 (4 files), on the page`.
-- `gate pb` on beta: `"adapter":"beta"`, `"commands":{"review":"/beta:handoff"}`, the reviewers `beta:hunter` and `beta:trimmer`, and no `feature` in `types`; the Feature start answers `400` `type`.
+- `gate pb` on beta: `"adapter":"beta"`, `"commands":{"review":"/beta:handoff"}`, the reviewers `beta:hunter` and `beta:trimmer`, and in `types` `change` with only the steps `implement`, `review` and `deliver`, since beta has no `documents`, beside `explore` and `quick`, and no `incident`, whose root cause beta can't name; `/api/size` with `incident` answers `400` `type`.
 - After the project picks knackpack: `gate pb` still has `"adapter":"beta"` and `/beta:handoff`, with knackpack's two reviewers, since reviews follow the project's pack and the session keeps its own; the removal answers `{"error":"in use","message":"A saved session runs the pack beta, and keeps it across Stop and Wake. Delete that session first."} 409`.
 - The wake: `{"ok":true} 202`, and the stream's `versions` frame for `pb` has the text `This session keeps the pack it started with, beta 1.0.0 (fc23c1888199); the project now uses knackpack, which new sessions get.`, which the page shows in a toast titled `<name> woke with a note on what it runs.` `gate pb` after the wake still has `"adapter":"beta"`. Once `pb` is stopped and deleted, `pk remove ",\"digest\":\"$B\""` answers `200`.
 
@@ -430,7 +475,7 @@ n=$(logs engine 'msg="reviewer container" event=started .*snapshot=true' | wc -l
 sf /api/message "{\"sid\":\"$(sid w)\",\"text\":\"factory_push\"}"
 until [ "$(logs engine 'msg="reviewer container" event=started .*snapshot=true' | wc -l)" -ge $((n + 2)) ]; do sleep 1; done; sleep 5; restart
 events | grep -o '"unchecked":true' | wc -l
-sf /api/size "{\"sid\":\"$(sid h)\",\"size\":\"fix\"}"; events | grep -o '"unchecked":true' | wc -l
+sf /api/size "{\"sid\":\"$(sid h)\",\"size\":\"quick\"}"; events | grep -o '"unchecked":true' | wc -l
 until logs engine 'event=pushed by="agent, after reviews"' > /dev/null; do sleep 1; done
 logs engine 'msg="push resume"|by="agent, after reviews"|why=engine-stopped|msg="reviewer container" event=(stopped|not-started|sandbox-failed)|msg="update check"'; remote | grep "$(branch w)"
 docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserver release-seen
@@ -470,7 +515,7 @@ check 'true'; push v; vwait v; push v; logs helper 'msg=verifier'
 - The agent's held reason is byte-identical while its run (`sleep 20; exit 1`) runs and after it failed, and a newer commit pushed while the older one's run runs is queued (`verify event=queued`), not refused.
 - In a project whose team file doesn't require `verify`, a run you start with **Verify this commit** doesn't delay the agent's push: it goes out as soon as its reviews pass.
 - An engine restart during a push's run leaves the run `interrupted`; the waiting push is decided as held, its card asks to press Verify this commit, and the audit has `verify` `not-restarted`.
-- A push from an Exploring session starts no run.
+- A push from an Explore session starts no run.
 - **Verify this commit** pressed while the session's push run is queued runs the commit once: the queued item is gone (`queued` false), and the waiting push goes out after that one run.
 - A queued run whose branch moved, or whose push no longer needs it, logs `verify event=queued-dropped` and starts nothing; the push is decided again.
 - Two sessions at one commit (the second started from the first, `from: {sid}`): with the push slot taken, the second's agent push queues its run, the first's person presses Verify, and when the slot frees the second still runs its own copy (or is decided again when the first's run ends) and pushes.

@@ -29,19 +29,23 @@ const (
 )
 
 var agentRoutes = map[string]string{
-	"/register":   http.MethodPost,
-	"/poll":       http.MethodGet,
-	"/events":     http.MethodPost,
-	"/wait":       http.MethodGet,
-	"/wake":       http.MethodPost,
-	"/image":      http.MethodGet,
-	"/check":      http.MethodPost,
-	pushRoute:     http.MethodPost,
-	forgeRoute:    http.MethodPost,
-	checksRoute:   http.MethodPost,
-	commentsRoute: http.MethodPost,
-	splitRoute:    http.MethodPost,
-	workTypeRoute: http.MethodPost,
+	"/register":    http.MethodPost,
+	"/poll":        http.MethodGet,
+	"/events":      http.MethodPost,
+	"/wait":        http.MethodGet,
+	"/wake":        http.MethodPost,
+	"/image":       http.MethodGet,
+	"/check":       http.MethodPost,
+	pushRoute:      http.MethodPost,
+	forgeRoute:     http.MethodPost,
+	checksRoute:    http.MethodPost,
+	commentsRoute:  http.MethodPost,
+	splitRoute:     http.MethodPost,
+	workTypeRoute:  http.MethodPost,
+	accessAskRoute: http.MethodPost,
+	actionAskRoute: http.MethodPost,
+	sshKeysRoute:   http.MethodGet,
+	sshSignRoute:   http.MethodPost,
 
 	turnCheckRoute:    http.MethodPost,
 	sessionModelRoute: http.MethodGet,
@@ -180,6 +184,18 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	case workTypeRoute:
 		s.workTypeRequest(w, r)
+		return
+	case accessAskRoute:
+		s.accessRequest(w, r)
+		return
+	case actionAskRoute:
+		s.actionRequest(w, r)
+		return
+	case sshKeysRoute:
+		s.sshKeys(w, r)
+		return
+	case sshSignRoute:
+		s.sshSign(w, r)
 		return
 	case "/check":
 		s.check(w, r)

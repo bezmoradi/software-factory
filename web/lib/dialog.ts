@@ -10,7 +10,6 @@ export interface ModalOptions {
   actions?: Node[]
   consent?: boolean
   headingClass?: string
-  closeButton?: boolean
   focus?: 'heading' | HTMLElement
   single?: string
   docs: string | false
@@ -41,7 +40,7 @@ export function modal(o: ModalOptions): Modal {
   }
   const back = opener()
   const d = el('dialog', [o.consent === false ? '' : 'consent', o.kind, 'surface'].filter(Boolean).join(' '))
-  const heading = el('h2', o.headingClass ?? (o.closeButton ? 'dialog-title' : 'label'), o.title)
+  const heading = el('h2', o.headingClass ?? 'label', o.title)
   heading.id = `dialog-title-${++titles}`
   d.setAttribute('aria-labelledby', heading.id)
   const cleanups: (() => void)[] = []
@@ -77,18 +76,7 @@ export function modal(o: ModalOptions): Modal {
   }
   if (o.focus === 'heading') heading.tabIndex = -1
   const docs = o.docs === false ? undefined : docsLink({ doc: o.docs, open: () => handle.close() })
-  let head: HTMLElement = pageHead({ title: heading, ...(docs ? { action: docs } : {}) })[0]!
-  if (o.closeButton) {
-    const cross = button('', 'ghost icon-button dialog-x', () => handle.close())
-    cross.setAttribute('aria-label', 'Close')
-    cross.title = 'Close'
-    const mark = el('sf-icon', 'icon')
-    mark.setAttribute('name', 'close')
-    cross.append(mark)
-    const wrap = el('div', 'dialog-head')
-    wrap.append(heading, ...(docs ? [docs] : []), cross)
-    head = wrap
-  }
+  const head = pageHead({ title: heading, ...(docs ? { action: docs } : {}) })[0]!
   d.append(head, ...(o.body ?? []))
   if (o.lead?.length || o.actions?.length) d.append(actions(o.actions ?? [], o.lead ?? []))
   d.addEventListener('cancel', e => {
@@ -123,7 +111,7 @@ export function modal(o: ModalOptions): Modal {
   return handle
 }
 
-export function confirmDialog(title: string, docs: string, parts: Node[], yes: string, tone: 'primary' | 'danger', cleanup?: () => void, no = 'Cancel'): Promise<boolean> {
+export function confirmDialog(title: string, docs: string, parts: Node[], yes: string, tone: 'primary' | 'danger', no = 'Cancel'): Promise<boolean> {
   return new Promise(resolve => {
     let answer = false
     const m = modal({
@@ -139,7 +127,6 @@ export function confirmDialog(title: string, docs: string, parts: Node[], yes: s
         }),
       ],
     })
-    if (cleanup) m.onClose(cleanup)
     m.onClose(() => resolve(answer))
   })
 }

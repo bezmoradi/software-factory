@@ -53,6 +53,8 @@ type Config struct {
 	Packs          session.PacksPage
 	Identity       session.IdentityPage
 	Egress         session.EgressPage
+	Access         session.AccessPage
+	Credentials    session.CredentialsPage
 	Recaps         session.RecapPage
 	WorkspaceView  session.WorkspacePage
 	Exceptions     session.ExceptionsPage
@@ -180,10 +182,12 @@ var pageRoutes = map[string]bool{
 	"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true,
 	reviewRoute: true, pushPageRoute: true, answerRoute: true, expectRoute: true, loginRoute: true, trustRoute: true, overrideRoute: true, handoffRoute: true, forgeAnswerRoute: true, findingsRoute: true,
 	uploadRoute: true, testListRoute: true, reviewerAgentsRoute: true, packsRoute: true, identityRoute: true, "/api/files": true, "/api/file": true, "/api/file-check": true, "/api/file-match": true,
-	haltRoute:       true,
-	limitsRoute:     true,
-	egressRoute:     true,
-	allowRulesRoute: true, agentReportRoute: true,
+	haltRoute:        true,
+	limitsRoute:      true,
+	egressRoute:      true,
+	accessRoute:      true,
+	credentialsRoute: true,
+	allowRulesRoute:  true, agentReportRoute: true,
 	walkthroughRoute: true,
 	recapRoute:       true, workspaceRoute: true, exceptionsRoute: true,
 	projectFactsRoute: true,
@@ -385,6 +389,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == egressRoute {
 		s.egress(w, r, body)
+		return
+	}
+	if r.URL.Path == accessRoute {
+		s.access(w, r, body)
+		return
+	}
+	if r.URL.Path == credentialsRoute {
+		s.credentials(w, r, body)
 		return
 	}
 	if r.URL.Path == allowRulesRoute {

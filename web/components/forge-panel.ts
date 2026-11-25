@@ -1,6 +1,6 @@
-import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import { field } from '../lib/form.ts'
-import { scrolledText } from './cards.ts'
+import { codeBlock } from './code-block.ts'
 import { saidOf } from '../lib/json.ts'
 import type { ForgePanelView, SessionForge } from '../types.ts'
 import { checkbox } from '../lib/controls.ts'
@@ -29,7 +29,6 @@ class SfForgePanel extends HTMLElement {
   #drafts = new Map<string, boolean>()
   #confirmed = new Set<string>()
   #answered = ''
-  #observers: ResizeObserver[] = []
 
   connectedCallback() {
     if (!this.#key) this.hidden = true
@@ -39,8 +38,6 @@ class SfForgePanel extends HTMLElement {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
-    for (const observer of this.#observers) observer.disconnect()
-    this.#observers = []
     const list = value?.forge ?? []
     this.hidden = !list.length
     if (!value || !list.length) {
@@ -64,7 +61,7 @@ class SfForgePanel extends HTMLElement {
     head.append(el('span', `tag ${tone}`, word), el('span', 'small', `Comment on pull request #${f.number} in ${shown(f.repo)}`), el('span', 'small muted forge-time', clock(f.at || f.asked)))
     box.append(head)
     if (f.note) box.append(el('p', 'small muted', f.note))
-    if (f.body) box.append(...this.#body(unspoofed(f.body), `The comment on pull request #${f.number}`))
+    if (f.body) box.append(this.#body(unspoofed(f.body), `The comment on pull request #${f.number}`))
     if (f.state === 'waiting') box.append(...this.#waiting(f, value, 'Post comment', () => ({ card: f.card, approve: true, confirmed: !!f.secretAt })))
     if (f.url && f.state === 'commented') {
       const line = el('p', 'small forge-link')
@@ -95,7 +92,7 @@ class SfForgePanel extends HTMLElement {
     if (pull) box.append(el('p', 'small muted forge-refs', `From ${shown(f.head)} into ${shown(f.base)}`))
     if (f.state === 'waiting' || f.state === 'sending') {
       if (f.note) box.append(el('p', 'small muted', f.note))
-      box.append(...this.#body(f.body ? unspoofed(f.body) : '(no body)', `Body of the ${pull ? 'pull request' : 'issue'}`))
+      box.append(this.#body(f.body ? unspoofed(f.body) : '(no body)', `Body of the ${pull ? 'pull request' : 'issue'}`))
     }
     if (f.number && f.url) {
       const line = el('p', 'small forge-link')
@@ -121,10 +118,8 @@ class SfForgePanel extends HTMLElement {
     return box
   }
 
-  #body(text: string, name: string): Node[] {
-    const [box, more, observer] = scrolledText(text, name, 'forge-body')
-    this.#observers.push(observer)
-    return [box, more]
+  #body(text: string, name: string): HTMLElement {
+    return codeBlock({ text: visibleCommand(text), label: name, wrap: true })
   }
 
   #waiting(f: SessionForge, value: ForgePanelView, text: string, answer: () => ForgeAnswer, draft = false, title = ''): Node[] {
@@ -162,10 +157,7 @@ class SfForgePanel extends HTMLElement {
       const box = el('div', 'forge-secret')
       box.append(el('p', 'small bad', `This looks like a secret: ${shown(f.secretAt)}.`))
       if (f.secretLine) {
-        const line = el('pre', 'forge-body', shown(f.secretLine))
-        line.tabIndex = 0
-        line.setAttribute('aria-label', `The line that looks like a secret, ${shown(f.secretAt)}`)
-        box.append(line)
+        box.append(codeBlock({ text: shown(f.secretLine), label: `The line that looks like a secret, ${shown(f.secretAt)}`, wrap: true }))
       }
       const input = checkbox({ checked: this.#confirmed.has(key) })
       input.disabled = off

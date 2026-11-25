@@ -1,12 +1,13 @@
 import { request, sendState } from './api.ts'
-import { armed, current, offWhy, sessions, state, type Session } from './app-state.ts'
+import { current, offWhy, sessions, state, type Session } from './app-state.ts'
 import { setSide } from './layout.ts'
 import type { Navigation } from './navigation.ts'
-import { reviewAsking, type SessionActions } from './session-actions.ts'
+import { askToManage, busyManage, once, reviewAsking, type SessionActions } from './session-actions.ts'
 import { byId, shown, visible } from './lib/dom.ts'
 import { label } from './lib/format.ts'
 import { isMac, openPalette, openShortcuts, paletteKey, typing, type PaletteItem } from './components/palette.ts'
 import { openEgress } from './components/egress-panel.ts'
+import { openCredentials } from './components/credentials.ts'
 import { openAway } from './components/halt.ts'
 import { openWorkspace } from './components/workspace.ts'
 import { openExceptions } from './components/exceptions.ts'
@@ -24,12 +25,13 @@ interface PaletteDeps {
   openIdentity: () => void
   openSignIn: () => void
   navigation: Pick<Navigation, 'go' | 'openChanges' | 'openDocs'>
-  actions: Pick<SessionActions, 'wakeSession' | 'startReview' | 'startPush'>
+  actions: Pick<SessionActions, 'wakeSession' | 'startReview' | 'startPush' | 'send'>
 }
 
-export function startPalette({ reviewsOf, projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush } }: PaletteDeps) {
+export function startPalette({ reviewsOf, projectList, projects, labelOfSid, forgetSession, openIdentity, openSignIn, navigation: { go, openChanges, openDocs }, actions: { wakeSession, startReview, startPush, send } }: PaletteDeps) {
   const dialogs: Record<DialogName, () => void> = {
     egress: () => openEgress(request),
+    credentials: () => openCredentials(request, labelOfSid),
     workspace: () => openWorkspace(request, labelOfSid, forgetSession),
     exceptions: () => openExceptions(request, labelOfSid),
     backup: () => openBackup(request, sendState),
@@ -62,15 +64,12 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     const out: PaletteItem[] = []
     out.push({ id: 'wake', group, label: 'Wake the session', detail: 'Asks for any sign-in or cost confirmation, as Wake does', off: offline || offWhy(s, 'wake'), run: () => void wakeSession(s) })
     out.push({ id: 'turn', group, label: 'Stop the turn', off: offline || offWhy(s, 'stop'), run: () => byId('stop').click() })
-    const manageButton = byId<HTMLButtonElement>('manage-button')
-    const stopping = manageButton.dataset.action !== 'remove'
-    out.push({ id: 'manage', group, label: stopping ? 'Stop the session' : 'Delete the session', detail: 'Then press Confirm, as with its button', off: offline || offWhy(s, 'manage') || (manageButton.disabled || manageButton.getAttribute('aria-busy') === 'true' ? 'it is already being stopped or deleted' : ''), run: () => {
-      for (const action of ['stop', 'remove', 'force']) armed.delete(`${s.sid}:${action}`)
-      manageButton.click()
-      manageButton.focus()
-    } })
+    out.push({ id: 'manage', group, label: s.info.running ? 'Stop the session' : 'Delete the session', detail: 'Asks first under the message box, as the ⋯ menu does', off: offline || offWhy(s, 'manage') || (busyManage.has(s.sid) ? 'it is already being stopped or deleted' : ''), run: () => askToManage(s) })
     out.push({ id: 'review', group, label: 'Review', detail: 'Runs the required reviewers, asking for cost confirmation when the sign-in is per use', off: offline || noReview || (s.info.review?.running || reviewAsking.has(s.sid) ? 'a review is running' : ''), run: () => void startReview(s, false) })
     out.push({ id: 'push', group, label: 'Push', detail: 'The gate checks the reviews first; a held push waits on its card', off: offline || noReview || (rv?.pushing ? 'a push is being decided' : rv?.pushed ? 'the latest commit is already pushed' : ''), run: () => void startPush(s) })
+    for (const a of s.gate?.path?.asks ?? []) {
+      out.push({ id: `ask:${a.ask}`, group, label: a.label, detail: a.title, off: offline || offWhy(s, 'steps'), run: () => once(s, a.ask, () => send('', [], s, false, [], { part: { ask: a.ask } })) })
+    }
     out.push({ id: 'changes', group, label: 'Open Changes', detail: 'The diff, its comparison points and viewed marks', off: !s.changes ? 'the engine hasn’t sent this session’s changes yet' : '', run: () => openSessionPanel('changes') })
     out.push({ id: 'rules', group, label: 'What this session may and may not do', off: offWhy(s, 'rules'), run: () => openSessionPanel('rules') })
     return out
@@ -104,6 +103,7 @@ export function startPalette({ reviewsOf, projectList, projects, labelOfSid, for
     panel('v:projects', 'Projects', () => go('projects'))
     panel('v:docs', 'Docs', () => openDocs(''))
     panel('v:egress', 'Network access', dialogs.egress, needsEngine)
+    panel('v:credentials', 'Credentials', dialogs.credentials, needsEngine)
     panel('v:workspace', 'Workspace', dialogs.workspace, needsEngine)
     panel('v:exceptions', 'Register of exceptions', dialogs.exceptions, needsEngine)
     panel('v:backup', 'Export and import', dialogs.backup, needsEngine)

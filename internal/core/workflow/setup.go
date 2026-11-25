@@ -182,20 +182,6 @@ func RunTotal(list []Requirement) int {
 	return n
 }
 
-func Effective(t WorkType, files []string, listed bool) (WorkType, string) {
-	if t.Edits != DocsEdits {
-		return t, ""
-	}
-	feature, _ := builtinType("feature")
-	if !listed {
-		return feature, "Docs only needs what a Feature needs until the gate can list the files this branch changes."
-	}
-	if others := NotDocs(files); len(others) > 0 {
-		return feature, "Docs only covers documentation, but this branch also changes " + clip(others[0], 120) + ", so it needs what a Feature needs."
-	}
-	return t, ""
-}
-
 func Required(s Setup, t WorkType, files []string) []Requirement {
 	var out []Requirement
 	add := func(r Requirement) {
@@ -204,16 +190,13 @@ func Required(s Setup, t WorkType, files []string) []Requirement {
 		}
 	}
 	article := "a "
-	switch t.ID {
-	case "docs":
-		article = ""
-	case IncidentType:
+	if t.ID == IncidentType {
 		article = "an "
 	}
 	for _, r := range t.Roles {
 		add(Requirement{Agent: s.Roles[r], Role: r, Why: "Needed for " + article + t.Name + ", as its " + r.Name()})
 	}
-	if t.Profile() == Exploring {
+	if t.Profile() == Explore {
 		return out
 	}
 	byCatalog := ""

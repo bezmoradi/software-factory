@@ -175,7 +175,7 @@ func approvalOf(a *workApprovalJSON) (*session.SavedApproval, bool) {
 	if !teamSHA.MatchString(a.Hash) || !commitID.MatchString(a.Commit) {
 		return nil, false
 	}
-	v := &session.SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At}
+	v := &session.SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Plan: a.Plan}
 	if utf8.ValidString(a.Text) {
 		v.Text = a.Text
 	}
@@ -186,7 +186,7 @@ func approvalJSONOf(a *session.SavedApproval) *workApprovalJSON {
 	if a == nil {
 		return nil
 	}
-	return &workApprovalJSON{Hash: a.Hash, Commit: a.Commit, At: a.At.UTC(), Text: a.Text}
+	return &workApprovalJSON{Hash: a.Hash, Commit: a.Commit, At: a.At.UTC(), Text: a.Text, Plan: a.Plan}
 }
 
 func relPath(p string) bool {
@@ -203,7 +203,7 @@ func sessionWorkOf(sid string, w sessionWorkJSON) (session.SavedWork, bool) {
 	if !ok1 || !ok2 {
 		return session.SavedWork{}, false
 	}
-	v := session.SavedWork{Repo: w.Repo, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock)}
+	v := session.SavedWork{Repo: w.Repo, Type: w.Type, Chosen: w.Chosen, Requirements: req, Plan: plan, Lock: testLockOf(w.Lock), Ran: w.Ran}
 	for p, blobs := range w.Allowed {
 		if !relPath(p) || len(blobs) == 0 || len(blobs) > maxVersions || slices.ContainsFunc(blobs, func(b string) bool { return !commitID.MatchString(b) }) {
 			continue

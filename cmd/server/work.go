@@ -19,7 +19,7 @@ func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, 
 		Targets: targets, Doubled: doubled, Held: held, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
 		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), Note: reg.NoteFor("work-type"), HistoryOnly: history, DocsInRepo: true,
-		Changes: files.Reader{}, Level: reg.PushLevel,
+		Changes: files.Reader{}, Level: reg.PushLevel, Uncommitted: reg.SettledUncommitted,
 	}
 	if reviews != nil {
 		wc.Reviews = reviews
@@ -38,6 +38,7 @@ func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, 
 	w, err := session.NewWork(wc)
 	if err == nil {
 		repos.UseProjectData(w)
+		reg.UseFirstSteps(w)
 	}
 	if err == nil && reviews != nil {
 		reg.OnDocsReported(w.RecheckApproval)
@@ -71,6 +72,10 @@ func knackpackRefused(pins *npm.Plugins) func(string) bool {
 
 func tellSession(reg *session.Registry) func(sid, text string) error {
 	return func(sid, text string) error { return reg.Message(sid, text, false, nil, nil) }
+}
+
+func typedSession(reg *session.Registry) func(sid, text string) error {
+	return func(sid, text string) error { return reg.PersonMessage(sid, text, false, nil, nil) }
 }
 
 func (p engineParts) auditPage(cfg PageConfig) session.AuditPage {

@@ -20,7 +20,6 @@ type PathAction struct {
 	Ask   string
 	Label string
 	Title string
-	Hold  string
 }
 
 type PathStage struct {
@@ -39,12 +38,19 @@ type PathCard struct {
 	Done   float64
 }
 
+type PathLine struct {
+	Text    string
+	Actions []PathAction
+}
+
 type PathModel struct {
 	Stages        []PathStage
+	Line          *PathLine
 	Card          PathCard
 	Missing       []string
 	ReviewsActive bool
 	Required      []string
+	Asks          []PathAction
 }
 
 type mark struct {
@@ -97,6 +103,21 @@ func press(off, ran bool) string {
 	return ": press Start"
 }
 
+const (
+	continueDefine = "Continue defining"
+	continueTriage = "Continue triage"
+)
+
+func pressDefine(t pathTurn) string {
+	switch {
+	case !t.ran["define"]:
+		return ": send what you want built"
+	case t.off || t.busy:
+		return ""
+	}
+	return ": press " + continueDefine
+}
+
 func reviewCount(done, all int) string {
 	word := "reviews pass"
 	if all == 1 {
@@ -123,9 +144,16 @@ func incidentMarks(v GateView, t pathTurn) map[string]mark {
 	}
 	shown := firstRunes(status, 40)
 	reproduced := status == "REPRODUCED" || status == "CONFIRMED" || status == "UNCONFIRMED"
-	triage := markDone(false, "No triage yet: give the evidence and the deployed commit or tag in a message, then press Start")
-	if status != "" {
+	var triage mark
+	switch {
+	case status != "":
 		triage = markDone(true, "Triaged · "+path.Base(d.Path)+" says "+shown)
+	case !t.ran["triage"]:
+		triage = markDone(false, "No triage yet: describe the incident in a message, with its evidence and the deployed commit or tag")
+	case t.busy:
+		triage = markDone(false, "The agent is working on the triage")
+	default:
+		triage = markDone(false, "No triage yet: give the evidence and the deployed commit or tag in a message, then press "+continueTriage)
 	}
 	var reproduce mark
 	switch {
@@ -156,33 +184,26 @@ func incidentMarks(v GateView, t pathTurn) map[string]mark {
 	return map[string]mark{"triage": triage, "reproduce": reproduce, "cause": cause}
 }
 
-func pathMarks(v GateView, started BranchStart, t pathTurn, pushed bool) map[string]mark {
+func pathMarks(v GateView, t pathTurn, pushed bool) map[string]mark {
 	reviewers := v.Reviewers
-	begun := started == StartedCommits || v.Plan != nil || slices.ContainsFunc(reviewers, func(r WorkReviewer) bool { return r.State != "none" || r.Round != 0 })
-	strict := profileOf(v) == workflow.Feature
 	reqHash := v.Requirements != nil && v.Requirements.Hash != ""
 	working := func(step string) bool { return t.active == step || t.running == step }
 	var define mark
 	switch {
-	case strict && v.Define:
+	case v.Define:
 		define = markDone(true, "Requirements approved")
-	case !strict && v.Define:
-		define = markDone(true, "Requirements agreed")
 	case working("define"):
 		define = markDone(false, "The agent is working on the requirements")
-	case strict && reqHash && t.busy:
+	case reqHash && t.busy:
 		define = markDone(false, "The agent is still working on the requirements")
-	case strict && reqHash:
+	case reqHash:
 		define = markDone(false, "Agreed requirements wait for your approval")
-	case strict && v.Holds["define"] != "":
+	case v.Holds["define"] != "":
 		define = markDone(false, "Start waits until the gate can check the working tree")
-	case !strict && begun:
-		define = markAs(StageSkipped, "Skipped: no agreed requirements")
 	default:
-		define = markDone(false, "No agreed requirements yet"+press(t.off, t.ran["define"]))
+		define = markDone(false, "No agreed requirements yet"+pressDefine(t))
 	}
-	feature := v.Effective == workflow.Feature
-	planned := !feature || (v.Plan != nil && v.Plan.Approved)
+	change := v.Profile == workflow.Change
 	okCount := 0
 	for _, r := range reviewers {
 		if slices.Contains(reviewOK, r.State) {
@@ -191,60 +212,56 @@ func pathMarks(v GateView, started BranchStart, t pathTurn, pushed bool) map[str
 	}
 	verified := len(reviewers) > 0 && okCount == len(reviewers)
 	at := headAt(v)
-	if v.Effective == workflow.Exploring {
-		return map[string]mark{
-			"define":    define,
-			"plan":      markAs(StageSkipped, "Not needed while Exploring"),
-			"implement": markDone(false, at),
-			"verify":    markDone(false, "No reviews while Exploring"),
-			"deliver":   markDone(false, "Exploring can't push. Pick another work type to push:"),
-		}
-	}
 	wait := v.Waiting
 	passed := "Every review passes on this commit"
 	if slices.ContainsFunc(reviewers, func(r WorkReviewer) bool { return r.State == "overridden" }) {
 		passed = "Reviews done on this commit, with an override"
 	}
 	running := slices.ContainsFunc(reviewers, func(r WorkReviewer) bool { return r.State == "running" })
-	incident := v.Effective == workflow.Incident
+	incident := v.Profile == workflow.Incident
 	fixed := !incident || (v.Plan != nil && v.Plan.Approved)
 	out := map[string]mark{}
 	if incident {
 		out = incidentMarks(v, t)
 	}
 	out["define"] = define
-	var plan mark
-	name := ""
-	if v.Plan != nil {
-		name = path.Base(v.Plan.Path)
-	}
-	switch {
-	case !feature:
-		plan = markAs(StageSkipped, "Not needed for "+sizedWord(v.Effective))
-	case v.Plan == nil && working("plan"):
-		plan = markDone(false, "The agent is making the plan")
-	case v.Plan == nil && strict && v.Holds["plan"] != "":
-		plan = markDone(false, "Starts once you approve the requirements")
-	case v.Plan == nil:
-		plan = markDone(false, "Needs a plan"+press(t.off, t.ran["plan"]))
-	case !v.Plan.Approved && t.busy:
-		plan = markDone(false, "The agent is still working on the plan")
-	case !v.Plan.Approved:
-		plan = markDone(false, name+" · waiting for your approval")
-	default:
-		research := "skipped"
-		if v.Research != "" {
-			research = "done"
+	if change {
+		var plan mark
+		name := ""
+		if v.Plan != nil {
+			name = path.Base(v.Plan.Path)
 		}
-		plan = markDone(planned, name+" · approved · research "+research)
+		switch {
+		case v.NoPlan:
+			plan = markAs(StageSkipped, "Skipped: you approved the requirements without a plan")
+		case v.Plan == nil && working("plan"):
+			plan = markDone(false, "The agent is making the plan")
+		case v.Plan == nil && v.Holds["plan"] != "":
+			plan = markDone(false, "Starts once you approve the requirements")
+		case v.Plan == nil:
+			plan = markDone(false, "Needs a plan"+press(t.off, t.ran["plan"]))
+		case !v.Plan.Approved && t.busy:
+			plan = markDone(false, "The agent is still working on the plan")
+		case !v.Plan.Approved:
+			plan = markDone(false, name+" · waiting for your approval")
+		default:
+			research := "skipped"
+			if v.Research != "" {
+				research = "done"
+			}
+			plan = markDone(true, name+" · approved · research "+research)
+		}
+		out["plan"] = plan
 	}
-	out["plan"] = plan
 	suffix := ""
 	switch {
 	case wait != "" && v.Head != "":
 		suffix = " · " + wait
-	case started == StartedNoBase:
+	case v.Started == StartedNoBase:
 		suffix = " · no base branch, so the page can't tell this branch's commits"
+	}
+	if v.Profile == workflow.Direct && v.Type == workflow.DefaultType {
+		suffix += " · this pack writes no requirements the engine can read, so nothing is approved before the change"
 	}
 	if fixed {
 		out["implement"] = markDone(wait == "", at+suffix)
@@ -278,34 +295,31 @@ func pathMarks(v GateView, started BranchStart, t pathTurn, pushed bool) map[str
 	return out
 }
 
-func sizedWord(p workflow.Profile) string {
-	switch p {
-	case workflow.Fix:
-		return "a Fix"
-	case workflow.Incident:
-		return "an Incident"
-	case workflow.Exploring:
-		return "Exploring"
-	}
-	return "Docs only"
-}
-
-func profileOf(v GateView) workflow.Profile {
-	for _, t := range v.Types {
-		if t.ID == v.Type {
-			return t.Profile()
-		}
-	}
-	return workflow.Fix
-}
+const (
+	exploreLine   = "Changes files freely; nothing is pushed."
+	exploreIssues = " Turn what you found into issues; you approve each one."
+	issuesLabel   = "Draft issues"
+	issuesTitle   = "The agent drafts issues from this session; you approve each one before it's opened"
+	reviewLabel   = "Write the incident review"
+)
 
 var stageNames = map[string]string{"define": "Define", "plan": "Plan", "triage": "Triage", "reproduce": "Reproduce", "cause": "Root cause", "implement": "Implement", "verify": "Code review", "deliver": "Deliver"}
 
-var stageOrder = []string{"define", "plan", "triage", "reproduce", "cause", "implement", "verify", "deliver"}
-
 var incidentStages = []string{"triage", "reproduce", "cause"}
 
-var customKinds = map[string]workflow.Step{"define": workflow.Define, "plan": workflow.Plan, "implement": workflow.Implement, "verify": workflow.Review, "deliver": workflow.Deliver}
+var stepStages = map[workflow.Step]string{workflow.Define: "define", workflow.Plan: "plan", workflow.Implement: "implement", workflow.Review: "verify", workflow.Deliver: "deliver"}
+
+func pathStages(v GateView) []string {
+	if v.Profile == workflow.Incident {
+		return append(slices.Clone(incidentStages), "implement", "verify", "deliver")
+	}
+	steps := workflow.TypeOr(v.Types, v.Type).Steps
+	out := make([]string, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, stepStages[s])
+	}
+	return out
+}
 
 func ReviewsActive(i Info, v GateView) bool {
 	return slices.ContainsFunc(v.Reviewers, func(r WorkReviewer) bool {
@@ -315,9 +329,9 @@ func ReviewsActive(i Info, v GateView) bool {
 
 func awaitingStep(v GateView) string {
 	switch {
-	case profileOf(v) == workflow.Feature && v.Requirements != nil && v.Requirements.Hash != "" && !v.Requirements.Approved:
+	case v.Profile == workflow.Change && v.Requirements != nil && v.Requirements.Hash != "" && !v.Requirements.Approved:
 		return "define"
-	case v.Effective == workflow.Feature && v.Plan != nil && !v.Plan.Approved:
+	case v.Profile == workflow.Change && !v.NoPlan && v.Plan != nil && !v.Plan.Approved:
 		return "plan"
 	}
 	return ""
@@ -329,6 +343,8 @@ func stageTitle(ask, command string) string {
 		return "Sends /knackpack:fix-incident to this session, with the SHA-256 of the root cause you approved"
 	case AskCommit:
 		return "Asks this session to commit every uncommitted change, and to ask you about any file that shouldn't be committed"
+	case AskIssues:
+		return issuesTitle
 	case AskIncidentReview:
 		return "Sends " + command + " to this session, which commits a draft incident review"
 	}
@@ -338,9 +354,17 @@ func stageTitle(ask, command string) string {
 func Path(i Info, v GateView, pushed bool) PathModel {
 	commands := stageCommands(v)
 	reviewsActive := ReviewsActive(i, v)
+	asks := sessionAsks(commands)
+	if v.Profile == workflow.Explore {
+		line := &PathLine{Text: exploreLine, Actions: asks}
+		if len(asks) > 0 {
+			line.Text += exploreIssues
+		}
+		return PathModel{Stages: []PathStage{}, Line: line, Card: PathCard{Step: workflow.TypeOr(v.Types, v.Type).Name, Detail: headAt(v)}, ReviewsActive: reviewsActive, Required: []string{}, Missing: []string{}, Asks: asks}
+	}
 	waiting := i.Live && i.Needs > 0
 	t := pathTurn{ran: map[string]bool{}, busy: i.Busy, off: SessionActions(i)[ActionSteps] != ""}
-	for _, s := range i.StepsRan {
+	for _, s := range slices.Concat(i.StepsRan, v.Ran) {
 		t.ran[s] = true
 	}
 	if t.busy {
@@ -356,33 +380,21 @@ func Path(i Info, v GateView, pushed bool) PathModel {
 	case working && !waiting:
 		t.active = cmpOr(t.running, i.Step, "work")
 	}
-	marks := pathMarks(v, v.Started, t, pushed)
-	if typed := customType(v); typed != nil {
-		for stage, want := range customKinds {
-			got, ok := marks[stage]
-			if !slices.Contains(typed.Steps, want) || ok && got.state == StageSkipped {
-				marks[stage] = markAs(StageSkipped, "Not part of "+typed.Name)
-			}
-		}
-	}
-	incident := v.Effective == workflow.Incident
+	marks := pathMarks(v, t, pushed)
+	incident := v.Profile == workflow.Incident
 	status := ""
 	if incident && v.Plan != nil {
 		status = CauseStatus(v.Plan.Text)
 	}
-	out := PathModel{ReviewsActive: reviewsActive, Required: []string{}, Missing: []string{}}
-	if v.Effective != workflow.Exploring {
-		for _, r := range v.Reviewers {
-			out.Required = append(out.Required, r.Agent)
-		}
+	out := PathModel{ReviewsActive: reviewsActive, Required: []string{}, Missing: []string{}, Asks: asks}
+	for _, r := range v.Reviewers {
+		out.Required = append(out.Required, r.Agent)
 	}
 	current := false
 	finished := 0
 	var card *PathCard
-	for _, id := range stageOrder {
-		if incident && (id == "define" || id == "plan") || !incident && slices.Contains(incidentStages, id) {
-			continue
-		}
+	stages := pathStages(v)
+	for _, id := range stages {
 		m := marks[id]
 		now := !m.done && !current
 		st := PathStage{ID: id, Name: stageNames[id], Detail: m.detail, Actions: []PathAction{}}
@@ -421,7 +433,7 @@ func Path(i Info, v GateView, pushed bool) PathModel {
 		card.Done = float64(finished) / float64(n)
 		out.Card = *card
 	} else {
-		out.Card = PathCard{Step: "Every step done", Detail: marks["deliver"].detail, Done: 1}
+		out.Card = PathCard{Step: "Every step done", Detail: marks[stages[len(stages)-1]].detail, Done: 1}
 	}
 	if !v.Allowed && !pushed {
 		out.Missing = append(out.Missing, v.Missing...)
@@ -438,21 +450,16 @@ func cmpOr(list ...string) string {
 	return ""
 }
 
-func customType(v GateView) *workflow.WorkType {
-	for _, t := range v.Types {
-		if t.ID == v.Type && !t.Builtin {
-			return &t
-		}
-	}
-	return nil
-}
-
 func stageActions(id string, m mark, now bool, status string, t pathTurn, v GateView, commands map[string]string) []PathAction {
 	offer := func(ask, label string) PathAction {
 		return PathAction{Ask: ask, Label: label, Title: stageTitle(ask, commands[ask])}
 	}
 	out := []PathAction{}
 	switch {
+	case id == "triage":
+		if now && status == "" && t.ran[id] && !t.busy && commands[id] != "" {
+			out = append(out, offer(id, continueTriage))
+		}
 	case slices.Contains(incidentStages, id):
 		if now && status != "CONFIRMED" && commands[id] != "" {
 			label := "Start"
@@ -461,27 +468,34 @@ func stageActions(id string, m mark, now bool, status string, t pathTurn, v Gate
 			}
 			out = append(out, offer(id, label))
 		}
-	case id == "define" || id == "plan":
-		produced := id == "define" && v.Requirements != nil && v.Requirements.Hash != "" || id == "plan" && v.Plan != nil
-		if !m.complete() && t.running != id && !produced && commands[id] != "" {
+	case id == "define":
+		produced := v.Requirements != nil && v.Requirements.Hash != ""
+		if !m.complete() && t.ran[id] && !t.busy && !produced && commands[id] != "" && v.Holds[id] == "" {
+			out = append(out, offer(id, continueDefine))
+		}
+	case id == "plan":
+		if !m.complete() && t.running != id && v.Plan == nil && commands[id] != "" && v.Holds[id] == "" {
 			label := "Start"
 			if t.ran[id] {
 				label = "Continue"
 			}
-			a := offer(id, label)
-			a.Hold = v.Holds[id]
-			out = append(out, a)
+			out = append(out, offer(id, label))
 		}
 	case id == "implement":
 		if !m.complete() && commands[AskFix] != "" {
 			out = append(out, offer(AskFix, "Start"))
 		}
 	case id == "deliver":
-		for _, d := range []struct{ ask, label string }{{AskIssues, "Issues"}, {AskHandoff, "Handoff"}, {AskIncidentReview, "Incident review"}} {
-			if commands[d.ask] != "" {
-				out = append(out, offer(d.ask, d.label))
-			}
+		if commands[AskIncidentReview] != "" {
+			out = append(out, offer(AskIncidentReview, reviewLabel))
 		}
 	}
 	return out
+}
+
+func sessionAsks(commands map[string]string) []PathAction {
+	if commands[AskIssues] == "" {
+		return []PathAction{}
+	}
+	return []PathAction{{Ask: AskIssues, Label: issuesLabel, Title: stageTitle(AskIssues, commands[AskIssues])}}
 }

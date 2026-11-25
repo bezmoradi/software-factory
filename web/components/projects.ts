@@ -611,10 +611,11 @@ class SfProjects extends HTMLElement {
     }
     head.append(...this.#who(name))
     if (list.length && this.#removing !== p.path) {
-      const counted = button(count ? `${count} running` : `${list.length} stopped`, 'link project-count secondary', toggle, 'button', `row:${p.path}:count`)
+      const total = `${list.length} ${list.length === 1 ? 'session' : 'sessions'}`
+      const counted = button(total, 'link project-count secondary', toggle, 'button', `row:${p.path}:count`)
       counted.append(icon('chevron', 'icon count-chevron'))
       counted.setAttribute('aria-expanded', String(open))
-      counted.setAttribute('aria-label', `${count ? `${count} running` : `${list.length} stopped`}: ${open ? 'hide' : 'show'} the sessions in ${p.name}`)
+      counted.setAttribute('aria-label', `${total}: ${open ? 'hide' : 'show'} the sessions in ${p.name}`)
       head.append(counted)
     }
     const acts = el('span', 'acts')
@@ -793,8 +794,7 @@ class SfProjects extends HTMLElement {
     if (hosts.length) parts.push(this.#hostList)
     if (hosts.length && !this.#addingHost) {
       if (this.#replacing || this.#forgetting || !offered.length) return parts
-      const more = el('div', 'projects-actions')
-      more.append(button('+ Add another host', 'link small add-more', () => {
+      parts.push(actionsRow([], [button('Add a git host', 'small', () => {
         this.#addingHost = true
         this.#replacing = ''
         this.#forgetting = ''
@@ -802,8 +802,7 @@ class SfProjects extends HTMLElement {
         blank(this.#tokenValue)
         this.#render()
         this.#tokenHost.focus()
-      }, 'button', 'token-more'))
-      parts.push(more)
+      }, 'button', 'token-more')]))
       return parts
     }
     if (!offered.length) return parts

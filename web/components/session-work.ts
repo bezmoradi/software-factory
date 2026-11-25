@@ -1,12 +1,15 @@
 import { request, savedTone, type EngineAnswer } from '../api.ts'
-import { busy, button, el, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, say, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { actions, answerControl, field, form } from '../lib/form.ts'
-import { shortSha } from '../lib/format.ts'
+import { plural, shortSha } from '../lib/format.ts'
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
-import type { LockedTests, TestLockView, TypeChange } from '../types.ts'
+import type { Attention, LockedTests, TestLockView, TypeChange } from '../types.ts'
+import { sectionHead } from '../lib/page.ts'
 import { typeChangeOf, typeChangeParts } from './push-facts.ts'
 import { textarea, dropdown, option } from '../lib/controls.ts'
-import { toast } from './toasts.ts'
+import { outcome } from './toasts.ts'
+import './caps.ts'
+import { codeBlock } from './code-block.ts'
 
 export interface AgentModel {
   id: string
@@ -133,6 +136,10 @@ function when(ms: number): string {
   return ms ? new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''
 }
 
+function runSaid(run: CommandRun, title: string): string {
+  return `${title === 'Check' ? 'The project\'s check' : 'The setup command'} ${visible(run.said.label)}${run.state === 'failed' ? ` (exit code ${run.code})` : ''}${run.ended ? ` at ${when(run.ended)}` : run.started ? `, started ${when(run.started)}` : ''}.${run.retry ? ' That was its run after the agent\'s retry.' : ''}`
+}
+
 class SfSessionWork extends HTMLElement {
   #target: SessionWorkTarget | null = null
   #view: WorkView | null = null
@@ -147,10 +154,8 @@ class SfSessionWork extends HTMLElement {
   #bad: { input: HTMLElement; text: string } | null = null
   #loading = 0
   #key = ''
-  #details = el('details', 'session-work')
-  #summary = el('summary', 'small')
-  #opened: boolean | null = null
-  #shown = false
+  #told = ''
+  #caps = el('sf-session-limits')
   #lock: LockRead | null = null
   #lockLoading = 0
 
@@ -171,11 +176,7 @@ class SfSessionWork extends HTMLElement {
       this.#bad = null
       labelError(input, '')
     })
-    this.#details.addEventListener('toggle', () => {
-      if (this.#details.open !== this.#shown) this.#opened = this.#details.open
-      this.#shown = this.#details.open
-      if (this.#details.open && this.#target?.sid) void this.#readLock(this.#target.sid)
-    })
+    this.#caps.caps = true
   }
 
   set view(value: SessionWorkTarget | null) {
@@ -188,14 +189,15 @@ class SfSessionWork extends HTMLElement {
     if (!value?.sid) {
       this.#view = null
       this.replaceChildren()
+      this.#tell()
       return
     }
     if (changed) {
       this.#view = null
       this.#lock = null
       this.#editing = ''
-      this.#opened = null
       this.#status.textContent = ''
+      this.#tell()
       void this.refresh(value.sid)
     } else this.#paint()
   }
@@ -228,7 +230,6 @@ class SfSessionWork extends HTMLElement {
     if (!sid) return
     this.#busy = true
     this.#busyKey = key
-    this.#opened ??= this.#details.open
     this.#paint()
     const a = await request('/api/lock-tests', op === 'lock' ? { sid, op, head } : { sid, op })
     this.#busy = false
@@ -240,7 +241,7 @@ class SfSessionWork extends HTMLElement {
       return
     }
     say(this.#status, '')
-    toast({ id: `work:${sid}`, title: op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', tone: 'ok' })
+    outcome(this, this.#status, { id: `work:${sid}`, title: op === 'lock' ? `Locked the tests of commit ${shortSha(head)}.` : 'Unlocked the tests.', tone: 'ok' })
     await this.#readLock(sid)
     this.#paint()
   }
@@ -297,27 +298,28 @@ class SfSessionWork extends HTMLElement {
     return parts
   }
 
-  focusModel() {
-    this.hidden = false
-    this.#opened = true
-    this.#shown = true
-    this.#details.open = true
+  focusModel(): boolean {
+    if (!this.#model.isConnected) return false
     this.#model.focus()
+    return document.activeElement === this.#model
   }
 
-  #summaryText(v: WorkView): string {
-    const parts: string[] = []
-    if (v.canSwitchModel) parts.push(`Model: ${v.model.now ? visible(v.model.now) : 'default'}${v.model.nowEffort ? ` (${visible(v.model.nowEffort)})` : ''}`)
-    parts.push(v.queue.items.length ? `Queue: ${v.queue.items.length}${v.queue.stopped ? ', stopped' : ''}` : 'Queue: empty')
-    if (v.setup) parts.push(`Setup ${visible(v.setup.said.label)}`)
-    if (v.check) parts.push(`Check ${visible(v.check.said.label)}`)
-    if (v.ports) parts.push(`Ports ${v.ports.first}–${v.ports.last}`)
-    if (this.#lock?.lock.commit) parts.push(this.#lock.lock.changed?.count ? `Locked tests changed: ${this.#lock.lock.changed.count}` : 'Tests locked')
-    return parts.join(' · ')
+  get attention(): Attention | null {
+    const v = this.#view
+    if (!v) return null
+    const q = v.queue
+    if (q.stopped) return { section: 'queue', rank: 1, title: 'Queue.', text: `Stopped: ${q.stopped}`, alert: false }
+    if (v.check && (v.check.state === 'failed' || v.check.state === 'timed-out')) return { section: 'check', rank: 2, title: 'Check.', text: runSaid(v.check, 'Check'), alert: false }
+    if (v.setup?.state === 'running') return { section: 'setup', rank: 6, title: 'Setup.', text: runSaid(v.setup, 'Setup'), alert: false }
+    if (q.items.length) return { section: 'queue', rank: 7, title: 'Queue.', text: q.waiting || `${q.items.length} ${plural(q.items.length, 'message')} waiting.`, alert: false }
+    return null
   }
 
-  #notable(v: WorkView): boolean {
-    return v.queue.items.length > 0 || !!v.queue.stopped || v.setup?.state === 'running' || v.check?.state === 'failed' || v.check?.state === 'timed-out'
+  #tell() {
+    const key = JSON.stringify(this.attention)
+    if (key === this.#told) return
+    this.#told = key
+    emit(this, 'sf-attention')
   }
 
   #held(b: HTMLButtonElement): boolean {
@@ -332,7 +334,6 @@ class SfSessionWork extends HTMLElement {
     this.#busy = true
     this.#busyKey = key
     this.#bad = null
-    this.#opened ??= this.#details.open
     this.#paint()
     const a = await request('/api/session-work', { ...body, sid })
     this.#busy = false
@@ -349,7 +350,7 @@ class SfSessionWork extends HTMLElement {
     const v = readView(a.body)
     if (v) this.#view = v
     say(this.#status, '')
-    toast({ id: `work:${sid}`, title: ok ?? a.message, tone: ok === null ? savedTone(a) : 'ok' })
+    outcome(this, this.#status, { id: `work:${sid}`, title: ok ?? a.message, tone: ok === null ? savedTone(a) : 'ok' })
     this.#paint()
     return true
   }
@@ -368,7 +369,7 @@ class SfSessionWork extends HTMLElement {
     const now = v.model.now ? visible(name(v.model.now)) : 'the agent\'s default'
     const effort = v.model.nowEffort ? `, effort ${visible(v.model.nowEffort)}` : ''
     const said = v.model.model || v.model.effort ? `Model: ${now}${effort}, set from this page; it applies from ${v.model.from || 'the next turn'}.` : `Model: ${now}${effort}, as the session started.`
-    const parts: HTMLElement[] = [el('h3', 'label', 'Model'), el('p', 'small', said)]
+    const parts: HTMLElement[] = [sectionHead('Model', 'model'), el('p', 'small', said)]
     parts.push(el('p', 'small muted', 'Claude Code\'s own status line keeps naming the model the session started with; the switch rewrites only this session\'s main-loop requests, and never Claude Code\'s saved defaults.'))
     if (!this.contains(document.activeElement) || document.activeElement === document.body) {
       modelOptions(this.#model, v.model.offered, `The start model (${v.model.start || 'default'})`)
@@ -391,7 +392,7 @@ class SfSessionWork extends HTMLElement {
 
   #queuePart(v: WorkView, off: boolean): HTMLElement[] {
     const q = v.queue
-    const parts: HTMLElement[] = [el('h3', 'label', `Queue (${q.items.length} of ${q.max})`), el('p', 'small muted', 'The engine sends the next message when a turn ends. It stops at a card, a held push, a failed or stopped turn, or a sign-in problem, and says why here.')]
+    const parts: HTMLElement[] = [sectionHead(`Queue (${q.items.length} of ${q.max})`, 'queue'), el('p', 'small muted', 'The engine sends the next message when a turn ends. It stops at a card, a held push, a failed or stopped turn, or a sign-in problem, and says why here.')]
     if (q.waiting) parts.push(el('p', 'small', q.waiting))
     if (q.stopped) {
       const row = el('div', 'row')
@@ -463,19 +464,16 @@ class SfSessionWork extends HTMLElement {
   }
 
   #runPart(run: CommandRun | null, title: string, set: boolean): HTMLElement[] {
-    if (!run) return set ? [el('h3', 'label', title), el('p', 'small muted', title === 'Check' ? 'No check has run in this session yet.' : 'The setup command hasn\'t run in this session.')] : []
-    const word = visible(run.said.label)
-    const head = `${title === 'Check' ? 'The project\'s check' : 'The setup command'} ${word}${run.state === 'failed' ? ` (exit code ${run.code})` : ''}${run.ended ? ` at ${when(run.ended)}` : run.started ? `, started ${when(run.started)}` : ''}.${run.retry ? ' That was its run after the agent\'s retry.' : ''}`
-    const parts: HTMLElement[] = [el('h3', 'label', title), el('p', `small ${run.said.tone}`, head)]
+    const section = title === 'Check' ? 'check' : 'setup'
+    if (!run) return set ? [sectionHead(title, section), el('p', 'small muted', title === 'Check' ? 'No check has run in this session yet.' : 'The setup command hasn\'t run in this session.')] : []
+    const parts: HTMLElement[] = [sectionHead(title, section), el('p', `small ${run.said.tone}`, runSaid(run, title))]
     if (title === 'Check') parts.push(el('p', 'small muted', 'Advisory only: it never counts for a review or a push.'))
     if (run.reason) parts.push(el('p', 'small muted', visible(run.reason)))
     if (run.withheld) parts.push(el('p', 'small muted', 'The output held a token-shaped string, so the engine didn\'t keep it.'))
     else if (run.tail) {
       if (run.cut) parts.push(el('p', 'small muted', 'The last 8 KiB of its output:'))
-      const pre = el('pre', 'small command-tail', visible(run.tail))
-      pre.tabIndex = 0
-      pre.setAttribute('aria-label', `${title} output`)
-      parts.push(pre)
+      const tail = visible(run.tail)
+      parts.push(codeBlock({ text: tail, label: `${title} output`, copy: { text: tail, label: 'Copy the output' }, keep: 'end', wrap: true, size: 'small', tone: run.said.tone === 'bad' ? 'bad' : undefined }))
     }
     return parts
   }
@@ -486,17 +484,14 @@ class SfSessionWork extends HTMLElement {
     if (!t?.sid || !v) return this.replaceChildren()
     const focused = focusedKey(this)
     const off = t.disabled || this.#busy
-    const parts: HTMLElement[] = [...(t.reason ? [el('p', 'small muted', t.reason)] : []), ...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck)]
-    if (v.ports) parts.push(el('h3', 'label', 'Ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
+    const parts: HTMLElement[] = [...(t.reason ? [el('p', 'small muted', t.reason)] : []), ...this.#modelPart(v, off), ...this.#queuePart(v, off), ...this.#runPart(v.setup, 'Setup', v.hasSetup), ...this.#runPart(v.check, 'Check', v.hasCheck), this.#caps]
+    if (v.ports) parts.push(sectionHead('Ports', 'ports'), el('p', 'small', `This session's ports: ${v.ports.first} to ${v.ports.last}. Its start note names them${v.ports.env ? ', and PORT and SF_PORT_BASE in its shell hold the first one' : ''}.`))
     parts.push(...this.#lockPart(off))
     if (this.#lock?.typeChange) parts.push(el('h3', 'label', 'The change and its work type'), ...typeChangeParts(this.#lock.typeChange))
     parts.push(this.#status)
-    this.#summary.textContent = this.#summaryText(v)
-    this.#shown = this.#opened ?? this.#notable(v)
-    this.#details.open = this.#shown
-    replaceKeeping(this.#details, [this.#summary, ...parts])
+    replaceKeeping(this, parts)
     for (const input of [this.#add, this.#edit]) labelError(input, this.#bad?.input === input ? this.#bad.text : '')
-    if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
+    this.#tell()
     refocus(this, focused, key => [...(key === 'work-lock' ? ['work-unlock'] : key === 'work-unlock' ? ['work-lock'] : []), 'work-add', 'work-queue-add', 'work-model'])
   }
 }

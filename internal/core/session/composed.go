@@ -144,7 +144,6 @@ const (
 	AskFix            = "fix"
 	AskCommit         = "commit"
 	AskIssues         = "issues"
-	AskHandoff        = "handoff"
 	AskIncidentReview = "incident-review"
 	AskCheckpoint     = "checkpoint"
 )
@@ -153,7 +152,7 @@ var gateFree = map[string]string{AskCommit: CommitAsk, AskCheckpoint: Checkpoint
 
 func ValidAsk(ask string) bool {
 	switch ask {
-	case AskDefine, AskPlan, AskTriage, AskReproduce, AskCause, AskFix, AskCommit, AskIssues, AskHandoff, AskIncidentReview, AskCheckpoint:
+	case AskDefine, AskPlan, AskTriage, AskReproduce, AskCause, AskFix, AskCommit, AskIssues, AskIncidentReview, AskCheckpoint:
 		return true
 	}
 	return false
@@ -175,7 +174,7 @@ func stageCommands(v GateView) map[string]string {
 			out[string(step)] = c
 		}
 	}
-	incident := v.Effective == workflow.Incident
+	incident := v.Profile == workflow.Incident
 	if incident {
 		for _, ask := range []string{AskTriage, AskReproduce, AskCause} {
 			out[ask] = "/knackpack:debug-incident"
@@ -185,8 +184,8 @@ func stageCommands(v GateView) map[string]string {
 		}
 	}
 	if v.Adapter == workflow.Knackpack {
-		out[AskIssues], out[AskHandoff] = "/knackpack:create-issues", "/knackpack:handoff"
-		if incident {
+		out[AskIssues] = "/knackpack:create-issues"
+		if incident && v.FixCommitted {
 			out[AskIncidentReview] = "/knackpack:incident-review"
 		}
 	}

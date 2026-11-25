@@ -92,8 +92,8 @@ steps:
             types:
               - builtin: true
                 edits: "any"
-                id: "feature"
-                name: "Feature"
+                id: "change"
+                name: "Code change"
                 push: true
                 roles:
                   - "bug-hunter"
@@ -101,18 +101,6 @@ steps:
                 steps:
                   - "define"
                   - "plan"
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
-                edits: "any"
-                id: "fix"
-                name: "Fix"
-                push: true
-                roles:
-                  - "bug-hunter"
-                  - "simplicity"
-                steps:
                   - "implement"
                   - "review"
                   - "deliver"
@@ -130,20 +118,9 @@ steps:
                   - "review"
                   - "deliver"
               - builtin: true
-                edits: "docs"
-                id: "docs"
-                name: "Docs only"
-                push: true
-                roles:
-                  - "simplicity"
-                steps:
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
                 edits: "any"
                 id: "explore"
-                name: "Exploring"
+                name: "Explore"
                 push: false
                 roles: []
                 steps:
@@ -167,8 +144,8 @@ steps:
             types:
               - builtin: true
                 edits: "any"
-                id: "feature"
-                name: "Feature"
+                id: "change"
+                name: "Code change"
                 push: true
                 roles:
                   - "bug-hunter"
@@ -176,18 +153,6 @@ steps:
                 steps:
                   - "define"
                   - "plan"
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
-                edits: "any"
-                id: "fix"
-                name: "Fix"
-                push: true
-                roles:
-                  - "bug-hunter"
-                  - "simplicity"
-                steps:
                   - "implement"
                   - "review"
                   - "deliver"
@@ -205,20 +170,9 @@ steps:
                   - "review"
                   - "deliver"
               - builtin: true
-                edits: "docs"
-                id: "docs"
-                name: "Docs only"
-                push: true
-                roles:
-                  - "simplicity"
-                steps:
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
                 edits: "any"
                 id: "explore"
-                name: "Exploring"
+                name: "Explore"
                 push: false
                 roles: []
                 steps:
@@ -231,6 +185,8 @@ steps:
         starters:
           - command: "claude --bg"
             default: true
+            defaultEffort: "high"
+            defaultModel: "opus"
             efforts:
               - "low"
               - "medium"
@@ -430,8 +386,8 @@ steps:
             types:
               - builtin: true
                 edits: "any"
-                id: "feature"
-                name: "Feature"
+                id: "change"
+                name: "Code change"
                 push: true
                 roles:
                   - "bug-hunter"
@@ -439,18 +395,6 @@ steps:
                 steps:
                   - "define"
                   - "plan"
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
-                edits: "any"
-                id: "fix"
-                name: "Fix"
-                push: true
-                roles:
-                  - "bug-hunter"
-                  - "simplicity"
-                steps:
                   - "implement"
                   - "review"
                   - "deliver"
@@ -468,20 +412,9 @@ steps:
                   - "review"
                   - "deliver"
               - builtin: true
-                edits: "docs"
-                id: "docs"
-                name: "Docs only"
-                push: true
-                roles:
-                  - "simplicity"
-                steps:
-                  - "implement"
-                  - "review"
-                  - "deliver"
-              - builtin: true
                 edits: "any"
                 id: "explore"
-                name: "Exploring"
+                name: "Explore"
                 push: false
                 roles: []
                 steps:
@@ -494,6 +427,8 @@ steps:
         starters:
           - command: "claude --bg"
             default: true
+            defaultEffort: "high"
+            defaultModel: "opus"
             efforts:
               - "low"
               - "medium"

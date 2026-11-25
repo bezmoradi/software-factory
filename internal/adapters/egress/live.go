@@ -7,13 +7,17 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/session"
 )
 
-const MaxEntries = 256
+const MaxEntries = session.MaxEgressEntries
 
 type Lists struct {
 	Allow   []string
+	Ports   []string
 	Expires map[string]time.Time
+	Git     []string
 }
 
 type Live struct {

@@ -1,5 +1,5 @@
 import { request, type EngineAnswer } from './api.ts'
-import { allowed, armed, current, paint, say, schedulePaint, state, toast, type Session } from './app-state.ts'
+import { allowed, armed, current, paint, say, schedulePaint, state, toast, waking, type Session } from './app-state.ts'
 import { byId, pressed, visible, whileBusy } from './lib/dom.ts'
 import { agentWord, label } from './lib/format.ts'
 import { boxSignIn } from './components/login.ts'
@@ -28,14 +28,22 @@ export interface SessionActions {
   startTestList: (s: Session | null) => Promise<void>
   startAside: (s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) => Promise<void>
   checkStep: (s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) => Promise<void>
-  approve: (kind: 'requirements' | 'plan', hash: string) => Promise<void>
-  wakeSession: (s: Session) => Promise<void>
+  approve: (kind: 'requirements' | 'plan', hash: string, plan?: boolean) => Promise<void>
+  wakeSession: (s: Session, quiet?: boolean) => Promise<boolean>
   withConsent: (name: string, what: string, send: (c: Consent) => Promise<EngineAnswer>, resumable?: boolean, sid?: string) => Promise<EngineAnswer>
   bringMain: (s: Session) => Promise<void>
 }
 
 export const removals = new Map<string, { message: string; offer: { flag: string; value: string } | null }>()
 export const busyManage = new Map<string, { action: string; at: number; force: boolean }>()
+export const footAsk = new Map<string, 'stop' | 'remove'>()
+
+export function askToManage(s: Session) {
+  footAsk.set(s.sid, s.info.running ? 'stop' : 'remove')
+  paint()
+  const go = byId<HTMLButtonElement>('ask-confirm')
+  if (!go.closest('[hidden]')) go.focus()
+}
 export const controlBusy = new Set<string>()
 export const reviewAsking = new Set<string>()
 export const pushAsking = new Set<string>()
@@ -265,8 +273,10 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     if (files.length) body.files = files
     if (bypass) body.confirm = true
     const name = starterNames().get(s.info.agent ?? '') ?? 'The agent'
+    if (asleep) startWaking(s.sid)
     const answer = asleep ? await withConsent(name, 'the session', consent => request('/api/message', { ...body, ...consent }), false, s.sid) : await request('/api/message', body)
     if (!answer.ok) {
+      if (asleep) stopWaking(s.sid)
       const line = typeof answer.body.line === 'string' ? answer.body.line : ''
       if (line) toast({ id: 'shell-line', title: "The page doesn't run shell lines.", description: answer.message, tone: 'warn', action: { label: 'Copy the command', run: () => void copy(line) } })
       const said = answer.message
@@ -289,7 +299,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     if (!ok) toast({ id: `walkthrough:${s.sid}`, title: "The step wasn't checked off.", description: message, tone: 'bad' })
   }
 
-  async function approve(kind: 'requirements' | 'plan', hash: string) {
+  async function approve(kind: 'requirements' | 'plan', hash: string, plan?: boolean) {
     const s = current()
     if (!s) return
     s.asked[kind] = { hash, at: Date.now() }
@@ -297,19 +307,34 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     schedulePaint()
     setTimeout(schedulePaint, ASK_WAIT_MS)
     const doc = kind === 'plan' ? s.gate?.planDoc : s.gate?.requirements
-    const a = doc?.hash === hash ? await request(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text }) : null
+    const choice = kind === 'requirements' && s.gate?.planChoice && plan !== undefined ? { plan } : {}
+    const a = doc?.hash === hash ? await request(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text, ...choice }) : null
     delete s.asked[kind]
     void loadGate(s, true)
     schedulePaint()
     notThrough(a, 'The approval did not go through.')
   }
 
-  async function wakeSession(s: Session) {
+  function startWaking(sid: string) {
+    waking.set(sid, Date.now())
+    schedulePaint()
+  }
+
+  function stopWaking(sid: string) {
+    waking.delete(sid)
+    schedulePaint()
+  }
+
+  async function wakeSession(s: Session, quiet = false): Promise<boolean> {
     const name = starterNames().get(s.info.agent ?? '') ?? 'The agent'
+    startWaking(s.sid)
     const a = await withConsent(name, 'the session', consent => request('/api/wake', { sid: s.sid, ...consent }), false, s.sid)
     const { ok, body, message } = a
-    if (body.refused === true) return
+    if (!ok) stopWaking(s.sid)
+    if (body.refused === true) return false
+    if (ok && (quiet || current() === s)) return true
     toast(ok ? { id: `wake:${s.sid}`, title: `Waking ${visible(label(s.info))}…`, description: 'It reconnects in a few seconds.', tone: 'info', timeout: 30000 } : { id: `wake:${s.sid}`, title: 'The session could not be woken.', description: message, tone: 'bad', timeout: body.needs || identityAction(a) ? 0 : undefined, action: identityAction(a) })
+    return ok
   }
 
   async function answerTrust(path: string): Promise<EngineAnswer | null> {
@@ -360,7 +385,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
         continue
       }
       if (next === 'trust' && needs.trust) {
-        if (!(await askTrust(needs.trust))) break
+        if (!(await askTrust())) break
         const trusted = await answerTrust(needs.trust)
         if (!trusted) break
         if (!trusted.ok) {

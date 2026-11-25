@@ -4,6 +4,7 @@ import { isRecord, saidOf, type Said } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { pngBlob, saveBlob } from '../lib/files.ts'
 import { toast } from './toasts.ts'
+import { codeBlock } from './code-block.ts'
 
 const ROUTE = '/api/verify'
 const SHA = /^[0-9a-f]{40}$/
@@ -323,12 +324,9 @@ class SfVerify extends HTMLElement {
     if (r.reason) out.push(el('p', 'small', shown(r.reason)))
     if (r.withheld) out.push(el('p', 'small muted', 'Its output held a token-shaped string, so the engine didn’t keep it.'))
     else if (r.tail) {
-      const pre = el('pre', 'small command-tail', visibleCommand(r.tail))
-      pre.tabIndex = 0
-      pre.setAttribute('role', 'region')
-      pre.setAttribute('aria-label', current ? 'End of the verification run’s output' : `End of the output of the run of ${shortSha(r.commit)}`)
+      const tail = visibleCommand(r.tail)
       if (r.cut) out.push(el('p', 'small muted', 'The end of its output:'))
-      out.push(pre)
+      out.push(codeBlock({ text: tail, label: current ? 'End of the verification run’s output' : `End of the output of the run of ${shortSha(r.commit)}`, copy: { text: tail, label: 'Copy the output' }, keep: 'end', wrap: true, size: 'small', tone: r.said.tone === 'bad' ? 'bad' : undefined }))
     }
     out.push(...this.#files(r))
     return out

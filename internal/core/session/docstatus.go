@@ -8,11 +8,11 @@ const (
 	DocRootCause    = "root-cause"
 )
 
-func DocKind(requirements bool, effective workflow.Profile) string {
+func DocKind(requirements bool, profile workflow.Profile) string {
 	switch {
 	case requirements:
 		return DocRequirements
-	case effective == workflow.Incident:
+	case profile == workflow.Incident:
 		return DocRootCause
 	}
 	return DocPlan
@@ -53,7 +53,7 @@ func DocStatus(kind string, d WorkDoc) string {
 		}
 		return What + " changed after you approved " + them + ". Read " + them + " and approve again."
 	case reqs:
-		return "Plan starts once you read the agreed requirements and approve them."
+		return "The next step starts once you read the agreed requirements and approve them."
 	case cause:
 		return "Fix starts once you read the confirmed root cause and approve it. Approving it lets this branch push code; an edit to the file clears it."
 	}

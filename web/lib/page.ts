@@ -1,5 +1,6 @@
 import { button, el } from './dom.ts'
 import { tipText, tooltip } from './tooltip.ts'
+import type { SettingsSection } from '../types.ts'
 
 export interface DocsLinkOptions {
   doc?: string
@@ -74,6 +75,12 @@ export function pageHead(o: PageHeadOptions): HTMLElement[] {
   if (o.docs) row.append(docsLink(o.docs))
   if (o.action) row.append(o.action)
   return o.intro ? [row, el('p', 'small muted page-intro', o.intro)] : [row]
+}
+
+export function sectionHead(text: string, section: SettingsSection): HTMLHeadingElement {
+  const h = el('h3', 'label', text)
+  h.dataset.section = section
+  return h
 }
 
 export interface UsageMeterOptions {
