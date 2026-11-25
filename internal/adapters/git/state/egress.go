@@ -29,10 +29,8 @@ type addedHostJSON struct {
 }
 
 type gatewayJSON struct {
-	URL       string `json:"url"`
-	Agents    bool   `json:"agents"`
-	Reviewers bool   `json:"reviewers"`
-	Owner     string `json:"owner,omitempty"`
+	URL   string `json:"url"`
+	Owner string `json:"owner,omitempty"`
 }
 
 type egressJSON struct {
@@ -87,7 +85,7 @@ func (s Egress) Load() (session.EgressSettings, bool, error) {
 		if err != nil {
 			return session.EgressSettings{}, false, errEgressFile
 		}
-		out.Gateway = session.Gateway{URL: u, Host: host, Agents: f.Gateway.Agents, Reviewers: f.Gateway.Reviewers}
+		out.Gateway = session.Gateway{URL: u, Host: host}
 	}
 	return out, true, nil
 }
@@ -107,7 +105,7 @@ func (s Egress) Save(e session.EgressSettings) error {
 		f.Added = append(f.Added, j)
 	}
 	if e.Gateway.URL != "" {
-		f.Gateway = &gatewayJSON{Owner: owner, URL: e.Gateway.URL, Agents: e.Gateway.Agents, Reviewers: e.Gateway.Reviewers}
+		f.Gateway = &gatewayJSON{Owner: owner, URL: e.Gateway.URL}
 	}
 	return write(s.Dir, egressFile, f)
 }

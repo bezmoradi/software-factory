@@ -1,9 +1,10 @@
-import { actionButton, button, el, statusLine } from '../lib/dom.ts'
+import { answerOf, type EngineAnswer } from '../api.ts'
+import { actionButton, button, el, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { icon } from './icon.ts'
-import { commandBlock } from './copy.ts'
+import { codeBlock } from './code-block.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 interface Release {
   version: string
@@ -11,7 +12,6 @@ interface Release {
 
 export interface UpdateView {
   running: string
-  check: boolean
   forced: boolean
   unreadable: boolean
   development: boolean
@@ -28,7 +28,7 @@ const RELOAD_MS = 60 * 60 * 1000
 const SOON_MS = 15_000
 const SOON_TRIES = 8
 
-let post: Post = () => Promise.reject(new Error('not ready'))
+let post: Post = () => answerOf(null)
 let view: UpdateView | null = null
 let timer = 0
 let soon = 0
@@ -45,10 +45,9 @@ function releaseOf(v: unknown): Release | null {
 export function updateOf(v: unknown): UpdateView | null {
   if (v === null || typeof v !== 'object') return null
   const r = v as Record<string, unknown>
-  if (typeof r.running !== 'string' || typeof r.check !== 'boolean') return null
+  if (typeof r.running !== 'string') return null
   return {
     running: VERSION.test(r.running) ? r.running : '',
-    check: r.check,
     forced: r.forced === true,
     unreadable: r.unreadable === true,
     development: r.development === true,
@@ -59,7 +58,7 @@ export function updateOf(v: unknown): UpdateView | null {
 
 function settle() {
   clearTimeout(soon)
-  if (view?.check && view.result === 'not-yet' && tries < SOON_TRIES) {
+  if (view && !view.forced && !view.unreadable && view.result === 'not-yet' && tries < SOON_TRIES) {
     tries++
     soon = window.setTimeout(() => void loadUpdate(), SOON_MS)
     return
@@ -72,22 +71,15 @@ function paintAll() {
 }
 
 async function call(body: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, message: 'The engine didn’t answer.' }
-  const parsed: unknown = await res.json().catch(() => null)
-  const next = res.ok ? updateOf(parsed) : null
+  const a = await post(ROUTE, body)
+  const next = a.ok ? updateOf(a.body) : null
   if (next) {
     view = next
     paintAll()
     settle()
     return { ok: true, message: '' }
   }
-  const message = parsed !== null && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string' ? (parsed as { message: string }).message : ''
-  return { ok: false, message: message || 'The engine didn’t take that. Try again once the page is connected.' }
-}
-
-export function developmentBuild(): boolean {
-  return view?.development === true
+  return { ok: false, message: a.message }
 }
 
 export function initUpdates(p: Post): void {
@@ -118,18 +110,8 @@ function code(text: string): HTMLElement {
   return el('code', '', text)
 }
 
-function oneLine(command: string, what: string): HTMLElement {
-  const block = commandBlock(command, `Copy the ${what}`)
-  block.classList.add('update-oneline')
-  const text = block.querySelector('code')
-  if (!text) return block
-  const scroll = el('div', 'update-scroll')
-  scroll.tabIndex = 0
-  scroll.setAttribute('role', 'region')
-  scroll.setAttribute('aria-label', `The ${what}`)
-  text.replaceWith(scroll)
-  scroll.append(text)
-  return block
+function command(text: string, what: string, wrap = true): HTMLElement {
+  return codeBlock({ text: visible(text), label: `The ${what}`, copy: { text, label: `Copy the ${what}` }, look: 'terminal', wrap })
 }
 
 function releaseSteps(version: string): HTMLElement {
@@ -138,16 +120,16 @@ function releaseSteps(version: string): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const download = el('li')
-  download.append(para('', 'Download it:'), oneLine(`curl -fsSLO ${script}`, 'download command'))
+  download.append(para('', 'Download it:'), command(`curl -fsSLO ${script}`, 'download command', false))
   const verify = el('li')
-  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), oneLine(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command'))
+  verify.append(para('', `Check that this repository’s release workflow built it for ${tag}:`), command(`gh attestation verify install.sh ${SIGNER} --source-ref refs/tags/${tag}`, 'check command', false))
   const run = el('li')
-  run.append(para('', 'Run it:'), commandBlock('sh install.sh', 'Copy the run command'))
+  run.append(para('', 'Run it:'), command('sh install.sh', 'run command'))
   steps.append(download, verify, run)
   box.append(
     el('h3', 'update-subhead', 'If you installed a release'),
     para('small', `Run release ${version}’s install command in a terminal:`),
-    oneLine(`curl -fsSL ${script} | sh`, 'install command'),
+    command(`curl -fsSL ${script} | sh`, 'install command', false),
     para('small', 'Or check the script before it runs, with a signed-in gh:'),
     steps,
     para('small muted', 'Either way, the script replaces the containers of the project software-factory and keeps its volumes. If you installed with SF_HOME, SF_DOCKER_GID, SF_DOCKER_SOCKET or SF_PORT set, set them the same way again.'),
@@ -159,9 +141,9 @@ function sourceSteps(development: boolean): HTMLElement {
   const box = el('section', 'update-steps')
   const steps = el('ol', 'small update-list')
   const pull = el('li')
-  pull.append(para('', 'Get the new code:'), commandBlock('git pull', 'Copy the pull command'))
+  pull.append(para('', 'Get the new code:'), command('git pull', 'pull command'))
   const up = el('li')
-  up.append(para('', 'Rebuild and restart the stack:'), commandBlock('make up', 'Copy the rebuild command'))
+  up.append(para('', 'Rebuild and restart the stack:'), command('make up', 'rebuild command'))
   steps.append(pull, up)
   box.append(
     el('h3', 'update-subhead', development ? 'This engine runs a development image, built from source' : 'If you built it from source'),
@@ -189,10 +171,6 @@ export function openUpdate(): void {
   const running = view.running
   const development = view.development
   const title = `Update to Software Factory ${r.version}`
-  const cross = button('', 'ghost icon-button update-x', () => m.close())
-  cross.setAttribute('aria-label', 'Close')
-  cross.title = 'Close'
-  cross.append(icon('close'))
   const said = statusLine('small warn')
   const later = actionButton('Remind me later', 'ghost small', async () => {
     const a = await call({ later: r.version })
@@ -205,8 +183,7 @@ export function openUpdate(): void {
   const m = modal({
     kind: 'update',
     title,
-    headingClass: 'update-title',
-    header: { cls: 'update-head', after: [cross] },
+    docs: 'update-to-software-factory',
     body: [
       para('small', running ? `You run ${running}. ` : '', `Release ${r.version} is out: `, link(`${REPO}/releases/tag/${tag}`, `${tag} on GitHub`), '.'),
       para('small muted', 'Software Factory never updates itself. Nothing changes until you run the steps below yourself.'),
@@ -254,70 +231,10 @@ class SfUpdate extends HTMLElement {
   }
 }
 
-class SfUpdateSetting extends HTMLElement {
-  #box = el('input')
-  #label = el('label', 'notify-pref small')
-  #note = el('p', 'small muted')
-  #off = el('span', 'update-off', '(off)')
-  #said = statusLine('small warn')
-  #busy = false
-
-  connectedCallback() {
-    painted.add(this)
-    if (!this.childElementCount) {
-      this.#box.type = 'checkbox'
-      this.#note.id = 'update-setting-note'
-      this.#box.setAttribute('aria-describedby', this.#note.id)
-      this.#box.addEventListener('click', e => {
-        if (this.#busy || this.#box.getAttribute('aria-disabled') === 'true') e.preventDefault()
-      })
-      this.#box.addEventListener('change', () => void this.#change())
-      this.#off.setAttribute('aria-hidden', 'true')
-      this.#label.append(this.#box, el('span', '', 'Check for updates'), this.#off)
-      const set = el('fieldset', 'themes')
-      set.append(el('legend', 'label', 'Updates'), this.#label, this.#note, this.#said)
-      this.append(set)
-    }
-    this.paint()
-  }
-
-  disconnectedCallback() {
-    painted.delete(this)
-  }
-
-  async #change() {
-    const on = this.#box.checked
-    this.#busy = true
-    this.#box.setAttribute('aria-busy', 'true')
-    const a = await call({ check: on })
-    this.#busy = false
-    this.#box.removeAttribute('aria-busy')
-    this.#said.textContent = a.ok ? '' : a.message
-    this.paint()
-  }
-
-  paint() {
-    const v = view
-    const locked = !v || v.forced || v.unreadable
-    if (!this.#busy) this.#box.checked = !!v?.check
-    if (locked) this.#box.setAttribute('aria-disabled', 'true')
-    else this.#box.removeAttribute('aria-disabled')
-    this.#label.classList.toggle('is-off', locked)
-    this.#off.hidden = !v || !locked
-    this.#note.classList.toggle('muted', !locked)
-    if (!v) this.#note.textContent = 'Shown once the page is connected to the engine.'
-    else if (v.forced) this.#note.textContent = 'Off: the engine was started with SF_NO_UPDATE_CHECK set, so this can’t be turned on here.'
-    else if (v.unreadable) this.#note.textContent = 'Off: the engine can’t read its update setting (update.json in its state).'
-    else this.#note.textContent = 'Once a day the engine asks api.github.com for the newest release, from your computer, with no token or cookie. A newer one shows Update in the top bar.'
-  }
-}
-
 customElements.define('sf-update', SfUpdate)
-customElements.define('sf-update-setting', SfUpdateSetting)
 
 declare global {
   interface HTMLElementTagNameMap {
     'sf-update': SfUpdate
-    'sf-update-setting': SfUpdateSetting
   }
 }

@@ -29,6 +29,7 @@ type SandboxConfig struct {
 	Deny      []string
 	Outside   string
 	Allowlist *session.Allowlist
+	Grants    docker.GrantLists
 	TLS       *tls.Config
 }
 
@@ -97,7 +98,7 @@ func sandboxChecker(cfg PageConfig, hosts func() []string) (session.Sandbox, err
 	sb := cfg.Sandbox
 	return docker.New(docker.Config{
 		Probe: []string{cfg.AgentBinary, "sandbox-probe"},
-		Proxy: sb.Proxy, Status: sb.Status, Side: AgentsSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts, Lists: listsOf(sb), TLS: sb.TLS,
+		Proxy: sb.Proxy, Status: sb.Status, Side: AgentsSide, Allow: sb.Allow, Deny: sb.Deny, Outside: sb.Outside, Repos: hosts, Lists: listsOf(sb), Grants: sb.Grants, TLS: sb.TLS,
 	})
 }
 

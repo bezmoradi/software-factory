@@ -42,7 +42,7 @@ type SavedPromptStore interface {
 
 type SavedPromptsPage interface {
 	Prompts(repo string) ([]SavedPrompt, error)
-	SavePrompt(repo, id, name, text string) ([]SavedPrompt, error)
+	SavePrompt(repo, id, name, text string) ([]SavedPrompt, bool, error)
 	RemovePrompt(repo, id string) ([]SavedPrompt, error)
 }
 
@@ -117,12 +117,12 @@ func newPromptID() string {
 
 func (s *SavedPrompts) load() (SavedPromptState, error) {
 	if s.cfg.Store == nil {
-		return SavedPromptState{}, explained(conflict("no store"), "This engine keeps no saved prompts.")
+		return SavedPromptState{}, conflict("no store", "This engine keeps no saved prompts.")
 	}
 	st, err := s.cfg.Store.Load()
 	if err != nil {
 		s.cfg.Logger.Warn("saved prompts", "event", "not-read")
-		return SavedPromptState{}, explained(conflict("unreadable"), "The engine couldn't read its saved prompts, so it changes none.")
+		return SavedPromptState{}, conflict("unreadable", "The engine couldn't read its saved prompts, so it changes none.")
 	}
 	if st.Projects == nil {
 		st.Projects = map[string][]SavedPrompt{}
@@ -193,7 +193,7 @@ func (s *SavedPrompts) KeepProjects(names []string) {
 
 func (s *SavedPrompts) known(repo string) error {
 	if s.cfg.Known == nil || !s.cfg.Known(repo) {
-		return explained(invalid("repo"), "That isn't a project this engine knows.")
+		return invalid("repo", "That isn't a project this engine knows.")
 	}
 	return nil
 }
@@ -215,46 +215,57 @@ func (s *SavedPrompts) save(st SavedPromptState) error {
 	trimmed, err := s.cfg.Store.Save(st)
 	if err != nil {
 		s.cfg.Logger.Warn("saved prompts", "event", "not-saved", "err", err.Error())
-		return explained(conflict("not saved"), "The engine couldn't save the prompts, so nothing changed.")
+		return conflict("not saved", "The engine couldn't save the prompts, so nothing changed.")
 	}
 	s.trimmed(trimmed)
 	return nil
 }
 
-func (s *SavedPrompts) SavePrompt(repo, id, name, text string) ([]SavedPrompt, error) {
+func PromptsFull(saved int) string {
+	if saved < MaxSavedPrompts {
+		return ""
+	}
+	return "A project keeps at most 50 saved prompts"
+}
+
+func (s *SavedPrompts) SavePrompt(repo, id, name, text string) ([]SavedPrompt, bool, error) {
+	name = strings.TrimSpace(name)
 	if err := s.known(repo); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	switch {
 	case id != "" && !ValidPromptID(id):
-		return nil, invalid("id")
+		return nil, false, invalid("id", "That isn't the id of a saved prompt. Reload the list and try again.")
 	case !ValidPromptName(name):
-		return nil, explained(invalid("name"), "A prompt's name is one line of 1 to 60 characters.")
+		return nil, false, onField("name", invalid("name", "One line of 1 to 60 characters."))
 	case !ValidPromptText(text):
-		return nil, explained(invalid("text"), "A prompt's text is 1 to 20,000 characters, the length of a message, with no control characters but line breaks and tabs.")
+		return nil, false, onField("text", invalid("text", "Needs 1 to 20,000 characters."))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, err := s.load()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	all := st.Projects
 	list := slices.Clone(all[repo])
 	edited := SavedPrompt{ID: id, Name: name, Text: text, At: s.cfg.Now()}
 	if id == "" {
 		if len(list) >= MaxSavedPrompts {
-			return nil, explained(limited("prompts"), "A project keeps at most 50 saved prompts. Delete one first.")
+			return nil, false, limited("prompts", "A project keeps at most 50 saved prompts. Delete one first.")
 		}
 		if _, ok := all[repo]; !ok && len(all) >= MaxPromptProjects {
-			return nil, explained(limited("projects"), "The engine keeps saved prompts for at most 200 projects.")
+			return nil, false, limited("projects", "The engine keeps saved prompts for at most 200 projects.")
 		}
 		edited.ID = newPromptID()
 		list = append(list, edited)
 	} else {
 		i := slices.IndexFunc(list, func(p SavedPrompt) bool { return p.ID == id })
 		if i < 0 {
-			return nil, explained(conflict("gone"), "That prompt isn't saved any more. Reload the list.")
+			return nil, false, conflict("gone", "That prompt isn't saved any more. Reload the list.")
+		}
+		if list[i].Name == name && list[i].Text == text {
+			return list, false, nil
 		}
 		list[i] = edited
 	}
@@ -262,13 +273,13 @@ func (s *SavedPrompts) SavePrompt(repo, id, name, text string) ([]SavedPrompt, e
 	all[repo] = list
 	if promptBytes(all) > MaxSavedPromptBytes {
 		all[repo] = before
-		return nil, explained(limited("size"), "The saved prompts together would be over 1 MiB, more than the engine keeps. Delete or shorten some first.")
+		return nil, false, limited("size", "The saved prompts together would be over 1 MiB, more than the engine keeps. Delete or shorten some first.")
 	}
 	if err := s.save(st); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s.cfg.Logger.Info("saved prompts", "event", "saved", "new", id == "")
-	return slices.Clone(list), nil
+	return slices.Clone(list), true, nil
 }
 
 func (s *SavedPrompts) RemovePrompt(repo, id string) ([]SavedPrompt, error) {
@@ -276,7 +287,7 @@ func (s *SavedPrompts) RemovePrompt(repo, id string) ([]SavedPrompt, error) {
 		return nil, err
 	}
 	if !ValidPromptID(id) {
-		return nil, invalid("id")
+		return nil, invalid("id", "That isn't the id of a saved prompt. Reload the list and try again.")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

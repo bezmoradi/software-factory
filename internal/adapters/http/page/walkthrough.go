@@ -75,7 +75,7 @@ func (s *Server) walkthroughCheck(w http.ResponseWriter, r *http.Request, body m
 	done, okDone := body["done"].(bool)
 	if !keysWithin(body, "sid", "commit", "step", "done") || !okSid || sid == "" || len(sid) > 80 || !okCommit || !commitHex.MatchString(commit) ||
 		!okStep || step != math.Trunc(step) || step < 1 || step > session.MaxWalkSteps || !okDone {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

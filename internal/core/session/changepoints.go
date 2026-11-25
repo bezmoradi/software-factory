@@ -64,10 +64,10 @@ func (p *Pushes) branchWalk(ctx context.Context, t PushTarget, head, fork string
 	}
 	commits, complete, err := p.cfg.Branch.BranchCommits(ctx, t.Repo, head, fork, MaxBranchWalk)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return branchSet{}, explained(conflict("changes"), "The engine stopped reading the branch's history: the request ran out of time.")
+		return branchSet{}, conflict("changes", "The engine stopped reading the branch's history: the request ran out of time.")
 	}
 	if err != nil {
-		return branchSet{}, explained(conflict("changes"), clip("The engine couldn't read the branch's history: "+err.Error(), maxOutput))
+		return branchSet{}, conflict("changes", clip("The engine couldn't read the branch's history: "+err.Error(), maxOutput))
 	}
 	return branchSet{commits: commits, complete: complete}, nil
 }
@@ -114,20 +114,20 @@ func changeBase(fork string, at ChangePoint, points ChangePoints, branch branchS
 	switch at.From {
 	case FromReviewed:
 		if points.Reviewed == "" {
-			return "", explained(conflict("no reviewed commit"), "No commit on this session's branch has a reviewer's pass or block yet, within the newest "+strconv.Itoa(MaxBranchWalk)+" commits, so there is no last reviewed commit to compare with.")
+			return "", conflict("no reviewed commit", "No commit on this session's branch has a reviewer's pass or block yet, within the newest "+strconv.Itoa(MaxBranchWalk)+" commits, so there is no last reviewed commit to compare with.")
 		}
 		return points.Reviewed, nil
 	case FromTurn:
 		if points.Turn == "" {
-			return "", explained(conflict("no turn"), "The session hasn't reported starting a turn since the engine started, at a commit still on its branch, so there is no turn to compare with.")
+			return "", conflict("no turn", "The session hasn't reported starting a turn since the engine started, at a commit still on its branch, so there is no turn to compare with.")
 		}
 		return points.Turn, nil
 	case FromCommit:
 		if !branch.has(at.Commit) {
 			if !branch.complete {
-				return "", explained(conflict("commit"), "Commit "+shortSHA(at.Commit)+" isn't within the newest "+strconv.Itoa(MaxBranchWalk)+" commits of this session's branch, so the engine doesn't compare with it.")
+				return "", conflict("commit", "Commit "+shortSHA(at.Commit)+" isn't within the newest "+strconv.Itoa(MaxBranchWalk)+" commits of this session's branch, so the engine doesn't compare with it.")
 			}
-			return "", explained(conflict("commit"), "Commit "+shortSHA(at.Commit)+" isn't on this session's branch, so the engine doesn't compare with it.")
+			return "", conflict("commit", "Commit "+shortSHA(at.Commit)+" isn't on this session's branch, so the engine doesn't compare with it.")
 		}
 		return at.Commit, nil
 	}

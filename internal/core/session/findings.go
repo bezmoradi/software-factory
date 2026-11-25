@@ -176,27 +176,27 @@ func (p *Pushes) SendFindings(ctx context.Context, sid, card, commit string) err
 	switch {
 	case h == nil || h.card != card || h.commit != commit:
 		p.mu.Unlock()
-		return explained(conflict("card"), "That push card isn't the one waiting any more. Press Push again.")
+		return conflict("card", "That push card isn't the one waiting any more. Press Push again.")
 	case !now.Before(h.expires):
 		delete(p.held, sid)
 		p.mu.Unlock()
 		p.showCleared(sid)
-		return explained(conflict("expired"), "That push card expired after 15 minutes. Press Push again.")
+		return conflict("expired", "That push card expired after 15 minutes. Press Push again.")
 	case p.closing:
 		p.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	case p.busy[sid]:
 		p.mu.Unlock()
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	case h.handoff:
 		p.mu.Unlock()
-		return explained(conflict("round limit"), "A reviewer reached this project's round limit and still blocks, so the engine doesn't ask the agent for another fix. Use Hand off, or decide on the push.")
+		return conflict("round limit", "A reviewer reached this project's round limit and still blocks, so the engine doesn't ask the agent for another fix. Use Hand off, or decide on the push.")
 	case !h.findings:
 		p.mu.Unlock()
-		return explained(conflict("no findings"), "No reviewer's blocking message is waiting for this commit.")
+		return conflict("no findings", "No reviewer's blocking message is waiting for this commit.")
 	case !h.sent.IsZero():
 		p.mu.Unlock()
-		return explained(conflict("sent"), "The findings for this commit were already sent to the session.")
+		return conflict("sent", "The findings for this commit were already sent to the session.")
 	}
 	p.busy[sid] = true
 	p.mu.Unlock()
@@ -207,11 +207,11 @@ func (p *Pushes) SendFindings(ctx context.Context, sid, card, commit string) err
 func (p *Pushes) sendFindings(ctx context.Context, sid string, h *heldPush, by string) error {
 	t, ok := p.cfg.Targets(sid)
 	if !ok || p.cfg.Reviews == nil {
-		return explained(conflict("not started here"), "Only a session this engine started can get its reviewers' findings.")
+		return conflict("not started here", "Only a session this engine started can get its reviewers' findings.")
 	}
 	entries, err := p.cfg.Reviews.Entries()
 	if err != nil {
-		return explained(conflict("records"), "The engine couldn't read its review records.")
+		return conflict("records", "The engine couldn't read its review records.")
 	}
 	roles := blockingRoles(entries, h.branch, h.commit, p.requiredAgents(ctx, sid, t, h.commit), func(e ReviewEntry) (string, int) { return p.cfg.Reviews.ReplyOf(sid, e) })
 	agents := make([]string, 0, len(roles))
@@ -223,17 +223,17 @@ func (p *Pushes) sendFindings(ctx context.Context, sid string, h *heldPush, by s
 	e := AuditEntry{Time: p.cfg.Now(), Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: by,
 		Kind: AuditFindings, Reviewer: strings.Join(agents, ", "), Req: shared.RequestOf(ctx)}
 	if len(roles) == 0 {
-		return explained(conflict("no findings"), "No reviewer's blocking message is waiting for this commit.")
+		return conflict("no findings", "No reviewer's blocking message is waiting for this commit.")
 	}
 	text, ok := findingsText(h.commit, h.branch, roles)
 	if !ok {
 		e.Result, e.Reason = ResultWithheld, "the reviewers' messages held a token-shaped string, so the engine didn't send them"
 		p.record(e)
 		shared.For(ctx, p.cfg.Logger).Warn("push", "event", "findings-withheld")
-		return explained(conflict("withheld"), "The reviewers' messages hold what looks like a token, so the engine didn't send them to the session. Read them on the page instead.")
+		return conflict("withheld", "The reviewers' messages hold what looks like a token, so the engine didn't send them to the session. Read them on the page instead.")
 	}
 	if p.cfg.Tell == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message.")
+		return conflict("no session", "This engine can't send the session a message.")
 	}
 	if err := p.cfg.Tell(sid, text); err != nil {
 		e.Result, e.Reason = ResultNotSent, "the session wasn't running and controlled from the page, so the findings weren't sent"
@@ -242,7 +242,7 @@ func (p *Pushes) sendFindings(ctx context.Context, sid string, h *heldPush, by s
 		if x, ok := errors.AsType[*Error](err); ok && x.Message != "" {
 			return x
 		}
-		return explained(conflict("not sent"), "The findings couldn't reach the session, which must be running and controlled from this page. The push stays held.")
+		return conflict("not sent", "The findings couldn't reach the session, which must be running and controlled from this page. The push stays held.")
 	}
 	sent := p.cfg.Now()
 	p.mu.Lock()

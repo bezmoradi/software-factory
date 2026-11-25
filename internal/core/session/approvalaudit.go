@@ -10,9 +10,11 @@ func (w *Work) holdOf(name string) (HoldSettings, error) {
 	return st.Projects[name].Hold, err
 }
 
+const HoldRule = "A whole number of files or lines, 0 to switch it off."
+
 func (w *Work) SetHold(path string, h HoldSettings) error {
-	if !h.Valid() {
-		return explained(invalid("hold"), "A size limit is a whole number of files or lines, 0 to switch it off.")
+	if field := h.Fault(); field != "" {
+		return onField(field, invalid("hold", HoldRule))
 	}
 	r, err := w.repoByPath(path)
 	if err != nil {
@@ -26,13 +28,20 @@ func (w *Work) SetHold(path string, h HoldSettings) error {
 	})
 }
 
-func (w *Work) approved(sid string, t PushTarget, head string, plan bool, hash, what string) {
+func (w *Work) approved(sid string, t PushTarget, head string, plan bool, hash, what, chose string) {
 	kind := AuditApproveRequirements
 	if plan {
 		kind = AuditApprovePlan
 	}
 	w.audit(AuditEntry{Session: sid, Repository: t.Name, Branch: t.Branch, Commit: head, Kind: kind, Hash: hash,
-		Reason: "the developer approved the " + what + " shown on the page, at commit " + shortSHA(head)})
+		Reason: "the developer approved the " + what + " shown on the page, at commit " + shortSHA(head) + chose})
+}
+
+func planChoiceWords(planned bool) string {
+	if planned {
+		return ", and chose a plan"
+	}
+	return ", without a plan"
 }
 
 func (w *Work) teamAudit(repo, kind, sha string) {

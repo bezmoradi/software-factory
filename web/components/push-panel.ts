@@ -1,27 +1,22 @@
-import { api } from '../api.ts'
-import { actionButton, busy, button, el, emit, field, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { download as downloadFile } from '../api.ts'
+import { actionButton, busy, button, el, emit, labelError, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { saveFile } from '../lib/download.ts'
+import { actions, field as formField, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
 import { changeFacts } from './push-facts.ts'
 import { coverageFacts } from './push-coverage.ts'
+import './push-checked.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
-
-const RESULTS: Record<string, [string, string, string, string]> = {
-  pushed: ['check', 'ok', 'Pushed', 'Pushed to'],
-  'up-to-date': ['check', 'ok', 'Pushed', 'Pushed to'],
-  held: ['warning', 'warn', 'Push held', 'Push held for'],
-  denied: ['error', 'bad', 'Push denied', 'Push denied for'],
-  refused: ['error', 'bad', 'Not pushed', 'Not pushed to'],
-  unclear: ['warning', 'warn', 'Push outcome unclear', 'Push outcome unclear for'],
-}
+import { textbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
 const RECORD_ROUTE = '/api/push-record'
 const RECORD_NAME = /filename="(software-factory-push-[0-9a-f]{7,12}\.json)"/
 
-function recordName(res: Response, commit: string): string {
-  return RECORD_NAME.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `software-factory-push-${commit.slice(0, 12)}.json`
+function recordName(disposition: string, commit: string): string {
+  return RECORD_NAME.exec(disposition)?.[1] ?? `software-factory-push-${commit.slice(0, 12)}.json`
 }
 
 function text(value: string): string {
@@ -68,35 +63,17 @@ function outLink(label: string, href: string, title: string): HTMLElement {
   return a
 }
 
-const HELD_UNTIL = 'held until it has: '
-
-function reasonOf(p: SessionPush): string {
-  const at = p.result === 'held' && p.missing.length ? p.reason.indexOf(HELD_UNTIL) : -1
-  const said = at < 0 ? p.reason : p.reason.slice(0, at).replace(/[;,\s]+$/, '')
-  return said.charAt(0).toUpperCase() + said.slice(1)
-}
-
-function how(p: SessionPush): string {
-  const by = p.audit?.by ?? ''
-  const who = by === 'agent' || by === 'agent, after reviews' ? 'Asked by the agent' : by === 'page' ? 'From the page' : ''
-  const passed = p.passed ?? 0
-  const overridden = p.overridden ?? 0
-  const n = passed + overridden
-  let after = ''
-  if (p.missing.length) after = `allowed with ${p.missing.length === 1 ? '1 item' : `${p.missing.length} items`} missing`
-  else if (n && !overridden) after = `after ${n === 1 ? 'its review' : n === 2 ? 'both reviews' : `all ${n} reviews`} passed`
-  else if (n) after = `after ${passed} of ${n} reviews passed, ${overridden} overridden`
-  return [who, after].filter(Boolean).join(' · ')
-}
-
 class SfPushPanel extends HTMLElement {
   #key = ''
+  #checked = el('sf-push-checked')
   #expiry = 0
   #ends = 0
   #last: PushPanelView | null = null
   #card = ''
   #reason: HTMLInputElement | null = null
   #fileReasons = new Map<string, string>()
+  #refused = new Map<string, string>()
+  #watched = new WeakSet<HTMLInputElement>()
   #fileShown = new Map<string, string>()
   #fileChanged = new Set<string>()
   #answered = ''
@@ -125,6 +102,31 @@ class SfPushPanel extends HTMLElement {
     }, Math.min(Math.max(0, this.#ends - Date.now() + 500), 2 ** 31 - 1))
   }
 
+  refuse(key: string, message: string): boolean {
+    const target = () => this.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+    if (!target()) return false
+    this.#refused.set(key, message)
+    this.#key = ''
+    this.view = this.#last
+    target()?.focus()
+    return true
+  }
+
+  #refusedFor(input: HTMLInputElement) {
+    if (!this.#watched.has(input)) {
+      this.#watched.add(input)
+      input.addEventListener('input', () => {
+        if (this.#refused.delete(input.dataset.key ?? '')) labelError(input, '')
+      })
+    }
+    labelError(input, this.#refused.get(input.dataset.key ?? '') ?? '')
+  }
+
+  #unrefuse(input: HTMLInputElement) {
+    this.#refused.delete(input.dataset.key ?? '')
+    labelError(input, '')
+  }
+
   set view(value: PushPanelView | null) {
     const key = JSON.stringify(value)
     if (key === this.#key) return
@@ -136,6 +138,7 @@ class SfPushPanel extends HTMLElement {
     this.#ends = ends > Date.now() ? ends : 0
     if (this.#ends) this.#arm()
     const p = value?.push ?? null
+    this.#checked.view = p ? { push: p } : null
     const flagged = (value?.flagged ?? []).filter(f => !f.allowed)
     this.hidden = !p && !flagged.length && value?.flagsRead !== false
     if (!value || this.hidden) {
@@ -156,10 +159,11 @@ class SfPushPanel extends HTMLElement {
     if (p.running) parts.push(el('p', 'small muted', 'The engine is checking the gate and the remote…'))
     else if (p.result) parts.push(this.#result(p))
     if (!p.running && p.result === 'pushed' && FULL_SHA.test(p.commit) && value.sid) parts.push(this.#record(value.sid, p.commit))
-    const facts = p.running ? null : changeFacts(p, value.checks ?? [], value.typeChange ?? null)
+    const facts = p.running ? null : changeFacts(p, value.typeChange ?? null)
     if (facts) parts.push(facts)
     const coverage = p.running ? null : coverageFacts(value.coverage ?? [])
     if (coverage) parts.push(coverage)
+    if (!this.#checked.hidden) parts.push(this.#checked)
     if (p.card && !p.running) parts.push(this.#heldInPlace(p, value))
     else {
       this.#card = ''
@@ -206,27 +210,21 @@ class SfPushPanel extends HTMLElement {
       } else li.append(el('code', '', text(f.shown)), ` is flagged: ${text(f.why)}${size}.`)
       if (!commit && this.#fileChanged.has(seen)) li.append(el('p', 'small warn', 'It changed on the branch since the page first showed it, so your reason was cleared: look at the change again before you allow it.'))
       if (!commit && f.link) li.append(el('p', 'small warn', "This symbolic link is one the hold can't follow, under proctor/ and pointing outside it or a root Makefile that is a link, so it can't be allowed and the engine refuses the push: only asking the agent to take it out of the branch clears it."))
-      const input = el('input', 'textbox')
-      input.maxLength = 500
+      const input = textbox()
       input.id = `flag-reason-${i}`
       input.dataset.key = `flag:${id}`
+      input.setAttribute('aria-required', 'true')
       input.value = this.#fileReasons.get(id) ?? ''
       input.addEventListener('input', () => this.#fileReasons.set(id, input.value))
-      const label = el('label', 'small', 'Your reason for allowing it (the audit file keeps it)')
-      label.htmlFor = input.id
-      const allow = button('Allow it', 'small', () => {
+      const allow = button('Allow it', 'small', undefined, 'submit', `allow:${id}`)
+      const allowIt = () => {
         if (off || f.full || f.link) return
-        const reason = input.value.trim()
-        if (!reason) {
-          input.setAttribute('aria-invalid', 'true')
-          input.focus()
-          return
-        }
-        input.removeAttribute('aria-invalid')
+        const reason = input.value
         this.#fileReasons.delete(id)
+        this.#unrefuse(input)
         if (commit) emit(this, 'sf-allow-commit', { commit, field, reason })
         else emit(this, 'sf-allow-file', { path: f.path, digest, reason })
-      }, 'button', `allow:${id}`)
+      }
       allow.setAttribute('aria-label', `Allow it: ${name}`)
       allow.setAttribute('aria-disabled', String(off || !!f.full || !!f.link))
       if (f.full) allow.title = 'It has more than 20 flagged versions on the branch, so it can\'t be allowed'
@@ -248,11 +246,8 @@ class SfPushPanel extends HTMLElement {
         : spec
           ? 'Sends the session a message asking it to take this change to a Proctor specification out of every commit on the branch, so the file is as the main branch has it'
           : 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
-      const row = el('div', 'row field-row')
-      row.append(label, input)
-      const actions = el('div', 'actions')
-      actions.append(allow, remove)
-      li.append(row, actions)
+      li.append(form({ children: [formField('Your reason for allowing it (the audit file keeps it)', input, { kind: 'inline', cls: 'field-row' }), actions([allow, remove])], onSubmit: allowIt }))
+      this.#refusedFor(input)
       ul.append(li)
     })
     box.append(ul)
@@ -260,12 +255,12 @@ class SfPushPanel extends HTMLElement {
   }
 
   #result(p: SessionPush): HTMLElement {
-    const [name, tone, alone, lead] = RESULTS[p.result] ?? ['warning', 'warn', 'Push', 'Push to']
+    const { icon: name, tone, label: alone, lead } = p.look ?? { icon: 'warning', tone: 'warn', label: 'Push', lead: 'Push to' }
     const remote = remoteOf(p.remote)
     const box = el('div', 'push-result')
     box.id = 'push-result'
     box.tabIndex = -1
-    const head = el('div', 'push-line push-head')
+    const head = el('p', 'push-line push-head')
     const title = el('span', 'push-title')
     if (p.remote) title.append(`${lead} `, outLink(text(remote.name), remote.href, text(remote.shown)))
     else title.append(alone)
@@ -284,7 +279,7 @@ class SfPushPanel extends HTMLElement {
     }
     if (refs.childNodes.length) box.append(refs)
     const ok = p.result === 'pushed' || p.result === 'up-to-date'
-    const third = p.result === 'up-to-date' ? 'The remote already had this commit, so nothing was sent' : ok ? how(p) : text(reasonOf(p))
+    const third = text(p.outcome ?? '')
     if (third) box.append(el('p', `push-line small${ok ? ' muted' : ''}`, third))
     const person = p.audit?.personReason ?? ''
     if (person && ok) box.append(el('p', 'push-line small muted', `Your reason: ${text(person)}`))
@@ -298,22 +293,21 @@ class SfPushPanel extends HTMLElement {
     const said = statusLine('small muted')
     const download = actionButton('Download this push\'s record', 'ghost small', async () => {
       said.textContent = 'Building the record…'
-      const res = await api(RECORD_ROUTE, { sid, commit }).catch(() => null)
+      const got = await downloadFile(RECORD_ROUTE, { sid, commit })
       if (this.#recordFor !== key) return
-      if (!res || !res.ok) {
-        const parsed: unknown = res ? await res.json().catch(() => null) : null
-        const message = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>).message : undefined
-        said.textContent = typeof message === 'string' && message ? visible(message) : 'The engine didn’t build the record.'
+      if (!got.answer.ok) {
+        said.textContent = got.answer.message
         return
       }
-      const blob = await res.blob().catch(() => null)
-      if (!blob || this.#recordFor !== key) {
-        if (!blob) said.textContent = 'The record was cut off. Try again.'
+      const blob = got.file
+      if (!blob) {
+        said.textContent = 'The record was cut off. Try again.'
         return
       }
-      const name = recordName(res, commit)
+      const name = recordName(got.disposition, commit)
       saveFile(blob, name)
-      said.textContent = `Saved ${name}. Nothing was sent anywhere.`
+      said.textContent = ''
+      toast({ id: `push-record:${sid}`, title: `Saved ${name}. Nothing was sent anywhere.`, tone: 'ok' })
     }, 'button', 'push-record')
     download.setAttribute('aria-label', `Download the record of the push of commit ${shortSha(commit)}`)
     download.title = 'One JSON file built from the engine’s own records: the commit, each review with its versions, the approvals, overrides and Allows with your reasons, the verification run, and the checks the agent reported, labelled as such'
@@ -329,11 +323,10 @@ class SfPushPanel extends HTMLElement {
 
   #held(p: SessionPush, value: PushPanelView): HTMLElement {
     const box = el('div', 'push-card')
-    const passed = new Set(value.passedSince ?? [])
-    const blocked = new Set((value.blockedSince ?? []).filter(m => !passed.has(m)))
-    const done = p.missing.filter(m => passed.has(m))
-    const failed = p.missing.filter(m => blocked.has(m))
-    const still = p.missing.filter(m => !passed.has(m) && !blocked.has(m))
+    const items = p.missingItems ?? p.missing.map(text => ({ text, since: '' }))
+    const done = items.filter(m => m.since === 'passed').map(m => m.text)
+    const failed = items.filter(m => m.since === 'blocked').map(m => m.text)
+    const still = items.filter(m => m.since !== 'passed' && m.since !== 'blocked').map(m => m.text)
     const expired = !!p.expires && p.expires <= Date.now()
     sayIfChanged(this.#passedSaid, done.length && !expired ? `${done.length === 1 ? 'A review this card lists has' : `${done.length} reviews this card lists have`} passed since it was made; the engine is checking the push again, so these lists are about to change.` : '', 'muted')
     const listed = (heading: string, tone: string, items: string[]) => {
@@ -356,36 +349,31 @@ class SfPushPanel extends HTMLElement {
     if (p.expires) box.append(el('p', 'small muted', `Allow works until ${when(p.expires)}, once, for this commit only.`))
     if (this.#card !== p.card || !this.#reason) {
       this.#card = p.card
-      this.#reason = el('input', 'textbox push-reason')
-      this.#reason.maxLength = 500
+      this.#reason = textbox({ cls: 'push-reason' })
       this.#reason.dataset.key = 'reason'
       this.#reason.id = 'push-reason'
     }
     const input = this.#reason
-    const row = field(p.needsReason ? 'Your reason for allowing it with items missing (the audit file keeps it), or a note for Deny' : 'A note (optional)', input, undefined, 'row field-row')
+    if (p.needsReason) input.setAttribute('aria-required', 'true')
+    else input.removeAttribute('aria-required')
+    const row = formField(p.needsReason ? 'Your reason for allowing it with items missing (the audit file keeps it), or a note for Deny' : 'A note', input, { kind: 'inline', cls: 'field-row', optional: !p.needsReason })
     const off = value.answering || !!value.disabled || p.running
     const answer = (allow: boolean) => () => {
       if (off) return
-      const reason = input.value.trim()
-      if (allow && p.needsReason && !reason) {
-        input.setAttribute('aria-invalid', 'true')
-        input.focus()
-        return
-      }
-      input.removeAttribute('aria-invalid')
+      const reason = input.value
+      this.#unrefuse(input)
       this.#answered = allow ? 'allow' : 'deny'
       emit(this, 'sf-push-answer', { card: p.card, commit: p.commit, allow, reason })
     }
-    const allow = button('Allow', 'primary small', answer(true), 'button', 'allow')
-    const deny = button('Deny', 'small', answer(false), 'button', 'deny')
-    const actions = el('div', 'actions')
-    actions.append(allow, deny)
+    const allow = button('Allow', 'primary small', answer(true), 'button', `push-allow:${p.card}`)
+    const deny = button('Deny', 'small', answer(false), 'button', `push-deny:${p.card}`)
+    const buttons = [allow, deny]
     if (p.handoff) {
       const handoff = button('Hand off', 'small', () => {
         if (!off) emit(this, 'sf-handoff', { card: p.card, commit: p.commit })
       }, 'button', 'handoff')
       handoff.title = 'Denies this push and asks the session for a handoff of the open findings: a reviewer reached this project\'s round limit and still blocks'
-      actions.append(handoff)
+      buttons.push(handoff)
     }
     const sent = p.findingsSent ?? 0
     const findings = p.findings && !p.handoff ? button(sent ? 'Findings sent' : 'Send findings', 'small', () => {
@@ -393,13 +381,14 @@ class SfPushPanel extends HTMLElement {
     }, 'button', 'findings') : null
     if (findings) {
       findings.title = 'Sends the session the blocking reviewers\' final messages, marked as untrusted findings to check. The push stays held: Allow and Deny still work.'
-      actions.append(findings)
+      buttons.push(findings)
     }
-    for (const b of actions.querySelectorAll('button')) b.setAttribute('aria-disabled', String(off))
+    for (const b of buttons) b.setAttribute('aria-disabled', String(off))
     if (findings && sent) findings.setAttribute('aria-disabled', 'true')
     if (value.answering && this.#answered === 'allow') busy(allow, true)
     if (value.answering && this.#answered === 'deny') busy(deny, true)
-    box.append(row, actions)
+    box.append(form({ children: [row, actions(buttons)] }))
+    this.#refusedFor(input)
     if (findings && sent) box.append(el('p', 'small muted', `Findings sent to the session at ${when(sent)}; the push stays held.`))
     if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))
     return box

@@ -2,7 +2,7 @@ version: 2
 suite: fields
 tables:
   - id: FLD-T01
-    name: "A route refuses a body its field check doesn't accept, naming the field"
+    name: "A route refuses a body its field check doesn't accept, naming the field, with a message in words"
     do: http.request
     identity: page
     with:
@@ -14,118 +14,150 @@ tables:
       equal:
         "$.status": 400
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: "${row.error}" }
+        "$.body": { error: "${row.error}", message: "${row.message}" }
     no_state_check: "refused with 400 by the route's own field check before it acts, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
     waive: { EXE-09: { rows: [fld_remove_session, fld_remove_session_offer, fld_remove_repo], reason: "every row is refused with 400 by the route's own field check before it acts, so nothing can be removed: the remove-repo row's empty body names no repository, the fld_remove_session row's body names no session, and the fld_remove_session_offer row's flag and value are fields the route refuses" } }
-    columns: ["case", "route", "body", "error"]
+    columns: ["case", "route", "body", "error", "message"]
     rows:
-      - ["fld_replay", "/api/replay", { proctorUnknownField: true }, "fields"]
-      - ["fld_interrupt", "/api/interrupt", { proctorUnknownField: true }, "fields"]
-      - ["fld_answer", "/api/answer", { proctorUnknownField: true }, "fields"]
-      - ["fld_control", "/api/control", { proctorUnknownField: true }, "fields"]
-      - ["fld_control_unconfirmed", "/api/control", { sid: "00000000-0000-4000-8000-000000000000", on: true }, "confirm"]
-      - ["fld_release", "/api/release", { proctorUnknownField: true }, "fields"]
-      - ["fld_session", "/api/session", { proctorUnknownField: true }, "body"]
-      - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs"]
-      - ["fld_message", "/api/message", { proctorUnknownField: true }, "text"]
-      - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text"]
-      - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields"]
-      - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path"]
-      - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields"]
-      - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields"]
-      - ["fld_wake_home_short", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: abc }, "fields"]
-      - ["fld_wake_home_upper", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" }, "fields"]
-      - ["fld_wake_home_empty", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "" }, "fields"]
-      - ["fld_wake_home_type", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: 1 }, "fields"]
-      - ["fld_wake_refuse_false", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: false }, "fields"]
-      - ["fld_wake_refuse_text", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: "true" }, "fields"]
-      - ["fld_wake_refuse_home", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
-      - ["fld_wake_refuse_approve", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, approve: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
-      - ["fld_message_home", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, home: abc }, "text"]
-      - ["fld_dispatch_home", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields"]
-      - ["fld_remove_session", "/api/remove-session", { proctorUnknownField: true }, "fields"]
-      - ["fld_remove_session_offer", "/api/remove-session", { sid: "00000000-0000-4000-8000-000000000000", flag: proctor, value: x }, "offer"]
-      - ["fld_review", "/api/review", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_override", "/api/override", { sid: "00000000-0000-4000-8000-000000000000", agent: "knackpack:adversarial-reviewer", commit: abc, reason: proctor }, "fields"]
-      - ["fld_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
-      - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields"]
-      - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
-      - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op"]
-      - ["fld_lock_no_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock }, "fields"]
-      - ["fld_lock_bad_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock, head: abc }, "fields"]
-      - ["fld_unlock_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: unlock, head: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
-      - ["fld_lock_no_sid", "/api/lock-tests", { op: unlock }, "fields"]
-      - ["fld_team", "/api/team", { proctorUnknownField: true }, "fields"]
-      - ["fld_team_op", "/api/team", { path: /workspace/base/demo, op: proctor }, "op"]
-      - ["fld_viewed_blob", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: xyz, viewed: true }, "fields"]
-      - ["fld_viewed_long_path", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: "${fill(4097)}", blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "fields"]
-      - ["fld_viewed_missing", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md }, "fields"]
-      - ["fld_keep_commit_read", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
-      - ["fld_keep_extra", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_halt", "/api/halt", {}, "op"]
-      - ["fld_halt_extra", "/api/halt", { op: read, proctorUnknownField: true }, "fields"]
-      - ["fld_diagnostics", "/api/diagnostics", { proctorUnknownField: true }, "fields"]
-      - ["fld_update_two", "/api/update", { check: true, later: "1.0.0" }, "fields"]
-      - ["fld_update_type", "/api/update", { check: "yes" }, "fields"]
-      - ["fld_update_empty_later", "/api/update", { later: "" }, "fields"]
-      - ["fld_save_token", "/api/save-token", { host: "gitserver.test:8443" }, "token"]
-      - ["fld_save_token_extra", "/api/save-token", { proctorUnknownField: true }, "fields"]
-      - ["fld_add_repo", "/api/add-repo", { proctorUnknownField: true }, "fields"]
-      - ["fld_add_repo_type", "/api/add-repo", { url: 1 }, "url"]
-      - ["fld_remove_repo", "/api/remove-repo", {}, "name"]
-      - ["fld_remove_token", "/api/remove-token", {}, "host"]
-      - ["fld_export", "/api/export", { proctorUnknownField: true }, "fields"]
-      - ["fld_clone_again", "/api/clone-again", {}, "name"]
-      - ["fld_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_files", "/api/files", { proctorUnknownField: true }, "fields"]
-      - ["fld_file_match", "/api/file-match", { proctorUnknownField: true }, "fields"]
-      - ["fld_limits_op", "/api/limits", { op: proctor }, "op"]
-      - ["fld_limits_disk_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
-      - ["fld_limits_disk_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "fields"]
-      - ["fld_limits_disk_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
-      - ["fld_limits_disk_text", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "fields"]
-      - ["fld_limits_disk_null", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "fields"]
-      - ["fld_limits_project_disk_negative", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "fields"]
-      - ["fld_limits_project_disk_fraction", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "fields"]
-      - ["fld_limits_project_disk_over", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "fields"]
-      - ["fld_limits_session_extra", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
-      - ["fld_limits_project_extra", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields"]
-      - ["fld_limits_session_no_money", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "fields"]
-      - ["fld_limits_money_negative", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "fields"]
-      - ["fld_limits_money_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "fields"]
-      - ["fld_limits_minutes_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "fields"]
-      - ["fld_limits_minutes_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "fields"]
-      - ["fld_limits_turns_fraction", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "fields"]
-      - ["fld_limits_turns_over", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "fields"]
-      - ["fld_limits_raise_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: 2 }, "fields"]
-      - ["fld_limits_raise_extra", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2, proctorUnknownField: true }, "fields"]
-      - ["fld_limits_measure_extra", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields"]
-      - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields"]
-      - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields"]
-      - ["fld_verify", "/api/verify", { proctorUnknownField: true }, "fields"]
-      - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
-      - ["fld_verify_stop_id", "/api/verify", { op: stop, sid: "00000000-0000-4000-8000-000000000000", id: xyz }, "fields"]
-      - ["fld_verify_main_both", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", repo: demo, kind: check }, "fields"]
-      - ["fld_verify_main_repo", "/api/verify", { op: start, repo: 5, kind: check }, "fields"]
-      - ["fld_verify_main_name", "/api/verify", { op: read, repo: "../demo" }, "fields"]
-      - ["fld_verify_main_extra", "/api/verify", { op: start, repo: demo, kind: check, proctorUnknownField: true }, "fields"]
-      - ["fld_verify_main_no_kind", "/api/verify", { op: start, repo: demo }, "fields"]
-      - ["fld_verify_main_read_extra", "/api/verify", { op: read, repo: demo, kind: check }, "fields"]
-      - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields"]
-      - ["fld_push_record", "/api/push-record", { proctorUnknownField: true }, "fields"]
-      - ["fld_push_record_extra", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567", proctorUnknownField: true }, "fields"]
-      - ["fld_push_record_short", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456" }, "fields"]
-      - ["fld_push_record_upper", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789ABCDEF0123456789ABCDEF01234567" }, "fields"]
-      - ["fld_push_record_no_sid", "/api/push-record", { commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
-      - ["fld_project_commands_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: 1 }, "fields"]
-      - ["fld_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: 1 }, "fields"]
-      - ["fld_verify_attachment_id", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: xyz, name: home.png }, "fields"]
-      - ["fld_verify_attachment_extra", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png, proctorUnknownField: true }, "fields"]
+      - ["fld_replay", "/api/replay", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_interrupt", "/api/interrupt", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_answer", "/api/answer", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_control", "/api/control", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_control_unconfirmed", "/api/control", { sid: "00000000-0000-4000-8000-000000000000", on: true }, "confirm", "Changing who controls this session needs your confirmation. Reload the page and try again."]
+      - ["fld_release", "/api/release", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_session", "/api/session", { proctorUnknownField: true }, "body", "Signing in takes an empty JSON object. Reload the page."]
+      - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs", "The engine saves only a theme and a text size the page offers. Reload the page and pick again."]
+      - ["fld_message", "/api/message", { proctorUnknownField: true }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_issues_number_type", "/api/issues", { op: read, path: /workspace/base/demo, number: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_number_list", "/api/issues", { op: read, path: /workspace/base/demo, number: ["42"] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_number_missing", "/api/issues", { op: read, path: /workspace/base/demo }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_caps", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, caps: { money: 0, minutes: 0, turns: 0, disk: 0 } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_list_label", "/api/issues", { op: list, path: /workspace/base/demo, label: bug }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_issues_read_extra", "/api/issues", { op: read, path: /workspace/base/demo, number: "abc", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_message_no_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000" }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_dispatch", "/api/dispatch", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_path_type", "/api/dispatch", { path: 1 }, "path", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_type", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, type: change }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_dispatch_from_shape", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, from: { branch: proctor } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_stop_session", "/api/stop-session", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake", "/api/wake", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_home_short", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: abc }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_home_upper", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_home_empty", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: "" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_home_type", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", home: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_refuse_false", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: false }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_refuse_text", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: "true" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_refuse_home", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_wake_refuse_approve", "/api/wake", { sid: "00000000-0000-4000-8000-000000000000", refuse: true, approve: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_message_revise_kind", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: proctor, note: proctor } }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_revise_extra", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: proctor, proctorUnknownField: true } }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_revise_and_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, revise: { kind: requirements, note: proctor } }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_revise_and_comments", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: proctor }, comments: [] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_comments_type", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: proctor }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_comments_line", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: one, removed: false, text: proctor }] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_comments_no_file", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: "", line: 1, removed: false, text: proctor }] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_comments_images", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: proctor }], images: ["0123456789abcdef01234567"] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_type", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: 1 }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_handoff", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: handoff }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_unknown", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: proctor }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_and_text", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, ask: commit }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_and_revise", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define, revise: { kind: requirements, note: proctor } }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_ask_images", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: checkpoint, images: ["0123456789abcdef01234567"] }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_message_home", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, home: abc }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_dispatch_home", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, home: "0000000000000000000000000000000000000000000000000000000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_remove_session", "/api/remove-session", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_remove_session_offer", "/api/remove-session", { sid: "00000000-0000-4000-8000-000000000000", flag: proctor, value: x }, "offer", "That isn't a choice the engine offered for this session's folder. Reload the page and try again."]
+      - ["fld_review", "/api/review", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_override", "/api/override", { sid: "00000000-0000-4000-8000-000000000000", agent: "knackpack:adversarial-reviewer", commit: abc, reason: proctor }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_size_number", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_size_shape", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: "Not a type" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_requirements_plan_type", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: "no" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_plan_plan_choice", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_lock_no_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lock_bad_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock, head: abc }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_unlock_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: unlock, head: "0123456789abcdef0123456789abcdef01234567" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lock_no_sid", "/api/lock-tests", { op: unlock }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_team", "/api/team", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_team_op", "/api/team", { path: /workspace/base/demo, op: proctor }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_viewed_blob", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md, blob: xyz, viewed: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_viewed_long_path", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: "${fill(4097)}", blob: "0123456789abcdef0123456789abcdef01234567", viewed: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_viewed_missing", "/api/viewed", { sid: "00000000-0000-4000-8000-000000000000", path: README.md }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_keep_commit_read", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_keep_extra", "/api/keep", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_halt", "/api/halt", {}, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_halt_extra", "/api/halt", { op: read, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_halt_stop", "/api/halt", { op: stop }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_halt_pause", "/api/halt", { op: pause }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_halt_release", "/api/halt", { op: release }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_diagnostics", "/api/diagnostics", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_update_two", "/api/update", { check: true, later: "1.0.0" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_update_check", "/api/update", { check: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_update_check_off", "/api/update", { check: false }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_update_empty_later", "/api/update", { later: "" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_save_token", "/api/save-token", { host: "gitserver.test:8443" }, "token", "The engine needs text of at most 64 KiB here."]
+      - ["fld_save_token_extra", "/api/save-token", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_add_repo", "/api/add-repo", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_add_repo_type", "/api/add-repo", { url: 1 }, "url", "The engine needs text of at most 64 KiB here."]
+      - ["fld_remove_repo", "/api/remove-repo", {}, "name", "The engine needs text of at most 200 bytes here."]
+      - ["fld_remove_token", "/api/remove-token", {}, "host", "The engine needs text of at most 4 KiB here."]
+      - ["fld_export", "/api/export", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_clone_again", "/api/clone-again", {}, "name", "The engine needs text of at most 200 bytes here."]
+      - ["fld_push", "/api/push", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_files", "/api/files", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_file_match", "/api/file-match", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_op", "/api/limits", { op: proctor }, "op", "That op isn't one this route takes. Reload the page and try again."]
+      - ["fld_limits_session_extra", "/api/limits", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_project_extra", "/api/limits", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 1, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_raise_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: 2 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_raise_extra", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: disk, value: 2, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_measure_extra", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_measure_disk", "/api/limits", { op: measure, sid: "00000000-0000-4000-8000-000000000000", disk: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_measure_no_sid", "/api/limits", { op: measure }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_read_extra", "/api/limits", { op: read, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_check_extra", "/api/limits", { op: check, money: 0, minutes: 0, turns: 0, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_limits_raise_value_kind", "/api/limits", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: space, value: null }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify", "/api/verify", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_extra", "/api/verify", { op: read, sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_no_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_stop_id", "/api/verify", { op: stop, sid: "00000000-0000-4000-8000-000000000000", id: xyz }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_both", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", repo: demo, kind: check }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_repo", "/api/verify", { op: start, repo: 5, kind: check }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_name", "/api/verify", { op: read, repo: "../demo" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_extra", "/api/verify", { op: start, repo: demo, kind: check, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_no_kind", "/api/verify", { op: start, repo: demo }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_main_read_extra", "/api/verify", { op: read, repo: demo, kind: check }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_project_commands_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_push_record", "/api/push-record", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_push_record_extra", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_push_record_short", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_push_record_upper", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789ABCDEF0123456789ABCDEF01234567" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_push_record_no_sid", "/api/push-record", { commit: "0123456789abcdef0123456789abcdef01234567" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_project_commands_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_attachment_id", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: xyz, name: home.png }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_verify_attachment_extra", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png, proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lessons_approve_sid_type", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: 1 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lessons_approve_sid_shape", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef", sid: "a/b" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_lessons_approve_no_sid", "/api/lessons", { op: approve, name: demo, id: "0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_review_depth_old_shape", "/api/review-depth", { op: set, path: /workspace/base/demo, advisory: [], runs: {}, maxFiles: 0, maxLines: 0, extra: [], extraRuns: 0 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_credential", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", credential: github-ci, port: 22 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_fraction", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22.5 }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_port_no_host", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", port: 22, scope: session, expires: hour }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_run_id", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "deploy-pi", args: {} }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_run_args", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "0123456789abcdef0123456789abcdef", args: ["v1"] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_action_stop_run", "/api/access", { op: action-stop, sid: "00000000-0000-4000-8000-000000000000", run: "0123456789abcdef0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_shape", "/api/credentials", { op: action-save, action: { name: 1 } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_files", "/api/credentials", { op: action-save, action: { name: deploy-pi, command: rsync, files: "yes" } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_action_delete_id", "/api/credentials", { op: action-delete, id: deploy-pi }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, git: example.org }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_preset_git", "/api/credentials", { op: preset-save, preset: { name: proctor, host: example.org, scope: session, expires: hour, project: demo, git: [1] } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
 
   - id: FLD-T01R
-    name: "A route that only reads refuses a body its field check doesn't accept, naming the field"
+    name: "A route that only reads refuses a body its field check doesn't accept, naming the field, with a message in words"
     do: http.request
     identity: page
     with:
@@ -137,27 +169,27 @@ tables:
       equal:
         "$.status": 400
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: "${row.error}" }
-    columns: ["case", "route", "body", "error"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    columns: ["case", "route", "body", "error", "message"]
     rows:
-      - ["fld_projects", "/api/projects", { proctorUnknownField: true }, "fields"]
-      - ["fld_docs", "/api/docs", { proctorUnknownField: true }, "fields"]
-      - ["fld_audit_extra", "/api/audit", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_audit_no_sid", "/api/audit", {}, "fields"]
-      - ["fld_gate", "/api/gate", {}, "fields"]
-      - ["fld_gate_extra", "/api/gate", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_changes_from", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: later }, "fields"]
-      - ["fld_changes_commit_alone", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields"]
-      - ["fld_changes_commit_missing", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: commit }, "fields"]
-      - ["fld_changes_extra", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields"]
-      - ["fld_backup", "/api/backup", { proctorUnknownField: true }, "fields"]
-      - ["fld_metrics_no_repo", "/api/metrics", { op: read }, "fields"]
-      - ["fld_agent_report", "/api/agent-report", { op: list }, "fields"]
-      - ["fld_screenshots", "/api/screenshots", {}, "fields"]
-      - ["fld_screenshot_name", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000" }, "name"]
-      - ["fld_review_reply", "/api/review-reply", { sid: "00000000-0000-4000-8000-000000000000" }, "fields"]
-      - ["fld_file", "/api/file", {}, "fields"]
-      - ["fld_file_check", "/api/file-check", { proctorUnknownField: true }, "fields"]
+      - ["fld_projects", "/api/projects", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_docs", "/api/docs", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_audit_extra", "/api/audit", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_audit_no_sid", "/api/audit", {}, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_gate", "/api/gate", {}, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_gate_extra", "/api/gate", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_changes_from", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: later }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_changes_commit_alone", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_changes_commit_missing", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", from: commit }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_changes_extra", "/api/changes", { sid: "00000000-0000-4000-8000-000000000000", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_backup", "/api/backup", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_metrics_no_repo", "/api/metrics", { op: read }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_agent_report", "/api/agent-report", { op: list }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_screenshots", "/api/screenshots", {}, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_screenshot_name", "/api/screenshot", { sid: "00000000-0000-4000-8000-000000000000" }, "name", "Name a screenshot from the list. Reload it and try again."]
+      - ["fld_review_reply", "/api/review-reply", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_file", "/api/file", {}, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_file_check", "/api/file-check", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
 
   - id: FLD-T02
     name: "A route refuses an operation or mode it doesn't have, with a message saying what it does"
@@ -182,9 +214,10 @@ tables:
       - ["msg_verify_kind", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: video }, "kind", "The engine runs two kinds of verification: check and browser."]
       - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
       - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
+      - ["msg_split_op", "/api/split", { op: queue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "op", "A task card is edited, dismissed, started or taken out of the queue, nothing else."]
+      - ["msg_access_op", "/api/access", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, checks, allows, refuses, applies and takes back access grants, and runs and stops actions, nothing else."]
+      - ["msg_credentials_op", "/api/credentials", { op: write }, "op", "The engine reads, saves and deletes credentials, presets and actions, and checks a preset's risk, nothing else."]
       - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
-      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "A browser command is one line of at most 300 bytes, with no control characters."]
-      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "The image for verification runs is a name pinned by digest, such as node@sha256: and 64 hexadecimal digits, of at most 300 bytes."]
 
   - id: FLD-T02R
     name: "A route that only reads refuses an operation other than read, with a message saying so"
@@ -203,6 +236,220 @@ tables:
     columns: ["case", "route", "body", "error", "message"]
     rows:
       - ["msg_metrics_op", "/api/metrics", { op: write, repo: demo }, "op", "The engine reads a project's numbers, nothing else."]
+
+  - id: FLD-T06
+    name: "A route refuses a value a person typed that its rule doesn't take, with a message saying what it takes, so the page sends what was typed and shows the engine's answer"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the value before it saves, sends or starts anything, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["msg_message_images_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, images: ["000000000000000000000001", "000000000000000000000002", "000000000000000000000003", "000000000000000000000004", "000000000000000000000005"] }, "text", "You can attach up to 4 images to a message."]
+      - ["msg_message_files_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", text: proctor, files: ["000000000000000000000001", "000000000000000000000002", "000000000000000000000003", "000000000000000000000004", "000000000000000000000005"] }, "text", "You can attach up to 4 files to a message."]
+      - ["msg_message_comments_none", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [] }, "comments", "Add a comment first."]
+      - ["msg_message_comments_empty", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: proctor }, { file: b.go, line: 7, removed: true, text: " \n " }] }, "comments", "Comment 2, on b.go line 7, is empty: write it, or remove it."]
+      - ["msg_message_comment_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: "${fill(2001)}" }] }, "comments", "Comment 1, on a.go line 1, is over 2,000 characters: shorten it."]
+      - ["msg_message_comments_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 2, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 3, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 4, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 5, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 6, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 7, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 8, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 9, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 10, removed: false, text: "${fill(2000)}" }, { file: a.go, line: 11, removed: false, text: "${fill(2000)}" }] }, "comments", "These comments would make a message over 20,000 characters. Remove some, send these, then add the rest."]
+      - ["msg_message_comments_many", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", comments: [{ file: a.go, line: 1, removed: false, text: x }, { file: a.go, line: 2, removed: false, text: x }, { file: a.go, line: 3, removed: false, text: x }, { file: a.go, line: 4, removed: false, text: x }, { file: a.go, line: 5, removed: false, text: x }, { file: a.go, line: 6, removed: false, text: x }, { file: a.go, line: 7, removed: false, text: x }, { file: a.go, line: 8, removed: false, text: x }, { file: a.go, line: 9, removed: false, text: x }, { file: a.go, line: 10, removed: false, text: x }, { file: a.go, line: 11, removed: false, text: x }, { file: a.go, line: 12, removed: false, text: x }, { file: a.go, line: 13, removed: false, text: x }, { file: a.go, line: 14, removed: false, text: x }, { file: a.go, line: 15, removed: false, text: x }, { file: a.go, line: 16, removed: false, text: x }, { file: a.go, line: 17, removed: false, text: x }, { file: a.go, line: 18, removed: false, text: x }, { file: a.go, line: 19, removed: false, text: x }, { file: a.go, line: 20, removed: false, text: x }, { file: a.go, line: 21, removed: false, text: x }, { file: a.go, line: 22, removed: false, text: x }, { file: a.go, line: 23, removed: false, text: x }, { file: a.go, line: 24, removed: false, text: x }, { file: a.go, line: 25, removed: false, text: x }, { file: a.go, line: 26, removed: false, text: x }, { file: a.go, line: 27, removed: false, text: x }, { file: a.go, line: 28, removed: false, text: x }, { file: a.go, line: 29, removed: false, text: x }, { file: a.go, line: 30, removed: false, text: x }, { file: a.go, line: 31, removed: false, text: x }, { file: a.go, line: 32, removed: false, text: x }, { file: a.go, line: 33, removed: false, text: x }, { file: a.go, line: 34, removed: false, text: x }, { file: a.go, line: 35, removed: false, text: x }, { file: a.go, line: 36, removed: false, text: x }, { file: a.go, line: 37, removed: false, text: x }, { file: a.go, line: 38, removed: false, text: x }, { file: a.go, line: 39, removed: false, text: x }, { file: a.go, line: 40, removed: false, text: x }, { file: a.go, line: 41, removed: false, text: x }, { file: a.go, line: 42, removed: false, text: x }, { file: a.go, line: 43, removed: false, text: x }, { file: a.go, line: 44, removed: false, text: x }, { file: a.go, line: 45, removed: false, text: x }, { file: a.go, line: 46, removed: false, text: x }, { file: a.go, line: 47, removed: false, text: x }, { file: a.go, line: 48, removed: false, text: x }, { file: a.go, line: 49, removed: false, text: x }, { file: a.go, line: 50, removed: false, text: x }, { file: a.go, line: 51, removed: false, text: x }] }, "comments", "At most 50 comments go in one message. Remove some, send these, then add the rest."]
+
+  - id: FLD-T07
+    name: "/api/limits refuses a cap a person typed that its range doesn't take, naming the field and its range, so the page sends what was typed and marks that field"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/limits"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: fields, field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the caps before Limits.SetProject or SetSession saves anything, and check saves nothing at all, so the route changed nothing; /api/limits isn't declared a read, since its op decides read or write, and no other read shows caps"
+    columns: ["case", "body", "field", "message"]
+    rows:
+      - ["fld_limits_disk_negative", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: -1 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 1.5 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_text", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: "1" }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_disk_null", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 0, disk: null }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_negative", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: -1 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_fraction", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 0.5 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_disk_over", { op: project, name: demo, money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["fld_limits_project_money_negative", { op: project, name: demo, money: -1, minutes: 0, turns: 0, disk: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["fld_limits_project_turns_fraction", { op: project, name: demo, money: 0, minutes: 0, turns: 1.5, disk: 0 }, "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
+      - ["fld_limits_project_minutes_text", { op: project, name: demo, money: 0, minutes: "60", turns: 0 }, "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
+      - ["fld_limits_session_no_money", { op: session, sid: "00000000-0000-4000-8000-000000000000", minutes: 0, turns: 0, disk: 1 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["fld_limits_money_negative", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: -1, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["fld_limits_money_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 100001, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["fld_limits_minutes_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 1.5, turns: 0 }, "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
+      - ["fld_limits_minutes_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 43201, turns: 0 }, "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
+      - ["fld_limits_turns_fraction", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 1.5 }, "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
+      - ["fld_limits_turns_over", { op: session, sid: "00000000-0000-4000-8000-000000000000", money: 0, minutes: 0, turns: 10001 }, "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
+      - ["cap_check_money_over", { op: check, money: 100000.01, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["cap_check_minutes_text", { op: check, money: 0, minutes: "60", turns: 0 }, "minutes", "Needs whole minutes, 0 to 43,200; 0 or empty is off."]
+      - ["cap_check_turns_negative", { op: check, money: 0, minutes: 0, turns: -1 }, "turns", "Needs whole turns, 0 to 10,000; 0 or empty is off."]
+      - ["cap_check_disk_over", { op: check, money: 0, minutes: 0, turns: 0, disk: 4097 }, "disk", "Needs whole GiB, 0 to 4,096; 0 or empty is off."]
+      - ["cap_project_money_null", { op: project, name: demo, money: null, minutes: 0, turns: 0 }, "money", "Needs 0 to 100,000 US dollars; 0 or empty is off."]
+      - ["cap_raise_value_null", { op: raise, sid: "00000000-0000-4000-8000-000000000000", kind: money, value: null }, "value", "Type the new cap as a number."]
+
+  - id: FLD-T08
+    name: "A route refuses a value a person typed that its rule doesn't take, naming the field and saying what it takes, so the page marks that field and shows the engine's answer beside its label"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own check of the value before it saves, sends or starts anything, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
+    waive: { FIX-05: { rows: [msg_project_hold, msg_project_hold_lines], reason: "each of these rows sends the route's fixed op name, hold, which a later row's error, the engine's fixed refusal code for that op, happens to repeat; neither can carry ${run.id}, and every row's 400 is answered from its own body before anything is read or saved, so no earlier run's data can make it match" } }
+    columns: ["case", "route", "body", "error", "field", "message"]
+    rows:
+      - ["msg_project_check_long", "/api/project-commands", { op: set, name: demo, check: "${fill(365)}", setup: "" }, "command", "check", "One line of at most 300 bytes, with no control characters."]
+      - ["msg_project_setup_long", "/api/project-commands", { op: set, name: demo, check: "", setup: "${fill(365)}" }, "command", "setup", "One line of at most 300 bytes, with no control characters."]
+      - ["msg_project_browser", "/api/project-commands", { op: set, name: demo, check: "", setup: "", browser: "npx playwright test\u0007" }, "browser", "browser", "One line of at most 300 bytes, with no control characters."]
+      - ["msg_project_image", "/api/project-commands", { op: set, name: demo, check: "", setup: "", image: "node:latest" }, "image", "image", "Needs a digest-pinned name like node@sha256:<64 hex>."]
+      - ["msg_review_depth_lines", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: -1, twice: false }, "depth", "maxLines", "A whole number of lines, 0 to switch it off."]
+      - ["msg_review_depth_lines_text", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: x, twice: false }, "depth", "maxLines", "A whole number of lines, 0 to switch it off."]
+      - ["msg_review_depth_twice", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: "yes" }, "depth", "twice", "Needs true or false."]
+      - ["msg_review_depth_reviewers_type", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: ["knackpack:security-reviewer"], maxLines: 0, twice: false }, "depth", "reviewers", "Needs always, big or warn for each reviewer."]
+      - ["msg_review_depth_mode", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:security-reviewer": sometimes }, maxLines: 0, twice: false }, "depth", "reviewers", "Needs always, big or warn for each reviewer."]
+      - ["msg_review_depth_count", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { a1: always, a2: big, a3: warn, a4: warn, a5: warn, a6: warn }, maxLines: " 0 ", twice: false }, "depth", "reviewers", "At most 5 added reviewers."]
+      - ["msg_review_depth_name", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "bad name": big }, maxLines: "", twice: false }, "depth", "reviewers", "Agent names: letters, digits and . _ : @ -, up to 120 each."]
+      - ["msg_review_depth_unlisted", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:not-installed-reviewer": warn }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
+      - ["msg_review_depth_helper", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:adjudicator": warn }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
+      - ["msg_review_depth_required", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:adversarial-reviewer": always }, maxLines: 0, twice: false }, "agent", "reviewers", "Needs a reviewer that isn't already required."]
+      - ["msg_review_depth_big_unsized", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { "knackpack:security-reviewer": big }, maxLines: 0, twice: false }, "depth", "reviewers", "Needs a big-change size above 0 first."]
+      - ["msg_review_depth_twice_unsized", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: true }, "depth", "twice", "Needs a big-change size above 0 first."]
+      - ["msg_review_depth_big_unlisted", "/api/review-depth", { op: set, path: /workspace/base/demo, reviewers: { own-reviewer: big }, maxLines: 400, twice: false }, "agent", "reviewers", "Needs reviewers from the list."]
+      - ["msg_project_hold", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: -1, maxLines: 0 } }, "hold", "maxFiles", "A whole number of files or lines, 0 to switch it off."]
+      - ["msg_project_hold_lines", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: false, maxFiles: 0, maxLines: x } }, "hold", "maxLines", "A whole number of files or lines, 0 to switch it off."]
+      - ["msg_project_hold_after", "/api/project", { path: /workspace/base/demo, op: hold, hold: { afterBlock: "yes", maxFiles: 0, maxLines: 0 } }, "hold", "afterBlock", "A whole number of files or lines, 0 to switch it off."]
+      - ["msg_split_title_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: "", message: proctor }, "text", "title", "Is empty."]
+      - ["msg_split_message_empty", "/api/split", { op: edit, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", title: proctor, message: " " }, "text", "message", "Is empty."]
+      - ["msg_gateway_url", "/api/egress", { op: gateway, url: "http://llm-gateway.example.com" }, "gateway", "url", "Needs an address like https://llm.example.com."]
+      - ["msg_identity_name_empty", "/api/commit-identity", { op: set, name: "", email: "12345+proctor@users.noreply.github.com" }, "name", "name", "Needs 1 to 100 characters."]
+      - ["msg_identity_name_long", "/api/commit-identity", { op: set, name: "${fill(401)}", email: "12345+proctor@users.noreply.github.com" }, "name", "name", "Needs 1 to 100 characters."]
+      - ["msg_identity_email", "/api/commit-identity", { op: set, name: Proctor Run, email: not-an-email }, "email", "email", "Needs an address like you@example.com."]
+      - ["msg_decision_add_empty", "/api/decision-log", { op: add, repo: demo, text: "" }, "text", "text", "Needs its text."]
+      - ["msg_decision_add_long", "/api/decision-log", { op: add, repo: demo, text: "${fill(2001)}" }, "text", "text", "At most 500 characters."]
+      - ["msg_saved_prompt_name", "/api/saved-prompts", { op: save, repo: demo, name: "", text: proctor }, "name", "name", "One line of 1 to 60 characters."]
+      - ["msg_add_repo_empty", "/api/add-repo", { url: "" }, "url", "url", "Type the repository's https address."]
+      - ["msg_add_repo_long", "/api/add-repo", { url: "${fill(4097)}" }, "url", "url", "Has characters a repository address doesn't use."]
+      - ["msg_save_token_empty", "/api/save-token", { host: "gitserver.test:8443", token: "" }, "token", "token", "Needs 1 to 4096 printable characters with no spaces."]
+      - ["msg_queue_add_empty", "/api/session-work", { op: queue-add, sid: "00000000-0000-4000-8000-000000000000", text: "" }, "text", "text", "Type the message to queue first."]
+      - ["msg_login_code_empty", "/api/claude-login", { step: code, target: reviewers, code: "" }, "code", "code", "Paste the code exactly as claude.com shows it."]
+      - ["msg_message_revise_empty", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: " \n\t " } }, "note", "note", "Type what should change first."]
+      - ["msg_message_revise_long", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: requirements, note: "${fill(2001)}" } }, "note", "note", "At most 2,000 characters."]
+      - ["msg_issues_number_text", "/api/issues", { op: read, path: /workspace/base/demo, number: "abc" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_zero", "/api/issues", { op: read, path: /workspace/base/demo, number: "0" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_negative", "/api/issues", { op: read, path: /workspace/base/demo, number: "-3" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_above", "/api/issues", { op: read, path: /workspace/base/demo, number: "1000000001" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_inner_space", "/api/issues", { op: read, path: /workspace/base/demo, number: "4 2" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_hash_space", "/api/issues", { op: read, path: /workspace/base/demo, number: "# 42" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_empty", "/api/issues", { op: read, path: /workspace/base/demo, number: "" }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_json_zero", "/api/issues", { op: read, path: /workspace/base/demo, number: 0 }, "number", "number", "Needs an issue number like 123."]
+      - ["msg_issues_number_json_fraction", "/api/issues", { op: read, path: /workspace/base/demo, number: 4.5 }, "number", "number", "Needs an issue number like 123."]
+
+  - id: FLD-T10
+    name: "A start refuses an issue the page didn't read, naming the field, so the page marks that field instead of checking it itself"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 400
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 400 by the route's own field check before it reads an issue or a pull request, opens a container or starts a session, so nothing changed; /api/dispatch isn't a declared read, and no single read shows what a refused start would have started"
+    columns: ["case", "route", "body", "error", "field", "message"]
+    rows:
+      - ["start_dispatch_issue_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1, issueHash: abc }, "issue", "issue", "Read the issue again before starting from it."]
+      - ["start_dispatch_issue_no_hash", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 1 }, "issue", "issue", "Read the issue again before starting from it."]
+      - ["start_dispatch_issue_number", "/api/dispatch", { path: /workspace/base/demo, agent: dev-acp, issue: 0, issueHash: "0000000000000000000000000000000000000000000000000000000000000000" }, "issue", "issue", "That isn't an issue number."]
+
+  - id: FLD-T12
+    name: "/api/issues reads an issue number typed as text, trimmed and with or without #, as it reads a JSON number, so the page sends what the person typed and the engine decides"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/issues"
+      headers: { Origin: "${page.origin}" }
+      body: { op: read, path: "/workspace/base/absent-${run.id}", number: "${row.number}" }
+    expect:
+      equal:
+        "$.status": 404
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: project, message: "That project is no longer in the list." }
+    no_state_check: "the page adapter takes the number and IssueStarts.Read answers 404 because no project has this path, before it asks the git host for anything, so the route read nothing and changed nothing; /api/issues isn't a declared read, since its op decides what it reads"
+    columns: ["case", "number"]
+    rows:
+      - ["issues_number_typed", "42"]
+      - ["issues_number_typed_hash", "#42"]
+      - ["issues_number_typed_spaces", " 42 "]
+      - ["issues_number_typed_highest", "1000000000"]
+
+  - id: FLD-T11
+    name: "Taking out of the queue or dismissing a task card that isn't there is refused with 409 and a message"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 409 by Splits.Unqueue and Splits.Dismiss because no goal session with this id holds that card, so nothing changed; /api/split isn't a declared read, since its op decides read or write"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["split_unqueue_unknown", "/api/split", { op: unqueue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't in the queue any more."]
+      - ["split_dismiss_unknown", "/api/split", { op: dismiss, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't waiting any more."]
+
+  - id: FLD-T09
+    name: "/api/lessons refuses approving a suggested line with no session picked, naming the field, so the page marks the Send to list instead of checking it itself"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/lessons"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: session, field: sid, message: "Pick a session of this project to send the line to." }
+    no_state_check: "refused with 409 by Lessons.Approve before it changes a line, gives a note or writes the audit, since no session of the project has an empty id, so the route changed nothing; /api/lessons isn't declared a read, since its op decides read or write"
+    columns: ["case", "body"]
+    rows:
+      - ["lessons_approve_no_session", { op: approve, name: demo, id: "0123456789abcdef", sid: "" }]
+      - ["lessons_approve_unknown_session", { op: approve, name: demo, id: "0123456789abcdef", sid: "00000000-0000-4000-8000-000000000000" }]
 
   - id: FLD-T03
     name: "A route that acts on a session refuses an id the engine didn't start"
@@ -231,6 +478,18 @@ tables:
       - ["unk_push_record", "/api/push-record", { sid: "00000000-0000-4000-8000-000000000000", commit: "0123456789abcdef0123456789abcdef01234567" }, "Only a session this engine started has push records here."]
       - ["unk_verify_start_browser", "/api/verify", { op: start, sid: "00000000-0000-4000-8000-000000000000", kind: browser }, "Only a session this engine started can be verified here."]
       - ["unk_verify_attachment", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: home.png }, "Only a session this engine started has verification runs here."]
+      - ["unk_message_revise_plan", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: plan, note: proctor } }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_revise_cause", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: root-cause, note: proctor } }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_ask_define", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define }, "Only a session this engine started has a workflow here."]
+      - ["unk_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: change }, "Only a session this engine started has a work type here."]
+      - ["unk_message_ask_fix", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: fix }, "Only a session this engine started has a workflow here."]
+      - ["unk_access_read", "/api/access", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
+      - ["unk_access_revoke_all", "/api/access", { op: revoke-all, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
+      - ["unk_access_check_port", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22 }, "Only a session this engine started has access grants here."]
+      - ["unk_access_allow_port", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22, scope: session, expires: hour, confirmed: true }, "Only a session this engine started has access grants here."]
+      - ["unk_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, confirmed: true, git: [example.org] }, "Only a session this engine started has access grants here."]
+      - ["unk_access_action_run", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "0123456789abcdef0123456789abcdef", args: { tag: "v1" } }, "Only a session this engine started has access grants here."]
+      - ["unk_access_action_stop", "/api/access", { op: action-stop, sid: "00000000-0000-4000-8000-000000000000", run: "0123456789abcdef" }, "Only a session this engine started has access grants here."]
 
   - id: FLD-T05
     name: "/api/limits refuses to measure, raise for each kind of cap, stop or set caps for a session the engine didn't start; SES-003 pins a Raise of a kind a session isn't at"
@@ -357,7 +616,7 @@ scenarios:
         expect:
           equal:
             "$.status": 422
-            "$.body": { error: outside }
+            "$.body": { error: outside, message: "Only files inside this session's project open here." }
       - id: file-check-unverified
         do: http.request
         identity: page
@@ -369,7 +628,7 @@ scenarios:
         expect:
           equal:
             "$.status": 409
-            "$.body": { error: unverified }
+            "$.body": { error: unverified, message: "The engine didn't start this session, so it shows none of its files." }
 
   - id: FLD-003
     name: "The engine's copy of a session's commits isn't shown for a session it holds no branch of"
@@ -388,3 +647,361 @@ scenarios:
             "$.headers.content-type": ["application/json; charset=utf-8"]
             "$.body": { error: session, message: "This engine holds no branch for that session: it was deleted or not started here." }
         no_state_check: "op read changes nothing, and it's refused with 404 since no session has this id; /api/keep isn't declared a read, since op restore on the same path rewrites a branch and HTTP-11 matches the path only, and no other read shows the engine's copy"
+
+  - id: FLD-004
+    name: "A Save that changes nothing answers 200 with the engine's No change warning instead of Saved, so the page shows the engine's words and tone: a project's caps, review settings, a saved prompt, an entry of the decision log, the Git name and email and the company gateway; each step puts back what it changed"
+    steps:
+      - id: caps-set
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: project, name: demo, money: 0, minutes: 0, turns: 500 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved. New sessions in this project get these caps."
+            "$.body.tone": ok
+            "$.body.projects[0].turns": 500
+          length: { "$.body.projects": 1 }
+        no_state_check: "no declared read shows a project's caps: only /api/limits answers them, and its op decides read or write (op project saves them), so it isn't declared a read; caps-same's answer shows them saved, and caps-none reads them back after caps-cleared"
+      - id: caps-same
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: project, name: demo, money: 0, minutes: 0, turns: 500 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: these caps are already saved."
+            "$.body.tone": warn
+            "$.body.projects[0].turns": 500
+          length: { "$.body.projects": 1 }
+        no_state_check: "saves nothing, since the caps are already these, as the answer's No change says; no declared read shows a project's caps: only /api/limits answers them, and its op decides read or write (op project saves them), so it isn't declared a read; caps-none reads them back after caps-cleared"
+      - id: caps-cleared
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: project, name: demo, money: 0, minutes: 0, turns: 0 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved. New sessions in this project get these caps."
+            "$.body.tone": ok
+        no_state_check: "no declared read shows a project's caps: only /api/limits answers them, and its op decides read or write (op project saves them), so it isn't declared a read; caps-none reads them back"
+      - id: caps-none
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/limits"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read }
+        expect:
+          equal:
+            "$.status": 200
+          absent: ["$.body.message", "$.body.tone"]
+          length: { "$.body.projects": 0 }
+        no_state_check: "op read changes nothing; /api/limits isn't declared a read, since op project, session and raise on the same path save caps"
+      - id: depth-set
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review-depth"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 400, twice: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved. The next review uses them."
+            "$.body.tone": ok
+            "$.body.maxLines": 400
+            "$.body.twice": true
+            "$.body.reviewers": {}
+        no_state_check: "no declared read shows a project's review settings: only /api/review-depth answers them, and its op decides read or write (op set saves them), so it isn't declared a read; depth-same's answer shows them saved, and depth-back reads them back after depth-cleared"
+      - id: depth-same
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review-depth"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 400, twice: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: these review settings are already saved."
+            "$.body.tone": warn
+            "$.body.maxLines": 400
+            "$.body.twice": true
+            "$.body.reviewers": {}
+        no_state_check: "saves nothing, since the settings are already these, as the answer's No change says; no declared read shows a project's review settings: only /api/review-depth answers them, and its op decides read or write (op set saves them), so it isn't declared a read; depth-back reads them back after depth-cleared"
+      - id: depth-cleared
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review-depth"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, path: /workspace/base/demo, reviewers: {}, maxLines: 0, twice: false }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved. The next review uses them."
+            "$.body.tone": ok
+        no_state_check: "no declared read shows a project's review settings: only /api/review-depth answers them, and its op decides read or write (op set saves them), so it isn't declared a read; depth-back reads them back"
+      - id: depth-back
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review-depth"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, path: /workspace/base/demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.maxLines": 0
+            "$.body.twice": false
+            "$.body.reviewers": {}
+          present: ["$.body.available", "$.body.required"]
+          absent: ["$.body.message", "$.body.tone", "$.body.runs", "$.body.maxFiles", "$.body.extraRuns"]
+        no_state_check: "op read changes nothing; /api/review-depth isn't declared a read, since op set on the same path saves the settings"
+      - id: prompt-add
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/saved-prompts"
+          headers: { Origin: "${page.origin}" }
+          body: { op: save, repo: demo, name: "proctor ${run.id}", text: "say: prompt ${run.id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved “proctor ${run.id}”."
+            "$.body.tone": ok
+            "$.body.prompts[0].name": "proctor ${run.id}"
+        save: { prompt: "$.body.prompts[0].id" }
+        no_state_check: "no declared read shows a project's saved prompts: only /api/saved-prompts answers them, and its op decides read or write (op save and op remove change them), so it isn't declared a read; prompt-same's answer shows the prompt saved, and prompt-gone reads the list after prompt-remove"
+      - id: prompt-same
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/saved-prompts"
+          headers: { Origin: "${page.origin}" }
+          body: { op: save, repo: demo, id: "${prompt}", name: "proctor ${run.id}", text: "say: prompt ${run.id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: “proctor ${run.id}” is already saved like this."
+            "$.body.tone": warn
+            "$.body.prompts[0].text": "say: prompt ${run.id}"
+        no_state_check: "saves nothing, since the prompt already says this, as the answer's No change says; no declared read shows a project's saved prompts: only /api/saved-prompts answers them, and its op decides read or write (op save and op remove change them), so it isn't declared a read; prompt-gone reads the list after prompt-remove"
+      - id: prompt-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/saved-prompts"
+          headers: { Origin: "${page.origin}" }
+          body: { op: remove, repo: demo, id: "${prompt}" }
+        expect:
+          equal:
+            "$.status": 200
+          absent: ["$.body.message", "$.body.tone"]
+        no_state_check: "no declared read shows a project's saved prompts: only /api/saved-prompts answers them, and its op decides read or write (op save and op remove change them), so it isn't declared a read; prompt-gone reads the list without it"
+      - id: prompt-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/saved-prompts"
+          headers: { Origin: "${page.origin}" }
+          body: { op: list, repo: demo }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.prompts": { where: { id: "${prompt}" }, is: 0 }
+        no_state_check: "op list changes nothing; /api/saved-prompts isn't declared a read, since op save and op remove on the same path change the prompts"
+      - id: decision-add
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/decision-log"
+          headers: { Origin: "${page.origin}" }
+          body: { op: add, repo: demo, text: "proctor ${run.id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].text": "proctor ${run.id}"
+            "$.body.entries[0].added": true
+          absent: ["$.body.message", "$.body.tone"]
+        save: { decision: "$.body.entries[0].id" }
+        no_state_check: "no declared read shows a project's decision log: only /api/decision-log answers them, and its op decides read or write (op add, set and remove change it), so it isn't declared a read; decision-named's and decision-same's answers show the entry, and decision-gone reads the log after decision-remove"
+      - id: decision-named
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/decision-log"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, repo: demo, id: "${decision}", name: "named ${run.id}", text: "proctor ${run.id}", hidden: false }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Saved. It stays through every rebuild of the log."
+            "$.body.tone": ok
+            "$.body.entries[0].name": "named ${run.id}"
+        no_state_check: "no declared read shows a project's decision log: only /api/decision-log answers them, and its op decides read or write (op add, set and remove change it), so it isn't declared a read; decision-same's answer shows the name saved, and decision-gone reads the log after decision-remove"
+      - id: decision-same
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/decision-log"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, repo: demo, id: "${decision}", name: "named ${run.id}", text: "proctor ${run.id}", hidden: false }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: the entry already says this."
+            "$.body.tone": warn
+            "$.body.entries[0].name": "named ${run.id}"
+        no_state_check: "saves nothing, since the entry already says this, as the answer's No change says; no declared read shows a project's decision log: only /api/decision-log answers them, and its op decides read or write (op add, set and remove change it), so it isn't declared a read; decision-gone reads the log after decision-remove"
+      - id: decision-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/decision-log"
+          headers: { Origin: "${page.origin}" }
+          body: { op: remove, repo: demo, id: "${decision}" }
+        expect:
+          equal:
+            "$.status": 200
+          absent: ["$.body.message", "$.body.tone"]
+        no_state_check: "no declared read shows a project's decision log: only /api/decision-log answers them, and its op decides read or write (op add, set and remove change it), so it isn't declared a read; decision-gone reads the log without the entry"
+      - id: decision-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/decision-log"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, repo: demo }
+        expect:
+          equal:
+            "$.status": 200
+          count:
+            "$.body.entries": { where: { id: "${decision}" }, is: 0 }
+        no_state_check: "op read changes nothing; /api/decision-log isn't declared a read, since op add, set and remove on the same path change the log"
+      - id: identity-same
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/commit-identity"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: Proctor Run, email: "12345+proctor@users.noreply.github.com" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { identity: { name: Proctor Run, email: "12345+proctor@users.noreply.github.com" }, message: "No change: agents already commit with this name and email.", tone: warn }
+        waive: { FIX-05: "this is the name and email up.sh saved before the run, so it can't carry ${run.id}; saving them again changes nothing, which identity-kept reads" }
+        no_state_check: "saves nothing, since these are the name and email up.sh saved, as the answer's No change says; no declared read shows the name and email agents commit with: only /api/commit-identity answers them, and its op decides read or write (op set saves them), so it isn't declared a read; identity-kept reads them back"
+      - id: identity-same-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/commit-identity"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: "  Proctor Run ", email: " 12345+proctor@users.noreply.github.com" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { identity: { name: Proctor Run, email: "12345+proctor@users.noreply.github.com" }, message: "No change: agents already commit with this name and email.", tone: warn }
+        no_state_check: "saves nothing, since the trimmed name and email are the saved ones, as the answer's No change says; no declared read shows the name and email agents commit with: only /api/commit-identity answers them, and its op decides read or write (op set saves them), so it isn't declared a read; identity-kept reads them back"
+      - id: identity-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/commit-identity"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { identity: { name: Proctor Run, email: "12345+proctor@users.noreply.github.com" } }
+        no_state_check: "op read changes nothing; /api/commit-identity isn't declared a read, since op set on the same path saves the name and email"
+      - id: gateway-none
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: gateway, url: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: no gateway is set."
+            "$.body.tone": warn
+            "$.body.gateway": null
+        no_state_check: "saves nothing, since no gateway is set, as the answer's No change says; no declared read shows the company gateway: /api/egress answers it, but its op decides read or write (op gateway saves it), so it isn't declared a read, and /api/exceptions, which also lists it, isn't declared either; gateway-still-none reads it back"
+      - id: gateway-none-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: gateway, url: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "No change: no gateway is set."
+            "$.body.tone": warn
+        no_state_check: "saves nothing, since no gateway is set, as the answer's No change says; no declared read shows the company gateway: /api/egress answers it, but its op decides read or write (op gateway saves it), so it isn't declared a read, and /api/exceptions, which also lists it, isn't declared either; gateway-still-none reads it back"
+      - id: gateway-sides-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: gateway, url: "", agents: true, reviewers: true }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }
+        no_state_check: "refused with 400 fields before anything is read or saved, since a gateway always covers the agents and the reviewers and the gateway op takes only its URL; no declared read shows the company gateway (see gateway-none), and gateway-still-none reads it back"
+      - id: gateway-still-none
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/egress"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gateway": null
+          absent: ["$.body.message", "$.body.tone"]
+        no_state_check: "op read changes nothing; /api/egress isn't declared a read, since op gateway and the allowlist's ops on the same path change what it holds"

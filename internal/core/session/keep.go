@@ -582,11 +582,11 @@ func (k *Keep) holdsCommit(ctx context.Context, repo, last, head string) bool {
 func (k *Keep) View(ctx context.Context, sid string) (KeepView, error) {
 	t, ok := targetOrHeld(k.d.PushTarget, k.d.HeldTarget, sid)
 	if !ok {
-		return KeepView{}, explained(notFound("session"), "This engine holds no branch for that session: it was deleted or not started here.")
+		return KeepView{}, notFound("session", "This engine holds no branch for that session: it was deleted or not started here.")
 	}
 	rec, err := k.cfg.Store.Load(sid)
 	if err != nil {
-		return KeepView{}, explained(conflict("copy"), "The engine couldn't read its copy of this session's commits.")
+		return KeepView{}, conflict("copy", "The engine couldn't read its copy of this session's commits.")
 	}
 	v := KeepView{Branch: t.Branch, Commit: rec.Last(), Bytes: rec.Bytes(), Packs: len(rec.Packs), Stopped: rec.Stopped, Kind: rec.Why, SessionCap: KeepSessionCap, AllCap: KeepAllCap}
 	if n := len(rec.Packs); n > 0 {
@@ -653,48 +653,48 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	running := r.running
 	d.mu.Unlock()
 	if !d.reg.TurnSince(sid).IsZero() {
-		return KeepView{}, false, explained(conflict("in turn"), "The session is in its turn. Wait for it to end, or stop the turn, then restore the branch.")
+		return KeepView{}, false, conflict("in turn", "The session is in its turn. Wait for it to end, or stop the turn, then restore the branch.")
 	}
 	if !d.boxed() {
-		return KeepView{}, false, explained(conflict("no agent-host"), "This engine has no box helper to recreate the worktree in the session's container.")
+		return KeepView{}, false, conflict("no agent-host", "This engine has no box helper to recreate the worktree in the session's container.")
 	}
 	defer k.lockFor(sid)()
 	rec, err := k.cfg.Store.Load(sid)
 	if err != nil {
-		return KeepView{}, false, explained(conflict("copy"), "The engine couldn't read its copy of this session's commits.")
+		return KeepView{}, false, conflict("copy", "The engine couldn't read its copy of this session's commits.")
 	}
 	last := rec.Last()
 	if last == "" {
-		return KeepView{}, false, explained(conflict("nothing copied"), "The engine has no copy of this session's commits yet.")
+		return KeepView{}, false, conflict("nothing copied", "The engine has no copy of this session's commits yet.")
 	}
 	chosen := last
 	if commit != "" {
 		if !rec.kept(commit) {
-			return KeepView{}, false, explained(conflict("not kept"), "The engine's copy of this session's commits holds no commit "+shortSHA(commit)+", so it restored nothing. Restore one of the kept commits the panel lists.")
+			return KeepView{}, false, conflict("not kept", "The engine's copy of this session's commits holds no commit "+shortSHA(commit)+", so it restored nothing. Restore one of the kept commits the panel lists.")
 		}
 		chosen = commit
 	}
 	if k.cfg.Heads == nil || k.cfg.Reader == nil {
-		return KeepView{}, false, explained(conflict("no reader"), "This engine can't read the session's branch.")
+		return KeepView{}, false, conflict("no reader", "This engine can't read the session's branch.")
 	}
 	linked, lerr := d.worktreeLinked(r)
 	if lerr != nil {
-		return KeepView{}, false, explained(conflict("worktree"), "The engine couldn't read the session's worktree without following a link, so it touched nothing: "+keepSentence(clip(lerr.Error(), 300)))
+		return KeepView{}, false, conflict("worktree", "The engine couldn't read the session's worktree without following a link, so it touched nothing: "+keepSentence(clip(lerr.Error(), 300)))
 	}
 	head, herr := k.cfg.Heads.Head(r.clone, r.branch)
 	headOK := herr == nil && sha1Hex.MatchString(head)
 	holds := headOK && k.holdsCommit(ctx, r.clone, last, head)
 	if chosen != last {
 		if holds && head != last {
-			return KeepView{}, false, explained(conflict("not copied"), pastLast(r.branch, head, last))
+			return KeepView{}, false, conflict("not copied", pastLast(r.branch, head, last))
 		}
 		holds = headOK && head == chosen
 	}
 	if holds && linked {
 		if chosen != last {
-			return KeepView{}, false, explained(conflict("holds"), "The branch "+r.branch+" is at commit "+shortSHA(chosen)+" already, so there is nothing to restore.")
+			return KeepView{}, false, conflict("holds", "The branch "+r.branch+" is at commit "+shortSHA(chosen)+" already, so there is nothing to restore.")
 		}
-		return KeepView{}, false, explained(conflict("holds"), "The branch "+r.branch+" holds the last copied commit, so there is nothing to restore.")
+		return KeepView{}, false, conflict("holds", "The branch "+r.branch+" holds the last copied commit, so there is nothing to restore.")
 	}
 	repair := holds && !linked
 	id := d.cfg.Identity.Current()
@@ -704,10 +704,10 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	if !repair {
 		if err := k.cfg.Store.RestoreObjects(sid, r.box, r.repo, chosen); err != nil {
 			shared.For(ctx, k.cfg.Logger).Warn("restore branch", "event", "objects-not-written")
-			return KeepView{}, false, explained(conflict("objects"), "The engine couldn't write its copy's objects into the clone: "+keepSentence(err.Error()))
+			return KeepView{}, false, conflict("objects", "The engine couldn't write its copy's objects into the clone: "+keepSentence(err.Error()))
 		}
 		if _, err := k.cfg.Reader.Commit(r.clone, chosen); err != nil {
-			return KeepView{}, false, explained(conflict("objects"), "The engine wrote its copy into the clone, but couldn't read commit "+shortSHA(chosen)+" back from it.")
+			return KeepView{}, false, conflict("objects", "The engine wrote its copy into the clone, but couldn't read commit "+shortSHA(chosen)+" back from it.")
 		}
 	}
 	stopped := false
@@ -720,7 +720,7 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 		still := r.running
 		d.mu.Unlock()
 		if still {
-			return KeepView{}, false, explained(conflict("running"), "The session didn't stop in time, so its worktree wasn't touched. Try again in a moment.")
+			return KeepView{}, false, conflict("running", "The session didn't stop in time, so its worktree wasn't touched. Try again in a moment.")
 		}
 		stopped = true
 		d.lifecycle(ctx, AuditSessionStop, r, ByPage, ResultStopped, "stopped to restore its branch from the engine's copy")
@@ -736,10 +736,10 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, false)
 	if err != nil {
 		if h, ok := errors.AsType[*HostError](err); ok && h.Code == HostDirty {
-			return KeepView{}, stopped, explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it and the branch as they are. Wake the session and ask the agent to commit or discard them, then restore again.")
+			return KeepView{}, stopped, conflict("dirty", "The worktree "+r.name+" has changes that aren't committed, so the engine left it and the branch as they are. Wake the session and ask the agent to commit or discard them, then restore again.")
 		}
 		if linked {
-			return KeepView{}, stopped, explained(conflict("worktree"), "agent-host couldn't remove the worktree, so the branch wasn't touched: "+keepSentence(hostMessage(err)))
+			return KeepView{}, stopped, conflict("worktree", "agent-host couldn't remove the worktree, so the branch wasn't touched: "+keepSentence(hostMessage(err)))
 		}
 		shared.For(ctx, k.cfg.Logger).Warn("restore branch", "event", "broken-worktree-not-cleared", "worktree", r.name)
 	}
@@ -751,7 +751,7 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	werr := k.cfg.Store.WriteBranch(r.box, r.repo, r.branch, chosen)
 	if werr != nil {
 		k.restoreAudit(r, chosen, "failed", "the engine couldn't write the branch "+r.branch+" into the clone after agent-host "+removed+": "+werr.Error())
-		return KeepView{}, stopped, explained(conflict("branch"), "agent-host "+removed+", but the engine couldn't write the branch "+r.branch+": "+keepSentence(werr.Error())+" Press Restore this on commit "+shortSHA(chosen)+" again.")
+		return KeepView{}, stopped, conflict("branch", "agent-host "+removed+", but the engine couldn't write the branch "+r.branch+": "+keepSentence(werr.Error())+" Press Restore this on commit "+shortSHA(chosen)+" again.")
 	}
 	cwd, err := host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
 	if err == nil {
@@ -759,7 +759,7 @@ func (k *Keep) Restore(ctx context.Context, sid, commit string) (KeepView, bool,
 	}
 	if err != nil {
 		k.restoreAudit(r, chosen, "failed", "the branch "+r.branch+" is back at "+shortSHA(chosen)+" after agent-host "+removed+", but agent-host couldn't add its worktree again")
-		return KeepView{}, stopped, explained(conflict("worktree"), "The branch "+r.branch+" is back at "+shortSHA(chosen)+", but agent-host couldn't add its worktree again: "+keepSentence(hostMessage(err))+" Press Restore this on commit "+shortSHA(chosen)+" again.")
+		return KeepView{}, stopped, conflict("worktree", "The branch "+r.branch+" is back at "+shortSHA(chosen)+", but agent-host couldn't add its worktree again: "+keepSentence(hostMessage(err))+" Press Restore this on commit "+shortSHA(chosen)+" again.")
 	}
 	d.mu.Lock()
 	r.cwd = cwd
@@ -793,7 +793,7 @@ func (k *Keep) readded(ctx context.Context, sid string, r *run, commit string, n
 		if errors.As(err, &e) && e.Reason == "dirty" {
 			return KeepView{}, stopped, err
 		}
-		return KeepView{}, stopped, explained(conflict("worktree"), keepSentence(errText(err))+" Press Restore this on commit "+shortSHA(commit)+" again.")
+		return KeepView{}, stopped, conflict("worktree", keepSentence(errText(err))+" Press Restore this on commit "+shortSHA(commit)+" again.")
 	}
 	what := "the engine's last copied commit "
 	if !newest {

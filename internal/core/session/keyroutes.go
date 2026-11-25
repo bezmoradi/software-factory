@@ -28,7 +28,7 @@ type KeyRoutes interface {
 }
 
 type GatewayRoutes interface {
-	GatewayHost(side string) (string, bool)
+	GatewayHost() (string, bool)
 	HoldGateway() func()
 }
 
@@ -38,14 +38,14 @@ func (d *Dispatcher) UseGateways(g GatewayRoutes) {
 	d.gateways = g
 }
 
-func (d *Dispatcher) gatewayOf(side string) (string, bool) {
+func (d *Dispatcher) gatewayOf() (string, bool) {
 	d.mu.Lock()
 	g := d.gateways
 	d.mu.Unlock()
 	if g == nil {
 		return "", true
 	}
-	return g.GatewayHost(side)
+	return g.GatewayHost()
 }
 
 func (d *Dispatcher) holdGateway() func() {
@@ -56,13 +56,6 @@ func (d *Dispatcher) holdGateway() func() {
 		return func() {}
 	}
 	return g.HoldGateway()
-}
-
-func targetSide(target string) string {
-	if target == LoginReviewers {
-		return SideReviewers
-	}
-	return SideAgents
 }
 
 func (d *Dispatcher) expectAgentOf(target string) string {
@@ -156,7 +149,7 @@ func (d *Dispatcher) removeKeyLocked(ctx context.Context, target string, restore
 
 func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	if !ValidLoginTarget(target) {
-		return explained(invalid("target"), "")
+		return invalid("target", "That isn't a sign-in the engine knows. Reload the page and try again.")
 	}
 	if _, err := d.keyHost(ctx, target); err != nil {
 		return d.unreachedKey(target)
@@ -167,7 +160,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	defer d.keyMu.Unlock()
 	all, readable := d.keyRoutes()
 	k, present := all[target]
-	host, established := d.gatewayOf(targetSide(target))
+	host, established := d.gatewayOf()
 	if !keyMisrouted(k, readable && present, host, established) {
 		return nil
 	}
@@ -176,7 +169,7 @@ func (d *Dispatcher) KeyRouted(ctx context.Context, target string) error {
 	err := d.removeKeyLocked(kctx, target, true)
 	shared.For(ctx, d.cfg.Logger).Info("claude api key", "target", target, "step", "reconcile", "ok", err == nil)
 	if err != nil {
-		return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in panel removes it too.")
+		return conflict("api key", "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address the engine can't apply now, and the engine couldn't remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again: the engine tries to remove the key before every start, and a subscription sign-in in the sign-in panel removes it too.")
 	}
 	return nil
 }
@@ -188,12 +181,12 @@ func (d *Dispatcher) unreachedKey(target string) error {
 	defer d.keyMu.Unlock()
 	all, readable := d.keyRoutes()
 	k, present := all[target]
-	host, established := d.gatewayOf(targetSide(target))
+	host, established := d.gatewayOf()
 	if readable && (!present || !k.Saved || !keyMisrouted(k, true, host, established)) {
 		return nil
 	}
 	d.cfg.Logger.Info("claude api key", "target", target, "step", "reconcile", "ok", false, "why", "unreachable")
-	return explained(conflict("api key"), "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address has changed, and the engine can't reach that container to remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again.")
+	return conflict("api key", "Claude Code in the "+d.containerWords(target)+" may hold a key pasted for a gateway whose address has changed, and the engine can't reach that container to remove it, so Claude Code doesn't start there. Check that the container runs ("+d.runsCheck(target)+"), then try again.")
 }
 
 func (d *Dispatcher) ReconcileKeys(ctx context.Context) {

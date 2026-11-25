@@ -174,7 +174,7 @@ func decide(r Request, f Facts) Decision {
 		unmet = append(unmet, sandboxUnmet)
 		unsandboxed = true
 	}
-	roles := workflow.MinimumRoles(f.Type.Edits)
+	roles := workflow.MinimumRoles()
 	for _, role := range f.Type.Roles {
 		if !slices.Contains(roles, role) {
 			roles = append(roles, role)

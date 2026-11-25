@@ -9,9 +9,10 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-const SandboxStopReason = "the sandbox check failed"
-
-var _ HaltStopper = (*Dispatcher)(nil)
+const (
+	SandboxStopReason = "the sandbox check failed"
+	stopEveryFor      = 3 * time.Minute
+)
 
 func (r *Registry) stoppedFor(sid, why string) {
 	r.mu.Lock()
@@ -28,7 +29,7 @@ func StoppedNote(at time.Time, why string) string {
 
 func (d *Dispatcher) sandboxFailed() {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), haltFor)
+		ctx, cancel := context.WithTimeout(context.Background(), stopEveryFor)
 		defer cancel()
 		d.StopEvery(ctx, SandboxStopReason)
 	}()
@@ -106,27 +107,5 @@ func (d *Dispatcher) stopOne(ctx context.Context, sid, why string) {
 		case <-ctx.Done():
 		case <-time.After(time.Second):
 		}
-	}
-}
-
-func (d *Dispatcher) Kick() {
-	d.mu.Lock()
-	var bridges []*bridge
-	for _, r := range d.runs {
-		if r.bridge != nil {
-			bridges = append(bridges, r.bridge)
-		}
-	}
-	d.mu.Unlock()
-	for _, b := range bridges {
-		b.kick()
-	}
-}
-
-func (b *bridge) kick() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.turn == "" {
-		b.nextLocked()
 	}
 }

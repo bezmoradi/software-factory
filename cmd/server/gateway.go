@@ -26,11 +26,11 @@ type agentHost interface {
 	session.SignInChecker
 }
 
-func withGateway(c *agenthost.Client, allow *session.Allowlist, side string, commands ...string) agentHost {
+func withGateway(c *agenthost.Client, allow *session.Allowlist, commands ...string) agentHost {
 	if allow == nil {
 		return c
 	}
-	return gatewayHost{Client: c, url: func() string { return allow.BaseURL(side) }, commands: append([]string{"claude"}, commands...)}
+	return gatewayHost{Client: c, url: func() string { return allow.BaseURL() }, commands: append([]string{"claude"}, commands...)}
 }
 
 func (g gatewayHost) claudeCode(argv []string) bool {

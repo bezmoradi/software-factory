@@ -44,13 +44,13 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		okCode = true
 	}
 	if okTarget && (len(target) > maxTarget || !session.ValidLoginTarget(target)) {
-		refuse(w, http.StatusBadRequest, "target")
+		refuse(w, http.StatusBadRequest, "target", "That isn't a sign-in the engine knows. Reload the page and try again.")
 		return
 	}
 	if step == "key" {
 		key, okKey := body["key"].(string)
 		if !keysWithin(body, "step", "target", "key") || !okKey || !okTarget {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute + writeFor))
@@ -64,7 +64,7 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 	}
 	if step == "clear-key" {
 		if !keysWithin(body, "step", "target") || !okTarget {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute + writeFor))
@@ -72,7 +72,7 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		return
 	}
 	if !keysWithin(body, "step", "target", "code") || !okStep || !okCode {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if step == "status" {
@@ -81,13 +81,13 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		if _, has := body["target"]; has {
 			b, isBox := session.TargetBox(target)
 			if !okTarget || !isBox || len(target) > maxTarget {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			box = b
 		}
 		if _, has := body["code"]; has {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		which := ""
@@ -107,8 +107,8 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, body map[st
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2*time.Minute + writeFor))
-	if !okTarget || (step == "code") != (code != "") {
-		refuse(w, http.StatusBadRequest, "fields")
+	if !okTarget || step != "code" && code != "" {
+		refuseFields(w)
 		return
 	}
 	link, signedIn, err := s.cfg.Logins.Login(r.Context(), target, step, code)
@@ -127,7 +127,7 @@ func (s *Server) claudeTrust(w http.ResponseWriter, r *http.Request, body map[st
 	path, ok := body["path"].(string)
 	consent, okConsent := consentOf(body)
 	if !keysWithin(body, "path", "approve") || !ok || !okConsent || path == "" || len(path) > 4096 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2*time.Minute + writeFor))

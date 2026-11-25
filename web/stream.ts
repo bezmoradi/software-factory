@@ -1,16 +1,14 @@
-import { api, events, forget, signedIn, trade } from './api.ts'
-import { controllable, current, paint, say, schedulePaint, scroller, sessions, state, type Session } from './app-state.ts'
+import { answerOf, events, forget, request, signedIn, trade } from './api.ts'
+import { allowed, current, UNLISTED, paint, say, schedulePaint, scroller, sessions, state, type Session } from './app-state.ts'
 import { openTabs } from './navigation.ts'
 import { byId, el } from './lib/dom.ts'
-import { agentWord, attachCommand, isClaude } from './lib/format.ts'
+import { agentWord } from './lib/format.ts'
 import { isRecord } from './lib/json.ts'
-import type { Step } from './lib/path.ts'
 import { loadUpdate } from './components/update.ts'
 import type { CatalogEntry, SessionEvent, SessionInfo, StreamEvent } from './types.ts'
 
 interface StreamDeps {
   onEvent: (ev: StreamEvent) => void
-  began: (s: Session) => void
   markCheckpoint: (sid: string, level: string) => void
 }
 
@@ -81,8 +79,8 @@ async function signInAgain(): Promise<void> {
 }
 
 async function whyOf(res: Response): Promise<string> {
-  const body: unknown = await res.json().catch(() => null)
-  return isRecord(body) && typeof body.why === 'string' ? body.why : ''
+  const { body } = await answerOf(res)
+  return typeof body.why === 'string' ? body.why : ''
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -92,10 +90,6 @@ async function restarted(): Promise<boolean> {
   return res?.status === 404
 }
 
-function stepOf(text: string): Step {
-  const skill = /^\s*(?:<command-name>\s*)?\/?knackpack:(challenge-requirements|plan-implementation)\b/.exec(text)
-  return skill?.[1] === 'challenge-requirements' ? 'define' : skill?.[1] === 'plan-implementation' ? 'plan' : ''
-}
 
 export function ensure(sid: string): Session {
   let s = sessions.get(sid)
@@ -105,7 +99,7 @@ export function ensure(sid: string): Session {
   view.away = true
   view.scroller = scroller
   byId('conversations').append(view)
-  s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, step: '', compacting: '', changes: null, forkStart: null, changesKey: '', changesAt: 0, compare: { from: 'fork', commit: '' }, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
+  s = { sid, info: { sid, cwd: '', live: false }, view, epoch: '', seq: 0, replayAt: 0, rebase: false, gate: null, gateKey: '', gateAt: 0, workflow: null, workflowSeq: 0, planfile: null, agents: [], intent: null, catalog: null, total: 0, cost: 0, busy: false, compacting: '', changes: null, changesKey: '', changesAt: 0, compare: { from: 'fork', commit: '' }, context: null, asked: {}, refused: {}, audit: null, auditSeen: 0 }
   sessions.set(sid, s)
   return s
 }
@@ -114,7 +108,7 @@ export function requestReplay(s: Session, force = false) {
   if (!state.stream || !s.info.live || s.info.disputed) return
   if (!force && Date.now() - s.replayAt < 3000) return
   s.replayAt = Date.now()
-  void api('/api/replay', { stream: state.stream, sid: s.sid, epoch: s.epoch, since: s.seq }).catch(() => null)
+  void request('/api/replay', { stream: state.stream, sid: s.sid, epoch: s.epoch, since: s.seq })
 }
 
 export function updateSessions(list: unknown) {
@@ -125,19 +119,19 @@ export function updateSessions(list: unknown) {
     seen.add(info.sid)
     const s = ensure(info.sid)
     const was = s.info
-    const could = controllable(s)
+    const could = allowed(s, 'control')
     s.info = info
     if (info.live && (!was.live || was.disputed)) requestReplay(s, true)
     else if (info.live && !info.disputed && s.epoch && info.epoch === s.epoch && (info.lastSeq ?? 0) > s.seq) requestReplay(s)
     if (info.live && !was.live && current() === s && byId('hint').textContent?.startsWith('Waking')) say('')
     if (info.live && !was.live) byId<HTMLElementTagNameMap['sf-toasts']>('toasts').close(`wake:${info.sid}`)
     if (Boolean(info.running) !== Boolean(was.running)) s.auditSeen++
-    if (could !== controllable(s)) s.view.refreshCards(controllable(s))
+    if (could !== allowed(s, 'control')) s.view.refreshCards(allowed(s, 'control'))
   }
   for (const s of [...sessions.values()]) {
     if (seen.has(s.sid)) continue
     if (openTabs.includes(`s/${s.sid}`)) {
-      s.info = { ...s.info, live: false, running: false, verified: false, busy: false }
+      s.info = { ...s.info, live: false, running: false, verified: false, busy: false, summary: { word: UNLISTED, tone: 'off' }, warnings: [], control: { text: UNLISTED, action: '' }, actions: undefined, readOnly: '', stalled: false }
       continue
     }
     sessions.delete(s.sid)
@@ -150,13 +144,12 @@ function entries(list: unknown): CatalogEntry[] {
   return Array.isArray(list) ? (list as unknown[]).filter((e): e is CatalogEntry => isRecord(e) && typeof e.name === 'string' && typeof e.description === 'string').map(e => ({ name: e.name, description: e.description })) : []
 }
 
-export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Stream {
+export function startStream({ onEvent, markCheckpoint }: StreamDeps): Stream {
   function applySession(s: Session, ev: SessionEvent) {
-    s.lastAt = typeof ev.ts === 'number' && Number.isFinite(ev.ts) && ev.ts > 0 ? Math.min(ev.ts, Date.now()) : Date.now()
     s.view.who = agentWord(s.info.agent)
-    const attach = isClaude(s.info) && /^[0-9a-f]{8}$/.test(s.info.id || '') ? attachCommand(s.info.id!, s.info.box ?? '') : ''
+    const attach = s.info.commands?.attach ?? ''
     const card = ev.type === 'plan' || ev.type === 'permission' || ev.type === 'ask' ? { ...ev, attach, who: agentWord(s.info.agent) } : ev
-    s.view.apply(card, controllable(s))
+    s.view.apply(card, allowed(s, 'control'))
     switch (ev.type) {
       case 'workflow':
         s.workflow = ev
@@ -184,11 +177,6 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
         break
       case 'idle':
         s.busy = false
-        s.step = ''
-        break
-      case 'prompt':
-        s.step = typeof ev.text === 'string' ? stepOf(ev.text) : ''
-        began(s)
         break
       case 'command': {
         const kind = ev.approval === 'requirements' || ev.approval === 'plan' ? ev.approval : null
@@ -197,10 +185,6 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
         if (kind) delete s.asked[kind]
         break
       }
-      case 'tool':
-        if (ev.tool === 'Skill' && typeof ev.summary === 'string' && stepOf(ev.summary)) s.step = stepOf(ev.summary)
-        began(s)
-        break
       case 'compact':
         s.compacting = ev.state === 'start' ? (ev.trigger === 'auto' ? 'Claude Code is compacting the conversation on its own…' : 'Compacting the conversation…') : ''
         break
@@ -210,15 +194,15 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
         break
       case 'control':
         s.info = { ...s.info, controlled: ev.on === true }
-        s.view.refreshCards(controllable(s))
+        s.view.refreshCards(allowed(s, 'control'))
         break
       case 'mode':
-        s.info = { ...s.info, mode: typeof ev.mode === 'string' ? ev.mode : '' }
+        s.info = { ...s.info, mode: typeof ev.mode === 'string' ? ev.mode : '', modeLabel: typeof ev.label === 'string' ? ev.label : '' }
         break
       case 'context':
-        const known = (ev.level === 'warn' || ev.level === 'stop') && typeof ev.tokens === 'number' && Number.isFinite(ev.tokens)
-        s.context = known ? { tokens: ev.tokens, level: ev.level } : null
-        if (!known) markCheckpoint(s.sid, '')
+        const c = ev.checkpoint
+        s.context = c && typeof c.text === 'string' && typeof c.said === 'string' && typeof c.level === 'string' ? { level: c.level, text: c.text, said: c.said, stop: c.stop === true } : null
+        if (!s.context) markCheckpoint(s.sid, '')
         break
     }
     schedulePaint()
@@ -254,7 +238,7 @@ export function startStream({ onEvent, began, markCheckpoint }: StreamDeps): Str
         return gen === generation ? connect() : undefined
       }
       if (res.status === 403) {
-        const body: { wait?: unknown } = await res.json().catch(() => ({}))
+        const { body } = await answerOf(res)
         showGone('Signing in…', 'This takes a few seconds.', false, true)
         await sleep(Math.max(500, Math.min(20000, Number(body.wait) || 1000)))
         return gen === generation ? connect() : undefined

@@ -15,7 +15,7 @@ const (
 
 func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	if len(body) != 0 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if s.cfg.Diagnostics == nil {

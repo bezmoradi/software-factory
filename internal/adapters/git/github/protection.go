@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -22,18 +21,21 @@ const (
 )
 
 type protectionRead struct {
-	protected known
-	reviews   known
-	approvals int
-	checks    known
-	names     []string
-	notes     []string
+	protected   known
+	reviews     known
+	approvals   int
+	owners      bool
+	pullRequest bool
+	checks      known
+	names       []string
+	why         string
 }
 
 type ruleJSON struct {
 	Type       string `json:"type"`
 	Parameters struct {
-		RequiredApprovingReviewCount int `json:"required_approving_review_count"`
+		RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
+		RequireCodeOwnerReview       bool `json:"require_code_owner_review"`
 		RequiredStatusChecks         []struct {
 			Context string `json:"context"`
 		} `json:"required_status_checks"`
@@ -42,7 +44,8 @@ type ruleJSON struct {
 
 type classicJSON struct {
 	RequiredPullRequestReviews *struct {
-		RequiredApprovingReviewCount int `json:"required_approving_review_count"`
+		RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
+		RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
 	} `json:"required_pull_request_reviews"`
 	RequiredStatusChecks *struct {
 		Contexts []string `json:"contexts"`
@@ -71,6 +74,31 @@ func (p *protectionRead) check(name string) {
 
 func (p *protectionRead) yes(field *known) { *field = knownYes }
 
+func (p *protectionRead) pull(approvals int, owners bool) {
+	p.pullRequest = true
+	p.approvals = max(p.approvals, approvals)
+	p.owners = p.owners || owners
+	if approvals > 0 || owners {
+		p.yes(&p.reviews)
+	} else {
+		p.no(&p.reviews)
+	}
+}
+
+func (p *protectionRead) unread(why string) {
+	if p.why == "" {
+		p.why = why
+	}
+}
+
+func whyUnread(err error, what string) string {
+	var fe *session.ForgeError
+	if errors.As(err, &fe) && fe.Need != "" && (fe.Status == http.StatusForbidden || fe.Status == http.StatusNotFound) {
+		return "Needs a token with " + fe.Need
+	}
+	return "Couldn't read " + what
+}
+
 func (p *protectionRead) no(field *known) {
 	if *field == unknownYet {
 		*field = knownNo
@@ -88,8 +116,7 @@ func (a API) Protection(ctx context.Context, r session.ForgeRepo, branch string)
 		classicKnown = true
 		p.yes(&p.protected)
 		if c := classic.RequiredPullRequestReviews; c != nil {
-			p.yes(&p.reviews)
-			p.approvals = max(p.approvals, c.RequiredApprovingReviewCount)
+			p.pull(c.RequiredApprovingReviewCount, c.RequireCodeOwnerReviews)
 		} else {
 			p.no(&p.reviews)
 		}
@@ -110,7 +137,6 @@ func (a API) Protection(ctx context.Context, r session.ForgeRepo, branch string)
 		p.no(&p.reviews)
 		p.no(&p.checks)
 	case errors.As(err, &fe) && (fe.Status == http.StatusForbidden || fe.Status == http.StatusNotFound):
-		p.notes = append(p.notes, "The token can't read the branch protection rule's details (it needs "+session.NeedAdministration+"), so whether reviews are required by that rule is unknown.")
 		classicKnown = a.branch(ctx, r, branch, &p)
 	default:
 		return session.Protection{}, err
@@ -132,19 +158,22 @@ func (a API) Protection(ctx context.Context, r session.ForgeRepo, branch string)
 		return session.ProtectionUnknown
 	}
 	return session.Protection{
-		State:      word(p.protected, session.ProtectionOn, session.ProtectionOff),
-		Reviews:    word(p.reviews, session.RequiredYes, session.RequiredNo),
-		Approvals:  p.approvals,
-		Checks:     word(p.checks, session.RequiredYes, session.RequiredNo),
-		CheckNames: p.names,
-		Notes:      p.notes,
+		State:       word(p.protected, session.ProtectionOn, session.ProtectionOff),
+		Reviews:     word(p.reviews, session.RequiredYes, session.RequiredNo),
+		Approvals:   p.approvals,
+		AtLeast:     !rulesKnown || !classicKnown,
+		CodeOwners:  p.owners,
+		PullRequest: p.pullRequest,
+		Checks:      word(p.checks, session.RequiredYes, session.RequiredNo),
+		CheckNames:  p.names,
+		Why:         p.why,
 	}, nil
 }
 
 func (a API) rules(ctx context.Context, r session.ForgeRepo, branch string, p *protectionRead) bool {
 	var list []ruleJSON
 	if _, err := a.do(ctx, r, http.MethodGet, repoPath(r)+"/rules/branches/"+refPath(branch)+"?per_page=100", nil, session.NeedMetadata, &list); err != nil {
-		p.notes = append(p.notes, "The rulesets for the branch couldn't be read: "+session.CleanLine(err.Error(), 200))
+		p.unread(whyUnread(err, "the branch's rulesets"))
 		return false
 	}
 	active := false
@@ -152,8 +181,7 @@ func (a API) rules(ctx context.Context, r session.ForgeRepo, branch string, p *p
 		switch rule.Type {
 		case "pull_request":
 			active = true
-			p.yes(&p.reviews)
-			p.approvals = max(p.approvals, rule.Parameters.RequiredApprovingReviewCount)
+			p.pull(rule.Parameters.RequiredApprovingReviewCount, rule.Parameters.RequireCodeOwnerReview)
 		case "required_status_checks":
 			active = true
 			p.yes(&p.checks)
@@ -166,7 +194,6 @@ func (a API) rules(ctx context.Context, r session.ForgeRepo, branch string, p *p
 	}
 	if active {
 		p.yes(&p.protected)
-		p.notes = append(p.notes, "Rulesets apply to the branch ("+strconv.Itoa(len(list))+" rules).")
 	}
 	return true
 }
@@ -174,17 +201,17 @@ func (a API) rules(ctx context.Context, r session.ForgeRepo, branch string, p *p
 func (a API) branch(ctx context.Context, r session.ForgeRepo, branch string, p *protectionRead) bool {
 	var b branchJSON
 	if _, err := a.do(ctx, r, http.MethodGet, repoPath(r)+"/branches/"+refPath(branch), nil, session.NeedContents, &b); err != nil {
-		p.notes = append(p.notes, "The branch couldn't be read: "+session.CleanLine(err.Error(), 200))
+		p.unread(whyUnread(err, "the branch"))
 		return false
 	}
 	if !b.Protected {
-		p.notes = p.notes[:len(p.notes)-1]
 		p.no(&p.protected)
 		p.no(&p.reviews)
 		p.no(&p.checks)
 		return true
 	}
 	p.yes(&p.protected)
+	p.unread("Needs a token with " + session.NeedAdministration)
 	if c := b.Protection.RequiredStatusChecks; c.EnforcementLevel != "" && c.EnforcementLevel != "off" {
 		p.yes(&p.checks)
 		for _, n := range c.Contexts {

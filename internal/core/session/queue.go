@@ -23,9 +23,10 @@ const (
 )
 
 type QueuedMessage struct {
-	ID   string
-	Text string
-	At   time.Time
+	ID    string
+	Text  string
+	At    time.Time
+	Typed bool
 }
 
 type QueueState struct {
@@ -67,7 +68,7 @@ func (w *SessionWork) loadQueues() {
 		q := &sessionQueue{stopped: clip(st.Stopped, 300)}
 		for _, m := range st.Items {
 			if text, ok := queueText(m.Text); ok && len(q.items) < MaxQueue && cardID.MatchString(m.ID) {
-				q.items = append(q.items, QueuedMessage{ID: m.ID, Text: text, At: m.At})
+				q.items = append(q.items, QueuedMessage{ID: m.ID, Text: text, At: m.At, Typed: m.Typed})
 			}
 		}
 		if len(q.items) == 0 {
@@ -133,7 +134,7 @@ func (w *SessionWork) queueOf(sid string) *sessionQueue {
 
 func (w *SessionWork) admitted(sid string) error {
 	if _, ok := w.reg.workInfo(sid); !ok {
-		return explained(notFound("session"), "The engine has no session of that id.")
+		return notFound("session", "The engine has no session of that id.")
 	}
 	return w.branchHeld(sid)
 }
@@ -145,13 +146,23 @@ func (w *SessionWork) branchHeld(sid string) error {
 	return heldBranch(w.d.Doubled, sid)
 }
 
+func QueueFull(queued int) string {
+	if queued < MaxQueue {
+		return ""
+	}
+	return "Ten messages already wait in this session's queue."
+}
+
 func checkQueued(text string) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", onField("text", invalid("text", "Type the message to queue first."))
+	}
 	if secretText(text) {
-		return "", explained(invalid("text"), "The queue doesn't keep token-shaped text. Send that message directly instead.")
+		return "", onField("text", invalid("text", "Can't hold token-shaped text. Send it directly."))
 	}
 	t, ok := queueText(text)
 	if !ok {
-		return "", explained(invalid("text"), "A queued message is text of at most 20,000 characters, and not a command.")
+		return "", onField("text", invalid("text", "At most 20,000 characters, and not a command."))
 	}
 	return t, nil
 }
@@ -164,54 +175,66 @@ func (w *SessionWork) QueueAdd(sid, text string) error {
 	if err := w.admitted(sid); err != nil {
 		return err
 	}
-	if err := w.push(sid, t); err != nil {
+	if err := w.push(sid, t, true); err != nil {
 		return err
 	}
 	go w.pump(sid, "")
 	return nil
 }
 
-func (w *SessionWork) push(sid, text string) error {
+func (w *SessionWork) push(sid, text string, typed bool) error {
 	w.mu.Lock()
 	q := w.queueOf(sid)
-	if len(q.items) >= MaxQueue {
+	if full := QueueFull(len(q.items)); full != "" {
 		w.mu.Unlock()
-		return explained(limited("queue"), "Ten messages already wait in this session's queue.")
+		return limited("queue", full)
 	}
 	if _, ok := w.queues[sid]; !ok && len(w.queues) >= maxQueueSessions {
 		w.mu.Unlock()
-		return explained(limited("queue"), "The engine keeps queues for at most 1,000 sessions.")
+		return limited("queue", "The engine keeps queues for at most 1,000 sessions.")
 	}
-	q.items = append(q.items, QueuedMessage{ID: randomHex(16), Text: text, At: w.cfg.Now()})
+	q.items = append(q.items, QueuedMessage{ID: randomHex(16), Text: text, At: w.cfg.Now(), Typed: typed})
 	w.mu.Unlock()
 	w.saveQueues()
 	w.changed(sid)
 	return nil
 }
 
-func (w *SessionWork) QueueEdit(sid, id, text string) error {
+func (w *SessionWork) QueueEdit(sid, id, text string) (bool, error) {
 	t, err := checkQueued(text)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) { q.items[i].Text = t })
-}
-
-func (w *SessionWork) QueueRemove(sid, id string) error {
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) { q.items = slices.Delete(q.items, i, i+1) })
-}
-
-func (w *SessionWork) QueueMove(sid, id string, to int) error {
-	return w.queueChange(sid, id, func(q *sessionQueue, i int) {
-		to = min(max(to, 0), len(q.items)-1)
-		m := q.items[i]
-		q.items = slices.Insert(slices.Delete(q.items, i, i+1), to, m)
+	return w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		if q.items[i].Text == t {
+			return false
+		}
+		q.items[i].Text = t
+		return true
 	})
 }
 
-func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i int)) error {
+func (w *SessionWork) QueueRemove(sid, id string) error {
+	_, err := w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		q.items = slices.Delete(q.items, i, i+1)
+		return true
+	})
+	return err
+}
+
+func (w *SessionWork) QueueMove(sid, id string, to int) error {
+	_, err := w.queueChange(sid, id, func(q *sessionQueue, i int) bool {
+		to = min(max(to, 0), len(q.items)-1)
+		m := q.items[i]
+		q.items = slices.Insert(slices.Delete(q.items, i, i+1), to, m)
+		return true
+	})
+	return err
+}
+
+func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i int) bool) (bool, error) {
 	if err := w.branchHeld(sid); err != nil {
-		return err
+		return false, err
 	}
 	w.mu.Lock()
 	q := w.queues[sid]
@@ -221,20 +244,23 @@ func (w *SessionWork) queueChange(sid, id string, change func(q *sessionQueue, i
 	}
 	if i < 0 {
 		w.mu.Unlock()
-		return explained(notFound("queued"), "That message is no longer in the queue.")
+		return false, notFound("queued", "That message is no longer in the queue.")
 	}
 	if q.sending && i == 0 {
 		w.mu.Unlock()
-		return explained(conflict("sending"), "That message is being sent now.")
+		return false, conflict("sending", "That message is being sent now.")
 	}
-	change(q, i)
+	if !change(q, i) {
+		w.mu.Unlock()
+		return false, nil
+	}
 	if len(q.items) == 0 {
 		q.stopped = ""
 	}
 	w.mu.Unlock()
 	w.saveQueues()
 	w.changed(sid)
-	return nil
+	return true, nil
 }
 
 func (w *SessionWork) QueueResume(sid string) error {
@@ -252,7 +278,7 @@ func (w *SessionWork) QueueResume(sid string) error {
 	return nil
 }
 
-func (w *SessionWork) divert(sid, text string, attached bool) (bool, error) {
+func (w *SessionWork) divert(sid, text string, attached, typed bool) (bool, error) {
 	w.mu.Lock()
 	rs := w.runs[sid]
 	setting := rs != nil && rs.setting
@@ -261,13 +287,13 @@ func (w *SessionWork) divert(sid, text string, attached bool) (bool, error) {
 		return false, nil
 	}
 	if attached {
-		return true, explained(conflict("setup"), "The setup command is still running in this session's worktree. Send images and files once it has finished.")
+		return true, conflict("setup", "The setup command is still running in this session's worktree. Send images and files once it has finished.")
 	}
 	t, err := checkQueued(text)
 	if err != nil {
-		return true, explained(conflict("setup"), "The setup command is still running in this session's worktree, and this message can't wait in the queue. Send it once setup has finished.")
+		return true, conflict("setup", "The setup command is still running in this session's worktree, and this message can't wait in the queue. Send it once setup has finished.")
 	}
-	return true, w.push(sid, t)
+	return true, w.push(sid, t, typed)
 }
 
 func (w *SessionWork) cardShown(sid string) {
@@ -294,9 +320,6 @@ func (w *SessionWork) afterTurn(sid, reason string) {
 }
 
 func (w *SessionWork) blocked(sid, ended string) string {
-	if why := w.reg.halt.turns(); why != "" {
-		return why
-	}
 	switch {
 	case ended == "aborted":
 		return queueAborted
@@ -333,7 +356,11 @@ func (w *SessionWork) pump(sid, ended string) {
 	w.mu.Unlock()
 	why := w.blocked(sid, ended)
 	if why == "" {
-		if err := w.reg.Message(sid, first.Text, false, nil, nil); err != nil {
+		send := w.reg.Message
+		if first.Typed {
+			send = w.reg.PersonMessage
+		}
+		if err := send(sid, first.Text, false, nil, nil); err != nil {
 			why = queueRefused(err)
 		}
 	}
@@ -364,4 +391,15 @@ func queueRefused(err error) string {
 		return "The engine didn't send the next message (" + clip(e.Reason, 40) + ")."
 	}
 	return "The engine didn't send the next message."
+}
+
+func QueueMoves(count, i int, sending bool) (up, down, editable bool) {
+	editable = !sending || i != 0
+	up = i > 0 && (!sending || i > 1)
+	down = i < count-1 && (!sending || i != 0)
+	return up, down, editable
+}
+
+func ModelSwitchable(agent string) bool {
+	return agent == "claude"
 }

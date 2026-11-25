@@ -55,6 +55,7 @@ type hostCreateJSON struct {
 	CgroupnsMode   string            `json:"CgroupnsMode"`
 	IpcMode        string            `json:"IpcMode"`
 	ShmSize        int64             `json:"ShmSize"`
+	GroupAdd       []string          `json:"GroupAdd,omitempty"`
 }
 
 type endpointCreateJSON struct {

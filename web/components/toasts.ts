@@ -1,4 +1,4 @@
-import { button, el } from '../lib/dom.ts'
+import { button, el, say } from '../lib/dom.ts'
 import { icon } from './icon.ts'
 
 export type Tone = 'info' | 'ok' | 'warn' | 'bad'
@@ -101,6 +101,16 @@ class SfToasts extends HTMLElement {
 }
 
 customElements.define('sf-toasts', SfToasts)
+
+export function toast(t: Toast): string {
+  const shelf = document.getElementById('toasts')
+  return t.title && shelf instanceof SfToasts ? shelf.show(t) : ''
+}
+
+export function outcome(host: Element, line: HTMLElement, t: Toast): void {
+  if (!host.closest('dialog')) return void toast(t)
+  say(line, [t.title, t.description ?? ''].filter(Boolean).join(' '), t.tone === 'info' || !t.tone ? 'muted' : t.tone)
+}
 
 declare global {
   interface HTMLElementTagNameMap {

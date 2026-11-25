@@ -32,11 +32,8 @@ func foundOf(i issueJSON) session.IssueFound {
 	return out
 }
 
-func (a API) OpenIssues(ctx context.Context, r session.ForgeRepo, label string, page int) ([]session.IssueFound, bool, error) {
+func (a API) OpenIssues(ctx context.Context, r session.ForgeRepo, page int) ([]session.IssueFound, bool, error) {
 	q := url.Values{"state": {"open"}, "sort": {"created"}, "direction": {"desc"}, "per_page": {strconv.Itoa(openIssuesPage)}, "page": {strconv.Itoa(page)}}
-	if label != "" {
-		q.Set("labels", label)
-	}
 	var list []issueJSON
 	_, h, err := a.send(ctx, r, http.MethodGet, repoPath(r)+"/issues?"+q.Encode(), nil, needIssuesRead, &list)
 	if err != nil {

@@ -79,10 +79,11 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	agentsSeen, reviewersSeen := egress.NewSeen(), egress.NewSeen()
 	live := egress.NewLive(policy, AgentsSide, ReviewersSide)
 	subnets, reviewers := egress.NewSubnets(cfg.Pool), egress.NewSubnets(cfg.Pool)
+	grants, tried := egress.NewGrants(live.Side(AgentsSide), cfg.Pool), egress.NewSubnetSeen()
 	status := &http.Server{
 		Handler: egress.StatusHandler(egress.StatusConfig{
 			Live: live, Books: []*egress.Refusals{agentsBook, reviewersBook},
-			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets, Reviewers: reviewers, Logger: logger,
+			Seen: map[string]*egress.Seen{AgentsSide: agentsSeen, ReviewersSide: reviewersSeen}, KeyFile: cfg.KeyFile, Subnets: subnets, Reviewers: reviewers, Grants: grants, Tried: tried, Logger: logger,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -120,7 +121,7 @@ func ServeEgress(ctx context.Context, args []string, logger shared.Logger) error
 	} else {
 		reviewErr <- nil
 	}
-	proxy := egress.New(live.Side(AgentsSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide, Seen: agentsSeen})
+	proxy := egress.New(live.Side(AgentsSide), cfg.Limits, net.DefaultResolver, &net.Dialer{}, sided{logger, AgentsSide}, egress.Marks{Book: agentsBook, Side: AgentsSide, Seen: agentsSeen}).WithGrants(grants, tried)
 	proxyErr := proxy.Serve(ctx, egress.AllowSubnets(proxyListener, subnets, dropCounter(logger, "agents", "a session container's")))
 	cancel()
 	if err := <-reviewErr; err != nil && proxyErr == nil {

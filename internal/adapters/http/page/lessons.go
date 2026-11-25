@@ -2,11 +2,14 @@ package page
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/bezmoradi/software-factory/internal/core/review"
 	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
@@ -17,6 +20,16 @@ const (
 	reviewDepthRoute = "/api/review-depth"
 	maxDepthAgent    = 120
 	maxProjectName   = 400
+	depthAlways      = "always"
+	depthBig         = "big"
+	depthWarn        = "warn"
+	depthModeRule    = "Needs always, big or warn for each reviewer."
+	depthTwiceRule   = "Needs true or false."
+)
+
+const (
+	saidDepthSaved     = "Saved. The next review uses them."
+	saidDepthUnchanged = "No change: these review settings are already saved."
 )
 
 var (
@@ -39,7 +52,7 @@ func (s *Server) UseReviewDepth(d session.ReviewDepthPage) {
 func (s *Server) lessonsAPI(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	s.mu.Lock()
@@ -59,7 +72,7 @@ func (s *Server) lessonsAPI(w http.ResponseWriter, r *http.Request, body map[str
 		}
 		s.depthOp(w, depth, op, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -130,7 +143,7 @@ func lessonsOf(v session.LessonsView) lessonsJSON {
 func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons session.LessonsPage, op string, body map[string]any) {
 	name, okName := body["name"].(string)
 	if !okName || name == "" || len(name) > maxProjectName {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	id, okID := body["id"].(string)
@@ -139,13 +152,13 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "name") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "suggest":
 		consent, consented := consentOf(body)
 		if !keysWithin(body, "op", "name", "costOk") || !consented {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if !s.knownProject(name) {
@@ -161,14 +174,15 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 		return
 	case "approve":
 		sid, okSID := viewSession(body)
+		okSID = okSID || body["sid"] == ""
 		if !keysWithin(body, "op", "name", "id", "sid") || !okID || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = lessons.Approve(name, id, sid)
 	case "decline":
 		if !keysWithin(body, "op", "name", "id") || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = lessons.Decline(name, id)
@@ -198,80 +212,116 @@ func (s *Server) lessonsOp(w http.ResponseWriter, r *http.Request, lessons sessi
 }
 
 type depthJSON struct {
-	Advisory     []string       `json:"advisory"`
-	Runs         map[string]int `json:"runs"`
-	MaxFiles     int            `json:"maxFiles"`
-	MaxLines     int            `json:"maxLines"`
-	Extra        []string       `json:"extra"`
-	ExtraRuns    int            `json:"extraRuns"`
-	Agents       []string       `json:"agents"`
-	Type         string         `json:"type"`
-	RunsTotal    int            `json:"runsTotal"`
-	AboveRuns    int            `json:"aboveRuns"`
-	AdvisoryRuns int            `json:"advisoryRuns"`
-	MaxRuns      int            `json:"maxRuns"`
+	savedSaid
+	Reviewers    map[string]string `json:"reviewers"`
+	MaxLines     int               `json:"maxLines"`
+	Twice        bool              `json:"twice"`
+	Type         string            `json:"type"`
+	RunsTotal    int               `json:"runsTotal"`
+	AboveRuns    int               `json:"aboveRuns"`
+	AdvisoryRuns int               `json:"advisoryRuns"`
+	Available    []string          `json:"available"`
+	Required     []string          `json:"required"`
 }
 
-func agentList(v any, limit int) ([]string, bool) {
-	raw, ok := v.([]any)
-	if !ok || len(raw) > limit {
-		return nil, false
+func depthOfReviewers(v any) (workflow.Depth, string, bool) {
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return workflow.Depth{}, depthModeRule, false
 	}
-	out := make([]string, 0, len(raw))
-	for _, x := range raw {
-		a, ok := x.(string)
-		if !ok || len(a) > maxDepthAgent || !workflow.AgentName(a) {
-			return nil, false
+	if len(raw) > workflow.MaxAdded {
+		return workflow.Depth{}, workflow.DepthCountRule, false
+	}
+	var d workflow.Depth
+	for _, a := range slices.Sorted(maps.Keys(raw)) {
+		if len(a) > maxDepthAgent || !workflow.AgentName(a) {
+			return workflow.Depth{}, workflow.DepthNameRule, false
 		}
-		out = append(out, a)
+		switch raw[a] {
+		case depthAlways:
+			d.Always = append(d.Always, a)
+		case depthBig:
+			d.Extra = append(d.Extra, a)
+		case depthWarn:
+			d.Advisory = append(d.Advisory, a)
+		default:
+			return workflow.Depth{}, depthModeRule, false
+		}
 	}
-	return out, true
+	return d, "", true
+}
+
+func reviewersOf(d workflow.Depth) map[string]string {
+	out := map[string]string{}
+	for _, list := range []struct {
+		mode   string
+		agents []string
+	}{{depthAlways, d.Always}, {depthBig, d.Extra}, {depthWarn, d.Advisory}} {
+		for _, a := range list.agents {
+			out[a] = list.mode
+		}
+	}
+	return out
+}
+
+func typedCount(v any) (int64, bool) {
+	typed, ok := v.(string)
+	if !ok {
+		return integer(v)
+	}
+	typed = strings.TrimSpace(typed)
+	if typed == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(typed, 10, 64)
+	return n, err == nil
+}
+
+func refuseDepth(w http.ResponseWriter, field, message string) {
+	send(w, http.StatusBadRequest, problem{Error: "depth", Field: field, Message: message})
 }
 
 func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, op string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if !okPath || path == "" || len(path) > session.MaxCwd {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
+	var said savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "set":
-		if !keysWithin(body, "op", "path", "advisory", "runs", "maxFiles", "maxLines", "extra", "extraRuns") {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "path", "reviewers", "maxLines", "twice") {
+			refuseFields(w)
 			return
 		}
-		advisory, okAdvisory := agentList(body["advisory"], workflow.MaxAdvisory)
-		extra, okExtra := agentList(body["extra"], workflow.MaxDeeper)
-		files, okFiles := integer(body["maxFiles"])
-		lines, okLines := integer(body["maxLines"])
-		extraRuns, okExtraRuns := integer(body["extraRuns"])
-		rawRuns, okRuns := body["runs"].(map[string]any)
-		if !okAdvisory || !okExtra || !okFiles || !okLines || !okExtraRuns || !okRuns || len(rawRuns) > 20 ||
-			files < 0 || lines < 0 || files > workflow.MaxDepthSize || lines > workflow.MaxDepthSize || extraRuns < 0 || extraRuns > review.MaxRuns {
-			refuse(w, http.StatusBadRequest, "depth")
+		d, why, okReviewers := depthOfReviewers(body["reviewers"])
+		lines, okLines := typedCount(body["maxLines"])
+		twice, okTwice := body["twice"].(bool)
+		switch {
+		case !okReviewers:
+			refuseDepth(w, "reviewers", why)
+			return
+		case !okLines || lines < 0 || lines > workflow.MaxDepthSize:
+			refuseDepth(w, "maxLines", workflow.DepthSizeRule)
+			return
+		case !okTwice:
+			refuseDepth(w, "twice", depthTwiceRule)
 			return
 		}
-		runs := map[string]int{}
-		for a, v := range rawRuns {
-			n, ok := integer(v)
-			if !ok || n < 1 || n > review.MaxRuns || len(a) > maxDepthAgent || !workflow.AgentName(a) {
-				refuse(w, http.StatusBadRequest, "depth")
-				return
-			}
-			runs[a] = int(n)
-		}
-		err := depth.SetReviewDepth(path, workflow.Depth{Advisory: advisory, Runs: runs, MaxFiles: int(files), MaxLines: int(lines), Extra: extra, ExtraRuns: int(extraRuns)})
-		s.logger.Info("project setting", "op", "review-depth", "ok", err == nil)
+		d.MaxLines, d.Twice = int(lines), twice
+		changed, err := depth.SetReviewDepth(path, d)
+		s.logger.Info("project setting", "op", "review-depth", "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		said = saveSaid(changed, saidDepthSaved, saidDepthUnchanged)
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads and sets a project's review settings only."})
 		return
@@ -282,10 +332,6 @@ func (s *Server) depthOp(w http.ResponseWriter, depth session.ReviewDepthPage, o
 		send(w, code, p)
 		return
 	}
-	runs := v.Depth.Runs
-	if runs == nil {
-		runs = map[string]int{}
-	}
-	send(w, http.StatusOK, depthJSON{Advisory: nonNil(v.Depth.Advisory), Runs: runs, MaxFiles: v.Depth.MaxFiles, MaxLines: v.Depth.MaxLines, Extra: nonNil(v.Depth.Extra),
-		ExtraRuns: v.Depth.ExtraRuns, Agents: nonNil(v.Agents), Type: v.Type, RunsTotal: v.Runs, AboveRuns: v.AboveRuns, AdvisoryRuns: v.Advisory, MaxRuns: review.MaxRuns})
+	send(w, http.StatusOK, depthJSON{savedSaid: said, Reviewers: reviewersOf(v.Depth), MaxLines: v.Depth.MaxLines, Twice: v.Depth.Twice, Type: v.Type, RunsTotal: v.Runs, AboveRuns: v.AboveRuns,
+		AdvisoryRuns: v.Advisory, Available: nonNil(v.Available), Required: nonNil(v.Required)})
 }

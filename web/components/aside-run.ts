@@ -43,7 +43,7 @@ export function asideBox(o: AsideBox): HTMLElement {
   if (running) busy(b, true)
   b.title = o.hint
   const head = el('div', 'row aside-run-head')
-  head.append(el('span', 'small', o.title), el('span', 'spacer'), b)
+  head.append(el('h4', 'label', o.title), el('span', 'spacer'), b)
   box.append(head)
   if (!t) {
     box.append(el('p', 'small muted', o.intro))

@@ -16,24 +16,55 @@ const (
 	limitsFor   = 2*time.Minute + 15*time.Second
 )
 
-func capsBody(body map[string]any) (session.Caps, bool) {
+const (
+	saidProjectCapsSaved     = "Saved. New sessions in this project get these caps."
+	saidProjectCapsUnchanged = "No change: these caps are already saved."
+	saidSessionCapsSaved     = "Saved. This session runs with these caps."
+	saidSessionCapsUnchanged = "No change: this session already has these caps."
+)
+
+type capsProblem struct {
+	Error   string `json:"error"`
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+func refuseCaps(w http.ResponseWriter, field, message string) {
+	send(w, http.StatusBadRequest, capsProblem{Error: "fields", Field: field, Message: message})
+}
+
+var capWireFields = map[string]string{session.CapMoney: "money", session.CapTime: "minutes", session.CapTurns: "turns", session.CapDisk: "disk"}
+
+func capsBody(body map[string]any) (session.Caps, string) {
 	m, okMoney := body["money"].(float64)
-	minutes, okMinutes := integer(body["minutes"])
-	turns, okTurns := integer(body["turns"])
-	if !okMoney || !okMinutes || !okTurns || math.IsNaN(m) || math.IsInf(m, 0) {
-		return session.Caps{}, false
+	if !okMoney {
+		return session.Caps{}, session.CapMoney
 	}
-	if minutes < 0 || minutes > session.MaxCapMinutes || turns < 0 || turns > session.MaxCapTurns {
-		return session.Caps{}, false
+	minutes, okMinutes := integer(body["minutes"])
+	if !okMinutes {
+		return session.Caps{}, session.CapTime
+	}
+	turns, okTurns := integer(body["turns"])
+	if !okTurns {
+		return session.Caps{}, session.CapTurns
 	}
 	var disk int64
 	if raw, has := body["disk"]; has {
 		var okDisk bool
-		if disk, okDisk = integer(raw); !okDisk || disk < 0 || disk > session.MaxCapDiskGiB {
-			return session.Caps{}, false
+		if disk, okDisk = integer(raw); !okDisk {
+			return session.Caps{}, session.CapDisk
 		}
 	}
-	return session.CheckCaps(session.Caps{MoneyUSD: m, Minutes: int(minutes), Turns: int(turns), DiskGiB: int(disk)})
+	return session.CheckCapsFault(session.Caps{MoneyUSD: m, Minutes: int(minutes), Turns: int(turns), DiskGiB: int(disk)})
+}
+
+func checkedCaps(w http.ResponseWriter, body map[string]any) (session.Caps, bool) {
+	c, fault := capsBody(body)
+	if fault != "" {
+		refuseCaps(w, capWireFields[fault], session.CapRefusal(fault))
+		return session.Caps{}, false
+	}
+	return c, true
 }
 
 func (s *Server) knownProject(name string) bool {
@@ -51,48 +82,73 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 	l := s.reg.Limits()
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	sid, okSid := body["sid"].(string)
 	okSid = okSid && sid != "" && len(sid) <= 80
 	var err error
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
+			return
+		}
+	case "check":
+		if !keysWithin(body, "op", "money", "minutes", "turns", "disk") {
+			refuseFields(w)
+			return
+		}
+		if _, ok := checkedCaps(w, body); !ok {
 			return
 		}
 	case "project":
 		name, okName := body["name"].(string)
-		c, okCaps := capsBody(body)
-		if !keysWithin(body, "op", "name", "money", "minutes", "turns", "disk") || !okName || !okCaps || len(name) > 400 {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "name", "money", "minutes", "turns", "disk") || !okName || len(name) > 400 {
+			refuseFields(w)
+			return
+		}
+		c, okCaps := checkedCaps(w, body)
+		if !okCaps {
 			return
 		}
 		if !s.knownProject(name) {
 			send(w, http.StatusNotFound, problem{Error: "project", Message: "The engine has no project of that name."})
 			return
 		}
-		err = l.SetProject(name, c)
+		var changed bool
+		changed, err = l.SetProject(name, c)
+		done := saveSaid(changed, saidProjectCapsSaved, saidProjectCapsUnchanged)
+		said = &done
 	case "session":
-		c, okCaps := capsBody(body)
-		if !keysWithin(body, "op", "sid", "money", "minutes", "turns", "disk") || !okSid || !okCaps {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "sid", "money", "minutes", "turns", "disk") || !okSid {
+			refuseFields(w)
 			return
 		}
-		err = l.SetSession(sid, c)
+		c, okCaps := checkedCaps(w, body)
+		if !okCaps {
+			return
+		}
+		var changed bool
+		changed, err = l.SetSession(sid, c)
+		done := saveSaid(changed, saidSessionCapsSaved, saidSessionCapsUnchanged)
+		said = &done
 	case "raise":
 		kind, okKind := body["kind"].(string)
 		value, okValue := body["value"].(float64)
-		if !keysWithin(body, "op", "sid", "kind", "value") || !okSid || !okKind || !session.ValidCapKind(kind) || !okValue || math.IsNaN(value) || math.IsInf(value, 0) {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "sid", "kind", "value") || !okSid || !okKind || !session.ValidCapKind(kind) {
+			refuseFields(w)
+			return
+		}
+		if !okValue || math.IsNaN(value) || math.IsInf(value, 0) {
+			refuseCaps(w, "value", "Type the new cap as a number.")
 			return
 		}
 		err = l.Raise(sid, kind, value)
 	case "stop":
 		if !keysWithin(body, "op", "sid") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rc := http.NewResponseController(w)
@@ -102,7 +158,7 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		cancel()
 	case "measure":
 		if !keysWithin(body, "op", "sid") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rc := http.NewResponseController(w)
@@ -115,22 +171,22 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		kind, okKind := body["kind"].(string)
 		_, hasSid := body["sid"]
 		if !keysWithin(body, "op", "side", "kind", "sid") || !okSide || !okKind || len(side) > 40 || len(kind) > 60 || hasSid && !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = l.Continue(r.Context(), side, sid, kind)
 	case "wake":
 		on, okOn := body["on"].(bool)
 		if !keysWithin(body, "op", "sid", "on") || !okSid || !okOn {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = l.WakeAtReset(sid, on)
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
-	if op != "read" {
+	if op != "read" && op != "check" {
 		shared.For(r.Context(), s.logger).Info("limits", "op", op, "ok", err == nil)
 	}
 	if err != nil {
@@ -138,5 +194,9 @@ func (s *Server) limits(w http.ResponseWriter, r *http.Request, body map[string]
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, l.Frame())
+	answer := l.Frame()
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }

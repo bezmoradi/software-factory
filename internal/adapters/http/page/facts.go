@@ -12,6 +12,10 @@ import (
 const (
 	projectFactsRoute = "/api/project-facts"
 	projectFactsFor   = 40 * time.Second
+
+	saidLookupsSaved     = "Saved. The push card looks up new packages for this project."
+	saidLookupsOffSaved  = "Saved. The push card doesn't look up new packages for this project."
+	saidLookupsUnchanged = "No change: this setting is already saved."
 )
 
 type uncommittedJSON struct {
@@ -36,6 +40,8 @@ type agentCheckJSON struct {
 	At       int64  `json:"at"`
 	EditedAt int64  `json:"editedAt,omitempty"`
 	Hidden   string `json:"hidden,omitempty"`
+	Label    string `json:"label"`
+	Result   string `json:"result"`
 }
 
 type changeNoteJSON struct {
@@ -62,6 +68,7 @@ type dependencyJSON struct {
 	Published int64  `json:"published"`
 	Young     bool   `json:"young"`
 	Note      string `json:"note,omitempty"`
+	Label     string `json:"ecosystemLabel"`
 }
 
 type workflowRunJSON struct {
@@ -93,9 +100,18 @@ type protectionJSON struct {
 	State      string   `json:"state"`
 	Reviews    string   `json:"reviews"`
 	Approvals  int      `json:"approvals"`
+	AtLeast    bool     `json:"atLeast"`
 	Checks     string   `json:"checks"`
 	CheckNames []string `json:"checkNames"`
-	Notes      []string `json:"notes"`
+
+	Rows []protectionRowJSON `json:"rows"`
+}
+
+type lookupsJSON struct {
+	Repo    string `json:"repo"`
+	Lookups bool   `json:"lookups"`
+	Message string `json:"message,omitempty"`
+	Tone    string `json:"tone,omitempty"`
 }
 
 type projectFactsJSON struct {
@@ -105,7 +121,6 @@ type projectFactsJSON struct {
 	Workflows        []workflowRunJSON `json:"workflows"`
 	WorkflowsProblem string            `json:"workflowsProblem,omitempty"`
 	Protection       protectionJSON    `json:"protection"`
-	Lookups          bool              `json:"lookups"`
 	Readiness        []readinessJSON   `json:"readiness"`
 }
 
@@ -133,7 +148,8 @@ func checksOf(list []session.AgentCheck) []agentCheckJSON {
 	}
 	out := make([]agentCheckJSON, 0, len(list))
 	for _, c := range list {
-		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At), EditedAt: millis(c.EditedAt), Hidden: string(c.Hidden)})
+		out = append(out, agentCheckJSON{Kind: string(c.Kind), Command: c.Command, OK: c.OK, At: millis(c.At), EditedAt: millis(c.EditedAt), Hidden: string(c.Hidden),
+			Label: session.CheckKindLabel(string(c.Kind)), Result: session.CheckResult(c.OK, string(c.Hidden))})
 	}
 	return out
 }
@@ -157,7 +173,7 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 	}
 	for _, d := range x.Dependencies {
 		out.Dependencies = append(out.Dependencies, dependencyJSON{Ecosystem: d.Ecosystem, Name: d.Name, From: d.From, To: d.To, Change: d.Change, File: d.File, Lockfile: d.Lockfile,
-			Looked: d.Looked, Found: d.Found, Published: millis(d.Published), Young: d.Young, Note: d.Note})
+			Looked: d.Looked, Found: d.Found, Published: millis(d.Published), Young: d.Young, Note: d.Note, Label: session.EcosystemLabel(d.Ecosystem)})
 	}
 	for _, k := range x.Kinds {
 		out.Kinds = append(out.Kinds, fileKindJSON{Path: k.Path, Kind: k.Kind, Target: k.Target})
@@ -167,8 +183,8 @@ func extraOf(x *session.PushExtra) *pushExtraJSON {
 
 func projectFactsOf(v session.ProjectFactsView) projectFactsJSON {
 	p := v.Protection
-	return projectFactsJSON{Repo: v.Repo, Branch: v.Branch, Commit: v.Commit, Workflows: workflowRunsOf(v.Workflows), WorkflowsProblem: v.WorkflowsProblem, Lookups: v.Lookups, Readiness: readinessOf(v.Readiness),
-		Protection: protectionJSON{State: p.State, Reviews: p.Reviews, Approvals: p.Approvals, Checks: p.Checks, CheckNames: nonNil(p.CheckNames), Notes: nonNil(p.Notes)}}
+	return projectFactsJSON{Repo: v.Repo, Branch: v.Branch, Commit: v.Commit, Workflows: workflowRunsOf(v.Workflows), WorkflowsProblem: v.WorkflowsProblem, Readiness: readinessOf(v.Readiness),
+		Protection: protectionJSON{State: p.State, Reviews: p.Reviews, Approvals: p.Approvals, AtLeast: p.AtLeast, Checks: p.Checks, CheckNames: nonNil(p.CheckNames), Rows: protectionRowsOf(p)}}
 }
 
 func (s *Server) UseProjectFacts(facts session.ProjectFactsPage) {
@@ -188,35 +204,55 @@ func (s *Server) projectFacts(w http.ResponseWriter, r *http.Request, body map[s
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), projectFactsFor)
-	defer cancel()
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(projectFactsFor + writeFor))
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-	case "lookups":
-		on, okOn := body["on"].(bool)
-		if !keysWithin(body, "op", "repo", "on") || !okOn {
-			refuse(w, http.StatusBadRequest, "fields")
+	case "read-lookups":
+		if !keysWithin(body, "op", "repo") {
+			refuseFields(w)
 			return
 		}
-		err := facts.SetLookups(repo, on)
-		shared.For(r.Context(), s.logger).Info("package lookup", "on", on, "ok", err == nil)
+		on, err := facts.Lookups(repo)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		send(w, http.StatusOK, lookupsJSON{Repo: repo, Lookups: on})
+		return
+	case "lookups":
+		on, okOn := body["on"].(bool)
+		if !keysWithin(body, "op", "repo", "on") || !okOn {
+			refuseFields(w)
+			return
+		}
+		changed, err := facts.SetLookups(repo, on)
+		shared.For(r.Context(), s.logger).Info("package lookup", "on", on, "changed", changed, "ok", err == nil)
+		if err != nil {
+			code, p := status(err)
+			send(w, code, p)
+			return
+		}
+		saved := saidLookupsOffSaved
+		if on {
+			saved = saidLookupsSaved
+		}
+		said := saveSaid(changed, saved, saidLookupsUnchanged)
+		send(w, http.StatusOK, lookupsJSON{Repo: repo, Lookups: on, Message: said.Message, Tone: said.Tone})
+		return
 	default:
-		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads a project's workflows and branch protection, and switches the package lookup on or off, nothing else."})
+		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads a project's workflows and branch protection, and reads or switches the package lookup, nothing else."})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), projectFactsFor)
+	defer cancel()
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(projectFactsFor + writeFor))
 	v, err := facts.ProjectFacts(ctx, repo)
 	if err != nil {
 		code, p := status(err)

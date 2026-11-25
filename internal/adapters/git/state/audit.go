@@ -52,6 +52,7 @@ type auditJSON struct {
 	Time         time.Time `json:"time"`
 	Session      string    `json:"session"`
 	Repository   string    `json:"repository,omitempty"`
+	ProjectURL   string    `json:"repositoryUrl,omitempty"`
 	Branch       string    `json:"branch,omitempty"`
 	Commit       string    `json:"commit,omitempty"`
 	Remote       string    `json:"remote,omitempty"`
@@ -98,7 +99,7 @@ func (a Audit) Append(e session.AuditEntry) error {
 	if kind == "" {
 		kind = session.AuditPush
 	}
-	line, err := json.Marshal(auditJSON{Time: e.Time.UTC(), Session: e.Session, Repository: e.Repository, Branch: e.Branch, Commit: e.Commit,
+	line, err := json.Marshal(auditJSON{Time: e.Time.UTC(), Session: e.Session, Repository: e.Repository, ProjectURL: projectURL(a.Dir, e.Repository, e.ProjectURL), Branch: e.Branch, Commit: e.Commit,
 		Remote: e.Remote, By: e.By, Result: e.Result, Reason: e.Reason, Missing: missing, PersonReason: e.PersonReason,
 		Kind: kind, Reviewer: e.Reviewer, Verdict: e.Verdict, Path: e.Path, Blobs: e.Blobs, Request: e.Request, Hash: e.Hash, Agent: e.Agent,
 		PluginCommit: e.PluginCommit, ClaudeCode: e.ClaudeCode, Models: e.Models, Req: e.Req, Person: personOf(a.Dir, e.Person), FormerPerson: matching(e.FormerPerson, personID),
@@ -188,7 +189,7 @@ func (a Audit) Read(repository, branch string, limit int) ([]session.AuditEntry,
 }
 
 func entryOf(j auditJSON, kind string) session.AuditEntry {
-	return session.AuditEntry{Time: j.Time, Session: j.Session, Repository: j.Repository, Branch: j.Branch, Commit: j.Commit, Remote: j.Remote,
+	return session.AuditEntry{Time: j.Time, Session: j.Session, Repository: j.Repository, ProjectURL: cleanProjectURL(j.ProjectURL), Branch: j.Branch, Commit: j.Commit, Remote: j.Remote,
 		By: j.By, Result: j.Result, Reason: j.Reason, Missing: j.Missing, PersonReason: j.PersonReason, Kind: kind, Reviewer: j.Reviewer,
 		Verdict: j.Verdict, Path: j.Path, Blobs: j.Blobs, Request: matching(j.Request, requestID), Hash: matching(j.Hash, teamSHA),
 		Agent: matching(j.Agent, agentID), PluginCommit: matching(j.PluginCommit, commitID), ClaudeCode: matching(j.ClaudeCode, versionText),
@@ -216,6 +217,24 @@ var (
 	startKind  = regexp.MustCompile(`^[a-z][a-z-]{0,19}$`)
 	startRef   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
 )
+
+func projectURL(dir, name, given string) string {
+	if given == "" && name != "" {
+		if recs, err := (Repos{Dir: dir}).Load(); err == nil {
+			if i := slices.IndexFunc(recs, func(r session.Record) bool { return r.Name == name }); i >= 0 {
+				given = recs[i].URL
+			}
+		}
+	}
+	return cleanProjectURL(given)
+}
+
+func cleanProjectURL(u string) string {
+	if n, err := session.NormalizeURL(u); u == "" || err != nil || n != u {
+		return ""
+	}
+	return u
+}
 
 func personOf(dir, given string) string {
 	if personID.MatchString(given) {

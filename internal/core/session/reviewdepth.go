@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"maps"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,7 +11,13 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
-const keptSizes = 64
+const (
+	keptSizes      = 64
+	depthUnlisted  = "Needs reviewers from the list."
+	reviewerSuffix = "-reviewer"
+	depthRequired  = "Needs a reviewer that isn't already required."
+	depthUnsized   = "Needs a big-change size above 0 first."
+)
 
 type changeSize struct {
 	files   int
@@ -22,11 +28,12 @@ type changeSize struct {
 
 type DepthView struct {
 	Depth     workflow.Depth
-	Agents    []string
 	Type      string
 	Runs      int
 	AboveRuns int
 	Advisory  int
+	Available []string
+	Required  []string
 }
 
 func (w *Work) depthOf(name string) workflow.Depth {
@@ -43,7 +50,7 @@ func (w *Work) deepened(ctx context.Context, t PushTarget, required []workflow.R
 }
 
 func (w *Work) above(ctx context.Context, repo, base, head string, listed bool, d workflow.Depth) (bool, string) {
-	limit := sizeLimit(HoldSettings{MaxFiles: d.MaxFiles, MaxLines: d.MaxLines})
+	limit := sizeLimit(HoldSettings{MaxLines: d.MaxLines})
 	if !listed {
 		return true, "Required by this project above " + limit + ": the engine couldn't count this change"
 	}
@@ -51,9 +58,9 @@ func (w *Work) above(ctx context.Context, repo, base, head string, listed bool, 
 	switch {
 	case !n.ok:
 		return true, "Required by this project above " + limit + ": the engine couldn't count this change"
-	case n.clipped && d.MaxLines > 0:
+	case n.clipped:
 		return true, "Required by this project above " + limit + ": this change has " + strconv.Itoa(n.files) + " " + plural(n.files, "file", "files") + " and more changed lines than the engine counts"
-	case (d.MaxFiles > 0 && n.files > d.MaxFiles) || (d.MaxLines > 0 && n.lines > d.MaxLines):
+	case n.lines > d.MaxLines:
 		return true, "Required by this project above " + limit + ": this change has " + strconv.Itoa(n.files) + " " + plural(n.files, "file", "files") + " and " + strconv.Itoa(n.lines) + " changed " + plural(n.lines, "line", "lines")
 	}
 	return false, ""
@@ -123,72 +130,124 @@ func (w *Work) ReviewDepth(path string) (DepthView, error) {
 	}
 	d := w.depthOf(r.Name)
 	setup := w.setupFor(r.Name)
-	kind, ok := typeIn(setup.setup.Types, w.defaultType(setup.setup))
-	if !ok {
-		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
-	}
+	kind := workflow.TypeOr(setup.setup.Types, setup.setup.DefaultType)
 	required := workflow.Required(setup.setup, kind, nil)
 	base := workflow.Deepen(required, d, false, "")
-	v := DepthView{Depth: d, Type: kind.Name, Runs: workflow.RunTotal(base), Advisory: len(workflow.Advisory(base, d))}
+	v := DepthView{Depth: d, Type: kind.Name, Runs: workflow.RunTotal(base), Advisory: len(workflow.Advisory(base, d)), Available: w.reviewersFor(r.Name), Required: w.requiredFor(r.Name)}
 	if d.Sized() {
 		v.AboveRuns = workflow.RunTotal(workflow.Deepen(required, d, true, ""))
-	}
-	for _, role := range review.Roles {
-		if a := setup.setup.Roles[role]; a != "" && !slices.Contains(v.Agents, a) {
-			v.Agents = append(v.Agents, a)
-		}
-	}
-	for _, a := range append(append(slices.Clone(setup.setup.Agents), d.Extra...), slices.Sorted(maps.Keys(d.Runs))...) {
-		if !slices.Contains(v.Agents, a) {
-			v.Agents = append(v.Agents, a)
-		}
 	}
 	return v, nil
 }
 
-func (w *Work) SetReviewDepth(path string, d workflow.Depth) error {
-	if why := d.Problem(); why != "" {
-		return explained(invalid("depth"), "The engine didn't save it: "+why+".")
+func (w *Work) SetReviewDepth(path string, d workflow.Depth) (bool, error) {
+	if field, why := d.Problem(); why != "" {
+		return false, onField(field, invalid("depth", why))
 	}
 	r, err := w.repoByPath(path)
 	if err != nil {
-		return err
+		return false, err
 	}
-	installed, known := w.installed(r.Name), w.packKnown(r.Name)
-	for _, a := range append(slices.Clone(d.Advisory), d.Extra...) {
-		offer := offerFor(w.cfg.RoleAgents, a)
-		if why := review.RoleProblem(a, &offer); why != "" {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+why+".", maxOutput))
-		}
-		if strings.HasPrefix(a, "knackpack:") && !known && len(installed) > 0 && !slices.Contains(installed, a) {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent the knackpack installed in the reviewer image provides.", maxOutput))
-		}
-		if strings.Contains(a, ":") && known && !slices.Contains(installed, a) {
-			return explained(invalid("agent"), clip("The engine didn't save it: "+a+" isn't an agent of the pack this project uses.", maxOutput))
-		}
-	}
-	clean := workflow.Depth{Advisory: unique(d.Advisory), Extra: unique(d.Extra), MaxFiles: d.MaxFiles, MaxLines: d.MaxLines, ExtraRuns: d.ExtraRuns}
-	for a, n := range d.Runs {
-		if n > 1 {
-			if clean.Runs == nil {
-				clean.Runs = map[string]int{}
-			}
-			clean.Runs[a] = n
-		}
-	}
-	if clean.ExtraRuns < 2 {
-		clean.ExtraRuns = 0
-	}
-	if err := w.change(func(st *WorkState) error {
+	available, required := w.reviewersFor(r.Name), w.requiredFor(r.Name)
+	clean := workflow.Depth{Always: unique(d.Always), Advisory: unique(d.Advisory), Extra: unique(d.Extra), MaxLines: d.MaxLines, Twice: d.Twice}
+	err = w.change(func(st *WorkState) error {
 		p := st.Projects[r.Name]
+		if err := unsized(clean, p.Depth); err != nil {
+			return err
+		}
+		if err := w.unlisted(clean, p.Depth, available, required); err != nil {
+			return err
+		}
+		if sameDepth(p.Depth, clean) {
+			return errNoDepthChange
+		}
 		p.Depth = clean
 		st.Projects[r.Name] = p
 		return nil
-	}); err != nil {
-		return err
+	})
+	if errors.Is(err, errNoDepthChange) {
+		return false, nil
 	}
-	w.cfg.Logger.Info("project setting", "op", "review-depth", "advisory", len(clean.Advisory), "repeated", len(clean.Runs), "sized", clean.Sized())
+	if err != nil {
+		return false, err
+	}
+	w.cfg.Logger.Info("project setting", "op", "review-depth", "always", len(clean.Always), "big", len(clean.Extra), "warn", len(clean.Advisory), "sized", clean.Sized())
+	return true, nil
+}
+
+var errNoDepthChange = errors.New("the review settings are already these")
+
+func sameDepth(a, b workflow.Depth) bool {
+	return slices.Equal(a.Always, b.Always) && slices.Equal(a.Advisory, b.Advisory) && slices.Equal(a.Extra, b.Extra) && a.MaxLines == b.MaxLines && a.Twice == b.Twice
+}
+
+func (w *Work) reviewersFor(project string) []string {
+	out := []string{}
+	for _, a := range w.installed(project) {
+		if w.packKnown(project) || strings.HasSuffix(a, reviewerSuffix) {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (w *Work) requiredFor(project string) []string {
+	setup := w.setupFor(project).setup
+	out := []string{}
+	names := slices.Clone(setup.Agents)
+	for _, role := range review.Roles {
+		names = append(names, setup.Roles[role])
+	}
+	for _, a := range names {
+		if a != "" && !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func unsized(d, saved workflow.Depth) error {
+	if d.MaxLines > 0 {
+		return nil
+	}
+	for _, a := range d.Extra {
+		if !slices.Contains(saved.Extra, a) {
+			return onField("reviewers", invalid("depth", depthUnsized))
+		}
+	}
+	if d.Twice && !saved.Twice {
+		return onField("twice", invalid("depth", depthUnsized))
+	}
 	return nil
+}
+
+func (w *Work) unlisted(d, saved workflow.Depth, available, required []string) error {
+	kept := saved.Added()
+	for _, a := range d.Added() {
+		if why := w.roleRefusal(a, available, required, kept); why != "" {
+			return onField("reviewers", invalid("agent", why))
+		}
+	}
+	return nil
+}
+
+func (w *Work) roleRefusal(a string, available, required, saved []string) string {
+	if slices.Contains(saved, a) {
+		return ""
+	}
+	if !slices.Contains(available, a) {
+		return depthUnlisted
+	}
+	if slices.Contains(required, a) {
+		return depthRequired
+	}
+	offer := offerFor(w.cfg.RoleAgents, a)
+	if review.RoleProblem(a, &offer) != "" {
+		return withName("", a, " isn't from a trusted source.")
+	}
+	return ""
 }
 
 func unique(list []string) []string {
@@ -203,7 +262,7 @@ func unique(list []string) []string {
 
 type ReviewDepthPage interface {
 	ReviewDepth(path string) (DepthView, error)
-	SetReviewDepth(path string, d workflow.Depth) error
+	SetReviewDepth(path string, d workflow.Depth) (bool, error)
 }
 
 var _ ReviewDepthPage = (*Work)(nil)

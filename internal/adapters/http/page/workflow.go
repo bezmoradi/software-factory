@@ -2,6 +2,7 @@ package page
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"regexp"
 	"time"
@@ -35,6 +36,9 @@ type workDocJSON struct {
 	ApprovedAt string `json:"approvedAt,omitempty"`
 	Reported   bool   `json:"reported,omitempty"`
 	OnBase     bool   `json:"onBase,omitempty"`
+	Note       string `json:"note"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
 }
 
 type workTypeJSON struct {
@@ -45,6 +49,7 @@ type workTypeJSON struct {
 	Push    bool     `json:"push"`
 	Roles   []string `json:"roles"`
 	Builtin bool     `json:"builtin"`
+	Warning string   `json:"startWarning,omitempty"`
 }
 
 type gateReviewerJSON struct {
@@ -71,8 +76,8 @@ type gateJSON struct {
 	Size         string             `json:"size"`
 	WorkType     string             `json:"workType"`
 	Chosen       bool               `json:"chosen"`
-	Effective    string             `json:"effective"`
 	SizeNote     string             `json:"sizeNote"`
+	Upload       string             `json:"uploadWarning,omitempty"`
 	Types        []workTypeJSON     `json:"types"`
 	Commands     map[string]string  `json:"commands"`
 	Team         map[string]any     `json:"team"`
@@ -83,6 +88,8 @@ type gateJSON struct {
 	Approved     bool               `json:"approved"`
 	Research     string             `json:"research"`
 	Define       bool               `json:"define"`
+	PlanChoice   bool               `json:"planChoice"`
+	PlanSwitch   string             `json:"planSwitch"`
 	Reviewers    []gateReviewerJSON `json:"reviewers"`
 	Missing      []string           `json:"missing"`
 	Allowed      bool               `json:"allowed"`
@@ -99,6 +106,103 @@ type gateJSON struct {
 	CatalogWhy   string             `json:"catalogWhy,omitempty"`
 	TestLock     testLockJSON       `json:"testLock"`
 	TypeChange   *typeChangeJSON    `json:"typeChange,omitempty"`
+	Started      any                `json:"started"`
+	Review       reviewOfferJSON    `json:"review"`
+	Pushed       bool               `json:"pushed"`
+	Path         pathJSON           `json:"path"`
+	Flow         *flowJSON          `json:"flow"`
+	TypeAsk      *typeCardJSON      `json:"typeAsk,omitempty"`
+}
+
+type pathActionJSON struct {
+	Ask   string `json:"ask"`
+	Label string `json:"label"`
+	Title string `json:"title"`
+}
+
+type pathStageJSON struct {
+	ID      string           `json:"id"`
+	Name    string           `json:"name"`
+	State   string           `json:"state"`
+	Active  bool             `json:"active"`
+	Detail  string           `json:"detail"`
+	Actions []pathActionJSON `json:"actions"`
+}
+
+type pathCardJSON struct {
+	Step   string  `json:"step"`
+	Count  string  `json:"count"`
+	Detail string  `json:"detail"`
+	Done   float64 `json:"done"`
+}
+
+type pathLineJSON struct {
+	Text    string           `json:"text"`
+	Actions []pathActionJSON `json:"actions"`
+}
+
+type pathJSON struct {
+	Stages        []pathStageJSON  `json:"stages"`
+	Line          *pathLineJSON    `json:"line"`
+	Card          pathCardJSON     `json:"card"`
+	Missing       []string         `json:"missing"`
+	ReviewsActive bool             `json:"reviewsActive"`
+	Required      []string         `json:"required"`
+	Asks          []pathActionJSON `json:"asks"`
+}
+
+func pathOf(m session.PathModel) pathJSON {
+	out := pathJSON{Stages: make([]pathStageJSON, 0, len(m.Stages)), Card: pathCardJSON{Step: m.Card.Step, Count: m.Card.Count, Detail: m.Card.Detail, Done: m.Card.Done},
+		Missing: nonNil(m.Missing), ReviewsActive: m.ReviewsActive, Required: nonNil(m.Required), Asks: pathActionsOf(m.Asks)}
+	for _, s := range m.Stages {
+		out.Stages = append(out.Stages, pathStageJSON{ID: s.ID, Name: s.Name, State: s.State, Active: s.Active, Detail: s.Detail, Actions: pathActionsOf(s.Actions)})
+	}
+	if m.Line != nil {
+		out.Line = &pathLineJSON{Text: m.Line.Text, Actions: pathActionsOf(m.Line.Actions)}
+	}
+	return out
+}
+
+func pathActionsOf(list []session.PathAction) []pathActionJSON {
+	out := make([]pathActionJSON, 0, len(list))
+	for _, a := range list {
+		out = append(out, pathActionJSON{Ask: a.Ask, Label: a.Label, Title: a.Title})
+	}
+	return out
+}
+
+type plannedJSON struct {
+	Name    string `json:"name"`
+	Agent   string `json:"agent"`
+	Why     string `json:"why"`
+	Summary string `json:"summary"`
+}
+
+type reviewOfferJSON struct {
+	Available bool          `json:"available"`
+	Reason    string        `json:"reason"`
+	Planned   []plannedJSON `json:"planned"`
+}
+
+func startedJSON(s session.BranchStart) any {
+	switch s {
+	case session.StartedCommits:
+		return true
+	case session.StartedNone:
+		return false
+	case session.StartedNoBase:
+		return "nobase"
+	}
+	return nil
+}
+
+func offerOf(i session.Info, v session.GateView) reviewOfferJSON {
+	o := session.OfferReview(i, v)
+	out := reviewOfferJSON{Available: o.Reason == "", Reason: o.Reason, Planned: []plannedJSON{}}
+	for _, r := range o.Planned {
+		out.Planned = append(out.Planned, plannedJSON{Name: r.Name, Agent: r.Agent, Why: r.Why, Summary: r.Summary})
+	}
+	return out
 }
 
 type typeFileJSON struct {
@@ -166,12 +270,13 @@ func testLockOf(v session.LockView) testLockJSON {
 	return out
 }
 
-func docJSON(d *session.WorkDoc) *workDocJSON {
+func docJSON(d *session.WorkDoc, clipped string, v session.GateView) *workDocJSON {
 	if d == nil {
 		return nil
 	}
-	return &workDocJSON{Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
-		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase}
+	kind := session.DocKind(d == v.Requirements, v.Profile)
+	return &workDocJSON{Kind: kind, Status: session.DocStatus(kind, *d), Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
+		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase, Note: session.DocNote(*d, clipped, v.PlanApprovals, v.Head)}
 }
 
 func typesJSON(list []workflow.WorkType) []workTypeJSON {
@@ -185,22 +290,23 @@ func typesJSON(list []workflow.WorkType) []workTypeJSON {
 		for _, r := range t.Roles {
 			roles = append(roles, string(r))
 		}
-		out = append(out, workTypeJSON{ID: t.ID, Name: t.Name, Steps: steps, Edits: string(t.Edits), Push: t.Push, Roles: roles, Builtin: t.Builtin})
+		out = append(out, workTypeJSON{ID: t.ID, Name: t.Name, Steps: steps, Edits: string(t.Edits), Push: t.Push, Roles: roles, Builtin: t.Builtin, Warning: t.Profile().StartWarning()})
 	}
 	return out
 }
 
 func gateOf(v session.GateView) gateJSON {
-	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(profileSize(v)), WorkType: v.Type, Chosen: v.Chosen,
-		Effective: string(v.Effective), SizeNote: v.Note, Types: typesJSON(v.Types), Commands: map[string]string{},
-		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements), Plan: docJSON(v.Plan),
-		Research: v.Research, Define: v.Define, Reviewers: []gateReviewerJSON{},
-		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Effective != workflow.Exploring,
+	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(v.Profile), WorkType: v.Type, Chosen: v.Chosen,
+		SizeNote: v.Note, Upload: v.Profile.UploadWarning(), Types: typesJSON(v.Types), Commands: map[string]string{},
+		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements, "", v), Plan: docJSON(v.Plan, session.PlanDocWord(v.Profile), v),
+		Research: v.Research, Define: v.Define, PlanChoice: v.PlanChoice, PlanSwitch: string(v.PlanSwitch), Reviewers: []gateReviewerJSON{},
+		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Profile != workflow.Explore,
 		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
-		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change)}
+		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change), Started: startedJSON(v.Started)}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
 	}
+	maps.Copy(out.Commands, session.StageCommands(v))
 	if v.Plan != nil {
 		out.PlanPath, out.PlanHash, out.Approved = v.Plan.Path, v.Plan.Hash, v.Plan.Approved
 	}
@@ -211,13 +317,19 @@ func gateOf(v session.GateView) gateJSON {
 	return out
 }
 
-func profileSize(v session.GateView) workflow.Profile {
-	for _, t := range v.Types {
-		if t.ID == v.Type {
-			return t.Profile()
-		}
+func planChoiceOf(body map[string]any) (session.PlanChoice, bool) {
+	v, set := body["plan"]
+	if !set {
+		return session.PlanUnstated, true
 	}
-	return workflow.Fix
+	on, ok := v.(bool)
+	switch {
+	case !ok:
+		return session.PlanUnstated, false
+	case on:
+		return session.PlanWanted, true
+	}
+	return session.PlanSkipped, true
 }
 
 type teamViewJSON struct {
@@ -273,7 +385,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		s.commitFlag(r.Context(), w, path, sid, body)
 	case "/api/gate":
 		if !keysWithin(body, "sid") || sid == "" {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.Work.View(r.Context(), sid)
@@ -282,11 +394,17 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusOK, map[string]any{"gate": gateOf(v)})
+		g := gateOf(v)
+		info, _ := s.reg.Session(sid)
+		g.Review, g.Pushed = offerOf(info, v), session.HeadPushed(info, v.Head)
+		g.Path = pathOf(session.Path(info, v, g.Pushed))
+		g.Flow = flowOf(session.LiveFlow(info, v, g.Pushed))
+		g.TypeAsk = typeCardOf(session.WorkTypeCard(info, v))
+		send(w, http.StatusOK, map[string]any{"gate": g})
 	case "/api/size":
 		size, ok := body["size"].(string)
 		if !keysWithin(body, "sid", "size") || sid == "" || !ok || !workTypeID.MatchString(size) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Work.SetType(r.Context(), sid, size)
@@ -295,17 +413,23 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 	case "/api/approve-plan", "/api/approve-requirements":
 		hash, okHash := body["hash"].(string)
 		text, okText := body["text"].(string)
-		if !keysWithin(body, "sid", "hash", "text") || sid == "" || !okHash || !hash256.MatchString(hash) || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+		plan := path == "/api/approve-plan"
+		keys := []string{"sid", "hash", "text"}
+		if !plan {
+			keys = append(keys, "plan")
+		}
+		choice, okChoice := planChoiceOf(body)
+		if !keysWithin(body, keys...) || sid == "" || !okHash || !hash256.MatchString(hash) || !okText || !okChoice {
+			refuseFields(w)
 			return
 		}
-		err := s.cfg.Work.Approve(r.Context(), sid, path == "/api/approve-plan", hash, text)
+		err := s.cfg.Work.Approve(r.Context(), sid, plan, hash, text, choice)
 		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case lockTestsRoute:
 		op, okOp := body["op"].(string)
 		if !okOp || sid == "" {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var err error
@@ -313,18 +437,18 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "lock":
 			head, okHead := body["head"].(string)
 			if !keysWithin(body, "sid", "op", "head") || !okHead || !flagCommit.MatchString(head) {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			err = s.cfg.Work.LockTests(r.Context(), sid, head)
 		case "unlock":
 			if !keysWithin(body, "sid", "op") {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			err = s.cfg.Work.UnlockTests(sid)
 		default:
-			refuse(w, http.StatusBadRequest, "op")
+			refuse(w, http.StatusBadRequest, "op", saidOp)
 			return
 		}
 		shared.For(r.Context(), s.logger).Info("test lock", "op", op, "ok", err == nil)
@@ -333,7 +457,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		repo, okPath := body["path"].(string)
 		op, okOp := body["op"].(string)
 		if !keysWithin(body, "path", "op", "sha") || !okPath || len(repo) > session.MaxCwd || !okOp {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
@@ -347,14 +471,14 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "approve":
 			sha, ok := body["sha"].(string)
 			if !ok || !hash256.MatchString(sha) {
-				refuse(w, http.StatusBadRequest, "sha")
+				refuse(w, http.StatusBadRequest, "sha", "That isn't the SHA-256 of a team file. Reload the team file and approve it again.")
 				return
 			}
 			v, err = s.cfg.Work.ApproveTeam(ctx, repo, sha)
 		case "forget":
 			v, err = s.cfg.Work.ForgetTeam(repo)
 		default:
-			refuse(w, http.StatusBadRequest, "op")
+			refuse(w, http.StatusBadRequest, "op", saidOp)
 			return
 		}
 		if err != nil {
@@ -371,7 +495,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		if !keysWithin(body, "path", "op", "rounds", "type", "findings", "on") || !okPath || len(repo) > session.MaxCwd || !okOp {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		rounds, kind := 0, ""
@@ -379,7 +503,7 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case session.ProjectPRComment:
 			on, ok := body["on"].(bool)
 			if !ok || !keysWithin(body, "path", "op", "on") {
-				refuse(w, http.StatusBadRequest, "on")
+				refuse(w, http.StatusBadRequest, "on", saidFields)
 				return
 			}
 			err := s.cfg.Work.SetProjectOption(repo, op, on)
@@ -389,21 +513,21 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		case "rounds":
 			n, ok := integer(body["rounds"])
 			if !ok || n < 1 || n > 20 || !keysWithin(body, "path", "op", "rounds") {
-				refuse(w, http.StatusBadRequest, "rounds")
+				refuse(w, http.StatusBadRequest, "rounds", "Review rounds are a whole number from 1 to 20.")
 				return
 			}
 			rounds = int(n)
 		case "type":
 			t, ok := body["type"].(string)
 			if !ok || (t != "" && !workTypeID.MatchString(t)) || !keysWithin(body, "path", "op", "type") {
-				refuse(w, http.StatusBadRequest, "type")
+				refuse(w, http.StatusBadRequest, "type", "That isn't a work type the engine knows. Reload the page and pick one from the list.")
 				return
 			}
 			kind = t
 		case "findings":
 			on, ok := body["findings"].(bool)
 			if !ok || !keysWithin(body, "path", "op", "findings") {
-				refuse(w, http.StatusBadRequest, "findings")
+				refuse(w, http.StatusBadRequest, "findings", saidFields)
 				return
 			}
 			err := s.cfg.Work.SetAutoFindings(repo, on)

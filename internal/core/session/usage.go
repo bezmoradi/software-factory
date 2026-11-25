@@ -380,17 +380,17 @@ func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	switch {
 	case side == SideReviewers && sid != "":
 		l.mu.Unlock()
-		return invalid("sid")
+		return invalid("sid", "The reviewers' limit belongs to no session, so the request names none.")
 	case side == SideAgents:
 		k, known := l.known[sid]
 		if !sidPattern.MatchString(sid) || !known {
 			l.mu.Unlock()
-			return explained(conflict("not started here"), "Only a session this engine started has usage limits of its own container to answer for.")
+			return conflict("not started here", "Only a session this engine started has usage limits of its own container to answer for.")
 		}
 		s, b := meterOf(k)
 		if s != side {
 			l.mu.Unlock()
-			return explained(conflict("not near"), "That limit isn't near its end now, so there is nothing to answer.")
+			return conflict("not near", "That limit isn't near its end now, so there is nothing to answer.")
 		}
 		box = b
 	}
@@ -402,7 +402,7 @@ func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 	}
 	if found == nil {
 		l.mu.Unlock()
-		return explained(conflict("not near"), "That limit isn't near its end now, so there is nothing to answer.")
+		return conflict("not near", "That limit isn't near its end now, so there is nothing to answer.")
 	}
 	l.acks[usageAck{side: side, box: box, kind: kind}] = found.ResetsAt
 	name := windowName(side, *found)
@@ -443,11 +443,10 @@ func (p *Pushes) Continued(ctx context.Context, sid string, findings bool) {
 	if err != nil {
 		return
 	}
-	halted := p.halted(ByReviews) != ""
 	p.mu.Lock()
 	h := p.held[sid]
 	ready := !p.closing && h != nil && h.commit == head && h.branch == t.Branch && !p.refusedLocked(sid, head)
-	send := ready && findings && !halted
+	send := ready && findings
 	if send {
 		p.wg.Add(1)
 	}
@@ -459,11 +458,6 @@ func (p *Pushes) Continued(ctx context.Context, sid string, findings bool) {
 		defer p.wg.Done()
 		log.Info("push", "event", "continued", "then", "findings")
 		p.autoFindings(ctx, sid)
-	case findings:
-		log.Info("push", "event", "continued", "then", "held-by-halt")
-	case halted:
-		p.waitAs(sid, head, shared.RequestOf(ctx))
-		log.Info("push", "event", "continued", "then", "held-by-halt")
 	default:
 		log.Info("push", "event", "continued", "then", "review")
 		p.queueReview(sid, head)
@@ -486,7 +480,7 @@ func (l *Limits) wakeOfferLocked(sid string, now time.Time) time.Time {
 
 func (l *Limits) WakeAtReset(sid string, on bool) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
 		return err
@@ -500,11 +494,11 @@ func (l *Limits) WakeAtReset(sid string, on bool) error {
 		return nil
 	}
 	if _, ok := l.known[sid]; !ok {
-		return explained(conflict("not started here"), "Only a session this engine started can be woken at the reset.")
+		return conflict("not started here", "Only a session this engine started can be woken at the reset.")
 	}
 	at := l.wakeOfferLocked(sid, now)
 	if at.IsZero() {
-		return explained(conflict("no limit"), "This session's agent hasn't reported a usage limit that is used up, so there is no reset to wait for.")
+		return conflict("no limit", "This session's agent hasn't reported a usage limit that is used up, so there is no reset to wait for.")
 	}
 	l.wakes[sid] = at.Add(wakeAfterReset)
 	go l.flush(true)

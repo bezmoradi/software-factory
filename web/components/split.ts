@@ -1,11 +1,12 @@
-import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
+import type { Tone } from '../lib/dom.ts'
+import { actions, field, form } from '../lib/form.ts'
 import { label } from '../lib/format.ts'
+import { saidOf } from '../lib/json.ts'
 import type { SessionInfo, SplitCard } from '../types.ts'
-
-export const GOAL_LIMIT = 3
-const MAX_TITLE = 120
-const MAX_MESSAGE = 8000
+import { textbox, textarea } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 export interface SplitPanelView {
   sid: string
@@ -14,19 +15,8 @@ export interface SplitPanelView {
   disabled: string
 }
 
-export type SplitStarter = (sid: string, card: string) => Promise<{ ok: boolean; body: Record<string, unknown> }>
+export type SplitStarter = (sid: string, card: string) => Promise<EngineAnswer>
 
-const STATES: Record<SplitCard['state'], [string, string]> = {
-  waiting: ['waiting for you', 'warn'],
-  queued: ['waits for a free slot', 'warn'],
-  starting: ['starting', 'warn'],
-  started: ['started', 'ok'],
-  dismissed: ['dismissed', ''],
-}
-
-function said(body: Record<string, unknown>, fallback: string): string {
-  return typeof body.message === 'string' && body.message ? shown(body.message) : fallback
-}
 
 function tasksOf(goal: string, sessions: SessionInfo[]): SessionInfo[] {
   return sessions.filter(s => s.lineage?.groupKind === 'goal' && s.lineage.group === goal)
@@ -37,9 +27,9 @@ class SfSplit extends HTMLElement {
   #view: SplitPanelView | null = null
   #key = ''
   #editing = new Map<string, { title: string; message: string }>()
-  #pressed = new Map<string, number>()
   #busy = new Map<string, string>()
-  #notes = new Map<string, { text: string; bad: boolean }>()
+  #notes = new Map<string, { text: string; tone: Tone }>()
+  #refused = new Map<string, { field: string; text: string }>()
 
   connectedCallback() {
     if (!this.#view) this.hidden = true
@@ -48,25 +38,11 @@ class SfSplit extends HTMLElement {
   set view(value: SplitPanelView | null) {
     this.#view = value
     const goal = value ? tasksOf(value.sid, value.sessions).map(s => [s.sid, s.running === true, label(s)]) : []
-    const key = JSON.stringify([value?.sid, value?.info.splits, value?.info.lineage, value?.disabled, goal, [...this.#editing], [...this.#busy], [...this.#notes]])
+    const key = JSON.stringify([value?.sid, value?.info.splits, value?.info.splitGoal, value?.info.lineage, value?.disabled, goal, [...this.#editing], [...this.#busy], [...this.#notes], [...this.#refused]])
     if (key !== this.#key) {
       this.#key = key
       this.paint()
     }
-    this.#resume()
-  }
-
-  #running(): number {
-    const v = this.#view
-    return v ? tasksOf(v.sid, v.sessions).filter(s => s.running).length : 0
-  }
-
-  #resume() {
-    const v = this.#view
-    if (!v || v.disabled || this.#busy.size) return
-    const running = this.#running()
-    const next = (v.info.splits ?? []).find(c => c.state === 'queued' && running < (this.#pressed.get(c.card) ?? 0))
-    if (next) void this.#start(next)
   }
 
   paint() {
@@ -93,16 +69,17 @@ class SfSplit extends HTMLElement {
   }
 
   #cards(v: SplitPanelView, cards: SplitCard[]): Node[] {
-    const running = this.#running()
+    const goal = v.info.splitGoal
     const head = el('div', 'row split-head')
-    head.append(el('h2', 'label', 'Tasks the agent proposed'), el('span', 'small muted', `${running} of ${GOAL_LIMIT} of this goal's sessions running`))
-    const intro = el('p', 'small muted', `The agent wrote these with factory_split. Each card shows its text exactly as written; read it before you start it, since it becomes the new session's first message. Start runs a normal session from main with this session's agent and work type, through the usual start-up, sign-in and cost checks. At most ${GOAL_LIMIT} run at once.`)
+    head.append(el('h2', 'label', 'Tasks the agent proposed'))
+    if (goal) head.append(el('span', 'small muted', `${goal.running} of ${goal.limit} of this goal's sessions running`))
+    const intro = el('p', 'small muted', `The agent wrote these with factory_split. Each card shows its text exactly as written; read it before you start it, since it becomes the new session's first message. Start runs a normal session from main with this session's agent and work type, through the usual start-up, sign-in and cost checks.${goal ? ` At most ${goal.limit} run at once; a Start beyond that queues the task, and the engine starts it when one of them stops.` : ''}`)
     return [head, intro, ...cards.map(c => this.#card(v, c))]
   }
 
   #card(v: SplitPanelView, c: SplitCard): HTMLElement {
     const box = el('div', 'forge-card split-card')
-    const [word, tone] = STATES[c.state] ?? [c.state, 'warn']
+    const { label: word, tone } = saidOf(c.said, c.state)
     const head = el('div', 'row forge-head')
     head.append(el('span', `tag ${tone}`, word), el('span', 'tag', 'written by the agent'))
     if (c.edited) head.append(el('span', 'tag', 'edited by you'))
@@ -123,7 +100,8 @@ class SfSplit extends HTMLElement {
       }
     }
     if (c.secretAt && open) box.append(el('p', 'small bad', `This looks like a token (${shown(c.secretAt)}). Edit it out before starting.`))
-    if (c.state === 'queued') box.append(el('p', 'small warn', this.#pressed.has(c.card) ? `Waits until one of this goal's sessions stops; it starts then, while this page stays open.` : `Waited for a free slot. Press Start again when fewer than ${GOAL_LIMIT} of this goal's sessions run.`))
+    const queue = v.info.splitGoal?.queue.length ?? 0
+    if (c.note) box.append(el('p', 'small warn', `${c.place && queue ? `In the queue: ${c.place} of ${queue}. ` : ''}${shown(c.note)}`))
     if (c.state === 'started' && c.sid) {
       const task = v.sessions.find(s => s.sid === c.sid)
       const line = el('div', 'row split-started')
@@ -132,87 +110,102 @@ class SfSplit extends HTMLElement {
       box.append(line)
     }
     const note = this.#notes.get(c.card)
-    if (note) box.append(el('p', `small ${note.bad ? 'bad' : 'muted'}`, note.text))
-    if (open && !editing) box.append(this.#actions(v, c))
+    if (note) box.append(el('p', `small ${note.tone}`, note.text))
+    if (open && !editing && c.actions) box.append(this.#actions(v, c))
     return box
   }
 
   #actions(v: SplitPanelView, c: SplitCard): HTMLElement {
     const off = !!v.disabled || this.#busy.has(c.card)
+    const offered = c.actions ?? {}
     const row = el('div', 'actions forge-actions')
-    const start = button('Start', 'primary small', () => {
-      if (off) return
-      this.#pressed.set(c.card, GOAL_LIMIT + 1)
-      void this.#start(c)
-    }, 'button', `start:${c.card}`)
-    start.setAttribute('aria-disabled', String(off || !!c.secretAt))
-    if (v.disabled) start.title = v.disabled
-    const edit = button('Edit', 'small', () => {
+    const add = (name: 'start' | 'unqueue' | 'edit' | 'dismiss', b: HTMLButtonElement) => {
+      const why = offered[name]
+      if (why === undefined) return
+      b.setAttribute('aria-disabled', String(off || !!why))
+      if (v.disabled) b.title = v.disabled
+      else if (why) b.title = shown(why)
+      if (this.#busy.get(c.card) === name) busy(b, true)
+      row.append(b)
+    }
+    add('start', button('Start', 'primary small', () => {
+      if (!off && !offered.start) void this.#start(c)
+    }, 'button', `start:${c.card}`))
+    add('unqueue', button('Remove from queue', 'small', () => {
+      if (!off) void this.#call(c, { op: 'unqueue', sid: v.sid, card: c.card }, 'Taken out of the queue. Press Start to start it.')
+    }, 'button', `unqueue:${c.card}`))
+    add('edit', button('Edit', 'small', () => {
       if (off) return
       this.#editing.set(c.card, { title: c.title, message: c.message })
       this.#key = ''
       this.view = this.#view
-    }, 'button', `edit:${c.card}`)
-    const dismiss = button('Dismiss', 'small ghost', () => {
+    }, 'button', `edit:${c.card}`))
+    add('dismiss', button('Dismiss', 'small ghost', () => {
       if (!off) void this.#call(c, { op: 'dismiss', sid: v.sid, card: c.card }, '')
-    }, 'button', `dismiss:${c.card}`)
-    for (const b of [edit, dismiss]) b.setAttribute('aria-disabled', String(off))
-    if (this.#busy.get(c.card) === 'start') busy(start, true)
-    if (this.#busy.get(c.card) === 'dismiss') busy(dismiss, true)
-    row.append(start, edit, dismiss)
+    }, 'button', `dismiss:${c.card}`))
     return row
   }
 
   #editor(v: SplitPanelView, c: SplitCard, draft: { title: string; message: string }): HTMLElement {
-    const form = el('form', 'stacked split-edit')
-    const title = el('input', 'textbox')
-    title.value = draft.title
-    title.maxLength = MAX_TITLE
-    title.setAttribute('aria-label', 'Task title')
+    const title = textbox({ name: 'title', value: draft.title })
+    title.setAttribute('aria-required', 'true')
     title.dataset.key = `title:${c.card}`
-    const message = el('textarea', 'textbox')
-    message.value = draft.message
-    message.maxLength = MAX_MESSAGE
-    message.rows = 8
-    message.setAttribute('aria-label', 'First message of the task')
+    const message = textarea({ rows: 8, name: 'message', value: draft.message })
+    message.setAttribute('aria-required', 'true')
     message.dataset.key = `message:${c.card}`
-    const keep = () => this.#editing.set(c.card, { title: title.value, message: message.value })
-    title.addEventListener('input', keep)
-    message.addEventListener('input', keep)
-    const row = el('div', 'actions')
+    const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = { title, message }
+    for (const [name, input] of Object.entries(inputs)) {
+      input.addEventListener('input', () => {
+        this.#editing.set(c.card, { title: title.value, message: message.value })
+        if (this.#refused.get(c.card)?.field !== name) return
+        this.#refused.delete(c.card)
+        labelError(input, '')
+      })
+    }
     const save = button('Save', 'primary small', undefined, 'submit', `save:${c.card}`)
     if (this.#busy.get(c.card) === 'edit') busy(save, true)
-    row.append(button('Cancel', 'small ghost', () => {
+    const cancel = button('Cancel', 'small ghost', () => {
       this.#editing.delete(c.card)
       this.#key = ''
       this.view = this.#view
-    }), save)
-    form.append(title, message, row)
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      void this.#call(c, { op: 'edit', sid: v.sid, card: c.card, title: title.value, message: message.value }, 'Saved.').then(ok => {
-        if (ok) this.#editing.delete(c.card)
-        this.#key = ''
-        this.view = this.#view
-      })
     })
-    return form
+    const edit = form({
+      cls: 'stacked split-edit',
+      children: [field('Task title', title), field('First message of the task', message), actions([cancel, save])],
+      onSubmit: () => {
+        void this.#call(c, { op: 'edit', sid: v.sid, card: c.card, title: title.value, message: message.value }, null).then(ok => {
+          if (ok) this.#editing.delete(c.card)
+          this.#key = ''
+          this.view = this.#view
+          const own = this.#refused.get(c.card)
+          if (own) this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`${own.field}:${c.card}`)}"]`)?.focus()
+        })
+      },
+    })
+    const refused = this.#refused.get(c.card)
+    const bad = refused && Object.hasOwn(inputs, refused.field) ? inputs[refused.field] : undefined
+    if (refused && bad) labelError(bad, refused.text)
+    return edit
   }
 
-  async #call(c: SplitCard, body: Record<string, unknown>, done: string): Promise<boolean> {
+  async #call(c: SplitCard, body: Record<string, unknown>, done: string | null): Promise<boolean> {
     this.#busy.set(c.card, typeof body.op === 'string' ? body.op : '')
     this.#key = ''
     this.view = this.#view
-    const res = await api('/api/split', body).catch(() => null)
-    const out = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
+    this.#refused.delete(c.card)
+    const a = await request('/api/split', body)
     this.#busy.delete(c.card)
-    if (res?.ok) {
-      if (done) this.#notes.set(c.card, { text: done, bad: false })
-      else this.#notes.delete(c.card)
-    } else this.#notes.set(c.card, { text: said(out, "The engine didn't answer."), bad: true })
+    const onField = body.op === 'edit' && (a.field === 'title' || a.field === 'message') && a.message
+    if (a.ok) {
+      this.#notes.delete(c.card)
+      toast({ id: `split:${c.card}`, title: done ?? a.message, tone: done === null ? savedTone(a) : 'ok' })
+    } else if (onField) {
+      this.#notes.delete(c.card)
+      this.#refused.set(c.card, { field: a.field, text: a.message })
+    } else this.#notes.set(c.card, { text: a.message, tone: 'bad' })
     this.#key = ''
     this.view = this.#view
-    return !!res?.ok
+    return a.ok
   }
 
   async #start(c: SplitCard) {
@@ -222,18 +215,11 @@ class SfSplit extends HTMLElement {
     this.#notes.delete(c.card)
     this.#key = ''
     this.paint()
-    const { ok, body } = await this.start(v.sid, c.card)
+    const a = await this.start(v.sid, c.card)
     this.#busy.delete(c.card)
-    if (ok) {
-      this.#pressed.delete(c.card)
-      this.#notes.set(c.card, { text: 'Started. It gets this text as its first message once it connects.', bad: false })
-    } else if (body.error === 'goal full') {
-      this.#pressed.set(c.card, Math.min(GOAL_LIMIT, this.#running()))
-      this.#notes.set(c.card, { text: said(body, 'It waits for a free slot.'), bad: false })
-    } else {
-      this.#pressed.delete(c.card)
-      this.#notes.set(c.card, { text: said(body, "The task didn't start."), bad: true })
-    }
+    if (a.ok) toast({ id: `split:${c.card}`, title: 'Started. It gets this text as its first message once it connects.', tone: 'ok' })
+    else if (a.error === 'goal full') this.#notes.delete(c.card)
+    else this.#notes.set(c.card, { text: a.message, tone: 'bad' })
     this.#key = ''
     this.view = this.#view
   }

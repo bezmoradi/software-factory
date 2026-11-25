@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"path"
@@ -140,6 +141,7 @@ type SessionPacks interface {
 type ProjectPacks interface {
 	PackSetup(project string) PackSetup
 	WorkflowOf(choice string) workflow.Adapter
+	KnackpackVersion() string
 }
 
 type PackView struct {
@@ -163,12 +165,21 @@ type PacksView struct {
 	KnackpackCommit  string
 	Packs            []PackView
 	Max              int
+	Kept             string
+}
+
+func (v PacksView) Full() string {
+	if len(v.Packs) < v.Max {
+		return ""
+	}
+	return "The engine keeps " + strconv.Itoa(v.Max) + " packs, its limit. Remove one to add another."
 }
 
 type PacksPage interface {
 	ListPacks(path string) (PacksView, error)
 	FetchPack(ctx context.Context, path, url, commit string) (PackView, error)
 	AddPack(ctx context.Context, path, url, commit, digest string) (PacksView, error)
+	AddAndUsePack(ctx context.Context, path, url, commit, digest string) (PacksView, error)
 	UploadPack(path, name string, files []PackUpload) (PacksView, error)
 	RemovePack(path, digest string) (PacksView, error)
 	UsePack(path, pack string) (PacksView, error)
@@ -298,6 +309,11 @@ func (p *Packs) KnackpackCommit() string {
 	return p.cfg.Files.KnackpackCommit()
 }
 
+func (p *Packs) KnackpackVersion() string {
+	v, _ := p.cfg.Files.KnackpackVersion()
+	return v
+}
+
 func (p *Packs) PackSetup(project string) PackSetup {
 	choice, sp, err := p.chosen(project)
 	switch {
@@ -418,10 +434,10 @@ func (p *Packs) sessionsUsing(digest string) bool {
 func (p *Packs) byPath(path string) (Repository, error) {
 	r, ok, err := p.repo(func(r Repository) bool { return r.Path == path })
 	if err != nil {
-		return Repository{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return Repository{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	if !ok {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return r, nil
 }
@@ -458,27 +474,28 @@ func (p *Packs) ListPacks(path string) (PacksView, error) {
 	}
 	st, err := p.load()
 	if err != nil {
-		return PacksView{}, explained(conflict("state"), "The engine couldn't read its packs (packs.json).")
+		return PacksView{}, conflict("state", "The engine couldn't read its packs (packs.json).")
 	}
 	return p.viewFor(r, st), nil
 }
 
 func packURLProblem(url string) string {
 	if url == "" || len(url) > MaxPackURL || !strings.HasPrefix(url, "https://") || strings.ContainsAny(url, " \t\r\n?#@") {
-		return "A pack comes from a plain https address of a git repository, with no user, query or fragment."
+		return "Needs a plain https address of a git repository."
 	}
 	return ""
 }
 
 func (p *Packs) fetch(ctx context.Context, url, commit string) (FetchedPack, error) {
+	url, commit = strings.TrimSpace(url), strings.ToLower(strings.TrimSpace(commit))
 	if why := packURLProblem(url); why != "" {
-		return FetchedPack{}, explained(invalid("url"), why)
+		return FetchedPack{}, onField("url", invalid("url", why))
 	}
 	if !sha1Hex.MatchString(commit) {
-		return FetchedPack{}, explained(invalid("commit"), "A pack is pinned by a full 40-character commit hash, never a branch or tag.")
+		return FetchedPack{}, onField("commit", invalid("commit", "Needs a full 40-character commit hash."))
 	}
 	if !p.fetching.TryLock() {
-		return FetchedPack{}, explained(limited("fetching"), "The engine is fetching another pack. Wait for it to finish.")
+		return FetchedPack{}, limited("fetching", "The engine is fetching another pack. Wait for it to finish.")
 	}
 	defer p.fetching.Unlock()
 	f, err := p.cfg.Files.Fetch(ctx, url, commit)
@@ -487,7 +504,7 @@ func (p *Packs) fetch(ctx context.Context, url, commit string) (FetchedPack, err
 		if e, ok := errors.AsType[*Error](err); ok {
 			return FetchedPack{}, e
 		}
-		return FetchedPack{}, explained(invalid("pack"), clip("The engine refused this pack: "+err.Error()+".", maxOutput))
+		return FetchedPack{}, invalid("pack", clip("The engine refused this pack: "+err.Error()+".", maxOutput))
 	}
 	return f, nil
 }
@@ -510,7 +527,7 @@ func (p *Packs) change(r Repository, fn func(*PackState) error) (PacksView, erro
 	st, err := p.cfg.Store.Load()
 	if err != nil {
 		p.mu.Unlock()
-		return PacksView{}, explained(conflict("state"), "The engine couldn't read its packs (packs.json).")
+		return PacksView{}, conflict("state", "The engine couldn't read its packs (packs.json).")
 	}
 	if err := fn(&st); err != nil {
 		p.mu.Unlock()
@@ -518,13 +535,31 @@ func (p *Packs) change(r Repository, fn func(*PackState) error) (PacksView, erro
 	}
 	if err := p.cfg.Store.Save(st); err != nil {
 		p.mu.Unlock()
-		return PacksView{}, explained(conflict("state"), "The engine couldn't save its packs.")
+		return PacksView{}, conflict("state", "The engine couldn't save its packs.")
 	}
 	p.mu.Unlock()
 	return p.viewFor(r, st), nil
 }
 
+var PackUploadHelp = "Or upload a pack: pick a folder holding " + workflow.PackManifestFile + " and the pack's agents/, skills/ and commands/ folders. The page sends those files only, as text, and the engine takes at most " + strconv.Itoa(MaxPackUploadFiles) + " of them, " + strconv.Itoa(MaxPackUploadFile>>10) + " KiB each and " + strconv.Itoa(MaxPackUploadBytes>>20) + " MiB in all; it writes the plugin's manifest itself, keeps the pack by its digest and refuses hooks, servers and programs."
+
+func manifestName(files []PackUpload) string {
+	i := slices.IndexFunc(files, func(f PackUpload) bool { return f.Path == workflow.PackManifestFile })
+	if i < 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(files[i].Text), &m) != nil {
+		return ""
+	}
+	name, _ := m["name"].(string)
+	return name
+}
+
 func uploadProblem(name string, files []PackUpload) string {
+	if name == "" && !slices.ContainsFunc(files, func(f PackUpload) bool { return f.Path == workflow.PackManifestFile }) {
+		return "The folder has no " + workflow.PackManifestFile + " naming the pack at its top."
+	}
 	if why := workflow.PackNameProblem(name); why != "" {
 		return why + "."
 	}
@@ -560,18 +595,21 @@ func (p *Packs) UploadPack(path, name string, files []PackUpload) (PacksView, er
 	if err != nil {
 		return PacksView{}, err
 	}
+	if name == "" {
+		name = manifestName(files)
+	}
 	if why := uploadProblem(name, files); why != "" {
 		p.cfg.Logger.Info("pack", "event", "upload-refused")
-		return PacksView{}, explained(invalid("refused upload"), "The engine refused this upload: "+why)
+		return PacksView{}, invalid("refused upload", "The engine refused this upload: "+why)
 	}
 	if !p.fetching.TryLock() {
-		return PacksView{}, explained(limited("fetching"), "The engine is fetching another pack. Wait for it to finish.")
+		return PacksView{}, limited("fetching", "The engine is fetching another pack. Wait for it to finish.")
 	}
 	defer p.fetching.Unlock()
 	f, err := p.cfg.Files.Upload(name, files)
 	if err != nil {
 		p.cfg.Logger.Info("pack", "event", "upload-refused")
-		return PacksView{}, explained(invalid("pack"), clip("The engine refused this pack: "+err.Error()+".", maxOutput))
+		return PacksView{}, invalid("pack", clip("The engine refused this pack: "+err.Error()+".", maxOutput))
 	}
 	return p.keep(r, f, "uploaded the pack "+f.Pack.Name+" "+f.Pack.Version+" ("+strconv.Itoa(len(files))+" files)")
 }
@@ -582,7 +620,7 @@ func (p *Packs) AddPack(ctx context.Context, path, url, commit, digest string) (
 		return PacksView{}, err
 	}
 	if !PackDigest.MatchString(digest) {
-		return PacksView{}, explained(invalid("digest"), "Add a pack with the digest the page showed after fetching it.")
+		return PacksView{}, invalid("digest", "Add a pack with the digest the page showed after fetching it.")
 	}
 	f, err := p.fetch(ctx, url, commit)
 	if err != nil {
@@ -592,7 +630,7 @@ func (p *Packs) AddPack(ctx context.Context, path, url, commit, digest string) (
 	if sp.Digest != digest {
 		f.Drop()
 		p.cfg.Logger.Info("pack", "event", "digest-changed")
-		return PacksView{}, explained(conflict("digest"), "The pack at that commit isn't the one the page showed: its reviewers' digest is now "+shortSHA(sp.Digest)+", not "+shortSHA(digest)+". Fetch it again and read what it holds before you add it.")
+		return PacksView{}, conflict("digest", "The pack at that commit isn't the one the page showed: its reviewers' digest is now "+shortSHA(sp.Digest)+", not "+shortSHA(digest)+". Fetch it again and read what it holds before you add it.")
 	}
 	return p.keep(r, f, "added the pack "+sp.Name+" "+sp.Version+" from git, pinned at commit "+shortSHA(sp.Source.Commit))
 }
@@ -604,18 +642,18 @@ func (p *Packs) keep(r Repository, f FetchedPack, what string) (PacksView, error
 	v, err := p.change(r, func(st *PackState) error {
 		if old, ok := packOf(*st, sp.Digest); ok {
 			if old.SessionDigest != sp.SessionDigest {
-				return explained(conflict("same reviewers"), "The engine already keeps a pack with the same reviewers and other session files, "+old.Name+" "+old.Version+". Remove it first.")
+				return conflict("same reviewers", "The engine already keeps a pack with the same reviewers and other session files, "+old.Name+" "+old.Version+". Remove it first.")
 			}
 			return nil
 		}
 		if slices.ContainsFunc(st.Packs, func(s StoredPack) bool { return s.Name == sp.Name }) {
-			return explained(conflict("name"), "The engine already keeps a pack named "+sp.Name+". Remove it first, or use the one it keeps.")
+			return conflict("name", "The engine already keeps a pack named "+sp.Name+". Remove it first, or use the one it keeps.")
 		}
 		if len(st.Packs) >= MaxPacks {
-			return explained(limited("packs"), "The engine already keeps "+strconv.Itoa(MaxPacks)+" packs, its limit. Remove one first.")
+			return limited("packs", "The engine already keeps "+strconv.Itoa(MaxPacks)+" packs, its limit. Remove one first.")
 		}
 		if err := f.Keep(); err != nil {
-			return explained(conflict("files"), clip("The engine couldn't keep the pack's files in the agents volume: "+err.Error(), maxOutput))
+			return conflict("files", clip("The engine couldn't keep the pack's files in the agents volume: "+err.Error(), maxOutput))
 		}
 		added = true
 		st.Packs = append(st.Packs, sp)
@@ -627,11 +665,30 @@ func (p *Packs) keep(r Repository, f FetchedPack, what string) (PacksView, error
 	if err != nil {
 		return PacksView{}, err
 	}
+	v.Kept = sp.Digest
 	if added {
 		p.audit(AuditEntry{Repository: r.Name, Result: ResultAdded, Hash: sp.Digest, Remote: sp.Source.URL, Commit: sp.Source.Commit,
 			Reason: "the developer " + what + ", on the page"})
 		p.cfg.Logger.Info("pack", "event", ResultAdded, "name", sp.Name, "digest", sp.Digest)
 	}
+	return v, nil
+}
+
+func (p *Packs) AddAndUsePack(ctx context.Context, path, url, commit, digest string) (PacksView, error) {
+	v, err := p.ListPacks(path)
+	if err != nil {
+		return PacksView{}, err
+	}
+	if !slices.ContainsFunc(v.Packs, func(k PackView) bool { return k.Digest == digest }) {
+		if v, err = p.AddPack(ctx, path, url, commit, digest); err != nil {
+			return PacksView{}, err
+		}
+		digest = v.Kept
+	}
+	if v, err = p.UsePack(path, digest); err != nil {
+		return PacksView{}, err
+	}
+	v.Kept = digest
 	return v, nil
 }
 
@@ -641,17 +698,17 @@ func (p *Packs) RemovePack(path, digest string) (PacksView, error) {
 		return PacksView{}, err
 	}
 	if !PackDigest.MatchString(digest) {
-		return PacksView{}, explained(invalid("digest"), "Remove a pack by the digest the page shows.")
+		return PacksView{}, invalid("digest", "Remove a pack by the digest the page shows.")
 	}
 	listed, err := p.cfg.Repos.List()
 	if err != nil {
-		return PacksView{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return PacksView{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	var removed StoredPack
 	v, err := p.change(r, func(st *PackState) error {
 		sp, ok := packOf(*st, digest)
 		if !ok {
-			return explained(notFound("pack"), "The engine keeps no pack with that digest.")
+			return notFound("pack", "The engine keeps no pack with that digest.")
 		}
 		var users []string
 		for _, l := range listed {
@@ -660,13 +717,13 @@ func (p *Packs) RemovePack(path, digest string) (PacksView, error) {
 			}
 		}
 		if len(users) > 0 {
-			return explained(conflict("in use"), clip("The pack "+sp.Name+" reviews "+strings.Join(users, ", ")+". Pick another pack for "+plural(len(users), "that project", "those projects")+" first.", maxOutput))
+			return conflict("in use", clip("The pack "+sp.Name+" reviews "+strings.Join(users, ", ")+". Pick another pack for "+plural(len(users), "that project", "those projects")+" first.", maxOutput))
 		}
 		if p.sessionsUsing(digest) {
-			return explained(conflict("in use"), "A saved session runs the pack "+sp.Name+", and keeps it across Stop and Wake. Delete that session first.")
+			return conflict("in use", "A saved session runs the pack "+sp.Name+", and keeps it across Stop and Wake. Delete that session first.")
 		}
 		if err := p.cfg.Files.Remove(digest); err != nil {
-			return explained(conflict("files"), "The engine couldn't remove the pack's files from the agents volume.")
+			return conflict("files", "The engine couldn't remove the pack's files from the agents volume.")
 		}
 		st.Packs = slices.DeleteFunc(st.Packs, func(s StoredPack) bool { return s.Digest == digest })
 		st.Choices = slices.DeleteFunc(st.Choices, func(c PackChoice) bool { return c.Pack == digest })
@@ -688,14 +745,14 @@ func (p *Packs) UsePack(path, pack string) (PacksView, error) {
 		return PacksView{}, err
 	}
 	if pack != PackKnackpack && pack != PackNone && !PackDigest.MatchString(pack) {
-		return PacksView{}, explained(invalid("pack"), "A project uses knackpack, a pack the engine keeps, by its digest, or none.")
+		return PacksView{}, invalid("pack", "A project uses knackpack, a pack the engine keeps, by its digest, or none.")
 	}
 	var chosen StoredPack
 	v, err := p.change(r, func(st *PackState) error {
 		if pack != PackKnackpack && pack != PackNone {
 			sp, ok := packOf(*st, pack)
 			if !ok {
-				return explained(notFound("pack"), "The engine keeps no pack with that digest. Add it first.")
+				return notFound("pack", "The engine keeps no pack with that digest. Add it first.")
 			}
 			chosen = sp
 		}

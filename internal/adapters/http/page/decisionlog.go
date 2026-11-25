@@ -8,6 +8,11 @@ import (
 
 const decisionLogRoute = "/api/decision-log"
 
+const (
+	saidDecisionSaved     = "Saved. It stays through every rebuild of the log."
+	saidDecisionUnchanged = "No change: the entry already says this."
+)
+
 type decisionEntryJSON struct {
 	ID       string `json:"id"`
 	Kind     string `json:"kind"`
@@ -20,9 +25,11 @@ type decisionEntryJSON struct {
 	Hidden   bool   `json:"hidden,omitempty"`
 	Added    bool   `json:"added,omitempty"`
 	Edited   bool   `json:"edited,omitempty"`
+	Label    string `json:"label"`
 }
 
 type decisionLogJSON struct {
+	savedSaid
 	Repo       string              `json:"repo"`
 	Entries    []decisionEntryJSON `json:"entries"`
 	More       int                 `json:"more"`
@@ -36,7 +43,7 @@ type decisionLogJSON struct {
 func decisionLogOf(v session.DecisionLogView) decisionLogJSON {
 	out := decisionLogJSON{Repo: v.Repo, Entries: make([]decisionEntryJSON, 0, len(v.Entries)), More: v.More, Note: v.Note, Left: v.Left, AuditSince: millis(v.AuditSince), Orphans: v.Orphans, Problems: nonNil(v.Problems)}
 	for _, e := range v.Entries {
-		out.Entries = append(out.Entries, decisionEntryJSON{ID: e.ID, Kind: e.Kind, At: millis(e.Time), Line: e.Line, Reason: e.Reason, Withheld: e.Withheld, Name: e.Name, Text: e.Text, Hidden: e.Hidden, Added: e.Added, Edited: e.Edited})
+		out.Entries = append(out.Entries, decisionEntryJSON{ID: e.ID, Kind: e.Kind, At: millis(e.Time), Line: e.Line, Reason: e.Reason, Withheld: e.Withheld, Name: e.Name, Text: e.Text, Hidden: e.Hidden, Added: e.Added, Edited: e.Edited, Label: session.DecisionLabel(e.Kind)})
 	}
 	return out
 }
@@ -58,42 +65,43 @@ func (s *Server) decisionLog(w http.ResponseWriter, body map[string]any) {
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	id, _ := body["id"].(string)
 	okID := session.ValidDecisionID(id)
 	name, okName := body["name"].(string)
 	text, okText := body["text"].(string)
-	okName = okName && len(name) <= 4*session.MaxDecisionName
-	okText = okText && len(text) <= 4*session.MaxDecisionText
 	var v session.DecisionLogView
 	var err error
+	var said savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = log.DecisionLog(repo)
 	case "set":
 		hidden, okHidden := body["hidden"].(bool)
 		if !keysWithin(body, "op", "repo", "id", "name", "text", "hidden") || !okID || !okName || !okText || !okHidden {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-		v, err = log.SetDecision(repo, id, name, text, hidden)
-		s.logger.Info("decision log", "op", "set", "ok", err == nil)
+		var changed bool
+		v, changed, err = log.SetDecision(repo, id, name, text, hidden)
+		s.logger.Info("decision log", "op", "set", "ok", err == nil, "changed", changed)
+		said = saveSaid(changed, saidDecisionSaved, saidDecisionUnchanged)
 	case "add":
 		if !keysWithin(body, "op", "repo", "text") || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = log.AddDecision(repo, text)
 		s.logger.Info("decision log", "op", "add", "ok", err == nil)
 	case "remove":
 		if !keysWithin(body, "op", "repo", "id") || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err = log.RemoveDecision(repo, id)
@@ -107,5 +115,7 @@ func (s *Server) decisionLog(w http.ResponseWriter, body map[string]any) {
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, decisionLogOf(v))
+	answer := decisionLogOf(v)
+	answer.savedSaid = said
+	send(w, http.StatusOK, answer)
 }

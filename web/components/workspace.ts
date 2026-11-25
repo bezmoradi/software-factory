@@ -1,7 +1,12 @@
+import type { EngineAnswer } from '../api.ts'
 import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
+import { saidOf, tagClass, type Said } from '../lib/json.ts'
+import { emptyState, usageMeter } from '../lib/page.ts'
+import { WALK_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/workspace'
 
@@ -17,6 +22,7 @@ interface Row {
   sizeMore: boolean
   sizeKnown: boolean
   state: string
+  said: Said
   head: string
   deletable: boolean
   why: string
@@ -29,22 +35,6 @@ interface View {
   low: boolean
   lowBelow: number
   sessions: Row[]
-}
-
-type Answer = { ok: boolean; body: Record<string, unknown> }
-
-const STATE: Record<string, { text: string; tone: string }> = {
-  merged: { text: 'on main', tone: 'ok' },
-  pushed: { text: 'pushed', tone: 'ok' },
-  unpushed: { text: 'unpushed commits', tone: 'warn' },
-  unknown: { text: 'not known', tone: '' },
-}
-
-async function call(post: Post, body: unknown): Promise<Answer> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  return { ok: res.ok, body: parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {} }
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -71,7 +61,7 @@ function viewOf(body: Record<string, unknown>): View {
     lowBelow: num(body.lowBelow),
     sessions: rows.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null && typeof (r as Record<string, unknown>).sid === 'string').map(r => ({
       sid: text(r.sid), name: text(r.name), repo: text(r.repo), branch: text(r.branch), tree: text(r.tree), running: r.running === true,
-      size: num(r.size), entries: num(r.entries), sizeMore: r.sizeMore === true, sizeKnown: r.sizeKnown === true, state: text(r.state), head: text(r.head),
+      size: num(r.size), entries: num(r.entries), sizeMore: r.sizeMore === true, sizeKnown: r.sizeKnown === true, state: text(r.state), said: saidOf(r.said), head: text(r.head),
       deletable: r.deletable === true, why: text(r.why),
     })),
   }
@@ -92,18 +82,17 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     space.replaceChildren()
     if (v.spaceKnown) {
       const used = v.total ? Math.round(((v.total - v.free) / v.total) * 100) : 0
-      space.append(el('p', 'small', `${bytes(v.free)} free of ${bytes(v.total)} on the workspace volume (${used}% used).`))
+      space.append(usageMeter({ label: 'Workspace volume', percent: used, detail: `${bytes(v.free)} free of ${bytes(v.total)}`, warn: v.low }))
       if (v.low) space.append(el('p', 'notice warn small', `Free space is low: under ${bytes(v.lowBelow)} or 5% of the volume. A clone, an install or a build can fail when it runs out. Delete sessions you no longer need below.`))
     } else space.append(el('p', 'small muted', 'The engine couldn’t read the workspace volume’s free space.'))
     list.replaceChildren()
-    if (!v.sessions.length) list.append(el('li', 'muted', 'No sessions this engine started.'))
+    if (!v.sessions.length) list.append(emptyState('No sessions this engine started.', { tag: 'li' }))
     for (const r of v.sessions) {
       const li = el('li', 'workspace-row')
       const head = el('div', 'row')
       const name = labelOf(r.sid) || r.name || r.tree
       head.append(el('strong', '', visible(name)), el('span', 'small muted', `${visible(r.repo)} · ${visible(r.branch)}`))
-      const st = STATE[r.state] ?? STATE.unknown!
-      head.append(el('span', `tag ${st.tone}`.trim(), st.text))
+      head.append(el('span', tagClass(r.said), r.said.label))
       if (r.running) head.append(el('span', 'tag', 'running'))
       head.append(el('span', 'spacer'))
       const size = r.sizeKnown ? `${r.sizeMore ? 'more than ' : ''}${bytes(r.size)} in ${r.sizeMore ? 'more than ' : ''}${r.entries.toLocaleString()} ${r.entries === 1 ? 'entry' : 'entries'}` : 'size not counted'
@@ -122,14 +111,14 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     refocus(list, key)
   }
 
-  const reload = async (keepSaid = false) => {
-    if (!keepSaid) say.textContent = 'Counting…'
-    const a = await call(post, { op: 'view' })
+  let readSaid = ''
+  const show = (a: EngineAnswer) => {
+    const mine = !say.textContent || say.textContent === readSaid
     if (!a.ok) {
-      say.textContent = text(a.body.message) ? visible(text(a.body.message)) : 'The workspace status didn’t load.'
+      if (mine) say.textContent = readSaid = a.message
       return
     }
-    if (!keepSaid) say.textContent = ''
+    if (mine) say.textContent = readSaid = ''
     paint(viewOf(a.body))
   }
 
@@ -150,15 +139,15 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
     deleting.add(r.sid)
     const before = order
     say.textContent = 'Deleting…'
-    const a = await call(post, offer ? { op: 'delete', sid: r.sid, flag: offer.flag, value: offer.value } : { op: 'delete', sid: r.sid })
+    const a = await post(ROUTE, offer ? { op: 'delete', sid: r.sid, flag: offer.flag, value: offer.value } : { op: 'delete', sid: r.sid })
     deleting.delete(r.sid)
     if (a.ok) {
       say.textContent = 'Deleted, with its worktree.'
       deleted(r.sid)
-      await reload(true)
+      await refresh.now()
       return settle(r.sid, before, null)
     }
-    const message = text(a.body.message) ? visible(text(a.body.message)) : 'The session wasn’t deleted.'
+    const message = a.message
     const o = a.body.offer
     let anyway: HTMLButtonElement | null = null
     if (o && typeof o === 'object' && typeof (o as Record<string, unknown>).flag === 'string' && typeof (o as Record<string, unknown>).value === 'string') {
@@ -166,13 +155,13 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       anyway = actionButton('Delete anyway', 'ghost small', () => remove(r, next))
       say.replaceChildren(el('span', '', `${message} `), anyway)
     } else say.textContent = message
-    await reload(true)
+    await refresh.now()
     settle(r.sid, before, anyway)
   }
 
   const m = modal({
     kind: 'workspace',
-    title: 'Workspace',
+    ...dialogDocs('workspace'),
     body: [
       el('p', 'small', 'Clones and session worktrees share the workspace volume. Sizes count the files in each worktree without following links, and stop counting at 200,000 entries.'),
       space,
@@ -180,8 +169,9 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       el('p', 'small muted', 'A stopped session can be deleted here when its branch is pushed or on main, so nothing is lost. A session with commits that aren’t pushed can be deleted only from its own menu.'),
       list, say,
     ],
-    lead: [actionButton('Refresh', 'ghost small', () => reload())],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
-  void reload()
+  say.textContent = readSaid = 'Counting…'
+  const refresh = whileOpen({ root: list, read: () => post(ROUTE, { op: 'view' }), show, everyMs: WALK_EVERY_MS })
+  m.onClose(() => refresh.stop())
 }

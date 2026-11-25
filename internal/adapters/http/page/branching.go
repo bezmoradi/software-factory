@@ -3,7 +3,6 @@ package page
 import (
 	"context"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/push"
@@ -17,10 +16,7 @@ const (
 	maxFromBranch    = 255
 )
 
-var (
-	branchingRoutes = map[string]bool{bringMainRoute: true, startPointsRoute: true}
-	agentID         = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-)
+var branchingRoutes = map[string]bool{bringMainRoute: true, startPointsRoute: true}
 
 type remoteRefJSON struct {
 	Name   string `json:"name"`
@@ -102,7 +98,7 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 	switch r.URL.Path {
 	case bringMainRoute:
 		if !keysWithin(body, "sid") || !okSid {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		commit, err := b.BringMain(ctx, sid)
@@ -116,7 +112,7 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 	case startPointsRoute:
 		path, okPath := body["path"].(string)
 		if !keysWithin(body, "path") || !okPath || path == "" || len(path) > session.MaxCwd {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		points, err := b.StartPoints(ctx, path)
@@ -135,6 +131,6 @@ func (s *Server) branchingAPI(w http.ResponseWriter, r *http.Request, body map[s
 		}
 		send(w, http.StatusOK, map[string]any{"main": points.Main, "branches": branches, "pulls": pulls, "pullsWhy": points.PullsWhy})
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }

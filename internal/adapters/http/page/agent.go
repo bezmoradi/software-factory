@@ -29,18 +29,23 @@ const (
 )
 
 var agentRoutes = map[string]string{
-	"/register":   http.MethodPost,
-	"/poll":       http.MethodGet,
-	"/events":     http.MethodPost,
-	"/wait":       http.MethodGet,
-	"/wake":       http.MethodPost,
-	"/image":      http.MethodGet,
-	"/check":      http.MethodPost,
-	pushRoute:     http.MethodPost,
-	forgeRoute:    http.MethodPost,
-	checksRoute:   http.MethodPost,
-	commentsRoute: http.MethodPost,
-	splitRoute:    http.MethodPost,
+	"/register":    http.MethodPost,
+	"/poll":        http.MethodGet,
+	"/events":      http.MethodPost,
+	"/wait":        http.MethodGet,
+	"/wake":        http.MethodPost,
+	"/image":       http.MethodGet,
+	"/check":       http.MethodPost,
+	pushRoute:      http.MethodPost,
+	forgeRoute:     http.MethodPost,
+	checksRoute:    http.MethodPost,
+	commentsRoute:  http.MethodPost,
+	splitRoute:     http.MethodPost,
+	workTypeRoute:  http.MethodPost,
+	accessAskRoute: http.MethodPost,
+	actionAskRoute: http.MethodPost,
+	sshKeysRoute:   http.MethodGet,
+	sshSignRoute:   http.MethodPost,
 
 	turnCheckRoute:    http.MethodPost,
 	sessionModelRoute: http.MethodGet,
@@ -63,7 +68,7 @@ func (s *Server) Agent() http.Handler {
 
 func (s *Server) agentReject(w http.ResponseWriter, r *http.Request, status int, why string) {
 	s.agentRefused(r, why)
-	refuse(w, status, why)
+	agentRefuse(w, status, why)
 }
 
 func (s *Server) agentRefused(r *http.Request, why string) {
@@ -126,15 +131,15 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	want, ok := agentRoutes[r.URL.Path]
 	if !ok {
-		refuse(w, http.StatusNotFound, "route")
+		agentRefuse(w, http.StatusNotFound, "route")
 		return
 	}
 	if r.Method != want {
-		refuse(w, http.StatusMethodNotAllowed, "method")
+		agentRefuse(w, http.StatusMethodNotAllowed, "method")
 		return
 	}
 	if r.Method == http.MethodPost && !isJSON(r) {
-		refuse(w, http.StatusUnsupportedMediaType, "type")
+		agentRefuse(w, http.StatusUnsupportedMediaType, "type")
 		return
 	}
 	box := ConnBox(r.Context())
@@ -148,13 +153,13 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		card = q.Get("card")
 		if len(q) != 1 || len(q["card"]) != 1 || !cardParam.MatchString(card) {
-			refuse(w, http.StatusBadRequest, "card")
+			agentRefuse(w, http.StatusBadRequest, "card")
 			return
 		}
 	case "/image":
 	default:
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
-			refuse(w, http.StatusBadRequest, "query")
+			agentRefuse(w, http.StatusBadRequest, "query")
 			return
 		}
 	}
@@ -176,6 +181,21 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	case splitRoute:
 		s.splitRequest(w, r)
+		return
+	case workTypeRoute:
+		s.workTypeRequest(w, r)
+		return
+	case accessAskRoute:
+		s.accessRequest(w, r)
+		return
+	case actionAskRoute:
+		s.actionRequest(w, r)
+		return
+	case sshKeysRoute:
+		s.sshKeys(w, r)
+		return
+	case sshSignRoute:
+		s.sshSign(w, r)
 		return
 	case "/check":
 		s.check(w, r)
@@ -216,7 +236,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		_ = rc.SetReadDeadline(time.Now().Add(eventsBodyFor))
 		data, status := readBody(w, r, MaxEventsBody)
 		if status != 0 {
-			refuse(w, status, "body")
+			agentRefuse(w, status, "body")
 			return
 		}
 		_ = rc.SetReadDeadline(time.Now().Add(eventsWait + writeFor))
@@ -228,7 +248,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		batch, status, why := decodeEvents(json.NewDecoder(bytes.NewReader(data)))
 		if status != 0 {
 			done()
-			refuse(w, status, why)
+			agentRefuse(w, status, why)
 			return
 		}
 		err := s.reg.Report(given, batch)
@@ -259,7 +279,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		}
 		defer leave()
 		if _, status := readObject(w, r, MaxAgentBody); status != 0 {
-			refuse(w, status, "body")
+			agentRefuse(w, status, "body")
 			return
 		}
 		if err := s.reg.Wake(given, card); err != nil {
@@ -276,7 +296,7 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		case "/image":
 			s.image(w, r)
 		default:
-			refuse(w, http.StatusNotFound, "route")
+			agentRefuse(w, http.StatusNotFound, "route")
 		}
 	}
 }
@@ -292,7 +312,7 @@ func (s *Server) agentError(w http.ResponseWriter, r *http.Request, err error) {
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxRegisterBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	protocol, _ := integer(body["protocol"])

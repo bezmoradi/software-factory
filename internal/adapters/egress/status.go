@@ -26,7 +26,9 @@ const (
 
 type sideJSON struct {
 	Allow   []string         `json:"allow"`
+	Ports   []string         `json:"ports,omitempty"`
 	Expires map[string]int64 `json:"expires"`
+	Git     []string         `json:"git,omitempty"`
 }
 
 type status struct {
@@ -35,6 +37,7 @@ type status struct {
 	Set     bool                `json:"set"`
 	Deny    []string            `json:"deny"`
 	Sides   map[string]sideJSON `json:"sides"`
+	Grants  map[string]sideJSON `json:"grants"`
 }
 
 type setJSON struct {
@@ -51,9 +54,13 @@ type refusalJSON struct {
 }
 
 type boxesJSON struct {
-	Version   string   `json:"version"`
-	Subnets   []string `json:"subnets"`
-	Reviewers []string `json:"reviewers"`
+	Version   string              `json:"version"`
+	Subnets   []string            `json:"subnets"`
+	Reviewers []string            `json:"reviewers"`
+	Actions   []string            `json:"actions,omitempty"`
+	Grants    map[string]sideJSON `json:"grants,omitempty"`
+	Stack     []string            `json:"stack,omitempty"`
+	Git       []string            `json:"git,omitempty"`
 }
 
 type refusalsJSON struct {
@@ -72,6 +79,7 @@ type seenJSON struct {
 type refusedJSON struct {
 	Version string                `json:"version"`
 	Sides   map[string][]seenJSON `json:"sides"`
+	Subnets map[string][]seenJSON `json:"subnets"`
 }
 
 type StatusConfig struct {
@@ -81,7 +89,27 @@ type StatusConfig struct {
 	KeyFile   string
 	Subnets   *Subnets
 	Reviewers *Subnets
+	Grants    *Grants
+	Tried     *SubnetSeen
 	Logger    shared.Logger
+}
+
+func listsOf(raw map[string]sideJSON) (map[string]Lists, bool) {
+	out := map[string]Lists{}
+	for key, s := range raw {
+		if s.Allow == nil {
+			return nil, false
+		}
+		l := Lists{Allow: s.Allow, Ports: s.Ports, Expires: map[string]time.Time{}, Git: s.Git}
+		for h, t := range s.Expires {
+			if t <= 0 {
+				return nil, false
+			}
+			l.Expires[h] = time.Unix(t, 0)
+		}
+		out[key] = l
+	}
+	return out, true
 }
 
 func prefixesOf(raw []string) ([]netip.Prefix, bool) {
@@ -96,10 +124,25 @@ func prefixesOf(raw []string) ([]netip.Prefix, bool) {
 	return out, true
 }
 
+func gitNamesOf(raw []string) ([]string, bool) {
+	if len(raw) > MaxEntries {
+		return nil, false
+	}
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		name, err := entryName(r)
+		if err != nil || name != r || strings.HasPrefix(name, ".") {
+			return nil, false
+		}
+		out = append(out, name)
+	}
+	return out, true
+}
+
 func StatusHandler(cfg StatusConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, statusOf(cfg.Live.snapshot()))
+		writeJSON(w, statusOf(cfg.Live.snapshot(), cfg.Grants))
 	})
 	mux.HandleFunc("GET /refusals/{marker}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -145,7 +188,7 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 				http.Error(w, "a side has no allow list", http.StatusBadRequest)
 				return
 			}
-			l := Lists{Allow: s.Allow, Expires: map[string]time.Time{}}
+			l := Lists{Allow: s.Allow, Expires: map[string]time.Time{}, Git: s.Git}
 			for h, t := range s.Expires {
 				if t <= 0 {
 					http.Error(w, "an expiry isn't a time", http.StatusBadRequest)
@@ -159,7 +202,7 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, statusOf(cfg.Live.snapshot()))
+		writeJSON(w, statusOf(cfg.Live.snapshot(), cfg.Grants))
 	})
 	mux.HandleFunc("PUT /boxes", func(w http.ResponseWriter, r *http.Request) {
 		if !keyed(w, r, cfg.KeyFile) {
@@ -173,7 +216,7 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			http.Error(w, "the subnets must be JSON", http.StatusUnsupportedMediaType)
 			return
 		}
-		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxControlBody))
+		data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBoxesBody))
 		if err != nil {
 			http.Error(w, "the subnets are larger than egress reads", http.StatusRequestEntityTooLarge)
 			return
@@ -185,12 +228,26 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			http.Error(w, "the subnets aren't ones egress reads", http.StatusBadRequest)
 			return
 		}
-		boxes, ok := prefixesOf(q.Subnets)
+		sessions, ok := prefixesOf(q.Subnets)
 		reviewers, rok := prefixesOf(q.Reviewers)
-		if !ok || !rok {
+		actions, aok := prefixesOf(q.Actions)
+		stack, sok := prefixesOf(q.Stack)
+		if !ok || !rok || !aok || !sok || len(stack) > MaxStack || len(actions) > MaxActionSubnets || len(actions) > 0 && cfg.Grants == nil {
 			http.Error(w, "a subnet isn't one egress reads", http.StatusBadRequest)
 			return
 		}
+		git, gok := gitNamesOf(q.Git)
+		if !gok {
+			http.Error(w, "the git hosts aren't host names egress reads", http.StatusBadRequest)
+			return
+		}
+		for _, p := range actions {
+			if slices.ContainsFunc(sessions, p.Overlaps) || slices.ContainsFunc(reviewers, p.Overlaps) {
+				http.Error(w, "an action container's subnet is also another container's", http.StatusBadRequest)
+				return
+			}
+		}
+		boxes := append(slices.Clone(sessions), actions...)
 		for _, p := range reviewers {
 			if slices.ContainsFunc(boxes, p.Overlaps) {
 				http.Error(w, "a subnet is both a session container's and a reviewer container's", http.StatusBadRequest)
@@ -203,6 +260,31 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 				return
 			}
 		}
+		raw, ok := listsOf(q.Grants)
+		if !ok || len(q.Grants) > 0 && cfg.Grants == nil {
+			http.Error(w, "the grants aren't ones egress reads", http.StatusBadRequest)
+			return
+		}
+		var granted map[string]Policy
+		if cfg.Grants != nil {
+			if granted, err = cfg.Grants.Check(boxes, raw); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, p := range actions {
+				l := raw[p.String()]
+				if len(l.Allow)+len(l.Ports) != 1 || len(l.Git) > 0 {
+					http.Error(w, "an action container's subnet needs exactly one host or host port and no git host", http.StatusBadRequest)
+					return
+				}
+				if entry := slices.Concat(l.Allow, l.Ports)[0]; cfg.Grants.gitTarget(git, entry) {
+					delete(granted, p.String())
+					if cfg.Logger != nil {
+						cfg.Logger.Warn("egress", "event", "action-git-refused", "subnet", p.String(), "target", entry)
+					}
+				}
+			}
+		}
 		if err := cfg.Subnets.Replace(boxes); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -211,13 +293,19 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, boxesJSON{Version: Version, Subnets: q.Subnets, Reviewers: q.Reviewers})
+		if cfg.Grants != nil {
+			cfg.Grants.SetStack(stack)
+			cfg.Grants.SetGitHosts(git)
+			cfg.Grants.ReplaceAlone(granted, actions)
+		}
+		cfg.Tried.Keep(boxes)
+		writeJSON(w, boxesJSON{Version: Version, Subnets: q.Subnets, Reviewers: q.Reviewers, Actions: q.Actions})
 	})
 	mux.HandleFunc("GET /refused", func(w http.ResponseWriter, r *http.Request) {
 		if !keyed(w, r, cfg.KeyFile) {
 			return
 		}
-		out := refusedJSON{Version: Version, Sides: map[string][]seenJSON{}}
+		out := refusedJSON{Version: Version, Sides: map[string][]seenJSON{}, Subnets: cfg.Tried.list()}
 		for name, book := range cfg.Seen {
 			list := []seenJSON{}
 			for _, e := range book.List() {
@@ -275,8 +363,8 @@ func controlRoute(path string) string {
 	return "other"
 }
 
-func statusOf(s snapshot) status {
-	out := status{Version: Version, Boot: s.boot, Set: s.set, Deny: s.deny, Sides: map[string]sideJSON{}}
+func statusOf(s snapshot, g *Grants) status {
+	out := status{Version: Version, Boot: s.boot, Set: s.set, Deny: s.deny, Sides: map[string]sideJSON{}, Grants: g.snapshot()}
 	if out.Deny == nil {
 		out.Deny = []string{}
 	}

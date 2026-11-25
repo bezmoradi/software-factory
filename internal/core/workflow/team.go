@@ -184,12 +184,12 @@ func parseWorkTypes(root *object, team *Team, out *[]string) {
 			say(": \"steps\" must list step kinds from " + stepList())
 		}
 		edits, _ := asString(t.values["edits"])
-		editsOK := edits == string(AnyEdits) || edits == string(DocsEdits)
+		editsOK := edits == string(AnyEdits)
 		switch {
 		case edits == string(NoEdits):
 			say(": \"edits\" can't be \"none\": a work type that changes no file reviewed a pull request from the git host, which the agent container can't reach")
 		case !editsOK:
-			say(": \"edits\" must be \"any\" or \"docs\"")
+			say(": \"edits\" must be \"any\"")
 		}
 		push, pushOK := t.values["push"].(bool)
 		if !pushOK {
@@ -205,7 +205,7 @@ func parseWorkTypes(root *object, team *Team, out *[]string) {
 		if !rolesSet || !rolesOK {
 			roles = []review.Role{}
 			if push {
-				roles = MinimumRoles(Edits(edits))
+				roles = MinimumRoles()
 			}
 		}
 		w := WorkType{ID: id, Name: name, Steps: steps, Edits: Edits(edits), Push: push, Roles: roles}

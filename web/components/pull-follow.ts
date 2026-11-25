@@ -1,10 +1,12 @@
-import { api } from '../api.ts'
-import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
+import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
 import type { Tone } from '../lib/dom.ts'
-import { DOUBLED_NOTE } from '../lib/format.ts'
+import { actions, field, form } from '../lib/form.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
+import { textbox, checkbox } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
-type Answer = { ok: boolean; status: number; body: Record<string, unknown> }
+type Answer = EngineAnswer
 
 type Finding = { severity: string; title: string; location: string; text: string; reviewer: string; agent: string }
 
@@ -12,18 +14,7 @@ type Findings = { key: string; commit: string; items: Finding[]; held: number; o
 
 type Settings = { project: string; bots: string[]; auto: boolean; assign: boolean }
 
-const MAX_BOTS = 20
-const BOT = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/
 
-async function call(path: string, body: unknown): Promise<Answer> {
-  const res = await api(path, body).catch(() => null)
-  const parsed = res ? ((await res.json().catch(() => ({}))) as Record<string, unknown>) : {}
-  return { ok: !!res && res.ok, status: res?.status ?? 0, body: parsed }
-}
-
-function message(a: Answer, fallback: string): string {
-  return typeof a.body.message === 'string' && a.body.message ? shown(a.body.message) : fallback
-}
 
 function safeLink(url: string): string {
   try {
@@ -64,7 +55,7 @@ function reviewKey(v: PullFollowView): string {
 
 export function pullFollowOf(sid: string, info: SessionInfo, connected: boolean): PullFollowView | null {
   if (!info.verified) return null
-  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.doubled ? DOUBLED_NOTE : connected ? '' : 'Actions work once the page is connected again.', connected }
+  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.readOnly || (connected ? '' : 'Actions work once the page is connected again.'), connected }
 }
 
 class SfPullFollow extends HTMLElement {
@@ -72,6 +63,7 @@ class SfPullFollow extends HTMLElement {
   #key = ''
   #busy = ''
   #status = new Map<string, [string, Tone | undefined]>()
+  #botsRefused = new Map<string, string>()
   #said = statusLine('small status-slot')
   #findings = new Map<string, Findings>()
   #loading = ''
@@ -97,15 +89,16 @@ class SfPullFollow extends HTMLElement {
     else this.#status.delete(sid)
   }
 
-  async #run(op: string, path: string, body: Record<string, unknown>, ok: string, fail: string): Promise<Answer | null> {
+  async #run(op: string, path: string, body: Record<string, unknown>, ok: string | null, own: (a: Answer) => boolean = () => false): Promise<Answer | null> {
     const v = this.#view
     if (!v || this.#busy || v.disabled) return null
     this.#busy = op
     this.#say(v.sid, '')
     this.#paint()
-    const a = await call(path, body)
+    const a = await request(path, body)
     this.#busy = ''
-    this.#say(v.sid, a.ok ? ok : message(a, fail), a.ok ? 'muted' : 'bad')
+    if (!a.ok) this.#say(v.sid, own(a) ? '' : a.message, 'bad')
+    else toast({ id: `pull-follow:${v.sid}`, title: ok ?? a.message, tone: ok === null ? savedTone(a) : 'ok' })
     this.#paint()
     return a
   }
@@ -114,7 +107,7 @@ class SfPullFollow extends HTMLElement {
     const key = reviewKey(v)
     if (!key || this.#findings.has(key) || this.#loading === key || !v.connected) return
     this.#loading = key
-    const a = await call('/api/finding-issues', { op: 'read', sid: v.sid })
+    const a = await request('/api/finding-issues', { op: 'read', sid: v.sid })
     this.#loading = ''
     if (!a.ok) return
     const items = Array.isArray(a.body.items) ? (a.body.items as Finding[]) : []
@@ -124,9 +117,9 @@ class SfPullFollow extends HTMLElement {
   }
 
   async #loadSettings(sid: string) {
-    const a = await call('/api/pull-request', { op: 'settings', sid })
+    const a = await request('/api/pull-request', { op: 'settings', sid })
     if (!a.ok) {
-      this.#say(sid, message(a, "The project's pull request settings couldn't be read."), 'bad')
+      this.#say(sid, a.message, 'bad')
       return this.#paint()
     }
     const s: Settings = { project: typeof a.body.project === 'string' ? a.body.project : '', bots: Array.isArray(a.body.bots) ? (a.body.bots as string[]) : [], auto: a.body.auto === true, assign: a.body.assign === true }
@@ -173,7 +166,7 @@ class SfPullFollow extends HTMLElement {
   #state(v: PullFollowView, f: PullFollow | null): HTMLElement {
     const box = el('div', 'pull-state')
     const openPull = () => this.#action('Open pull request', 'open', 'small', `pull-open:${v.sid}`,
-      () => void this.#run('open', '/api/pull-request', { op: 'open', sid: v.sid }, 'A pull request card waits under Issues and pull requests. Read it, then open it from there.', "The pull request card wasn't made."),
+      () => void this.#run('open', '/api/pull-request', { op: 'open', sid: v.sid }, 'A pull request card waits under Issues and pull requests. Read it, then open it from there.'),
       'Makes a pull request card from the engine\'s records: the branch, its commits and the approved requirements\' title. It opens as a draft unless you clear that on the card.')
     if (!f || !f.state) {
       box.append(el('p', 'small muted', 'Once the branch is pushed, the engine follows its pull request: CI results, your own comments and the bots this project names.'))
@@ -210,7 +203,7 @@ class SfPullFollow extends HTMLElement {
   }
 
   async #delete(sid: string) {
-    const a = await this.#run('delete', '/api/workspace', { op: 'delete', sid }, 'The session was deleted.', "The session wasn't deleted.")
+    const a = await this.#run('delete', '/api/workspace', { op: 'delete', sid }, 'The session was deleted.')
     if (a?.ok) emit(this, 'sf-session-deleted', { sid })
   }
 
@@ -218,11 +211,11 @@ class SfPullFollow extends HTMLElement {
     const out: Node[] = []
     const actions = el('div', 'actions pull-actions')
     if (f.draft && f.opened) actions.append(this.#action('Ready for review', 'ready', 'small', `pull-ready:${v.sid}`,
-      () => void this.#run('ready', '/api/pull-request', { op: 'ready', sid: v.sid }, 'It is ready for review now.', "It wasn't marked ready for review."), 'Marks the engine\'s draft pull request ready for review on the git host, with your saved token'))
+      () => void this.#run('ready', '/api/pull-request', { op: 'ready', sid: v.sid }, 'It is ready for review now.'), 'Marks the engine\'s draft pull request ready for review on the git host, with your saved token'))
     if (f.conflict) {
       out.push(el('p', 'small warn', `The branch conflicts with main (GitHub says ${shown(f.mergeState || 'not mergeable')}).`))
       actions.append(this.#action('Ask the agent to bring in main', 'main', 'small', `pull-main:${v.sid}`,
-        () => void this.#run('main', '/api/bring-main', { sid: v.sid }, 'The agent was asked to bring in main.', "The agent wasn't asked.")))
+        () => void this.#run('main', '/api/bring-main', { sid: v.sid }, 'The agent was asked to bring in main.')))
     }
     const total = f.failing + f.passing + f.running
     if (total) {
@@ -256,7 +249,7 @@ class SfPullFollow extends HTMLElement {
     if (f.checksNew || f.comments.length) {
       out.push(el('p', 'small muted', 'The agent gets this as text from the git host, marked untrusted: feedback to weigh, not instructions.'))
       actions.append(this.#action('Send to the agent', 'send', 'primary small', `pull-send:${v.sid}`,
-        () => void this.#run('send', '/api/pull-request', { op: 'send', sid: v.sid }, 'Sent to the agent.', "It wasn't sent.")))
+        () => void this.#run('send', '/api/pull-request', { op: 'send', sid: v.sid }, 'Sent to the agent.')))
     } else if (f.sent) out.push(el('p', 'small muted', `Last sent to the agent ${clock(f.sent)}. Nothing new since.`))
     if (f.auto) out.push(el('p', `small ${f.autoStop ? 'warn' : 'muted'}`, f.autoStop ? `Sending on its own stopped: ${shown(f.autoStop)}. Send it yourself to start again.` : `This project sends what's new to the agent on its own: ${f.rounds} of 5 rounds used.`))
     if (actions.childElementCount) out.push(actions)
@@ -290,7 +283,7 @@ class SfPullFollow extends HTMLElement {
   }
 
   async #openFindings(v: PullFollowView, found: Findings) {
-    const a = await this.#run('findings', '/api/finding-issues', { op: 'open', sid: v.sid, commit: found.commit }, 'One issue card per finding waits under Issues and pull requests. Approve each one on its own.', 'No issue card was made.')
+    const a = await this.#run('findings', '/api/finding-issues', { op: 'open', sid: v.sid, commit: found.commit }, 'One issue card per finding waits under Issues and pull requests. Approve each one on its own.')
     if (a?.ok || a?.status === 409) {
       found.opened = true
       this.#paint()
@@ -313,55 +306,54 @@ class SfPullFollow extends HTMLElement {
       d.append(el('p', 'small muted', 'Reading…'))
       return d
     }
-    const form = el('form', 'stacked pull-settings-form')
-    form.autocomplete = 'off'
     const botsId = `pull-bots-${v.sid}`
-    const label = el('label', 'small', 'Bot logins whose comments the engine follows, exactly as GitHub shows them (none by default)')
-    label.htmlFor = botsId
-    const bots = el('input', 'textbox')
+    const bots = textbox({ name: 'bots', value: draft.bots, placeholder: 'e.g. coderabbitai[bot], sonarcloud[bot]' })
     bots.id = botsId
-    bots.value = draft.bots
-    bots.placeholder = 'e.g. coderabbitai[bot], sonarcloud[bot]'
     bots.dataset.key = `pull-bots:${v.sid}`
-    bots.addEventListener('input', () => { draft.bots = bots.value })
-    const auto = el('input')
-    auto.type = 'checkbox'
-    auto.checked = draft.auto
+    bots.addEventListener('input', () => {
+      draft.bots = bots.value
+      if (this.#botsRefused.delete(v.sid)) labelError(bots, '')
+    })
+    const auto = checkbox({ checked: draft.auto })
     auto.dataset.key = `pull-auto:${v.sid}`
     auto.addEventListener('change', () => { draft.auto = auto.checked })
-    const autoLabel = el('label', 'check small')
-    autoLabel.append(auto, 'Send what\'s new to the agent on its own, only when it is signed in on a subscription, at most 5 rounds per pull request')
-    const assign = el('input')
-    assign.type = 'checkbox'
-    assign.checked = draft.assign
+    const assign = checkbox({ checked: draft.assign })
     assign.dataset.key = `pull-assign:${v.sid}`
     assign.addEventListener('change', () => { draft.assign = assign.checked })
-    const assignLabel = el('label', 'check small')
-    assignLabel.append(assign, 'Assign the issues and pull requests the engine opens to the token\'s own user')
-    const why = el('p', 'small bad')
-    why.hidden = true
-    const save = button('Save', 'small', undefined, 'submit', `pull-save:${v.sid}`)
+    const save = button('Save', 'primary small', undefined, 'submit', `pull-save:${v.sid}`)
     save.setAttribute('aria-disabled', String(this.#off()))
     if (this.#busy === 'settings') busy(save, true)
-    form.append(el('p', 'small muted', `For ${shown(saved.project)}. Comments by anyone else never reach the agent.`), label, bots, autoLabel, assignLabel, why, save)
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      if (this.#off()) return
-      const list = draft.bots.split(/[\s,]+/).filter(Boolean)
-      const bad = list.find(b => !BOT.test(b))
-      if (bad || list.length > MAX_BOTS) {
-        why.textContent = bad ? `${shown(bad)} isn't a GitHub login.` : `At most ${MAX_BOTS} bot logins.`
-        why.hidden = false
-        return void bots.focus()
-      }
-      void this.#saveSettings(v.sid, list, draft.auto, draft.assign)
+    const settings = form({
+      cls: 'stacked pull-settings-form',
+      autocomplete: 'off',
+      children: [
+        el('p', 'small muted', `For ${shown(saved.project)}. Comments by anyone else never reach the agent.`),
+        field('Bot logins whose comments the engine follows, exactly as GitHub shows them (none by default)', bots),
+        field('Send what\'s new to the agent on its own, only when it is signed in on a subscription, at most 5 rounds per pull request', auto, { kind: 'check' }),
+        field('Assign the issues and pull requests the engine opens to the token\'s own user', assign, { kind: 'check' }),
+        actions([save]),
+      ],
+      onSubmit: () => {
+        if (this.#off()) return
+        const list = draft.bots.split(/[\s,]+/).filter(Boolean)
+        void this.#saveSettings(v.sid, list, draft.auto, draft.assign)
+      },
     })
-    d.append(form)
+    labelError(bots, this.#botsRefused.get(v.sid) ?? '')
+    d.append(settings)
     return d
   }
 
   async #saveSettings(sid: string, bots: string[], auto: boolean, assign: boolean) {
-    const a = await this.#run('settings', '/api/pull-request', { op: 'set', sid, bots, auto, assign }, 'Saved.', "The settings weren't saved.")
+    this.#botsRefused.delete(sid)
+    const a = await this.#run('settings', '/api/pull-request', { op: 'set', sid, bots, auto, assign }, null, b => {
+      if (b.field !== 'bots') return false
+      this.#botsRefused.set(sid, b.message)
+      return true
+    })
+    if (a && !a.ok && a.field === 'bots') {
+      this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`pull-bots:${sid}`)}"]`)?.focus()
+    }
     if (a?.ok) {
       const s = this.#settings.get(sid)
       if (s) this.#settings.set(sid, { ...s, bots, auto, assign })

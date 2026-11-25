@@ -2,8 +2,8 @@
   title: "The API routes' 415 for a wrong content type becomes 400"
   edits:
     - file: "internal/adapters/http/page/page.go"
-      find: "\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\")\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
-      replace: "\t\trefuse(w, http.StatusBadRequest, \"type\")\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
+      find: "\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\", saidType)\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
+      replace: "\t\trefuse(w, http.StatusBadRequest, \"type\", saidType)\n\t\treturn\n\t}\n\tlimit := int64(MaxPageBody)"
 - id: HAND-002
   title: "The Origin check accepts any origin that starts with the page's"
   edits:
@@ -68,8 +68,8 @@
   title: "Adding a repository already listed answers 400 instead of 409"
   edits:
     - file: "internal/core/session/repos.go"
-      find: "explained(conflict(\"exists\"),"
-      replace: "explained(invalid(\"exists\"),"
+      find: "conflict(\"exists\","
+      replace: "invalid(\"exists\","
 - id: HAND-013
   title: "Removing a session leaves its home volume"
   edits:
@@ -92,7 +92,7 @@
   title: "A POST without an Origin header is no longer refused"
   edits:
     - file: "internal/adapters/http/page/page.go"
-      find: "\tif r.Method == http.MethodPost && !hasOrigin {\n\t\ts.reject(w, r, http.StatusForbidden, \"origin\")\n\t\treturn\n\t}\n"
+      find: "\tif r.Method == http.MethodPost && !hasOrigin {\n\t\ts.reject(w, r, http.StatusForbidden, \"origin\", saidOrigin)\n\t\treturn\n\t}\n"
       replace: ""
 - id: PAGE-003
   title: "A top-level visit no longer needs Sec-Fetch-Dest: document, so Sec-Fetch-Site: none is accepted for frames"
@@ -104,7 +104,7 @@
   title: "The sign-in route no longer requires a JSON content type"
   edits:
     - file: "internal/adapters/http/page/page.go"
-      find: "\tif r.URL.Path == signinRoute {\n\t\tif !isJSON(r) {\n\t\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\")\n\t\t\treturn\n\t\t}\n\t\ts.signin(w, r)"
+      find: "\tif r.URL.Path == signinRoute {\n\t\tif !isJSON(r) {\n\t\t\trefuse(w, http.StatusUnsupportedMediaType, \"type\", saidType)\n\t\t\treturn\n\t\t}\n\t\ts.signin(w, r)"
       replace: "\tif r.URL.Path == signinRoute {\n\t\ts.signin(w, r)"
 - id: PAGE-005
   title: "An event stream that ends is never detached from the registry"
@@ -128,7 +128,7 @@
   title: "Sign-in accepts a non-empty body"
   edits:
     - file: "internal/adapters/http/page/page.go"
-      find: "\tif len(body) != 0 {\n\t\ts.reject(w, r, http.StatusBadRequest, \"body\")\n\t\treturn\n\t}\n\tkey := s.keys.issue()"
+      find: "\tif len(body) != 0 {\n\t\ts.reject(w, r, http.StatusBadRequest, \"body\", \"Signing in takes an empty JSON object. Reload the page.\")\n\t\treturn\n\t}\n\tkey := s.keys.issue()"
       replace: "\t_ = body\n\tkey := s.keys.issue()"
 - id: PAGE-010
   title: "The page key is never filled with random bytes"
@@ -236,8 +236,8 @@
   title: "The attachment count cap is removed"
   edits:
     - file: "internal/adapters/http/page/upload.go"
-      find: "if !ok || len(list) > session.MaxAttached {"
-      replace: "if !ok {"
+      find: "if list, isList := body[key].([]any); isList && len(list) > session.MaxAttached {"
+      replace: "if list, isList := body[key].([]any); isList && false {"
 - id: PAGE-028
   title: "Uploaded files are saved world-readable"
   edits:
@@ -272,14 +272,14 @@
   title: "Approving requirements approves the plan and the other way round"
   edits:
     - file: "internal/adapters/http/page/workflow.go"
-      find: "s.cfg.Work.Approve(r.Context(), sid, path == \"/api/approve-plan\", hash, text)"
-      replace: "s.cfg.Work.Approve(r.Context(), sid, path != \"/api/approve-plan\", hash, text)"
+      find: "s.cfg.Work.Approve(r.Context(), sid, plan, hash, text, choice)"
+      replace: "s.cfg.Work.Approve(r.Context(), sid, !plan, hash, text, choice)"
 - id: PAGE-034
   title: "Approving the team file doesn't check the sha's form"
   edits:
     - file: "internal/adapters/http/page/workflow.go"
-      find: "if !ok || !hash256.MatchString(sha) {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\")"
-      replace: "if !ok {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\")"
+      find: "if !ok || !hash256.MatchString(sha) {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\","
+      replace: "if !ok {\n\t\t\t\trefuse(w, http.StatusBadRequest, \"sha\","
 - id: PAGE-035
   title: "Review role models come back with model and effort swapped"
   edits:
@@ -322,12 +322,6 @@
     - file: "internal/adapters/http/page/keep.go"
       find: "okCommit = okCommit && op == \"restore\" && flagCommit.MatchString(commit)"
       replace: "okCommit = okCommit && op == \"restore\""
-- id: PAGE-042
-  title: "The cap on agents in a pair is removed"
-  edits:
-    - file: "internal/adapters/http/page/pair.go"
-      find: "if !ok || len(list) == 0 || len(list) > session.MaxPairAgents {"
-      replace: "if !ok || len(list) == 0 {"
 - id: PAGE-043
   title: "Dismissed task cards stay in the session's view"
   edits:
@@ -352,12 +346,6 @@
     - file: "internal/adapters/http/page/repos.go"
       find: "\t\tif !ok || len(v) > limit {"
       replace: "\t\tif !ok {"
-- id: PAGE-047
-  title: "Stop all pauses instead of stopping"
-  edits:
-    - file: "internal/adapters/http/page/halt.go"
-      find: "\t\tcase \"stop\":\n\t\t\terr = h.StopAll()"
-      replace: "\t\tcase \"stop\":\n\t\t\terr = h.PauseAll()"
 - id: PAGE-048
   title: "The commit pattern for flags is no longer anchored at the end"
   edits:
@@ -398,7 +386,7 @@
   title: "Diagnostics accepts fields in its body"
   edits:
     - file: "internal/adapters/http/page/diagnostics.go"
-      find: "\tif len(body) != 0 {\n\t\trefuse(w, http.StatusBadRequest, \"fields\")\n\t\treturn\n\t}\n\tif s.cfg.Diagnostics == nil {"
+      find: "\tif len(body) != 0 {\n\t\trefuseFields(w)\n\t\treturn\n\t}\n\tif s.cfg.Diagnostics == nil {"
       replace: "\tif s.cfg.Diagnostics == nil {"
 - id: PAGE-055
   title: "Files the engine writes atomically in its state folder are world-readable"
@@ -434,20 +422,14 @@
   title: "Project caps can be set for a project the engine doesn't have"
   edits:
     - file: "internal/adapters/http/page/limits.go"
-      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\terr = l.SetProject(name, c)"
-      replace: "\t\terr = l.SetProject(name, c)"
+      find: "\t\tif !s.knownProject(name) {\n\t\t\tsend(w, http.StatusNotFound, problem{Error: \"project\", Message: \"The engine has no project of that name.\"})\n\t\t\treturn\n\t\t}\n\t\tvar changed bool\n\t\tchanged, err = l.SetProject(name, c)"
+      replace: "\t\tvar changed bool\n\t\tchanged, err = l.SetProject(name, c)"
 - id: PAGE-061
   title: "A forge answer without confirmed counts as confirmed"
   edits:
     - file: "internal/adapters/http/page/forge.go"
       find: "confirmed, okConfirmed := body[\"confirmed\"].(bool)"
       replace: "confirmed, okConfirmed := body[\"confirmed\"] != false, true"
-- id: PAGE-062
-  title: "The update route takes check and later together"
-  edits:
-    - file: "internal/adapters/http/page/update.go"
-      find: "if len(body) > 1 || !keysWithin(body, \"check\", \"later\") {"
-      replace: "if !keysWithin(body, \"check\", \"later\") {"
 - id: PAGE-063
   title: "Switching the package lookup on switches it off and the other way round"
   edits:
@@ -500,8 +482,8 @@
   title: "A refusal carries an empty why when the key wasn't one this engine retired"
   edits:
     - file: "internal/adapters/http/page/page.go"
-      find: "\t\tif why := s.keys.why(given); why != \"\" {\n\t\t\tbody[\"why\"] = why\n\t\t}\n"
-      replace: "\t\tbody[\"why\"] = s.keys.why(given)\n"
+      find: "\t\tif why := s.keys.why(given); why != \"\" {\n\t\t\tbody[\"why\"] = why\n\t\t\tbody[\"message\"] = keyEnded(why)\n\t\t}\n"
+      replace: "\t\twhy := s.keys.why(given)\n\t\tbody[\"why\"] = why\n\t\tif why != \"\" {\n\t\t\tbody[\"message\"] = keyEnded(why)\n\t\t}\n"
 - id: CMD-001
   title: "The 0.0.0.0 page listener no longer refuses connections to the engine's other addresses"
   edits:
@@ -616,12 +598,6 @@
     - file: "cmd/server/backup.go"
       find: "\t\tRestart: hook.restart,\n"
       replace: "\t\tRestart: func() {},\n"
-- id: CMD-020
-  title: "Pushes aren't told about the stop switch"
-  edits:
-    - file: "cmd/server/durable.go"
-      find: "\t\tp.pushes.UseHalt(reg.Halt())\n"
-      replace: ""
 - id: CMD-021
   title: "Diagnostics shows the named settings' values, not only set or unset"
   edits:
@@ -725,7 +701,7 @@
       find: "case l.Level == level.Stopped && l.Sandboxed:"
       replace: "case l.Level == level.Stopped:"
 - id: GATE-016
-  title: "Only work types that change no file are refused a push, so Exploring (push false) can push"
+  title: "Only work types that change no file are refused a push, so Explore (push false) can push"
   edits:
     - file: "internal/core/gate/decision.go"
       find: "if !f.Type.Push {"
@@ -893,17 +869,17 @@
       find: "if f.Head == \"\" || (f.Head != f.ReqBaseline && !f.ArtifactsOnly) {"
       replace: "if f.Head == \"\" {"
 - id: FLOW-004
-  title: "Implement may start once the requirements are approved, before the plan is"
+  title: "Implement may start once the requirements are approved, before the plan the developer chose is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "if feature && !f.PlanOk {"
-      replace: "if feature && !f.ReqOk {"
+      find: "case change && f.PlanChosen && !f.PlanOk:"
+      replace: "case change && f.PlanChosen && !f.ReqOk:"
 - id: FLOW-005
-  title: "A Feature's edits are allowed once the requirements are approved, before the plan is"
+  title: "A Code change's edits are allowed once the requirements are approved, before the plan the developer chose is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "case f.Profile != Feature || f.PlanOk ||"
-      replace: "case f.Profile != Feature || f.ReqOk ||"
+      find: "case f.Profile != Change || f.ReqOk && (!f.PlanChosen || f.PlanOk) ||"
+      replace: "case f.Profile != Change || f.ReqOk ||"
 - id: FLOW-006
   title: "Agent instruction files (CLAUDE.md, .claude/...) count as documentation"
   edits:
@@ -1100,7 +1076,7 @@
   title: "Import reads the archive before checking that the engine is empty"
   edits:
     - file: "internal/core/session/backup.go"
-      find: "\tif why := b.empty(); why != \"\" {\n\t\tb.audit(ImportRefused, why)\n\t\treturn ImportReport{}, explained(conflict(\"not empty\"), why)\n\t}\n\treport, err := b.cfg.Archive.Stage(r)"
+      find: "\tif why := b.empty(); why != \"\" {\n\t\tb.audit(ImportRefused, why)\n\t\treturn ImportReport{}, conflict(\"not empty\", why)\n\t}\n\treport, err := b.cfg.Archive.Stage(r)"
       replace: "\treport, err := b.cfg.Archive.Stage(r)"
 - id: SESS-010
   title: "Box ids may hold any lowercase letter"
@@ -1136,14 +1112,14 @@
   title: "Deleting a session doesn't remove its container"
   edits:
     - file: "internal/core/session/boxsessions.go"
-      find: "if err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
-      replace: "if err := error(nil); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      find: "\t\td.cfg.Routes.Down(box)\n\t\tif err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {"
+      replace: "\t\td.cfg.Routes.Down(box)\n\t\tif err := error(nil); err != nil && !errors.Is(err, ErrBoxUnknown) {"
 - id: SESS-016
   title: "Deleting a session leaves its folder in the workspace"
   edits:
     - file: "internal/core/session/boxsessions.go"
-      find: "if err := d.cfg.Folders.Remove(box); err != nil {"
-      replace: "if err := error(nil); err != nil {"
+      find: "if err := d.cfg.Folders.Remove(box); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {"
+      replace: "if err := error(nil); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {"
 - id: SESS-017
   title: "At start the engine doesn't stop session containers left running"
   edits:
@@ -1168,12 +1144,6 @@
     - file: "internal/core/session/bridge.go"
       find: "\tfor card := range b.reqs {\n\t\tb.recordLocked(Fields{\"type\": \"resolved\", \"id\": card})\n\t}\n"
       replace: ""
-- id: SESS-021
-  title: "Queued messages start new turns while Pause all or Stop everything is on"
-  edits:
-    - file: "internal/core/session/bridge.go"
-      find: "if len(b.waiting) == 0 || b.ended || b.reg.halt.turns() != \"\" {"
-      replace: "if len(b.waiting) == 0 || b.ended {"
 - id: SESS-022
   title: "A tool call's command is shown without masking tokens"
   edits:
@@ -1202,8 +1172,8 @@
   title: "A session at a cap accepts new own caps instead of Raise"
   edits:
     - file: "internal/core/session/capspage.go"
-      find: "\tif s.reached != \"\" {\n\t\tl.mu.Unlock()\n\t\treturn explained(conflict(\"reached\")"
-      replace: "\tif false {\n\t\tl.mu.Unlock()\n\t\treturn explained(conflict(\"reached\")"
+      find: "\tif s.reached != \"\" {\n\t\tl.mu.Unlock()\n\t\treturn false, conflict(\"reached\","
+      replace: "\tif false {\n\t\tl.mu.Unlock()\n\t\treturn false, conflict(\"reached\","
 - id: SESS-027
   title: "Raise the cap raises a kind the session didn't reach"
   edits:
@@ -1226,14 +1196,14 @@
   title: "Yes is accepted on a permission card the page couldn't show in full"
   edits:
     - file: "internal/core/session/cards.go"
-      find: "\t\tcase \"yes\":\n\t\t\treturn c.complete\n"
-      replace: "\t\tcase \"yes\":\n\t\t\treturn true\n"
+      find: "\t\tcase \"yes\":\n\t\t\treturn c.complete, \"\"\n"
+      replace: "\t\tcase \"yes\":\n\t\t\treturn true, \"\"\n"
 - id: SESS-031
   title: "Answers to questions the agent didn't ask are accepted"
   edits:
     - file: "internal/core/session/cards.go"
-      find: "if !asked[k] || !ok || strings.TrimSpace(text) == \"\""
-      replace: "if !asked[k] && k == \"\" || !ok || strings.TrimSpace(text) == \"\""
+      find: "case !asked[k] || !ok:"
+      replace: "case !asked[k] && k == \"\" || !ok:"
 - id: SESS-032
   title: "Changes from a commit accept any text as the commit"
   edits:
@@ -1304,14 +1274,14 @@
   title: "Removing an added host says it isn't there, and removing an unknown host succeeds"
   edits:
     - file: "internal/core/session/egress.go"
-      find: "if len(s.Added) == n {\n\t\t\treturn explained(notFound(\"host\")"
-      replace: "if len(s.Added) != n {\n\t\t\treturn explained(notFound(\"host\")"
+      find: "if len(s.Added) == n {\n\t\t\treturn notFound(\"host\","
+      replace: "if len(s.Added) != n {\n\t\t\treturn notFound(\"host\","
 - id: SESS-044
   title: "The gateway's host isn't checked against the deny list"
   edits:
     - file: "internal/core/session/egress.go"
-      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif !agents && !reviewers {"
-      replace: "\t\tif !agents && !reviewers {"
+      find: "\t\tif err := a.refuseHost(host); err != nil {\n\t\t\treturn false, onField(\"url\", err)\n\t\t}\n\t\tnext, words = Gateway{URL: u, Host: host}"
+      replace: "\t\tnext, words = Gateway{URL: u, Host: host}"
 - id: SESS-045
   title: "registry.npmjs.org is no longer treated as an upload host"
   edits:
@@ -1340,7 +1310,7 @@
   title: "An allowlist reason holding a token is saved"
   edits:
     - file: "internal/core/session/egressreason.go"
-      find: "\tcase secretText(r):\n\t\treturn \"\", explained(invalid(\"reason\"), \"The reason looks like it holds a token or a key, so it wasn't saved. Write it without one.\")\n"
+      find: "\tcase secretText(r):\n\t\treturn \"\", onField(\"reason\", invalid(\"reason\", \"Looks like a token or key, so it wasn't saved.\"))\n"
       replace: ""
 - id: SESS-050
   title: "Every allowed push is listed as an exception, not only ones the person allowed past the gate"
@@ -1352,14 +1322,8 @@
   title: "Bring in main runs on a stopped session"
   edits:
     - file: "internal/core/session/fetchmain.go"
-      find: "\tif !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
-      replace: "\tif false && !running {\n\t\treturn \"\", explained(conflict(\"not running\")"
-- id: SESS-052
-  title: "Bring in main messages the agent while Pause all or Stop everything is on"
-  edits:
-    - file: "internal/core/session/fetchmain.go"
-      find: "\tif why := d.reg.halt.turns(); why != \"\" {\n\t\treturn \"\", explained(conflict(\"halted\"), why)\n\t}\n"
-      replace: ""
+      find: "\tif !running {\n\t\treturn \"\", conflict(\"not running\","
+      replace: "\tif false && !running {\n\t\treturn \"\", conflict(\"not running\","
 - id: SESS-053
   title: "Issues from findings open for a commit that isn't the latest review's"
   edits:
@@ -1388,7 +1352,7 @@
   title: "The same findings can be sent to the agent again"
   edits:
     - file: "internal/core/session/findings.go"
-      find: "\tcase !h.sent.IsZero():\n\t\tp.mu.Unlock()\n\t\treturn explained(conflict(\"sent\"), \"The findings for this commit were already sent to the session.\")\n"
+      find: "\tcase !h.sent.IsZero():\n\t\tp.mu.Unlock()\n\t\treturn conflict(\"sent\", \"The findings for this commit were already sent to the session.\")\n"
       replace: ""
 - id: SESS-058
   title: "Turning automatic Send findings off leaves it on"
@@ -1460,7 +1424,7 @@
   title: "A start with only a commit is accepted and starts from main"
   edits:
     - file: "internal/core/session/fork.go"
-      find: "\tcase q.From.Commit != \"\" && q.From.Branch == \"\" && q.From.Pull == 0 && q.From.SID == \"\":\n\t\treturn explained(invalid(\"from\"), \"A commit goes only with a branch, a pull request or a session.\")\n"
+      find: "\tcase q.From.Commit != \"\" && q.From.Branch == \"\" && q.From.Pull == 0 && q.From.SID == \"\":\n\t\treturn invalid(\"from\", \"A commit needs a branch, a pull request or a session.\")\n"
       replace: ""
 - id: SESS-070
   title: "Forking from a commit missing from the session's clone is accepted"
@@ -1468,36 +1432,12 @@
     - file: "internal/core/session/fork.go"
       find: "\t\tin, err = false, nil"
       replace: "\t\tin, err = true, nil"
-- id: SESS-071
-  title: "Stop everything doesn't stop the running sessions"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n\th.stopEvery(cfg)\n"
-      replace: "\tcfg.Logger.Warn(\"halt\", \"event\", \"stop-everything\")\n"
-- id: SESS-072
-  title: "Stop everything lets sessions start and wake, and Pause all blocks them"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tif h.modeNow() == HaltStopped {\n\t\treturn \"Stop everything is on, so no session starts"
-      replace: "\tif h.modeNow() == HaltPaused {\n\t\treturn \"Stop everything is on, so no session starts"
-- id: SESS-073
-  title: "Pause all doesn't stop new turns"
-  edits:
-    - file: "internal/core/session/halt.go"
-      find: "\tcase HaltPaused:\n\t\treturn \"Pause all is on, so no new turn starts until you press Release at the top of the page.\"\n"
-      replace: ""
 - id: SESS-074
   title: "Away mode for every session has no effect"
   edits:
     - file: "internal/core/session/halt.go"
       find: "return h.awayAll || h.away[sid]"
       replace: "return h.away[sid]"
-- id: SESS-075
-  title: "Pause all refuses the person's own Push from the page"
-  edits:
-    - file: "internal/core/session/haltpush.go"
-      find: "if p.halted(ByPage) == \"\" {"
-      replace: "if p.halted(ByAgent) == \"\" {"
 - id: SESS-077
   title: "The commit name may hold < or >, which breaks the author line"
   edits:
@@ -1592,20 +1532,8 @@
   title: "A held push card stays valid for 15 hours instead of 15 minutes"
   edits:
     - file: "internal/core/session/pushes.go"
-      find: "AllowFor        = 15 * time.Minute"
-      replace: "AllowFor        = 15 * time.Hour"
-- id: SESS-502
-  title: "Pressing Push on the page ignores an engine-wide halt"
-  edits:
-    - file: "internal/core/session/pushes.go"
-      find: "\tif err := p.pageHalted(); err != nil {\n\t\treturn err\n\t}\n\tif err := p.claim(sid); err != nil {"
-      replace: "\tif err := p.claim(sid); err != nil {"
-- id: SESS-503
-  title: "Answering a held card checks the halt for Deny instead of Allow"
-  edits:
-    - file: "internal/core/session/pushes.go"
-      find: "if err := p.pageHalted(); allow && err != nil {"
-      replace: "if err := p.pageHalted(); !allow && err != nil {"
+      find: "AllowFor      = 15 * time.Minute"
+      replace: "AllowFor      = 15 * time.Hour"
 - id: SESS-504
   title: "Allowing a push with exactly one missing item needs no reason"
   edits:
@@ -1682,8 +1610,8 @@
   title: "Negative push-hold limits are accepted"
   edits:
     - file: "internal/core/session/pushhold.go"
-      find: "return h.MaxFiles >= 0 && h.MaxFiles <= MaxHoldFiles"
-      replace: "return h.MaxFiles >= -1 && h.MaxFiles <= MaxHoldFiles"
+      find: "case h.MaxFiles < 0 || h.MaxFiles > MaxHoldFiles:"
+      replace: "case h.MaxFiles < -1 || h.MaxFiles > MaxHoldFiles:"
 - id: SESS-517
   title: "The file-count hold triggers at the limit instead of above it"
   edits:
@@ -1802,8 +1730,8 @@
   title: "A plan approval counts against requirements that changed after their approval"
   edits:
     - file: "internal/core/session/work.go"
-      find: "(!feature || g.reqOk)"
-      replace: "(!feature || ws.req != nil)"
+      find: "(!change || g.reqOk && g.planChosen)"
+      replace: "(!change || ws.req != nil && g.planChosen)"
 - id: SESS-537
   title: "An approval keeps counting after its document changes"
   edits:
@@ -1844,14 +1772,14 @@
   title: "A flagged file may be allowed without a reason"
   edits:
     - file: "internal/core/session/work.go"
-      find: "\tif clean == \"\" {\n\t\treturn explained(invalid(\"reason\"), \"Allowing a flagged file needs"
-      replace: "\tif false {\n\t\treturn explained(invalid(\"reason\"), \"Allowing a flagged file needs"
+      find: "digest, reason string) error {\n\tclean := gate.Reason(reason)\n\tif clean == \"\" {"
+      replace: "digest, reason string) error {\n\tclean := gate.Reason(reason)\n\tif false {"
 - id: SESS-544
   title: "A symlink the spec hold can't follow may be allowed"
   edits:
     - file: "internal/core/session/work.go"
-      find: "\tif f.Link {\n\t\treturn explained(conflict(\"link\")"
-      replace: "\tif false && f.Link {\n\t\treturn explained(conflict(\"link\")"
+      find: "\tif f.Link {\n\t\treturn conflict(\"link\","
+      replace: "\tif false && f.Link {\n\t\treturn conflict(\"link\","
 - id: SESS-545
   title: "Allowing a flagged file without a digest skips the staleness check"
   edits:
@@ -1862,14 +1790,14 @@
   title: "Tests are locked even when the branch moved since the page read it"
   edits:
     - file: "internal/core/session/testlock.go"
-      find: "\tif g.head != head {\n\t\treturn explained(conflict(\"changed\")"
-      replace: "\tif g.head != head && head == \"\" {\n\t\treturn explained(conflict(\"changed\")"
+      find: "\tif g.head != head {\n\t\treturn conflict(\"changed\","
+      replace: "\tif g.head != head && head == \"\" {\n\t\treturn conflict(\"changed\","
 - id: SESS-547
   title: "A lock with no test files is accepted"
   edits:
     - file: "internal/core/session/testlock.go"
-      find: "if len(files) == 0 {\n\t\treturn explained(conflict(\"no tests\")"
-      replace: "if files == nil {\n\t\treturn explained(conflict(\"no tests\")"
+      find: "if len(files) == 0 {\n\t\treturn conflict(\"no tests\","
+      replace: "if files == nil {\n\t\treturn conflict(\"no tests\","
 - id: SESS-548
   title: "A locked test that was modified isn't reported as changed"
   edits:
@@ -1895,11 +1823,11 @@
       find: "\tcase g.base == g.head:\n"
       replace: "\tcase g.base == g.head && g.base == \"\":\n"
 - id: SESS-552
-  title: "Images up to 5 MB are accepted instead of 2.5 MB"
+  title: "Images up to 64 MiB are taken in instead of 32 MiB"
   edits:
-    - file: "internal/core/session/uploads.go"
-      find: "MaxImage       = 5 << 19"
-      replace: "MaxImage       = 5 << 20"
+    - file: "internal/core/session/imagefit.go"
+      find: "MaxImageUpload = 32 << 20"
+      replace: "MaxImageUpload = 64 << 20"
 - id: SESS-553
   title: "An upload's bytes aren't checked against its image type"
   edits:
@@ -1928,8 +1856,8 @@
   title: "Uploads are accepted for a stopped session"
   edits:
     - file: "internal/core/session/uploads.go"
-      find: "\tcase !a.running:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
-      replace: "\tcase false:\n\t\tr.mu.Unlock()\n\t\treturn \"\", explained(conflict(\"not running\")"
+      find: "\tcase !a.running:\n\t\treturn conflict(\"not running\","
+      replace: "\tcase false:\n\t\treturn conflict(\"not running\","
 - id: SESS-558
   title: "A message may attach another session's upload"
   edits:
@@ -1984,12 +1912,6 @@
     - file: "internal/core/session/sandbox.go"
       find: "if d.cfg.Sandbox == nil || o.Event == level.CheckPassed {"
       replace: "if d.cfg.Sandbox == nil || o.Event != level.CheckFailed {"
-- id: SESS-567
-  title: "Sessions start during an engine-wide halt"
-  edits:
-    - file: "internal/core/session/sandbox.go"
-      find: "\tif why := d.reg.halt.starts(); why != \"\" {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
-      replace: "\tif why := d.reg.halt.starts(); why != \"\" && false {\n\t\treturn CheckState{}, explained(conflict(\"halted\"), why)"
 - id: SESS-568
   title: "The sandbox check gets 90 ms instead of 90 seconds"
   edits:
@@ -2054,14 +1976,14 @@
   title: "A verdict may be overridden without a reason"
   edits:
     - file: "internal/core/session/review.go"
-      find: "\tif clean == \"\" {\n\t\treturn explained(invalid(\"reason\"), \"An override needs"
-      replace: "\tif false {\n\t\treturn explained(invalid(\"reason\"), \"An override needs"
+      find: "\tif clean == \"\" {\n\t\treturn onField(\"reason\", invalid(\"reason\", \"Needs your reason"
+      replace: "\tif false {\n\t\treturn onField(\"reason\", invalid(\"reason\", \"Needs your reason"
 - id: SESS-579
   title: "A verdict may be overridden after the branch moved"
   edits:
     - file: "internal/core/session/review.go"
-      find: "\tif head != commit {\n\t\treturn explained(conflict(\"moved\")"
-      replace: "\tif head != commit && commit == \"\" {\n\t\treturn explained(conflict(\"moved\")"
+      find: "\tif head != commit {\n\t\treturn conflict(\"moved\","
+      replace: "\tif head != commit && commit == \"\" {\n\t\treturn conflict(\"moved\","
 - id: SESS-580
   title: "Failed and passed reviews may be overridden, not only blocking ones"
   edits:
@@ -2084,8 +2006,8 @@
   title: "A review starts on a branch with nothing new"
   edits:
     - file: "internal/core/session/reviewstart.go"
-      find: "\tif base == head {\n\t\trelease()\n\t\treturn explained(conflict(\"no change\")"
-      replace: "\tif base == head && head == \"\" {\n\t\trelease()\n\t\treturn explained(conflict(\"no change\")"
+      find: "\tif base == head {\n\t\trelease()\n\t\treturn conflict(\"no change\","
+      replace: "\tif base == head && head == \"\" {\n\t\trelease()\n\t\treturn conflict(\"no change\","
 - id: SESS-584
   title: "A second review of a session starts while one is running"
   edits:
@@ -2108,8 +2030,8 @@
   title: "Token-shaped text is kept in the message queue"
   edits:
     - file: "internal/core/session/queue.go"
-      find: "\tif secretText(text) {\n\t\treturn \"\", explained(invalid(\"text\"), \"The queue doesn't keep"
-      replace: "\tif false {\n\t\treturn \"\", explained(invalid(\"text\"), \"The queue doesn't keep"
+      find: "\tif secretText(text) {\n\t\treturn \"\", onField(\"text\", invalid(\"text\", \"Can't hold token-shaped"
+      replace: "\tif false {\n\t\treturn \"\", onField(\"text\", invalid(\"text\", \"Can't hold token-shaped"
 - id: SESS-588
   title: "A queued message may start with ! (a shell command)"
   edits:
@@ -2120,8 +2042,8 @@
   title: "The queue holds 11 messages instead of 10"
   edits:
     - file: "internal/core/session/queue.go"
-      find: "if len(q.items) >= MaxQueue {"
-      replace: "if len(q.items) > MaxQueue {"
+      find: "if queued < MaxQueue {"
+      replace: "if queued <= MaxQueue {"
 - id: BOX-001
   title: "The helper's request size limit is 8 KiB instead of 1 KiB, so a 2 KiB request header is read instead of refused with 431"
   edits:
@@ -2216,14 +2138,14 @@
   title: "The default memory limit of a session's and a reviewer container is 8 GiB instead of 2 GiB"
   edits:
     - file: "internal/adapters/sandbox/boxes/config.go"
-      find: "DefaultMemory   = 2 << 30"
-      replace: "DefaultMemory   = 8 << 30"
+      find: "DefaultMemory        = 2 << 30"
+      replace: "DefaultMemory        = 8 << 30"
 - id: BOX-022
   title: "The default CPU limit of a session's and a reviewer container is 16 CPUs instead of 2"
   edits:
     - file: "internal/adapters/sandbox/boxes/config.go"
-      find: "DefaultNanoCPUs = 2_000_000_000"
-      replace: "DefaultNanoCPUs = 16_000_000_000"
+      find: "DefaultNanoCPUs      = 2_000_000_000"
+      replace: "DefaultNanoCPUs      = 16_000_000_000"
 - id: BOX-023
   title: "A reviewer container mounts its snapshot read-write, so the reviewer can change what it reviews (touch /reviews/<id>/x succeeds)"
   edits:
@@ -2444,8 +2366,8 @@
   title: "Egress no longer cuts an open tunnel when its host leaves the allowlist (Network access remove, or an expiry), so the tunnel lives until idle or the hour limit"
   edits:
     - file: "internal/adapters/egress/proxy.go"
-      find: "if policy.Check(tn.host) != \"\" {"
-      replace: "if policy.Check(tn.host) == ReasonIPLiteral {"
+      find: "case p.check(policy, tn.subnet, tn.host) != \"\":"
+      replace: "case p.check(policy, tn.subnet, tn.host) == ReasonIPLiteral:"
 - id: EGR-012
   title: "When the engine drops a session's subnet (its container stopped), egress keeps that subnet's open connections instead of closing them"
   edits:
@@ -2977,3 +2899,297 @@
     - file: "internal/adapters/http/page/packs.go"
       find: "\t\tif !keysWithin(body, \"op\", \"path\") {"
       replace: "\t\tif !keysWithin(body, \"op\", \"path\", \"proctorUnknownField\") {"
+- id: PAGE-074
+  title: "The update route takes check again, the setting it no longer has"
+  edits:
+    - file: "internal/adapters/http/page/update.go"
+      find: "if !keysWithin(body, \"later\") {"
+      replace: "if !keysWithin(body, \"check\", \"later\") {"
+- id: SESS-594
+  title: "A revise note of only spaces is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\tif note == \"\" {\n\t\treturn \"\", onField(\"note\", invalid(\"note\", \"Type what should change first.\"))"
+      replace: "\tif false {\n\t\treturn \"\", onField(\"note\", invalid(\"note\", \"Type what should change first.\"))"
+- id: SESS-595
+  title: "More than 50 line comments go in one message"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if len(list) > MaxComments {"
+      replace: "if len(list) > 4*MaxComments {"
+- id: SESS-596
+  title: "An empty line comment is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\t\tif text == \"\" {\n\t\t\treturn \"\", invalid(\"comments\","
+      replace: "\t\tif false {\n\t\t\treturn \"\", invalid(\"comments\","
+- id: SESS-597
+  title: "Line comments over the message limit are sent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\tif utf16Len(text) > MaxText {"
+      replace: "\tif false {"
+- id: SESS-598
+  title: "A time cap over 43,200 minutes is accepted"
+  edits:
+    - file: "internal/core/session/caps.go"
+      find: "if c.Minutes < 0 || c.Minutes > MaxCapMinutes {"
+      replace: "if c.Minutes < 0 {"
+- id: PAGE-075
+  title: "A cap refusal names no field"
+  edits:
+    - file: "internal/adapters/http/page/limits.go"
+      find: "refuseCaps(w, capWireFields[fault], session.CapRefusal(fault))"
+      replace: "refuseCaps(w, \"\", session.CapRefusal(fault))"
+- id: SESS-599
+  title: "A revise note over 2,000 characters is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if utf16Len(note) > MaxNote {"
+      replace: "if false {"
+- id: SESS-600
+  title: "A line comment over 2,000 characters is sent to the agent"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if utf16Len(pageTrim(c.Text)) > MaxComment {"
+      replace: "if false {"
+- id: SESS-651
+  title: "A card for a command that can't be undone keeps its don't-ask-again choice"
+  edits:
+    - file: "internal/core/session/cards.go"
+      find: "if kind == \"permission\" && ev[\"irreversible\"] == true {"
+      replace: "if false {"
+- id: SESS-652
+  title: "A refused shell line's copyable command keeps its leading !"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "e.Line = strings.TrimSpace(strings.TrimPrefix(text, \"!\"))"
+      replace: "e.Line = text"
+- id: PAGE-151
+  title: "A dropped file over 10 MiB is refused with the image's message instead of naming the file"
+  edits:
+    - file: "internal/adapters/http/page/upload.go"
+      find: "tooBig.Message = session.DropRefused(name)"
+      replace: "tooBig.Message = session.ImageRefused"
+- id: SESS-653
+  title: "A branch with no commit beyond main counts as started, so Review is offered with nothing to review"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase g.base == g.head:\n\t\treturn StartedNone"
+      replace: "\tcase g.base == g.head:\n\t\treturn StartedCommits"
+- id: SESS-654
+  title: "A wake that needs changed settings approved names approving start-up files as the next step"
+  edits:
+    - file: "internal/core/session/startup.go"
+      find: "\tcase n.Home != nil:\n\t\treturn NextHome"
+      replace: "\tcase n.Home != nil:\n\t\treturn NextApprove"
+- id: SESS-655
+  title: "A session the page controls is offered Let this page control it instead of Make it read-only"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "c.Action, c.Label = ControlReadOnly, \"Make it read-only\""
+      replace: "c.Action, c.Label = ControlTake, \"Make it read-only\""
+- id: SESS-656
+  title: "A finished turn sends no turn-finished notice on the stream"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "\t\tif turnEnded {\n"
+      replace: "\t\tif turnEnded && false {\n"
+- id: SESS-657
+  title: "A message may name two composed parts, an ask and a revise"
+  edits:
+    - file: "internal/adapters/http/page/composed.go"
+      find: "if parts != 1 || hasText"
+      replace: "if parts > 2 || hasText"
+- id: SESS-658
+  title: "An ask the engine doesn't know is taken as a step"
+  edits:
+    - file: "internal/adapters/http/page/composed.go"
+      find: "if !ok || !session.ValidAsk(name) {"
+      replace: "if !ok {"
+- id: SESS-659
+  title: "A goal's queue starts a task while 3 of the goal's sessions run"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "len(queue) == 0 || running >= MaxGoalRunning"
+      replace: "len(queue) == 0"
+    - file: "internal/core/session/split.go"
+      find: "\tif running >= MaxGoalRunning {"
+      replace: "\tif running >= MaxGoalRunning && !queued {"
+- id: SESS-660
+  title: "A goal's queue goes on starting tasks while one of its cards waits for the person's answer"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "wait := held[goal] || "
+      replace: "wait := "
+- id: SESS-661
+  title: "A queued task starts with a cost confirmation the person never gave"
+  edits:
+    - file: "internal/core/session/split.go"
+      find: "s.start(start, goal, queue[0], Consent{}, true)"
+      replace: "s.start(start, goal, queue[0], Consent{CostOK: true}, true)"
+- id: PAGE-152
+  title: "A start takes an issue hash that isn't 64 hex digits"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "if !isText || !session.ValidIssueHash(h) {"
+      replace: "if !isText {"
+    - file: "internal/core/session/fromissue.go"
+      find: "\tif !ValidIssueHash(hash) {"
+      replace: "\tif false {"
+- id: PAGE-153
+  title: "An issue number typed with # is refused"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "var issueNumberText = regexp.MustCompile(`^#?[0-9]{1,10}$`)"
+      replace: "var issueNumberText = regexp.MustCompile(`^[0-9]{1,10}$`)"
+- id: PAGE-154
+  title: "A typed issue number isn't trimmed"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "\t\ttext := strings.TrimSpace(n)"
+      replace: "\t\ttext := n"
+- id: PAGE-155
+  title: "A typed issue number above the highest is taken"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "if err != nil || number < 1 || number > session.MaxIssueNumber {"
+      replace: "if err != nil || number < 1 {"
+- id: PAGE-156
+  title: "A JSON issue number out of range gets the generic fields refusal instead of the number field's"
+  edits:
+    - file: "internal/adapters/http/page/pulls.go"
+      find: "\t\tnumber, ok := wholeNumber(n, 1, session.MaxIssueNumber)\n\t\treturn number, ok, true"
+      replace: "\t\tnumber, ok := wholeNumber(n, 1, session.MaxIssueNumber)\n\t\treturn number, ok, ok"
+- id: HAND-015
+  title: "A clone's progress shows from its start, so a fast clone shows a bar"
+  edits:
+    - file: "internal/core/session/cloneprogress.go"
+      find: "CloneShowAfter = time.Second"
+      replace: "CloneShowAfter = 0"
+- id: FLOW-019
+  title: "A session with no work type changes files before the person picks one"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "\tcase f.Untyped:\n\t\treturn untypedHold(path, f.Offered)\n"
+      replace: ""
+- id: SESS-662
+  title: "The edit hold counts a session with no work type as typed"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "UsesArtifacts: g.docs.held, Untyped: !g.ws.chosen}"
+      replace: "UsesArtifacts: g.docs.held, Untyped: false}"
+- id: SESS-663
+  title: "factory_work_type takes a type the project doesn't offer"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tt, ok := typeIn(setup.setup.Types, id)\n\tif !ok {"
+      replace: "\tt, ok := typeIn(setup.setup.Types, id)\n\tif !ok && id == \"\" {"
+- id: SESS-664
+  title: "A held edit leaves no card when the agent hasn't suggested a type"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "if a == nil || !a.held && a.typeID == \"\" {"
+      replace: "if a == nil || a.typeID == \"\" {"
+- id: SESS-665
+  title: "Picking a work type leaves the card showing"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "s.typeID, s.chosen, s.ask = id, true, nil"
+      replace: "s.typeID, s.chosen = id, true"
+- id: SESS-666
+  title: "/api/size sets a work type the project doesn't offer"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tt, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id)\n\tif !ok {\n\t\treturn invalid(\"type\", \"That work type isn't one this project offers.\")"
+      replace: "\tt, ok := typeIn(w.packSetup(sid, ws.repo).setup.Types, id)\n\tif !ok && id == \"\" {\n\t\treturn invalid(\"type\", \"That work type isn't one this project offers.\")"
+- id: PAGE-157
+  title: "/api/dispatch takes a work type again"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "if !keysWithin(body, \"path\", \"name\", \"model\", \"mode\", \"agent\", \"approve\","
+      replace: "if !keysWithin(body, \"path\", \"name\", \"model\", \"mode\", \"agent\", \"type\", \"approve\","
+- id: HOST-014
+  title: "agent-host's factory_work_type passes a reason of several lines to the engine"
+  edits:
+    - file: "internal/adapters/agenthost/mcpworktype.go"
+      find: " || strings.ContainsAny(reason, \"\\r\\n\") {"
+      replace: " {"
+- id: PAGE-158
+  title: "The new-session form's Claude Code model starts on Sonnet instead of Opus"
+  edits:
+    - file: "internal/core/session/sessionwork.go"
+      find: "return ModelChoice{Model: \"opus\", Effort: \"high\"}"
+      replace: "return ModelChoice{Model: \"sonnet\", Effort: \"high\"}"
+- id: PAGE-159
+  title: "The new-session form's Claude Code effort starts on medium instead of high"
+  edits:
+    - file: "internal/core/session/sessionwork.go"
+      find: "return ModelChoice{Model: \"opus\", Effort: \"high\"}"
+      replace: "return ModelChoice{Model: \"opus\", Effort: \"medium\"}"
+- id: SESS-667
+  title: "The suggested session name joins its words with an underscore instead of a hyphen"
+  edits:
+    - file: "internal/core/session/names.go"
+      find: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"-\" + nameNouns[rand.IntN(len(nameNouns))]"
+      replace: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"_\" + nameNouns[rand.IntN(len(nameNouns))]"
+- id: SESS-668
+  title: "The suggested session name puts the noun before the adjective"
+  edits:
+    - file: "internal/core/session/names.go"
+      find: "name = nameAdjectives[rand.IntN(len(nameAdjectives))] + \"-\" + nameNouns[rand.IntN(len(nameNouns))]"
+      replace: "name = nameNouns[rand.IntN(len(nameNouns))] + \"-\" + nameAdjectives[rand.IntN(len(nameAdjectives))]"
+- id: SESS-669
+  title: "factory_work_type takes a suggestion once the session has a work type"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tif ws.chosen {\n\t\treturn refuse(\"this session's work type is already \""
+      replace: "\tif false {\n\t\treturn refuse(\"this session's work type is already \""
+- id: SESS-671
+  title: "Continue defining shows before Define has run"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "if !m.complete() && t.ran[id] && !t.busy && !produced"
+      replace: "if !m.complete() && !t.busy && !produced"
+- id: SESS-670
+  title: "An untyped session's card doesn't name the type the agent suggested"
+  edits:
+    - file: "internal/core/session/worktypeask.go"
+      find: "\tif a.Type != \"\" {\n\t\tc.Suggests,"
+      replace: "\tif a.Type == \"\" {\n\t\tc.Suggests,"
+- id: SESS-672
+  title: "Approve requirements without a plan choice is taken as Approve and implement"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase !plan && g.chosen.Plans() && choice == PlanUnstated:\n"
+      replace: "\tcase false:\n"
+- id: SESS-673
+  title: "Add a plan is taken while work made since the approval is uncommitted"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase choice == PlanWanted && !g.planChosen && g.worked:\n"
+      replace: "\tcase false:\n"
+- id: SESS-674
+  title: "Skip the plan is taken once the plan is approved"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase choice == PlanSkipped && g.planOk:\n"
+      replace: "\tcase false:\n"
+- id: SESS-675
+  title: "A Code change's first typed message goes to the agent as typed, not as Define's command"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\tcase workflow.Change:\n\t\treturn AskDefine\n"
+      replace: "\tcase workflow.Change:\n\t\treturn \"\"\n"
+- id: SESS-676
+  title: "Write the incident review is offered before the fix is committed on the approved root cause"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if incident && v.FixCommitted {"
+      replace: "if incident {"
+- id: PAGE-160
+  title: "/api/session-name takes a field it doesn't read"
+  edits:
+    - file: "internal/adapters/http/page/page.go"
+      find: "\tsessionNameRoute: {},\n"
+      replace: ""

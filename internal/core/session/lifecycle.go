@@ -21,7 +21,6 @@ const (
 	StartFromBranch = "branch"
 	StartFromPull   = "pull-request"
 	StartFromFork   = "fork"
-	StartFromPinned = "pinned"
 )
 
 const (
@@ -48,8 +47,6 @@ type startedFrom struct {
 
 func startFromOf(q Dispatch) startedFrom {
 	switch {
-	case q.pinned != nil:
-		return startedFrom{kind: StartFromPinned}
 	case q.From.SID != "":
 		return startedFrom{kind: StartFromFork, source: q.From.SID}
 	case q.From.Branch != "":

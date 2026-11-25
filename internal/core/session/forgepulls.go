@@ -63,52 +63,52 @@ func (f *Forges) PageRequest(ctx context.Context, sid string, kind ForgeKind, ti
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return explained(invalid("title"), "The title is empty.")
+		return invalid("title", "The title is empty.")
 	}
 	if _, why := ForgeText(title, MaxForgeTitle, false); why != "" {
-		return explained(invalid("title"), "The title "+why+".")
+		return invalid("title", "The title "+why+".")
 	}
 	body = f.issueBody(sid, kind, body)
 	if _, why := ForgeText(body, MaxForgeBody, true); why != "" {
-		return explained(invalid("body"), "The body "+why+".")
+		return invalid("body", "The body "+why+".")
 	}
 	f.mu.Lock()
 	closed := f.closed
 	f.mu.Unlock()
 	if closed {
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	ft, why := f.target(sid, need)
 	if why != "" {
-		return explained(conflict("target"), strings.ToUpper(why[:1])+why[1:]+".")
+		return conflict("target", strings.ToUpper(why[:1])+why[1:]+".")
 	}
 	ctx, cancel := context.WithTimeout(ctx, ForgeFor)
 	defer cancel()
 	v := ForgeView{Kind: kind, State: ForgeWaiting, Title: title, Body: body, Host: ft.repo.Host, Repo: ft.repo.Slug(), Asked: now, At: now, From: from}
 	if kind == ForgePull {
 		if ft.main == "" {
-			return explained(conflict("main"), "The engine doesn't know the repository's main branch yet.")
+			return conflict("main", "The engine doesn't know the repository's main branch yet.")
 		}
 		v.Head, v.Base = ft.t.Branch, ft.main
 		head, err := f.cfg.API.Branch(ctx, ft.repo, ft.t.Branch)
 		if err != nil {
 			if errors.Is(err, ErrNoBranch) {
-				return explained(conflict("not pushed"), "The branch "+ft.t.Branch+" isn't on "+ft.repo.Host+" yet. Push it first.")
+				return conflict("not pushed", "The branch "+ft.t.Branch+" isn't on "+ft.repo.Host+" yet. Push it first.")
 			}
-			return explained(conflict("host"), f.clean(ft.repo.Token, "The engine couldn't read the branch on the git host: "+forgeWhy(err, NeedContents)+"."))
+			return conflict("host", f.clean(ft.repo.Token, "The engine couldn't read the branch on the git host: "+forgeWhy(err, NeedContents)+"."))
 		}
 		if commitSHA.MatchString(head) {
 			v.Commit = head
 		}
 		link, open, err := f.cfg.API.OpenPull(ctx, ft.repo, ft.t.Branch)
 		if err != nil {
-			return explained(conflict("host"), f.clean(ft.repo.Token, "The engine couldn't list the open pull requests: "+forgeWhy(err, NeedPulls)+"."))
+			return conflict("host", f.clean(ft.repo.Token, "The engine couldn't list the open pull requests: "+forgeWhy(err, NeedPulls)+"."))
 		}
 		if open {
-			return explained(conflict("exists"), "Pull request #"+strconv.Itoa(link.Number)+" for "+ft.t.Branch+" is already open.")
+			return conflict("exists", "Pull request #"+strconv.Itoa(link.Number)+" for "+ft.t.Branch+" is already open.")
 		}
 	} else if err := f.cfg.API.Repository(ctx, ft.repo); err != nil {
-		return explained(conflict("host"), f.clean(ft.repo.Token, "The engine couldn't read the repository on the git host: "+forgeWhy(err, NeedMetadata)+"."))
+		return conflict("host", f.clean(ft.repo.Token, "The engine couldn't read the repository on the git host: "+forgeWhy(err, NeedMetadata)+"."))
 	}
 	f.mu.Lock()
 	list := f.cards[sid]
@@ -119,13 +119,13 @@ func (f *Forges) PageRequest(ctx context.Context, sid string, kind ForgeKind, ti
 		}
 		if c.view.Kind == kind && (kind == ForgePull || c.view.Title == title && c.view.Body == body) {
 			f.mu.Unlock()
-			return explained(conflict("waiting"), "The same "+kindWord(kind)+" already waits on its card.")
+			return conflict("waiting", "The same "+kindWord(kind)+" already waits on its card.")
 		}
 		waiting++
 	}
 	if waiting >= maxForgeWait {
 		f.mu.Unlock()
-		return explained(conflict("full"), strconv.Itoa(maxForgeWait)+" issues and pull requests already wait on their cards. Answer them first.")
+		return conflict("full", strconv.Itoa(maxForgeWait)+" issues and pull requests already wait on their cards. Answer them first.")
 	}
 	v.Card = randomHex(16)
 	f.cards[sid] = append(list, &forgeCard{view: v, repo: ft.repo, sid: sid})
@@ -169,20 +169,20 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	}
 	_, _, mainName, err := f.cfg.Repos.ForgeTarget(t.Name)
 	if err != nil {
-		return explained(conflict("repository"), "The session's repository isn't in the engine's list any more.")
+		return conflict("repository", "The session's repository isn't in the engine's list any more.")
 	}
 	ft, why := f.target(sid, NeedPulls)
 	if why != "" {
-		return explained(conflict("target"), strings.ToUpper(why[:1])+why[1:]+".")
+		return conflict("target", strings.ToUpper(why[:1])+why[1:]+".")
 	}
 	rctx, cancel := context.WithTimeout(ctx, ForgeFor)
 	head, err := f.cfg.API.Branch(rctx, ft.repo, t.Branch)
 	cancel()
 	if err != nil {
 		if errors.Is(err, ErrNoBranch) {
-			return explained(conflict("not pushed"), "The branch "+t.Branch+" isn't on "+ft.repo.Host+" yet. Push it first.")
+			return conflict("not pushed", "The branch "+t.Branch+" isn't on "+ft.repo.Host+" yet. Push it first.")
 		}
-		return explained(conflict("host"), f.clean(ft.repo.Token, "The engine couldn't read the branch on the git host: "+forgeWhy(err, NeedContents)+"."))
+		return conflict("host", f.clean(ft.repo.Token, "The engine couldn't read the branch on the git host: "+forgeWhy(err, NeedContents)+"."))
 	}
 	title := ""
 	if fl.cfg.Approved != nil {
@@ -231,7 +231,7 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	}
 	ft, why := f.target(sid, NeedPulls)
 	if why != "" {
-		return explained(conflict("target"), strings.ToUpper(why[:1])+why[1:]+".")
+		return conflict("target", strings.ToUpper(why[:1])+why[1:]+".")
 	}
 	now := fl.cfg.Now()
 	fl.mu.Lock()
@@ -239,16 +239,16 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	switch {
 	case fl.closed:
 		fl.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	case x == nil || x.saved.Number == 0 || x.saved.Done != "":
 		fl.mu.Unlock()
-		return explained(conflict("not followed"), "The engine follows no open pull request for this session.")
+		return conflict("not followed", "The engine follows no open pull request for this session.")
 	case !x.saved.Opened:
 		fl.mu.Unlock()
-		return explained(conflict("not ours"), "Only a pull request the engine opened can be marked ready from the page. Mark this one ready on the git host.")
+		return conflict("not ours", "Only a pull request the engine opened can be marked ready from the page. Mark this one ready on the git host.")
 	case !fl.readies.allow(sid, now):
 		fl.mu.Unlock()
-		return explained(limited("ready"), "Wait a few minutes before trying again.")
+		return limited("ready", "Wait a few minutes before trying again.")
 	}
 	number := x.saved.Number
 	fl.mu.Unlock()
@@ -256,10 +256,10 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	defer cancel()
 	ps, err := fl.cfg.API.PullStatus(ctx, ft.repo, number)
 	if err != nil {
-		return explained(conflict("host"), f.clean(ft.repo.Token, "The engine couldn't read pull request #"+strconv.Itoa(number)+": "+forgeWhy(err, NeedPulls)+"."))
+		return conflict("host", f.clean(ft.repo.Token, "The engine couldn't read pull request #"+strconv.Itoa(number)+": "+forgeWhy(err, NeedPulls)+"."))
 	}
 	if ps.State != "open" {
-		return explained(conflict("closed"), "Pull request #"+strconv.Itoa(number)+" isn't open any more.")
+		return conflict("closed", "Pull request #"+strconv.Itoa(number)+" isn't open any more.")
 	}
 	if !ps.Draft {
 		fl.mu.Lock()
@@ -268,7 +268,7 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 		}
 		fl.mu.Unlock()
 		fl.show(sid)
-		return explained(conflict("ready"), "Pull request #"+strconv.Itoa(number)+" is already ready for review.")
+		return conflict("ready", "Pull request #"+strconv.Itoa(number)+" is already ready for review.")
 	}
 	request := randomHex(16)
 	fl.auditKind(AuditPRReady, sid, ft.t, ft.repo, ByPage, ResultSending, request, "marking pull request #"+strconv.Itoa(number)+" ready for review, as the person asked on the page")
@@ -279,7 +279,7 @@ func (fl *Follows) Ready(ctx context.Context, sid string) error {
 	if err != nil {
 		why := f.clean(ft.repo.Token, forgeWhy(err, NeedPulls))
 		fl.auditKind(AuditPRReady, sid, ft.t, ft.repo, ByPage, ForgeFailed, request, "couldn't mark pull request #"+strconv.Itoa(number)+" ready for review: "+why)
-		return explained(conflict("host"), "The engine couldn't mark it ready for review: "+why+".")
+		return conflict("host", "The engine couldn't mark it ready for review: "+why+".")
 	}
 	fl.mu.Lock()
 	if fl.list[sid] == x {

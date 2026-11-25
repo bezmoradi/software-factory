@@ -92,7 +92,14 @@ sed -n 's/^        - { method: POST, path: \([^ ,}]*\) }$/\1/p' "$work/destructi
 	exit 1
 }
 sed -n 's/^        - { method: POST, path: [^ ,}]*, shows: \[\([^]]*\)\] }$/\1/p' "$work/reads-block" >"$work/shows"
-[ "$(grep -c 'shows:' "$config")" -eq "$(wc -l <"$work/shows" | tr -d ' ')" ] || {
+sed -n '/^relations:$/,/^[^ ]/p' "$config" >"$work/relations-block"
+sed -n 's/^  - act: { driver: http, target: \([^ ,}]*\) }$/\1/p' "$work/relations-block" >"$work/related-all"
+[ "$(grep -c '^  - act:' "$work/relations-block")" -eq "$(wc -l <"$work/related-all" | tr -d ' ')" ] || {
+	say "proctor/proctor.yaml has a relation this script can't read; write each act as { driver: http, target: <route> }"
+	exit 1
+}
+sort -u "$work/related-all" >"$work/related"
+[ "$(sed '/^relations:$/,/^[^ ]/d' "$config" | grep -c 'shows:')" -eq "$(wc -l <"$work/shows" | tr -d ' ')" ] || {
 	say "proctor/proctor.yaml has a shows list this script can't read; write each on its reads entry's line, as { method: POST, path: <route>, shows: [<route>, ...] }"
 	exit 1
 }
@@ -103,6 +110,10 @@ for r in $(comm -13 "$work/code" "$work/reads"); do
 done
 for r in $(comm -13 "$work/code" "$work/destructive"); do
 	say "proctor/proctor.yaml declares POST $r destructive, but the page serves no such route"
+	failed=1
+done
+for r in $(comm -13 "$work/code" "$work/related"); do
+	say "proctor/proctor.yaml relates an act on POST $r, but the page serves no such route"
 	failed=1
 done
 for r in $(comm -13 "$work/code" "$work/shown"); do

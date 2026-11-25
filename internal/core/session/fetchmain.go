@@ -27,23 +27,20 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 	running := r.running
 	d.mu.Unlock()
 	if !running {
-		return "", explained(conflict("not running"), "The session isn't running. Wake it, then bring in the latest main.")
-	}
-	if why := d.reg.halt.turns(); why != "" {
-		return "", explained(conflict("halted"), why)
+		return "", conflict("not running", "The session isn't running. Wake it, then bring in the latest main.")
 	}
 	if !d.reg.TurnSince(sid).IsZero() {
-		return "", explained(conflict("in turn"), "The session is in its turn. Wait for it to end, then bring in the latest main.")
+		return "", conflict("in turn", "The session is in its turn. Wait for it to end, then bring in the latest main.")
 	}
 	if d.cfg.Repositories == nil {
-		return "", explained(conflict("no agent-host"), "This engine has no repositories to fetch.")
+		return "", conflict("no agent-host", "This engine has no repositories to fetch.")
 	}
 	commit, err := d.cfg.Repositories.Fresh(ctx, r.repo)
 	if err != nil {
 		if e, ok := errors.AsType[*Error](err); ok {
 			return "", explained(e, strings.Replace(e.Message, ", so no session started", "", 1))
 		}
-		return "", explained(conflict("fetch"), "The engine couldn't fetch the project's main branch.")
+		return "", conflict("fetch", "The engine couldn't fetch the project's main branch.")
 	}
 	main := "main"
 	if repos, err := d.cfg.Repositories.List(); err == nil {
@@ -52,7 +49,7 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 		}
 	}
 	if err := d.syncTo(r, main, commit); err != nil {
-		return "", explained(conflict("clone"), "The engine fetched "+main+" at "+shortSHA(commit)+", but couldn't bring it into the session's clone, so it asked the agent nothing: "+clip(err.Error(), 300))
+		return "", conflict("clone", "The engine fetched "+main+" at "+shortSHA(commit)+", but couldn't bring it into the session's clone, so it asked the agent nothing: "+clip(err.Error(), 300))
 	}
 	text := main + " is now at " + commit + " as origin/" + main + "; merge it into your branch and resolve conflicts"
 	sent := d.reg.Message(sid, NoteMarker+text, false, nil, nil) == nil

@@ -69,7 +69,7 @@ func (d *Dispatcher) runsReadable() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.runsUnread {
-		return explained(conflict("sessions unread"), runsUnreadWhy)
+		return conflict("sessions unread", runsUnreadWhy)
 	}
 	return nil
 }
@@ -242,7 +242,7 @@ func isDoubled(doubled func(sid string) bool, sid string) bool {
 
 func heldBranch(doubled func(sid string) bool, sid string) error {
 	if isDoubled(doubled, sid) {
-		return explained(conflict("branch held"), doubledMessage)
+		return conflict("branch held", doubledMessage)
 	}
 	return nil
 }
@@ -276,7 +276,7 @@ func notStartedHere(doubled func(sid string) bool, sid, why string) error {
 	if err := heldBranch(doubled, sid); err != nil {
 		return err
 	}
-	return explained(conflict("not started here"), why)
+	return conflict("not started here", why)
 }
 
 func (d *Dispatcher) oneHolder(saved []SavedRun) map[string]bool {

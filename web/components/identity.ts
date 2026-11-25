@@ -1,7 +1,11 @@
-import { button, el, field, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
-import { actionRow, modal } from '../lib/dialog.ts'
+import { UNREAD, savedTone, type EngineAnswer } from '../api.ts'
+import { button, el, labelError, say, statusLine, whileBusy } from '../lib/dom.ts'
+import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
+import { actions, field, form, showAnswer } from '../lib/form.ts'
+import { textbox, type TextType } from '../lib/controls.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 export interface CommitIdentity {
   name: string
@@ -10,13 +14,6 @@ export interface CommitIdentity {
 
 const ROUTE = '/api/commit-identity'
 
-async function call(post: Post, body: unknown): Promise<{ ok: boolean; body: Record<string, unknown> }> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  return { ok: res.ok, body: parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {} }
-}
-
 function identityOf(v: unknown): CommitIdentity | null {
   if (v === null || typeof v !== 'object') return null
   const r = v as Record<string, unknown>
@@ -24,49 +21,42 @@ function identityOf(v: unknown): CommitIdentity | null {
 }
 
 export async function identityState(post: Post): Promise<CommitIdentity | null | undefined> {
-  const a = await call(post, { op: 'read' })
+  const a = await post(ROUTE, { op: 'read' })
   return a.ok ? identityOf(a.body.identity) : undefined
 }
 
-function textField(name: string, words: string, type: string, max: number, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
-  const input = el('input', 'textbox')
-  input.type = type
-  input.name = name
-  input.autocomplete = auto
-  input.spellcheck = false
-  input.required = true
-  input.maxLength = max
+function textField(name: string, words: string, type: TextType, value: string, auto: AutoFill): [HTMLDivElement, HTMLInputElement] {
+  const input = textbox({ type, name, autocomplete: auto, spellcheck: false })
+  input.setAttribute('aria-required', 'true')
   input.value = value
   return [field(words, input), input]
 }
 
-export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity) => void): void {
-  const form = el('form', 'identity-form')
-  const [nameField, name] = textField('name', 'Name', 'text', 100, current?.name ?? '', 'name')
-  const [emailField, email] = textField('email', 'Email', 'email', 254, current?.email ?? '', 'email')
+export function editIdentity(post: Post, current: CommitIdentity | null, saved: (id: CommitIdentity, said: string, tone: 'ok' | 'warn') => void): void {
+  const [nameField, name] = textField('name', 'Name', 'text', current?.name ?? '', 'name')
+  const [emailField, email] = textField('email', 'Email', 'email', current?.email ?? '', 'email')
   const why = statusLine('small warn status-slot')
+  for (const input of [name, email]) input.addEventListener('input', () => labelError(input, ''))
   const save = button('Save', 'primary small', undefined, 'submit')
-  form.append(nameField, emailField, why, actionRow([], [button('Cancel', 'ghost small', () => m.close()), save]))
-  form.addEventListener('submit', e => {
-    e.preventDefault()
-    if (!form.reportValidity()) return
-    void whileBusy(save, () => call(post, { op: 'set', name: name.value, email: email.value })).then(a => {
-      const id = identityOf(a.body.identity)
-      if (!a.ok || !id) {
-        say(why, typeof a.body.message === 'string' ? visible(a.body.message) : 'The name and email weren’t saved. Check that the engine is running.', 'warn')
-        return
-      }
-      m.close()
-      saved(id)
-    })
+  const box = form({
+    cls: 'identity-form',
+    children: [nameField, emailField, why, actions([button('Cancel', 'ghost small', () => m.close()), save])],
+    onSubmit: () => {
+      void whileBusy(save, () => post(ROUTE, { op: 'set', name: name.value, email: email.value })).then(a => {
+        if (!showAnswer(box, a, why, { tone: 'warn' })) return
+        const id = identityOf(a.body.identity)
+        if (!id || !a.message) return say(why, UNREAD, 'warn')
+        m.close()
+        saved(id, a.message, savedTone(a))
+      })
+    },
   })
   const m = modal({
     kind: 'identity',
-    title: 'The name and email agents commit with',
+    ...dialogDocs('identity'),
     body: [
-      el('p', 'small', 'Every agent commits with this name and email, in each session’s worktree, so it never falls back to the email of its sign-in. They become public when the engine pushes. For GitHub, use your noreply address, which keeps your own email private: ID+USERNAME@users.noreply.github.com, shown under Settings, Emails, “Keep my email addresses private”.'),
-      el('p', 'small muted', 'A session started after you save uses it at once; a stopped session picks it up when you wake it. A running session keeps the name and email it started with.'),
-      form,
+      el('p', 'small', 'Every agent commits with these, and pushes make them public. For GitHub, use your noreply address: ID+USERNAME@users.noreply.github.com. New sessions use them at once; a stopped session when you wake it.'),
+      box,
     ],
     focus: name,
   })

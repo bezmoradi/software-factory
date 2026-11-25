@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -26,15 +27,17 @@ type ruleJSON struct {
 	Worktree string   `json:"worktree,omitempty"`
 	Path     string   `json:"path"`
 	Wide     []string `json:"wide"`
+	Where    string   `json:"placeLabel"`
 }
 
 type ruleFileJSON struct {
-	Box      string `json:"box"`
-	Place    string `json:"place"`
-	Worktree string `json:"worktree,omitempty"`
-	Path     string `json:"path"`
-	Count    int    `json:"count"`
-	Problem  string `json:"problem,omitempty"`
+	Box       string `json:"box"`
+	Container string `json:"container,omitempty"`
+	Place     string `json:"place"`
+	Worktree  string `json:"worktree,omitempty"`
+	Path      string `json:"path"`
+	Count     int    `json:"count"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 type allowRulesJSON struct {
@@ -53,10 +56,10 @@ func (s *Server) UseAgentReports(reports session.AgentReportPage, rules session.
 func allowRulesOf(v session.AllowRulesView) allowRulesJSON {
 	out := allowRulesJSON{Repo: v.Repo, Idle: v.Idle, Files: []ruleFileJSON{}, Rules: []ruleJSON{}}
 	for _, f := range v.Files {
-		out.Files = append(out.Files, ruleFileJSON{Box: f.Box, Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
+		out.Files = append(out.Files, ruleFileJSON{Box: f.Box, Container: session.CommandsFor("", "", f.Box).Container, Place: string(f.Place), Worktree: f.Worktree, Path: f.Path, Count: len(f.Rules), Problem: f.Problem})
 	}
 	for _, r := range v.Rules {
-		out.Rules = append(out.Rules, ruleJSON{Box: r.Box, Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide)})
+		out.Rules = append(out.Rules, ruleJSON{Box: r.Box, Rule: r.Rule, Place: string(r.Place), Worktree: r.Worktree, Path: r.Path, Wide: nonNil(r.Wide), Where: session.SessionPlaceLabel(string(r.Place))})
 	}
 	return out
 }
@@ -72,7 +75,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), rulesFor)
@@ -81,7 +84,7 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 	switch op {
 	case "list":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "remove":
@@ -92,19 +95,19 @@ func (s *Server) allowRules(w http.ResponseWriter, r *http.Request, body map[str
 		if v, has := body["worktree"]; has {
 			t, ok := v.(string)
 			if !ok {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			worktree = t
 		}
 		if !keysWithin(body, "op", "repo", "box", "place", "worktree", "rule") || !okPlace || !okRule || !okBox || !session.ValidBox(box) || !session.ValidRuleText(rule) || len(worktree) > 64 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		switch session.RulePlace(place) {
 		case session.RuleInClone, session.RuleInUser, session.RuleInWorktree:
 		default:
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := rules.RemoveAllowRule(ctx, repo, box, session.RulePlace(place), worktree, rule)
@@ -147,34 +150,41 @@ type homeViewJSON struct {
 }
 
 type pinJSON struct {
-	Agent      string `json:"agent"`
-	Name       string `json:"name"`
-	Package    string `json:"package"`
-	Version    string `json:"version"`
-	State      string `json:"state"`
-	Repository string `json:"repository,omitempty"`
-	Workflow   string `json:"workflow,omitempty"`
-	Ref        string `json:"ref,omitempty"`
-	Commit     string `json:"commit,omitempty"`
-	LoggedAt   int64  `json:"loggedAt"`
-	Note       string `json:"note,omitempty"`
+	Agent      string   `json:"agent"`
+	Name       string   `json:"name"`
+	Package    string   `json:"package"`
+	Version    string   `json:"version"`
+	State      string   `json:"state"`
+	Repository string   `json:"repository,omitempty"`
+	Workflow   string   `json:"workflow,omitempty"`
+	Ref        string   `json:"ref,omitempty"`
+	Commit     string   `json:"commit,omitempty"`
+	LoggedAt   int64    `json:"loggedAt"`
+	Note       string   `json:"note,omitempty"`
+	Link       string   `json:"link,omitempty"`
+	Said       saidJSON `json:"said"`
 }
 
 type pluginPinJSON struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Source      string `json:"source"`
-	Branch      string `json:"branch"`
-	Version     string `json:"version"`
-	Commit      string `json:"commit"`
-	Refused     bool   `json:"refused,omitempty"`
-	RefusedWhy  string `json:"refusedWhy,omitempty"`
-	InstalledAt int64  `json:"installedAt"`
-	CheckedAt   int64  `json:"checkedAt"`
-	Check       string `json:"check"`
-	Head        string `json:"head,omitempty"`
-	From        string `json:"from,omitempty"`
-	Problem     string `json:"problem,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Link        string   `json:"link,omitempty"`
+	Branch      string   `json:"branch"`
+	Version     string   `json:"version"`
+	Commit      string   `json:"commit"`
+	Refused     bool     `json:"refused,omitempty"`
+	RefusedWhy  string   `json:"refusedWhy,omitempty"`
+	InstalledAt int64    `json:"installedAt"`
+	CheckedAt   int64    `json:"checkedAt"`
+	Check       string   `json:"check"`
+	Head        string   `json:"head,omitempty"`
+	From        string   `json:"from,omitempty"`
+	Problem     string   `json:"problem,omitempty"`
+	CheckLine   string   `json:"checkLine"`
+	CheckTone   string   `json:"checkTone"`
+	Stamped     bool     `json:"checkStamped"`
+	Said        saidJSON `json:"said"`
 }
 
 type advisoryJSON struct {
@@ -201,6 +211,27 @@ type agentReportJSON struct {
 	Advisories advisoriesJSON  `json:"advisories"`
 }
 
+var (
+	npmPackage = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]{0,100}/)?[a-z0-9][a-z0-9._-]{0,100}$`)
+	npmVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,100}$`)
+	githubRepo = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$`)
+)
+
+func npmLink(pkg, version string) string {
+	if !npmPackage.MatchString(pkg) || !npmVersion.MatchString(version) {
+		return ""
+	}
+	return "https://www.npmjs.com/package/" + pkg + "/v/" + version
+}
+
+func githubLink(source string) string {
+	repo := strings.TrimSuffix(source, ".git")
+	if !githubRepo.MatchString(repo) {
+		return ""
+	}
+	return repo
+}
+
 func agentReportOf(v session.AgentReport) agentReportJSON {
 	out := agentReportJSON{
 		Settings: homeReportJSON{Problem: v.Home.Problem, Sessions: []homeViewJSON{}},
@@ -211,11 +242,13 @@ func agentReportOf(v session.AgentReport) agentReportJSON {
 		out.Settings.Sessions = append(out.Settings.Sessions, homeViewJSON{SID: h.SID, Session: h.Session, Checked: millis(h.Checked), Since: millis(h.Since), Changed: nonNil(h.Changed), More: h.More, First: h.First, Dropped: h.Dropped, Running: h.Running, Problem: h.Problem, Watching: h.Watching})
 	}
 	for _, p := range v.Pins {
-		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note})
+		out.Pins = append(out.Pins, pinJSON{Agent: p.Agent, Name: p.Name, Package: p.Package, Version: p.Version, State: p.State, Repository: p.Repository, Workflow: p.Workflow, Ref: p.Ref, Commit: p.Commit, LoggedAt: millis(p.LoggedAt), Note: p.Note, Link: npmLink(p.Package, p.Version), Said: saidJSONOf(session.PinSaid(p.State))})
 	}
 	for _, p := range v.Plugins {
-		out.Plugins = append(out.Plugins, pluginPinJSON{ID: p.ID, Name: p.Name, Source: p.Source, Branch: p.Branch, Version: p.Version, Commit: p.Commit, Refused: p.Refused, RefusedWhy: p.RefusedWhy,
-			InstalledAt: millis(p.InstalledAt), CheckedAt: millis(p.CheckedAt), Check: p.CheckResult, Head: p.CheckHead, From: p.CheckFrom, Problem: p.Problem})
+		line, tone, stamped := session.PluginCheckLine(p.CheckResult, p.Branch, p.CheckFrom, p.Problem, p.Commit != "" && !p.Refused)
+		out.Plugins = append(out.Plugins, pluginPinJSON{ID: p.ID, Name: p.Name, Source: p.Source, Link: githubLink(p.Source), Branch: p.Branch, Version: p.Version, Commit: p.Commit, Refused: p.Refused, RefusedWhy: p.RefusedWhy,
+			InstalledAt: millis(p.InstalledAt), CheckedAt: millis(p.CheckedAt), Check: p.CheckResult, Head: p.CheckHead, From: p.CheckFrom, Problem: p.Problem,
+			CheckLine: line, CheckTone: tone, Stamped: stamped, Said: saidJSONOf(session.PluginSaid(p.CheckResult))})
 	}
 	for _, a := range v.Advisories.Found {
 		out.Advisories.Found = append(out.Advisories.Found, advisoryJSON{Label: a.Label, ID: a.ID, Summary: a.Summary, Aliases: nonNil(a.Aliases), Link: a.Link})
@@ -228,7 +261,7 @@ func (s *Server) agentReport(w http.ResponseWriter, body map[string]any) {
 	reports := s.reports
 	s.mu.Unlock()
 	if op, ok := body["op"].(string); !ok || op != "read" || !keysWithin(body, "op") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if reports == nil {

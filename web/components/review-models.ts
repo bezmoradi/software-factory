@@ -1,5 +1,8 @@
-import { api } from '../api.ts'
+import { request } from '../api.ts'
 import { el, focusedKey, refocus, replaceKeeping, say, statusLine, visible } from '../lib/dom.ts'
+import { field, form } from '../lib/form.ts'
+import { dropdown, option } from '../lib/controls.ts'
+import { toast } from './toasts.ts'
 
 interface RoleModel {
   name: string
@@ -31,11 +34,6 @@ function readView(v: unknown): ReviewModelsView | null {
   return { roles, models, efforts: (b.efforts as unknown[]).filter((e): e is string => typeof e === 'string') }
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn\'t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? body.message : 'The engine refused the change. Try again.'
-}
 
 class SfReviewModels extends HTMLElement {
   #target: ReviewModelsTarget | null = null
@@ -68,17 +66,18 @@ class SfReviewModels extends HTMLElement {
     if (!project) return
     this.#busy = true
     this.#paint()
-    const res = await api('/api/review-models', { ...body, path: project }).catch(() => null)
+    const a = await request('/api/review-models', { ...body, path: project })
     this.#busy = false
     if (project !== this.#target?.project) return
-    if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       return this.#paint()
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
     if (ok) {
-      say(this.#status, ok, 'ok')
+      say(this.#status, '')
+      toast({ id: `review-models:${project}`, title: ok, tone: 'ok' })
     }
     this.#paint()
   }
@@ -90,27 +89,13 @@ class SfReviewModels extends HTMLElement {
     const off = this.#target.disabled
     const parts: HTMLElement[] = [el('p', 'small', 'Model and effort for each review role'), el('p', 'small muted', 'The default passes no --model or --effort, so the role\'s agent file decides. Each review shows the model it ran with.')]
     for (const [role, r] of Object.entries(v.roles)) {
-      const model = el('select', 'textbox')
+      const model = dropdown({ options: [option('Model: the default', ''), ...v.models.map(m => option(visible(m.name), m.id))] })
       model.id = `review-model-${role}`
       model.dataset.key = `review-model:${role}`
-      const blank = el('option', '', 'Model: the default')
-      blank.value = ''
-      model.append(blank, ...v.models.map(m => {
-        const o = el('option', '', visible(m.name))
-        o.value = m.id
-        return o
-      }))
       model.value = v.models.some(m => m.id === r.model) ? r.model : ''
-      const effort = el('select', 'textbox')
+      const effort = dropdown({ options: [option('Effort: the default', ''), ...v.efforts.map(e => option(`Effort: ${visible(e)}`, e))] })
       effort.dataset.key = `review-effort:${role}`
       effort.setAttribute('aria-label', `Effort of the ${visible(r.name)} role`)
-      const none = el('option', '', 'Effort: the default')
-      none.value = ''
-      effort.append(none, ...v.efforts.map(e => {
-        const o = el('option', '', `Effort: ${visible(e)}`)
-        o.value = e
-        return o
-      }))
       effort.value = v.efforts.includes(r.effort) ? r.effort : ''
       const shownModel = model.value
       const shownEffort = effort.value
@@ -126,11 +111,7 @@ class SfReviewModels extends HTMLElement {
       effort.addEventListener('change', save)
       model.disabled = effort.disabled = off
       if (this.#busy) for (const s of [model, effort]) s.setAttribute('aria-disabled', 'true')
-      const label = el('label', 'small', `The ${visible(r.name)} role runs on`)
-      label.htmlFor = model.id
-      const row = el('div', 'row field-row')
-      row.append(label, model, effort)
-      parts.push(row)
+      parts.push(form({ inline: true, cls: 'field-row', children: [field(`The ${visible(r.name)} role runs on`, model, { kind: 'inline', cls: 'field-row' }), effort] }))
     }
     parts.push(this.#status)
     replaceKeeping(this, parts)

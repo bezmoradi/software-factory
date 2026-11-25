@@ -50,11 +50,7 @@ func (p engineParts) waitSends(limit time.Duration) {
 func (p engineParts) useHalt(reg *session.Registry, cfg PageConfig, logger shared.Logger) {
 	hc := session.HaltConfig{Store: state.NewHalt(cfg.StateDir), Audit: state.NewAudit(cfg.StateDir), Logger: logger}
 	if p.dispatcher != nil {
-		hc.Targets, hc.Doubled, hc.Known, hc.Stopper = p.dispatcher.PushTarget, p.dispatcher.Doubled, p.dispatcher.Known, p.dispatcher
-	}
-	if p.pushes != nil {
-		p.pushes.UseHalt(reg.Halt())
-		hc.Resume = p.pushes.Resume
+		hc.Targets, hc.Doubled, hc.Known = p.dispatcher.PushTarget, p.dispatcher.Doubled, p.dispatcher.Known
 	}
 	reg.Halt().Use(hc)
 }

@@ -272,11 +272,11 @@ func providerFor(a ReviewAgentFiles, pack ReviewerPack, agent string) string {
 func (a *ReviewerAgents) repoByPath(path string) (Repository, error) {
 	list, err := a.cfg.Repos.List()
 	if err != nil {
-		return Repository{}, explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return Repository{}, conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Path == path })
 	if i < 0 {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return list[i], nil
 }
@@ -327,7 +327,7 @@ func (a *ReviewerAgents) change(r Repository, fn func(*AgentFileState) error) (R
 	st, err := a.cfg.Store.Load()
 	if err != nil {
 		a.mu.Unlock()
-		return ReviewerAgentsView{}, explained(conflict("state"), "The engine couldn't read its reviewer agent files.")
+		return ReviewerAgentsView{}, conflict("state", "The engine couldn't read its reviewer agent files.")
 	}
 	if err := fn(&st); err != nil {
 		a.mu.Unlock()
@@ -335,7 +335,7 @@ func (a *ReviewerAgents) change(r Repository, fn func(*AgentFileState) error) (R
 	}
 	if err := a.cfg.Store.Save(st); err != nil {
 		a.mu.Unlock()
-		return ReviewerAgentsView{}, explained(conflict("state"), "The engine couldn't save its reviewer agent files.")
+		return ReviewerAgentsView{}, conflict("state", "The engine couldn't save its reviewer agent files.")
 	}
 	a.mu.Unlock()
 	st, files := a.state()
@@ -358,7 +358,7 @@ func (a *ReviewerAgents) AddAgentFile(path, text string) (ReviewerAgentsView, er
 	}
 	if len(problems) > 0 {
 		a.cfg.Logger.Info("reviewer agents", "event", "refused", "problems", len(problems))
-		return ReviewerAgentsView{}, explained(invalid("agent file"), "The engine refused this agent file: "+strings.Join(problems[:min(len(problems), 8)], "; ")+".")
+		return ReviewerAgentsView{}, invalid("agent file", "The engine refused this agent file: "+strings.Join(problems[:min(len(problems), 8)], "; ")+".")
 	}
 	mine := ownedBy(r)
 	result := ResultAdded
@@ -376,10 +376,10 @@ func (a *ReviewerAgents) AddAgentFile(path, text string) (ReviewerAgentsView, er
 			kept = append(kept, f)
 		}
 		if count >= MaxProjectAgents {
-			return explained(limited("agent files"), "This project already keeps "+strconv.Itoa(MaxProjectAgents)+" agent files, its limit. Remove one first.")
+			return limited("agent files", "This project already keeps "+strconv.Itoa(MaxProjectAgents)+" agent files, its limit. Remove one first.")
 		}
 		if len(kept) >= MaxAgentFilesAll {
-			return explained(limited("agent files"), "The engine already keeps "+strconv.Itoa(MaxAgentFilesAll)+" agent files across projects, its limit. Remove one first.")
+			return limited("agent files", "The engine already keeps "+strconv.Itoa(MaxAgentFilesAll)+" agent files across projects, its limit. Remove one first.")
 		}
 		st.Files = append(kept, StoredAgentFile{Project: r.Name, URL: r.URL, Text: text, At: a.cfg.Now()})
 		return nil
@@ -411,7 +411,7 @@ func (a *ReviewerAgents) RemoveAgentFile(path, name string) (ReviewerAgentsView,
 			return false
 		})
 		if removed == "" {
-			return explained(notFound("agent file"), "This project has no agent file named "+clip(name, 80)+".")
+			return notFound("agent file", "This project has no agent file named "+clip(name, 80)+".")
 		}
 		st.Roles = slices.DeleteFunc(st.Roles, func(p AgentFileRole) bool { return mine(p.Project, p.URL) && p.Name == name })
 		return nil
@@ -427,7 +427,7 @@ func (a *ReviewerAgents) RemoveAgentFile(path, name string) (ReviewerAgentsView,
 
 func (a *ReviewerAgents) PickAgentFile(path string, role review.Role, name string) (ReviewerAgentsView, error) {
 	if !slices.Contains(review.Roles, role) {
-		return ReviewerAgentsView{}, explained(invalid("role"), "Only the bug hunter and simplicity checker roles can be filled by an agent file.")
+		return ReviewerAgentsView{}, invalid("role", "Only the bug hunter and simplicity checker roles can be filled by an agent file.")
 	}
 	r, err := a.repoByPath(path)
 	if err != nil {
@@ -442,7 +442,7 @@ func (a *ReviewerAgents) PickAgentFile(path string, role review.Role, name strin
 				return ok && mine(f.Project, f.URL) && u.File.Name == name
 			})
 			if i < 0 {
-				return explained(notFound("agent file"), "This project has no agent file named "+clip(name, 80)+".")
+				return notFound("agent file", "This project has no agent file named "+clip(name, 80)+".")
 			}
 			u, _ := uploadedOf(st.Files[i])
 			agent = u.ID
@@ -474,4 +474,11 @@ func (a *ReviewerAgents) audit(e AuditEntry) {
 	if err := a.cfg.Audit.Append(e); err != nil {
 		a.cfg.Logger.Warn("reviewer agents", "event", "audit-not-written")
 	}
+}
+
+func ProjectAgentsFull(files int) string {
+	if files < MaxProjectAgents {
+		return ""
+	}
+	return "This project keeps " + strconv.Itoa(MaxProjectAgents) + " agent files, its limit. Remove one to add another."
 }

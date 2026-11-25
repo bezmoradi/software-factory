@@ -726,8 +726,28 @@ func keyAt(callID, value string) {
 	report("completed")
 }
 
+func askTool(callID, value string) {
+	id, rest, _ := strings.Cut(value, " ")
+	tool, raw, _ := strings.Cut(strings.TrimSpace(rest), " ")
+	args := map[string]any{}
+	status := "failed"
+	if answerID.MatchString(id) && slices.Contains(tools, tool) && json.Unmarshal([]byte(raw), &args) == nil {
+		m, problem := callToolReply(tool, args)
+		a := asked{source: problem}
+		if problem == "" {
+			body, _ := json.Marshal(m["result"])
+			a = asked{body: append(body, '\n'), source: "mcp"}
+			status = "completed"
+		}
+		record(id, a, "called "+tool)
+	}
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "ask-tool " + value, "kind": "other", "status": status, "rawInput": args})
+}
+
 func placeLine(callID, key, value string) bool {
 	switch key {
+	case "ask-tool":
+		askTool(callID, value)
 	case "key-at":
 		keyAt(callID, value)
 	case "mkdir":

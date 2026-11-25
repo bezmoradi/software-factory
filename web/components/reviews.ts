@@ -1,19 +1,16 @@
-import { api } from '../api.ts'
-import { busy, button, el, emit, fileLink, replaceKeeping, repoPath, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { request, UNREAD } from '../api.ts'
+import { busy, button, el, emit, fileLink, labelError, replaceKeeping, repoPath, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { actions, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
+import { saidOf } from '../lib/json.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
+import { openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
+import { emptyState } from '../lib/page.ts'
+import { textbox } from '../lib/controls.ts'
 
-
-const STATES: Record<string, [string, string]> = {
-  running: ['running', ''],
-  pass: ['pass', 'ok'],
-  block: ['block', 'bad'],
-  unknown: ['no verdict', 'warn'],
-  failed: ['failed', 'bad'],
-}
 
 function text(value: string): string {
   return visible(unspoofed(value))
@@ -79,15 +76,10 @@ interface WholeReport {
 }
 
 async function wholeReport(ask: { sid: string; agent: string; commit: string; run: number }): Promise<WholeReport | string> {
-  try {
-    const res = await api('/api/review-reply', ask)
-    const body: unknown = await res.json().catch(() => null)
-    const got = body && typeof body === 'object' ? body as Record<string, unknown> : {}
-    if (res.ok && typeof got.text === 'string' && typeof got.clipped === 'boolean') return { text: got.text, clipped: got.clipped }
-    return typeof got.message === 'string' && got.message ? got.message : `the engine answered ${res.status}`
-  } catch {
-    return 'the engine didn\'t answer'
-  }
+  const a = await request('/api/review-reply', ask)
+  const got = a.body
+  if (a.ok && typeof got.text === 'string' && typeof got.clipped === 'boolean') return { text: got.text, clipped: got.clipped }
+  return a.ok ? UNREAD : a.message
 }
 
 class SfReviews extends HTMLElement {
@@ -97,12 +89,25 @@ class SfReviews extends HTMLElement {
   #again: HTMLButtonElement | null = null
   #said = statusLine('sr-only', 'span')
   #head = el('div', 'row reviews-head')
+  #flow: FlowModel | null = null
+  #flowSid = ''
+  #flowShown: FlowDialog | null = null
+  #flowShownSid = ''
+  #flowOpen = button('Open diagram', 'small', () => this.#showFlow(), 'button', 'reviews-diagram')
+  #flowRow = el('div', 'reviews-diagram')
   #pushSaid = statusLine('small push-said status-slot', 'span')
   #reasons = new Map<string, string>()
+  #refused = new Map<string, string>()
   #opened = new Set<string>()
   #wholes = new Map<string, Promise<WholeReport | string>>()
   #timer = 0
   #all = false
+
+  constructor() {
+    super()
+    this.#flowOpen.title = "Opens the latest commit's reviewers, the gate and its routes as a diagram that follows them live"
+    this.#flowRow.append(this.#flowOpen)
+  }
 
   connectedCallback() {
     if (!this.#button) this.hidden = true
@@ -130,11 +135,41 @@ class SfReviews extends HTMLElement {
     }
   }
 
+  #follow(value: ReviewsView | null) {
+    this.#flow = value?.flow ?? null
+    this.#flowSid = value?.sid ?? ''
+    const shown = this.#flowShown
+    if (!shown) return
+    if (this.#flow && this.#flowShownSid === this.#flowSid) shown.diagram.model = this.#flow
+    else shown.modal.close()
+  }
+
+  #showFlow() {
+    if (!this.#flow || this.#flowShown) return
+    const shown = openFlow('How the latest commit is being checked', this.#flow)
+    this.#flowShown = shown
+    this.#flowShownSid = this.#flowSid
+    shown.modal.onClose(() => {
+      if (this.#flowShown === shown) this.#flowShown = null
+    })
+  }
+
+  refuse(key: string, message: string): boolean {
+    const target = () => this.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+    if (!target()) return false
+    this.#refused.set(key, message)
+    this.#key = ''
+    this.view = this.#last
+    target()?.focus()
+    return true
+  }
+
   set view(value: ReviewsView | null) {
     const key = JSON.stringify(value)
     if (key === this.#key) return
     this.#key = key
     this.hidden = !value
+    this.#follow(value)
     if (!value) {
       this.replaceChildren()
       return
@@ -185,6 +220,7 @@ class SfReviews extends HTMLElement {
     if (!value.pushed) heading.push(p)
     replaceKeeping(this.#head, heading)
     const parts: Node[] = [this.#head]
+    if (this.#flow) parts.push(this.#flowRow)
     const note = value.disabled || r?.note || ''
     const described: string[] = []
     if (note) {
@@ -222,7 +258,7 @@ class SfReviews extends HTMLElement {
       const si = who.signIn && (!run || (who.signIn.checkedAt ?? 0) >= (run.checkedAt ?? 0)) ? who.signIn : run ?? who.signIn
       const said = !si ? "The reviewers' sign-in hasn't been checked yet."
         : si.stale ? 'The reviewers’ sign-in changed after it was last checked; the engine checks it again before the next review.'
-        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in under Start on the Welcome page.'
+        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in in the command palette.'
         : `The reviewers are signed in with ${text(si.words)}${si.costs ? '. Reviews cost money; the page asks first, and the engine starts none by itself' : ''}.`
       parts.push(el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said))
     }
@@ -254,7 +290,7 @@ class SfReviews extends HTMLElement {
       }
       parts.push(list)
     } else if (!value.disabled) {
-      parts.push(el('p', 'small muted', 'No review of this session yet.'))
+      parts.push(emptyState('No review of this session yet.'))
     }
     parts.push(this.#testList(value))
     this.#last = value
@@ -272,7 +308,7 @@ class SfReviews extends HTMLElement {
     if (testFocused) document.getElementById('test-list-button')?.focus({ preventScroll: true })
     if (explainFocused) document.getElementById('explain-button')?.focus({ preventScroll: true })
     this.#ticking()
-    const done = r && !r.running ? [failed?.said ?? '', r.roles.map(x => `${x.name}: ${STATES[x.state]?.[0] ?? x.state}`).join(', ')].filter(Boolean).join(' ') : ''
+    const done = r && !r.running ? [failed?.said ?? '', r.roles.map(x => `${x.name}: ${x.stateLabel ?? x.state}`).join(', ')].filter(Boolean).join(' ') : ''
     if (this.#said.textContent !== done) this.#said.textContent = done
   }
 
@@ -321,7 +357,7 @@ class SfReviews extends HTMLElement {
     if (running) busy(b, true)
     b.title = 'Asks Claude Code in a reviewer container of its own, with read-only tools, for steps to try by hand on this session branch\'s latest commit. It isn\'t a review: the push gate and the agent never see it'
     const head = el('div', 'row test-list-head')
-    head.append(el('span', 'small', 'Manual test list'), el('span', 'spacer'), b)
+    head.append(el('h4', 'label', 'Manual test list'), el('span', 'spacer'), b)
     box.append(head)
     if (!t) {
       box.append(el('p', 'small muted', 'On request, a reviewer run lists what to try by hand before you merge. It costs one run, and nothing reads it but you.'))
@@ -349,8 +385,7 @@ class SfReviews extends HTMLElement {
     const li = el('li')
     const row = el('div', 'row')
     const overridden = role.state === 'block' && !!role.override
-    const warned = !!role.advisory && role.state === 'block'
-    const [word, tone] = overridden ? ['overridden', 'warn'] : warned ? ['warning', 'warn'] : STATES[role.state] ?? [role.state, 'warn']
+    const { label: word, tone } = saidOf(role.said, role.state)
     row.append(el('span', '', runName(role)), el('span', 'spacer'))
     if (role.unchecked && role.state === 'pass') {
       const mark = el('span', 'tag warn', 'not rechecked')
@@ -482,32 +517,33 @@ class SfReviews extends HTMLElement {
   }
 
   #override(role: ReviewRole, commit: string, value: ReviewsView): HTMLElement {
-    const box = el('div', 'row field-row override')
-    const input = el('input', 'textbox')
-    input.maxLength = 500
+    const input = textbox()
     input.id = `override-${role.agent.replace(/[^A-Za-z0-9-]/g, '-')}`
     input.dataset.key = input.id
+    input.setAttribute('aria-required', 'true')
     const kept = this.#reasons.get(`${commit}:${role.agent}`)
     if (kept) input.value = kept
-    input.addEventListener('input', () => this.#reasons.set(`${commit}:${role.agent}`, input.value))
-    const label = el('label', 'small', 'Your reason for overriding it (the audit file keeps it)')
-    label.htmlFor = input.id
+    input.addEventListener('input', () => {
+      this.#reasons.set(`${commit}:${role.agent}`, input.value)
+      if (this.#refused.delete(input.id)) labelError(input, '')
+    })
     const held = value.overriding === role.agent || !!value.disabled
-    const b = button('Override', 'small', () => {
-      if (held) return
-      const reason = input.value.trim()
-      if (!reason) {
-        input.setAttribute('aria-invalid', 'true')
-        input.focus()
-        return
-      }
-      input.removeAttribute('aria-invalid')
-      emit(this, 'sf-override', { agent: role.agent, commit, reason })
-    }, 'button', `reviews-override:${value.sid ?? ''}:${commit}:${role.agent}`)
+    const b = button('Override', 'small', undefined, 'submit', `reviews-override:${value.sid ?? ''}:${commit}:${role.agent}`)
     b.setAttribute('aria-disabled', String(held))
     if (value.overriding === role.agent) busy(b, true)
     b.title = role.runs && role.runs > 1 ? 'Counts every blocking run of this role as passed for this commit only. A new commit needs a new review.' : 'Counts this role as passed for this commit only. A new commit needs a new review.'
-    box.append(label, input, b)
+    const box = form({
+      inline: true,
+      cls: 'field-row override',
+      children: [field('Your reason for overriding it (the audit file keeps it)', input, { kind: 'inline', cls: 'field-row' }), actions([b])],
+      onSubmit: () => {
+        if (held) return
+        this.#refused.delete(input.id)
+        labelError(input, '')
+        emit(this, 'sf-override', { agent: role.agent, commit, reason: input.value })
+      },
+    })
+    labelError(input, this.#refused.get(input.id) ?? '')
     return box
   }
 }

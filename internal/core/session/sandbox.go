@@ -97,9 +97,6 @@ func unwaited() level.Observation {
 }
 
 func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, error) {
-	if why := d.reg.halt.starts(); why != "" {
-		return CheckState{}, explained(conflict("halted"), why)
-	}
 	st := d.check(ctx)
 	if d.cfg.Sandbox != nil && st.Observation.Event == level.CheckPassed {
 		bctx, cancel := context.WithTimeout(ctx, checkFor)
@@ -122,7 +119,7 @@ func (d *Dispatcher) startCheck(ctx context.Context, box string) (CheckState, er
 	if len(o.Parts) > 0 {
 		why += ": " + strings.Join(o.Parts, "; ")
 	}
-	return st, explained(conflict("sandbox"), clip("No session starts while "+why+".", maxOutput))
+	return st, conflict("sandbox", clip("No session starts while "+why+".", maxOutput))
 }
 
 func (d *Dispatcher) observeStart(sid string, st CheckState) {

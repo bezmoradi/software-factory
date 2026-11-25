@@ -418,22 +418,22 @@ func ValidRuleText(rule string) bool {
 
 func (a *AllowRules) repo(name string) (Repository, error) {
 	if a.Hosts == nil || a.Repos == nil {
-		return Repository{}, explained(conflict("no agent-host"), "This engine has no agent-host, so it can't read the agents' saved rules.")
+		return Repository{}, conflict("no agent-host", "This engine has no agent-host, so it can't read the agents' saved rules.")
 	}
 	repos, err := a.Repos.List()
 	if err != nil {
-		return Repository{}, explained(conflict("workspace"), "The engine couldn't read the workspace's repositories.")
+		return Repository{}, conflict("workspace", "The engine couldn't read the workspace's repositories.")
 	}
 	i := slices.IndexFunc(repos, func(r Repository) bool { return r.Name == name })
 	if i < 0 {
-		return Repository{}, explained(notFound("project"), "That project is no longer in the list.")
+		return Repository{}, notFound("project", "That project is no longer in the list.")
 	}
 	return repos[i], nil
 }
 
 func checkRuleFiles(files []SettingsFile) ([]SettingsFile, error) {
 	if len(files) > MaxRuleFiles {
-		return nil, explained(conflict("agent-host"), "agent-host answered more settings files than the engine reads.")
+		return nil, conflict("agent-host", "agent-host answered more settings files than the engine reads.")
 	}
 	out := make([]SettingsFile, 0, len(files))
 	seen := map[string]bool{}
@@ -441,24 +441,24 @@ func checkRuleFiles(files []SettingsFile) ([]SettingsFile, error) {
 		switch f.Place {
 		case RuleInClone, RuleInUser:
 			if f.Worktree != "" {
-				return nil, explained(conflict("agent-host"), "agent-host answered a settings file the engine doesn't read.")
+				return nil, conflict("agent-host", "agent-host answered a settings file the engine doesn't read.")
 			}
 		case RuleInWorktree:
 			if !RuleWorktreeName.MatchString(f.Worktree) {
-				return nil, explained(conflict("agent-host"), "agent-host answered a worktree name the engine refuses.")
+				return nil, conflict("agent-host", "agent-host answered a worktree name the engine refuses.")
 			}
 		default:
-			return nil, explained(conflict("agent-host"), "agent-host answered a settings file the engine doesn't read.")
+			return nil, conflict("agent-host", "agent-host answered a settings file the engine doesn't read.")
 		}
 		key := string(f.Place) + "\x00" + f.Worktree
 		if seen[key] || len(f.Rules) > MaxRulesPerFile || len(f.Path) > maxRulePath || !utf8.ValidString(f.Path) {
-			return nil, explained(conflict("agent-host"), "agent-host answered a settings file the engine refuses.")
+			return nil, conflict("agent-host", "agent-host answered a settings file the engine refuses.")
 		}
 		seen[key] = true
 		rules := make([]string, 0, len(f.Rules))
 		for _, r := range f.Rules {
 			if !ValidRuleText(r) {
-				return nil, explained(conflict("agent-host"), "agent-host answered a rule the engine refuses.")
+				return nil, conflict("agent-host", "agent-host answered a rule the engine refuses.")
 			}
 			if !slices.Contains(rules, r) {
 				rules = append(rules, r)
@@ -481,7 +481,7 @@ func (a *AllowRules) AllowRules(ctx context.Context, name string) (AllowRulesVie
 	for _, h := range hosts {
 		files, err := h.Host.ReadAllowRules(ctx, repo.Name)
 		if err != nil {
-			return AllowRulesView{}, explained(conflict("agent-host"), "agent-host in "+h.Name+"'s container couldn't read the saved rules: "+hostMessage(err))
+			return AllowRulesView{}, conflict("agent-host", "agent-host in "+h.Name+"'s container couldn't read the saved rules: "+hostMessage(err))
 		}
 		files, err = checkRuleFiles(files)
 		if err != nil {
@@ -506,15 +506,15 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, plac
 	hosts := a.Hosts(ctx, repo.Name)
 	i := slices.IndexFunc(hosts, func(h RuleHost) bool { return h.Box == box })
 	if !ValidBox(box) || i < 0 {
-		return explained(notFound("box"), "No running session of this project has that container.")
+		return notFound("box", "No running session of this project has that container.")
 	}
 	switch {
 	case !ValidRuleText(rule):
-		return explained(invalid("rule"), "That isn't a rule the engine reads.")
+		return invalid("rule", "That isn't a rule the engine reads.")
 	case (place == RuleInClone || place == RuleInUser) && worktree == "":
 	case place == RuleInWorktree && RuleWorktreeName.MatchString(worktree):
 	default:
-		return explained(invalid("place"), "That isn't a settings file the engine lists.")
+		return invalid("place", "That isn't a settings file the engine lists.")
 	}
 	ctx, cancel := context.WithTimeout(ctx, allowRulesFor)
 	defer cancel()
@@ -536,7 +536,7 @@ func (a *AllowRules) RemoveAllowRule(ctx context.Context, name, box string, plac
 		_ = a.Audit.Append(AuditEntry{Req: shared.RequestOf(ctx), Time: now().UTC(), Repository: repo.Name, By: "page", Kind: AuditRemoveAllowRule, Result: result, Path: where, Hash: hex.EncodeToString(sum[:]), Missing: []string{}})
 	}
 	if err != nil {
-		return explained(conflict("not removed"), "The rule wasn't removed: "+hostMessage(err))
+		return conflict("not removed", "The rule wasn't removed: "+hostMessage(err))
 	}
 	return nil
 }

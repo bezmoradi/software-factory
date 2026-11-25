@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path"
 	"regexp"
 	"slices"
@@ -105,14 +106,14 @@ func (d *Dispatcher) readdWorktree(ctx context.Context, r *run, id CommitIdentit
 	aside, err := host.RemoveWorktree(ctx, r.repo, r.name, false)
 	if err != nil {
 		if h, ok := errors.AsType[*HostError](err); ok && h.Code == HostDirty {
-			return "", explained(conflict("dirty"), "The worktree "+r.name+" has changes that aren't committed, so the engine left it as it is.")
+			return "", conflict("dirty", "The worktree "+r.name+" has changes that aren't committed, so the engine left it as it is.")
 		}
 		shared.For(ctx, d.cfg.Logger).Warn("worktree", "event", "not-cleared", "worktree", r.name)
 	}
 	aside = d.tellAside(r, aside, during)
 	cwd, err := host.AddExistingWorktree(ctx, r.repo, r.name, r.branch, id)
 	if err != nil {
-		return aside, explained(conflict("worktree"), "agent-host couldn't add the session's worktree again: "+hostMessage(err))
+		return aside, conflict("worktree", "agent-host couldn't add the session's worktree again: "+hostMessage(err))
 	}
 	if err := d.checkWorktree(r, cwd); err != nil {
 		return aside, err
@@ -156,13 +157,13 @@ func (d *Dispatcher) tellAside(r *run, got, during string) string {
 func (d *Dispatcher) wakeWorktree(ctx context.Context, r *run, id CommitIdentity) error {
 	linked, err := d.worktreeLinked(r)
 	if err != nil {
-		return explained(conflict("worktree"), "The engine couldn't read the session's worktree without following a link, so the session didn't wake: "+clip(err.Error(), 300))
+		return conflict("worktree", "The engine couldn't read the session's worktree without following a link, so the session didn't wake: "+clip(err.Error(), 300))
 	}
 	if linked {
 		return nil
 	}
 	if _, err := d.readdWorktree(ctx, r, id, "while the session woke"); err != nil {
-		return explained(conflict("worktree"), "The session's worktree is missing or broken, and agent-host couldn't add it again on its branch, so the session didn't wake: "+clip(errText(err), 600)+" If the engine holds a copy of the branch, press Restore branch.")
+		return conflict("worktree", "The session's worktree is missing or broken, and agent-host couldn't add it again on its branch, so the session didn't wake: "+clip(errText(err), 600)+" If the engine holds a copy of the branch, press Restore branch.")
 	}
 	return nil
 }
@@ -264,7 +265,7 @@ func BoxWorktree(workspace, box, name string) string {
 }
 
 func oldLayout() *Error {
-	return explained(conflict("old container"), OldLayoutReason)
+	return conflict("old container", OldLayoutReason)
 }
 
 type downHost struct{ err error }
@@ -351,15 +352,15 @@ func boxError(err error) error {
 			n = m[1]
 		}
 		if n == "" {
-			return explained(limited("boxes"), "As many sessions are running as this stack allows. Stop one to start or wake this session.")
+			return limited("boxes", "As many sessions are running as this stack allows. Stop one to start or wake this session.")
 		}
-		return explained(limited("boxes"), n+" sessions are running, the most this stack allows. Stop one to start or wake this session.")
+		return limited("boxes", n+" sessions are running, the most this stack allows. Stop one to start or wake this session.")
 	case errors.Is(err, ErrBoxUnknown):
-		return explained(conflict("box unknown"), "The box helper doesn't know the session's container any more: "+msg)
+		return conflict("box unknown", "The box helper doesn't know the session's container any more: "+msg)
 	case errors.Is(err, ErrBoxUnavailable):
-		return explained(conflict("box helper"), "The box helper, which makes each session's container, didn't answer, so the session's container didn't start: "+msg)
+		return conflict("box helper", "The box helper, which makes each session's container, didn't answer, so the session's container didn't start: "+msg)
 	}
-	return explained(conflict("box"), "The session's container didn't start. Docker said: "+msg)
+	return conflict("box", "The session's container didn't start. Docker said: "+msg)
 }
 
 func (d *Dispatcher) loadBoxes() ([]BoxRecord, error) {
@@ -420,20 +421,20 @@ func (d *Dispatcher) forgetBox(box string) {
 
 func (d *Dispatcher) openBox(ctx context.Context, project, agent string) (string, error) {
 	if !d.boxed() || d.cfg.Folders == nil {
-		return "", explained(conflict("no agent-host"), "This engine has no box helper to start sessions' containers in.")
+		return "", conflict("no agent-host", "This engine has no box helper to start sessions' containers in.")
 	}
 	box, err := NewBox()
 	if err != nil {
-		return "", explained(conflict("box"), "The engine couldn't make a name for the session's container.")
+		return "", conflict("box", "The engine couldn't make a name for the session's container.")
 	}
 	if err := d.recordBox(box, project, agent); err != nil {
 		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-recorded")
-		return "", explained(conflict("state"), "The engine couldn't record the session's container, so no session started.")
+		return "", conflict("state", "The engine couldn't record the session's container, so no session started.")
 	}
 	if err := d.cfg.Folders.Make(box); err != nil {
 		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "folders-not-made", "box", box)
 		d.dropBox(box, false)
-		return "", explained(conflict("workspace"), "The engine couldn't make the session's folders in the workspace, so no session started.")
+		return "", conflict("workspace", "The engine couldn't make the session's folders in the workspace, so no session started.")
 	}
 	bctx, cancel := context.WithTimeout(ctx, boxCallFor)
 	defer cancel()
@@ -459,21 +460,21 @@ func (d *Dispatcher) upBox(ctx context.Context, box string) error {
 	}
 	if info.Box != box || !info.Agent.IsValid() || !info.Engine.IsValid() || !info.Subnet.IsValid() {
 		_ = d.cfg.Boxes.Stop(context.WithoutCancel(ctx), box)
-		return explained(conflict("box"), "The box helper answered with a container the engine can't use.")
+		return conflict("box", "The box helper answered with a container the engine can't use.")
 	}
 	d.forgetSeen()
 	if err := d.cfg.Routes.Up(ctx, info); err != nil {
 		d.cfg.Routes.Down(box)
 		_ = d.cfg.Boxes.Stop(context.WithoutCancel(ctx), box)
 		shared.For(ctx, d.cfg.Logger).Warn("boxes", "event", "not-routed", "box", box)
-		return explained(conflict("box"), "The engine couldn't reach the session's container: "+clip(err.Error(), 300))
+		return conflict("box", "The engine couldn't reach the session's container: "+clip(err.Error(), 300))
 	}
 	return nil
 }
 
 func (d *Dispatcher) wakeBox(ctx context.Context, box string) error {
 	if !d.boxed() {
-		return explained(conflict("no agent-host"), "This engine has no box helper to start sessions' containers in.")
+		return conflict("no agent-host", "This engine has no box helper to start sessions' containers in.")
 	}
 	if d.liveBox(box) {
 		err := d.ConfirmBox(ctx, box)
@@ -482,11 +483,11 @@ func (d *Dispatcher) wakeBox(ctx context.Context, box string) error {
 		}
 	}
 	if d.isUnstopped(box) && !d.retryStop(ctx, box) {
-		return explained(conflict("box not stopped"), "The box helper couldn't stop the session's container after its last stop, so the engine doesn't start the agent in it again. It retries the stop at every sandbox check; try again once the box helper answers.")
+		return conflict("box not stopped", "The box helper couldn't stop the session's container after its last stop, so the engine doesn't start the agent in it again. It retries the stop at every sandbox check; try again once the box helper answers.")
 	}
 	if d.cfg.Folders != nil {
 		if err := d.cfg.Folders.Make(box); err != nil {
-			return explained(conflict("workspace"), "The engine couldn't check the session's folders in the workspace.")
+			return conflict("workspace", "The engine couldn't check the session's folders in the workspace.")
 		}
 	}
 	bctx, cancel := context.WithTimeout(ctx, boxCallFor)
@@ -527,6 +528,33 @@ func (d *Dispatcher) clearBox(ctx context.Context, box string) {
 	}
 }
 
+func (d *Dispatcher) clearGone(box string) bool {
+	if !d.boxed() {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), boxCallFor)
+	defer cancel()
+	d.cfg.Logger.Info("boxes", "event", "started-to-clear", "box", box)
+	if err := d.cfg.Folders.Make(box); err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "folders-not-made", "box", box)
+		return false
+	}
+	if err := d.cfg.Boxes.Create(ctx, box); err != nil {
+		d.cfg.Logger.Warn("boxes", "event", "not-created", "box", box)
+		return false
+	}
+	up := d.upBox(ctx, box) == nil
+	if up {
+		d.clearBox(ctx, box)
+	}
+	d.cfg.Routes.Down(box)
+	if err := d.cfg.Boxes.Remove(ctx, box); err != nil && !errors.Is(err, ErrBoxUnknown) {
+		d.cfg.Logger.Warn("boxes", "event", "not-removed", "box", box)
+		return false
+	}
+	return up && d.cfg.Folders.Remove(box) == nil
+}
+
 func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	if !ValidBox(box) {
 		return false
@@ -545,7 +573,7 @@ func (d *Dispatcher) dropBox(box string, clear bool) bool {
 	}
 	folders := true
 	if d.cfg.Folders != nil {
-		if err := d.cfg.Folders.Remove(box); err != nil {
+		if err := d.cfg.Folders.Remove(box); err != nil && (!errors.Is(err, fs.ErrPermission) || !d.clearGone(box)) {
 			folders = false
 			d.cfg.Logger.Warn("boxes", "event", "folders-not-removed", "box", box)
 		}
@@ -768,7 +796,7 @@ func (d *Dispatcher) dropStillPending(box string) {
 
 func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *run) error {
 	if d.cfg.Clones == nil {
-		return explained(conflict("no clone"), "This engine can't make the session's own clone.")
+		return conflict("no clone", "This engine can't make the session's own clone.")
 	}
 	mainBranch := ""
 	if d.cfg.Repositories != nil {
@@ -790,14 +818,14 @@ func (d *Dispatcher) makeClone(ctx context.Context, r *run, main string, from *r
 	defer cancel()
 	if err := d.cfg.Clones.SessionClone(cctx, q); err != nil {
 		shared.For(ctx, d.cfg.Logger).Warn("dispatch", "event", "clone-failed")
-		return explained(conflict("clone"), "The engine couldn't make the session's own clone of "+r.repo+": "+clip(err.Error(), 600))
+		return conflict("clone", "The engine couldn't make the session's own clone of "+r.repo+": "+clip(err.Error(), 600))
 	}
 	return nil
 }
 
 func (d *Dispatcher) carried(from *run, head, main string) ([]push.Object, error) {
 	if d.cfg.CloneReader == nil {
-		return nil, explained(conflict("no reader"), "This engine can't read the other session's commits.")
+		return nil, conflict("no reader", "This engine can't read the other session's commits.")
 	}
 	d.mu.Lock()
 	clone, box := from.clone, from.box
@@ -813,7 +841,7 @@ func (d *Dispatcher) carried(from *run, head, main string) ([]push.Object, error
 		return nil, oldLayout()
 	}
 	if _, err := d.cfg.CloneReader.Commit(clone, head); err != nil {
-		return nil, explained(conflict("from"), "The engine couldn't read commit "+shortSHA(head)+" in the other session's clone.")
+		return nil, conflict("from", "The engine couldn't read that session's commit "+shortSHA(head)+".")
 	}
 	have := []string{}
 	for _, h := range []string{main, synced, base} {
@@ -823,10 +851,10 @@ func (d *Dispatcher) carried(from *run, head, main string) ([]push.Object, error
 	}
 	objects, err := d.cfg.CloneReader.ObjectsToSend(clone, head, have)
 	if errors.Is(err, push.ErrTooLarge) {
-		return nil, explained(conflict("from"), "The other session's commits are larger than the engine carries into a new session's clone.")
+		return nil, conflict("from", "That session's commits are too large to carry over.")
 	}
 	if err != nil {
-		return nil, explained(conflict("from"), "The engine couldn't read the other session's commits: "+clip(err.Error(), 300))
+		return nil, conflict("from", "The engine couldn't read that session's commits.")
 	}
 	return objects, nil
 }
@@ -835,7 +863,7 @@ func (d *Dispatcher) checkWorktree(r *run, cwd string) error {
 	want := BoxWorktree(d.cfg.Workspace, r.box, r.name)
 	if want == "" || cwd != want {
 		d.cfg.Logger.Warn("dispatch", "event", "worktree-path-refused")
-		return explained(conflict("worktree"), "agent-host answered a worktree path that isn't the session's own folder, so the engine doesn't use it.")
+		return conflict("worktree", "agent-host answered a worktree path that isn't the session's own folder, so the engine doesn't use it.")
 	}
 	return nil
 }
@@ -884,16 +912,16 @@ func (d *Dispatcher) unwait(box string) {
 
 func (d *Dispatcher) resume(ctx context.Context, q Dispatch, spec AgentSpec, repo Repository) (Started, error) {
 	if !ValidBox(q.Box) {
-		return Started{}, explained(invalid("box"), "")
+		return Started{}, invalid("box", "That isn't a session's container on this engine. Reload the page and try again.")
 	}
 	d.mu.Lock()
 	r := d.waiting[q.Box]
 	d.mu.Unlock()
 	if r == nil {
-		return Started{}, explained(notFound("box"), "That start isn't waiting any more. Start the session again.")
+		return Started{}, notFound("box", "That start isn't waiting any more. Start the session again.")
 	}
 	if r.repoPath != repo.Path || r.spec.ID != spec.ID {
-		return Started{}, explained(conflict("box"), "That session's container waits for another project or agent.")
+		return Started{}, conflict("box", "That session's container waits for another project or agent.")
 	}
 	kept := false
 	defer func() {
@@ -960,10 +988,10 @@ func (d *Dispatcher) startSource(repo Repository, q Dispatch) (*run, error) {
 	r := d.runs[sid]
 	d.mu.Unlock()
 	if r == nil || r.repoPath != repo.Path {
-		return nil, explained(notFound("from"), "That session isn't one of this project's sessions on this engine.")
+		return nil, notFound("from", "That session isn't one of this project's.")
 	}
 	if r.history {
-		return nil, explained(conflict("history only"), historyMessage)
+		return nil, conflict("history only", historyMessage)
 	}
 	if r.box == "" || r.clone == "" {
 		return nil, oldLayout()

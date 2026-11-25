@@ -15,19 +15,25 @@ export function barStatus(detail: string) {
   title.hidden = !detail
 }
 
-function barFits(bar: HTMLElement): boolean {
-  const style = getComputedStyle(bar)
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+function sideNeed(side: Element, rem: number): number {
   let need = 0
   let shown = 0
-  for (const c of bar.children) {
+  for (const c of side.children) {
     if (!c.getClientRects().length) continue
     shown++
     if (c.id === 'state') need += (document.body.classList.contains('live') ? 8 : 6) * rem
-    else if (c.id !== 'title' && !c.classList.contains('spacer')) need += c.getBoundingClientRect().width
+    else if (c.id !== 'title') need += c.getBoundingClientRect().width
   }
-  need += (parseFloat(style.columnGap) || 0) * Math.max(0, shown - 1)
-  return need <= bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+  return need + (parseFloat(getComputedStyle(side).columnGap) || 0) * Math.max(0, shown - 1)
+}
+
+function barFits(bar: HTMLElement): boolean {
+  const style = getComputedStyle(bar)
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const inner = bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+  const box = byId('palette-open').getBoundingClientRect().width
+  const room = (inner - box) / 2 - (parseFloat(style.columnGap) || 0)
+  return [...bar.querySelectorAll(':scope > .bar-side')].every(side => sideNeed(side, rem) <= room)
 }
 
 function fitBar() {
@@ -73,6 +79,7 @@ function placeSide() {
   document.body.classList.toggle('wide', now)
   byId<HTMLElementTagNameMap['sf-docs']>('docs').navSlot = now ? byId('docs-side') : null
   byId<HTMLElementTagNameMap['sf-projects']>('projects').sideSlot = now ? byId('projects-side') : null
+  byId<HTMLElementTagNameMap['sf-project-page']>('project-page').navSlot = now ? byId('project-page-side') : null
 }
 
 export function paintSide(s: Session | null) {
@@ -129,11 +136,19 @@ export function startLayout({ jumpLatest }: { jumpLatest: () => void }) {
   new MutationObserver(measureFrame).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
   placeSide()
   byId('frame').addEventListener('wheel', e => {
-    const side = e.target instanceof Element ? e.target.closest<HTMLElement>('.page-side') : null
-    const still = !!side && side.scrollHeight <= side.clientHeight
+    const target = e.target instanceof Element ? e.target : null
+    const side = target?.closest<HTMLElement>('.page-side') ?? null
+    const still = !!target && !!side && !scrollsWithin(target, side)
     if (e.target !== e.currentTarget && !still) return
     scroller.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * scroller.clientHeight : e.deltaY
   }, { passive: true })
+}
+
+function scrollsWithin(node: Element, root: Element): boolean {
+  for (let n: Element | null = node; n; n = n === root ? null : n.parentElement) {
+    if (n.scrollHeight > n.clientHeight && /auto|scroll/.test(getComputedStyle(n).overflowY)) return true
+  }
+  return false
 }
 
 export function startTopBar() {

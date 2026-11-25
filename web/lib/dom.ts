@@ -1,3 +1,7 @@
+import { INVISIBLE, visible } from '../types.ts'
+
+export { visible }
+
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K]
 export function el(tag: string, cls?: string, text?: string): HTMLElement
 export function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -8,12 +12,6 @@ export function el(tag: string, cls?: string, text?: string): HTMLElement {
 }
 
 export const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-
-const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
-
-export function visible(text: string): string {
-  return String(text).replace(INVISIBLE, c => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, '0')}}`)
-}
 
 const SPOOFING = /[\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu
 
@@ -33,11 +31,40 @@ export function shown(text: string): string {
   return visible(unspoofed(text))
 }
 
-export function visibleCommand(text: string): string {
-  return visible(text)
-    .replace(/(?:\n[ \t]*){4,}/g, run => `\n⏎ ×${run.split('\n').length - 2}\n`)
+export interface NumberedLine {
+  text: string
+  line: number
+}
+
+const BLANK_RUN = /(?:\n[ \t]*){4,}/g
+
+function shortSpaces(line: string): string {
+  return line
     .replace(/(\S) {8,}/g, (run, before: string) => `${before} ␠ ×${run.length - before.length} `)
-    .replace(/^ {32,}/gm, run => `␠ ×${run.length} `)
+    .replace(/^ {32,}/, run => `␠ ×${run.length} `)
+}
+
+export function visibleCommandLines(text: string): NumberedLine[] {
+  const shown = visible(text)
+  const out: NumberedLine[] = []
+  const add = (part: string, first: number) => part.split('\n').forEach((t, i) => out.push({ text: shortSpaces(t), line: first + i }))
+  let from = 0
+  let line = 1
+  for (const run of shown.matchAll(BLANK_RUN)) {
+    const part = shown.slice(from, run.index)
+    add(part, line)
+    line += part.split('\n').length - 1
+    const breaks = run[0].split('\n').length - 1
+    out.push({ text: `⏎ ×${breaks - 1}`, line: line + 1 })
+    line += breaks
+    from = run.index + run[0].length
+  }
+  add(shown.slice(from), line)
+  return out
+}
+
+export function visibleCommand(text: string): string {
+  return visibleCommandLines(text).map(l => l.text).join('\n')
 }
 
 export function focusedKey(root: HTMLElement): string {
@@ -68,32 +95,48 @@ export function button(text: string, cls = '', onClick?: () => void, type: 'butt
   return b
 }
 
-let fields = 0
+let ids = 0
 
-function labelTarget(control: HTMLElement): HTMLElement {
-  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement || control instanceof HTMLButtonElement) return control
-  return control.querySelector<HTMLElement>('input, select, textarea') ?? control
-}
-
-export function field(label: string, control: HTMLElement, help?: string, cls = 'field'): HTMLDivElement {
-  const target = labelTarget(control)
-  if (!target.id) target.id = `field-${++fields}`
-  const box = el('div', cls)
-  const name = el('label', 'small', label)
-  name.htmlFor = target.id
-  box.append(name, control)
-  if (help) {
-    const note = el('p', 'small muted', help)
-    note.id = `${target.id}-help`
-    const described = (target.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
-    if (!described.includes(note.id)) target.setAttribute('aria-describedby', [...described, note.id].join(' '))
-    box.append(note)
-  }
-  return box
+export function ensureId(node: HTMLElement): string {
+  if (!node.id) node.id = `field-${++ids}`
+  return node.id
 }
 
 const TONES = ['bad', 'warn', 'ok', 'muted'] as const
 export type Tone = typeof TONES[number]
+
+export function labelError(input: HTMLElement, message: string): void {
+  const id = `${ensureId(input)}-error`
+  const root = input.getRootNode()
+  const scope = root instanceof Document || root instanceof DocumentFragment || root instanceof Element ? root : null
+  const label = scope?.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(input.id)}"]`) ?? null
+  label?.querySelector('.label-error')?.remove()
+  if (label?.dataset.shownForError) {
+    label.classList.replace('small', 'sr-only')
+    delete label.dataset.shownForError
+  }
+  const described = (input.getAttribute('aria-describedby') ?? '').split(' ').filter(d => d && d !== id)
+  if (!message || !label) {
+    input.removeAttribute('aria-invalid')
+    if (described.length) input.setAttribute('aria-describedby', described.join(' '))
+    else input.removeAttribute('aria-describedby')
+    return
+  }
+  const note = el('span', 'label-error', `(${message.trim().replace(/\.$/, '')})`)
+  note.id = id
+  note.setAttribute('aria-hidden', 'true')
+  label.append(note)
+  if (label.classList.replace('sr-only', 'small')) label.dataset.shownForError = 'yes'
+  input.setAttribute('aria-invalid', 'true')
+  input.setAttribute('aria-describedby', [...described, id].join(' '))
+  const cleared = new AbortController()
+  const clear = () => {
+    cleared.abort()
+    if (note.isConnected) labelError(input, '')
+  }
+  input.addEventListener('input', clear, { signal: cleared.signal })
+  input.addEventListener('change', clear, { signal: cleared.signal })
+}
 
 export function statusLine(cls?: string): HTMLParagraphElement
 export function statusLine(cls: string, tag: 'span'): HTMLSpanElement
@@ -216,7 +259,7 @@ function busyLine(layer: Element): HTMLSpanElement {
   let line = busyLines.get(layer)
   if (!line?.isConnected) {
     line = statusLine('sr-only', 'span')
-    layer.append(line)
+    layer.prepend(line)
     busyLines.set(layer, line)
   }
   return line
@@ -282,6 +325,31 @@ function busyStarted(b: HTMLButtonElement): void {
   busyChecks ??= setInterval(checkBusy, BUSY_CHECKED_EVERY_MS)
 }
 
+const unplaced = new Set<WeakRef<HTMLButtonElement>>()
+let placing: MutationObserver | undefined
+
+function placeBusy(): void {
+  for (const ref of unplaced) {
+    const b = ref.deref()
+    if (!b || !resting.has(b)) unplaced.delete(ref)
+    else if (b.isConnected) {
+      unplaced.delete(ref)
+      busyStarted(b)
+    }
+  }
+  if (unplaced.size) return
+  placing?.disconnect()
+  placing = undefined
+}
+
+function awaitPlace(b: HTMLButtonElement): void {
+  for (const ref of unplaced) if (ref.deref() === b) return
+  unplaced.add(new WeakRef(b))
+  if (placing || typeof MutationObserver === 'undefined') return
+  placing = new MutationObserver(placeBusy)
+  placing.observe(document, { childList: true, subtree: true })
+}
+
 if (typeof document !== 'undefined' && document.body) busyLines.set(document.body, document.body.appendChild(statusLine('sr-only', 'span')))
 
 export function busy(b: HTMLButtonElement, on: boolean): void {
@@ -293,12 +361,13 @@ export function busy(b: HTMLButtonElement, on: boolean): void {
     b.setAttribute('aria-busy', 'true')
     b.setAttribute('aria-disabled', 'true')
     if (b.isConnected) busyStarted(b)
-    else queueMicrotask(() => busyStarted(b))
+    else awaitPlace(b)
     return
   }
   if (!resting.has(b)) return
   const before = resting.get(b) ?? null
   resting.delete(b)
+  if (unplaced.size) placeBusy()
   busySince.delete(b)
   delete b.dataset.busyShown
   b.removeAttribute('aria-busy')
@@ -359,18 +428,6 @@ export function remembered(open: Map<string, boolean>, key: string, openByDefaul
   d.addEventListener('toggle', () => open.set(key, d.open))
   d.append(summary, ...content)
   return d
-}
-
-export function pageCrumb(text: string): HTMLElement {
-  const nav = el('nav', 'crumbs')
-  nav.setAttribute('aria-label', 'Breadcrumb')
-  const li = el('li')
-  li.setAttribute('aria-current', 'page')
-  li.append(el('h1', '', text))
-  const ol = el('ol')
-  ol.append(li)
-  nav.append(ol)
-  return nav
 }
 
 export function focusView(): void {

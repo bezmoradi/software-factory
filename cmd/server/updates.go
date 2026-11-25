@@ -73,8 +73,6 @@ func updateFacts(u session.UpdatesPage) []session.DiagFact {
 		on = "off by SF_NO_UPDATE_CHECK"
 	case v.Unreadable:
 		on = "off: settings unreadable"
-	case !v.Check:
-		on = "off"
 	}
 	return []session.DiagFact{{Name: "update check", Value: on}, {Name: "update check result", Value: v.Result}}
 }

@@ -14,7 +14,7 @@ const (
 	MaxHostName       = 253
 	MaxGatewayURL     = 512
 	maxGatewayPath    = 256
-	GatewayKeyNote    = "Paste the gateway's key or token with its address for the reviewers; for Claude Code sessions, paste it in each session's sign-in panel, since each session runs in its own container. The engine passes it only to the container it was pasted for, which saves it for Claude Code's apiKeyHelper, as with a pasted API key, and the page never shows it again. Claude Code sends it in both the Authorization (Bearer) and x-api-key headers. Turning the gateway on for a side, changing its host, turning a side off or removing the gateway first removes the key saved there, an API key included, so no key reaches an address it wasn't pasted for."
+	GatewayKeyNote    = "Paste its key or token here for the reviewers, and in each session's sign-in panel for that session."
 	UploadsWarning    = "also accepts uploads, such as publishing a package, so an agent could send your code out through it."
 	PyPIReadHostsNote = "For installs from PyPI, add only its read hosts, pypi.org and files.pythonhosted.org; upload.pypi.org takes uploads."
 )
@@ -126,6 +126,23 @@ func UploadHost(entry string) bool {
 	return false
 }
 
+func HostNote(typed string) string {
+	if PyPIHost(HostName(typed)) {
+		return PyPIReadHostsNote
+	}
+	return ""
+}
+
+func (r RefusalView) Note() string {
+	switch {
+	case len(r.Suggest) > 0:
+		return PyPIReadHostsNote
+	case r.Uploads:
+		return r.Host + " also accepts uploads."
+	}
+	return ""
+}
+
 func PyPIHost(entry string) bool {
 	bare, wild := strings.CutPrefix(entry, ".")
 	if bare == "pythonhosted.org" || strings.HasSuffix(bare, ".pythonhosted.org") || bare == "pypi.org" || strings.HasSuffix(bare, ".pypi.org") {
@@ -140,30 +157,30 @@ func PyPIHost(entry string) bool {
 func CheckGatewayURL(raw string) (string, string, error) {
 	raw = strings.TrimSpace(raw)
 	bad := func(why string) (string, string, error) {
-		return "", "", explained(invalid("gateway"), why)
+		return "", "", invalid("gateway", why)
 	}
 	if raw == "" || len(raw) > MaxGatewayURL {
-		return bad("The gateway's base URL needs 1 to 512 characters.")
+		return bad("Needs 1 to 512 characters.")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Opaque != "" {
-		return bad("The gateway's base URL must start with https:// and name a host, such as https://llm-gateway.example.com.")
+		return bad("Needs an address like https://llm.example.com.")
 	}
 	if u.User != nil {
-		return bad("The gateway's base URL can't hold a user name or password. Paste its key or token in the key field instead.")
+		return bad("Leave out the user name and password.")
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
-		return bad("The gateway's base URL can't have a query (?) or a fragment (#).")
+		return bad("Can't have a query (?) or a fragment (#).")
 	}
 	if p := u.Port(); p != "" && p != "443" {
-		return bad("The gateway must answer on port 443: egress lets agents reach only that port.")
+		return bad("Needs port 443 or none.")
 	}
 	host := HostName(u.Hostname())
 	if strings.HasPrefix(host, ".") || !ValidAllowEntry(host) {
-		return bad("The gateway's base URL must name one host by a name with at least two labels, not an IP address or a leading dot for subdomains.")
+		return bad("Needs one host name, like llm.example.com.")
 	}
 	if len(u.EscapedPath()) > maxGatewayPath || strings.ContainsAny(u.Path, "\x00\r\n\t ") {
-		return bad("The gateway's base URL path is longer than 256 characters or holds spaces or control characters.")
+		return bad("Needs a path of at most 256 characters, no spaces.")
 	}
 	out := url.URL{Scheme: "https", Host: host, Path: strings.TrimRight(u.Path, "/"), RawPath: strings.TrimRight(u.RawPath, "/")}
 	return out.String(), host, nil

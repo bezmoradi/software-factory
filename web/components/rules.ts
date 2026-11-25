@@ -1,10 +1,13 @@
-import { api } from '../api.ts'
-import { button, el, emit, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { button, el, emit, say, shown, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { haltView } from './halt.ts'
 import { when } from './usage.ts'
+import { emptyState } from '../lib/page.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { toast } from './toasts.ts'
 
-export type RulesLink = 'allow-rules' | 'egress' | 'team' | 'away' | 'exceptions'
+export type RulesLink = 'egress' | 'team' | 'away' | 'exceptions'
 
 export interface RulesView {
   sid: string
@@ -15,7 +18,7 @@ export interface RulesView {
   box: string
 }
 
-type Answer = { ok: boolean; body: Record<string, unknown> }
+type Answer = EngineAnswer
 
 const FIXED: { what: string; why: string; claude?: boolean }[] = [
   { what: 'Reach a built-in git host or one on the deny list', why: 'Egress always refuses GitHub, githubusercontent.com, GitLab, Bitbucket and the hosts on its deny list. Another git host you add under Network access is reachable like any allowed host.' },
@@ -28,22 +31,15 @@ const FIXED: { what: string; why: string; claude?: boolean }[] = [
 
 const NOT_CLAUDE = 'This session’s agent isn’t Claude Code, so the gate’s command and write checks (push-shaped commands, cloud hand-off commands, protected paths) don’t apply to it: only its pushes go through the gate.'
 
-const PLACES: Record<string, string> = { clone: 'the clone folder, shared by the project’s sessions', worktree: 'this session’s worktree', user: 'the agent’s user settings in this session’s container' }
-
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
 const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
 const records = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)) : [])
 const record = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
 
-async function call(route: string, body: unknown): Promise<Answer> {
-  const res = await api(route, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  return { ok: res.ok, body: record(parsed) }
-}
+const OUTSIDE: Answer = { ok: false, status: 0, error: '', field: '', message: 'This session isn’t in a project of your list.', body: {} }
 
-function failed(a: Answer, fallback: string): HTMLElement {
-  return el('p', 'small warn', text(a.body.message) ? visible(text(a.body.message)) : fallback)
+function failed(a: Answer): HTMLElement {
+  return el('p', 'small warn', a.message)
 }
 
 class SfRules extends HTMLElement {
@@ -51,20 +47,19 @@ class SfRules extends HTMLElement {
   #details = el('details', 'rules-panel')
   #body = el('div', 'rules-body')
   #status = statusLine('small muted')
-  #loaded = ''
-  #pending = ''
-  #gen = 0
+  #removeSaid = statusLine('small')
+  #poll: WhileOpen | null = null
 
   constructor() {
     super()
     const summary = el('summary', 'label', 'What this session may and may not do')
     summary.dataset.key = 'rules:summary'
-    const refresh = button('Refresh', 'ghost small', () => void whileBusy(refresh, () => this.#load(true)), 'button', 'rules:refresh')
     const head = el('div', 'row rules-head')
-    head.append(el('p', 'small muted', 'What the engine holds for this session now, read only. Each item you can change links to where it changes; the fixed refusals have no such link.'), refresh)
+    head.append(el('p', 'small muted', 'What the engine holds for this session now. Remove a saved rule here; each other item you can change links to where it changes, and the fixed refusals have no such link.'))
     this.#details.append(summary, head, this.#status, this.#body)
     this.#details.addEventListener('toggle', () => {
-      if (this.#details.open) void this.#load(false)
+      if (!this.#details.open) this.#stop()
+      else if (!this.#poll?.live) this.#load()
     })
   }
 
@@ -77,17 +72,15 @@ class SfRules extends HTMLElement {
     this.#view = v
     this.hidden = !v
     if (same) return
-    this.#gen++
-    this.#pending = ''
-    this.#loaded = ''
+    this.#stop()
     this.#body.replaceChildren()
     this.#status.textContent = ''
-    if (v && this.#details.open) void this.#load(false)
+    if (v && this.#details.open) this.#load()
   }
 
   open() {
     this.#details.open = true
-    void this.#load(false)
+    if (!this.#poll?.live) this.#load()
     this.scrollIntoView({ block: 'start' })
     this.querySelector<HTMLElement>('summary')?.focus()
   }
@@ -104,23 +97,35 @@ class SfRules extends HTMLElement {
     return s
   }
 
-  async #load(force: boolean) {
+  #stop() {
+    this.#poll?.stop()
+    this.#poll = null
+  }
+
+  #load() {
     const v = this.#view
-    if (!v || (!force && (this.#loaded === v.sid || this.#pending === v.sid))) return
-    const gen = ++this.#gen
-    this.#pending = v.sid
+    if (!v) return
+    this.#stop()
     this.#status.textContent = 'Reading what the engine holds…'
-    const [rules, egress, team, exceptions] = await Promise.all([
-      v.repo ? call('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
-      call('/api/egress', { op: 'read' }),
-      v.path ? call('/api/team', { path: v.path, op: 'read' }) : Promise.resolve<Answer>({ ok: false, body: { message: 'This session isn’t in a project of your list.' } }),
-      call('/api/exceptions', {}),
-    ])
-    if (gen !== this.#gen || this.#view?.sid !== v.sid) return
-    this.#pending = ''
-    this.#loaded = v.sid
-    this.#status.textContent = `Read at ${when(Date.now())}.`
-    this.#body.replaceChildren(this.#fixed(v), this.#saved(v, rules), this.#hosts(egress), this.#limits(v, team), this.#away(v), this.#register(v, exceptions))
+    let team: Promise<Answer> | null = null
+    const current = () => this.#view === v && this.#details.open
+    this.#poll = whileOpen({
+      root: this.#body,
+      everyMs: CHEAP_EVERY_MS,
+      open: () => this.#details.open && this.checkVisibility(),
+      read: async () => {
+        team ??= v.path ? request('/api/team', { path: v.path, op: 'read' }) : Promise.resolve(OUTSIDE)
+        const [rules, egress, teamFile, exceptions] = await Promise.all([
+          v.repo ? request('/api/allow-rules', { op: 'list', repo: v.repo }) : Promise.resolve(OUTSIDE),
+          request('/api/egress', { op: 'read' }),
+          team,
+          request('/api/exceptions', {}),
+        ])
+        if (current()) this.#status.textContent = `Read at ${when(Date.now())}.`
+        return { rules, egress, teamFile, exceptions }
+      },
+      show: a => this.#body.replaceChildren(this.#fixed(v), this.#saved(v, a.rules), this.#hosts(a.egress), this.#limits(v, a.teamFile), this.#away(v), this.#register(v, a.exceptions)),
+    })
   }
 
   #fixed(v: RulesView): HTMLElement {
@@ -138,31 +143,46 @@ class SfRules extends HTMLElement {
   }
 
   #saved(v: RulesView, a: Answer): HTMLElement {
-    const link = this.#link('Change on Projects', 'allow-rules', 'the saved allow rules of this project')
-    if (!a.ok) return this.#section('Saved “don’t ask again” rules', failed(a, 'The saved rules didn’t load.'), link)
+    const title = 'Saved “don’t ask again” rules'
+    if (!a.ok) return this.#section(title, failed(a))
     const mine = records(a.body.rules).filter(r => text(r.rule) && (text(r.place) === 'clone' || (!!v.box && text(r.box) === v.box)))
     const ul = el('ul', 'list rules-list')
-    if (!mine.length) ul.append(el('li', 'small muted', a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.'))
+    if (!mine.length) ul.append(emptyState(a.body.idle === true ? 'No session of this project is running, so no session’s container was read; none was found in the clone folder.' : 'None saved.', { tag: 'li' }))
     for (const r of mine) {
-      const li = el('li', 'small')
-      li.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${PLACES[text(r.place)] ?? visible(text(r.place))}`))
+      const li = el('li', 'row text-row')
+      const what = el('span', 'small')
+      what.append(el('code', '', visible(text(r.rule))), ' ', el('span', 'muted', `in ${visible(text(r.placeLabel) || text(r.place))}`))
       const wide = strings(r.wide)
-      if (wide.length) li.append(' ', el('span', 'tag warn', 'wide'), el('span', 'small warn', ` ${wide.map(visible).join('; ')}`))
+      if (wide.length) what.append(' ', el('span', 'tag warn', 'wide'), el('span', 'small warn', ` ${wide.map(visible).join('; ')}`))
+      const key = `rules:remove:${text(r.box)}:${text(r.place)}:${text(r.worktree)}:${text(r.rule)}`
+      const remove = button('Remove', 'ghost small', () => void this.#remove(v, r, remove), 'button', key)
+      remove.setAttribute('aria-label', `Remove the rule ${visible(text(r.rule))} from ${visible(text(r.path))}`)
+      li.append(what, el('span', 'spacer'), remove)
       ul.append(li)
     }
-    return this.#section('Saved “don’t ask again” rules', ul, link)
+    return this.#section(title, ul, this.#removeSaid)
+  }
+
+  async #remove(v: RulesView, r: Record<string, unknown>, b: HTMLButtonElement) {
+    const body: Record<string, unknown> = { op: 'remove', repo: v.repo, box: text(r.box), place: text(r.place), rule: text(r.rule) }
+    if (text(r.worktree)) body.worktree = text(r.worktree)
+    say(this.#removeSaid, '')
+    const a = await whileBusy(b, () => request('/api/allow-rules', body))
+    if (!a.ok) return say(this.#removeSaid, a.message, 'warn')
+    toast({ id: `allow-rules:${v.repo}`, title: `Removed ${visible(text(r.rule))} from ${visible(text(r.path))}. The next matching call shows a card again.`, tone: 'ok' })
+    void this.#poll?.now()
   }
 
   #hosts(a: Answer): HTMLElement {
     const link = this.#link('Change under Network access', 'egress', 'the hosts sessions may reach')
-    if (!a.ok) return this.#section('Hosts the session may reach', failed(a, 'Network access didn’t load.'), link)
+    if (!a.ok) return this.#section('Hosts the session may reach', failed(a), link)
     const lists = record(a.body.lists)
     const allow = strings(record(lists.agents).allow)
     const now = Number(a.body.now) || Math.floor(Date.now() / 1000)
     const added = records(a.body.added).filter(h => text(h.host))
     const parts: Node[] = []
     const ul = el('ul', 'list rules-hosts')
-    if (!allow.length) ul.append(el('li', 'small muted', 'No host: every connection is refused.'))
+    if (!allow.length) ul.append(emptyState('No host: every connection is refused.', { tag: 'li' }))
     for (const h of allow) {
       const extra = added.find(x => text(x.host) === h)
       const li = el('li', 'small')
@@ -175,14 +195,14 @@ class SfRules extends HTMLElement {
     }
     parts.push(ul)
     const gw = record(a.body.gateway)
-    if (text(gw.url)) parts.push(el('p', 'small warn', `A company LLM gateway, ${visible(text(gw.host))}, is set${gw.agents === true ? ' for the sessions' : ''}.`))
+    if (text(gw.url)) parts.push(el('p', 'small warn', `A company LLM gateway, ${visible(text(gw.host))}, is set for the sessions.`))
     parts.push(el('p', 'small muted', 'Every session shares this list; egress tells sessions apart only by their container.'), link)
     return this.#section('Hosts the session may reach', ...parts)
   }
 
   #limits(v: RulesView, a: Answer): HTMLElement {
     const link = this.#link('Review the team file', 'team', 'the protect list in the team file on main')
-    if (!a.ok) return this.#section('Paths it must ask before writing', failed(a, 'The team file didn’t load.'), link)
+    if (!a.ok) return this.#section('Paths it must ask before writing', failed(a), link)
     const setup = record(a.body.setup)
     const protect = strings(setup.protect)
     const approved = record(a.body.approved)
@@ -193,7 +213,7 @@ class SfRules extends HTMLElement {
       const applies = !!a.body.approved && approved.same === true
       parts.push(el('p', `small ${applies ? 'muted' : 'warn'}`, `From software-factory.json on main${head ? ` at ${shortSha(head)}` : ''}. ${applies ? 'You approved this version, so it applies.' : !a.body.approved ? 'You haven’t approved it, so it doesn’t apply yet.' : 'It changed since you approved it, so it applies once you approve this version.'}`))
       const ul = el('ul', 'list rules-list')
-      if (!protect.length) ul.append(el('li', 'small muted', 'No path is protected.'))
+      if (!protect.length) ul.append(emptyState('No path is protected.', { tag: 'li' }))
       for (const p of protect) ul.append(el('li', 'small mono', shown(p)))
       parts.push(ul, el('p', `small ${v.claude ? 'muted' : 'warn'}`, v.claude ? 'Claude Code shows a card before each write to these paths, with no “don’t ask again”. A push is never held by path.' : 'This session’s agent isn’t Claude Code, so it writes these paths without a card. A push is never held by path.'))
     }
@@ -205,19 +225,17 @@ class SfRules extends HTMLElement {
     const h = haltView()
     const on = h.awayAll || h.away.includes(v.sid)
     const parts: Node[] = [el('p', `small ${on ? 'warn' : ''}`, on ? `Away mode is on${h.awayAll ? ' for every session' : ' for this session'}: each new permission card is denied with a note to the agent.` : 'Away mode is off: permission cards wait for you.')]
-    if (h.mode === 'stopped') parts.push(el('p', 'small bad', 'Stop everything is on: this session can’t start, wake or take messages until Release.'))
-    else if (h.mode === 'paused') parts.push(el('p', 'small warn', 'Pause all is on: no new turn starts and no automatic review or push runs until Release.'))
     parts.push(this.#link('Change with Away in the header', 'away', 'away mode'))
     return this.#section('Away mode', ...parts)
   }
 
   #register(v: RulesView, a: Answer): HTMLElement {
     const link = this.#link('Open the register of exceptions', 'exceptions', 'every exception you made')
-    if (!a.ok) return this.#section('Exceptions you made for this session', failed(a, 'The register didn’t load.'), link)
+    if (!a.ok) return this.#section('Exceptions you made for this session', failed(a), link)
     const mine = records(a.body.items).filter(i => text(i.sid) === v.sid)
     const KIND: Record<string, string> = { 'allow-push': 'Push allowed with items missing', override: 'Verdict overridden', 'allow-file': 'Flagged file allowed', 'allow-commit': 'Flagged commit allowed', 'cap-reached': 'Cap reached', 'cap-answer': 'Cap card answered', 'usage-answer': 'Kept running near a usage limit' }
     const ul = el('ul', 'list rules-list')
-    if (!mine.length) ul.append(el('li', 'small muted', 'None recorded for this session.'))
+    if (!mine.length) ul.append(emptyState('None recorded for this session.', { tag: 'li' }))
     for (const i of mine.slice(0, 10)) {
       const li = el('li', 'small')
       const at = Number(i.time) || 0

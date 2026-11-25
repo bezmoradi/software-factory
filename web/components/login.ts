@@ -1,28 +1,20 @@
-import { busy, button, el, field, say, sayIfChanged, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { UNREAD, type EngineAnswer } from '../api.ts'
+import { busy, button, el, labelError, say, statusLine, visible } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs } from '../lib/dialog-docs.ts'
+import { actions, field, form, showAnswer } from '../lib/form.ts'
 import type { Needs, SignIn } from '../types.ts'
 import './accordion.ts'
 import { secret } from './secret.ts'
-import { commandBlock } from './copy.ts'
+import { codeBlock } from './code-block.ts'
 import { GATEWAY_WARNING } from './egress-panel.ts'
 import { when } from './usage.ts'
+import { textbox } from '../lib/controls.ts'
+import { WALK_EVERY_MS, whileOpen } from '../lib/refresh.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
-
-interface Answer {
-  ok: boolean
-  body: Record<string, unknown>
-}
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/claude-login'
-
-async function call(post: Post, body: unknown): Promise<Answer> {
-  const res = await post(ROUTE, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  const record = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-  return { ok: res.ok, body: record }
-}
 
 function signInOf(v: unknown): SignIn | null {
   if (v === null || typeof v !== 'object') return null
@@ -62,15 +54,11 @@ function describe(s: SignIn | null, busy = false): string {
 
 const PER_USE = ['api-key', 'gateway', 'bedrock', 'vertex']
 
-function secretField(name: string, words: string, what: string, autocomplete: AutoFill): [HTMLElement, HTMLInputElement] {
-  const input = el('input', 'textbox')
-  input.type = 'password'
-  input.name = name
-  input.autocomplete = autocomplete
-  input.spellcheck = false
-  input.required = true
-  input.maxLength = 512
-  return [field(words, secret(input, what), undefined, 'login-field'), input]
+function secretField(name: string, words: string, what: string, autocomplete: AutoFill, inBox = false): [HTMLElement, HTMLInputElement] {
+  const input = textbox({ type: 'password', name, autocomplete, spellcheck: false, ...(inBox ? { placeholder: words } : {}) })
+  input.setAttribute('aria-required', 'true')
+  input.addEventListener('input', () => labelError(input, ''))
+  return [field(words, secret(input, what), { cls: 'login-field', ...(inBox ? { kind: 'hidden' as const } : {}) }), input]
 }
 
 function sending(input: HTMLInputElement, on: boolean) {
@@ -88,12 +76,16 @@ class Row {
   private readonly codeGo = button('Complete sign-in', 'primary small', undefined, 'submit')
   private readonly keyGo = button('Save key', 'primary small', undefined, 'submit')
   private readonly link = el('a', 'button primary small', 'Sign in')
-  private readonly linkSaid = statusLine('small muted status-slot')
+  private readonly linkWait = button('Sign in', 'primary small')
+  private readonly linkRow = el('div', 'login-link')
   private readonly code: HTMLInputElement
   private readonly key: HTMLInputElement
+  private readonly codeForm: HTMLFormElement
+  private readonly keyForm: HTMLFormElement
   private readonly subscription = el('div', 'login-panel')
   private readonly apiKey = el('div', 'login-panel')
   private waiting = false
+  private fetching = false
   private starting = 0
   private signIn: SignIn | null = null
   private current = true
@@ -107,25 +99,28 @@ class Row {
     this.signedIn = signedIn
     this.link.target = '_blank'
     this.link.rel = 'noopener noreferrer'
-    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code')
+    const [codeLabel, code] = secretField('code', 'Code from claude.com', 'code', 'one-time-code', true)
     this.code = code
-    const codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
+    this.codeForm = this.form(codeLabel, this.codeGo, () => void this.finishCode())
     this.subscription.append(
       el('p', 'small muted', 'Sign in opens claude.com in a new tab. Sign in with your Claude account there, copy the code it shows, paste it here and press Complete sign-in.'),
-      this.linkSaid,
-      codeForm,
+      this.linkRow,
+      this.codeForm,
       this.subscriptionSaid,
     )
     const agents = target !== 'reviewers'
-    const [keyLabel, key] = secretField('api-key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
+    const [keyLabel, key] = secretField('key', agents ? 'API key from the Claude Console, or your company gateway’s key' : 'API key from the Claude Console', 'API key', 'off')
     this.key = key
+    this.keyForm = this.form(keyLabel, this.keyGo, () => void this.finishKey())
     this.apiKey.append(
-      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set for ${agents ? 'the agents' : 'the reviewers'} under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
-      this.form(keyLabel, this.keyGo, () => void this.finishKey()),
+      el('p', 'small muted', `Billed per use. Software Factory saves the key in ${agents ? 'this session’s container' : 'the reviewers’ home'} for Claude Code and never shows it again. While a gateway is set under Network access, Claude Code sends this key to the gateway; paste a gateway’s key there.`),
+      this.keyForm,
       this.keySaid,
     )
     this.kinds.addEventListener('sf-expand', e => {
-      if (e.detail === 'subscription') void this.begin()
+      if (e.detail === 'subscription') {
+        if (!this.waiting && !this.fetching) void this.begin()
+      }
       else this.cancel()
     })
     this.paint()
@@ -133,13 +128,7 @@ class Row {
   }
 
   private form(label: HTMLElement, go: HTMLButtonElement, done: () => void): HTMLFormElement {
-    const form = el('form', 'row login-code')
-    form.append(label, go)
-    form.addEventListener('submit', e => {
-      e.preventDefault()
-      done()
-    })
-    return form
+    return form({ inline: true, cls: 'login-code', children: [label, actions([go])], onSubmit: done })
   }
 
   private paint() {
@@ -159,35 +148,53 @@ class Row {
     this.paint()
   }
 
-  private unready(said = '') {
-    sayIfChanged(this.linkSaid, said)
+  private unready(fetching = false) {
     this.link.removeAttribute('href')
-    if (!this.link.parentNode) return
-    const focused = document.activeElement === this.link
+    const focused = document.activeElement === this.link || document.activeElement === this.linkWait
     this.link.remove()
+    if (fetching) {
+      if (!this.linkWait.parentNode) this.linkRow.append(this.linkWait)
+      busy(this.linkWait, true)
+      if (focused) this.linkWait.focus({ preventScroll: true })
+      return
+    }
+    busy(this.linkWait, false)
+    this.linkWait.remove()
     if (focused) this.code.focus({ preventScroll: true })
   }
 
   private ready(href: string) {
-    sayIfChanged(this.linkSaid, '')
+    const focused = document.activeElement === this.linkWait
+    busy(this.linkWait, false)
+    this.linkWait.remove()
     this.link.href = href
-    if (!this.link.parentNode) this.linkSaid.after(this.link)
+    if (!this.link.parentNode) this.linkRow.append(this.link)
+    if (focused) this.link.focus({ preventScroll: true })
   }
 
   private note(said: HTMLElement, text: string, bad = false) {
     say(said, text, bad ? 'bad' : undefined)
   }
 
+  prepare() {
+    void this.begin()
+  }
+
   private async begin(keepNote = false) {
     const mine = ++this.starting
-    this.unready('Getting the sign-in link…')
+    this.fetching = true
+    this.unready(true)
     if (!keepNote) this.note(this.subscriptionSaid, '')
-    const a = await call(this.post, { step: 'start', target: this.target })
-    if (mine !== this.starting) return
+    const a = await this.post(ROUTE, { step: 'start', target: this.target })
+    if (mine !== this.starting) {
+      if (a.ok && !this.fetching && !this.waiting) void this.post(ROUTE, { step: 'cancel', target: this.target })
+      return
+    }
+    this.fetching = false
     const link = safeLink(a.body.url)
     if (!a.ok || !link) {
-      sayIfChanged(this.linkSaid, '')
-      return this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'The login didn’t start. Close Subscription and open it again to retry.', true)
+      this.unready()
+      return this.note(this.subscriptionSaid, a.ok ? UNREAD : a.message, true)
     }
     this.waiting = true
     this.ready(link)
@@ -196,19 +203,25 @@ class Row {
 
   private async finishCode() {
     const code = this.code.value.trim()
-    if (!code || !this.waiting || this.code.readOnly) return
+    if (!this.waiting || this.code.readOnly) return
     sending(this.code, true)
     busy(this.codeGo, true)
     this.note(this.subscriptionSaid, '')
-    const a = await call(this.post, { step: 'code', target: this.target, code })
+    labelError(this.code, '')
+    const a = await this.post(ROUTE, { step: 'code', target: this.target, code })
+    if (!a.ok && a.field === 'code') {
+      sending(this.code, false)
+      busy(this.codeGo, false)
+      showAnswer(this.codeForm, a, this.subscriptionSaid)
+      return
+    }
     this.code.value = ''
     this.code.type = 'password'
     sending(this.code, false)
     busy(this.codeGo, false)
     this.waiting = false
     this.unready()
-    if (!a.ok) {
-      this.note(this.subscriptionSaid, typeof a.body.message === 'string' ? a.body.message : 'That didn’t work.', true)
+    if (!showAnswer(this.codeForm, a, this.subscriptionSaid)) {
       if (this.kinds.open === 'subscription') void this.begin(true)
       return
     }
@@ -218,24 +231,26 @@ class Row {
 
   private async finishKey() {
     const key = this.key.value.trim()
-    if (!key || this.key.readOnly) return
+    if (this.key.readOnly) return
     sending(this.key, true)
     busy(this.keyGo, true)
     this.note(this.keySaid, '')
-    const a = await call(this.post, { step: 'key', target: this.target, key })
+    labelError(this.key, '')
+    const a = await this.post(ROUTE, { step: 'key', target: this.target, key })
     this.key.value = ''
     this.key.type = 'password'
     sending(this.key, false)
     busy(this.keyGo, false)
-    if (!a.ok) return this.note(this.keySaid, typeof a.body.message === 'string' ? a.body.message : 'The key wasn’t saved. Try again.', true)
+    if (!showAnswer(this.keyForm, a, this.keySaid)) return this.key.focus()
     this.show(signInOf(a.body.signIn))
     this.signedIn('your API key')
   }
 
   cancel() {
     this.starting++
+    this.fetching = false
     this.unready()
-    if (this.waiting) void call(this.post, { step: 'cancel', target: this.target })
+    if (this.waiting) void this.post(ROUTE, { step: 'cancel', target: this.target })
     this.waiting = false
   }
 }
@@ -258,7 +273,7 @@ function signedIn(v: unknown): boolean | null {
 }
 
 export async function signInState(post: Post): Promise<SignInState | null> {
-  const a = await call(post, { step: 'status' })
+  const a = await post(ROUTE, { step: 'status' })
   if (!a.ok) return null
   const each = Array.isArray(a.body.each) ? (a.body.each as unknown[]) : []
   const agents: AgentLogin[] = []
@@ -280,7 +295,7 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
   let again = 0
   const m = modal({
     kind: 'login',
-    title: 'Sign Claude Code in for the reviewers',
+    ...dialogDocs('signIn'),
     body: [
       el('p', 'small', 'The reviewers run their own Claude Code, which signs in once, with a subscription or an API key. Reviews then start only on the kind you signed in with here. Each session signs in in its own container when you start it.'),
       reviewers.node,
@@ -296,7 +311,7 @@ export async function claudeLogin(post: Post, tell: (title: string) => void, clo
   })
   if (known) reviewers.show(known)
   const refresh = async (): Promise<void> => {
-    const a = await call(post, { step: 'status' })
+    const a = await post(ROUTE, { step: 'status' })
     if (!open) return
     if (a.body.reviewer !== true) return void reviewers.node.remove()
     const busy = a.body.reviewersBusy === true
@@ -327,44 +342,48 @@ export function boxSignIn(post: Post, needs: Needs, name: string, tell: (title: 
       done(true)
       tell(`${visible(name)} is signed in for this session with ${how}.`)
     }) : null
-    const check = async (): Promise<boolean | null> => {
-      say(status, 'Checking…')
-      const a = await call(post, { step: 'status', target })
+    const read = () => post(ROUTE, { step: 'status', target })
+    const apply = (a: EngineAnswer) => {
       if (!a.ok) {
-        say(status, typeof a.body.message === 'string' ? visible(a.body.message) : 'The engine didn’t answer.')
-        return null
+        say(status, a.message)
+        return
       }
       const each = Array.isArray(a.body.each) ? a.body.each as unknown[] : []
       const first = each[0] !== null && typeof each[0] === 'object' ? each[0] as Record<string, unknown> : {}
       const s = signInOf(first.signIn)
       row?.show(s)
       const ready = signedIn(first.signIn)
-      if (ready === false) say(status, row ? 'Not signed in yet. Sign in above, then press Continue.' : `${describe(s)} Run the command below, then press Continue.`)
-      else say(status, row ? '' : describe(s))
-      return ready
-    }
-    const proceed = async () => {
-      if (await check() !== false) done(true)
+      say(status, row ? '' : describe(s))
+      if (ready === true && !finished) {
+        done(true)
+        tell(`${visible(name)} is signed in for this session.`)
+      }
     }
     const parts: Node[] = [
       el('p', 'small', `Each session runs in its own container, with its own sign-in. ${visible(name)} there needs one before the session starts. The container stays up while you sign in.`),
     ]
     if (row) {
       row.show(needs.signIn ?? null)
+      row.prepare()
       parts.push(row.node, status)
     } else {
       parts.push(status)
-      if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), commandBlock(needs.step))
+      if (needs.step) parts.push(el('p', 'small muted', 'Run this in a terminal, then open the link it prints and enter the code it shows.'), codeBlock({ text: visible(needs.step), label: 'The sign-in command', copy: { text: needs.step, label: 'Copy the command' }, look: 'terminal', wrap: true }))
     }
-    const go = button('Continue', 'primary small', () => void whileBusy(go, proceed))
     const m = modal({
       kind: 'login',
       title: `Sign ${visible(name)} in for this session`,
+      docs: 'sign-claude-code-in-for-this-session',
       body: parts,
-      actions: [button('Cancel', 'ghost small', () => done(false)), go],
+      actions: [button('Cancel', 'ghost small', () => done(false))],
     })
+    const watch = whileOpen({ root: m.dialog, read, show: apply, same: a => JSON.stringify(a, (k, v: unknown) => (k === 'checkedAt' ? undefined : v)), everyMs: WALK_EVERY_MS, open: () => !finished })
+    const back = () => void watch.now()
+    addEventListener('focus', back)
     m.onClose(() => {
       finished = true
+      watch.stop()
+      removeEventListener('focus', back)
       row?.cancel()
       resolve(answer)
     })

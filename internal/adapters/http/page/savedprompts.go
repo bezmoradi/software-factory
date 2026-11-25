@@ -2,6 +2,7 @@ package page
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
 )
@@ -32,15 +33,16 @@ func (s *Server) savedPrompts(w http.ResponseWriter, body map[string]any) {
 	op, okOp := body["op"].(string)
 	repo, okRepo := body["repo"].(string)
 	if !okOp || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var list []session.SavedPrompt
 	var err error
+	var said *savedSaid
 	switch op {
 	case "list":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		list, err = prompts.Prompts(repo)
@@ -53,16 +55,19 @@ func (s *Server) savedPrompts(w http.ResponseWriter, body map[string]any) {
 		}
 		name, okName := body["name"].(string)
 		text, okText := body["text"].(string)
-		if !keysWithin(body, "op", "repo", "id", "name", "text") || !okID || !okName || !okText || len(name) > 4*session.MaxPromptName || len(text) > 4*session.MaxText {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "repo", "id", "name", "text") || !okID || !okName || !okText {
+			refuseFields(w)
 			return
 		}
-		list, err = prompts.SavePrompt(repo, id, name, text)
-		s.logger.Info("saved prompt", "op", "save", "ok", err == nil)
+		var changed bool
+		list, changed, err = prompts.SavePrompt(repo, id, name, text)
+		s.logger.Info("saved prompt", "op", "save", "ok", err == nil, "changed", changed)
+		done := saveSaid(changed, "Saved “"+strings.TrimSpace(name)+"”.", "No change: “"+strings.TrimSpace(name)+"” is already saved like this.")
+		said = &done
 	case "remove":
 		id, okID := body["id"].(string)
 		if !keysWithin(body, "op", "repo", "id") || !okID || !session.ValidPromptID(id) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		list, err = prompts.RemovePrompt(repo, id)
@@ -80,5 +85,10 @@ func (s *Server) savedPrompts(w http.ResponseWriter, body map[string]any) {
 	for _, p := range list {
 		out = append(out, savedPromptJSON{ID: p.ID, Name: p.Name, Text: p.Text, At: millis(p.At)})
 	}
-	send(w, http.StatusOK, map[string]any{"repo": repo, "prompts": out, "max": session.MaxSavedPrompts})
+	full := session.PromptsFull(len(list))
+	answer := map[string]any{"repo": repo, "prompts": out, "max": session.MaxSavedPrompts, "canAdd": full == "", "full": full}
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }

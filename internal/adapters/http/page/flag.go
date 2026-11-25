@@ -52,7 +52,7 @@ func flagsJSON(list []session.FlagView) []flagJSON {
 func (s *Server) flag(ctx context.Context, w http.ResponseWriter, route, sid string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if sid == "" || !okPath || path == "" || len(path) > maxFlagPath {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var err error
@@ -60,15 +60,15 @@ func (s *Server) flag(ctx context.Context, w http.ResponseWriter, route, sid str
 	case allowFileRoute:
 		reason, okReason := body["reason"].(string)
 		digest, okDigest := body["digest"].(string)
-		if !keysWithin(body, "sid", "path", "digest", "reason") || !okReason || len(reason) > 2000 || !okDigest || !flagDigest.MatchString(digest) {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "sid", "path", "digest", "reason") || !okReason || !okDigest || !flagDigest.MatchString(digest) {
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Work.AllowFile(ctx, sid, path, digest, reason)
 		s.logger.Info("flagged file", "op", "allow", "ok", err == nil)
 	default:
 		if !keysWithin(body, "sid", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Work.AskRemove(ctx, sid, path)
@@ -81,22 +81,22 @@ func (s *Server) commitFlag(ctx context.Context, w http.ResponseWriter, route, s
 	commit, okCommit := body["commit"].(string)
 	field, okField := body["field"].(string)
 	if sid == "" || !okCommit || !flagCommit.MatchString(commit) || !okField || session.FieldWords[session.CommitField(field)] == "" {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var err error
 	switch route {
 	case allowCommitRoute:
 		reason, okReason := body["reason"].(string)
-		if !keysWithin(body, "sid", "commit", "field", "reason") || !okReason || len(reason) > 2000 {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "sid", "commit", "field", "reason") || !okReason {
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Work.AllowCommit(ctx, sid, commit, session.CommitField(field), reason)
 		s.logger.Info("flagged commit", "op", "allow", "ok", err == nil)
 	default:
 		if !keysWithin(body, "sid", "commit", "field") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Work.AskRewrite(ctx, sid, commit, session.CommitField(field))

@@ -44,7 +44,7 @@ func (s *Server) views(w http.ResponseWriter, r *http.Request, body map[string]a
 	case exceptionsRoute:
 		s.exceptions(w, r, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -62,7 +62,7 @@ func (s *Server) recap(w http.ResponseWriter, body map[string]any) {
 	op, okOp := body["op"].(string)
 	sid, okSID := viewSession(body)
 	if !keysWithin(body, "op", "sid") || !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
@@ -81,25 +81,26 @@ func (s *Server) recap(w http.ResponseWriter, body map[string]any) {
 		}
 		send(w, http.StatusOK, map[string]any{"since": millis(v.Since), "waiting": v.Waiting, "more": v.More, "lines": lines})
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 	}
 }
 
 type workspaceRowJSON struct {
-	SID       string `json:"sid"`
-	Name      string `json:"name"`
-	Repo      string `json:"repo"`
-	Branch    string `json:"branch"`
-	Tree      string `json:"tree"`
-	Running   bool   `json:"running"`
-	Size      int64  `json:"size"`
-	Entries   int    `json:"entries"`
-	SizeMore  bool   `json:"sizeMore"`
-	SizeKnown bool   `json:"sizeKnown"`
-	State     string `json:"state"`
-	Head      string `json:"head"`
-	Deletable bool   `json:"deletable"`
-	Why       string `json:"why"`
+	SID       string   `json:"sid"`
+	Name      string   `json:"name"`
+	Repo      string   `json:"repo"`
+	Branch    string   `json:"branch"`
+	Tree      string   `json:"tree"`
+	Running   bool     `json:"running"`
+	Size      int64    `json:"size"`
+	Entries   int      `json:"entries"`
+	SizeMore  bool     `json:"sizeMore"`
+	SizeKnown bool     `json:"sizeKnown"`
+	State     string   `json:"state"`
+	Head      string   `json:"head"`
+	Deletable bool     `json:"deletable"`
+	Why       string   `json:"why"`
+	Said      saidJSON `json:"said"`
 }
 
 func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[string]any) {
@@ -109,7 +110,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 	}
 	op, ok := body["op"].(string)
 	if !ok {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(workspaceFor + writeFor))
@@ -118,7 +119,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 	switch op {
 	case "view":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.WorkspaceView.WorkspaceView(ctx)
@@ -130,13 +131,13 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 		rows := make([]workspaceRowJSON, 0, len(v.Sessions))
 		for _, x := range v.Sessions {
 			rows = append(rows, workspaceRowJSON{SID: x.SID, Name: x.Name, Repo: x.Repo, Branch: x.Branch, Tree: x.Tree, Running: x.Running, Size: x.Size.Bytes, Entries: x.Size.Entries,
-				SizeMore: x.Size.More, SizeKnown: x.SizeKnown, State: x.State, Head: x.Head, Deletable: x.Deletable, Why: x.Why})
+				SizeMore: x.Size.More, SizeKnown: x.SizeKnown, State: x.State, Head: x.Head, Deletable: x.Deletable, Why: x.Why, Said: saidJSONOf(session.WorkspaceSaid(x.State))})
 		}
 		send(w, http.StatusOK, map[string]any{"spaceKnown": v.SpaceKnown, "free": v.Free, "total": v.Total, "low": v.Low, "lowBelow": v.LowBelow, "sessions": rows})
 	case "delete":
 		sid, okSID := viewSession(body)
 		if !keysWithin(body, "op", "sid", "flag", "value") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		var given *session.Offer
@@ -144,12 +145,12 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 			f, isFlag := flag.(string)
 			v, isValue := body["value"].(string)
 			if !isFlag || !isValue || !slices.Contains([]string{"discard", "force", "worktree"}, f) || len(v) > maxOfferValue {
-				refuse(w, http.StatusBadRequest, "offer")
+				refuse(w, http.StatusBadRequest, "offer", saidOffer)
 				return
 			}
 			given = &session.Offer{Flag: f, Value: v}
 		} else if _, has := body["value"]; has {
-			refuse(w, http.StatusBadRequest, "offer")
+			refuse(w, http.StatusBadRequest, "offer", saidOffer)
 			return
 		}
 		offer, err := s.cfg.WorkspaceView.DeleteSession(ctx, sid, given)
@@ -165,7 +166,7 @@ func (s *Server) workspace(w http.ResponseWriter, r *http.Request, body map[stri
 		}
 		send(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 	}
 }
 
@@ -182,6 +183,8 @@ type exceptionJSON struct {
 	Result   string `json:"result"`
 	Verdict  string `json:"verdict"`
 	Reason   string `json:"reason"`
+	Label    string `json:"label"`
+	Note     string `json:"note"`
 }
 
 type exceptionHostJSON struct {
@@ -203,7 +206,7 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 		return
 	}
 	if !keysWithin(body) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(exceptionsFor + writeFor))
@@ -217,7 +220,8 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 	}
 	items := make([]exceptionJSON, 0, len(v.Items))
 	for _, e := range v.Items {
-		items = append(items, exceptionJSON{Kind: e.Kind, Time: millis(e.Time), SID: e.SID, Repo: e.Repo, Branch: e.Branch, Commit: e.Commit, Reviewer: e.Reviewer, Path: e.Path, Missing: e.Missing, Result: e.Result, Verdict: e.Verdict, Reason: e.Reason})
+		items = append(items, exceptionJSON{Kind: e.Kind, Time: millis(e.Time), SID: e.SID, Repo: e.Repo, Branch: e.Branch, Commit: e.Commit, Reviewer: e.Reviewer, Path: e.Path, Missing: e.Missing, Result: e.Result, Verdict: e.Verdict, Reason: e.Reason,
+			Label: session.ExceptionLabel(e.Kind, e.Result, e.Verdict, e.Reviewer, e.Path, e.Missing), Note: session.ExceptionNote(e.Kind, e.Verdict, e.Reason)})
 	}
 	hosts := make([]exceptionHostJSON, 0, len(v.Hosts))
 	for _, h := range v.Hosts {
@@ -225,13 +229,13 @@ func (s *Server) exceptions(w http.ResponseWriter, r *http.Request, body map[str
 	}
 	var gateway any
 	if v.Gateway != nil {
-		gateway = map[string]any{"host": v.Gateway.Host, "agents": v.Gateway.Agents, "reviewers": v.Gateway.Reviewers}
+		gateway = map[string]any{"host": v.Gateway.Host}
 	}
 	rules := make([]exceptionRulesJSON, 0, len(v.Rules))
 	for _, x := range v.Rules {
 		list := make([]ruleJSON, 0, len(x.Rules))
 		for _, rule := range x.Rules {
-			list = append(list, ruleJSON{Rule: rule.Rule, Place: string(rule.Place), Worktree: rule.Worktree, Path: rule.Path, Wide: nonNil(rule.Wide)})
+			list = append(list, ruleJSON{Rule: rule.Rule, Place: string(rule.Place), Worktree: rule.Worktree, Path: rule.Path, Wide: nonNil(rule.Wide), Where: session.PlaceLabel(string(rule.Place))})
 		}
 		rules = append(rules, exceptionRulesJSON{Repo: x.Repo, Problem: x.Problem, Rules: list})
 	}

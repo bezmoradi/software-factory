@@ -21,7 +21,7 @@ type SlotRefusal interface {
 
 func reviewersBusy(err error) *Error {
 	if b, ok := errors.AsType[SlotRefusal](err); ok && b.ReviewersBusy() {
-		return explained(limited("reviews"), clip(b.Error(), maxOutput))
+		return limited("reviews", clip(b.Error(), maxOutput))
 	}
 	return nil
 }

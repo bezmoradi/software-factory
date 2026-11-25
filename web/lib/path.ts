@@ -1,185 +1,118 @@
-import { el, visible } from './dom.ts'
-import { shortSha } from './format.ts'
-import type { GateEvent } from '../types.ts'
+import { button, el, visible } from './dom.ts'
+import type { GatePath, PathAction } from '../types.ts'
 
-const OK: string[] = ['pass', 'overridden']
-const SKIPPED = 'skipped'
-const OUTDATED = 'outdated'
-type Mark = boolean | typeof SKIPPED | typeof OUTDATED
-export type Started = boolean | null | 'nobase'
-export type Step = '' | 'define' | 'plan'
-type Active = '' | 'work' | 'verify' | 'define' | 'plan'
-export interface Turn {
-  ran: ReadonlySet<Step>
-  running: Step
-  busy: boolean
-}
-const IDLE: Turn = { ran: new Set(), running: '', busy: false }
-
-function count(done: number, all: number, one: string, many: string): string {
-  return `${done} of ${all} ${all === 1 ? `review ${one}` : `reviews ${many}`} on this commit`
-}
-
-export function uncommittedIn(gate: GateEvent | null): boolean {
-  const pending = gate?.uncommitted
-  return !!pending && (!pending.complete || pending.count > 0)
-}
-
-export function causeStatus(text: string): string {
-  const lines = text.split('\n')
-  const at = lines.findIndex(l => l.replace(/[ \t]+$/, '') === '## Status')
-  if (at < 0) return ''
-  for (const l of lines.slice(at + 1)) {
-    if (l.startsWith('#')) return ''
-    const word = l.split(/[ \t]+/).find(Boolean)
-    if (word) return word
-  }
-  return ''
-}
-
-const INCIDENT_STAGES = ['triage', 'reproduce', 'cause']
-
-function incidentStages(gate: GateEvent, turn: Turn): Record<string, [Mark, string]> {
-  const doc = gate.planDoc
-  const status = doc ? causeStatus(doc.text) : ''
-  const shown = visible(status).slice(0, 40)
-  const reproduced = ['REPRODUCED', 'CONFIRMED', 'UNCONFIRMED'].includes(status)
-  const triage: [Mark, string] = status ? [true, `Triaged · ${visible(doc?.path.split('/').pop() ?? '')} says ${shown}`] : [false, 'No triage yet: give the evidence and the deployed commit or tag in a message, then press Start']
-  const reproduce: [Mark, string] = reproduced ? [true, 'Reproduced at the deployed commit'] : status === 'BLOCKED' ? [false, 'Blocked: the file names the evidence or environment it needs. Give it in a message, then press Continue'] : status === 'TRIAGED' ? [false, 'Next: a reproduction at the deployed commit, run and shown to fail: press Continue'] : status ? [false, `The file's Status is ${shown}, which knackpack doesn't use`] : [false, '']
-  const cause: [Mark, string] = status === 'CONFIRMED'
-    ? doc?.approved ? [true, 'Cause confirmed · approved'] : turn.busy ? [false, 'The agent is still working on the diagnosis'] : doc?.changed ? [false, 'Cause confirmed, but the file changed after you approved it: read it and approve again'] : [false, 'Cause confirmed · waiting for your approval']
-    : status === 'UNCONFIRMED' ? [false, 'No cause confirmed yet: the file says what would decide. Give it in a message, then press Continue']
-    : status === 'REPRODUCED' ? [false, 'Next: ranked hypotheses, and a cause confirmed by a test that tells them apart: press Continue']
-    : [false, '']
-  return { triage, reproduce, cause }
-}
-
-function press(off: boolean, ran: boolean): string {
-  return off ? '' : `: press ${ran ? 'Continue' : 'Start'}`
-}
-
-function stages(gate: GateEvent | null, started: Started, active: Active, off: boolean, turn: Turn, pushed: boolean): Record<string, [Mark, string]> {
-  if (!gate) {
-    return {
-      define: [false, 'Waiting for the session'],
-      plan: [false, ''],
-      implement: [false, ''],
-      verify: [false, ''],
-      deliver: [false, ''],
-    }
-  }
-  const reviewers = gate.reviewers || []
-  const begun = started === true || !!gate.plan || reviewers.some(r => r.state !== 'none' || !!r.round)
-  const strict = (gate.size ?? 'feature') === 'feature'
-  const define: [boolean | typeof SKIPPED, string] = strict
-    ? gate.define ? [true, 'Requirements approved'] : active === 'define' || turn.running === 'define' ? [false, 'The agent is working on the requirements'] : gate.requirements?.hash ? [false, turn.busy ? 'The agent is still working on the requirements' : 'Agreed requirements wait for your approval'] : gate.holds?.define ? [false, gate.uncommitted?.complete ? 'Start needs a clean working tree: commit or discard the uncommitted files' : 'Start waits until the gate can check the working tree'] : [false, `No agreed requirements yet${press(off, turn.ran.has('define'))}`]
-    : gate.define ? [true, 'Requirements agreed'] : active === 'define' || turn.running === 'define' ? [false, 'The agent is working on the requirements'] : begun ? [SKIPPED, 'Skipped: no agreed requirements'] : [false, `No agreed requirements yet${press(off, turn.ran.has('define'))}`]
-  const feature = (gate.effective ?? 'feature') === 'feature'
-  const planned = !feature || (!!gate.plan && gate.approved !== false)
-  const verified = reviewers.length > 0 && reviewers.every(r => OK.includes(r.state))
-  const name = (path: string) => path.split('/').pop()
-  const sized = gate.effective === 'fix' ? 'a Fix' : gate.effective === 'incident' ? 'an Incident' : gate.effective === 'explore' ? 'Exploring' : 'Docs only'
-  if (gate.effective === 'explore') return {
-    define,
-    plan: [SKIPPED, 'Not needed while Exploring'],
-    implement: [false, gate.head ? `${gate.branch ? `On ${gate.branch} at` : 'At'} ${shortSha(gate.head)}` : "Couldn't read the current commit"],
-    verify: [false, 'No reviews while Exploring'],
-    deliver: [false, "Exploring can't push. Pick another work type to push:"],
-  }
-  const pending = gate.uncommitted
-  const dirty = uncommittedIn(gate)
-  const local = !pending ? '' : !pending.complete ? " · couldn't check for uncommitted changes" : pending.count === 1 ? ' · 1 file not committed' : ` · ${pending.count} files not committed`
-  const at = gate.head ? `${gate.branch ? `On ${gate.branch} at` : 'At'} ${shortSha(gate.head)}` : "Couldn't read the current commit"
-  const wait = gate?.waiting ?? ''
-  const passed = reviewers.some(r => r.state === 'overridden') ? 'Reviews done on this commit, with an override' : 'Every review passes on this commit'
-  const running = reviewers.some(r => r.state === 'running')
-  const incident = gate.effective === 'incident'
-  const fixed = !incident || !!gate.planDoc?.approved
-  return {
-    ...(incident ? incidentStages(gate, turn) : {}),
-    define,
-    plan: [!feature ? SKIPPED : planned, !feature ? `Not needed for ${sized}` : !gate.plan ? (active === 'plan' || turn.running === 'plan' ? 'The agent is making the plan' : strict && gate.holds?.plan ? 'Starts once you approve the requirements' : `Needs a plan${press(off, turn.ran.has('plan'))}`) : gate.approved === false ? (turn.busy ? 'The agent is still working on the plan' : `${name(gate.plan)} · waiting for your approval`) : `${name(gate.plan)} · approved · research ${gate.research ? 'done' : 'skipped'}`],
-    implement: !fixed ? [false, `${at} · Fix starts once you approve the root cause`] : [!wait, `${at}${dirty ? local : wait && gate.head ? ` · ${wait}` : started === 'nobase' ? " · no base branch, so the page can't tell this branch's commits" : ''}`],
-    verify: [verified ? (dirty ? OUTDATED : !wait) : false, !verified ? `${count(reviewers.filter(r => OK.includes(r.state)).length, reviewers.length, 'passes', 'pass')}${!wait ? '' : running ? `. Reviews are running before Implement is done: ${wait}${dirty ? ", so they won't count" : ''}` : `. Reviews start once Implement is done: ${wait}`}` : dirty ? `${passed}, but ${pending?.complete ? "uncommitted files aren't reviewed" : "the gate couldn't check for uncommitted files"}` : wait ? `${passed}, but Implement isn't done: ${wait}` : passed],
-    deliver: pushed ? [true, `Pushed ${shortSha(gate.head)}${gate.branch ? ` to ${gate.branch}` : ''}`] : [!!gate.allowed, gate.allowed ? 'The gate has what it needs for this commit: Push sends it, once the sandbox check holds' : 'Push held until it has:'],
-  }
-}
-
-function paintCard(card: HTMLElement, step: string, count: string, detail: string, done: number) {
+function paintCard(card: HTMLElement, step: string, count: string, detail: string, done: number, steps: boolean) {
   card.querySelector('.path-card-step')!.textContent = step
   card.querySelector('.path-card-count')!.textContent = count
   card.querySelector('.path-card-detail')!.textContent = detail
+  card.querySelector<HTMLElement>('.path-card-bar')!.hidden = !steps
   card.style.setProperty('--done', String(done))
 }
 
-function produced(stage: string, gate: GateEvent | null): boolean {
-  return stage === 'define' ? !!gate?.requirements?.hash : stage === 'plan' ? !!gate?.plan : false
+function paintActions(host: HTMLElement, anchor: HTMLElement, actions: PathAction[]) {
+  for (const a of actions) {
+    const made = [...host.querySelectorAll<HTMLButtonElement>('button.stage')]
+    if (made.some(b => b.dataset.ask === a.ask)) continue
+    const b = button(a.label, 'link stage')
+    b.dataset.ask = a.ask
+    ;(made.at(-1) ?? anchor).after(' ', b)
+  }
+  for (const b of host.querySelectorAll<HTMLButtonElement>('button.stage')) {
+    const action = actions.find(a => a.ask === b.dataset.ask)
+    b.hidden = !action
+    if (!action) continue
+    if (b.textContent !== action.label) b.textContent = action.label
+    b.title = action.title
+  }
 }
 
-export function paintPath(root: HTMLElement, gate: GateEvent | null, started: Started = false, card?: HTMLElement, active: Active = '', off = false, turn: Turn = IDLE, pushed = false): void {
-  const all = stages(gate, started, active, off, turn, pushed)
-  const typed = gate?.types?.find(t => t.id === gate.workType)
-  if (typed && !typed.builtin) {
-    const kinds: Record<string, string[]> = { define: ['define'], plan: ['plan'], implement: ['implement'], verify: ['review'], deliver: ['deliver'] }
-    for (const [stage, wants] of Object.entries(kinds)) {
-      const got = all[stage]
-      if (!wants.some(k => typed.steps.includes(k)) || got?.[0] === SKIPPED) all[stage] = [SKIPPED, `Not part of ${visible(typed.name)}`]
-    }
-  }
-  const incident = gate?.effective === 'incident'
-  const status = incident && gate?.planDoc ? causeStatus(gate.planDoc.text) : ''
+function lineOf(root: HTMLElement): HTMLElement {
+  const next = root.nextElementSibling
+  if (next instanceof HTMLElement && next.classList.contains('path-line')) return next
+  const line = el('p', 'path-line small')
+  line.hidden = true
+  line.append(el('span', 'path-line-text'))
+  root.after(line)
+  return line
+}
+
+const STATUS: Record<string, string> = { done: 'Done', skipped: 'Skipped', outdated: 'Out of date', current: 'Now' }
+
+function statusOf(st: GatePath['stages'][number] | undefined): string {
+  if (!st) return ''
+  if (st.active) return 'Working'
+  return STATUS[st.state] ?? ''
+}
+
+export function paintPath(root: HTMLElement, path: GatePath | null, card?: HTMLElement): void {
+  const stages = new Map((path?.stages ?? []).map(s => [s.id, s]))
   for (const li of root.children as HTMLCollectionOf<HTMLElement>) {
-    const stage = li.dataset.stage ?? ''
-    li.hidden = incident ? stage === 'define' || stage === 'plan' : INCIDENT_STAGES.includes(stage)
-    if (stage === 'implement') {
-      const name = li.querySelector('strong')!
-      const want = incident ? 'Fix' : 'Implement'
-      if (name.textContent !== want) name.textContent = want
+    const st = stages.get(li.dataset.stage ?? '')
+    if (path) li.hidden = !st
+    const name = li.querySelector('strong')!
+    if (st && name.textContent !== st.name) name.textContent = st.name
+    li.className = st?.state ?? ''
+    li.classList.toggle('active', !!st?.active)
+    li.querySelector('.stage-detail')!.textContent = visible(st?.detail ?? '')
+    let status = li.querySelector<HTMLElement>('.stage-status')
+    if (!status) {
+      status = el('span', 'stage-status small muted')
+      name.after(status)
     }
+    const said = statusOf(st)
+    if (status.textContent !== said) status.textContent = said
+    paintActions(li, status, st?.actions ?? [])
   }
-  const steps = ([...root.children] as HTMLElement[]).filter(li => !li.hidden)
-  let current = false
-  let finished = 0
-  let at: { index: number; name: string; detail: string } | null = null
-  for (const [index, li] of steps.entries()) {
-    const stage = li.dataset.stage!
-    const [done, detail] = all[stage] ?? [false, '']
-    const now = !done && !current && !!gate
-    if (now) {
-      current = true
-      at = { index, name: li.querySelector('strong')?.textContent ?? '', detail }
-    }
-    if (done && done !== OUTDATED) finished++
-    li.className = done === SKIPPED ? 'skipped' : done === OUTDATED ? 'outdated' : done ? 'done' : now ? 'current' : ''
-    const unchecked = stage === 'implement' && !!gate?.uncommitted && !gate.uncommitted.complete
-    li.classList.toggle('unchecked', unchecked)
-    const ring = active === 'verify' ? stage === 'verify' : active === 'define' || active === 'plan' ? stage === active && !done : active === 'work' && now && stage !== 'define' && stage !== 'plan'
-    li.classList.toggle('active', !unchecked && ring)
-    li.querySelector('.stage-detail')!.textContent = detail
-    const complete = !!done && done !== OUTDATED
-    const running = turn.running === stage
-    if (INCIDENT_STAGES.includes(stage)) {
-      const word = status ? 'Continue' : 'Start'
-      for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) {
-        b.hidden = !now || status === 'CONFIRMED' || running
-        if (b.textContent !== word) b.textContent = word
-      }
-    } else if (stage === 'define' || stage === 'plan') {
-      const word = turn.ran.has(stage) ? 'Continue' : 'Start'
-      for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) {
-        b.hidden = complete || running || produced(stage, gate)
-        if (b.textContent !== word) b.textContent = word
-      }
-    } else if (stage !== 'deliver') for (const b of li.querySelectorAll<HTMLButtonElement>('button.stage')) b.hidden = complete || (b.dataset.command === 'commit' && !gate?.uncommitted?.count) || ('fix' in b.dataset && (!b.dataset.command || !incident))
-  }
-  const pending = gate?.uncommitted?.complete ? gate.uncommitted : null
-  const files = (pending?.files ?? []).slice(0, 5).map(p => el('li', '', `${p.path} (${p.status})`))
-  if (pending && pending.count > files.length && files.length) files.push(el('li', '', `and ${pending.count - files.length} more`))
-  root.querySelector('.pending')?.replaceChildren(...files)
-  const missing = root.querySelector('.missing')!
-  missing.replaceChildren(...(gate && !gate.allowed && !pushed ? (gate.missing || []).map(m => el('li', '', visible(m))) : []))
+  root.querySelector('.missing')!.replaceChildren(...(path?.missing ?? []).map(m => el('li', '', visible(m))))
+  const free = path?.line ?? null
+  const line = lineOf(root)
+  root.hidden = !!free
+  line.hidden = !free
+  const text = line.querySelector<HTMLElement>('.path-line-text')!
+  text.textContent = visible(free?.text ?? '')
+  paintActions(line, text, free?.actions ?? [])
   if (!card) return
-  if (!gate) paintCard(card, 'Waiting for the session', '', '', 0)
-  else if (at) paintCard(card, at.name, `Step ${at.index + 1} of ${steps.length}`, at.detail, finished / steps.length)
-  else paintCard(card, 'Every step done', '', all.deliver?.[1] ?? '', 1)
+  if (!path) paintCard(card, 'Waiting for the session', '', '', 0, true)
+  else paintCard(card, path.card.step, path.card.count, visible(path.card.detail), path.card.done, !free)
+}
+
+export interface StepsEntry { title: string, target: HTMLElement }
+
+function goTo(target: HTMLElement) {
+  target.scrollIntoView({ block: 'start' })
+  if (!target.hasAttribute('tabindex')) target.tabIndex = -1
+  target.focus({ preventScroll: true })
+}
+
+export function paintSteps(nav: HTMLElement, root: HTMLElement, extra: StepsEntry[]): void {
+  const steps = [...root.children as HTMLCollectionOf<HTMLElement>].filter(li => !li.hidden)
+  const rows = steps.map(li => ({
+    title: li.querySelector('strong')?.textContent ?? '',
+    status: li.querySelector('.stage-status')?.textContent ?? '',
+    now: li.classList.contains('current') || li.classList.contains('active'),
+    target: li,
+  }))
+  const shown = extra.filter(x => !x.target.closest('[hidden]'))
+  const key = JSON.stringify([rows.map(r => [r.title, r.status, r.now]), shown.map(x => x.title)])
+  if (nav.dataset.key === key) return
+  nav.dataset.key = key
+  if (!rows.length && !shown.length) return nav.replaceChildren()
+  const toc = el('ul', 'project-toc')
+  for (const r of rows) {
+    const b = button(r.title, 'link', () => goTo(r.target))
+    if (r.status) b.append(' ', el('span', 'toc-status', r.status))
+    if (r.now) b.setAttribute('aria-current', 'step')
+    const item = el('li')
+    item.append(b)
+    toc.append(item)
+  }
+  for (const x of shown) {
+    const item = el('li')
+    item.append(button(x.title, 'link', () => goTo(x.target)))
+    toc.append(item)
+  }
+  const box = el('nav', 'project-nav')
+  box.setAttribute('aria-label', 'Steps of the execution path')
+  box.append(el('p', 'label', 'Contents'), toc)
+  nav.replaceChildren(box)
 }

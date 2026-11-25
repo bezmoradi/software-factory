@@ -1,7 +1,12 @@
-import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { request, type EngineAnswer } from '../api.ts'
+import { busy, button, el, labelError, say, statusLine, unspoofed, visible, whileBusy } from '../lib/dom.ts'
+import { actions, field, form } from '../lib/form.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
+import { emptyState, pageHead } from '../lib/page.ts'
+import { dropdown, option } from '../lib/controls.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { toast } from './toasts.ts'
 
 interface LessonFinding {
   id: string
@@ -40,8 +45,6 @@ interface LessonsView {
   offered: number
 }
 
-const POLL_MS = 3000
-
 function text(value: string): string {
   return visible(unspoofed(value))
 }
@@ -56,101 +59,91 @@ class SfLessons extends HTMLElement {
   #view: LessonsView | null = null
   #said = statusLine()
   #body = el('div', 'lessons-body')
-  #again = button('Read again', 'link small', () => {
-    if (this.#reads) return
-    say(this.#said, '')
-    void whileBusy(this.#again, () => this.#call({ op: 'read', name: this.#project }))
-  }, 'button', 'lessons-again')
-  #timer = 0
   #busy = ''
   #doing = ''
   #chosen = new Map<string, string>()
+  #pickRefused = new Map<string, string>()
   #built = false
-  #gen = 0
-  #reads = 0
+  #poll: WhileOpen | null = null
+  #failed = false
 
   connectedCallback() {
     if (!this.#built) {
       this.#built = true
-      const heading = el('h3', 'label', 'Lessons from reviews')
-      heading.tabIndex = -1
-      heading.dataset.key = 'lessons-heading'
-      this.replaceChildren(
-        heading,
-        el('p', 'small muted', 'The engine counts the blocking findings of this project\'s reviews by reviewer, file and title, with case, numbers and punctuation left out. That matching is approximate: two different findings can count as one, and a reworded finding counts as a new one. Nothing here changes a file or a review on its own.'),
-        this.#body,
-        this.#said,
-      )
+      const head = pageHead({ title: 'Lessons from reviews', level: 'h2', headingClass: 'label', intro: 'Blocking findings that keep coming back, and the instruction lines they suggest.', docs: { doc: 'lessons-from-reviews', key: 'lessons-docs' } })
+      const heading = head[0]?.querySelector<HTMLElement>('h2')
+      if (heading) {
+        heading.tabIndex = -1
+        heading.dataset.key = 'lessons-heading'
+      }
+      this.replaceChildren(...head, this.#body, this.#said)
     }
-    if (this.#project && !this.#view && !this.#reads) void this.#call({ op: 'read', name: this.#project })
-    else this.#poll()
-  }
-
-  disconnectedCallback() {
-    window.clearTimeout(this.#timer)
-    this.#timer = 0
+    if (!this.#poll?.live) this.#watch()
   }
 
   set project(name: string) {
     if (name === this.#project) return
     this.#project = name
     this.#view = null
-    if (this.isConnected) void this.#call({ op: 'read', name })
+    this.#paint()
+    this.#watch()
   }
 
-  #poll() {
-    window.clearTimeout(this.#timer)
-    this.#timer = 0
-    if (this.isConnected && this.#view?.run?.state === 'running') this.#timer = window.setTimeout(() => void this.#call({ op: 'read', name: this.#project }), POLL_MS)
+  #watch() {
+    this.#poll?.stop()
+    this.#poll = null
+    const name = this.#project
+    if (!name || !this.isConnected) return
+    this.#poll = whileOpen({ root: this, everyMs: CHEAP_EVERY_MS, hold: () => this.#typing(), read: () => request('/api/lessons', { op: 'read', name }), show: a => this.#took(a), near: () => ['lessons-suggest', 'lessons-heading'] })
+  }
+
+  #typing(): boolean {
+    const a = document.activeElement
+    return !!this.#busy || (a instanceof HTMLElement && this.contains(a) && a.matches('input, textarea, select'))
+  }
+
+  #took(a: EngineAnswer) {
+    if (!a.ok) {
+      this.#failed = true
+      say(this.#said, a.message, 'warn')
+      return
+    }
+    if (this.#failed) say(this.#said, '')
+    this.#failed = false
+    const v: unknown = a.body
+    if (isView(v)) this.#view = v
+    this.#paint()
   }
 
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const project = this.#project
     if (!project) return false
-    const gen = ++this.#gen
-    const read = body.op === 'read'
-    if (read) this.#reads++
-    this.#hold()
-    const res = await api('/api/lessons', body).catch(() => null)
-    if (read) this.#reads--
-    this.#hold()
-    if (project !== this.#project || (read && gen !== this.#gen)) return false
+    const a = await request('/api/lessons', body)
+    if (project !== this.#project) return false
     this.#busy = ''
-    if (!res || !res.ok) {
-      const problem = await res?.json().catch(() => null) as { message?: unknown; needs?: Needs } | null
-      if (problem?.needs?.cost && body.op === 'suggest' && !body.costOk) {
-        const ok = await consentFor(problem.needs, project, 'suggesting instruction lines')
+    if (!a.ok) {
+      const needs = a.body.needs as Needs | undefined
+      if (needs?.next === 'cost' && body.op === 'suggest' && !body.costOk) {
+        const ok = await consentFor(needs, project, 'suggesting instruction lines')
         if (ok?.costOk) return this.#call({ ...body, costOk: true })
       }
-      say(this.#said, typeof problem?.message === 'string' && problem.message ? visible(problem.message) : 'The engine didn\'t answer. Try again.', 'warn')
+      const pick = body.op === 'approve' && a.field === 'sid' && a.message && typeof body.id === 'string' ? body.id : ''
+      if (pick) this.#pickRefused.set(pick, a.message)
+      say(this.#said, pick ? '' : a.message, 'warn')
       this.#paint()
-      if (read) this.#retry(true)
+      if (pick) document.getElementById(`lesson-session-${pick}`)?.focus()
       return false
     }
     if (body.op === 'suggest') {
       say(this.#said, 'The run started in a reviewer container. Its lines show here when it ends.', 'muted')
-      return this.#call({ op: 'read', name: project })
+      await this.#poll?.now()
+      return true
     }
-    const v: unknown = await res.json().catch(() => null)
-    if (project !== this.#project || (read && gen !== this.#gen)) return false
+    const v: unknown = a.body
     if (isView(v)) this.#view = v
     this.#paint()
-    if (read && isView(v)) this.#retry(false)
-    this.#poll()
+    void this.#poll?.now()
     return true
-  }
-
-  #hold() {
-    if (this.#reads) this.#again.setAttribute('aria-disabled', 'true')
-    else this.#again.removeAttribute('aria-disabled')
-  }
-
-  #retry(on: boolean) {
-    if (on === (this.#again.parentNode === this)) return
-    if (on) return this.#said.after(this.#again)
-    const focused = focusedKey(this)
-    this.#again.remove()
-    refocus(this, focused, () => ['lessons-suggest', 'lessons-heading'])
   }
 
   #paint() {
@@ -162,7 +155,7 @@ class SfLessons extends HTMLElement {
     const parts: Node[] = []
     const titles = new Map(v.findings.map(f => [f.id, f]))
     if (!v.findings.length) {
-      parts.push(el('p', 'small muted', `No blocking finding has come back on this project yet. When one blocks ${v.after} commits, Suggest lines appears here.`))
+      parts.push(emptyState(`No blocking finding has come back on this project yet. When one blocks ${v.after} commits, Suggest lines appears here.`))
     } else {
       const list = el('ul', 'small lessons-findings')
       for (const f of v.findings) {
@@ -181,7 +174,6 @@ class SfLessons extends HTMLElement {
         void this.#call({ op: 'suggest', name: this.#project })
       }, 'button', 'lessons-suggest')
       if (running) busy(b, true)
-      b.title = 'Starts a run in a reviewer container of its own, with read-only tools and no verdict, given these findings and your own comments on this project\'s recent pull requests, read from the git host now. It proposes lines for the instruction file; you approve each one.'
       parts.push(el('p', 'small muted', `${v.offered} ${v.offered === 1 ? 'finding has' : 'findings have'} blocked ${v.after} or more commits. Suggest lines costs one reviewer run.`), b)
     }
     if (run && run.state !== 'running') {
@@ -193,8 +185,7 @@ class SfLessons extends HTMLElement {
     }
     const offered = v.lines.filter(x => x.state === 'offered')
     if (offered.length) {
-      parts.push(el('h4', 'label', 'Suggested lines'))
-      parts.push(el('p', 'small muted', 'Each line comes from a reviewer run that read text agents and reviewers wrote: read it before you approve it. An approved line goes to the session you pick as a note asking the agent to add it to the instruction file and commit it, which the usual reviews then cover. A declined line isn\'t offered again for the same findings.'))
+      parts.push(...pageHead({ title: 'Suggested lines', level: 'h3', headingClass: 'label', intro: 'Lines for the instruction file that a reviewer run proposed from these findings. Read each one before you approve or decline it.', docs: { doc: 'suggested-lines', key: 'suggested-docs' } }))
       const list = el('ul', 'list lessons-lines')
       for (const x of offered) list.append(this.#line(x, v, titles))
       parts.push(list)
@@ -206,7 +197,7 @@ class SfLessons extends HTMLElement {
         const s = v.sessions.find(y => y.sid === x.session)
         list.append(el('li', '', `${text(x.text)}: sent to ${s ? text(s.name || s.sid) : 'a session'} as a note`))
       }
-      parts.push(el('h4', 'label', 'Approved lines'), list)
+      parts.push(...pageHead({ title: 'Approved lines', level: 'h3', headingClass: 'label', intro: 'Lines you approved, each sent to a session as a note asking its agent to add it to the instruction file.', docs: { doc: 'approved-lines', key: 'approved-docs' } }), list)
     }
     this.#body.replaceChildren(...parts)
   }
@@ -216,51 +207,45 @@ class SfLessons extends HTMLElement {
     li.append(el('div', 'small', text(x.text)))
     const from = x.from.map(id => titles.get(id)).filter((f): f is LessonFinding => !!f).map(f => text(f.title))
     li.append(el('div', 'small muted', from.length ? `From: ${from.join('; ')}` : 'From findings no longer listed'))
-    const row = el('div', 'row field-row')
-    const pick = el('select', 'textbox')
+    const pick = dropdown({ name: 'sid' })
     pick.id = `lesson-session-${x.id}`
-    const label = el('label', 'small', 'Send to')
-    label.htmlFor = pick.id
-    const none = el('option', '', v.sessions.length ? 'Pick a session' : 'No session of this project')
-    none.value = ''
-    pick.append(none)
-    for (const s of v.sessions) {
-      const o = el('option', '', `${text(s.name || s.sid)}${s.running ? '' : ' (stopped: the note waits for its next message)'}`)
-      o.value = s.sid
-      pick.append(o)
-    }
+    pick.append(option(v.sessions.length ? 'Pick a session' : 'No session of this project', ''))
+    for (const s of v.sessions) pick.append(option(`${text(s.name || s.sid)}${s.running ? '' : ' (stopped: the note waits for its next message)'}`, s.sid))
     pick.value = this.#chosen.get(x.id) ?? ''
-    pick.addEventListener('change', () => this.#chosen.set(x.id, pick.value))
+    pick.addEventListener('change', () => {
+      this.#chosen.set(x.id, pick.value)
+      if (this.#pickRefused.delete(x.id)) labelError(pick, '')
+    })
     const held = this.#busy === x.id
-    const approve = button('Approve', 'small', () => {
+    const approve = button('Approve', 'small', undefined, 'submit', `lessons-approve:${this.#project}:${x.id}`)
+    const send = () => {
       if (held) return
-      if (!pick.value) {
-        pick.setAttribute('aria-invalid', 'true')
-        pick.focus()
-        return
-      }
-      pick.removeAttribute('aria-invalid')
+      this.#pickRefused.delete(x.id)
+      labelError(pick, '')
       this.#busy = x.id
       this.#doing = 'approve'
       void whileBusy(approve, () => this.#call({ op: 'approve', name: this.#project, id: x.id, sid: pick.value })).then(ok => {
         if (!ok) return
-        say(this.#said, 'Sent to the session as a note with its next message.', 'muted')
+        say(this.#said, '')
+        toast({ id: `lessons:${this.#project}`, title: 'Sent to the session as a note with its next message.', tone: 'ok' })
       })
-    }, 'button', `lessons-approve:${this.#project}:${x.id}`)
+    }
     const decline = button('Decline', 'small ghost', () => {
       if (held) return
       this.#busy = x.id
       this.#doing = 'decline'
       void whileBusy(decline, () => this.#call({ op: 'decline', name: this.#project, id: x.id })).then(ok => {
         if (!ok) return
-        say(this.#said, 'Declined. Nothing was sent or changed.', 'muted')
+        say(this.#said, '')
+        toast({ id: `lessons:${this.#project}`, title: 'Declined. Nothing was sent or changed.', tone: 'ok' })
       })
     }, 'button', `lessons-decline:${this.#project}:${x.id}`)
     if (held && this.#doing === 'approve') busy(approve, true)
     else approve.setAttribute('aria-disabled', String(held))
     if (held && this.#doing === 'decline') busy(decline, true)
     else decline.setAttribute('aria-disabled', String(held))
-    row.append(label, pick, approve, decline)
+    const row = form({ inline: true, cls: 'field-row', children: [field('Send to', pick, { kind: 'inline', cls: 'field-row' }), actions([approve, decline])], onSubmit: send })
+    labelError(pick, this.#pickRefused.get(x.id) ?? '')
     li.append(row)
     return li
   }

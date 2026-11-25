@@ -27,7 +27,7 @@ func (s *Server) pushRecord(w http.ResponseWriter, r *http.Request, body map[str
 	sid, okSID := viewSession(body)
 	commit, okCommit := body["commit"].(string)
 	if !keysWithin(body, "sid", "commit") || !okSID || !okCommit || !flagCommit.MatchString(commit) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	if records == nil {

@@ -138,7 +138,7 @@ func (l *Limits) measureSoon(sid, box string) {
 
 func (l *Limits) MeasureNow(ctx context.Context, sid string) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	l.mu.Lock()
 	s := l.sessions[sid]
@@ -146,17 +146,17 @@ func (l *Limits) MeasureNow(ctx context.Context, sid string) error {
 	disk := l.cfg.Disk
 	if s == nil || s.reached != CapDisk {
 		l.mu.Unlock()
-		return explained(conflict("not reached"), "This session isn't at its disk cap, so there is nothing to check again.")
+		return conflict("not reached", "This session isn't at its disk cap, so there is nothing to check again.")
 	}
 	l.mu.Unlock()
 	if !known {
 		known = l.reg.admittedProject(sid, &k)
 	}
 	if disk == nil || !known || !ValidBox(k.box) {
-		return explained(conflict("not measured"), "This engine can't measure the session's folder. Press Raise the cap, or Stop.")
+		return conflict("not measured", "This engine can't measure the session's folder. Press Raise the cap, or Stop.")
 	}
 	if err := l.measureDisk(ctx, []diskTarget{{sid: sid, box: k.box}}); err != nil {
-		return explained(conflict("not measured"), "The engine couldn't measure the session's folder this time. Press Check again, or Raise the cap.")
+		return conflict("not measured", "The engine couldn't measure the session's folder this time. Press Check again, or Raise the cap.")
 	}
 	return nil
 }

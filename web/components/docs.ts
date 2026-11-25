@@ -1,4 +1,6 @@
-import { button, el, pageCrumb } from '../lib/dom.ts'
+import { button, el } from '../lib/dom.ts'
+import { dialogLink, docsId, pageHead } from '../lib/page.ts'
+import { DIALOGS, dialogOpenedFrom } from '../lib/dialog-docs.ts'
 import { headings } from './markdown.ts'
 import { icon } from './icon.ts'
 
@@ -10,7 +12,9 @@ type Entry = { id: string; button: HTMLButtonElement; target: () => HTMLElement 
 
 const SESSION = 'session'
 const PAGE_LINKS: Record<string, { view: string; text: string }> = {
-  'projects-and-new-sessions': { view: 'projects', text: 'Go to Projects' },
+  projects: { view: 'projects', text: 'Go to Projects' },
+  'project-settings': { view: 'projects', text: 'Go to Projects' },
+  'git-host-tokens': { view: 'projects', text: 'Go to Projects' },
   'working-in-a-session': { view: SESSION, text: 'Back to session' },
   'execution-path-with-knackpack': { view: SESSION, text: 'Back to session' },
 }
@@ -26,18 +30,16 @@ function pageLink(cls: string, view: string, text: string): HTMLAnchorElement {
 function addPageLinks(root: HTMLElement, session: string) {
   for (const h of root.querySelectorAll<HTMLElement>(':scope > sf-markdown > :is(h2, h3)')) {
     const had = h.querySelector<HTMLElement>('.docs-page')
-    const name = slug(h.dataset.title ?? h.textContent ?? '')
-    const to = Object.hasOwn(PAGE_LINKS, name) ? PAGE_LINKS[name] : undefined
     h.dataset.title ??= h.textContent ?? ''
+    const name = docsId(h.dataset.title)
+    const opens = dialogOpenedFrom(name)
+    if (opens && !h.querySelector('button[data-dialog]')) h.append(dialogLink({ title: DIALOGS[opens].title, dialog: opens }))
+    const to = Object.hasOwn(PAGE_LINKS, name) ? PAGE_LINKS[name] : undefined
     const view = to?.view === SESSION ? session : to?.view ?? ''
     if (had && had.dataset.view === view) continue
     had?.remove()
     if (to && view) h.append(pageLink('docs-page', view, to.text))
   }
-}
-
-function slug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 function sections(text: string): Section[] {
@@ -49,7 +51,7 @@ function sections(text: string): Section[] {
     const newline = part.indexOf('\n')
     const title = part.slice(3, newline < 0 ? undefined : newline).trim()
     const body = part
-    return { id: slug(title), title, body, subs: headings(body, 3) }
+    return { id: docsId(title), title, body, subs: headings(body, 3) }
   })
 }
 
@@ -119,10 +121,14 @@ class SfDocs extends HTMLElement {
   show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null) {
     this.#want = id
     this.#back = back
-    const index = id ? this.#entries.findIndex(e => e.id === id) : -1
-    const target = index >= 0 ? this.#entries[index]!.target() : null
+    let index = id ? this.#entries.findIndex(e => e.id === id) : -1
+    let target = index >= 0 ? this.#entries[index]!.target() : null
+    if (!target && id) {
+      target = this.#deep(id)
+      if (target) index = this.#owner(target)
+    }
     this.querySelector('.docs-back')?.remove()
-    const heading = !target ? null : target.matches('h2, h3') ? target : target.querySelector<HTMLElement>('h2, h3')
+    const heading = !target ? null : target.matches('h2, h3, h4, h5') ? target : target.querySelector<HTMLElement>('h2, h3')
     if (heading && back && !heading.querySelector(`.docs-page[data-view="${CSS.escape(back.view)}"]`)) {
       const link = pageLink('docs-back', back.view, `Back to ${back.label}`)
       link.addEventListener('click', () => {
@@ -135,6 +141,23 @@ class SfDocs extends HTMLElement {
       target.scrollIntoView({ block: 'start' })
       this.#jumped(index)
     } else if (!id) this.closest<HTMLElement>('.scroller')?.scrollTo({ top: 0 })
+  }
+
+  #deep(id: string): HTMLElement | null {
+    for (const h of this.querySelectorAll<HTMLElement>('.docs-section > sf-markdown > :is(h4, h5)')) {
+      h.dataset.title ??= h.textContent ?? ''
+      if (docsId(h.dataset.title) === id) return h
+    }
+    return null
+  }
+
+  #owner(node: HTMLElement): number {
+    let at = -1
+    this.#entries.forEach((e, i) => {
+      const t = e.target()
+      if (t && (t === node || t.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)) at = i
+    })
+    return at
   }
 
   #jumped(index: number) {
@@ -202,9 +225,7 @@ class SfDocs extends HTMLElement {
     nav.setAttribute('aria-label', 'Docs sections')
     const toc = el('ul', 'docs-toc')
     const body = el('div', 'docs-body')
-    const head = el('div', 'page-head')
-    head.append(pageCrumb('Docs'))
-    body.append(head)
+    body.append(...pageHead({ title: 'Docs', crumb: true }))
     for (const s of list) {
       const part = el('section', 'docs-section')
       part.dataset.doc = s.id
@@ -220,7 +241,7 @@ class SfDocs extends HTMLElement {
         const ul = el('ul')
         s.subs.forEach((title, k) => {
           const sub = el('li')
-          sub.append(this.#entry(slug(title), title, () => part.querySelectorAll<HTMLElement>(':scope > sf-markdown > h3')[k] ?? null))
+          sub.append(this.#entry(docsId(title), title, () => part.querySelectorAll<HTMLElement>(':scope > sf-markdown > h3')[k] ?? null))
           ul.append(sub)
         })
         li.append(ul)

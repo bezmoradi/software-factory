@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 415
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: type }
+        "$.body": { error: type, message: "The engine takes an image as PNG, JPEG, GIF or WebP, or a file as application/octet-stream." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]"]
@@ -138,7 +138,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400 by the upload handler's name check, before the body is read or anything is saved; no page read lists uploads"
       - id: file-name-with-slash
         do: http.request
@@ -151,7 +151,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400, since the name decodes to one holding a slash, which session.UploadName refuses, before the body is read or anything is saved; no page read lists uploads"
       - id: file-name-bad-escape
         do: http.request
@@ -164,7 +164,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "The engine takes a file name of at most 255 bytes, with no slash, backslash or control character." }
         no_state_check: "refused with 400, since url.PathUnescape refuses the name's %zz, before the body is read or anything is saved; no page read lists uploads"
       - id: image-with-name
         do: http.request
@@ -177,7 +177,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: name }
+            "$.body": { error: name, message: "Only a file, not an image, is sent with its name. Reload the page and try again." }
         no_state_check: "refused with 400, since an image takes its name from its type and a name sent with one is refused, before the body is read or anything is saved; no page read lists uploads"
 
   - id: UPL-003
@@ -208,7 +208,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: session }
+            "$.body": { error: session, message: "The upload's session id is missing or longer than 80 characters. Reload the page and try again." }
         no_state_check: "refused with 400 by the upload handler's session check, before the body is read or anything is saved; no page read lists uploads"
       - id: long-session
         do: http.request
@@ -221,11 +221,11 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: session }
+            "$.body": { error: session, message: "The upload's session id is missing or longer than 80 characters. Reload the page and try again." }
         no_state_check: "refused with 400, since the session header is 81 characters and the handler takes at most 80, before the body is read or anything is saved; no page read lists uploads"
 
   - id: UPL-004
-    name: "An image of 2.5 MiB passes the size check, and one byte more is refused with 413 before its body is read"
+    name: "An image of 32 MiB passes the size check, so the engine can shrink a large screenshot itself, and one byte more is refused with 413 and the page's message before its body is read"
     steps:
       - id: at-limit
         do: http.request
@@ -234,12 +234,12 @@ scenarios:
           method: POST
           path: "/api/upload"
           headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
-          body_fill: { bytes: 2621440, pattern_base64: iVBORw0KGgo= }
+          body_fill: { bytes: 33554432, pattern_base64: iVBORw0KGgo= }
         expect:
           equal:
             "$.status": 404
             "$.body": { error: session, message: "Only a session this engine started takes images and files." }
-        no_state_check: "an image of exactly session.MaxImage bytes that starts as a PNG does passes the size and type checks and is refused with 404 by Registry.Upload, since no session has this id, before it saves anything; no page read lists uploads"
+        no_state_check: "an image of exactly session.MaxImageUpload bytes that starts as a PNG does passes the size and type checks and is refused with 404 by Registry.Upload, since no session has this id, before it fits or saves anything; no page read lists uploads"
       - id: over-limit
         do: http.request
         identity: page
@@ -247,16 +247,16 @@ scenarios:
           method: POST
           path: "/api/upload"
           headers: { Origin: "${page.origin}", Content-Type: image/png, X-SF-Session: "00000000-0000-4000-8000-000000000000" }
-          body_fill: { bytes: 2621441, pattern_base64: iVBORw0KGgo= }
+          body_fill: { bytes: 33554433, pattern_base64: iVBORw0KGgo= }
         expect:
           equal:
             "$.status": 413
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: body }
-        no_state_check: "refused with 413 because its Content-Length is over session.MaxImage, before the body is read or anything is saved; no page read lists uploads"
+            "$.body": { error: body, message: "That image is too large to send, or not one the page can read." }
+        no_state_check: "refused with 413 because its Content-Length is over session.MaxImageUpload, before the body is read or anything is saved; no page read lists uploads"
 
   - id: UPL-005
-    name: "A file of 10 MiB passes the size check, and one byte more is refused with 413 before its body is read"
+    name: "A file of 10 MiB passes the size check, and one byte more is refused with 413 and a message naming the file before its body is read"
     steps:
       - id: at-limit
         do: http.request
@@ -283,7 +283,7 @@ scenarios:
           equal:
             "$.status": 413
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: body }
+            "$.body": { error: body, message: "${run.id}.bin is larger than 10 MB. Type its path with @ instead." }
         no_state_check: "refused with 413 because its Content-Length is over session.MaxDrop, before the body is read or anything is saved; no page read lists uploads"
 
   - id: IMP-001
@@ -314,7 +314,7 @@ scenarios:
           equal:
             "$.status": 415
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: x-gzip
         do: http.request
         identity: page
@@ -326,7 +326,7 @@ scenarios:
         expect:
           equal:
             "$.status": 415
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: gzip-with-parameter
         do: http.request
         identity: page
@@ -338,7 +338,7 @@ scenarios:
         expect:
           equal:
             "$.status": 415
-            "$.body": { error: type }
+            "$.body": { error: type, message: "An import takes a backup file, sent with Content-Type application/gzip." }
       - id: with-name
         do: http.request
         identity: page
@@ -350,7 +350,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: fields }
+            "$.body": { error: fields, message: "An import takes no X-SF-Name or X-SF-Session header. Reload the page and try again." }
       - id: with-session
         do: http.request
         identity: page
@@ -362,7 +362,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: fields }
+            "$.body": { error: fields, message: "An import takes no X-SF-Name or X-SF-Session header. Reload the page and try again." }
       - id: over-limit
         do: http.request
         identity: page
@@ -375,7 +375,7 @@ scenarios:
           equal:
             "$.status": 413
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: body }
+            "$.body": { error: body, message: "That file is larger than 256 MiB, more than an import takes." }
       - id: at-limit
         do: http.request
         identity: page

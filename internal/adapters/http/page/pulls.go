@@ -4,6 +4,9 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -14,7 +17,11 @@ const (
 	issuesRoute        = "/api/issues"
 	findingIssuesRoute = "/api/finding-issues"
 	pullFor            = 60 * time.Second
-	maxBotLogin        = 44
+)
+
+const (
+	saidPullSettingsSaved     = "Saved. The project's pull requests follow these settings."
+	saidPullSettingsUnchanged = "No change: these pull request settings are already saved."
 )
 
 var pullRoutes = map[string]bool{pullRoute: true, issuesRoute: true, findingIssuesRoute: true}
@@ -124,7 +131,7 @@ func (s *Server) pullAPI(w http.ResponseWriter, r *http.Request, body map[string
 		}
 		s.findingIssues(ctx, w, pulls, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -136,22 +143,43 @@ func wholeNumber(v any, low, high int) (int, bool) {
 	return int(f), true
 }
 
+var issueNumberText = regexp.MustCompile(`^#?[0-9]{1,10}$`)
+
+func issueNumber(v any) (int, bool, bool) {
+	switch n := v.(type) {
+	case float64:
+		number, ok := wholeNumber(n, 1, session.MaxIssueNumber)
+		return number, ok, true
+	case string:
+		text := strings.TrimSpace(n)
+		if !issueNumberText.MatchString(text) {
+			return 0, false, true
+		}
+		number, err := strconv.Atoi(strings.TrimPrefix(text, "#"))
+		if err != nil || number < 1 || number > session.MaxIssueNumber {
+			return 0, false, true
+		}
+		return number, true, true
+	}
+	return 0, false, false
+}
+
 func (s *Server) pullRequest(ctx context.Context, w http.ResponseWriter, pulls session.PullsPage, body map[string]any) {
 	op, okOp := body["op"].(string)
 	sid, okSID := viewSession(body)
 	if !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "send", "open", "ready", "settings":
 		if !keysWithin(body, "op", "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "set":
 		if !keysWithin(body, "op", "sid", "bots", "auto", "assign") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	default:
@@ -182,21 +210,28 @@ func (s *Server) pullRequest(ctx context.Context, w http.ResponseWriter, pulls s
 		list, okList := body["bots"].([]any)
 		auto, okAuto := body["auto"].(bool)
 		assign, okAssign := body["assign"].(bool)
-		if !okList || !okAuto || !okAssign || len(list) > session.MaxFollowBots {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !okList || !okAuto || !okAssign {
+			refuseFields(w)
 			return
 		}
 		bots := make([]string, 0, len(list))
 		for _, v := range list {
 			b, ok := v.(string)
-			if !ok || b == "" || len(b) > maxBotLogin {
-				refuse(w, http.StatusBadRequest, "fields")
+			if !ok {
+				refuseFields(w)
 				return
 			}
 			bots = append(bots, b)
 		}
-		err = pulls.SetSettings(sid, session.FollowSettings{Bots: bots, Auto: auto, Assign: assign})
-		s.logger.Info("pull settings", "ok", err == nil)
+		changed, err := pulls.SetSettings(sid, session.FollowSettings{Bots: bots, Auto: auto, Assign: assign})
+		s.logger.Info("pull settings", "ok", err == nil, "changed", changed)
+		if err != nil {
+			code, p := status(err)
+			send(w, code, p)
+			return
+		}
+		send(w, http.StatusOK, saveSaid(changed, saidPullSettingsSaved, saidPullSettingsUnchanged).ok())
+		return
 	}
 	reply(w, err, http.StatusOK)
 }
@@ -220,34 +255,25 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 	op, okOp := body["op"].(string)
 	path, okPath := body["path"].(string)
 	if !okOp || !okPath || path == "" || len(path) > session.MaxCwd {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "list":
-		if !keysWithin(body, "op", "path", "label", "page") {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "path", "page") {
+			refuseFields(w)
 			return
-		}
-		label := ""
-		if v, has := body["label"]; has {
-			l, ok := v.(string)
-			if !ok || len(l) > 4*session.MaxIssueLabel {
-				refuse(w, http.StatusBadRequest, "fields")
-				return
-			}
-			label = l
 		}
 		page := 1
 		if v, has := body["page"]; has {
 			n, ok := wholeNumber(v, 1, session.MaxIssuePage)
 			if !ok {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			page = n
 		}
-		v, err := issues.List(ctx, path, label, page)
+		v, err := issues.List(ctx, path, page)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
@@ -257,11 +283,15 @@ func (s *Server) issueList(ctx context.Context, w http.ResponseWriter, issues se
 		for _, i := range v.Issues {
 			list = append(list, issueOf(i))
 		}
-		send(w, http.StatusOK, map[string]any{"repo": v.Repo, "label": v.Label, "page": v.Page, "more": v.More, "issues": list})
+		send(w, http.StatusOK, map[string]any{"repo": v.Repo, "page": v.Page, "more": v.More, "issues": list})
 	case "read":
-		number, okNumber := wholeNumber(body["number"], 1, session.MaxIssueNumber)
-		if !keysWithin(body, "op", "path", "number") || !okNumber {
-			refuse(w, http.StatusBadRequest, "fields")
+		number, okNumber, typed := issueNumber(body["number"])
+		if !keysWithin(body, "op", "path", "number") || !typed {
+			refuseFields(w)
+			return
+		}
+		if !okNumber {
+			send(w, http.StatusBadRequest, problem{Error: "number", Field: "number", Message: "Needs an issue number like 123."})
 			return
 		}
 		v, err := issues.Read(ctx, path, number)
@@ -289,13 +319,13 @@ func (s *Server) findingIssues(ctx context.Context, w http.ResponseWriter, pulls
 	op, okOp := body["op"].(string)
 	sid, okSID := viewSession(body)
 	if !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := pulls.Findings(sid)
@@ -312,7 +342,7 @@ func (s *Server) findingIssues(ctx context.Context, w http.ResponseWriter, pulls
 	case "open":
 		commit, okCommit := body["commit"].(string)
 		if !keysWithin(body, "op", "sid", "commit") || !okCommit || !commitHex.MatchString(commit) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		made, err := pulls.OpenFindings(ctx, sid, commit)

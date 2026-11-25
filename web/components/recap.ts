@@ -1,6 +1,7 @@
+import type { EngineAnswer } from '../api.ts'
 import { button, el, visible } from '../lib/dom.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/recap'
 const SEEN_EVERY_MS = 30000
@@ -83,19 +84,18 @@ class SfRecap extends HTMLElement {
   async #seen(sid: string) {
     if (!this.#post || this.#readOnly) return
     this.#seenAt = Date.now()
-    await this.#post(ROUTE, { op: 'seen', sid }).catch(() => null)
+    await this.#post(ROUTE, { op: 'seen', sid })
   }
 
   async #load(sid: string) {
     if (!this.#post) return
     this.#loading = true
-    const res = await this.#post(ROUTE, { op: 'read', sid }).catch(() => null)
-    const body: unknown = res && res.ok ? await res.json().catch(() => null) : null
+    const a = await this.#post(ROUTE, { op: 'read', sid })
     this.#loading = false
     if (this.#sid !== sid) return
     if (!document.hidden) void this.#seen(sid)
-    if (typeof body !== 'object' || body === null) return
-    const v = body as Record<string, unknown>
+    if (!a.ok) return
+    const v = a.body
     const since = typeof v.since === 'number' ? v.since : 0
     const lines = Array.isArray(v.lines) ? (v.lines as unknown[]).map(lineOf).filter((l): l is Line => l !== null) : []
     const waiting = typeof v.waiting === 'number' && v.waiting > 0 ? Math.floor(v.waiting) : 0

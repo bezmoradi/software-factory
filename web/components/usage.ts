@@ -1,5 +1,6 @@
-import { api } from '../api.ts'
+import { request, savedTone } from '../api.ts'
 import { actionButton, el, focusedKey, refocus, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { actions } from '../lib/form.ts'
 
 export interface CapsValues {
   money: number
@@ -43,6 +44,7 @@ export interface SessionLimits {
   levels: Record<string, string>
   reached: string
   reachedAt: number
+  raise: { min: number; suggested: number } | null
   stuck: Stuck | null
   wakeAt: number
   wakeOffer: number
@@ -118,11 +120,13 @@ export function limitsOf(raw: unknown): LimitsView | null {
     const used = s.used ? rec(s.used) : null
     const stuck = s.stuck ? rec(s.stuck) : null
     const levels = rec(s.levels)
+    const raise = s.raise ? rec(s.raise) : null
     sessions.set(sid, {
       sid, caps: s.caps ? capsOf(s.caps) : null, own: s.own === true,
       used: used ? { costUsd: num(used.costUsd), minutes: num(used.minutes), turns: num(used.turns), diskBytes: num(used.diskBytes, 2 ** 53), diskMore: used.diskMore === true, diskAt: num(used.diskAt, 1e15) } : null,
       levels: { money: text(levels.money, 20), time: text(levels.time, 20), turns: text(levels.turns, 20), disk: text(levels.disk, 20) },
       reached: ['money', 'time', 'turns', 'disk'].includes(text(s.reached, 20)) ? text(s.reached, 20) : '', reachedAt: num(s.reachedAt, 1e15),
+      raise: raise ? { min: num(raise.min), suggested: num(raise.suggested) } : null,
       stuck: stuck ? { tool: text(stuck.tool, 80), detail: text(stuck.detail, 200), count: num(stuck.count, 100), failing: stuck.failing === true, at: num(stuck.at, 1e15) } : null,
       wakeAt: num(s.wakeAt, 1e15), wakeOffer: num(s.wakeOffer, 1e15), signInFrom: num(s.signInFrom, 1e15), signInUntil: num(s.signInUntil, 1e15),
     })
@@ -184,19 +188,25 @@ function paintAll() {
   for (const node of shown) node.paint()
 }
 
-export async function limitsCall(body: Record<string, unknown>): Promise<string> {
-  try {
-    const res = await api('/api/limits', body)
-    const data: unknown = await res.json().catch(() => null)
-    if (res.ok) {
-      setLimits(data)
-      return ''
-    }
-    const message = rec(data).message
-    return typeof message === 'string' && message ? visible(message) : "The engine didn't take that. Try again."
-  } catch {
-    return "The engine didn't answer. Try again once the page is connected."
+export interface LimitsAnswer {
+  problem: string
+  field: string
+  error: string
+  said: string
+  tone: 'ok' | 'warn'
+}
+
+export async function limitsAnswer(body: Record<string, unknown>): Promise<LimitsAnswer> {
+  const a = await request('/api/limits', body)
+  if (a.ok) {
+    setLimits(a.body)
+    return { problem: '', field: '', error: '', said: a.message, tone: savedTone(a) }
   }
+  return { problem: a.message, field: a.field, error: a.error, said: '', tone: 'ok' }
+}
+
+export async function limitsCall(body: Record<string, unknown>): Promise<string> {
+  return (await limitsAnswer(body)).problem
 }
 
 export function loadLimits(): Promise<string> {
@@ -232,8 +242,8 @@ export function windowLine(w: RateWindowView): HTMLElement {
 }
 
 export function expiryText(e: Expiry): string {
-  if (e.what === 'token') return `The token saved for ${visible(e.host)} expires ${when(e.until)}. Save a new one under Projects, Tokens, before then, or the engine can't push or open pull requests there.`
-  return `${visible(e.label)} has a claude.ai sign-in that ends between ${day(e.from)} and ${day(e.until)}. Renewing it doesn't move those dates: sign in again before then (Finish setting up on the Welcome page).`
+  if (e.what === 'token') return `The token saved for ${visible(e.host)} expires ${when(e.until)}. Save a new one under Projects, Git host tokens, before then, or the engine can't push or open pull requests there.`
+  return `${visible(e.label)} has a claude.ai sign-in that ends between ${day(e.from)} and ${day(e.until)}. Renewing it doesn't move those dates: sign in again before then (Reviewers’ sign-in in the command palette).`
 }
 
 class SfUsage extends HTMLElement {
@@ -268,7 +278,7 @@ class SfUsage extends HTMLElement {
         heads.set(`continue:${m.side}:${w.kind}`, `side:${m.side}`)
         if (w.near) {
           const ask = el('div', 'usage-ask small')
-          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`))
+          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actions([actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`)]))
           box.append(ask)
         } else if (w.continued) box.append(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
       }
@@ -287,40 +297,6 @@ class SfUsage extends HTMLElement {
   async #continue(side: string, kind: string) {
     this.#said.textContent = await limitsCall(continueBody(side, '', kind))
     this.paint()
-  }
-}
-
-class SfUsageLine extends HTMLElement {
-  #sid = ''
-  #stop = () => {}
-
-  set sid(value: string) {
-    this.#sid = SID.test(value) ? value : ''
-    this.paint()
-  }
-
-  connectedCallback() {
-    this.#stop = watchLimits(this)
-    this.paint()
-  }
-
-  disconnectedCallback() {
-    this.#stop()
-  }
-
-  paint() {
-    const m = this.#sid ? view.meter.find(x => x.sid === this.#sid) : undefined
-    const windows = m?.windows ?? []
-    this.hidden = !windows.length
-    if (!m || !windows.length) {
-      this.replaceChildren()
-      return
-    }
-    const near = windows.some(w => w.near)
-    const said = windows.map(w => `${visible(w.short || w.name)} ${Math.round(w.utilization * 100)}%${w.status === 'rejected' ? ' used up' : ''}`).join(' · ')
-    const line = el('span', near ? 'warn' : 'secondary', `${visible(m.label)}: ${said}${near ? ' · automatic work paused, open the session to answer' : ''}`)
-    this.title = windows.map(w => `${visible(w.name)}: ${Math.round(w.utilization * 100)}% used${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`).join('\n')
-    this.replaceChildren(line)
   }
 }
 
@@ -354,13 +330,11 @@ class SfTokenExpiry extends HTMLElement {
 }
 
 customElements.define('sf-usage', SfUsage)
-customElements.define('sf-usage-line', SfUsageLine)
 customElements.define('sf-token-expiry', SfTokenExpiry)
 
 declare global {
   interface HTMLElementTagNameMap {
     'sf-usage': SfUsage
-    'sf-usage-line': SfUsageLine
     'sf-token-expiry': SfTokenExpiry
   }
 }

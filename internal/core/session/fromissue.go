@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
@@ -27,7 +26,7 @@ const (
 )
 
 type IssuesPage interface {
-	List(ctx context.Context, path, label string, page int) (IssueList, error)
+	List(ctx context.Context, path string, page int) (IssueList, error)
 	Read(ctx context.Context, path string, number int) (IssueView, error)
 }
 
@@ -53,7 +52,6 @@ type IssueStarts struct {
 
 type IssueList struct {
 	Repo   string
-	Label  string
 	Page   int
 	More   bool
 	Issues []IssueFound
@@ -94,23 +92,23 @@ func (s *IssueStarts) Wait() { s.wg.Wait() }
 func (s *IssueStarts) repoFor(path string) (string, ForgeRepo, error) {
 	list, err := s.cfg.Projects()
 	if err != nil {
-		return "", ForgeRepo{}, explained(conflict("workspace"), "The engine couldn't read the workspace's repositories.")
+		return "", ForgeRepo{}, conflict("workspace", "The engine couldn't read the workspace's repositories.")
 	}
 	i := slices.IndexFunc(list, func(r Repository) bool { return r.Path == path })
 	if i < 0 {
-		return "", ForgeRepo{}, explained(notFound("project"), "That project is no longer in the list.")
+		return "", ForgeRepo{}, notFound("project", "That project is no longer in the list.")
 	}
 	f := s.cfg.Follows.cfg.Forges
 	raw, token, _, err := f.cfg.Repos.ForgeTarget(list[i].Name)
 	if err != nil {
-		return "", ForgeRepo{}, explained(conflict("repository"), "The project's repository isn't in the engine's list any more.")
+		return "", ForgeRepo{}, conflict("repository", "The project's repository is no longer in the list.")
 	}
 	host, owner, name, ok := ForgeRepoOf(raw)
 	if !ok || !f.cfg.API.Supports(host) {
-		return "", ForgeRepo{}, explained(conflict("not github"), "The engine reads issues only from GitHub (github.com or a GitHub Enterprise server).")
+		return "", ForgeRepo{}, conflict("not github", "Issues are read only from GitHub or GitHub Enterprise.")
 	}
 	if token == "" {
-		return "", ForgeRepo{}, explained(conflict("no token"), "No token is saved for "+host+". Save one under Git host tokens, with "+strings.TrimSuffix(NeedIssues, " and write")+".")
+		return "", ForgeRepo{}, conflict("no token", withName("No token for ", strings.TrimPrefix(host, "https://"), "; save one with "+strings.TrimSuffix(NeedIssues, " and write")+"."))
 	}
 	return list[i].Name, ForgeRepo{Host: host, Owner: owner, Name: name, Token: token}, nil
 }
@@ -119,24 +117,17 @@ func (s *IssueStarts) allow(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if !s.reads.allow(path, s.cfg.Now()) {
-		return explained(limited("issues"), "The engine read this project's issues "+strconv.Itoa(IssueCalls)+" times in 10 minutes. Wait a few minutes.")
+		return limited("issues", "Issues read "+strconv.Itoa(IssueCalls)+" times in 10 minutes. Wait a few minutes.")
 	}
 	return nil
 }
 
-func ValidLabel(label string) bool {
-	return utf8.ValidString(label) && utf8.RuneCountInString(label) <= MaxIssueLabel && CleanLine(label, MaxIssueLabel) == label && strings.TrimSpace(label) == label
-}
-
-func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (IssueList, error) {
-	if !ValidLabel(label) {
-		return IssueList{}, explained(invalid("label"), "A label is one line of at most 50 characters.")
-	}
+func (s *IssueStarts) List(ctx context.Context, path string, page int) (IssueList, error) {
 	if page < 1 || page > MaxIssuePage {
-		return IssueList{}, explained(invalid("page"), "The page is a number from 1 to 100.")
+		return IssueList{}, invalid("page", "The page is a number from 1 to 100.")
 	}
 	if err := s.allow(path); err != nil {
 		return IssueList{}, err
@@ -147,11 +138,11 @@ func (s *IssueStarts) List(ctx context.Context, path, label string, page int) (I
 	}
 	ctx, cancel := context.WithTimeout(ctx, ForgeFor)
 	defer cancel()
-	list, more, err := s.cfg.Follows.cfg.API.OpenIssues(ctx, repo, label, page)
+	list, more, err := s.cfg.Follows.cfg.API.OpenIssues(ctx, repo, page)
 	if err != nil {
-		return IssueList{}, explained(conflict("host"), s.cfg.Follows.cfg.Forges.clean(repo.Token, "The engine couldn't list the open issues: "+forgeWhy(err, strings.TrimSuffix(NeedIssues, " and write"))+"."))
+		return IssueList{}, conflict("host", s.cfg.Follows.cfg.Forges.clean(repo.Token, "The engine couldn't list the open issues: "+forgeWhy(err, strings.TrimSuffix(NeedIssues, " and write"))+"."))
 	}
-	out := IssueList{Repo: repo.Host + "/" + repo.Slug(), Label: label, Page: page, More: more}
+	out := IssueList{Repo: repo.Host + "/" + repo.Slug(), Page: page, More: more}
 	for _, i := range list {
 		i.Body = ""
 		i.Title, i.Author, i.URL = CleanLine(i.Title, MaxForgeTitle), CleanLine(i.Author, 100), CleanLine(i.URL, 300)
@@ -221,7 +212,7 @@ func issueRefusal(i IssueFound) string {
 
 func (s *IssueStarts) read(ctx context.Context, path string, number int) (IssueView, string, error) {
 	if number < 1 || number > MaxIssueNumber {
-		return IssueView{}, "", explained(invalid("number"), "That isn't an issue number.")
+		return IssueView{}, "", invalid("number", "That isn't an issue number.")
 	}
 	if err := s.allow(path); err != nil {
 		return IssueView{}, "", err
@@ -234,7 +225,7 @@ func (s *IssueStarts) read(ctx context.Context, path string, number int) (IssueV
 	defer cancel()
 	i, err := s.cfg.Follows.cfg.API.IssueByNumber(ctx, repo, number)
 	if err != nil {
-		return IssueView{}, "", explained(conflict("host"), s.cfg.Follows.cfg.Forges.clean(repo.Token, "The engine couldn't read issue #"+strconv.Itoa(number)+": "+forgeWhy(err, strings.TrimSuffix(NeedIssues, " and write"))+"."))
+		return IssueView{}, "", conflict("host", s.cfg.Follows.cfg.Forges.clean(repo.Token, "The engine couldn't read issue #"+strconv.Itoa(number)+": "+forgeWhy(err, strings.TrimSuffix(NeedIssues, " and write"))+"."))
 	}
 	text, clipped := IssueText(i.Number, i.Title, i.Body)
 	v := IssueView{Repo: repo.Host + "/" + repo.Slug(), Issue: i, Refused: issueRefusal(i), Clipped: clipped, Hash: hashIssue(text)}
@@ -260,30 +251,41 @@ var _ Starter = IssueDispatcher{}
 func (d IssueDispatcher) Dispatch(ctx context.Context, q Dispatch) (Started, error) {
 	if q.Issue == 0 || d.Issues == nil {
 		if q.Issue != 0 {
-			return Started{}, explained(conflict("no issues"), "This engine can't start a session from an issue.")
+			return Started{}, onField("issue", conflict("no issues", "This engine can't start a session from an issue."))
 		}
 		return d.Dispatcher.Dispatch(ctx, q)
 	}
-	if !ValidIssueHash(q.IssueHash) {
-		return Started{}, explained(invalid("issue"), "Read the issue on the page before starting from it.")
-	}
-	v, text, err := d.Issues.read(ctx, q.Path, q.Issue)
+	text, err := d.Issues.startText(ctx, q.Path, q.Issue, q.IssueHash)
 	if err != nil {
 		return Started{}, err
-	}
-	if v.Refused != "" {
-		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused")
-		return Started{}, explained(conflict("issue"), v.Refused+" No session started.")
-	}
-	if v.Hash != q.IssueHash {
-		shared.For(ctx, d.Issues.cfg.Logger).Info("issues", "event", "start-refused-changed")
-		return Started{}, explained(conflict("issue changed"), "The issue changed since you read it; read it again. No session started.")
 	}
 	started, err := d.Dispatcher.Dispatch(ctx, q)
 	if err == nil && started.SID != "" {
 		d.Issues.begin(started.SID, q.Issue, text)
 	}
 	return started, err
+}
+
+func (s *IssueStarts) startText(ctx context.Context, path string, number int, hash string) (string, error) {
+	if !ValidIssueHash(hash) {
+		return "", onField("issue", invalid("issue", "Read the issue again before starting from it."))
+	}
+	v, text, err := s.read(ctx, path, number)
+	if e, ok := errors.AsType[*Error](err); ok && e.Reason == "host" {
+		err = explained(e, "Couldn't be read from the git host. Try again.")
+	}
+	if err != nil {
+		return "", onField("issue", err)
+	}
+	if v.Refused != "" {
+		shared.For(ctx, s.cfg.Logger).Info("issues", "event", "start-refused")
+		return "", onField("issue", conflict("issue", "Can't be sent to an agent. Clear it or pick another."))
+	}
+	if v.Hash != hash {
+		shared.For(ctx, s.cfg.Logger).Info("issues", "event", "start-refused-changed")
+		return "", onField("issue", conflict("issue changed", "Changed since you read it. Read it again."))
+	}
+	return text, nil
 }
 
 func (s *IssueStarts) begin(sid string, number int, text string) {

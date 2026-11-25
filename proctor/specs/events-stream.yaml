@@ -14,7 +14,7 @@ tables:
       equal:
         "$.status": 401
         "$.headers.content-type": ["application/json; charset=utf-8"]
-        "$.body": { error: token }
+        "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.body.why"]
@@ -39,7 +39,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]", "$.body.why"]
@@ -59,7 +59,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token }
+            "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
           absent: ["$.body.why"]
 
   - id: EVS-003
@@ -76,7 +76,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: origin }
+            "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
 
   - id: EVS-004
     name: "The event stream refuses a cross-site fetch, even with the page key"
@@ -92,7 +92,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: site }
+            "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
 
   - id: EVS-005
     name: "The event stream refuses a query string, so the key never travels in a URL"
@@ -109,7 +109,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: query }
+            "$.body": { error: query, message: "The engine's routes take no query string." }
 
   - id: EVS-006
     name: "The event stream refuses another Host, even with the page key"
@@ -125,7 +125,7 @@ scenarios:
           equal:
             "$.status": 421
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: host }
+            "$.body": { error: host, message: "The engine answers only at the address it serves the page on. Open the page at that address." }
 
   - id: EVS-007
     name: "A POST to the event stream's route is refused, since the stream is GET only"
@@ -142,11 +142,11 @@ scenarios:
           equal:
             "$.status": 405
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: method }
+            "$.body": { error: method, message: "The engine doesn't take that method on this route." }
         no_state_check: "refused with 405 before the stream or any handler runs, so nothing changed; no read shows the stream's subscribers, and an http.frames step, which needs an open stream, isn't counted as an http request's state check"
 
   - id: EVS-008
-    name: "The page key opens the event stream as NDJSON, whose first frames are the hello with no session and the halt state, and nothing else comes while nothing happens"
+    name: "The page key opens the event stream as NDJSON, whose first frames are the hello with no session and the away mode state, and nothing else comes while nothing happens"
     steps:
       - id: open
         do: http.open
@@ -176,9 +176,10 @@ scenarios:
             "$.frames[0].json.sessions": []
             "$.frames[0].json.supervisor": ""
             "$.frames[0].json.compose": "docker compose -p sf-proctor"
-            "$.frames[1].json": { type: halt, mode: "", since: 0, awayAll: false, away: [] }
+            "$.frames[0].json.imageTypes": [image/gif, image/jpeg, image/png, image/webp]
+            "$.frames[1].json": { type: halt, awayAll: false, away: [] }
           matches: { "$.frames[0].json.stream": "[0-9a-f]{24}" }
-          keys: { "$.frames[0].json": [compose, sessions, stream, supervisor, type] }
+          keys: { "$.frames[0].json": [compose, imageTypes, sessions, stream, supervisor, type] }
       - id: quiet
         do: http.frames
         on: events
@@ -254,7 +255,7 @@ scenarios:
             "$.status": 429
             "$.open": false
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: streams }
+            "$.body": { error: streams, message: "The page holds two live streams at once, and both are open. Close another tab of the page, then reload this one." }
       - id: first-still-open
         do: http.frames
         on: first
@@ -262,7 +263,7 @@ scenarios:
           equal: { "$.frames[0].json.type": hello, "$.closed": false }
 
   - id: EVS-011
-    name: "A session's frames reach the open stream: its listing, its turns, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
+    name: "A session's frames reach the open stream: its listing with the engine's control notice and allowed actions, its turns with the engine's turn-finished notice, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
     steps:
       - id: open
         do: http.open
@@ -289,14 +290,14 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor stream ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor stream ${run.id}" }
         expect:
           equal:
             "$.status": 202
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "agent is the development agent's fixed id, dev-acp, and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -312,13 +313,39 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
       - id: listed-live
         do: http.frames
         on: events
         eventually: { within: 30s, every: 200ms }
         expect:
           any:
-            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].id": "${id}", "json.sessions[0].name": "proctor stream ${run.id}", "json.sessions[0].project": demo, "json.sessions[0].agent": dev-acp, "json.sessions[0].box": "${box}", "json.sessions[0].branch": "sf/${id}", "json.sessions[0].running": true, "json.sessions[0].live": true, "json.sessions[0].controlled": true, "json.sessions[0].doubled": false }
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].id": "${id}", "json.sessions[0].name": "proctor stream ${run.id}", "json.sessions[0].project": demo, "json.sessions[0].agent": dev-acp, "json.sessions[0].box": "${box}", "json.sessions[0].branch": "sf/${id}", "json.sessions[0].running": true, "json.sessions[0].live": true, "json.sessions[0].controlled": true, "json.sessions[0].doubled": false, "json.sessions[0].control.action": read-only, "json.sessions[0].control.label": Make it read-only, "json.sessions[0].actions.control": "" }
       - id: say
         do: http.request
         identity: page
@@ -476,6 +503,7 @@ scenarios:
             "$.frames":
               - { json.type: prompt, json.sid: "${sid}", json.from: page, json.images: 1, json.text: "proctor look ${run.id}" }
               - { json.type: text, json.sid: "${sid}", json.text: "The fake agent received 2 content blocks:\n- text: \"I pasted an image on the Software Factory page; it is in this message, and also saved at /uploads/${box}/${sid}/${image}/image.png.\\n\\nproctor look ${run.id}\"\n- image: image/png, 15 bytes, sha256 27c0ab99197e1139, uri file:///uploads/${box}/${sid}/${image}/image.png, decoded: true" }
+              - { json.type: notify, json.sid: "${sid}", json.what: turn finished }
       - id: nothing-withheld
         do: http.frames
         on: events
@@ -509,7 +537,7 @@ scenarios:
           equal:
             "$.status": 401
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: token, why: replaced }
+            "$.body": { error: token, why: replaced, message: "The page signed in again in another tab or browser, which ended this tab's key. Reload the page to use it here." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]

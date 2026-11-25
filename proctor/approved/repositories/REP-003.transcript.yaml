@@ -65,9 +65,14 @@ steps:
     fact:
       body:
         cloning: []
+        hostNotes:
+          "https://gitlab.com": "Pull requests and issues work only on GitHub."
         hosts:
           - host: "https://gitserver.test:8443"
             savedAt: "<hosts_saved_at-1>"
+        offerHosts:
+          - "https://github.com"
+          - "https://gitlab.com"
         projects:
           - addedAt: "<added_at-1>"
             agents: []
@@ -82,7 +87,44 @@ steps:
             path: "/workspace/base/demo"
             prComment: false
             rounds: 3
+            roundsMax: 20
             type: ""
+            types:
+              - builtin: true
+                edits: "any"
+                id: "change"
+                name: "Code change"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                steps:
+                  - "define"
+                  - "plan"
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "incident"
+                name: "Incident"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                startWarning: "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause."
+                steps:
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "explore"
+                name: "Explore"
+                push: false
+                roles: []
+                steps:
+                  - "implement"
             url: "https://gitserver.test:8443/dev/demo.git"
           - addedAt: "<second_added_at-1>"
             agents: []
@@ -97,27 +139,117 @@ steps:
             path: "/workspace/base/demo-2"
             prComment: false
             rounds: 3
+            roundsMax: 20
             type: ""
+            types:
+              - builtin: true
+                edits: "any"
+                id: "change"
+                name: "Code change"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                steps:
+                  - "define"
+                  - "plan"
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "incident"
+                name: "Incident"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                startWarning: "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause."
+                steps:
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "explore"
+                name: "Explore"
+                push: false
+                roles: []
+                steps:
+                  - "implement"
             url: "https://gitserver.test:8443/demo.git"
+        readiness: []
         repos: true
         reviewer:
           expect: "any"
         starters:
-          - enabled: true
+          - command: "claude --bg"
+            default: true
+            defaultEffort: "high"
+            defaultModel: "opus"
+            efforts:
+              - "low"
+              - "medium"
+              - "high"
+              - "xhigh"
+              - "max"
+            enabled: true
             expect: "any"
+            fields:
+              effort: true
+              expect: false
+              model: true
             id: "claude"
             method: "plugin"
+            models:
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "fable"
+                name: "Fable"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "opus"
+                name: "Opus"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "sonnet"
+                name: "Sonnet"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "haiku"
+                name: "Haiku"
             name: "Claude Code"
-          - enabled: true
+          - command: "its ACP server"
+            efforts: []
+            enabled: true
             expect: "any"
+            fields:
+              effort: false
+              expect: true
+              model: false
             id: "dev-acp"
             method: "acp"
+            models: []
             name: "Development ACP agent"
       header_lists:
         cache-control:
           - "no-store"
-        content-length:
-          - "891"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:
@@ -137,8 +269,6 @@ steps:
       headers:
         cache-control:
           - "no-store"
-        content-length:
-          - "891"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:
@@ -229,9 +359,14 @@ steps:
     fact:
       body:
         cloning: []
+        hostNotes:
+          "https://gitlab.com": "Pull requests and issues work only on GitHub."
         hosts:
           - host: "https://gitserver.test:8443"
             savedAt: "<hosts_saved_at-1>"
+        offerHosts:
+          - "https://github.com"
+          - "https://gitlab.com"
         projects:
           - addedAt: "<added_at-1>"
             agents: []
@@ -246,27 +381,117 @@ steps:
             path: "/workspace/base/demo"
             prComment: false
             rounds: 3
+            roundsMax: 20
             type: ""
+            types:
+              - builtin: true
+                edits: "any"
+                id: "change"
+                name: "Code change"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                steps:
+                  - "define"
+                  - "plan"
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "incident"
+                name: "Incident"
+                push: true
+                roles:
+                  - "bug-hunter"
+                  - "simplicity"
+                startWarning: "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause."
+                steps:
+                  - "implement"
+                  - "review"
+                  - "deliver"
+              - builtin: true
+                edits: "any"
+                id: "explore"
+                name: "Explore"
+                push: false
+                roles: []
+                steps:
+                  - "implement"
             url: "https://gitserver.test:8443/dev/demo.git"
+        readiness: []
         repos: true
         reviewer:
           expect: "any"
         starters:
-          - enabled: true
+          - command: "claude --bg"
+            default: true
+            defaultEffort: "high"
+            defaultModel: "opus"
+            efforts:
+              - "low"
+              - "medium"
+              - "high"
+              - "xhigh"
+              - "max"
+            enabled: true
             expect: "any"
+            fields:
+              effort: true
+              expect: false
+              model: true
             id: "claude"
             method: "plugin"
+            models:
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "fable"
+                name: "Fable"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "opus"
+                name: "Opus"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "sonnet"
+                name: "Sonnet"
+              - efforts:
+                  - "low"
+                  - "medium"
+                  - "high"
+                  - "xhigh"
+                  - "max"
+                id: "haiku"
+                name: "Haiku"
             name: "Claude Code"
-          - enabled: true
+          - command: "its ACP server"
+            efforts: []
+            enabled: true
             expect: "any"
+            fields:
+              effort: false
+              expect: true
+              model: false
             id: "dev-acp"
             method: "acp"
+            models: []
             name: "Development ACP agent"
       header_lists:
         cache-control:
           - "no-store"
-        content-length:
-          - "612"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:
@@ -286,8 +511,6 @@ steps:
       headers:
         cache-control:
           - "no-store"
-        content-length:
-          - "612"
         content-security-policy:
           - "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         content-type:

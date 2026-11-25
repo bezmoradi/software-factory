@@ -41,7 +41,7 @@ tables:
         "$.headers.content-type": ["application/json; charset=utf-8"]
         "$.headers.x-content-type-options": ["nosniff"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: site }
+        "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
       absent: ["$.headers.clear-site-data", "$.headers.access-control-allow-origin"]
     columns: ["case", "headers"]
     rows:
@@ -64,7 +64,7 @@ scenarios:
           equal:
             "$.status": 421
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: host }
+            "$.body": { error: host, message: "The engine answers only at the address it serves the page on. Open the page at that address." }
           absent: ["$.headers.clear-site-data"]
 
   - id: NAV-002
@@ -81,7 +81,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: origin }
+            "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
           absent: ["$.headers.clear-site-data"]
 
   - id: NAV-003

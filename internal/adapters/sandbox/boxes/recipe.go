@@ -33,7 +33,7 @@ const (
 	homeTarget     = "/home/agent"
 	liveTarget     = "/opt/sf-dev/bin"
 	liveEntrypoint = liveTarget + "/software-factory"
-	proxyURL       = "http://egress:3130"
+	proxyURL       = "http://" + session.PortProxy
 	noProxy        = "localhost,127.0.0.1,::1"
 	boxOOMScore    = 500
 	boxPids        = 2048
@@ -414,7 +414,7 @@ func (r *recipe) viewOf(c containerCreateJSON, labels map[string]string, g gener
 		ExtraHosts: g.all(h.ExtraHosts, g.host), NetworkMode: g.name(h.NetworkMode),
 		Networks: []string{g.name(h.NetworkMode)}, Address: g.address(agentOf(subnet).String()),
 		Mounts: g.mountsOf(h.Mounts), Points: points, Tmpfs: h.Tmpfs, Runtime: r.runtime, CgroupnsMode: h.CgroupnsMode,
-		IpcMode: h.IpcMode, ShmSize: h.ShmSize,
+		IpcMode: h.IpcMode, ShmSize: h.ShmSize, GroupAdd: nonEmpty(h.GroupAdd),
 	}
 }
 

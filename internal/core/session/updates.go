@@ -14,14 +14,12 @@ import (
 )
 
 const (
-	UpdateEvery        = 24 * time.Hour
-	UpdateRecheckAfter = time.Hour
-	updateCheckFor     = time.Minute
-	updateTries        = 3
-	maxReleaseTags     = 500
+	UpdateEvery    = 24 * time.Hour
+	updateCheckFor = time.Minute
+	updateTries    = 3
+	maxReleaseTags = 500
 
 	UpdateNotYet     = "not-yet"
-	UpdateOff        = "off"
 	UpdateOffByEnv   = "off-by-variable"
 	UpdateUnreadable = "settings-unreadable"
 	UpdateNewer      = "newer"
@@ -70,7 +68,6 @@ type UpdateLast struct {
 }
 
 type UpdateSettings struct {
-	Check bool
 	Later string
 	Last  UpdateLast
 }
@@ -96,7 +93,6 @@ type UpdateStore interface {
 
 type UpdateView struct {
 	Running     string
-	Check       bool
 	Forced      bool
 	Unreadable  bool
 	Development bool
@@ -107,7 +103,6 @@ type UpdateView struct {
 
 type UpdatesPage interface {
 	View() UpdateView
-	SetCheck(on bool) error
 	Later(version string) error
 }
 
@@ -131,7 +126,6 @@ type Updates struct {
 	result  string
 	checked time.Time
 	found   string
-	wake    chan struct{}
 }
 
 var _ UpdatesPage = (*Updates)(nil)
@@ -190,7 +184,7 @@ func NewUpdates(cfg UpdatesConfig) *Updates {
 	if cfg.Reuse <= 0 || cfg.Reuse > cfg.Every {
 		cfg.Reuse = cfg.Every
 	}
-	u := &Updates{cfg: cfg, set: UpdateSettings{Check: true}, result: UpdateNotYet, wake: make(chan struct{}, 1)}
+	u := &Updates{cfg: cfg, result: UpdateNotYet}
 	if cfg.Store != nil {
 		set, err := cfg.Store.Load()
 		if err != nil {
@@ -258,7 +252,6 @@ func (u *Updates) Watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
-		case <-u.wake:
 		}
 	}
 	for {
@@ -267,7 +260,6 @@ func (u *Updates) Watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(u.cfg.Every):
-		case <-u.wake:
 		}
 	}
 }
@@ -275,7 +267,7 @@ func (u *Updates) Watch(ctx context.Context) {
 func (u *Updates) active() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return !u.broken && u.cfg.Source != nil && u.set.Check
+	return !u.broken && u.cfg.Source != nil
 }
 
 func (u *Updates) check(ctx context.Context) {
@@ -354,7 +346,7 @@ func (u *Updates) lookup(ctx context.Context) (string, string) {
 }
 
 func (u *Updates) shownLocked() bool {
-	if u.cfg.Forced || u.broken || !u.set.Check || u.found == "" || !u.newerThanRunning(u.found) {
+	if u.cfg.Forced || u.broken || u.found == "" || !u.newerThanRunning(u.found) {
 		return false
 	}
 	if u.set.Later == "" {
@@ -371,8 +363,6 @@ func (u *Updates) resultLocked() string {
 		return UpdateOffByEnv
 	case u.broken:
 		return UpdateUnreadable
-	case !u.set.Check:
-		return UpdateOff
 	}
 	return u.result
 }
@@ -380,8 +370,7 @@ func (u *Updates) resultLocked() string {
 func (u *Updates) View() UpdateView {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	v := UpdateView{Running: u.cfg.Version, Check: u.set.Check && !u.cfg.Forced && !u.broken, Forced: u.cfg.Forced, Unreadable: u.broken,
-		Development: u.cfg.Development, Result: u.resultLocked(), Checked: u.checked}
+	v := UpdateView{Running: u.cfg.Version, Forced: u.cfg.Forced, Unreadable: u.broken, Development: u.cfg.Development, Result: u.resultLocked(), Checked: u.checked}
 	if u.shownLocked() {
 		v.Version = u.found
 	}
@@ -401,28 +390,6 @@ func (u *Updates) save(next UpdateSettings) error {
 		}
 	}
 	u.set = next
-	return nil
-}
-
-func (u *Updates) SetCheck(on bool) error {
-	u.mu.Lock()
-	next := u.set
-	next.Check = on
-	err := u.save(next)
-	stale := u.checked.IsZero() || u.cfg.Now().Sub(u.checked) >= UpdateRecheckAfter
-	if err == nil && on && stale {
-		u.result, u.found = UpdateNotYet, ""
-	}
-	u.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if on && stale {
-		select {
-		case u.wake <- struct{}{}:
-		default:
-		}
-	}
 	return nil
 }
 

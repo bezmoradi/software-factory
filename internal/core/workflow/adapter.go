@@ -34,7 +34,7 @@ var defaultAgents = map[review.Role]string{review.BugHunter: "knackpack:adversar
 var Adapters = map[AdapterID]Adapter{
 	Knackpack: {
 		Name:     string(Knackpack),
-		Commands: map[Step]string{Define: "/knackpack:challenge-requirements", Plan: "/knackpack:plan-implementation", Review: "/knackpack:handoff"},
+		Commands: map[Step]string{Define: "/knackpack:challenge-requirements", Plan: "/knackpack:plan-implementation"},
 		Agents:   defaultAgents,
 		Artifacts: map[Step][]string{
 			Define: {"REQUIREMENTS.md"},
@@ -79,6 +79,9 @@ func Offered(types []WorkType, a Adapter) []WorkType {
 		switch {
 		case t.Profile() == Incident && a.Documents.RootCause == "":
 		case a.HasDocuments() || (!slices.Contains(t.Steps, Define) && !slices.Contains(t.Steps, Plan)):
+			out = append(out, t)
+		case t.Builtin && t.ID == DefaultType:
+			t.Steps = slices.DeleteFunc(slices.Clone(t.Steps), func(s Step) bool { return s == Define || s == Plan })
 			out = append(out, t)
 		}
 	}

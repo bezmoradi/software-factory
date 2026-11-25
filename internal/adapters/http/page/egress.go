@@ -3,6 +3,7 @@ package page
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/session"
@@ -12,9 +13,14 @@ import (
 const (
 	egressRoute   = "/api/egress"
 	maxEgressHost = 300
-	maxHostReason = session.MaxHostReason * 4
-	maxEgressURL  = session.MaxGatewayURL + 64
 	egressFor     = 20 * time.Second
+)
+
+const (
+	saidGatewaySaved     = "Saved the gateway."
+	saidGatewayUnchanged = "No change: this gateway is already saved."
+	saidGatewayRemoved   = "Removed the gateway."
+	saidGatewayNone      = "No change: no gateway is set."
 )
 
 func (s *Server) UseEgress(e session.EgressPage) {
@@ -47,14 +53,22 @@ func egressViewJSON(v session.EgressView) map[string]any {
 	}
 	var gateway any
 	if v.Gateway != nil {
-		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host, "agents": v.Gateway.Agents, "reviewers": v.Gateway.Reviewers}
+		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host}
 	}
 	return map[string]any{
 		"saved": v.Saved, "pending": v.Pending, "added": added, "gateway": gateway,
 		"lists": map[string]any{"agents": egressListJSON(v.Lists.Agents), "reviewers": egressListJSON(v.Lists.Reviewers)},
 		"base":  v.Base, "deny": v.Deny, "now": v.Now.Unix(),
-		"gatewayKeyNote": session.GatewayKeyNote, "pypiNote": session.PyPIReadHostsNote,
+		"gatewayKeyNote": session.GatewayKeyNote, "pypiNote": session.PyPIReadHostsNote, "expiries": expiriesJSON(),
 	}
+}
+
+func expiriesJSON() []map[string]string {
+	out := make([]map[string]string, 0, len(session.ExpiryChoices))
+	for _, c := range session.ExpiryChoices {
+		out = append(out, map[string]string{"value": c.Value, "label": c.Label})
+	}
+	return out
 }
 
 func refusalsJSON(list []session.RefusalView, now time.Time) map[string]any {
@@ -65,8 +79,8 @@ func refusalsJSON(list []session.RefusalView, now time.Time) map[string]any {
 			suggest = []string{}
 		}
 		sides[r.Side] = append(sides[r.Side], map[string]any{
-			"host": r.Host, "reason": r.Reason, "count": r.Count, "last": r.Last.Unix(),
-			"addable": r.Addable, "gitHost": r.GitHost, "uploads": r.Uploads, "probe": r.Probe, "suggest": suggest,
+			"host": r.Host, "reason": r.Reason, "reasonLabel": session.EgressReasonLabel(r.Reason), "count": r.Count, "last": r.Last.Unix(),
+			"addable": r.Addable, "gitHost": r.GitHost, "uploads": r.Uploads, "probe": r.Probe, "suggest": suggest, "note": r.Note(),
 		})
 	}
 	return map[string]any{"refusals": sides, "now": now.Unix()}
@@ -79,21 +93,22 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 	}
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), egressFor)
 	defer cancel()
 	var err error
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "refusals":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		list, err := s.cfg.Egress.EgressRefusals(ctx)
@@ -111,7 +126,7 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 		if v, present := body["uploadsOk"]; present {
 			b, ok := v.(bool)
 			if !ok {
-				refuse(w, http.StatusBadRequest, "fields")
+				refuseFields(w)
 				return
 			}
 			uploadsOk = b
@@ -119,36 +134,40 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 		reason := ""
 		if v, present := body["reason"]; present {
 			t, ok := v.(string)
-			if !ok || len(t) > maxHostReason {
-				refuse(w, http.StatusBadRequest, "fields")
+			if !ok {
+				refuseFields(w)
 				return
 			}
 			reason = t
 		}
-		if !keysWithin(body, "op", "host", "expires", "uploadsOk", "reason") || !okHost || !okExp || len(host) > maxEgressHost || len(expires) > 8 {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "host", "expires", "uploadsOk", "reason") || !okHost || !okExp || len(expires) > 8 {
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Egress.AddHost(ctx, host, expires, uploadsOk, reason)
 	case "remove":
 		host, okHost := body["host"].(string)
 		if !keysWithin(body, "op", "host") || !okHost || len(host) > maxEgressHost {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.cfg.Egress.RemoveHost(ctx, host)
 	case "gateway":
 		u, okURL := body["url"].(string)
-		agents, okA := body["agents"].(bool)
-		reviewers, okR := body["reviewers"].(bool)
-		if !keysWithin(body, "op", "url", "agents", "reviewers") || !okURL || !okA || !okR || len(u) > maxEgressURL {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "url") || !okURL {
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(egressFor + writeFor))
-		err = s.cfg.Egress.SetGateway(ctx, u, agents, reviewers)
+		var changed bool
+		changed, err = s.cfg.Egress.SetGateway(ctx, u)
+		done := saveSaid(changed, saidGatewaySaved, saidGatewayUnchanged)
+		if strings.TrimSpace(u) == "" {
+			done = saveSaid(changed, saidGatewayRemoved, saidGatewayNone)
+		}
+		said = &done
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	if op != "read" {
@@ -165,5 +184,12 @@ func (s *Server) egress(w http.ResponseWriter, r *http.Request, body map[string]
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, egressViewJSON(v))
+	answer := egressViewJSON(v)
+	if host, ok := body["host"].(string); ok && op == "add" {
+		answer["note"] = session.HostNote(host)
+	}
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }

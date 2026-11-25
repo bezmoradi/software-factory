@@ -10,9 +10,28 @@ import (
 var repoRoutes = map[string]bool{"/api/add-repo": true, "/api/remove-repo": true, "/api/save-token": true, "/api/remove-token": true}
 
 type cloningJSON struct {
-	URL       string `json:"url"`
-	Name      string `json:"name"`
-	StartedAt int64  `json:"startedAt"`
+	URL       string             `json:"url"`
+	Name      string             `json:"name"`
+	StartedAt int64              `json:"startedAt"`
+	Progress  *cloneProgressJSON `json:"progress,omitempty"`
+}
+
+type cloneProgressJSON struct {
+	Phase   string `json:"phase"`
+	Percent *int   `json:"percent,omitempty"`
+	Said    string `json:"said"`
+}
+
+func cloningJSONOf(k session.Cloning) cloningJSON {
+	out := cloningJSON{URL: k.URL, Name: k.Name, StartedAt: millis(k.StartedAt)}
+	if k.Progress.Phase != "" {
+		p := &cloneProgressJSON{Phase: string(k.Progress.Phase), Said: k.Progress.Said}
+		if k.Progress.HasPercent {
+			p.Percent = &k.Progress.Percent
+		}
+		out.Progress = p
+	}
+	return out
 }
 
 type hostJSON struct {
@@ -29,14 +48,14 @@ func millis(t time.Time) int64 {
 
 func textFields(w http.ResponseWriter, body map[string]any, limit int, keys ...string) (map[string]string, bool) {
 	if !keysWithin(body, keys...) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return nil, false
 	}
 	out := map[string]string{}
 	for _, k := range keys {
 		v, ok := body[k].(string)
 		if !ok || len(v) > limit {
-			refuse(w, http.StatusBadRequest, k)
+			refuse(w, http.StatusBadRequest, k, "The engine needs text of at most "+sizeWords(int64(limit))+" here.")
 			return nil, false
 		}
 		out[k] = v
@@ -51,7 +70,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]a
 	}
 	switch r.URL.Path {
 	case "/api/add-repo":
-		f, ok := textFields(w, body, 4096, "url")
+		f, ok := textFields(w, body, MaxPageBody, "url")
 		if !ok {
 			return
 		}
@@ -69,7 +88,7 @@ func (s *Server) repos(w http.ResponseWriter, r *http.Request, body map[string]a
 		}
 		reply(w, s.cfg.Repos.Remove(f["name"]), http.StatusOK)
 	case "/api/save-token":
-		f, ok := textFields(w, body, session.MaxTokenLength+1, "host", "token")
+		f, ok := textFields(w, body, MaxPageBody, "host", "token")
 		if !ok {
 			return
 		}

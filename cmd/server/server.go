@@ -46,6 +46,7 @@ type PageConfig struct {
 	BoxRanges    []netip.Prefix
 	Workspace    string
 	Verify       string
+	Actions      string
 	PluginDir    string
 	PluginSocket string
 	AgentBinary  string
@@ -123,6 +124,12 @@ func parseStarts(cfg *PageConfig, getenv func(string) string) error {
 		}
 		cfg.Verify = filepath.Clean(v)
 	}
+	if v := getenv("SF_ACTIONS"); v != "" {
+		if !filepath.IsAbs(v) || strings.ContainsAny(v, "\x00\n") {
+			return errors.New("SF_ACTIONS must be an absolute path")
+		}
+		cfg.Actions = filepath.Clean(v)
+	}
 	if v := getenv("SF_HELPER"); v != "" && v != "off" {
 		if _, _, err := net.SplitHostPort(v); err != nil {
 			return fmt.Errorf("SF_HELPER must be host:port or off, got %q", v)
@@ -195,6 +202,7 @@ type engineParts struct {
 	agentFiles *session.ReviewerAgents
 	identity   *session.Identities
 	allowlist  *session.Allowlist
+	grants     *session.Grants
 	catalogs   *session.Catalogs
 	boxes      session.Boxes
 
@@ -314,6 +322,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	cfg.Sandbox.Allowlist, cfg.Sandbox.TLS = allow, tc
 	routes := newBoxRoutes(reg, allow, control, cfg.BoxRanges, reachable(helper), logger)
+	cfg.Sandbox.Grants = routes
 	sandbox, err := newSandbox(cfg, gitHostsOf(repos))
 	if err != nil {
 		return engineParts{}, err
@@ -360,7 +369,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	identity := session.NewIdentities(state.NewIdentity(cfg.StateDir), logger)
 	var d *session.Dispatcher
 	catalogs := knackpackCatalog(pins, logger)
-	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, agentFiles, logger)
+	work, err := workflowParts(cfg, reg, repos, reviews, pins, packs, catalogs, func(sid string) (session.PushTarget, bool) { return d.PushTarget(sid) }, func(sid string) bool { return d.Doubled(sid) }, func(sid string) (session.PushTarget, bool) { return d.HeldTarget(sid) }, func(sid string) error { return d.HistoryOnly(sid) }, agentFiles, logger)
 	if err != nil {
 		return engineParts{}, err
 	}
@@ -442,7 +451,14 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	d.UseForges(forged)
 	noteCompactions(reg, work, logger)
-	return engineParts{routes: routes, dispatcher: d, installer: inst, plugins: pins, packs: packs, packFiles: packFiles, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
+	grants, err := useGrants(base, cfg, allow, d, reg, repos, routes, helper, logger)
+	if err != nil {
+		return engineParts{}, err
+	}
+	if grants != nil {
+		d.OnRemoved(func(string) { go grants.Tend(base) })
+	}
+	return engineParts{grants: grants, routes: routes, dispatcher: d, installer: inst, plugins: pins, packs: packs, packFiles: packFiles, reviews: reviews, repos: repos, pushes: pushes, work: work, forges: forged, agentFiles: agentFiles, identity: identity, allowlist: allow, catalogs: catalogs, boxes: helper, reviewerHosts: reviewerHosts}, nil
 }
 
 func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *session.Dispatcher, repos *session.Repos, reviews *session.Reviews, work *session.Work, agentFiles *session.ReviewerAgents, logger shared.Logger) (*session.Pushes, error) {
@@ -569,6 +585,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return err
 	}
 	srv.UseEgress(parts.egressPage())
+	if parts.grants != nil {
+		srv.UseAccess(parts.grants)
+		srv.UseCredentials(parts.grants)
+	}
 	srv.UseUpdates(updates)
 	srv.UseBranching(parts.branching())
 	if parts.reviewing() != nil {
@@ -667,6 +687,11 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		go parts.dispatcher.Watch(ctx, session.CheckEvery)
 		if parts.allowlist != nil {
 			go parts.allowlist.Watch(ctx, session.ExpireWatch)
+		}
+		if parts.grants != nil {
+			go parts.grants.Watch(ctx, session.ExpireWatch)
+			go parts.grants.WatchActions(ctx, actionSweepEvery)
+			go parts.routes.watchRefusals(ctx)
 		}
 		go parts.dispatcher.WatchStates(ctx, session.StatesEvery)
 	}

@@ -81,7 +81,7 @@ func (a ApprovalGiven) hold(entries map[review.Key]ReviewEntry, branch, head str
 }
 
 const (
-	approvalHeldWhy = "it reviewed before the current approval of the requirements, the plan or the root cause, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+	approvalHeldWhy = "it reviewed before the current approval of the requirements, with its choice of whether a plan follows, the plan or the root cause, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 	teamHeldWhy     = "the team rules changed since it reviewed: the per-path rules of the approved " + TeamFile + " that apply to this change aren't the ones it was given, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 )
 
@@ -107,8 +107,8 @@ func (w *Work) ApprovedFor(ctx context.Context, sid string, t PushTarget, head, 
 
 func (w *Work) approvedOf(g gathered) ApprovedText {
 	ws := g.ws
-	incident := g.eff.Profile() == workflow.Incident
-	if !incident && !slices.Contains(g.eff.Steps, workflow.Define) && !slices.Contains(g.eff.Steps, workflow.Plan) {
+	incident := g.chosen.Profile() == workflow.Incident
+	if !incident && !slices.Contains(g.chosen.Steps, workflow.Define) && !slices.Contains(g.chosen.Steps, workflow.Plan) {
 		return ApprovedText{}
 	}
 	out := ApprovedText{Steps: true, Incident: incident}
@@ -153,6 +153,9 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 			add("requirements", name, "as the engine saved them when the person approved them", ws.req.Text)
 		default:
 			unkept("requirements", ws.req)
+		}
+		if g.chosen.Plans() {
+			out.given = append(out.given, "plan chosen "+strconv.FormatBool(g.planChosen))
 		}
 	}
 	if g.planOk {

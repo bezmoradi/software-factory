@@ -2,11 +2,16 @@ package session
 
 import (
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-const MaxRemovedProjects = 50
+const (
+	MaxRemovedProjects = 50
+	maxPendingSteps    = 2 * MaxRemovedProjects
+)
 
 type RemovedProject[T any] struct {
 	ID   ProjectID
@@ -140,4 +145,53 @@ func keepProjects[T any](active map[string]T, removed []RemovedProject[T], names
 		removed = setAside(active, removed, name)
 	}
 	return removed, len(unlisted)
+}
+
+type projectStep struct {
+	id      ProjectID
+	restore bool
+	at      time.Time
+}
+
+type pendingSteps struct {
+	mu    sync.Mutex
+	steps []projectStep
+}
+
+func (p *pendingSteps) remember(id ProjectID, restore bool, at time.Time) {
+	if id.Name == "" || id.URL == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.steps) >= maxPendingSteps {
+		p.steps = slices.Delete(p.steps, 0, 1)
+	}
+	p.steps = append(p.steps, projectStep{id: id, restore: restore, at: at})
+}
+
+func (p *pendingSteps) list() []projectStep {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.steps)
+}
+
+func (p *pendingSteps) done(n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.steps = slices.Delete(p.steps, 0, min(n, len(p.steps)))
+}
+
+func replaySteps[T any](steps []projectStep, active map[string]T, removed []RemovedProject[T]) ([]RemovedProject[T], []RemovedProject[T]) {
+	var dropped []RemovedProject[T]
+	for _, s := range steps {
+		if s.restore {
+			removed, _ = restoreProject(active, removed, s.id)
+			continue
+		}
+		var gone []RemovedProject[T]
+		removed, gone, _ = parkProject(active, removed, s.id)
+		dropped = append(dropped, gone...)
+	}
+	return removed, dropped
 }

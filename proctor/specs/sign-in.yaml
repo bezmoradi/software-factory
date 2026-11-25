@@ -16,7 +16,7 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: body }
+            "$.body": { error: body, message: "Signing in takes an empty JSON object. Reload the page." }
           absent: ["$.body.token"]
       - id: key-still-works
         do: http.request
@@ -45,7 +45,7 @@ scenarios:
         expect:
           equal:
             "$.status": 403
-            "$.body": { error: origin }
+            "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       - id: sign-in-not-json
         do: http.request
         identity: anonymous
@@ -57,7 +57,7 @@ scenarios:
         expect:
           equal:
             "$.status": 415
-            "$.body": { error: type }
+            "$.body": { error: type, message: "The engine takes this request as JSON only, sent with Content-Type application/json." }
       - id: key-still-works
         do: http.request
         identity: page

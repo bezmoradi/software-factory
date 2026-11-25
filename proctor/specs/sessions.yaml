@@ -12,7 +12,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -20,7 +20,6 @@ scenarios:
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; the gate step that expects it reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -39,6 +38,32 @@ scenarios:
           any:
             "$.body.entries": { kind: session-start, by: page, result: started, session: "${sid}", branch: "sf/${id}", from: main }
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
       - id: helper-image
         do: docker.container
         with: { name: sf-proctor-helper-1 }
@@ -137,9 +162,13 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.branch": "sf/${id}"
-            "$.body.gate.workType": fix
+            "$.body.gate.workType": explore
             "$.body.gate.allowed": false
             "$.body.gate.testLock": { offered: false, why: "The session's branch has no commit the main branch lacks yet. Lock the tests once the agent has committed the ones you want kept.", files: 0, paths: [], cut: false, branchLeft: 0, changed: null }
+            "$.body.gate.started": false
+            "$.body.gate.pushed": false
+            "$.body.gate.review.available": false
+            "$.body.gate.review.reason": "Nothing to review or push yet: this session has no commits."
           present: ["$.body.gate.head"]
         save: { head: "$.body.gate.head" }
       - id: changes
@@ -314,6 +343,21 @@ scenarios:
             "$.status": 200
             "$.body.current": null
             "$.body.runs": []
+      - id: verify-not-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-start, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: verify }
       - id: remove-while-running
         do: http.request
         identity: page
@@ -345,6 +389,42 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.gate.branch": "sf/${id}"
+      - id: message-empty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "  " }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: text, message: "Type a message first." }
+      - id: message-too-long
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "${fill(20001)}" }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: text, message: "A message holds at most 20,000 characters." }
+      - id: message-shell-line
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: " !ls -la " }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body": { error: command, message: "The page doesn't run shell lines: it sends messages to the agent. Ask it to run the command, or run it yourself in the agent container.", line: "ls -la" }
       - id: ask-for-a-file
         do: http.request
         identity: page
@@ -555,7 +635,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "disk ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "disk ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -578,6 +658,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
       - id: caps-without-disk
         do: http.request
         identity: page
@@ -591,6 +697,8 @@ scenarios:
             "$.status": 200
             "$.body.type": limits
             "$.body.unread": false
+            "$.body.message": "Saved. This session runs with these caps."
+            "$.body.tone": ok
           any:
             "$.body.sessions": { sid: "${sid}", own: true, reached: "", reachedAt: 0, caps: { money: 5, minutes: 600, turns: 50, disk: 0 }, levels: { money: "", time: "", turns: "", disk: "" }, used.costUsd: 0, used.diskBytes: 0, used.diskMore: false, used.diskAt: 0 }
       - id: grow
@@ -642,6 +750,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
+            "$.body.message": "Saved. This session runs with these caps."
+            "$.body.tone": ok
           any:
             "$.body.sessions": { sid: "${sid}", own: true, caps: { money: 5, minutes: 600, turns: 50, disk: 1 } }
       - id: reached
@@ -718,7 +828,7 @@ scenarios:
         expect:
           equal:
             "$.status": 400
-            "$.body": { error: value, message: "The new cap must be more than this session has used (1.1 GiB in the session's folder by the engine's count) and more than the cap now, and at most 4,096 GiB, a whole number." }
+            "$.body": { error: value, field: value, message: "Above the cap and what's used, up to 4,096 whole GiB." }
         waive: { FIX-05: "kind is one of the fixed cap kinds (money, time, turns, disk) and can't carry ${run.id}; every later frame entry that expects it is matched by the session id saved from this run's dispatch" }
       - id: check-while-over
         do: http.request
@@ -772,6 +882,8 @@ scenarios:
             "$.status": 200
           any:
             "$.body.entries": { kind: cap-answer, by: engine, result: disk, verdict: freed, session: "${sid}" }
+          count:
+            "$.body.entries": { where: { kind: cap-answer }, is: 1 }
       - id: check-not-at-cap
         do: http.request
         identity: page
@@ -820,6 +932,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
+            "$.body.message": "No change: this session already has these caps."
+            "$.body.tone": warn
           any:
             "$.body.sessions": { sid: "${sid}", caps.disk: 1 }
       - id: reached-again
@@ -863,6 +977,8 @@ scenarios:
             "$.status": 200
           any:
             "$.body.entries": { kind: cap-answer, by: page, result: disk, verdict: raised, session: "${sid}" }
+          count:
+            "$.body.entries": { where: { kind: cap-answer }, is: 2 }
       - id: message-through
         do: http.request
         identity: page
@@ -967,14 +1083,14 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor home ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor home ${run.id}" }
         expect:
           equal:
             "$.status": 202
             "$.body.ok": true
           present: ["$.body.id", "$.body.sid"]
         save: { sid: "$.body.sid", id: "$.body.id" }
-        waive: { FIX-05: "type is one of the fixed work types (fix, feature, docs, explore) and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
+        waive: { FIX-05: "agent is the development agent's fixed id, dev-acp, and can't carry ${run.id}; every later step reads the session saved from this dispatch, so no earlier run's session can match" }
       - id: audited
         do: http.request
         identity: page
@@ -990,6 +1106,32 @@ scenarios:
             "$.body.entries[0].session": "${sid}"
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
       - id: plant
         do: http.request
         identity: page
@@ -1052,6 +1194,7 @@ scenarios:
             "$.body.needs.home.first": false
             "$.body.needs.box": "${box}"
             "$.body.needs.agent": dev-acp
+            "$.body.needs.next": home
           matches: { "$.body.needs.home.digest": "[0-9a-f]{64}" }
           absent: ["$.body.needs.home.problem", "$.body.needs.approval", "$.body.needs.signIn"]
         save: { digest: "$.body.needs.home.digest" }
@@ -1449,7 +1592,7 @@ scenarios:
           method: POST
           path: "/api/dispatch"
           headers: { Origin: "${page.origin}" }
-          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor verify ${run.id}", type: fix }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor verify ${run.id}" }
         expect:
           equal:
             "$.status": 202
@@ -1470,6 +1613,32 @@ scenarios:
             "$.body.entries[0].kind": session-start
           present: ["$.body.entries[0].box"]
         save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
       - id: helper-image
         do: docker.container
         with: { name: sf-proctor-helper-1 }
@@ -1487,7 +1656,21 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back, and verify-start's answer and run-container show the run using them"
+      - id: set-image-again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "No change: these commands are already saved.", tone: warn }
+        no_state_check: "saves nothing, since the commands are already these, as the answer's No change says; no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back"
       - id: image-read-back
         do: http.request
         identity: page
@@ -1501,6 +1684,7 @@ scenarios:
             "$.status": 200
             "$.body.image": "proctor@${helper_image}"
             "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: verify-start
         do: http.request
         identity: page
@@ -1614,6 +1798,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "test -f README.md && echo ${run.id}"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; pass-not-counted's answer shows the earlier pass not counting under the new command"
       - id: pass-not-counted
         do: http.request
         identity: page
@@ -1640,6 +1825,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "echo ${run.id} && exit 3"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; verify-failing runs it, and failing-ended and failed read its exit code 3 and its output"
       - id: verify-failing
         do: http.request
         identity: page
@@ -1701,6 +1887,7 @@ scenarios:
             "$.status": 200
             "$.body.browser": "chromium --version && echo ${run.id}"
             "$.body.check": "echo ${run.id} && exit 3"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; browser-start's answer shows the browser command"
       - id: browser-start
         do: http.request
         identity: page
@@ -1720,6 +1907,7 @@ scenarios:
             "$.body.current.id": "${failing}"
           length: { "$.body.runs": 3 }
         save: { browser_run: "$.body.runs[0].id" }
+        waive: { FIX-05: "kind is one of the two fixed verification kinds (check, browser) and can't carry ${run.id}; no-browser reads the run whose id this step's answer saved (browser_run), so no earlier run's can match" }
       - id: browser-refused
         do: http.request
         identity: page
@@ -1773,7 +1961,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; cleared reads them back empty"
       - id: cleared
         do: http.request
         identity: page
@@ -1787,6 +1976,7 @@ scenarios:
             "$.status": 200
             "$.body.image": ""
             "$.body.check": ""
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: stop
         do: http.request
         identity: page
@@ -1886,6 +2076,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; main-check-read-back reads them back, and main-container shows the run on main using the image"
       - id: main-check-read-back
         do: http.request
         identity: page
@@ -1898,6 +2089,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.image": "proctor@${helper_image}"
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: main-start
         do: http.request
         identity: page
@@ -1954,7 +2146,8 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300 }
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; main-cleared reads them back empty, and main-recorded's why shows the change"
       - id: main-cleared
         do: http.request
         identity: page
@@ -1967,6 +2160,7 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.check": ""
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: main-recorded
         do: http.request
         identity: page
@@ -1985,3 +2179,49 @@ scenarios:
             "$.body.runs[0].by": page
             "$.body.runs[0].image": "proctor@${helper_image}"
             "$.body.why": "The check command or the project's verification image changed since the last run, so it doesn't count."
+        no_state_check: "op read changes nothing; /api/verify isn't declared a read, since op start on the same path starts a run"
+
+  - id: SES-006
+    name: "The new-session form's suggested name is an adjective and a noun from the engine's two lists, lowercase and joined by a hyphen, with a number after a second hyphen only when every pick was taken; one answer's adjective and another's noun are each matched against their whole list, since one pattern holding both lists is over Proctor's 1,024 bytes; the route takes no field"
+    steps:
+      - id: adjective-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.headers.cache-control": ["no-store"]
+          matches: { "$.body.name": '(agile|amber|arcane|astute|audacious|azure|balanced|beaming|bold|brave|bright|brilliant|calm|careful|celestial|cheerful|clever|cosmic|crafty|curious|daring|dazzling|deep|determined|dynamic|eager|electric|elegant|emerald|energetic|epic|fearless|fierce|focused|fortunate|friendly|frosty|gentle|glowing|golden|graceful|grand|happy|heroic|hidden|honest|humble|infinite|ingenious|inspired|keen|kind|lively|lucky|luminous|magnetic|majestic|mighty|mindful|mystic|nimble|noble|optimal|patient|peaceful|playful|polished|powerful|precise|primal|radiant|rapid|reliable|resilient|robust|rugged|savvy|serene|sharp|silent|silver|sleek|smart|soaring|solid|spirited|steady|stellar|strategic|subtle|sunny|swift|tenacious|tranquil|unified|valiant|vibrant|vivid|wise|zen)-[a-z]+(-[0-9]+)?' }
+      - id: noun-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.headers.cache-control": ["no-store"]
+          matches: { "$.body.name": '[a-z]+-(albatross|anvil|badger|beacon|bison|bluejay|boulder|bridge|canyon|captain|cascade|castle|cheetah|circuit|comet|compass|condor|coral|cougar|crystal|dolphin|dragon|eagle|eclipse|falcon|feather|ferret|firefly|fjord|flamingo|forge|fox|gazelle|gecko|glacier|glider|griffin|hammer|harbor|heron|horizon|ibex|island|jaguar|kestrel|kingfisher|lantern|leopard|lightning|lynx|marble|meadow|meteor|monarch|mongoose|mountain|nebula|nightingale|oasis|octopus|orchid|otter|owl|panther|paradox|phoenix|pioneer|planet|prism|puma|quartz|raven|reef|rocket|sailor|satellite|scarab|scout|shark|sparrow|sphinx|spider|squirrel|starling|summit|thunder|tiger|tortoise|trident|turbine|turtle|vanguard|voyager|walrus|warbler|whale|wolf|wombat|zenith|zephyr)(-[0-9]+)?' }
+      - id: unknown-field
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-name"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 400
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }

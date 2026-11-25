@@ -47,7 +47,7 @@ func (s *Server) markViewed(w http.ResponseWriter, r *http.Request, body map[str
 	blob, okBlob := body["blob"].(string)
 	on, okOn := body["viewed"].(bool)
 	if !keysWithin(body, "sid", "path", "blob", "viewed") || !okSID || sid == "" || len(sid) > 80 || !okPath || !session.ViewedPath(path) || !okBlob || !commitHex.MatchString(blob) || !okOn {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	reply(w, v.Mark(r.Context(), sid, path, blob, on), http.StatusOK)

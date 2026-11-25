@@ -1,6 +1,8 @@
 version: 1
 dimensions:
   post_routes:
+    - "/api/access"
+    - "/api/credentials"
     - "/api/add-repo"
     - "/api/agent-report"
     - "/api/allow-commit"
@@ -48,7 +50,6 @@ dimensions:
     - "/api/metrics"
     - "/api/override"
     - "/api/packs"
-    - "/api/pair"
     - "/api/plan-review"
     - "/api/prefs"
     - "/api/project"
@@ -76,6 +77,7 @@ dimensions:
     - "/api/screenshots"
     - "/api/send-findings"
     - "/api/session"
+    - "/api/session-name"
     - "/api/session-work"
     - "/api/sign-in-expect"
     - "/api/size"

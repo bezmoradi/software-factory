@@ -377,7 +377,7 @@ func (b *bridge) prompt(text string, m Fields) {
 }
 
 func (b *bridge) nextLocked() {
-	if len(b.waiting) == 0 || b.ended || b.reg.halt.turns() != "" {
+	if len(b.waiting) == 0 || b.ended {
 		return
 	}
 	m := b.waiting[0]
@@ -444,7 +444,7 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 	case agent.Mode:
 		if ev.Mode != "" {
-			b.recordLocked(Fields{"type": "mode", "mode": clip(ev.Mode, 40)})
+			b.recordLocked(Fields{"type": "mode", "mode": clip(ev.Mode, 40), "label": ModeLabel(clip(ev.Mode, 40))})
 		}
 	case agent.Commands:
 		list := make([]any, 0, len(ev.Commands))

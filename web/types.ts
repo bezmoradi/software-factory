@@ -1,3 +1,18 @@
+export const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}￹-￻\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
+
+export function visible(text: string): string {
+  return String(text).replace(INVISIBLE, c => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, '0')}}`)
+}
+
+export interface EngineAnswer {
+  ok: boolean
+  status: number
+  error: string
+  field: string
+  message: string
+  body: Record<string, unknown>
+}
+
 export interface SessionInfo {
   sid: string
   cwd: string
@@ -18,21 +33,21 @@ export interface SessionInfo {
   outdated?: boolean
   controlled?: boolean
   mode?: string
+  modeLabel?: string
+  checkpointSaved?: boolean
+  step?: string
   busy?: boolean
   needs?: number
   epoch?: string
   lastSeq?: number
-  checkout?: string
   login?: boolean
   claims?: string[]
-  level?: string
-  levelReason?: string
-  levelDropped?: boolean
-  levelLost?: boolean
-  sandboxed?: boolean
   review?: SessionReview
   push?: SessionPush
   forge?: SessionForge[]
+  access?: AccessCard[]
+  accessMarker?: string
+  accessNotes?: AccessNote[]
   signIn?: SignIn
   unbacked?: TurnMarks[]
   stopReason?: string
@@ -42,11 +57,34 @@ export interface SessionInfo {
   lineage?: Lineage
   follow?: PullFollow
   splits?: SplitCard[]
+  splitGoal?: SplitGoal
   box?: string
+  commands?: { container?: string; attach?: string; logs?: string; signIn: string }
+  filters?: string[]
+  startPoint?: boolean
   signInWait?: boolean
   homeHeld?: boolean
   branch?: string
   doubled?: boolean
+  summary?: { word: string; tone: string }
+  warnings?: string[]
+  control?: SessionControl
+  actions?: Partial<Record<SessionAction, string>>
+  readOnly?: string
+  stalled?: boolean
+  stalledSince?: number
+}
+
+export type SessionAction = 'control' | 'steps' | 'stop' | 'wake' | 'manage' | 'model' | 'bringMain' | 'fork' | 'copy' | 'restore' | 'checkpoint' | 'review' | 'rules'
+
+export interface SessionControl {
+  text: string
+  action: '' | 'release' | 'wake' | 'control' | 'read-only'
+  label?: string
+  confirm?: string
+  confirmText?: string
+  tone?: string
+  alert?: boolean
 }
 
 export interface SplitCard {
@@ -59,6 +97,19 @@ export interface SplitCard {
   asked: number
   at: number
   secretAt?: string
+  said?: { label: string; tone: string }
+  place?: number
+  note?: string
+  needs?: Needs
+  actions?: Partial<Record<SplitAction, string>>
+}
+
+export type SplitAction = 'start' | 'unqueue' | 'edit' | 'dismiss'
+
+export interface SplitGoal {
+  running: number
+  limit: number
+  queue: string[]
 }
 
 export interface Lineage {
@@ -66,7 +117,7 @@ export interface Lineage {
   origin?: string
   from: string
   group?: string
-  groupKind?: 'pair' | 'goal'
+  groupKind?: 'goal'
 }
 
 export interface StartFrom {
@@ -161,6 +212,8 @@ export interface AgentCheck {
   at: number
   editedAt?: number
   hidden?: string
+  label?: string
+  result?: string
 }
 
 export interface ChangeNote {
@@ -176,6 +229,7 @@ export interface FileKind {
 
 export interface DependencyChange {
   ecosystem: string
+  ecosystemLabel?: string
   name: string
   from: string
   to: string
@@ -228,6 +282,16 @@ export interface TypeLine {
 export interface TypeChange {
   type: string
   lines: TypeLine[]
+}
+
+export type SettingsSection = 'model' | 'queue' | 'setup' | 'check' | 'caps' | 'ports' | 'backup'
+
+export interface Attention {
+  section: SettingsSection
+  rank: number
+  title: string
+  text: string
+  alert: boolean
 }
 
 export interface LockedTests {
@@ -335,6 +399,8 @@ export interface Needs {
   box?: string
   agent?: string
   code?: boolean
+  next?: '' | 'home' | 'sign-in' | 'trust' | 'approve' | 'cost'
+  tries?: number
 }
 
 export interface Consent {
@@ -383,6 +449,46 @@ export interface SessionPush {
   findingsSent?: number
   extra?: PushExtra
   checks?: AgentCheck[]
+  notReported?: string
+  checkedBy?: PushCheckedBy
+  resultSaid?: { label: string; tone: string }
+  missingItems?: { text: string; agent?: string; since?: string }[]
+  look?: { icon: string; tone: string; label: string; lead: string }
+  decision?: string
+  outcome?: string
+  flow?: FlowModel
+}
+
+export interface PushCheckedReviewer {
+  agent: string
+  name: string
+  required: boolean
+  advisory: boolean
+  state: string
+  overridden: boolean
+  counted: boolean
+  setAside: string
+  unchecked: boolean
+  runs: number
+  blocking: number
+  requirements: number
+  verified: number
+  violated: number
+  notVerified: number
+  line?: CheckedLine
+}
+
+export interface PushCheckedRun {
+  kind: string
+  state: string
+  code: number
+  line?: CheckedLine
+}
+
+export interface PushCheckedBy {
+  reviewers: PushCheckedReviewer[]
+  runs: PushCheckedRun[]
+  unreadable: boolean
 }
 
 export interface SessionForge {
@@ -405,6 +511,9 @@ export interface SessionForge {
   secretAt?: string
   secretLine?: string
   from?: string
+  said?: { label: string; tone: string }
+  kindLabel?: string
+  note?: string
 }
 
 export interface ForgeMatch {
@@ -446,8 +555,6 @@ export interface PushPanelView {
   flagsRead?: boolean
   checks?: AgentCheck[]
   typeChange?: TypeChange | null
-  passedSince?: string[]
-  blockedSince?: string[]
   coverage?: CoverageRole[]
 }
 
@@ -487,6 +594,8 @@ export interface ReviewRole {
   models?: string[]
   progress?: ReviewProgress
   given?: ReviewGiven
+  said?: { label: string; tone: string }
+  stateLabel?: string
   run?: number
   runs?: number
   advisory?: boolean
@@ -506,6 +615,7 @@ export interface CoverageRow {
   line?: number
   endLine?: number
   note?: string
+  said?: { label: string; tone: string }
 }
 
 export interface FindingRef {
@@ -592,6 +702,8 @@ export interface ReviewsView {
   pushSaid?: { text: string; tone: string } | null
   planned?: { name: string; agent: string; why: string; summary: string }[]
   gate?: Reviewer[]
+  allowed?: boolean
+  missing?: string[]
   linked?: { commit: string; paths: string[] }
   catalog?: { state: string; why: string }
   head?: string
@@ -599,6 +711,7 @@ export interface ReviewsView {
   testList?: TestList | null
   testAsking?: boolean
   readOnly?: string
+  flow?: FlowModel | null
 }
 
 export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
@@ -611,6 +724,7 @@ export interface ChangeFile {
   stale?: boolean
   size?: number
   notDiffed?: 'large' | 'budget' | 'binary' | 'unreadable'
+  notDiffedWhy?: string
 }
 
 export interface Changes {
@@ -640,6 +754,7 @@ export interface Project {
   addedAt?: number
   agents: string[]
   rounds?: number
+  roundsMax?: number
   type?: string
   instructions?: string[]
   autoFindings?: boolean
@@ -653,19 +768,40 @@ export interface HoldSetting {
   maxLines: number
 }
 
+export interface HoldTyped {
+  afterBlock: boolean
+  maxFiles: string
+  maxLines: string
+}
+
 export interface Starter {
   id: string
   name: string
   method: string
   enabled: boolean
   off?: string
+  install?: boolean
   expect?: Expect
+  default?: boolean
+  models: { id: string; name: string }[]
+  efforts: string[]
+  defaultModel?: string
+  defaultEffort?: string
+  fields?: { model: boolean; effort: boolean; expect: boolean }
+  command?: string
+}
+
+export interface CloneProgress {
+  phase: 'waiting' | 'downloading' | 'preparing'
+  percent?: number
+  said: string
 }
 
 export interface Cloning {
   url: string
   name: string
   startedAt: number
+  progress?: CloneProgress
 }
 
 export interface TokenHost {
@@ -681,6 +817,15 @@ export interface ProjectsView {
   starters?: Starter[]
   reviewer?: ReviewerView | null
   helper?: string
+  offerHosts?: string[]
+  hostNotes?: Record<string, string>
+  readiness?: ReadinessNotice[]
+}
+
+export interface ReadinessNotice {
+  id: string
+  text: string
+  action: string
 }
 
 export interface Dispatch extends Consent {
@@ -689,28 +834,10 @@ export interface Dispatch extends Consent {
   name: string
   model: string
   mode: string
-  type?: string
-  caps?: { money: number; minutes: number; turns: number; disk: number }
   from?: StartFrom
   issue?: number
   issueHash?: string
   effort?: string
-}
-
-export interface PairAgent {
-  agent: string
-  model?: string
-  effort?: string
-}
-
-export interface PairDispatch {
-  path: string
-  name: string
-  type: string
-  agents: PairAgent[]
-  message?: string
-  benchmark?: { number: number; hash: string; base: string }
-  caps?: { money: number; minutes: number; turns: number; disk: number }
 }
 
 export interface HelloEvent {
@@ -719,6 +846,7 @@ export interface HelloEvent {
   sessions: SessionInfo[]
   supervisor?: string
   compose?: string
+  imageTypes?: unknown[]
 }
 
 export interface SessionsEvent {
@@ -913,6 +1041,8 @@ export interface GateEvent {
   branch: string
   adapter: string
   define: boolean
+  planChoice?: boolean
+  planSwitch?: PlanSwitch
   plan: string
   planHash?: string
   planDoc?: WorkflowDoc | null
@@ -922,7 +1052,7 @@ export interface GateEvent {
   missing: string[]
   size?: Size
   chosen?: boolean
-  effective?: Size
+  uploadWarning?: string
   sizeNote?: string
   approved?: boolean
   uncommitted?: { complete: boolean; count: number; note: string; files: { status: string; path: string; flag?: string; allowed?: boolean }[] } | null
@@ -944,6 +1074,127 @@ export interface GateEvent {
   commands?: { define?: string; plan?: string }
   rounds?: number
   committed?: boolean
+  started?: boolean | 'nobase' | null
+  review?: { available: boolean; reason: string; planned: { name: string; agent: string; why: string; summary: string }[] }
+  pushed?: boolean
+  path?: GatePath
+  flow?: FlowModel | null
+  typeAsk?: TypeAsk | null
+}
+
+export interface GrantChoice {
+  value: string
+  label: string
+}
+
+export interface AccessRisk {
+  scope: string
+  expires: string
+  level: string
+  label: string
+  says: string[]
+  accept?: string
+  git: string[]
+}
+
+export interface AccessNote {
+  id: string
+  text: string
+}
+
+export interface AccessCard {
+  id?: string
+  kind: string
+  host: string
+  port?: number
+  credential: string
+  title: string
+  why?: string
+  reason?: string
+  asked: number
+  risks: AccessRisk[]
+  scopes: GrantChoice[]
+  expiries: GrantChoice[]
+  action?: string
+  command?: string
+  target?: string
+  files?: boolean
+  minutes?: number
+}
+
+export interface TypeAsk {
+  text: string
+  suggests?: string
+  type?: string
+  reason?: string
+  use?: string
+}
+
+export interface FlowLook {
+  icon: string
+  tone: string
+  word: string
+}
+
+export interface FlowNode {
+  name: string
+  phase: string
+  look: FlowLook
+  aside: boolean
+  tags: { label: string; tone: string }[]
+}
+
+export interface FlowRoute {
+  label: string
+  look: FlowLook
+  taken: boolean
+  decided: boolean
+  note: string
+}
+
+export interface FlowZone {
+  kind: string
+  name: string
+  note: string
+  untrusted: boolean
+}
+
+export interface FlowModel {
+  commit: string
+  reviews: FlowNode[]
+  runs: FlowNode[]
+  gate: FlowNode
+  routes: FlowRoute[]
+  routesLabel: string
+  wires: string[]
+  outLive: boolean
+  zones: FlowZone[]
+  key: { swatch: string; words: string }[]
+  caption: string
+  expires?: number
+  expiredNote?: string
+  expiredCaption?: string
+}
+
+export interface CheckedLine {
+  icon: string
+  tone: string
+  name: string
+  said: string
+  details?: string
+  tags: { label: string; tone: string }[]
+}
+
+export interface PathAction { ask: string; label: string; title: string }
+
+export interface GatePath {
+  stages: { id: string; name: string; state: string; active: boolean; detail: string; actions: PathAction[] }[]
+  line: { text: string; actions: PathAction[] } | null
+  card: { step: string; count: string; detail: string; done: number }
+  missing: string[]
+  reviewsActive: boolean
+  required: string[]
+  asks: PathAction[]
 }
 
 export interface WorkflowDoc {
@@ -958,6 +1209,9 @@ export interface WorkflowDoc {
   approvedAt?: string
   reported?: boolean
   onBase?: boolean
+  note?: string
+  kind?: string
+  status?: string
 }
 
 export interface WorkflowEvent extends Stamped {
@@ -993,7 +1247,7 @@ export interface TeamView {
   remote: { branch: string; present: boolean; same: boolean }[]
 }
 
-export type Size = 'feature' | 'fix' | 'incident' | 'docs' | 'explore' | 'review'
+export type Size = 'change' | 'direct' | 'incident' | 'explore' | 'review'
 
 export interface PlanFileEvent extends Stamped {
   type: 'planfile'
@@ -1002,8 +1256,19 @@ export interface PlanFileEvent extends Stamped {
   text: string
 }
 
+export interface LineCommentBody {
+  file: string
+  line: number
+  removed: boolean
+  text: string
+}
+
+export type PlanSwitch = '' | 'add' | 'skip'
+
 export interface PlanApproval {
   kind?: 'plan' | 'requirements' | 'root-cause'
+  planChoice?: boolean
+  planSwitch?: PlanSwitch
   path: string
   text: string
   hash: string
@@ -1019,12 +1284,14 @@ export interface PlanApproval {
   approvedAt?: string
   reported?: boolean
   onBase?: boolean
+  status: string
 }
 
 export interface ProjectAgents {
   project: string
   disabled: boolean
   rounds: number
+  roundsMax: number
   prComment: boolean
   type: string
   types: [string, string][]
@@ -1083,12 +1350,14 @@ export interface ControlEvent extends Stamped {
 export interface ModeEvent extends Stamped {
   type: 'mode'
   mode: string
+  label?: string
 }
 
 export interface ContextEvent extends Stamped {
   type: 'context'
   tokens: number
   level: '' | 'warn' | 'stop'
+  checkpoint?: { level: string; text: string; said: string; stop: boolean }
 }
 
 export interface CompactEvent extends Stamped {
@@ -1143,10 +1412,11 @@ export type SessionEvent =
 
 export interface RepoEvent {
   type: 'repo'
-  state: 'cloning' | 'added' | 'failed'
+  state: 'cloning' | 'progress' | 'added' | 'failed'
   url: string
   name: string
   message?: string
+  progress?: CloneProgress
 }
 
 export interface ReviewerEvent extends SignIn {
@@ -1159,7 +1429,7 @@ export interface SessionGrant {
   token: string
 }
 
-export type AskAnswer = Record<string, string>
+export type AskAnswer = Record<string, string | string[]>
 export type PermissionAnswer = { choice: 'yes' | 'always' | 'auto' } | { choice: 'no'; note?: string }
 export type PlanAnswer = { choice: 'revise'; note: string } | { choice: 'terminal' }
 export type Answer = AskAnswer | PermissionAnswer | PlanAnswer
@@ -1224,18 +1494,20 @@ declare global {
     'sf-open': CustomEvent<{ id: string }>
     'sf-close': CustomEvent<{ id: string }>
     'sf-move': CustomEvent<{ id: string; index: number }>
-    'sf-approve': CustomEvent<{ hash: string }>
+    'sf-approve': CustomEvent<{ hash: string; plan?: boolean }>
     'sf-revise': CustomEvent<{ note: string }>
-    'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldSetting }>
+    'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldTyped }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
     'sf-counts': CustomEvent<{ waiting: number; working: number; stopped: number }>
     'sf-markdown-painted': Event
     'sf-tool-path': Event
     'sf-repo': CustomEvent<{ op: 'add'; url: string } | { op: 'remove'; name: string }>
+    'sf-project-page': CustomEvent<{ name: string }>
+    'sf-project-jump': CustomEvent<{ part: string }>
     'sf-token': CustomEvent<{ op: 'save'; host: string; token: string } | { op: 'remove'; host: string }>
     'sf-dispatch': CustomEvent<Dispatch>
-    'sf-pair': CustomEvent<PairDispatch>
     'sf-session-action': CustomEvent<{ sid: string; action: 'stop' | 'remove' }>
+    'sf-session-ask': CustomEvent<{ sid: string; action: '' | 'stop' | 'remove' }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
     'sf-reload': Event
@@ -1260,5 +1532,7 @@ declare global {
     'sf-commit-ask': Event
     'sf-session-deleted': CustomEvent<{ sid: string }>
     'sf-packs-changed': Event
+    'sf-work-type': CustomEvent<{ type: string; done: (refusal: string) => void }>
+    'sf-attention': Event
   }
 }

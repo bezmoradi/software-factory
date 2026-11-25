@@ -8,18 +8,19 @@ drivers:
     policy:
       reads:
         - { method: POST, path: /api/agent-report }
-        - { method: POST, path: /api/audit, shows: [/api/dispatch, /api/packs, /api/remove-session, /api/stop-session] }
+        - { method: POST, path: /api/audit, shows: [/api/dispatch, /api/limits, /api/packs, /api/remove-session, /api/stop-session, /api/verify] }
         - { method: POST, path: /api/backup, shows: [/api/import] }
         - { method: POST, path: /api/changes, shows: [/api/dispatch, /api/message, /api/viewed] }
         - { method: POST, path: /api/docs }
         - { method: POST, path: /api/file, shows: [/api/message] }
         - { method: POST, path: /api/file-check, shows: [/api/message] }
-        - { method: POST, path: /api/gate, shows: [/api/dispatch, /api/lock-tests, /api/packs, /api/remove-session] }
+        - { method: POST, path: /api/gate, shows: [/api/approve-plan, /api/approve-requirements, /api/dispatch, /api/lock-tests, /api/packs, /api/remove-session, /api/size] }
         - { method: POST, path: /api/metrics }
         - { method: POST, path: /api/projects, shows: [/api/add-repo, /api/remove-repo, /api/save-token, /api/session] }
         - { method: POST, path: /api/review-reply }
         - { method: POST, path: /api/screenshot }
         - { method: POST, path: /api/screenshots, shows: [/api/dispatch] }
+        - { method: POST, path: /api/session-name }
       destructive:
         - { method: POST, path: /api/packs }
         - { method: POST, path: /api/remove-repo }
@@ -34,6 +35,13 @@ drivers:
       scope:
         - { label: com.docker.compose.project, value: sf-proctor }
         - { label: dev.software-factory.stack, value: sf-proctor }
+relations:
+  - act: { driver: http, target: /api/wake }
+    shows:
+      - { driver: docker, target: "container/sf-proctor-box-{}" }
+  - act: { driver: http, target: /api/verify }
+    shows:
+      - { driver: docker, target: "container/sf-proctor-verify-{}" }
 identities:
   page:
     type: bearer

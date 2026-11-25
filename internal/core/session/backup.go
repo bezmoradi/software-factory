@@ -31,6 +31,7 @@ const (
 	restartAfter  = 2 * time.Second
 	maxReportLine = 300
 
+	ImportTooBig       = "That file is larger than 256 MiB, more than an import takes."
 	historyMessage     = "This session came from an export of another engine, so it is history only: its worktree and agent home stayed on that engine. Start a new session instead."
 	ImportedReviewNote = "These reviews came from an export of another engine. They are shown for the record and count for nothing here: a push of this commit needs its reviews again."
 )
@@ -164,13 +165,13 @@ func (b *Backups) empty() string {
 
 func (b *Backups) Export(w io.Writer) (ExportResult, error) {
 	if b.cfg.Archive == nil {
-		return ExportResult{}, explained(conflict("no state"), "This engine has no state folder to export.")
+		return ExportResult{}, conflict("no state", "This engine has no state folder to export.")
 	}
 	b.mu.Lock()
 	staged := b.staged
 	b.mu.Unlock()
 	if staged {
-		return ExportResult{}, explained(conflict("restarting"), "The engine restarts to finish an import. Export after it's back.")
+		return ExportResult{}, conflict("restarting", "The engine restarts to finish an import. Export after it's back.")
 	}
 	res, err := b.cfg.Archive.Export(w)
 	result := "exported"
@@ -190,12 +191,12 @@ func (b *Backups) Export(w io.Writer) (ExportResult, error) {
 
 func (b *Backups) Import(r io.Reader) (ImportReport, error) {
 	if b.cfg.Archive == nil {
-		return ImportReport{}, explained(conflict("no state"), "This engine has no state folder to import into.")
+		return ImportReport{}, conflict("no state", "This engine has no state folder to import into.")
 	}
 	b.mu.Lock()
 	if b.importing || b.staged {
 		b.mu.Unlock()
-		return ImportReport{}, explained(conflict("importing"), "An import is running or waiting for the engine to restart.")
+		return ImportReport{}, conflict("importing", "An import is running or waiting for the engine to restart.")
 	}
 	b.importing = true
 	b.mu.Unlock()
@@ -206,19 +207,19 @@ func (b *Backups) Import(r io.Reader) (ImportReport, error) {
 	}()
 	if why := b.empty(); why != "" {
 		b.audit(ImportRefused, why)
-		return ImportReport{}, explained(conflict("not empty"), why)
+		return ImportReport{}, conflict("not empty", why)
 	}
 	report, err := b.cfg.Archive.Stage(r)
 	if err != nil {
 		_ = b.cfg.Archive.Discard()
 		b.audit(ImportRefused, err.Error())
 		b.cfg.Logger.Warn("backup", "event", "import-refused")
-		return ImportReport{}, explained(invalid("archive"), clip("The file wasn't imported: "+err.Error(), maxOutput))
+		return ImportReport{}, invalid("archive", clip("The file wasn't imported: "+err.Error(), maxOutput))
 	}
 	if why := b.empty(); why != "" {
 		_ = b.cfg.Archive.Discard()
 		b.audit(ImportRefused, why)
-		return ImportReport{}, explained(conflict("not empty"), why)
+		return ImportReport{}, conflict("not empty", why)
 	}
 	b.mu.Lock()
 	b.staged = true
@@ -243,15 +244,15 @@ func (b *Backups) Applied(report ImportReport) {
 func (b *Backups) View() (BackupView, error) {
 	var v BackupView
 	if b.cfg.Archive == nil {
-		return v, explained(conflict("no state"), "This engine has no state folder.")
+		return v, conflict("no state", "This engine has no state folder.")
 	}
 	drops, err := b.cfg.Archive.Drops()
 	if err != nil {
-		return v, explained(conflict("drops"), "The engine couldn't read its counts of dropped records.")
+		return v, conflict("drops", "The engine couldn't read its counts of dropped records.")
 	}
 	v.Drops = drops
 	if v.Copies, err = b.cfg.Archive.Copies(); err != nil {
-		return v, explained(conflict("copies"), "The engine couldn't list its copies from before format changes.")
+		return v, conflict("copies", "The engine couldn't list its copies from before format changes.")
 	}
 	if last, ok, err := b.cfg.Archive.Last(); err == nil && ok {
 		v.Last = &last
@@ -271,7 +272,7 @@ func (b *Backups) View() (BackupView, error) {
 
 func (b *Backups) CloneAgain(name string) (Cloning, error) {
 	if b.cfg.Repos == nil {
-		return Cloning{}, explained(conflict("no workspace"), "This engine has no workspace, so it can't clone.")
+		return Cloning{}, conflict("no workspace", "This engine has no workspace, so it can't clone.")
 	}
 	return b.cfg.Repos.Reclone(name)
 }
@@ -304,10 +305,10 @@ func (d *Dispatcher) historyOnly(sid string) error {
 	old := r != nil && !r.history && r.box == ""
 	d.mu.Unlock()
 	if history {
-		return explained(conflict("history only"), historyMessage)
+		return conflict("history only", historyMessage)
 	}
 	if doubled {
-		return explained(conflict("branch held"), doubledMessage)
+		return conflict("branch held", doubledMessage)
 	}
 	if old {
 		return oldLayout()

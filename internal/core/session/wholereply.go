@@ -12,14 +12,14 @@ type WholeReplies interface {
 }
 
 func (d *Dispatcher) WholeReply(sid, agent, commit string, run int) (WholeReply, error) {
-	gone := explained(notFound("reply"), "The engine keeps no whole report for that review.")
+	gone := notFound("reply", "The engine keeps no whole report for that review.")
 	t, ok := targetOrHeld(d.PushTarget, d.HeldTarget, sid)
 	if !ok || d.cfg.Reviews == nil || run < 1 || run > review.MaxRuns {
 		return WholeReply{}, gone
 	}
 	entries, err := d.cfg.Reviews.Entries()
 	if err != nil {
-		return WholeReply{}, explained(conflict("records"), "The engine couldn't read its review records.")
+		return WholeReply{}, conflict("records", "The engine couldn't read its review records.")
 	}
 	e, ok := entries[review.Key{Commit: commit, Branch: t.Branch, Agent: agent}.AtRun(run)]
 	if !ok || e.Message == "" {

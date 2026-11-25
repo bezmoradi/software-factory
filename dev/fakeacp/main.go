@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -45,7 +46,7 @@ var (
 	calls   int
 )
 
-var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split"}
+var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split", "factory_work_type", "factory_request_access", "factory_action"}
 
 const noteMarker = "[Software Factory] "
 
@@ -77,9 +78,45 @@ func splitArgs(text string) map[string]any {
 	return map[string]any{"tasks": tasks}
 }
 
+func actionArgs(text string) map[string]any {
+	_, after, _ := strings.Cut(text, "factory_action")
+	line, _, _ := strings.Cut(after, "\n")
+	first, rest, _ := strings.Cut(line, "|")
+	if run, ok := strings.CutPrefix(strings.TrimSpace(first), "run:"); ok {
+		return map[string]any{"run": strings.TrimSpace(run)}
+	}
+	args := map[string]any{}
+	for pair := range strings.SplitSeq(rest, ",") {
+		if k, v, ok := strings.Cut(pair, "="); ok {
+			args[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	return map[string]any{"name": strings.TrimSpace(first), "args": args}
+}
+
 func toolArgs(tool, text string) map[string]any {
 	if tool == "factory_split" {
 		return splitArgs(text)
+	}
+	if tool == "factory_action" {
+		return actionArgs(text)
+	}
+	if tool == "factory_work_type" || tool == "factory_request_access" {
+		_, after, _ := strings.Cut(text, tool)
+		line, _, _ := strings.Cut(after, "\n")
+		first, reason, _ := strings.Cut(line, "|")
+		if tool == "factory_request_access" {
+			if name, ok := strings.CutPrefix(strings.TrimSpace(first), "credential:"); ok {
+				return map[string]any{"credential": strings.TrimSpace(name), "reason": strings.TrimSpace(reason)}
+			}
+			if target, ok := strings.CutPrefix(strings.TrimSpace(first), "port:"); ok {
+				host, port, _ := net.SplitHostPort(strings.TrimSpace(target))
+				n, _ := strconv.Atoi(port)
+				return map[string]any{"host": host, "port": n, "reason": strings.TrimSpace(reason)}
+			}
+			return map[string]any{"host": strings.TrimSpace(first), "reason": strings.TrimSpace(reason)}
+		}
+		return map[string]any{"type": strings.TrimSpace(first), "reason": strings.TrimSpace(reason)}
 	}
 	if tool != "factory_issue" && tool != "factory_pull_request" {
 		return map[string]any{}
@@ -97,6 +134,23 @@ func toolArgs(tool, text string) map[string]any {
 }
 
 func callTool(tool string, args map[string]any) string {
+	m, problem := callToolReply(tool, args)
+	if problem != "" {
+		return problem
+	}
+	res, _ := m["result"].(map[string]any)
+	content, _ := res["content"].([]any)
+	if len(content) > 0 {
+		if c, ok := content[0].(map[string]any); ok {
+			text, _ := c["text"].(string)
+			return text
+		}
+	}
+	b, _ := json.Marshal(m)
+	return "no answer from " + tool + ": " + string(b)
+}
+
+func callToolReply(tool string, args map[string]any) (map[string]any, string) {
 	for _, s := range stdio {
 		if s.Name != "software-factory" {
 			continue
@@ -111,7 +165,7 @@ func callTool(tool string, args map[string]any) string {
 		in, _ := cmd.StdinPipe()
 		outPipe, _ := cmd.StdoutPipe()
 		if err := cmd.Start(); err != nil {
-			return "the MCP server didn't start: " + err.Error()
+			return nil, "the MCP server didn't start: " + err.Error()
 		}
 		defer func() {
 			_ = in.Close()
@@ -139,19 +193,9 @@ func callTool(tool string, args map[string]any) string {
 		ask(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fake","version":"0"}}}`)
 		_, _ = io.WriteString(in, `{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n")
 		call, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
-		m := ask(string(call))
-		res, _ := m["result"].(map[string]any)
-		content, _ := res["content"].([]any)
-		if len(content) > 0 {
-			if c, ok := content[0].(map[string]any); ok {
-				text, _ := c["text"].(string)
-				return text
-			}
-		}
-		b, _ := json.Marshal(m)
-		return "no answer from " + tool + ": " + string(b)
+		return ask(string(call)), ""
 	}
-	return "no software-factory MCP server was given"
+	return nil, "no software-factory MCP server was given"
 }
 
 const session = "sess-fake-1"
@@ -388,6 +432,16 @@ func scripted(id json.RawMessage, text string) bool {
 				status = "failed"
 			}
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "commit":
+			rel := strings.TrimPrefix(filepath.Clean("/"+value), "/")
+			file := filepath.Join(worktreeTop(), rel)
+			status := "completed"
+			if os.MkdirAll(filepath.Dir(file), 0o755) != nil || os.WriteFile(file, []byte("ok\n"), 0o644) != nil {
+				status = "failed"
+			} else if _, ok := commitFiles("Add "+rel, rel); !ok {
+				status = "failed"
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Commit " + rel, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
 		case "grow-for":
 			growFor(callID, value)
 		case "say":
@@ -413,6 +467,16 @@ func answer(id json.RawMessage, text string) bool {
 		return true
 	}
 	if said, ok := incidentLine(text); ok {
+		chunk(said)
+		reply(id, map[string]any{"stopReason": "end_turn"})
+		return true
+	}
+	if said, ok := requirementsLine(text); ok {
+		chunk(said)
+		reply(id, map[string]any{"stopReason": "end_turn"})
+		return true
+	}
+	if said, ok := planLine(text); ok {
 		chunk(said)
 		reply(id, map[string]any{"stopReason": "end_turn"})
 		return true

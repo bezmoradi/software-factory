@@ -3,6 +3,8 @@ package session
 import (
 	"bytes"
 	"context"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,10 @@ const (
 )
 
 var ImageTypes = map[string]string{"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+
+func ImageTypeList() []string {
+	return slices.Sorted(maps.Keys(ImageTypes))
+}
 
 type UploadFiles interface {
 	Save(folder, id, name string, data []byte) (string, error)
@@ -97,6 +103,10 @@ func imageMatches(kind string, data []byte) bool {
 	return false
 }
 
+func DropRefused(name string) string {
+	return name + " is larger than 10 MB. Type its path with @ instead."
+}
+
 func UploadName(name string) bool {
 	if name == "" || name == "." || name == ".." || len(name) > maxUploadName || !utf8.ValidString(name) {
 		return false
@@ -114,50 +124,50 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	if image {
 		ext, ok := ImageTypes[kind]
 		if !ok {
-			return "", invalid("upload")
+			return "", invalid("upload", "The engine takes images as PNG, JPEG, GIF or WebP only.")
 		}
 		name = "image." + ext
-		if len(data) > MaxImage {
-			return "", explained(invalid("too big"), "An image may be at most 2.5 MB.")
+		if len(data) > MaxImageUpload {
+			return "", invalid("too big", ImageRefused)
 		}
 		if !imageMatches(kind, data) {
-			return "", explained(invalid("upload"), "That isn't the kind of image it says it is.")
+			return "", invalid("upload", "That isn't the kind of image it says it is.")
 		}
 	} else {
 		if !UploadName(name) {
-			return "", explained(invalid("name"), "That file's name can't be used.")
+			return "", invalid("name", "That file's name can't be used.")
 		}
 		if len(data) > MaxDrop {
-			return "", explained(invalid("too big"), "A file may be at most 10 MB.")
+			return "", invalid("too big", DropRefused(name))
 		}
 	}
 	if len(data) == 0 {
-		return "", explained(invalid("upload"), "The file is empty.")
+		return "", invalid("upload", "The file is empty.")
+	}
+	if image {
+		if err := r.uploadTarget(sid, true); err != nil {
+			return "", err
+		}
+		fitted, small, ok := fitImage(kind, data)
+		if !ok {
+			return "", invalid("too big", ImageRefused)
+		}
+		if fitted != kind {
+			name = "image." + ImageTypes[fitted]
+		}
+		kind, data = fitted, small
 	}
 	r.mu.Lock()
+	if err := r.uploadTargetLocked(sid, image); err != nil {
+		r.mu.Unlock()
+		return "", err
+	}
 	files := r.uploads.files
 	a := r.admitted[sid]
-	switch {
-	case files == nil:
-		r.mu.Unlock()
-		return "", explained(conflict("no uploads"), "This engine has no uploads folder, so it takes no images or files.")
-	case a == nil:
-		r.mu.Unlock()
-		return "", explained(notFound("session"), "Only a session this engine started takes images and files.")
-	case !a.running:
-		r.mu.Unlock()
-		return "", explained(conflict("not running"), "Images and files need a running session. Wake it first.")
-	case image && r.uploads.noImage[sid]:
-		r.mu.Unlock()
-		return "", explained(conflict("no images"), noImages)
-	case !ValidBox(a.Box):
-		r.mu.Unlock()
-		return "", oldLayout()
-	}
 	r.trimUnsent(sid)
 	if r.uploads.bytes+int64(len(data)) > MaxUploadBytes {
 		r.mu.Unlock()
-		return "", explained(limited("uploads"), "The uploads folder is full. Send or remove what's waiting, or wait for older uploads to be deleted.")
+		return "", limited("uploads", "The uploads folder is full. Send or remove what's waiting, or wait for older uploads to be deleted.")
 	}
 	folder := r.uploads.folders[sid]
 	if folder == "" {
@@ -176,15 +186,40 @@ func (r *Registry) Upload(sid, kind, name string, data []byte) (string, error) {
 	defer r.mu.Unlock()
 	if r.uploads.items[id] != u {
 		go func() { _ = files.Drop(folder, id) }()
-		return "", explained(conflict("gone"), "The session ended while the file was saved.")
+		return "", conflict("gone", "The session ended while the file was saved.")
 	}
 	if err != nil {
 		r.dropUpload(id)
-		return "", explained(conflict("save"), "The engine couldn't save the file.")
+		return "", conflict("save", "The engine couldn't save the file.")
 	}
 	u.Path = path
 	return id, nil
 }
+
+func (r *Registry) uploadTarget(sid string, image bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.uploadTargetLocked(sid, image)
+}
+
+func (r *Registry) uploadTargetLocked(sid string, image bool) error {
+	a := r.admitted[sid]
+	switch {
+	case r.uploads.files == nil:
+		return conflict("no uploads", "This engine has no uploads folder, so it takes no images or files.")
+	case a == nil:
+		return notFound("session", "Only a session this engine started takes images and files.")
+	case !a.running:
+		return conflict("not running", NeedsRunning)
+	case image && r.uploads.noImage[sid]:
+		return conflict("no images", noImages)
+	case !ValidBox(a.Box):
+		return oldLayout()
+	}
+	return nil
+}
+
+const NeedsRunning = "Images and files need a running session. Send a text message first, which wakes it."
 
 const noImages = "This agent doesn't take images in its messages (it doesn't offer ACP's image prompt capability), so send the text alone, or with files: the agent gets those as paths it can read."
 
@@ -264,7 +299,7 @@ func (r *Registry) sweepUploads(now time.Time) {
 
 func (r *Registry) takeUploads(sid string, ids []string, image bool) ([]Upload, error) {
 	if len(ids) > MaxAttached {
-		return nil, invalid("attachments")
+		return nil, invalid("attachments", "A message carries at most 4 images and 4 files.")
 	}
 	seen := map[string]bool{}
 	out := make([]Upload, 0, len(ids))
@@ -272,9 +307,9 @@ func (r *Registry) takeUploads(sid string, ids []string, image bool) ([]Upload, 
 		u := r.uploads.items[id]
 		if seen[id] || u == nil || u.SID != sid || u.Sent || u.Image != image || u.Path == "" {
 			if image {
-				return nil, explained(invalid("images"), "An image is no longer waiting to be sent. Attach it again.")
+				return nil, invalid("images", "An image is no longer waiting to be sent. Attach it again.")
 			}
-			return nil, explained(invalid("files"), "A file is no longer waiting to be sent. Attach it again.")
+			return nil, invalid("files", "A file is no longer waiting to be sent. Attach it again.")
 		}
 		seen[id] = true
 		out = append(out, *u)
@@ -310,21 +345,21 @@ func (r *Registry) Image(given, id string) (Upload, []byte, error) {
 	}
 	if r.disputed(c.sid, now) {
 		r.mu.Unlock()
-		return Upload{}, nil, conflict("disputed")
+		return Upload{}, nil, toAgent(Conflict, "disputed")
 	}
 	u := r.uploads.items[id]
 	if u == nil || u.SID != c.sid || !u.Image || !u.Sent {
 		r.mu.Unlock()
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	got, folder, files := *u, r.uploads.folders[u.SID], r.uploads.files
 	r.mu.Unlock()
 	if files == nil || folder == "" {
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	data, err := files.Read(folder, got.ID, got.Name, MaxImage)
 	if err != nil {
-		return Upload{}, nil, notFound("image")
+		return Upload{}, nil, toAgent(NotFound, "image")
 	}
 	return got, data, nil
 }

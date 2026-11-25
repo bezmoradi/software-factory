@@ -1,5 +1,8 @@
-import { api, signedIn } from '../api.ts'
+import { request, signedIn } from '../api.ts'
 import { el, visible } from '../lib/dom.ts'
+import { saidOf, type Said } from '../lib/json.ts'
+import { emptyState } from '../lib/page.ts'
+import { tipTag } from '../lib/tooltip.ts'
 
 interface SettingsReport {
   sid: string
@@ -25,11 +28,14 @@ interface Pin {
   ref: string
   commit: string
   note: string
+  link: string
+  said: Said
 }
 
 interface PluginPin {
   name: string
   source: string
+  link: string
   branch: string
   version: string
   commit: string
@@ -41,6 +47,10 @@ interface PluginPin {
   head: string
   from: string
   problem: string
+  checkLine: string
+  checkTone: string
+  checkStamped: boolean
+  said: Said
 }
 
 interface Advisory {
@@ -55,11 +65,12 @@ interface Report {
   settings: { problem: string; sessions: SettingsReport[] }
   pins: Pin[]
   plugins: PluginPin[]
-  advisories: { checkedAt: number; off: boolean; problem: string; found: Advisory[]; more: number; sent: string[] }
+  advisories: { checkedAt: number; off: boolean; problem: string; found: Advisory[]; more: number }
 }
 
 const POLL_MS = 60000
 const LINK = /^https:\/\/osv\.dev\/vulnerability\/[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/
+const SOURCE = /^https:\/\/(www\.npmjs\.com\/package\/|github\.com\/)[A-Za-z0-9@._\/+-]{1,240}$/
 
 function text(x: unknown): string {
   return typeof x === 'string' ? x : ''
@@ -87,16 +98,25 @@ function readReport(body: unknown): Report | null {
       problem: text(s.problem),
       sessions: list(s.sessions, h => ({ sid: text(h.sid), session: text(h.session), checkedAt: Number(h.checkedAt) || 0, sinceAt: Number(h.sinceAt) || 0, changed: strings(h.changed), more: Number(h.more) || 0, first: h.first === true, dropped: h.dropped === true, running: h.running === true, problem: text(h.problem), watching: Number(h.watching) || 0 })),
     },
-    pins: list(v.pins, p => ({ name: text(p.name), package: text(p.package), version: text(p.version), state: text(p.state), repository: text(p.repository), workflow: text(p.workflow), ref: text(p.ref), commit: text(p.commit), note: text(p.note) })),
+    pins: list(v.pins, p => ({ name: text(p.name), package: text(p.package), version: text(p.version), state: text(p.state), repository: text(p.repository), workflow: text(p.workflow), ref: text(p.ref), commit: text(p.commit), note: text(p.note), link: text(p.link), said: saidOf(p.said) })),
     plugins: list(v.plugins, p => ({
-      name: text(p.name), source: text(p.source), branch: text(p.branch), version: text(p.version), commit: text(p.commit), refused: p.refused === true, refusedWhy: text(p.refusedWhy), installedAt: Number(p.installedAt) || 0,
-      checkedAt: Number(p.checkedAt) || 0, check: text(p.check), head: text(p.head), from: text(p.from), problem: text(p.problem),
+      name: text(p.name), source: text(p.source), link: text(p.link), branch: text(p.branch), version: text(p.version), commit: text(p.commit), refused: p.refused === true, refusedWhy: text(p.refusedWhy), installedAt: Number(p.installedAt) || 0,
+      checkedAt: Number(p.checkedAt) || 0, check: text(p.check), head: text(p.head), from: text(p.from), problem: text(p.problem), checkLine: text(p.checkLine), checkTone: text(p.checkTone), checkStamped: p.checkStamped === true, said: saidOf(p.said),
     })),
     advisories: {
-      checkedAt: Number(a.checkedAt) || 0, off: a.off === true, problem: text(a.problem), sent: strings(a.sent), more: Math.max(0, Math.floor(Number(a.more) || 0)),
+      checkedAt: Number(a.checkedAt) || 0, off: a.off === true, problem: text(a.problem), more: Math.max(0, Math.floor(Number(a.more) || 0)),
       found: list(a.found, f => ({ label: text(f.label), id: text(f.id), summary: text(f.summary), aliases: strings(f.aliases), link: text(f.link) })),
     },
   }
+}
+
+function outLink(label: string, href: string, pattern: RegExp): HTMLElement {
+  if (!pattern.test(href)) return el('span', '', label)
+  const a = el('a', '', label)
+  a.href = href
+  a.rel = 'noreferrer noopener'
+  a.target = '_blank'
+  return a
 }
 
 function when(ms: number): string {
@@ -107,13 +127,6 @@ function short(sha: string): string {
   return /^[0-9a-f]{40}$/.test(sha) ? sha.slice(0, 7) : sha
 }
 
-const PIN_STATES: Record<string, [string, string]> = {
-  verified: ['Provenance verified', 'ok'],
-  none: ['No provenance', 'warn'],
-  unpinned: ['Provenance not checked against a source', 'warn'],
-  failed: ['Provenance failed', 'bad'],
-  unchecked: ['Provenance not checked yet', 'muted'],
-}
 
 class SfAgentReport extends HTMLElement {
   #timer = 0
@@ -135,11 +148,10 @@ class SfAgentReport extends HTMLElement {
     window.clearTimeout(this.#timer)
     this.#timer = 0
     const gen = ++this.#gen
-    const res = signedIn() ? await api('/api/agent-report', { op: 'read' }).catch(() => null) : null
+    const a = signedIn() ? await request('/api/agent-report', { op: 'read' }) : null
     if (gen !== this.#gen) return
-    if (res && res.ok) {
-      const r = readReport(await res.json().catch(() => null))
-      if (gen !== this.#gen) return
+    if (a?.ok) {
+      const r = readReport(a.body)
       if (r) this.#report = r
     }
     this.#paint()
@@ -147,11 +159,10 @@ class SfAgentReport extends HTMLElement {
   }
 
   #settings(r: Report['settings']): HTMLElement[] {
-    const out: HTMLElement[] = [el('h3', 'small', "The agents' user settings")]
+    const out: HTMLElement[] = [el('h3', 'label', 'Agent settings')]
     if (r.problem) out.push(el('p', 'small warn', visible(r.problem)))
-    else if (!r.sessions.length) out.push(el('p', 'small muted', 'No session is running. Each running session shows here with what changed in its own container since that session last started or woke.'))
-    for (const s of r.sessions) out.push(el('h4', 'small', `Session ${visible(s.session || s.sid)}`), ...this.#session(s))
-    out.push(el('p', 'small muted', "At each start agent-host lists and hashes the agents' user-level settings in that session's container (Claude Code's settings, agents, skills, commands, hooks and instructions, user MCP servers as claude mcp list prints them, git config, shell start-up files and auto-memory folders), and the engine compares the list with that container's list from its last start. This is an agent report from inside the session's container: it catches changes made by an honest session or a third party, not by a hostile agent, which can change agent-host's answer too. It never reads Claude Code's account file or a sign-in file, and it compares ~/.npmrc and ~/.ssh by size and time only."))
+    else if (!r.sessions.length) out.push(emptyState('No session is running.'))
+    for (const s of r.sessions) out.push(el('h4', 'label', `Session ${visible(s.session || s.sid)}`), ...this.#session(s))
     return out
   }
 
@@ -172,14 +183,13 @@ class SfAgentReport extends HTMLElement {
   }
 
   #pins(r: Report): HTMLElement[] {
-    const out: HTMLElement[] = [el('h3', 'small', 'Pinned agents and knackpack')]
-    const ul = el('ul', 'list')
+    const out: HTMLElement[] = [el('h3', 'label', 'Agent versions')]
+    const ul = el('ul', 'list flat')
     for (const p of r.pins) {
+      const note = p.state === 'verified' ? `Built by ${visible(p.repository)} with ${visible(p.workflow)} at ${visible(p.ref)}${p.commit ? `, commit ${visible(short(p.commit))}` : ''}.` : visible(p.note)
+      const { label, tone } = p.said.label ? p.said : { label: visible(p.state), tone: 'muted' }
       const li = el('li', 'small')
-      const [label, tone] = PIN_STATES[p.state] ?? [visible(p.state), 'muted']
-      li.append(el('strong', '', `${visible(p.name || p.package)} ${visible(p.version)}`), el('span', 'muted', ` ${visible(p.package)} `), el('span', `tag ${tone}`, label))
-      if (p.state === 'verified') li.append(el('p', 'small muted', `Built by ${visible(p.repository)} with ${visible(p.workflow)} at ${visible(p.ref)}${p.commit ? `, commit ${visible(short(p.commit))}` : ''}.`))
-      else if (p.note) li.append(el('p', 'small muted', visible(p.note)))
+      li.append(outLink(visible(p.package), p.link, SOURCE), el('span', 'muted', ` ${visible(p.version)} `), ...tipTag(label, tone, note))
       ul.append(li)
     }
     for (const p of r.plugins) ul.append(this.#plugin(p))
@@ -190,29 +200,23 @@ class SfAgentReport extends HTMLElement {
   #plugin(p: PluginPin): HTMLElement {
     const li = el('li', 'small')
     const source = visible(p.source.replace(/^https:\/\//, '').replace(/\.git$/, ''))
-    li.append(el('strong', '', visible(p.name)), el('span', 'muted', ` follows the ${visible(p.branch)} branch of ${source}`))
-    if (p.commit) li.append(el('p', 'small muted', `Installed: ${p.version ? visible(p.version) : 'a version it doesn\'t name'} at commit ${visible(short(p.commit))}${p.installedAt ? `, ${when(p.installedAt)}` : ''}.`))
-    else li.append(el('p', 'small bad', `No ${visible(p.name)} is installed: reviews can't start, so every push needs your Allow with a reason.`))
+    const check = p.checkStamped ? `Checked at this start (${when(p.checkedAt)}): ${visible(p.checkLine)}` : visible(p.checkLine)
+    const installed = p.commit ? `Installed at commit ${visible(short(p.commit))}${p.installedAt ? `, ${when(p.installedAt)}` : ''}.` : ''
+    const tip = [`Follows the ${visible(p.branch)} branch of ${source}.`, installed, check].filter(Boolean).join(' ')
+    const { label, tone } = p.said.label ? p.said : { label: visible(p.check), tone: 'muted' }
+    li.append(outLink(visible(p.name), p.link, SOURCE))
+    if (p.version || p.commit) li.append(el('span', 'muted', ` ${visible(p.version || short(p.commit))}`))
+    li.append(' ', ...tipTag(label, tone, tip))
+    if (!p.commit) li.append(el('p', 'small bad', `No ${visible(p.name)} is installed: reviews can't start, so every push needs your Allow with a reason.`))
     const unused = `reviews can't start, so every push needs your Allow with a reason, and new sessions start without ${visible(p.name)}`
     if (p.commit && p.refusedWhy) li.append(el('p', 'small bad', `Commit ${visible(short(p.commit))} doesn't pass this engine's install checks, so it isn't used: ${unused}. ${visible(p.refusedWhy)} At each start the engine installs the head of ${visible(p.branch)} if it passes them; with SF_AGENTS_INSTALL=manual, run install-agents once it does.`))
     else if (p.commit && p.refused) li.append(el('p', 'small bad', `This engine's list of refused ${visible(p.name)} commits names ${visible(short(p.commit))}, so it isn't used: ${unused}. At each start the engine installs the head of ${visible(p.branch)} if it isn't refused; with SF_AGENTS_INSTALL=manual, run install-agents once it isn't.`))
-    const kept = p.commit && !p.refused ? ', so reviews and new sessions use the installed commit' : ''
-    const checks: Record<string, [string, string]> = {
-      'up-to-date': [`Checked at this start (${when(p.checkedAt)}): up to date.`, 'ok'],
-      updated: [p.from ? `Checked at this start (${when(p.checkedAt)}): updated from commit ${visible(short(p.from))}.` : `Checked at this start (${when(p.checkedAt)}): installed.`, 'ok'],
-      kept: [`Checked at this start (${when(p.checkedAt)}): the head of ${visible(p.branch)} wasn't installed${kept}. ${visible(p.problem)}`, 'warn'],
-      'not-installed': [`Checked at this start (${when(p.checkedAt)}): nothing could be installed. ${visible(p.problem)}`, 'bad'],
-      checking: [`Checking the head of ${visible(p.branch)} now.`, 'muted'],
-      off: [`Not checked at this start: SF_AGENTS_INSTALL is manual, so the engine made no network call for it; install-agents checks and updates it.`, 'muted'],
-    }
-    const [line, tone] = checks[p.check] ?? ['Not checked yet at this start.', 'muted']
-    li.append(el('p', `small ${tone}`, line))
     return li
   }
 
   #advisories(r: Report): HTMLElement[] {
     const a = r.advisories
-    const out: HTMLElement[] = [el('h3', 'small', 'Known vulnerabilities')]
+    const out: HTMLElement[] = [el('h3', 'label', 'Vulnerabilities')]
     if (a.off) out.push(el('p', 'small muted', 'Advisory lookups are off (SF_OSV=off).'))
     else if (a.problem) out.push(el('p', 'small warn', visible(a.problem)))
     else if (!a.checkedAt) out.push(el('p', 'small muted', 'Not looked up yet: the engine asks OSV shortly after it starts, then every 24 hours.'))
@@ -222,13 +226,7 @@ class SfAgentReport extends HTMLElement {
       for (const f of a.found) {
         const li = el('li')
         li.append(el('strong', '', visible(f.label)), ': ')
-        if (LINK.test(f.link)) {
-          const link = el('a', '', visible(f.id))
-          link.href = f.link
-          link.rel = 'noreferrer noopener'
-          link.target = '_blank'
-          li.append(link)
-        } else li.append(el('span', '', visible(f.id)))
+        li.append(outLink(visible(f.id), f.link, LINK))
         if (f.aliases.length) li.append(el('span', 'muted', ` (${f.aliases.map(visible).join(', ')})`))
         if (f.summary) li.append(` ${visible(f.summary)}`)
         ul.append(li)
@@ -236,7 +234,6 @@ class SfAgentReport extends HTMLElement {
       if (a.more) ul.append(el('li', 'muted', `and ${a.more} more: the list stops at ${a.found.length}, so read the rest at osv.dev`))
       out.push(ul)
     } else out.push(el('p', 'small ok', `No known advisory for a pinned version or the installed knackpack commit (looked up ${when(a.checkedAt)}).`))
-    if (!a.off && a.sent.length) out.push(el('p', 'small muted', `The engine asks OSV (api.osv.dev) about ${a.sent.map(visible).join(', ')}: package names, versions and the commit, nothing else. The agent container never reaches OSV.`))
     return out
   }
 
@@ -244,7 +241,7 @@ class SfAgentReport extends HTMLElement {
     const r = this.#report
     this.hidden = !r
     if (!r) return this.replaceChildren()
-    this.replaceChildren(el('h2', '', 'Agents'), ...this.#advisories(r), ...this.#settings(r.settings), ...this.#pins(r))
+    this.replaceChildren(...this.#advisories(r), ...this.#settings(r.settings), ...this.#pins(r))
   }
 }
 

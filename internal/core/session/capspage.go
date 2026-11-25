@@ -123,6 +123,10 @@ func (l *Limits) Frame() Fields {
 			f["levels"] = Fields{CapMoney: capLevel(CapMoney, c, s.used), CapTime: capLevel(CapTime, c, s.used), CapTurns: capLevel(CapTurns, c, s.used), CapDisk: capLevel(CapDisk, c, s.used)}
 			f["reached"] = s.reached
 			f["reachedAt"] = ms(s.reachedAt)
+			if s.reached != "" {
+				least, suggested := raiseFor(s.reached, c, s.used)
+				f["raise"] = Fields{"min": least, "suggested": suggested}
+			}
 		}
 		if t != nil && t.notice != nil {
 			f["stuck"] = Fields{"tool": t.notice.tool, "detail": t.notice.detail, "count": float64(t.notice.count), "failing": t.notice.failing, "at": ms(t.notice.at)}
@@ -160,15 +164,34 @@ func (l *Limits) Frame() Fields {
 
 var _ ProjectData = (*Limits)(nil)
 
-func (l *Limits) projectData(event, name string, fn func() bool) {
+func (l *Limits) projectData(event string, step *projectStep, fn func() bool) {
 	l.mu.Lock()
-	logger := l.cfg.Logger
-	if l.cfg.Store != nil && !l.loaded {
+	logger, store := l.cfg.Logger, l.cfg.Store
+	if store == nil {
 		l.mu.Unlock()
-		projectDataNotSaved(logger, "limits", name, errors.New("caps.json wasn't read"))
 		return
 	}
-	if l.cfg.Store == nil || !fn() {
+	late := !l.loaded
+	if late {
+		st, err := store.Load()
+		if err != nil {
+			name := ""
+			if step != nil {
+				name = step.id.Name
+				l.pending.remember(step.id, step.restore, step.at)
+			}
+			l.mu.Unlock()
+			projectDataNotSaved(logger, "limits", name, errors.New("caps.json wasn't read"))
+			return
+		}
+		l.loadLocked(st)
+		l.loaded = true
+		logger.Info("limits", "event", "state-read-late")
+	}
+	steps := l.pending.list()
+	l.removed, _ = replaySteps(steps, l.projects, l.removed)
+	l.pending.done(len(steps))
+	if !fn() && len(steps) == 0 && !late {
 		l.mu.Unlock()
 		return
 	}
@@ -180,7 +203,7 @@ func (l *Limits) projectData(event, name string, fn func() bool) {
 }
 
 func (l *Limits) ParkProject(id ProjectID) {
-	l.projectData("caps-parked", id.Name, func() bool {
+	l.projectData("caps-parked", &projectStep{id: id, at: l.now()}, func() bool {
 		var parked bool
 		l.removed, _, parked = parkProject(l.projects, l.removed, id)
 		return parked
@@ -188,7 +211,7 @@ func (l *Limits) ParkProject(id ProjectID) {
 }
 
 func (l *Limits) RestoreProject(id ProjectID) {
-	l.projectData("caps-restored", id.Name, func() bool {
+	l.projectData("caps-restored", &projectStep{id: id, restore: true, at: l.now()}, func() bool {
 		var changed bool
 		l.removed, changed = restoreProject(l.projects, l.removed, id)
 		return changed
@@ -196,32 +219,29 @@ func (l *Limits) RestoreProject(id ProjectID) {
 }
 
 func (l *Limits) KeepProjects(names []string) {
-	l.projectData("caps-unlisted-set-aside", "", func() bool {
+	l.projectData("caps-unlisted-set-aside", nil, func() bool {
 		var n int
 		l.removed, n = keepProjects(l.projects, l.removed, names)
 		return n > 0
 	})
 }
 
-func (l *Limits) ProjectCaps(name string) Caps {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.projects[name]
-}
-
-func (l *Limits) SetProject(name string, c Caps) error {
+func (l *Limits) SetProject(name string, c Caps) (bool, error) {
 	clean, ok := CheckCaps(c)
 	if !ok || name == "" || len(name) > 400 {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
+		return false, invalid("caps", "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
-	_, had := l.projects[name]
+	was, had := l.projects[name]
 	switch {
+	case was == clean:
+		l.mu.Unlock()
+		return false, nil
 	case !clean.Any():
 		delete(l.projects, name)
 	case !had && len(l.projects) >= MaxCapProjects:
 		l.mu.Unlock()
-		return explained(limited("projects"), "The engine keeps caps for at most 1,000 projects.")
+		return false, limited("projects", "The engine keeps caps for at most 1,000 projects.")
 	default:
 		l.projects[name] = clean
 	}
@@ -233,19 +253,19 @@ func (l *Limits) SetProject(name string, c Caps) error {
 	l.mu.Unlock()
 	err := l.save()
 	l.flush(true)
-	return err
+	return true, err
 }
 
-func (l *Limits) SetSession(sid string, c Caps) error {
+func (l *Limits) SetSession(sid string, c Caps) (bool, error) {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return false, invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
-		return err
+		return false, err
 	}
 	clean, ok := CheckCaps(c)
 	if !ok {
-		return explained(invalid("caps"), "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
+		return false, invalid("caps", "A cap is a number from 0 (off) up to $100,000, 43,200 minutes, 10,000 turns or 4,096 GiB.")
 	}
 	l.mu.Lock()
 	k, known := l.known[sid]
@@ -259,28 +279,34 @@ func (l *Limits) SetSession(sid string, c Caps) error {
 	}
 	if !known {
 		l.mu.Unlock()
-		return explained(conflict("not started here"), "Only a session this engine started can have caps.")
+		return false, conflict("not started here", "Only a session this engine started can have caps.")
 	}
 	s := l.sessionLocked(sid, k.project)
 	if s == nil {
 		l.mu.Unlock()
-		return explained(limited("sessions"), "The engine keeps caps for at most 1,000 sessions.")
+		return false, limited("sessions", "The engine keeps caps for at most 1,000 sessions.")
 	}
 	if s.reached != "" {
 		l.mu.Unlock()
-		return explained(conflict("reached"), "This session is at a cap. Answer Raise the cap or Stop on the session first.")
+		return false, conflict("reached", "This session is at a cap. Answer Raise the cap or Stop on the session first.")
 	}
+	changed := s.own == nil || *s.own != clean
 	s.own = &clean
 	l.checkLocked(sid, s)
-	l.unsaved = true
+	if changed {
+		l.unsaved = true
+	}
 	measure := clean.DiskGiB > 0 && k.running && l.cfg.Disk != nil
 	l.mu.Unlock()
 	if measure {
 		l.measureSoon(sid, k.box)
 	}
-	err := l.save()
+	var err error
+	if changed {
+		err = l.save()
+	}
 	l.flush(true)
-	return err
+	return changed, err
 }
 
 func (r *Registry) admittedProject(sid string, out *limitsSession) bool {
@@ -296,7 +322,7 @@ func (r *Registry) admittedProject(sid string, out *limitsSession) bool {
 
 func (l *Limits) Raise(sid, kind string, value float64) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
 		return err
@@ -305,7 +331,7 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	s := l.sessions[sid]
 	if s == nil || s.reached == "" || s.reached != kind {
 		l.mu.Unlock()
-		return explained(conflict("not reached"), "This session isn't at that cap, so there is nothing to raise.")
+		return conflict("not reached", "This session isn't at that cap, so there is nothing to raise.")
 	}
 	c := l.capsOfLocked(s)
 	old := capWords(kind, c)
@@ -323,15 +349,12 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 	clean, ok := CheckCaps(next)
 	if !ok || value != math.Trunc(value) && kind != CapMoney || overCap(kind, clean, s.used) || capValue(kind, clean) <= capValue(kind, c) {
 		l.mu.Unlock()
-		most := "$100,000, 43,200 minutes or 10,000 turns"
-		if kind == CapDisk {
-			most = "4,096 GiB, a whole number"
-		}
-		return explained(invalid("value"), "The new cap must be more than this session has used ("+usedWords(kind, s.used)+") and more than the cap now, and at most "+most+".")
+		most := map[string]string{CapMoney: "$100,000", CapTime: "43,200 minutes", CapTurns: "10,000 turns", CapDisk: "4,096 whole GiB"}[kind]
+		return onField("value", invalid("value", "Above the cap and what's used, up to "+most+"."))
 	}
 	if least := (s.used.Time + raiseTimeMargin + time.Minute - 1).Truncate(time.Minute); kind == CapTime && time.Duration(clean.Minutes)*time.Minute < least {
 		l.mu.Unlock()
-		return explained(invalid("value"), "The session's time keeps counting while it waits at the cap, so a new time cap must leave it at least a minute: "+formatMinutes(least)+" or more ("+usedWords(kind, s.used)+" used).")
+		return onField("value", invalid("value", "Needs at least "+formatMinutes(least)+"."))
 	}
 	s.own = &clean
 	s.reached, s.reachedAt = "", time.Time{}
@@ -352,7 +375,7 @@ func (l *Limits) Raise(sid, kind string, value float64) error {
 
 func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	if !sidPattern.MatchString(sid) {
-		return invalid("sid")
+		return invalid("sid", "The engine knows no session by that id. Reload the page and pick the session again.")
 	}
 	if err := l.branchHeld(sid); err != nil {
 		return err
@@ -362,13 +385,13 @@ func (l *Limits) StopAtCap(ctx context.Context, sid string) error {
 	stop := l.cfg.Stop
 	if s == nil || s.reached == "" {
 		l.mu.Unlock()
-		return explained(conflict("not reached"), "This session isn't at a cap.")
+		return conflict("not reached", "This session isn't at a cap.")
 	}
 	kind := s.reached
 	words := capWords(kind, l.capsOfLocked(s))
 	l.mu.Unlock()
 	if stop == nil {
-		return explained(conflict("no agent-host"), "This engine can't stop sessions.")
+		return conflict("no agent-host", "This engine can't stop sessions.")
 	}
 	sctx, cancel := context.WithTimeout(ctx, capStopFor)
 	defer cancel()
@@ -391,4 +414,25 @@ func (l *Limits) branchHeld(sid string) error {
 	doubled := l.cfg.Doubled
 	l.mu.Unlock()
 	return heldBranch(doubled, sid)
+}
+
+func raiseFor(kind string, c Caps, u CapsUsed) (float64, float64) {
+	now := capValue(kind, c)
+	var least float64
+	switch kind {
+	case CapMoney:
+		least = max(now, math.Round(u.CostUSD*10000)/10000)
+		double := now * 2
+		if double == 0 {
+			double = 1
+		}
+		return least, math.Round(double*100) / 100
+	case CapTime:
+		least = max(now+1, math.Ceil(math.Floor(u.Time.Minutes()*10)/10)+1)
+	case CapTurns:
+		least = max(now+1, float64(u.Turns))
+	case CapDisk:
+		least = max(now+1, math.Floor(float64(u.DiskBytes)/(1<<30))+1)
+	}
+	return least, max(now*2, least)
 }

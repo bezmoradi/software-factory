@@ -237,10 +237,10 @@ func random() string {
 }
 
 func (k *conn) download(ctx context.Context, git *os.Root, want string, have []string) error {
-	return k.downloadDepth(ctx, git, want, have, 0)
+	return k.downloadDepth(ctx, git, want, have, 0, nil)
 }
 
-func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, have []string, depth int) error {
+func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, have []string, depth int, progress func(session.CloneProgress)) error {
 	req := packp.NewUploadPackRequestFromCapabilities(k.adv.Capabilities)
 	if depth > 0 && k.adv.Capabilities.Supports(capability.Shallow) {
 		_ = req.Capabilities.Set(capability.Shallow)
@@ -266,7 +266,7 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 		return k.explain(ctx, err)
 	}
 	defer func() { _ = res.Close() }()
-	err = storePack(git, res, want)
+	err = storePack(git, res, want, progress)
 	if err != nil && ctx.Err() != nil {
 		return k.explain(ctx, ctx.Err())
 	}
@@ -276,7 +276,7 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 	return nil
 }
 
-func storePack(git *os.Root, src io.Reader, want string) error {
+func storePack(git *os.Root, src io.Reader, want string, progress func(session.CloneProgress)) error {
 	if err := git.MkdirAll("objects/pack", 0o755); err != nil {
 		return errors.New("the clone's objects/pack folder couldn't be made")
 	}
@@ -292,18 +292,30 @@ func storePack(git *os.Root, src io.Reader, want string) error {
 			_ = git.Remove(tmp)
 		}
 	}()
-	n, err := io.Copy(f, io.LimitReader(src, MaxPack+1))
+	var m *meter
+	var dst io.Writer = f
+	if progress != nil {
+		m = newMeter(progress, f)
+		defer m.end()
+		dst = meteredFile{f: f, m: m}
+	}
+	n, err := io.Copy(dst, io.LimitReader(src, MaxPack+1))
 	if err != nil {
 		return errors.New("the pack didn't arrive whole: " + err.Error())
 	}
 	if n > MaxPack {
 		return fmt.Errorf("the repository's pack is larger than %d GiB, more than the engine clones", MaxPack>>30)
 	}
+	observers := []packfile.Observer{}
+	if m != nil {
+		m.received()
+		observers = append(observers, checkCount{m: m})
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return errors.New("the pack couldn't be read back")
 	}
 	w := new(idxfile.Writer)
-	parser, err := packfile.NewParser(packfile.NewScanner(f), w)
+	parser, err := packfile.NewParser(packfile.NewScanner(f), append([]packfile.Observer{w}, observers...)...)
 	if err != nil {
 		return errors.New("the remote sent a pack the engine can't read")
 	}
@@ -434,7 +446,7 @@ func (r Remote) Clone(ctx context.Context, q session.CloneRequest) (session.Clon
 		return session.Cloned{}, errors.New("the clone's .git folder can't be opened")
 	}
 	defer func() { _ = git.Close() }()
-	if err := k.download(ctx, git, head, nil); err != nil {
+	if err := k.downloadDepth(ctx, git, head, nil, 0, q.Progress); err != nil {
 		return session.Cloned{}, err
 	}
 	files := []struct{ name, data string }{
@@ -624,7 +636,7 @@ func (r Remote) FetchCommit(ctx context.Context, raw, commit, dir string) error 
 	if err := root.MkdirAll("objects/pack", 0o755); err != nil {
 		return errors.New("the download's objects folder can't be made")
 	}
-	if err := k.downloadDepth(ctx, root, commit, nil, 1); err != nil {
+	if err := k.downloadDepth(ctx, root, commit, nil, 1, nil); err != nil {
 		return err
 	}
 	if err := writeFile(root, "HEAD", []byte(commit+"\n")); err != nil {

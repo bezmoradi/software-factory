@@ -127,9 +127,10 @@ func (s ProjectCommands) Save(all map[session.ProjectID]session.ProjectCommands)
 }
 
 type queuedJSON struct {
-	ID   string    `json:"id"`
-	Text string    `json:"text"`
-	At   time.Time `json:"at"`
+	ID    string    `json:"id"`
+	Text  string    `json:"text"`
+	At    time.Time `json:"at"`
+	Typed bool      `json:"typed,omitempty"`
 }
 
 type queueJSON struct {
@@ -161,7 +162,7 @@ func (s Queues) Load() (map[string]session.QueueState, error) {
 		st := session.QueueState{Stopped: q.Stopped}
 		for _, m := range q.Items {
 			if len(st.Items) < session.MaxQueue {
-				st.Items = append(st.Items, session.QueuedMessage{ID: m.ID, Text: m.Text, At: m.At})
+				st.Items = append(st.Items, session.QueuedMessage{ID: m.ID, Text: m.Text, At: m.At, Typed: m.Typed})
 			}
 		}
 		out[q.SID] = st
@@ -178,7 +179,7 @@ func (s Queues) Save(all map[string]session.QueueState) error {
 		}
 		q := queueJSON{SID: sid, Stopped: st.Stopped, Items: []queuedJSON{}}
 		for _, m := range st.Items[:min(len(st.Items), session.MaxQueue)] {
-			q.Items = append(q.Items, queuedJSON{ID: m.ID, Text: m.Text, At: m.At.UTC()})
+			q.Items = append(q.Items, queuedJSON{ID: m.ID, Text: m.Text, At: m.At.UTC(), Typed: m.Typed})
 		}
 		f.Sessions = append(f.Sessions, q)
 	}

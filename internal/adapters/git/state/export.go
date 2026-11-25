@@ -25,6 +25,7 @@ const (
 	maxPrefsFile   = 4096
 	prefsFile      = "prefs.json"
 	KeepFolder     = "keep"
+	pairsFile      = "pairs.json"
 )
 
 type storeClass string
@@ -72,7 +73,6 @@ var stores = map[string]storeRow{
 	prFollowFile:        {class: classOff, version: 1, label: "pull request follows, send on its own and assign"},
 	lookupsFile:         {class: classOff, version: 1, label: "public-registry lookups"},
 	signInFile:          {class: classOff, version: 1, label: "the expected sign-in methods, reset to the default"},
-	pairsFile:           {class: classDisplay, version: 1, label: "sessions started together and benchmarks, for display only"},
 	lessonsFile:         {class: classDisplay, version: 1, label: "lessons from repeated findings, for display only; suggested lines not yet approved are dropped"},
 	waitingFile:         {class: classDropped, version: 1, label: "automatic pushes waiting on reviews"},
 	splitsFile:          {class: classDropped, version: 1, label: "tasks an agent proposed from a goal, waiting for the person"},
@@ -81,9 +81,12 @@ var stores = map[string]storeRow{
 	notesFile:           {class: classDropped, version: 1, label: "notes waiting for agents"},
 	homeSettingsFile:    {class: classDropped, version: 2, label: "the baseline of the agents' user settings"},
 	verifyRunsFile:      {class: classDropped, version: 1, label: "verification runs, whose results count only on the engine that ran them"},
+	grantsFile:          {class: classDropped, version: grantsVersion, label: "access grants, which the person gives again on the page"},
+	presetsFile:         {class: classDropped, version: presetsVersion, label: "access presets, which name credentials an export never holds"},
+	actionsFile:         {class: classDropped, version: actionsVersion, label: "saved actions, which name credentials an export never holds"},
 	capsFile:            {class: classKept, version: 1, label: "caps"},
 	deniedFile:          {class: classKept, version: deniedVersion, label: "denied commits"},
-	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "Stop everything and Pause all"},
+	haltFile:            {class: classKept, version: 1, place: placeKeepOwn, label: "away mode"},
 	identityFile:        {class: classKept, version: 1, place: placeKeepOwn, label: "the name and email agents commit with"},
 	personFile:          {class: classKept, version: 1, label: "the local person's id, which saved records and audit lines carry; the importing engine takes it as its own"},
 	portsFile:           {class: classKept, version: 1, label: "port ranges"},
@@ -99,6 +102,7 @@ var stores = map[string]storeRow{
 	auditFile:           {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit"},
 	"audit.1.jsonl":     {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit's older part"},
 	tokensFile:          {class: classOut, label: "git host tokens are never exported"},
+	credentialsFile:     {class: classOut, label: "credentials for access grants are never exported"},
 	boxesFile:           {class: classOut, label: "session containers belong to the stack that made them"},
 	"engine.sock":       {class: classOut, label: "the lock socket is runtime only"},
 	stampFile:           {class: classOut, label: "which engine last ran here"},
@@ -108,6 +112,7 @@ var stores = map[string]storeRow{
 	repliesFolder:       {class: classOut, label: "reviewers' whole replies stay with the engine that ran them; each review record keeps its 4,000-character summary"},
 	backupFolder:        {class: classOut, label: "this engine's copies from before a format change"},
 	stagingFolder:       {class: classOut, label: "an import this engine hasn't applied"},
+	pairsFile:           {class: classOut, label: "sessions started together, which this engine no longer keeps"},
 }
 
 func ImportedReviews(dir string) func() ([]session.ReviewEntry, error) {
@@ -208,8 +213,6 @@ func checkStore(name, d, workspace string) error {
 		err = loaded(NewViewed(d).Load)
 	case decisionLogFile:
 		err = loaded(NewDecisionLog(d).Load)
-	case pairsFile:
-		err = loaded(NewPairs(d).Load)
 	case lessonsFile:
 		err = loaded(NewLessons(d).Load)
 	case dropsFile:

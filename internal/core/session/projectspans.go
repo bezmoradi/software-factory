@@ -19,6 +19,22 @@ func inSpans(spans []ProjectSpan, name string, at time.Time) bool {
 	})
 }
 
+type projectLines struct {
+	spans []ProjectSpan
+	url   string
+}
+
+func (p projectLines) at(name string, t time.Time) bool {
+	return inSpans(p.spans, name, t)
+}
+
+func (p projectLines) audit(e AuditEntry) bool {
+	if e.ProjectURL != "" && p.url != "" {
+		return sameRepository(e.ProjectURL, p.url)
+	}
+	return p.at(e.Repository, e.Time)
+}
+
 func openSpan(spans []ProjectSpan, r Repository) bool {
 	n := len(spans)
 	return n > 0 && spans[n-1].To.IsZero() && spans[n-1].Name == r.Name && spans[n-1].From.Equal(r.AddedAt)
@@ -62,12 +78,12 @@ func (l *DecisionLog) record(repo string) (Repository, bool) {
 	return list[i], true
 }
 
-func (l *DecisionLog) spansFor(st DecisionState, repo string) []ProjectSpan {
+func (l *DecisionLog) linesFor(st DecisionState, repo string) projectLines {
 	r, ok := l.record(repo)
 	if !ok {
-		return nil
+		return projectLines{}
 	}
-	return spansOf(st, r)
+	return projectLines{spans: spansOf(st, r), url: r.URL}
 }
 
 func (l *DecisionLog) Spans(repo string) []ProjectSpan {
@@ -77,24 +93,24 @@ func (l *DecisionLog) Spans(repo string) []ProjectSpan {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	st, _ := l.state()
-	return l.spansFor(st, repo)
+	return l.linesFor(st, repo).spans
 }
 
-func (l *DecisionLog) parkSpans(st *DecisionState, id ProjectID) bool {
+func (l *DecisionLog) parkSpans(st *DecisionState, id ProjectID, at time.Time) bool {
 	list, ok := st.Spans[id.Name]
 	if !ok {
 		return false
 	}
-	st.Spans[id.Name] = closed(list, l.cfg.Now())
+	st.Spans[id.Name] = closed(list, at)
 	var parked bool
 	st.RemovedSpans, _, parked = parkProject(st.Spans, st.RemovedSpans, id)
 	return parked
 }
 
-func (l *DecisionLog) restoreSpans(st *DecisionState, id ProjectID) {
+func (l *DecisionLog) restoreSpans(st *DecisionState, id ProjectID, at time.Time) {
 	st.RemovedSpans, _ = restoreProject(st.Spans, st.RemovedSpans, id)
-	from := l.cfg.Now()
-	if r, ok := l.record(id.Name); ok {
+	from := at
+	if r, ok := l.record(id.Name); ok && sameURL(ProjectID{URL: r.URL}, id) {
 		from = r.AddedAt
 	}
 	st.Spans[id.Name] = opened(closed(st.Spans[id.Name], from), id.Name, from)

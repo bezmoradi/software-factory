@@ -44,19 +44,19 @@ func (s *Server) aside(w http.ResponseWriter, r *http.Request, body map[string]a
 	sid, okSID := body["sid"].(string)
 	consent, consented := consentOf(body)
 	if !okSID || !consented || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	hash := ""
 	if r.URL.Path == planReviewRoute {
 		h, okHash := body["hash"].(string)
 		if !keysWithin(body, "sid", "hash", "costOk") || !okHash || !hash256.MatchString(h) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		hash = h
 	} else if !keysWithin(body, "sid", "costOk") {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

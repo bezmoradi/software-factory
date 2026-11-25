@@ -3,8 +3,6 @@ import { shortSha } from '../lib/format.ts'
 import { isRecord } from '../lib/json.ts'
 import type { AgentCheck, DependencyChange, LockedTests, PushExtra, SessionPush, TypeChange, TypeLine, WorkflowRun } from '../types.ts'
 
-const KINDS: Record<string, string> = { test: 'Tests', lint: 'Lint', 'type-check': 'Type check', build: 'Build' }
-const ECOSYSTEMS: Record<string, string> = { go: 'Go', npm: 'npm', pypi: 'PyPI', crates: 'crates.io' }
 const DAY = 86400000
 
 function text(value: string): string {
@@ -45,7 +43,7 @@ function age(ms: number): string {
 }
 
 function dependency(d: DependencyChange, lookup: string): HTMLElement {
-  const li = item(d.change === 'added' ? 'warn' : '', `${ECOSYSTEMS[d.ecosystem] ?? text(d.ecosystem)} `, code(d.name))
+  const li = item(d.change === 'added' ? 'warn' : '', `${text(d.ecosystemLabel || d.ecosystem)} `, code(d.name))
   if (d.change === 'added') li.append(` added${d.to ? ` at ${text(d.to)}` : ''}`)
   else if (d.change === 'removed') li.append(` removed${d.from ? ` (was ${text(d.from)})` : ''}`)
   else li.append(` changed from ${text(d.from) || 'none'} to ${text(d.to) || 'none'}`)
@@ -77,29 +75,16 @@ function workflow(w: WorkflowRun): HTMLElement {
   return li
 }
 
-const HIDDEN: Record<string, string> = {
-  pipe: 'result unknown: its exit status is that of the command its output was piped into, and it doesn\'t set pipefail',
-  or: 'result unknown: it ends in || and a command that isn\'t a check, such as || true or || echo failed, so its exit status is that command\'s',
-  background: 'result unknown: it ran in the background, so the call returned before the check finished',
-}
-
-function result(c: AgentCheck): string {
-  if (c.hidden) return HIDDEN[c.hidden] ?? 'result unknown: its exit status isn\'t the check\'s own'
-  return c.ok ? 'finished without an error' : 'failed or was refused'
-}
-
 function ranCheck(p: SessionPush, c: AgentCheck): HTMLElement {
   const stale = !!c.editedAt && (!p.at || c.editedAt <= p.at)
-  const li = item(c.ok && !c.hidden && !stale ? '' : 'warn', `${KINDS[c.kind] ?? text(c.kind)}: `, code(c.command), ` ${result(c)}`)
+  const li = item(c.ok && !c.hidden && !stale ? '' : 'warn', `${text(c.label || c.kind)}: `, code(c.command), ` ${text(c.result ?? '')}`)
   if (stale) li.append(' ', tag('the agent edited files after it ran', 'warn'))
   return li
 }
 
-function checks(p: SessionPush, all: AgentCheck[]): HTMLElement {
-  const before = p.checks ?? all.filter(c => !p.at || c.at <= p.at)
-  const rows = before.map(c => ranCheck(p, c))
-  const missing = Object.keys(KINDS).filter(k => !before.some(c => c.kind === k))
-  if (missing.length) rows.push(item('muted', `Not reported: ${missing.map(k => KINDS[k]).join(', ')}`))
+function checks(p: SessionPush): HTMLElement {
+  const rows = (p.checks ?? []).map(c => ranCheck(p, c))
+  if (p.notReported) rows.push(item('muted', text(p.notReported)))
   return section('Checks the agent ran before this, reported by the agent:', list(rows))
 }
 
@@ -172,14 +157,14 @@ function extraParts(x: PushExtra): HTMLElement[] {
   return parts
 }
 
-export function changeFacts(p: SessionPush, all: AgentCheck[], typed: TypeChange | null = null): HTMLElement | null {
+export function changeFacts(p: SessionPush, typed: TypeChange | null = null): HTMLElement | null {
   if (!p.commit || !p.result) return null
   const x = p.extra && p.extra.commit === p.commit ? p.extra : null
   const parts: HTMLElement[] = []
   if (typed) parts.push(typeChangePart(typed))
   if (x) parts.push(...extraParts(x))
   else parts.push(el('p', 'small muted', 'Reading the change for tests, dependencies, file kinds and workflows…'))
-  parts.push(checks(p, all))
+  parts.push(checks(p))
   const box = el('div', 'push-facts')
   box.append(el('p', 'small', 'About this change'), el('p', 'small muted', 'Facts the engine read from the commit, for you to check. None of them holds or allows the push.'), ...parts)
   return box

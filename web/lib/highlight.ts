@@ -75,6 +75,14 @@ export function langFor(path: string): Lang | null {
   return key ? LANGS[key] ?? null : null
 }
 
+const INFO: Record<string, string> = { golang: 'go', javascript: 'js', typescript: 'js', node: 'js', python: 'py', python3: 'py', rust: 'rs', ruby: 'rb', shell: 'sh', console: 'sh', shellsession: 'sh', terminal: 'sh', 'c++': 'c', csharp: 'c', kotlin: 'c', make: 'make', docker: 'docker', postgres: 'sql', postgresql: 'sql' }
+
+export function langForInfo(info: string): Lang | null {
+  const word = (info.trim().split(/[\s{,]/)[0] ?? '').toLowerCase()
+  const key = INFO[word] ?? EXT[word] ?? NAMES[word]
+  return key ? LANGS[key] ?? null : null
+}
+
 const NUMBER = /0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?[a-zA-Z%]{0,4}|#[0-9a-fA-F]{3,8}\b/y
 const WORD = /[A-Za-z_$][\w$-]*/y
 const PLAIN_WORD = /[A-Za-z_$][\w$]*/y

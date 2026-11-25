@@ -59,6 +59,7 @@ TSC := web/node_modules/.bin/tsc
 web-check:
 	@npm --prefix web run check
 	@$(MAKE) --no-print-directory web-arch
+	@sh scripts/check-web-forms.sh
 
 DEPCRUISE := web/node_modules/.bin/depcruise
 WEB_ARCH_MIN_MODULES := 80
@@ -117,6 +118,7 @@ no-tests:
 
 files:
 	@sh scripts/check-files.sh
+	@sh scripts/check-refusals.sh
 
 instructions:
 	@sh scripts/check-instructions.sh $(INSTRUCTIONS_MAX_BYTES)

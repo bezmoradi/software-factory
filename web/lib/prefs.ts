@@ -1,4 +1,6 @@
 import type { Prefs } from '../types.ts'
+import { field } from './form.ts'
+import { radio } from './controls.ts'
 
 const root = document.documentElement
 
@@ -32,13 +34,11 @@ export function scales(): string[] {
   return rules(/^:root\[data-scale="(\d+)"\]$/).map(({ value }) => value)
 }
 
+function themeOption(group: string, value: string, label: Node): HTMLDivElement {
+  return field(label, radio(group, value), { kind: 'option', labelCls: 'theme' })
+}
+
 function row(theme: { value: string; label: string; default: boolean }) {
-  const label = document.createElement('label')
-  label.className = 'theme'
-  const input = document.createElement('input')
-  input.type = 'radio'
-  input.name = 'theme'
-  input.value = theme.value
   const name = document.createElement('span')
   name.textContent = theme.label
   if (theme.default) {
@@ -47,8 +47,13 @@ function row(theme: { value: string; label: string; default: boolean }) {
     tag.textContent = '(default)'
     name.append(' ', tag)
   }
-  label.append(input, name)
-  return label
+  return themeOption('theme', theme.value, name)
+}
+
+function sideOption(value: string, words: string) {
+  const name = document.createElement('span')
+  name.textContent = words
+  return themeOption('bar', value, name)
 }
 
 export function initPrefs(save: (prefs: Prefs) => void): void {
@@ -58,6 +63,7 @@ export function initPrefs(save: (prefs: Prefs) => void): void {
   const shown = document.getElementById('scale-value')!
   const reset = document.getElementById('scale-reset')!
   const sides = document.getElementById('bar-side')!
+  sides.append(sideOption('left', 'Left'), sideOption('right', 'Right'))
   const list = themes()
   for (const [heading, dark] of [['Dark', true], ['Light', false]] as const) {
     const group = list.filter(t => t.dark === dark)

@@ -52,7 +52,7 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 	}
 	follows.Restore()
 	go follows.Run(base)
-	issues, err := session.NewIssueStarts(session.IssueStartsConfig{Follows: follows, Projects: parts.dispatcher.Projects, Tell: tellSession(reg), Base: base, Logger: logger})
+	issues, err := session.NewIssueStarts(session.IssueStartsConfig{Follows: follows, Projects: parts.dispatcher.Projects, Tell: typedSession(reg), Base: base, Logger: logger})
 	if err != nil {
 		srv.UsePulls(follows, nil, nil)
 		return

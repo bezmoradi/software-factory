@@ -1,4 +1,4 @@
-import { api } from './api.ts'
+import { request, UNREAD } from './api.ts'
 import { armed, current, paint, scroller, sessions, state, type Session } from './app-state.ts'
 import { byId, settleFocus } from './lib/dom.ts'
 import { baseName, shortSha } from './lib/format.ts'
@@ -12,7 +12,6 @@ interface NavigationDeps {
     grow: () => void
     paintJump: () => void
   }
-  reply: (res: Response | null) => Promise<{ ok: boolean; body: Record<string, unknown> }>
 }
 
 export interface Navigation {
@@ -32,7 +31,7 @@ const spots = new Map<string, Spot | null>()
 
 const TABS_KEY = 'sf-tabs'
 const MAX_TAB_LINE = 10_000_000
-const TAB_KEY = /^(?:projects|docs|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
+const TAB_KEY = /^(?:projects|docs|p:[\w.-]{1,100}|s\/[\w-]{1,100}|c:[\w-]{1,100}|f:[\w-]{1,100}:[^\0\n]{1,4000}(?:\0[0-9a-f]{40})?)$/
 
 export function saveTabs() {
   try {
@@ -80,15 +79,6 @@ export function moveTab(id: string, index: number) {
 }
 
 export const files = new Map<string, FileView>()
-const FILE_ERRORS: Record<string, string> = {
-  outside: "Only files inside this session's project open here.",
-  secret: "This file can hold secrets, so the page doesn't show it.",
-  large: 'This file is over 512 KB, too large to show here.',
-  binary: "This isn't a text file.",
-  missing: "This file isn't there anymore.",
-  link: "This path goes through a symbolic link, which the page doesn't follow.",
-  commit: "This commit isn't one this session's reviews read, so the page doesn't open files from it.",
-}
 
 export function fileLabel(key: string): string {
   const path = files.get(key)?.path ?? key
@@ -114,16 +104,16 @@ function loadFile(key: string) {
   const { sid, path, commit } = fileKey(key)
   if (fileLoads.has(key) || !sessions.has(sid)) return
   fileLoads.add(key)
-  void api('/api/file', commit ? { sid, path, commit } : { sid, path }).catch(() => null).then(async res => {
-    const body = res ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null
+  void request('/api/file', commit ? { sid, path, commit } : { sid, path }).then(a => {
+    const body = a.body
     fileLoads.delete(key)
     if (!openTabs.includes(key)) return
-    const text = res?.ok && typeof body?.text === 'string' ? body.text : undefined
-    const shown = typeof body?.path === 'string' ? body.path : path
+    const text = a.ok && typeof body.text === 'string' ? body.text : undefined
+    const shown = typeof body.path === 'string' ? body.path : path
     const old = files.get(key)
     if (text !== undefined && old?.text === text && old.path === shown) return
     const at = { ...(commit ? { commit } : {}), ...(old?.line ? { line: old.line } : {}) }
-    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: (Object.hasOwn(FILE_ERRORS, String(body?.error)) ? FILE_ERRORS[String(body?.error)] : undefined) ?? "The file couldn't be read." })
+    files.set(key, text !== undefined ? { path: shown, text, ...at } : { path, ...at, note: a.ok ? UNREAD : a.message })
     const file = byId<HTMLElementTagNameMap['sf-file']>('file')
     const refocus = current.key === key && (focusFile === key || file.contains(document.activeElement) || document.activeElement === document.body)
     paint()
@@ -139,7 +129,7 @@ export function reloadFile() {
 
 let docsAt = 0
 
-export function startNavigation({ composer, reply }: NavigationDeps): Navigation {
+export function startNavigation({ composer }: NavigationDeps): Navigation {
   function go(key: string) {
     if (key === current.key) return
     scrolls.set(current.key, scroller.scrollTop)
@@ -205,8 +195,8 @@ export function startNavigation({ composer, reply }: NavigationDeps): Navigation
     const docs = byId<HTMLElementTagNameMap['sf-docs']>('docs')
     if (docs.loaded || !state.connected || Date.now() - docsAt < 10000) return
     docsAt = Date.now()
-    const { ok, body } = await reply(await api('/api/docs', {}).catch(() => null))
-    docs.text = ok && typeof body.text === 'string' ? body.text : ''
+    const a = await request('/api/docs')
+    docs.text = a.ok && typeof a.body.text === 'string' ? a.body.text : ''
   }
 
   function openDocs(id: string, back: { view: string; label: string } | null = null) {

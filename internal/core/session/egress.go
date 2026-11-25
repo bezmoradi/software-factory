@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -24,9 +25,18 @@ var (
 	expiryWords   = map[string]string{"hour": " for an hour", "day": " for a day", "week": " for a week"}
 )
 
+type ExpiryChoice struct {
+	Value string
+	Label string
+}
+
+var ExpiryChoices = []ExpiryChoice{{Value: "never", Label: "No expiry"}, {Value: "hour", Label: "For an hour"}, {Value: "day", Label: "For a day"}, {Value: "week", Label: "For a week"}}
+
 type EgressList struct {
 	Allow   []string
+	Ports   []string
 	Expires map[string]time.Time
+	Git     []string
 }
 
 type EgressLists struct {
@@ -45,6 +55,14 @@ type EgressState struct {
 	Starting bool
 	Lists    EgressLists
 	Deny     []string
+	Grants   map[netip.Prefix]EgressList
+}
+
+type SubnetRefusal struct {
+	Subnet netip.Prefix
+	Host   string
+	Count  int
+	Last   time.Time
 }
 
 type AddedHost struct {
@@ -55,10 +73,8 @@ type AddedHost struct {
 }
 
 type Gateway struct {
-	URL       string
-	Host      string
-	Agents    bool
-	Reviewers bool
+	URL  string
+	Host string
 }
 
 type EgressSettings struct {
@@ -114,7 +130,7 @@ type EgressPage interface {
 	EgressView() (EgressView, error)
 	AddHost(ctx context.Context, name, expiry string, uploadsOk bool, reason string) error
 	RemoveHost(ctx context.Context, name string) error
-	SetGateway(ctx context.Context, rawURL string, agents, reviewers bool) error
+	SetGateway(ctx context.Context, rawURL string) (bool, error)
 	EgressRefusals(ctx context.Context) ([]RefusalView, error)
 }
 
@@ -243,7 +259,7 @@ func (a *Allowlist) wantLocked(side string) EgressList {
 	for _, h := range agentHostsOf("claude") {
 		fixed[h] = true
 	}
-	if side == SideReviewers && s.Gateway.Reviewers && s.Gateway.Host != "" || side != SideReviewers && s.Gateway.Agents && s.Gateway.Host != "" {
+	if s.Gateway.Host != "" {
 		fixed[s.Gateway.Host] = true
 	}
 	expires := map[string]time.Time{}
@@ -259,7 +275,7 @@ func (a *Allowlist) wantLocked(side string) EgressList {
 			}
 		}
 	}
-	if gw := gatewayHostFor(s.Gateway, side); gw != "" {
+	if gw := s.Gateway.Host; gw != "" {
 		allow = slices.DeleteFunc(allow, func(h string) bool { return h != gw && ClaudeVendorHost(h) })
 		for h := range expires {
 			if !slices.Contains(allow, h) {
@@ -289,7 +305,8 @@ func (a *Allowlist) syncLocked(ctx context.Context) error {
 }
 
 func SameList(want, got EgressList) bool {
-	if !slices.Equal(sortedHosts(want.Allow), sortedHosts(got.Allow)) || len(want.Expires) != len(got.Expires) {
+	if !slices.Equal(sortedHosts(want.Allow), sortedHosts(got.Allow)) || !slices.Equal(sortedHosts(want.Ports), sortedHosts(got.Ports)) ||
+		!slices.Equal(sortedHosts(want.Git), sortedHosts(got.Git)) || len(want.Expires) != len(got.Expires) {
 		return false
 	}
 	for h, t := range want.Expires {
@@ -394,20 +411,19 @@ func (a *Allowlist) tend(ctx context.Context) bool {
 	return true
 }
 
-func (a *Allowlist) BaseURL(side string) string {
+func (a *Allowlist) BaseURL() string {
 	if a == nil {
 		return ""
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	g := a.settings.Gateway
-	if !a.saved || g.URL == "" || side == SideAgents && !g.Agents || side == SideReviewers && !g.Reviewers {
+	if !a.saved {
 		return ""
 	}
-	return g.URL
+	return a.settings.Gateway.URL
 }
 
-func (a *Allowlist) GatewayHost(side string) (string, bool) {
+func (a *Allowlist) GatewayHost() (string, bool) {
 	if a == nil {
 		return "", true
 	}
@@ -419,7 +435,7 @@ func (a *Allowlist) GatewayHost(side string) (string, bool) {
 	if !a.saved || a.settings.Gateway.URL == "" {
 		return "", true
 	}
-	return gatewayHostFor(a.settings.Gateway, side), true
+	return a.settings.Gateway.Host, true
 }
 
 func (a *Allowlist) HoldGateway() func() {
@@ -437,14 +453,14 @@ func (a *Allowlist) EgressView() (EgressView, error) {
 		v.Gateway = &g
 	}
 	if a.broken {
-		return v, explained(conflict("state"), "The engine couldn't read egress.json, so it uses the starting list from SF_ALLOW and SF_EXTRA_ALLOW and saves no change. Move the file out of the engine's state folder to start again.")
+		return v, conflict("state", "The engine couldn't read egress.json, so it uses the starting list from SF_ALLOW and SF_EXTRA_ALLOW and saves no change. Move the file out of the engine's state folder to start again.")
 	}
 	return v, nil
 }
 
 func (a *Allowlist) change(ctx context.Context, what, words string, edit func(*EgressSettings) error) error {
 	if a.broken {
-		return explained(conflict("state"), "The engine couldn't read egress.json, so it saves no change to the allowlist.")
+		return conflict("state", "The engine couldn't read egress.json, so it saves no change to the allowlist.")
 	}
 	a.mu.Lock()
 	s := a.current()
@@ -455,7 +471,7 @@ func (a *Allowlist) change(ctx context.Context, what, words string, edit func(*E
 	}
 	if err := a.cfg.Store.Save(s); err != nil {
 		a.mu.Unlock()
-		return explained(conflict("state"), "The engine couldn't save the allowlist.")
+		return conflict("state", "The engine couldn't save the allowlist.")
 	}
 	a.settings, a.saved = s, true
 	a.pruneLocked()
@@ -466,7 +482,7 @@ func (a *Allowlist) change(ctx context.Context, what, words string, edit func(*E
 		f()
 	}
 	if err != nil {
-		return explained(conflict("egress"), "Saved, but egress didn't take the new list, so the sandbox check fails and sessions are Held until it does. The engine sets it again at the next check.")
+		return conflict("egress", "Saved, but egress didn't take the new list, so the sandbox check fails and sessions are Held until it does. The engine sets it again at the next check.")
 	}
 	return nil
 }
@@ -482,18 +498,18 @@ func (a *Allowlist) audit(what, words string) {
 
 func (a *Allowlist) refuseHost(name string) error {
 	if !ValidAllowEntry(name) {
-		return explained(invalid("host"), "Give a host name with at least two labels, such as registry.npmjs.org, or a leading dot for its subdomains, such as .example.com; not an IP address, a port or a path.")
+		return onField("host", invalid("host", "Not a host name."))
 	}
 	if d := DeniedBy(a.cfg.Deny, name); d != "" {
-		return explained(conflict("git host"), name+" is a git host or covers one ("+d+"). Agents never reach a git host: the engine pushes for them.")
+		return conflict("git host", "Is or covers a git host; the engine pushes for agents.")
 	}
 	if a.cfg.Outside != "" && (EntryCovers(name, a.cfg.Outside) || name == "."+a.cfg.Outside) {
-		return explained(conflict("outside host"), "The sandbox check uses "+a.cfg.Outside+" as a host egress must refuse, so it can't be allowed. Set SF_SANDBOX_OUTSIDE to another host first.")
+		return conflict("outside host", "Covers the sandbox check's host; change SF_SANDBOX_OUTSIDE.")
 	}
 	if a.cfg.Repos != nil {
 		for _, r := range a.cfg.Repos() {
 			if r = HostName(r); EntryCovers(name, r) || name == r {
-				return explained(conflict("repository host"), name+" covers "+r+", the host of a repository you added, so agents could push there. Add "+r+" to SF_EXTRA_DENY, or allow a narrower host.")
+				return conflict("repository host", "Covers a repository's host; narrow it or use SF_EXTRA_DENY.")
 			}
 		}
 	}
@@ -511,14 +527,14 @@ func (a *Allowlist) AddHost(ctx context.Context, raw, expiry string, uploadsOk b
 	}
 	ttl, ok := expiryChoices[expiry]
 	if !ok {
-		return explained(invalid("expires"), "Choose never, an hour, a day or a week.")
+		return onField("expires", invalid("expires", "Choose never, an hour, a day or a week."))
 	}
 	if UploadHost(name) && !uploadsOk {
 		msg := name + " " + UploadsWarning
 		if PyPIHost(name) {
 			msg += " " + PyPIReadHostsNote
 		}
-		return explained(conflict("uploads"), msg)
+		return conflict("uploads", msg)
 	}
 	now := a.cfg.Now()
 	h := AddedHost{Name: name, AddedAt: now.Truncate(time.Second), Reason: why}
@@ -533,7 +549,7 @@ func (a *Allowlist) AddHost(ctx context.Context, raw, expiry string, uploadsOk b
 	return a.change(ctx, "added", words, func(s *EgressSettings) error {
 		s.Added = slices.DeleteFunc(s.Added, func(x AddedHost) bool { return x.Name == name })
 		if len(s.Added) >= MaxAddedHosts {
-			return explained(limited("hosts"), "The allowlist holds at most 64 added hosts. Remove one first.")
+			return limited("hosts", "The allowlist holds at most 64 added hosts. Remove one first.")
 		}
 		s.Added = append(s.Added, h)
 		return nil
@@ -546,36 +562,39 @@ func (a *Allowlist) RemoveHost(ctx context.Context, raw string) error {
 		n := len(s.Added)
 		s.Added = slices.DeleteFunc(s.Added, func(x AddedHost) bool { return x.Name == name })
 		if len(s.Added) == n {
-			return explained(notFound("host"), "That host isn't one you added.")
+			return notFound("host", "That host isn't one you added.")
 		}
 		return nil
 	})
 }
 
-func (a *Allowlist) SetGateway(ctx context.Context, raw string, agents, reviewers bool) error {
+func (a *Allowlist) SetGateway(ctx context.Context, raw string) (bool, error) {
 	next, words := Gateway{}, "gateway removed"
 	if strings.TrimSpace(raw) != "" {
 		u, host, err := CheckGatewayURL(raw)
 		if err != nil {
-			return err
+			return false, onField("url", err)
 		}
 		if err := a.refuseHost(host); err != nil {
-			return err
+			return false, onField("url", err)
 		}
-		if !agents && !reviewers {
-			return explained(invalid("gateway"), "Choose the agents, the reviewers or both for the gateway.")
-		}
-		next, words = Gateway{URL: u, Host: host, Agents: agents, Reviewers: reviewers}, "gateway "+host+sides(agents, reviewers)
+		next, words = Gateway{URL: u, Host: host}, "gateway "+host+" for agents and reviewers"
 	}
 	a.gwMu.Lock()
 	defer a.gwMu.Unlock()
+	a.mu.Lock()
+	same := !a.broken && a.current().Gateway == next
+	a.mu.Unlock()
+	if same {
+		return false, nil
+	}
 	if err := a.gatewayMayChange(ctx, next); err != nil {
-		return err
+		return false, err
 	}
 	if err := a.dropKeys(ctx, next); err != nil {
-		return err
+		return false, err
 	}
-	return a.change(ctx, "gateway", words, func(s *EgressSettings) error {
+	return true, a.change(ctx, "gateway", words, func(s *EgressSettings) error {
 		s.Gateway = next
 		return nil
 	})
@@ -586,19 +605,17 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	broken, was, keys := a.broken, a.current().Gateway, a.keys
 	a.mu.Unlock()
 	if broken {
-		return explained(conflict("state"), "The engine couldn't read egress.json, so it saves no change to the allowlist.")
+		return conflict("state", "The engine couldn't read egress.json, so it saves no change to the allowlist.")
 	}
 	if keys == nil {
-		return explained(conflict("gateway"), "This engine can't remove a key saved for Claude Code, so it doesn't change the gateway.")
+		return conflict("gateway", "This engine can't remove a key saved for Claude Code, so it doesn't change the gateway.")
 	}
 	var running []string
-	for _, side := range []string{SideAgents, SideReviewers} {
-		if gatewayHostFor(was, side) != gatewayHostFor(next, side) {
-			running = append(running, keys.RunningOn(side)...)
-		}
+	if was.Host != next.Host {
+		running = append(keys.RunningOn(SideAgents), keys.RunningOn(SideReviewers)...)
 	}
 	if len(running) > 0 {
-		return explained(conflict("running"), "Stop these sessions first: "+runningWords(running)+". They started with the old gateway setting, and Claude Code would send the next key you paste to the address they started with. Reviews finish by themselves; wait for them.")
+		return conflict("running", "Stop these sessions first: "+runningWords(running)+". They started with the old gateway setting, and Claude Code would send the next key you paste to the address they started with. Reviews finish by themselves; wait for them.")
 	}
 	if next.Host == "" {
 		return nil
@@ -606,26 +623,19 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	sctx, cancel := context.WithTimeout(ctx, egressSetFor)
 	defer cancel()
 	if _, err := a.cfg.Control.Status(sctx); err != nil {
-		return explained(conflict("egress"), "The gateway wasn't changed: egress's control channel doesn't answer, so the engine couldn't let Claude Code reach the gateway. Check that egress runs: "+Compose()+" ps egress.")
+		return conflict("egress", "The gateway wasn't changed: egress's control channel doesn't answer, so the engine couldn't let Claude Code reach the gateway. Check that egress runs: "+Compose()+" ps egress.")
 	}
 	return nil
-}
-
-func gatewayHostFor(g Gateway, side string) string {
-	if side == SideAgents && g.Agents || side == SideReviewers && g.Reviewers {
-		return g.Host
-	}
-	return ""
 }
 
 func (a *Allowlist) dropKeys(ctx context.Context, next Gateway) error {
 	a.mu.Lock()
 	was, keys := a.current().Gateway, a.keys
 	a.mu.Unlock()
+	if was.Host == next.Host {
+		return nil
+	}
 	for _, side := range []string{SideAgents, SideReviewers} {
-		if gatewayHostFor(was, side) == gatewayHostFor(next, side) {
-			continue
-		}
 		if err := keys.ClearSide(ctx, side); err != nil {
 			why := "The gateway wasn't changed. Claude Code would send the key saved in the " + containerOf(side) + " to the new address, and it couldn't be removed first"
 			if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
@@ -633,7 +643,7 @@ func (a *Allowlist) dropKeys(ctx context.Context, next Gateway) error {
 			} else {
 				why += "."
 			}
-			return explained(conflict("gateway"), why)
+			return conflict("gateway", why)
 		}
 	}
 	return nil
@@ -646,22 +656,12 @@ func containerOf(side string) string {
 	return "sessions' containers"
 }
 
-func sides(agents, reviewers bool) string {
-	switch {
-	case agents && reviewers:
-		return " for agents and reviewers"
-	case agents:
-		return " for agents"
-	}
-	return " for reviewers"
-}
-
 func (a *Allowlist) EgressRefusals(ctx context.Context) ([]RefusalView, error) {
 	ctx, cancel := context.WithTimeout(ctx, egressSetFor)
 	defer cancel()
 	got, err := a.cfg.Control.Refused(ctx)
 	if err != nil {
-		return nil, explained(conflict("egress"), "egress didn't say what it refused. Check that it runs: "+Compose()+" ps egress.")
+		return nil, conflict("egress", "egress didn't say what it refused. Check that it runs: "+Compose()+" ps egress.")
 	}
 	var repos []string
 	if a.cfg.Repos != nil {
@@ -669,7 +669,7 @@ func (a *Allowlist) EgressRefusals(ctx context.Context) ([]RefusalView, error) {
 	}
 	a.mu.Lock()
 	agentsWant := a.wantLocked(SideAgents)
-	agentsGateway := a.saved && gatewayHostFor(a.settings.Gateway, SideAgents) != ""
+	agentsGateway := a.saved && a.settings.Gateway.Host != ""
 	a.mu.Unlock()
 	out := make([]RefusalView, 0, len(got))
 	for _, r := range got {

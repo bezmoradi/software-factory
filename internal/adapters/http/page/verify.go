@@ -39,6 +39,8 @@ type verifyRunJSON struct {
 	Ended    int64            `json:"ended"`
 	Files    []verifyFileJSON `json:"files"`
 	FileNote string           `json:"fileNote"`
+	Said     saidJSON         `json:"said"`
+	Outcome  string           `json:"outcome"`
 }
 
 type verifyFileJSON struct {
@@ -77,7 +79,11 @@ type verifyViewJSON struct {
 func verifyRunJSONOf(r session.VerifyRun) verifyRunJSON {
 	out := verifyRunJSON{ID: r.ID, Commit: r.Commit, Branch: r.Branch, Kind: string(r.Kind), State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld,
 		Reason: r.Reason, By: r.By, Image: r.Image, ImageID: r.ImageID, Limit: int64(r.Limit / time.Second), Started: millis(r.Started), Ended: millis(r.Ended),
-		Files: make([]verifyFileJSON, 0, len(r.Attached)), FileNote: r.AttachNote}
+		Files: make([]verifyFileJSON, 0, len(r.Attached)), FileNote: r.AttachNote, Said: saidJSONOf(session.VerifySaid(r.State))}
+	out.Outcome = out.Said.Label
+	if r.State == "failed" {
+		out.Outcome = "failed with exit code " + strconv.Itoa(r.Code)
+	}
 	for _, a := range r.Attached {
 		out.Files = append(out.Files, verifyFileJSON{Name: a.Name, Kind: a.Kind, Bytes: a.Bytes, SHA256: a.SHA256, Width: a.Width, Height: a.Height})
 	}
@@ -115,19 +121,19 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 	}
 	sid, okSID := viewSession(body)
 	if !okOp || !okSID {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "start":
 		kind, okKind := body["kind"].(string)
 		if !keysWithin(body, "op", "sid", "kind") || !okKind || len(kind) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_, err := s.verify.Start(r.Context(), sid, session.VerifyKind(kind), session.VerifyByPage)
@@ -140,7 +146,7 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 	case "stop":
 		id, okID := body["id"].(string)
 		if !keysWithin(body, "op", "sid", "id") || !okID || !verifyRunID.MatchString(id) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.verify.Stop(r.Context(), sid, id)
@@ -154,7 +160,7 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 		id, okID := body["id"].(string)
 		name, okName := body["name"].(string)
 		if !keysWithin(body, "op", "sid", "id", "name") || !okID || !verifyRunID.MatchString(id) || !okName || name == "" || len(name) > 124 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		s.verifyAttachment(w, r, sid, id, name)
@@ -175,19 +181,19 @@ func (s *Server) verifyAPI(w http.ResponseWriter, r *http.Request, body map[stri
 func (s *Server) verifyMain(w http.ResponseWriter, r *http.Request, body map[string]any, op string) {
 	repo, okRepo := body["repo"].(string)
 	if _, hasSID := body["sid"]; hasSID || !okRepo || len(repo) > maxRulesRepo || !rulesRepoName.MatchString(repo) {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "repo") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "start":
 		kind, okKind := body["kind"].(string)
 		if !keysWithin(body, "op", "repo", "kind") || !okKind || len(kind) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))

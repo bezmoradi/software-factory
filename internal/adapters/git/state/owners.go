@@ -22,6 +22,9 @@ var ownedRecords = map[string][]ownedPart{
 	updateFile:          {{}},
 	reviewsFile:         {{path: []string{"reviews", "[]"}, only: "override"}},
 	egressFile:          {{path: []string{"added", "[]"}}, {path: []string{"gateway"}}},
+	grantsFile:          {{path: []string{"grants", "[]"}}},
+	presetsFile:         {{path: []string{"presets", "[]"}}},
+	actionsFile:         {{path: []string{"actions", "[]"}}},
 	capsFile:            {{path: []string{"projects", "{}"}}, {path: []string{"removed", "[]"}}, {path: []string{"sessions", "[]", "own"}}},
 	decisionLogFile:     {{path: []string{"projects", "[]", "entries", "[]"}}, {path: []string{"removed", "[]", "entries", "[]"}}},
 	savedPromptsFile:    {{path: []string{"projects", "[]", "prompts", "[]"}}, {path: []string{"removed", "[]", "prompts", "[]"}}},
@@ -33,7 +36,6 @@ var ownedRecords = map[string][]ownedPart{
 	prFollowFile:        {{path: []string{"settings", "[]"}}},
 	sessionsFile:        {{path: []string{"sessions", "[]"}}},
 	deniedFile:          {{path: []string{"denied", "[]"}}},
-	pairsFile:           {{path: []string{"pairs", "[]"}}},
 }
 
 func StampOwners(dir string) ([]string, error) {

@@ -10,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/bezmoradi/software-factory/internal/core/session"
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
@@ -45,10 +47,14 @@ type Proxy struct {
 	mu       sync.Mutex
 	tunnels  map[*tunnel]struct{}
 	logs     *logGate
+	grants   *Grants
+	tried    *SubnetSeen
 }
 
 type tunnel struct {
 	host   string
+	port   string
+	subnet string
 	cancel context.CancelCauseFunc
 }
 
@@ -70,6 +76,25 @@ func New(policy Source, limits Limits, resolver Resolver, dialer Dialer, logger 
 	}
 }
 
+func (p *Proxy) WithGrants(g *Grants, tried *SubnetSeen) *Proxy {
+	p.grants, p.tried = g, tried
+	return p
+}
+
+func (p *Proxy) check(policy Policy, subnet, host string) string {
+	if p.grants.only(subnet) {
+		policy = Policy{deny: policy.deny}
+	}
+	reason := policy.Check(host)
+	switch {
+	case reason == ReasonNotAllowlisted && p.grants.allows(subnet, normalize(host)):
+		return ""
+	case reason == ReasonGitHost && p.grants.allowsGit(subnet, normalize(host)):
+		return ""
+	}
+	return reason
+}
+
 func (p *Proxy) sweep(ctx context.Context) {
 	t := time.NewTicker(sweepEvery)
 	defer t.Stop()
@@ -81,7 +106,12 @@ func (p *Proxy) sweep(ctx context.Context) {
 			policy := p.policy.Current()
 			p.mu.Lock()
 			for tn := range p.tunnels {
-				if policy.Check(tn.host) != "" {
+				switch {
+				case tn.port != "":
+					if !p.grants.allowsPort(tn.subnet, tn.port) {
+						tn.cancel(errRevoked)
+					}
+				case p.check(policy, tn.subnet, tn.host) != "":
 					tn.cancel(errRevoked)
 				}
 			}
@@ -90,9 +120,9 @@ func (p *Proxy) sweep(ctx context.Context) {
 	}
 }
 
-func (p *Proxy) track(ctx context.Context, host string) (context.Context, func()) {
+func (p *Proxy) track(ctx context.Context, host, port, subnet string) (context.Context, func()) {
 	tctx, cancel := context.WithCancelCause(ctx)
-	tn := &tunnel{host: host, cancel: cancel}
+	tn := &tunnel{host: host, port: port, subnet: subnet, cancel: cancel}
 	p.mu.Lock()
 	p.tunnels[tn] = struct{}{}
 	p.mu.Unlock()
@@ -112,6 +142,9 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 	sweepCtx, stopSweep := context.WithCancel(ctx)
 	defer stopSweep()
 	wg.Go(func() { p.sweep(sweepCtx) })
+	if p.grants != nil {
+		wg.Go(func() { p.grants.watchKnown(sweepCtx, p.resolver) })
+	}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -156,7 +189,11 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		p.refuse(conn, http.StatusForbidden, ReasonMethod, "", tag...)
 		return
 	}
-	host, reason := p.target(req.RequestURI)
+	if target, host, ok := p.portGrant(req.RequestURI, subnetOf(conn)); ok {
+		p.forward(ctx, conn, reader, stop, target, host, subnetOf(conn), mark, marks, tag)
+		return
+	}
+	host, reason := p.target(req.RequestURI, subnetOf(conn))
 	if reason != "" {
 		requested, _, _ := net.SplitHostPort(req.RequestURI)
 		marks.note(mark, requestedTarget(req.RequestURI), "", reason)
@@ -197,13 +234,99 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	p.logger.Info("egress", append([]any{"event", "allowed", "host", host}, tag...)...)
-	tctx, done := p.track(ctx, host)
+	tctx, done := p.track(ctx, host, "", subnetOf(conn))
 	defer done()
 	end := relay(tctx, conn, upstream, p.limits)
 	p.logger.Info("egress", append([]any{"event", "closed", "reason", end}, tag...)...)
 }
 
-func (p *Proxy) target(authority string) (string, string) {
+func (p *Proxy) portGrant(authority, subnet string) (string, string, bool) {
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil || host == "" || p.grants == nil {
+		return "", "", false
+	}
+	host = normalize(host)
+	if a, err := netip.ParseAddr(host); err == nil {
+		host = a.Unmap().String()
+	}
+	target := net.JoinHostPort(host, port)
+	if _, _, ok := session.SplitPortTarget(target); !ok || !p.grants.allowsPort(subnet, target) {
+		return "", "", false
+	}
+	return target, host, true
+}
+
+func (p *Proxy) forward(ctx context.Context, conn net.Conn, reader *bufio.Reader, stop func() bool, target, host, subnet, mark string, marks Marks, tag []any) {
+	upstream, status, reason := p.dialPort(ctx, subnet, target)
+	if reason != "" {
+		marks.note(mark, target, "", reason)
+		p.refuse(conn, status, reason, logged(host), tag...)
+		return
+	}
+	defer func() { _ = upstream.Close() }()
+	if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		return
+	}
+	if early, _ := reader.Peek(reader.Buffered()); len(early) > 0 {
+		if _, err := upstream.Write(early); err != nil {
+			return
+		}
+	}
+	_ = conn.SetDeadline(time.Time{})
+	if !stop() {
+		return
+	}
+	p.logger.Info("egress", append([]any{"event", "allowed", "host", logged(host), "target", target}, tag...)...)
+	tctx, done := p.track(ctx, host, target, subnetOf(conn))
+	defer done()
+	end := relay(tctx, conn, upstream, p.limits)
+	p.logger.Info("egress", append([]any{"event", "closed", "reason", end}, tag...)...)
+}
+
+func (p *Proxy) dialPort(ctx context.Context, subnet, target string) (net.Conn, int, string) {
+	host, port, _ := session.SplitPortTarget(target)
+	ctx, cancel := context.WithTimeout(ctx, p.limits.Dial)
+	defer cancel()
+	if !p.grants.known.wait(ctx) {
+		return nil, http.StatusBadGateway, ReasonResolveFailed
+	}
+	var addrs []netip.Addr
+	if a, err := netip.ParseAddr(host); err == nil {
+		if session.AddressNever(a) != "" {
+			return nil, http.StatusForbidden, ReasonPrivateAddress
+		}
+		addrs = []netip.Addr{a}
+	} else {
+		got, err := p.resolver.LookupNetIP(ctx, "ip", host+".")
+		if err != nil || len(got) == 0 {
+			return nil, http.StatusBadGateway, ReasonResolveFailed
+		}
+		for _, a := range got {
+			if !publicAddress(a) {
+				return nil, http.StatusForbidden, ReasonPrivateAddress
+			}
+		}
+		addrs = got
+	}
+	if slices.ContainsFunc(addrs, p.grants.ownNetwork) {
+		return nil, http.StatusForbidden, ReasonOwnNetwork
+	}
+	if slices.ContainsFunc(addrs, p.grants.known.gitAddress) && !p.grants.openedGit(subnet, target) {
+		return nil, http.StatusForbidden, ReasonGitHost
+	}
+	for _, a := range addrs {
+		conn, err := p.dialer.DialContext(ctx, "tcp", netip.AddrPortFrom(a.Unmap(), uint16(port)).String())
+		if err == nil {
+			return conn, 0, ""
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, http.StatusBadGateway, ReasonDialFailed
+}
+
+func (p *Proxy) target(authority, subnet string) (string, string) {
 	host, port, err := net.SplitHostPort(authority)
 	if err != nil || host == "" {
 		return "", ReasonBadTarget
@@ -211,7 +334,7 @@ func (p *Proxy) target(authority string) (string, string) {
 	if port != "443" {
 		return "", ReasonPort
 	}
-	if reason := p.policy.Current().Check(host); reason != "" {
+	if reason := p.check(p.policy.Current(), subnet, host); reason != "" {
 		return "", reason
 	}
 	return normalize(host), ""
@@ -262,6 +385,9 @@ func (p *Proxy) refuse(conn net.Conn, status int, reason, host string, more ...a
 
 func (p *Proxy) refused(subnet, reason, host string, more ...any) {
 	p.marks.saw(host, reason)
+	if reason == ReasonNotAllowlisted {
+		p.tried.add(subnet, host)
+	}
 	p.logRefused(subnet, reason, host, more...)
 }
 

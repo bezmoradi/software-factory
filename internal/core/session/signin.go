@@ -117,7 +117,7 @@ type Expectations interface {
 const ReviewerAgent = "reviewer"
 
 func ReviewerSignInStep() string {
-	return "open Reviewers' sign-in under Start on the Welcome page"
+	return "open Reviewers' sign-in in the command palette"
 }
 
 const signInFor = 30 * time.Second
@@ -300,7 +300,7 @@ func (e *Expected) Adopt(agent string, m SignInMethod) Expect {
 func judge(name string, s SignIn, want Expect, step string, costOK bool, what string) error {
 	switch {
 	case s.Method == SignInNone:
-		return &Error{Kind: Conflict, Reason: "not signed in", Message: name + " isn't signed in, so " + what + " doesn't start. Sign it in with its own sign-in: " + step + ".",
+		return &Error{Kind: Conflict, Reason: "not signed in", Message: name + " isn't signed in.",
 			Needs: &Needs{SignIn: &s, Expected: want, Step: step}}
 	case !want.Accepts(s.Method):
 		return &Error{Kind: Conflict, Reason: "sign-in", Message: name + " is signed in with " + s.Words() + ", but you expect " + want.Words() + ", so " + what + " doesn't start. Sign it in the way you expect with its own sign-in (" + step + "), or change what you expect.",

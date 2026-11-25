@@ -25,42 +25,46 @@ const (
 )
 
 func ListenPlugin(path string) (net.Listener, error) {
+	return listenSocket(path, "plugin socket", RelayConns)
+}
+
+func listenSocket(path, what string, conns int) (net.Listener, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return nil, errors.New("agent-host: the plugin socket must be an absolute, clean path")
+		return nil, fmt.Errorf("agent-host: the %s must be an absolute, clean path", what)
 	}
 	if len(path) > MaxSocketPath {
-		return nil, fmt.Errorf("agent-host: the plugin socket path is %d bytes; it must be at most %d", len(path), MaxSocketPath)
+		return nil, fmt.Errorf("agent-host: the %s path is %d bytes; it must be at most %d", what, len(path), MaxSocketPath)
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("agent-host: create the plugin socket's folder: %w", err)
+		return nil, fmt.Errorf("agent-host: create the %s's folder: %w", what, err)
 	}
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !ownedByMe(info) {
-		return nil, errors.New("agent-host: the plugin socket's folder must be a folder this user owns, not a symbolic link")
+		return nil, fmt.Errorf("agent-host: the %s's folder must be a folder this user owns, not a symbolic link", what)
 	}
 	if info.Mode().Perm() != 0o700 {
 		if err := os.Chmod(dir, 0o700); err != nil {
-			return nil, errors.New("agent-host: the plugin socket's folder must be mode 0700")
+			return nil, fmt.Errorf("agent-host: the %s's folder must be mode 0700", what)
 		}
 	}
 	if old, err := os.Lstat(path); err == nil {
 		if old.Mode()&os.ModeSocket == 0 {
-			return nil, errors.New("agent-host: something other than a socket is at the plugin socket's path")
+			return nil, fmt.Errorf("agent-host: something other than a socket is at the %s's path", what)
 		}
 		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("agent-host: remove the old plugin socket: %w", err)
+			return nil, fmt.Errorf("agent-host: remove the old %s: %w", what, err)
 		}
 	}
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("agent-host: listen on the plugin socket: %w", err)
+		return nil, fmt.Errorf("agent-host: listen on the %s: %w", what, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = ln.Close()
-		return nil, fmt.Errorf("agent-host: set the plugin socket's mode: %w", err)
+		return nil, fmt.Errorf("agent-host: set the %s's mode: %w", what, err)
 	}
-	return netutil.LimitListener(ln, RelayConns), nil
+	return netutil.LimitListener(ln, conns), nil
 }
 
 func Relay(engine string, logger shared.Logger) (http.Handler, error) {

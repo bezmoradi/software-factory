@@ -38,6 +38,10 @@ type forgeJSON struct {
 	SecretAt   string `json:"secretAt,omitempty"`
 	SecretLine string `json:"secretLine,omitempty"`
 	From       string `json:"from,omitempty"`
+
+	Said      saidJSON `json:"said"`
+	KindLabel string   `json:"kindLabel"`
+	Note      string   `json:"note"`
 }
 
 func forgeOf(list []session.ForgeView) []forgeJSON {
@@ -45,7 +49,8 @@ func forgeOf(list []session.ForgeView) []forgeJSON {
 	for _, v := range list {
 		out = append(out, forgeJSON{Card: v.Card, Kind: string(v.Kind), State: v.State, Title: v.Title, Body: v.Body, Head: v.Head, Base: v.Base,
 			Host: v.Host, Repo: v.Repo, Number: v.Number, URL: v.URL, Reason: v.Reason, Draft: v.Draft, Asked: millis(v.Asked), At: millis(v.At), Matches: matchesOf(v.Matches),
-			SecretAt: v.SecretAt, SecretLine: v.SecretLine, From: v.From})
+			SecretAt: v.SecretAt, SecretLine: v.SecretLine, From: v.From,
+			Said: saidJSONOf(session.ForgeSaid(v.State)), KindLabel: session.ForgeKindLabel(string(v.Kind)), Note: session.ForgeNote(string(v.Kind), v.State, v.From)})
 	}
 	return out
 }
@@ -67,14 +72,14 @@ func (s *Server) forgeSession(w http.ResponseWriter, r *http.Request) (string, b
 func (s *Server) forgeRequest(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxForgeBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	kind, okKind := body["kind"].(string)
 	title, okTitle := body["title"].(string)
 	text, okText := body["body"].(string)
 	if !keysWithin(body, "kind", "title", "body") || !okKind || !okTitle || !okText || (kind != string(session.ForgeIssue) && kind != string(session.ForgePull)) {
-		refuse(w, http.StatusBadRequest, "input")
+		agentRefuse(w, http.StatusBadRequest, "input")
 		return
 	}
 	sid, ok := s.forgeSession(w, r)
@@ -94,11 +99,11 @@ func (s *Server) forgeRequest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) checksRequest(w http.ResponseWriter, r *http.Request) {
 	body, bad := readObject(w, r, MaxAgentBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	if len(body) != 0 {
-		refuse(w, http.StatusBadRequest, "input")
+		agentRefuse(w, http.StatusBadRequest, "input")
 		return
 	}
 	sid, ok := s.forgeSession(w, r)
@@ -132,7 +137,7 @@ func (s *Server) forgeAnswer(w http.ResponseWriter, r *http.Request, body map[st
 		okConfirmed = true
 	}
 	if !keysWithin(body, "sid", "card", "approve", "draft", "confirmed") || !okSID || sid == "" || len(sid) > 80 || !okCard || !pushCard.MatchString(card) || !okApprove || !okDraft || !okConfirmed {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	err := s.cfg.Forge.Answer(context.WithoutCancel(r.Context()), sid, card, approve, draft, confirmed)

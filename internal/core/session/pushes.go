@@ -19,18 +19,17 @@ import (
 )
 
 const (
-	AllowFor        = 15 * time.Minute
-	PushCalls       = 5
-	PushWindow      = 10 * time.Minute
-	PushFor         = 2 * time.Minute
-	DefaultWorkType = "fix"
-	ByAgent         = "agent"
-	ByPage          = "page"
-	ByReviews       = "agent, after reviews"
-	ByEngine        = "engine"
-	ByStart         = "engine, at start"
-	ByReset         = "engine, at reset"
-	AgentReplyFor   = 55 * time.Second
+	AllowFor      = 15 * time.Minute
+	PushCalls     = 5
+	PushWindow    = 10 * time.Minute
+	PushFor       = 2 * time.Minute
+	ByAgent       = "agent"
+	ByPage        = "page"
+	ByReviews     = "agent, after reviews"
+	ByEngine      = "engine"
+	ByStart       = "engine, at start"
+	ByReset       = "engine, at reset"
+	AgentReplyFor = 55 * time.Second
 
 	ResultUpToDate gate.Result = "up-to-date"
 
@@ -65,6 +64,7 @@ type AuditEntry struct {
 	Time         time.Time
 	Session      string
 	Repository   string
+	ProjectURL   string
 	Branch       string
 	Commit       string
 	Remote       string
@@ -121,12 +121,14 @@ type PushView struct {
 	FindingsSent time.Time
 	Extra        *PushExtra
 	Checks       []AgentCheck
+	CheckedBy    *PushChecked
 }
 
 func (v PushView) clone() PushView {
 	v.Missing = slices.Clone(v.Missing)
 	v.Unmet = slices.Clone(v.Unmet)
 	v.Checks = slices.Clone(v.Checks)
+	v.CheckedBy = v.CheckedBy.clone()
 	if v.Audit != nil {
 		a := *v.Audit
 		a.Missing = slices.Clone(a.Missing)
@@ -204,6 +206,7 @@ func (p *Pushes) verifier() PushVerify {
 type PushVerify interface {
 	Items(ctx context.Context, sid string, t PushTarget, head string, kinds []string, ask VerifyAsk) []string
 	Running(sid, head string) bool
+	CommitRuns(sid, commit string, at time.Time) []VerifyRun
 }
 
 type PushWork interface {
@@ -245,7 +248,6 @@ type Pushes struct {
 	resume  resumeState
 	saveMu  sync.Mutex
 	wg      sync.WaitGroup
-	halt    atomic.Pointer[Halt]
 	extras  atomic.Pointer[pushExtras]
 	limits  atomic.Pointer[Limits]
 	verify  atomic.Pointer[pushVerifyRef]
@@ -263,12 +265,9 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 		return nil, errors.New("pushes: need the pusher, the reader, the repositories, the audit file, the sessions and their levels")
 	}
 	cfg.Audit = masking(cfg.Audit)
-	kind, ok := workType(DefaultWorkType)
+	kind := workflow.TypeOr(workflow.Builtin, workflow.DefaultType)
 	if cfg.WorkType != nil {
-		kind, ok = *cfg.WorkType, true
-	}
-	if !ok {
-		return nil, errors.New("pushes: no default work type")
+		kind = *cfg.WorkType
 	}
 	if cfg.Agents == nil {
 		cfg.Agents = DefaultReviewers
@@ -293,14 +292,6 @@ func NewPushes(cfg PushesConfig) (*Pushes, error) {
 	p.loadDenials()
 	p.loadWaiting()
 	return p, nil
-}
-
-func workType(id string) (workflow.WorkType, bool) {
-	i := slices.IndexFunc(workflow.Builtin, func(t workflow.WorkType) bool { return t.ID == id })
-	if i < 0 {
-		return workflow.WorkType{}, false
-	}
-	return workflow.Builtin[i], true
 }
 
 func (p *Pushes) Wait() { p.wg.Wait() }
@@ -584,14 +575,9 @@ func (p *Pushes) reviewFor(ctx context.Context, sid string) (string, bool, strin
 	case recorded && !rerun:
 		return "", false, unfinishedReviews(head, ended)
 	default:
-		if p.halted(ByReviews) != "" {
-			return p.holdForRelease(sid, head, shared.RequestOf(ctx))
-		}
 		if err := start(ctx, sid); err != nil {
 			e, ok := errors.AsType[*Error](err)
 			switch {
-			case ok && e.Reason == "halted":
-				return p.holdForRelease(sid, head, shared.RequestOf(ctx))
 			case ok && e.Reason == "cost":
 				shared.For(ctx, p.cfg.Logger).Info("push", "event", "review-not-started", "why", "cost")
 				return "", false, "the reviewers run on a sign-in that costs money, so the engine doesn't start reviews by itself; the person starts them from the page"
@@ -685,10 +671,6 @@ func (p *Pushes) requiredNow(ctx context.Context, sid string, t PushTarget, head
 }
 
 func (p *Pushes) ReviewDone(sid, head string) {
-	if p.halted(ByReviews) != "" {
-		p.cfg.Logger.Info("push", "event", "held-by-halt")
-		return
-	}
 	if p.stillRunning(sid, head) {
 		p.cfg.Logger.Info("push", "event", "wait-kept", "why", "a review or verification run of the commit still runs")
 		return
@@ -759,9 +741,6 @@ func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
 		return notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started can be pushed from here.")
 	}
-	if err := p.pageHalted(); err != nil {
-		return err
-	}
 	if err := p.claim(sid); err != nil {
 		return err
 	}
@@ -781,10 +760,10 @@ func (p *Pushes) claim(sid string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closing {
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if p.busy[sid] {
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	p.busy[sid] = true
 	return nil
@@ -827,35 +806,31 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 	h := p.held[sid]
 	if h == nil || h.card != card || h.commit != commit {
 		p.mu.Unlock()
-		return explained(conflict("card"), "That push card isn't the one waiting any more. Press Push again.")
+		return conflict("card", "That push card isn't the one waiting any more. Press Push again.")
 	}
 	if !now.Before(h.expires) {
 		delete(p.held, sid)
 		p.mu.Unlock()
 		p.showCleared(sid)
-		return explained(conflict("expired"), "That push card expired after 15 minutes. Press Push again.")
+		return conflict("expired", "That push card expired after 15 minutes. Press Push again.")
 	}
 	if p.closing {
 		p.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	}
 	if p.busy[sid] {
 		p.mu.Unlock()
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
-	}
-	if err := p.pageHalted(); allow && err != nil {
-		p.mu.Unlock()
-		return err
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	given := strings.TrimSpace(reason)
 	clean := gate.Reason(reason)
 	if given != "" && clean == "" {
 		p.mu.Unlock()
-		return explained(invalid("reason"), "A reason has at most 500 characters and no control characters.")
+		return onField("reason", invalid("reason", "At most 500 characters and no control characters."))
 	}
 	if allow && len(h.missing) > 0 && clean == "" {
 		p.mu.Unlock()
-		return explained(invalid("reason"), "Type your reason for allowing this push with items missing. The audit file keeps it.")
+		return onField("reason", invalid("reason", "Needs your reason, up to 500 characters."))
 	}
 	delete(p.held, sid)
 	answer := &gate.Answer{Allow: allow, Reason: clean, Commit: h.commit, Branch: h.branch, Remote: h.remote, Expires: h.expires}
@@ -873,7 +848,7 @@ func (p *Pushes) Answer(ctx context.Context, sid, card, commit string, allow boo
 		e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 			Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: clean, Req: shared.RequestOf(ctx)}
 		p.record(e)
-		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
+		p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e, CheckedBy: p.checkedKept(sid, h.commit)})
 		said := "The person denied the push of commit " + shortSHA7(h.commit) + " to " + h.branch + " on Software Factory's page"
 		if clean != "" {
 			said += ": " + clip(clean, maxNoteReason)
@@ -897,33 +872,33 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	switch {
 	case h == nil || h.card != card || h.commit != commit:
 		p.mu.Unlock()
-		return explained(conflict("card"), "That push card isn't the one waiting any more. Press Push again.")
+		return conflict("card", "That push card isn't the one waiting any more. Press Push again.")
 	case !h.handoff:
 		p.mu.Unlock()
-		return explained(conflict("no handoff"), "Hand off is for a push held by a reviewer that reached this project's round limit, and this one isn't.")
+		return conflict("no handoff", "Hand off is for a push held by a reviewer that reached this project's round limit, and this one isn't.")
 	case !now.Before(h.expires):
 		delete(p.held, sid)
 		p.mu.Unlock()
 		p.showCleared(sid)
-		return explained(conflict("expired"), "That push card expired after 15 minutes. Press Push again.")
+		return conflict("expired", "That push card expired after 15 minutes. Press Push again.")
 	case p.closing:
 		p.mu.Unlock()
-		return explained(conflict("stopping"), stoppingMessage)
+		return conflict("stopping", stoppingMessage)
 	case p.busy[sid]:
 		p.mu.Unlock()
-		return explained(conflict("pushing"), "A push of this session is being decided. Wait for its result.")
+		return conflict("pushing", "A push of this session is being decided. Wait for its result.")
 	}
 	p.busy[sid] = true
 	p.mu.Unlock()
 	defer p.release(sid)
 	if p.cfg.Tell == nil || p.cfg.Work == nil {
-		return explained(conflict("no session"), "This engine can't send the session a message, so it can't hand off.")
+		return conflict("no session", "This engine can't send the session a message, so it can't hand off.")
 	}
 	if err := p.cfg.Tell(sid, HandoffCommand); err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Message != "" {
 			return e
 		}
-		return explained(conflict("not sent"), "The handoff message couldn't reach the session, which must be running and controlled from this page, so the push wasn't denied. Try again once it is.")
+		return conflict("not sent", "The handoff message couldn't reach the session, which must be running and controlled from this page, so the push wasn't denied. Try again once it is.")
 	}
 	p.mu.Lock()
 	if p.held[sid] == h {
@@ -939,7 +914,7 @@ func (p *Pushes) Handoff(ctx context.Context, sid, card, commit string) error {
 	e := AuditEntry{Time: now, Session: sid, Repository: t.Name, Branch: h.branch, Commit: h.commit, Remote: h.remote, By: ByPage,
 		Result: string(gate.Denied), Reason: why, Missing: slices.Clone(h.missing), PersonReason: "Hand off", Req: shared.RequestOf(ctx)}
 	p.record(e)
-	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e})
+	p.show(sid, PushView{Result: string(gate.Denied), Reason: why, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(h.missing), At: now, Audit: &e, CheckedBy: p.checkedKept(sid, h.commit)})
 	shared.For(ctx, p.cfg.Logger).Info("push", "event", "handoff")
 	return nil
 }
@@ -996,6 +971,7 @@ type pushing struct {
 	unmet      []string
 	refresh    bool
 	quiet      bool
+	checked    *PushChecked
 }
 
 func (x *pushing) clean(s string) string {
@@ -1050,7 +1026,7 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent}
 	p.held[x.sid] = h
 	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
-		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit}
+		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit, CheckedBy: x.checked.clone()}
 	p.mu.Unlock()
 	v.Checks = p.checksAt(x.sid, e.Time)
 	p.show(x.sid, v)
@@ -1068,7 +1044,7 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	e.Result, e.Reason, e.Missing, e.PersonReason = string(result), reason, slices.Clone(missing), x.clean(person)
 	e = e.masked()
 	reason = e.Reason
-	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time)}
+	v := PushView{Result: string(result), Reason: reason, Commit: e.Commit, Branch: e.Branch, Remote: e.Remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Checks: p.checksAt(x.sid, e.Time), CheckedBy: x.checked.clone()}
 	if result == gate.Held {
 		v.Unmet = slices.Clone(x.unmet)
 	}
@@ -1181,9 +1157,6 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		return refuse("only a session this engine started can push")
 	}
 	x.entry.Repository, x.entry.Branch = t.Name, t.Branch
-	if why := p.halted(by); why != "" {
-		return refuse(why)
-	}
 	url, token, err := p.cfg.Repos.PushTarget(t.Name)
 	if err != nil {
 		return refuse("the session's repository isn't in the engine's list any more")
@@ -1262,6 +1235,7 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 	}
 	request := gate.Request{Commit: head, Branch: t.Branch, Remote: url}
 	d := gate.Push(request, facts)
+	x.checked = p.checkedOf(sid, t, head, facts.Required, facts.Reviews, false)
 	if d.Result == gate.Allowed {
 		for _, q := range facts.Required {
 			recorded, passed, overridden := review.Outcome(facts.Reviews, review.Key{Commit: head, Branch: t.Branch, Agent: q.Agent}, q.RunCount())
@@ -1332,7 +1306,7 @@ func (p *Pushes) facts(ctx context.Context, sid string, t PushTarget, head, main
 		f.Type, f.Required, f.Items, f.NeedsApproval = wf.Type, wf.Required, slices.Clone(wf.Items), wf.NeedsApproval
 		limit = roundLimit(wf.Rounds)
 	} else {
-		roles := workflow.MinimumRoles(p.kind.Edits)
+		roles := workflow.MinimumRoles()
 		for _, role := range p.kind.Roles {
 			if !slices.Contains(roles, role) {
 				roles = append(roles, role)
@@ -1391,16 +1365,16 @@ func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (Chang
 	}
 	head, err := p.cfg.Heads.Head(t.Repo, t.Branch)
 	if err != nil {
-		return ChangeView{}, explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return ChangeView{}, conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	main, err := p.cfg.Repos.Main(t.Name)
 	if err != nil {
-		return ChangeView{}, explained(conflict("records"), "The engine couldn't read the repository's record.")
+		return ChangeView{}, conflict("records", "The engine couldn't read the repository's record.")
 	}
 	fork := ""
 	if main != "" {
 		if fork, err = p.cfg.History.MergeBase(ctx, t.Repo, head, main); err != nil {
-			return ChangeView{}, explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the main branch: "+err.Error(), maxOutput))
+			return ChangeView{}, conflict("merge base", clip("The engine couldn't find where "+t.Branch+" leaves the main branch: "+err.Error(), maxOutput))
 		}
 	}
 	branch, err := p.branchWalk(ctx, t, head, fork)
@@ -1414,7 +1388,7 @@ func (p *Pushes) Changes(ctx context.Context, sid string, at ChangePoint) (Chang
 	}
 	cs, err := p.cfg.Changes.Changes(ctx, t.Repo, base, head)
 	if err != nil {
-		return ChangeView{}, explained(conflict("changes"), clip("The engine couldn't read the change: "+err.Error(), maxOutput))
+		return ChangeView{}, conflict("changes", clip("The engine couldn't read the change: "+err.Error(), maxOutput))
 	}
 	return ChangeView{Branch: t.Branch, Head: head, Base: base, Main: main, From: at.From, Points: points, ChangeSet: maskChanges(cs)}, nil
 }

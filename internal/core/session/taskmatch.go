@@ -51,14 +51,14 @@ func typeLine(what string, files []TypeFile) TypeLine {
 	return l
 }
 
-func fixName(kind workflow.WorkType) string {
-	if kind.ID == "fix" {
-		return "A Fix"
-	}
-	if kind.Profile() == workflow.Incident {
+func changeName(kind workflow.WorkType) string {
+	switch {
+	case kind.Profile() == workflow.Incident:
 		return "An Incident's fix"
+	case kind.Builtin:
+		return "A " + kind.Name
 	}
-	return "Work of type " + clip(kind.Name, 60) + ", which gets a Fix's checks,"
+	return "Work of type " + clip(kind.Name, 60)
 }
 
 func (w *Work) TypeChange(ctx context.Context, sid, base, head string) (TypeChange, bool) {
@@ -71,10 +71,7 @@ func (w *Work) TypeChange(ctx context.Context, sid, base, head string) (TypeChan
 		return TypeChange{}, false
 	}
 	setup := w.setupFor(ws.repo)
-	kind, ok := typeIn(setup.setup.Types, ws.typeID)
-	if !ok {
-		kind, _ = typeIn(setup.setup.Types, DefaultWorkType)
-	}
+	kind := workflow.TypeOr(setup.setup.Types, ws.typeID)
 	changes, err := w.cfg.Files.ChangedFiles(ctx, t.Repo, base, head)
 	main, _ := w.cfg.Repos.Main(t.Name)
 	out := w.typeChange(t.Repo, kind, setup.setup.Protect, w.specsProtected(t, main, head), base, head, changes, err == nil)
@@ -86,18 +83,6 @@ func (w *Work) typeChange(repo string, kind workflow.WorkType, protect []string,
 	paths := make([]string, 0, len(changes))
 	for _, c := range changes {
 		paths = append(paths, c.Path)
-	}
-	if kind.Edits == workflow.DocsEdits {
-		if _, note := workflow.Effective(kind, paths, listed); !listed && note != "" {
-			out.Lines = append(out.Lines, TypeLine{What: strings.TrimSuffix(note, ".")})
-		}
-		if others := workflow.NotDocs(paths); listed && len(others) > 0 {
-			files := make([]TypeFile, 0, len(others))
-			for _, p := range others {
-				files = append(files, TypeFile{Path: p})
-			}
-			out.Lines = append(out.Lines, typeLine(clip(kind.Name, 60)+" is for documentation, and the branch changes files that aren't documentation, so it needs what a Feature needs: an approved plan and a Feature's reviews", files))
-		}
 	}
 	if specs {
 		var files []TypeFile
@@ -121,9 +106,9 @@ func (w *Work) typeChange(repo string, kind workflow.WorkType, protect []string,
 			out.Lines = append(out.Lines, typeLine("Files that match the protect list of the team file on main, which Claude Code's file tools ask the person about before each write; a shell command or another agent doesn't ask", files))
 		}
 	}
-	if p := kind.Profile(); specs && listed && (p == workflow.Fix || p == workflow.Incident) {
+	if p := kind.Profile(); specs && listed && (p == workflow.Change || p == workflow.Direct || p == workflow.Incident) {
 		l := w.loosenings(repo, base, head, changes)
-		what := fixName(kind) + " that loosens the specifications: in each file listed, the engine's line counts found new waivers, fewer scenarios or table rows, new declared reads or shows, or new expect_logs entries, which a fix rarely needs; the counts read lines, not YAML, so one can be wrong"
+		what := changeName(kind) + " that loosens the specifications: in each file listed, the engine's line counts found new waivers, fewer scenarios or table rows, new declared reads or shows, or new expect_logs entries, which a code change rarely needs; the counts read lines, not YAML, so one can be wrong"
 		if l.unread > 0 {
 			what += "; " + strconv.Itoa(l.unread) + " more " + plural(l.unread, "specification", "specifications") + " the engine couldn't read or count for this may loosen them too"
 		}

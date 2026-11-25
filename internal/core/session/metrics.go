@@ -101,14 +101,14 @@ func NewMetrics(cfg MetricsConfig) *Metrics {
 
 func knownRepo(repos Repositories, name string) error {
 	if repos == nil {
-		return explained(conflict("not-yet"), "This engine has no repositories.")
+		return conflict("not-yet", "This engine has no repositories.")
 	}
 	list, err := repos.List()
 	if err != nil {
-		return explained(conflict("records"), "The engine couldn't read its list of repositories.")
+		return conflict("records", "The engine couldn't read its list of repositories.")
 	}
 	if !slices.ContainsFunc(list, func(r Repository) bool { return r.Name == name }) {
-		return explained(notFound("project"), "That project is no longer in the list.")
+		return notFound("project", "That project is no longer in the list.")
 	}
 	return nil
 }
@@ -138,12 +138,8 @@ func (m *Metrics) Metrics(repo string) (MetricsView, error) {
 	if len(entries) > 0 {
 		v.AuditSince = entries[0].Time
 	}
-	owned := func(e AuditEntry) bool { return e.Repository == repo }
-	if m.cfg.Spans != nil {
-		spans := m.cfg.Spans(repo)
-		owned = func(e AuditEntry) bool { return inSpans(spans, e.Repository, e.Time) }
-	}
-	entries = slices.DeleteFunc(entries, func(e AuditEntry) bool { return !owned(e) })
+	own := m.lines(repo)
+	entries = slices.DeleteFunc(entries, func(e AuditEntry) bool { return !own.audit(e) })
 	branches := map[string]bool{}
 	for _, e := range entries {
 		if e.Branch != "" {
@@ -156,22 +152,41 @@ func (m *Metrics) Metrics(repo string) (MetricsView, error) {
 		if list, err := m.cfg.Runs(); err == nil {
 			runs, runsRead = list, true
 		} else {
-			v.Problems = append(v.Problems, "The engine couldn't read its sessions record, so it shows no time to the first push.")
+			v.Problems = append(v.Problems, "The engine couldn't read its sessions record, so it shows no time to the first push and no agent cost.")
 		}
 	}
+	runs = slices.DeleteFunc(runs, func(r SavedRun) bool {
+		return r.Repo != repo || !r.StartedAt.IsZero() && !own.at(r.Repo, r.StartedAt)
+	})
 	for _, r := range runs {
-		if r.Repo == repo {
-			branches[r.Branch] = true
-		}
+		branches[r.Branch] = true
 	}
 	firstPush := m.fromAudit(&v, entries)
 	if runsRead {
 		startToPush(&v, runs, firstPush)
 	}
 	m.fromReviews(&v, branches)
-	m.fromCaps(&v)
-	m.fromFollows(&v)
+	if runsRead {
+		m.fromCaps(&v, runs)
+	}
+	m.fromFollows(&v, own)
 	return v, nil
+}
+
+func (m *Metrics) lines(repo string) projectLines {
+	own := projectLines{spans: []ProjectSpan{{Name: repo}}}
+	if m.cfg.Spans != nil {
+		own.spans = m.cfg.Spans(repo)
+	}
+	if m.cfg.Repos == nil {
+		return own
+	}
+	if list, err := m.cfg.Repos.List(); err == nil {
+		if i := slices.IndexFunc(list, func(r Repository) bool { return r.Name == repo }); i >= 0 {
+			own.url = list[i].URL
+		}
+	}
+	return own
 }
 
 func (m *Metrics) fromAudit(v *MetricsView, entries []AuditEntry) map[string]time.Time {
@@ -280,7 +295,7 @@ func startToPush(v *MetricsView, runs []SavedRun, firstPush map[string]time.Time
 	var spans []time.Duration
 	for _, r := range runs {
 		at, ok := firstPush[r.SID]
-		if !ok || r.Repo != v.Repo || r.StartedAt.IsZero() || at.Before(r.StartedAt) {
+		if !ok || r.StartedAt.IsZero() || at.Before(r.StartedAt) {
 			continue
 		}
 		spans = append(spans, at.Sub(r.StartedAt))
@@ -340,7 +355,7 @@ func reviewCost(v *MetricsView, list []ReviewEntry, branches map[string]bool, im
 	}
 }
 
-func (m *Metrics) fromCaps(v *MetricsView) {
+func (m *Metrics) fromCaps(v *MetricsView, runs []SavedRun) {
 	if m.cfg.Caps == nil {
 		return
 	}
@@ -350,7 +365,7 @@ func (m *Metrics) fromCaps(v *MetricsView) {
 		return
 	}
 	for _, s := range st.Sessions {
-		if s.Project != v.Repo {
+		if !slices.ContainsFunc(runs, func(r SavedRun) bool { return r.SID == s.SID && r.Repo == s.Project }) {
 			continue
 		}
 		if c := costOf(s.Used.CostUSD); c > 0 {
@@ -360,7 +375,7 @@ func (m *Metrics) fromCaps(v *MetricsView) {
 	}
 }
 
-func (m *Metrics) fromFollows(v *MetricsView) {
+func (m *Metrics) fromFollows(v *MetricsView, own projectLines) {
 	if m.cfg.Follows == nil {
 		return
 	}
@@ -370,7 +385,11 @@ func (m *Metrics) fromFollows(v *MetricsView) {
 		return
 	}
 	for _, f := range rec.Follows {
-		if f.Project != v.Repo {
+		at := f.Pushed
+		if at.IsZero() {
+			at = f.DoneAt
+		}
+		if !own.at(f.Project, at) {
 			continue
 		}
 		if !f.Pushed.IsZero() && (v.PullsSince.IsZero() || f.Pushed.Before(v.PullsSince)) {

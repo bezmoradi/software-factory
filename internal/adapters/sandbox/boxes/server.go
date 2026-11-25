@@ -50,6 +50,7 @@ type ServerConfig struct {
 	Boxes     session.Boxes
 	Reviewers ReviewerMaker
 	Verifiers session.VerifierHost
+	Actions   session.ActionHost
 	KeyFile   string
 	Base      context.Context
 	Logger    shared.Logger
@@ -116,6 +117,8 @@ func route(path string) (routed, bool) {
 		return reviewerRoute(parts[2:])
 	case parts[1] == "verifiers":
 		return verifierRoute(parts[2:])
+	case parts[1] == "actions":
+		return actionRoute(parts[2:])
 	case parts[1] != "boxes":
 		return routed{}, false
 	case len(parts) == 2:
@@ -168,6 +171,12 @@ func allowed(r string) []string {
 		return []string{http.MethodPut, http.MethodDelete}
 	case routeVerifier:
 		return []string{http.MethodGet, http.MethodDelete}
+	case routeActions, routeActionLog:
+		return []string{http.MethodGet}
+	case routeAction:
+		return []string{http.MethodPut, http.MethodGet, http.MethodDelete}
+	case routeActionBox:
+		return []string{http.MethodPut}
 	case routeReview, routeVerify, routeBrowser:
 		return []string{http.MethodPut}
 	}
@@ -228,6 +237,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case routeVerifiers, routeVerifier, routeVerify, routeVerifyLog, routeVerifyOut, routeBrowser:
 		s.verifiers(base, w, r, rt)
+		return
+	case routeActions, routeAction, routeActionBox, routeActionStart, routeActionLog:
+		s.actions(base, w, r, rt)
 		return
 	}
 	if name != routeList && !session.ValidBox(box) {

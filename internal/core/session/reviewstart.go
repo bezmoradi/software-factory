@@ -18,12 +18,12 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		t.Req = shared.RequestOf(ctx)
 	}
 	if t.Repo == "" || t.Name == "" || t.Branch == "" {
-		return explained(conflict("no clone"), "The engine doesn't know which clone and branch this session works in, so it can't review it.")
+		return conflict("no clone", "The engine doesn't know which clone and branch this session works in, so it can't review it.")
 	}
 	r.mu.Lock()
 	if _, busy := r.running[t.SID]; busy {
 		r.mu.Unlock()
-		return explained(conflict("reviewing"), "A review of this session is running. Wait for it to finish.")
+		return conflict("reviewing", "A review of this session is running. Wait for it to finish.")
 	}
 	if err := r.holdLocked(t.SID); err != nil {
 		r.mu.Unlock()
@@ -44,12 +44,12 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	pack, err := r.cfg.Plugins.ReviewerPack(t.Name)
 	if err != nil {
 		release()
-		return explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
+		return conflict("no plugin", clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	head, err := r.cfg.Snapshots.Head(t.Repo, t.Branch)
 	if err != nil {
 		release()
-		return explained(conflict("branch"), clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
+		return conflict("branch", clip("The engine couldn't read the session's branch "+t.Branch+": "+err.Error(), maxOutput))
 	}
 	r.mu.Lock()
 	r.heads[t.SID] = head
@@ -60,22 +60,22 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 		if e, ok := errors.AsType[*Error](err); ok {
 			return e
 		}
-		return explained(conflict("fetch"), "The engine couldn't fetch the remote's main branch, so it can't tell what to review.")
+		return conflict("fetch", "The engine couldn't fetch the remote's main branch, so it can't tell what to review.")
 	}
 	if t.CloneSync != nil {
 		if why := t.CloneSync(main); why != "" {
 			release()
-			return explained(conflict("clone"), clip(keepSentence(strings.ToUpper(why[:1])+why[1:])+" No review started, since the reviewers would read the branch against an older main. Try again in a moment.", maxOutput))
+			return conflict("clone", clip(keepSentence(strings.ToUpper(why[:1])+why[1:])+" No review started, since the reviewers would read the branch against an older main. Try again in a moment.", maxOutput))
 		}
 	}
 	base, err := r.cfg.History.MergeBase(ctx, t.Repo, head, main)
 	if err != nil {
 		release()
-		return explained(conflict("merge base"), clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
+		return conflict("merge base", clip("The engine couldn't find where "+t.Branch+" leaves the remote's main branch: "+err.Error(), maxOutput))
 	}
 	if base == head {
 		release()
-		return explained(conflict("no change"), "The session's branch has nothing the remote's main branch lacks, so there's nothing to review. Commit the work first.")
+		return conflict("no change", "The session's branch has nothing the remote's main branch lacks, so there's nothing to review. Commit the work first.")
 	}
 	var required []workflow.Requirement
 	if t.Plan != nil {
@@ -91,14 +91,14 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	if !slices.ContainsFunc(required, func(q workflow.Requirement) bool { return !q.Advisory }) {
 		release()
 		if t.Pushes {
-			return explained(conflict("no reviewer"), NoReviewerText)
+			return conflict("no reviewer", NoReviewerText)
 		}
-		return explained(conflict("no reviews"), "This session's work type needs no review, and it can't push. Pick another work type to review and push it.")
+		return conflict("no reviews", "This session's work type needs no review, and it can't push. Pick another work type to review and push it.")
 	}
 	entries, err := r.Entries()
 	if err != nil {
 		release()
-		return explained(conflict("records"), "The engine couldn't read its review records.")
+		return conflict("records", "The engine couldn't read its review records.")
 	}
 	given := reviewGiven{asked: t.Approved != nil, rules: rulesGiven{main: main}}
 	ticket := r.approvalTicket()
@@ -171,7 +171,7 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if len(plans) == 0 && t.Scope == ScopeRetry {
 		release()
-		return explained(conflict("nothing to retry"), "Every review this commit needs has an outcome, so the engine doesn't run one again.")
+		return conflict("nothing to retry", "Every review this commit needs has an outcome, so the engine doesn't run one again.")
 	}
 	notInstalled := ""
 	if len(missing) > 0 {
@@ -179,28 +179,28 @@ func (r *Reviews) Start(ctx context.Context, t ReviewTarget) error {
 	}
 	if len(plans) == 0 && len(capped) == 0 && notInstalled != "" {
 		release()
-		return explained(conflict("not installed"), notInstalled)
+		return conflict("not installed", notInstalled)
 	}
 	if len(plans) == 0 && len(capped) == 0 {
 		release()
-		return explained(conflict("reviewed"), reviewedMessage(head))
+		return conflict("reviewed", reviewedMessage(head))
 	}
 	if len(plans) == 0 && len(finished) > 0 {
 		release()
-		return explained(conflict("capped"), fmt.Sprintf("Every other reviewer this commit needs has a verdict, and %s blocked in %d %s on this branch, the limit this project set, so the engine doesn't start %s again. Decide on the push: override a verdict, allow it with your reason, deny it, or hand the findings off.", strings.Join(capped, " and "), limit, plural(limit, "round", "rounds"), plural(len(capped), "it", "them")))
+		return conflict("capped", fmt.Sprintf("Every other reviewer this commit needs has a verdict, and %s blocked in %d %s on this branch, the limit this project set, so the engine doesn't start %s again. Decide on the push: override a verdict, allow it with your reason, deny it, or hand the findings off.", strings.Join(capped, " and "), limit, plural(limit, "round", "rounds"), plural(len(capped), "it", "them")))
 	}
 	if len(plans) == 0 {
 		release()
-		return explained(conflict("capped"), fmt.Sprintf("Every reviewer this commit needs has blocked in %d %s on this branch, the limit this project set, so the engine doesn't start them again. Decide on the push: override a verdict, allow it with your reason, deny it, or hand the findings off.", limit, plural(limit, "round", "rounds")))
+		return conflict("capped", fmt.Sprintf("Every reviewer this commit needs has blocked in %d %s on this branch, the limit this project set, so the engine doesn't start them again. Decide on the push: override a verdict, allow it with your reason, deny it, or hand the findings off.", limit, plural(limit, "round", "rounds")))
 	}
 	if t.Auto && autoRuns(entries, t.Branch)+len(plans) > MaxAutoRuns {
 		release()
 		shared.For(ctx, r.cfg.Logger).Info("review", "event", "refused", "why", "auto-capped")
-		return explained(conflict("auto-capped"), fmt.Sprintf("The engine already ran %d automatic reviews on this branch, its limit, so it doesn't start more on the agent's request. Press Review to start them yourself.", MaxAutoRuns))
+		return conflict("auto-capped", fmt.Sprintf("The engine already ran %d automatic reviews on this branch, its limit, so it doesn't start more on the agent's request. Press Review to start them yourself.", MaxAutoRuns))
 	}
 	if !r.growRuns(t.SID, len(plans)) {
 		release()
-		return explained(limited("reviews"), fmt.Sprintf("This review needs %d reviewer runs, and with the runs already going the engine would pass its limit of %d at once. Wait for one to finish.", len(plans), MaxReviewerRuns))
+		return limited("reviews", fmt.Sprintf("This review needs %d reviewer runs, and with the runs already going the engine would pass its limit of %d at once. Wait for one to finish.", len(plans), MaxReviewerRuns))
 	}
 	signIn, err := r.CheckSignIn(ctx)
 	if err != nil {
@@ -318,5 +318,5 @@ func coverProblem(ctx context.Context, h History, repo, base, head, main string)
 }
 
 func planStopped() error {
-	return explained(conflict("stopped"), "No review started: the request ended while the engine planned it. Press Review again.")
+	return conflict("stopped", "No review started: the request ended while the engine planned it. Press Review again.")
 }

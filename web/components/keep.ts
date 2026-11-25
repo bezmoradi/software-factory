@@ -1,8 +1,11 @@
-import { api } from '../api.ts'
-import { busy, button, el, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { request } from '../api.ts'
+import { busy, button, el, emit, focusedKey, refocus, replaceKeeping, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { isRecord } from '../lib/json.ts'
 import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
+import { outcome } from './toasts.ts'
+import { sectionHead } from '../lib/page.ts'
+import type { Attention } from '../types.ts'
 
 const ROUTE = '/api/keep'
 const SHA = /^[0-9a-f]{40}$/
@@ -67,7 +70,7 @@ function readHead(v: unknown): KeptHead | null {
   const roles = Array.isArray(v.roles) ? v.roles.map(readRole).filter(r => r !== null) : []
   return {
     commit: sha(v.commit), at: num(v.at), holds: v.holds === true, restorable: v.restorable === true, refusal: text(v.refusal),
-    reviewed: v.reviewed === true, rolesRead: v.rolesRead === true, roles, passed: v.passed === true && roles.length > 0,
+    reviewed: v.reviewed === true, rolesRead: v.rolesRead === true, roles, passed: v.passed === true,
   }
 }
 
@@ -93,12 +96,6 @@ function reviewsOf(h: KeptHead): string {
   return `Recorded reviews: ${h.roles.map(r => `${visible(r.name)} ${r.verdict}`).join(' · ')}.`
 }
 
-async function problemOf(res: Response | null): Promise<string> {
-  if (!res) return 'The engine didn’t answer. Try again.'
-  const body = await res.json().catch(() => null) as { message?: unknown } | null
-  return typeof body?.message === 'string' && body.message ? visible(body.message) : 'The engine didn’t restore the branch. Try again.'
-}
-
 function when(ms: number): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
 }
@@ -112,20 +109,23 @@ class SfKeep extends HTMLElement {
   #confirm: string | null = null
   #asked = ''
   #status = statusLine()
-  #details = el('details', 'session-work')
-  #summary = el('summary', 'small')
-  #opened: boolean | null = null
-  #shown = false
+  #told = ''
 
-  constructor() {
-    super()
-    this.#details.addEventListener('toggle', () => {
-      if (this.#details.open !== this.#shown) {
-        this.#opened = this.#details.open
-        if (this.#details.open && this.#target?.sid) void this.refresh(this.#target.sid)
-      }
-      this.#shown = this.#details.open
-    })
+  get attention(): Attention | null {
+    const v = this.#view
+    if (!v?.why) return null
+    return { section: 'backup', rank: 3, title: 'Backup of its commits.', text: `${this.#stoppedAt(v)}${visible(v.why)}.`, alert: false }
+  }
+
+  #tell() {
+    const key = JSON.stringify(this.attention)
+    if (key === this.#told) return
+    this.#told = key
+    emit(this, 'sf-attention')
+  }
+
+  #stoppedAt(v: KeepView): string {
+    return v.stopped ? `Copying stopped at commit ${shortSha(v.stopped)}: ` : 'Copying stopped: '
   }
 
   set view(value: KeepTarget | null) {
@@ -138,15 +138,16 @@ class SfKeep extends HTMLElement {
       this.#view = null
       this.hidden = true
       this.replaceChildren()
+      this.#tell()
       return
     }
     if (changed) {
       this.#view = null
       this.#confirm = null
       this.#asked = ''
-      this.#opened = null
       this.#status.textContent = ''
       this.hidden = true
+      this.#tell()
       void this.refresh(value.sid)
     } else this.#paint()
   }
@@ -154,17 +155,18 @@ class SfKeep extends HTMLElement {
   async refresh(sid: string) {
     if (!sid || sid !== this.#target?.sid) return
     const n = ++this.#loading
-    const res = await api(ROUTE, { op: 'read', sid }).catch(() => null)
+    const a = await request(ROUTE, { op: 'read', sid })
     if (n !== this.#loading || sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      if (res && res.status !== 404 && res.status !== 501) return
+    if (!a.ok) {
+      if (a.status !== 0 && a.status !== 404 && a.status !== 501) return
       this.#view = null
       this.#status.textContent = ''
       this.hidden = true
       this.replaceChildren()
+      this.#tell()
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (!v) return
     this.#view = v
     this.#paint()
@@ -173,7 +175,6 @@ class SfKeep extends HTMLElement {
   async #ask(commit: string) {
     const sid = this.#target?.sid
     if (!sid || this.#busy) return
-    this.#opened ??= this.#details.open
     this.#asked = commit
     await this.refresh(sid)
     if (sid !== this.#target?.sid) return
@@ -198,28 +199,21 @@ class SfKeep extends HTMLElement {
     this.#confirm = null
     say(this.#status, 'Restoring the branch…', 'muted')
     this.#paint()
-    const res = await api(ROUTE, commit ? { op: 'restore', sid, commit } : { op: 'restore', sid }).catch(() => null)
+    const a = await request(ROUTE, commit ? { op: 'restore', sid, commit } : { op: 'restore', sid })
     this.#busy = false
     if (sid !== this.#target?.sid) return
-    if (!res || !res.ok) {
-      say(this.#status, await problemOf(res), 'warn')
+    if (!a.ok) {
+      say(this.#status, a.message, 'warn')
       void this.refresh(sid)
       return
     }
-    const v = readView(await res.json().catch(() => null))
+    const v = readView(a.body)
     if (v) this.#view = v
     const back = v?.head || commit || v?.commit || ''
     const at = back ? ` at ${shortSha(back)}` : ''
-    say(this.#status, `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, 'ok')
+    say(this.#status, '')
+    outcome(this, this.#status, { id: `keep:${sid}`, title: `The branch ${visible(v?.branch ?? '')} is back${at}, with its worktree.${v?.wasStopped ? ' The engine stopped the session to do it; wake it from the ⋯ menu to go on.' : ''}`, tone: 'ok' })
     this.#paint()
-  }
-
-  #summaryText(v: KeepView): string {
-    if (!v.commit) return v.why ? 'Engine copy of the commits: stopped' : 'Engine copy of the commits: nothing yet'
-    const parts = [`Engine copy of the commits: up to ${shortSha(v.commit)} (${bytes(v.bytes)})`]
-    if (v.why) parts.push('stopped')
-    if (!v.holds) parts.push(v.head ? 'the branch no longer holds it' : 'the branch is gone')
-    return parts.join(' · ')
   }
 
   #paint() {
@@ -227,7 +221,7 @@ class SfKeep extends HTMLElement {
     const v = this.#view
     if (!t?.sid || !v) return
     const focused = focusedKey(this)
-    const parts: HTMLElement[] = [el('p', 'small muted', `When a turn ends, the engine copies the commits on ${visible(v.branch)} that main lacks into its own store, which no agent can reach, so Restore this on a kept commit can bring the branch and its worktree back to it if an agent deletes the branch or resets it.`)]
+    const parts: HTMLElement[] = [sectionHead('Backup of its commits', 'backup'), el('p', 'small muted', `When a turn ends, the engine copies the commits on ${visible(v.branch)} that main lacks into its own store, which no agent can reach, so Restore this on a kept commit can bring the branch and its worktree back to it if an agent deletes the branch or resets it.`)]
     if (v.commit) {
       parts.push(el('p', 'small', `Last copied commit: ${shortSha(v.commit)}${v.at ? `, ${when(v.at)}` : ''}. The copy holds ${bytes(v.bytes)} in ${v.packs} ${v.packs === 1 ? 'pack' : 'packs'}, of ${bytes(v.sessionCap)} for one session.`))
       if (!v.head) parts.push(el('p', 'small warn', `The branch ${visible(v.branch)} isn’t in the clone now.`))
@@ -236,7 +230,7 @@ class SfKeep extends HTMLElement {
       else parts.push(el('p', 'small warn', `The branch is at ${shortSha(v.head)} now, which doesn’t hold the last copied commit.`))
     }
     if (v.why) {
-      const where = v.stopped ? `Copying stopped at commit ${shortSha(v.stopped)}: ` : 'Copying stopped: '
+      const where = this.#stoppedAt(v)
       const resume = v.stopped && v.kind !== 'session-cap' ? ` The copy stays at ${v.commit ? shortSha(v.commit) : 'no commit'}, and copying goes on once the branch no longer holds commit ${shortSha(v.stopped)}.` : ''
       parts.push(el('p', 'small warn', `${where}${visible(v.why)}.${resume}`))
     }
@@ -263,12 +257,9 @@ class SfKeep extends HTMLElement {
       parts.push(row)
     } else parts.push(...this.#heads(t, v, off))
     parts.push(this.#status)
-    this.#summary.textContent = this.#summaryText(v)
-    this.#shown = this.#opened ?? (!!v.why || (!!v.commit && !v.holds))
-    this.#details.open = this.#shown
-    replaceKeeping(this.#details, [this.#summary, ...parts])
-    if (this.#details.parentNode !== this) this.replaceChildren(this.#details)
+    replaceKeeping(this, parts)
     this.hidden = false
+    this.#tell()
     refocus(this, focused, () => [this.#confirm !== null ? 'keep-confirm' : `keep-restore-${this.#asked}`, 'keep-restore'])
   }
 

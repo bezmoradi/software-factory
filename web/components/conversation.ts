@@ -50,7 +50,6 @@ function contextBody(v: ContextView): HTMLElement {
 class SfConversation extends HTMLElement {
   #timeline: HTMLOListElement | null = null
   #needs: HTMLElement | null = null
-  #blank = true
   #heading: HTMLHeadingElement | null = null
   #said: HTMLParagraphElement | null = null
   #reply: { turnId: string; body: HTMLElementTagNameMap['sf-markdown'] } | null = null
@@ -107,6 +106,10 @@ class SfConversation extends HTMLElement {
     return [...this.#cards.values()].flatMap(n => (n.source && !answering(n) ? [n.source] : []))
   }
 
+  get empty(): boolean {
+    return !this.#timeline?.childElementCount && !this.#cards.size
+  }
+
   get pinned(): boolean {
     return this.#pinned
   }
@@ -157,7 +160,6 @@ class SfConversation extends HTMLElement {
     const li = el('li', cls)
     if (who) li.append(el('span', 'who', who))
     this.#timeline!.append(li)
-    this.#blank = false
     return li
   }
 
@@ -226,10 +228,6 @@ class SfConversation extends HTMLElement {
     return out
   }
 
-  get blank(): boolean {
-    return this.#blank
-  }
-
   reset(note: string): void {
     this.#timeline!.replaceChildren()
     this.#needs!.replaceChildren(this.#heading!)
@@ -239,7 +237,6 @@ class SfConversation extends HTMLElement {
     this.#groups.clear()
     this.#cards.clear()
     this.#reply = null
-    this.#blank = !note
     if (note) this.#timeline!.append(el('li', 'reset small muted', note))
   }
 

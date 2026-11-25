@@ -1,33 +1,25 @@
-import { busy, button, el, emit, field, focusedKey, pageCrumb, refocus, replaceKeeping, rovingKeys, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, rovingKeys, sayIfChanged, statusLine, visible } from '../lib/dom.ts'
+import { request } from '../api.ts'
+import type { EngineAnswer } from '../api.ts'
+import { actions as actionsRow, answerControl, field, fieldRow, form, showAnswer } from '../lib/form.ts'
+import { emptyState, pageHead } from '../lib/page.ts'
 import { icon } from './icon.ts'
 import { secret } from './secret.ts'
-import { effortOptions } from './session-work.ts'
-import './allow-rules.ts'
-import './project-facts.ts'
-import './team-rules.ts'
-import './caps.ts'
 import './issue-picker.ts'
 import './usage.ts'
-import './project-commands.ts'
-import './metrics.ts'
-import './decision-log.ts'
-import './review-depth.ts'
-import './lessons.ts'
+import './progress.ts'
 import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './session-list.ts'
 import { placeMenu } from '../lib/menu.ts'
-import { BenchmarkField, PairField, StartFromField } from './start-from.ts'
-import { developmentBuild } from './update.ts'
-import type { Cloning, Expect, PairAgent, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
+import { StartFromField } from './start-from.ts'
+import type { CloneProgress, Cloning, Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
+import { textbox, dropdown, option } from '../lib/controls.ts'
 
-const MODELS: [string, string][] = [['', 'Default model'], ['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
-function options(select: HTMLSelectElement, list: [string, string][]) {
-  for (const [value, text] of list) {
-    const o = el('option', '', text)
-    o.value = value
-    select.append(o)
-  }
+function modelChoices(starter: Starter | undefined): [string, string][] {
+  return [['', 'Default model'], ...(starter?.models ?? []).map((m): [string, string] => [m.id, m.name])]
 }
-
+function options(select: HTMLSelectElement, list: [string, string][]) {
+  for (const [value, text] of list) select.append(option(text, value))
+}
 
 function savedAt(ms: number): string {
   if (!ms) return ''
@@ -41,7 +33,6 @@ function hostName(host: string): string {
 
 const GITHUB = 'https://github.com'
 const GITLAB = 'https://gitlab.com'
-const DEV_HOST = 'https://gitserver.test:8443'
 const TOKEN_NAME = 'name=Software+Factory&description=Clone%2C+fetch+and+push+for+Software+Factory'
 
 interface TokenHelp {
@@ -62,70 +53,33 @@ const TOKEN_HOSTS: Record<string, TokenHelp> = {
     label: 'GitLab',
     link: `${GITLAB}/-/user_settings/personal_access_tokens?${TOKEN_NAME}&scopes=read_repository,write_repository`,
     linkText: 'Create a GitLab token',
-    scopes: 'The link opens GitLab with the right scopes already chosen. Set an expiry date, create the token, then paste it below. Pull requests and issues work only on GitHub.',
+    scopes: 'The link opens GitLab with the right scopes already chosen. Set an expiry date, create the token, then paste it below.',
   },
 }
 
-function tokenShape(host: string, value: string): string {
-  const v = value.trim()
-  if (!v) return ''
-  if (host === GITHUB && !/^(github_pat_|gh[pousr]_)/.test(v)) return 'GitHub tokens start with github_pat_ or ghp_. Check that you pasted the token itself.'
-  if (host === GITLAB && !v.startsWith('glpat-')) return 'GitLab personal access tokens start with glpat-. Check that you pasted the token itself.'
-  return ''
+function tokenHostHelp(host: string): TokenHelp | undefined {
+  return Object.hasOwn(TOKEN_HOSTS, host) ? TOKEN_HOSTS[host] : undefined
 }
 
 function blank(...inputs: HTMLInputElement[]) {
   for (const input of inputs) {
     input.value = ''
     input.type = 'password'
+    labelError(input, '')
   }
 }
 
 function actions(...buttons: HTMLElement[]): HTMLElement[] {
-  if (!buttons.length) return []
-  const row = el('div', 'form-actions')
-  row.append(...buttons)
-  return [row]
+  return buttons.length ? [actionsRow(buttons)] : []
 }
 
 function stacked(...children: HTMLElement[]): HTMLFormElement {
-  const form = el('form', 'stacked')
-  form.autocomplete = 'off'
-  form.append(...children)
-  return form
-}
-
-function webAddress(url: string): string {
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : ''
-  } catch {
-    return ''
-  }
-}
-
-function urlText(url: string): HTMLElement {
-  const href = webAddress(url)
-  const text = el('bdi', '', url)
-  text.dir = 'ltr'
-  if (!href) {
-    const span = el('span', 'project-path secondary')
-    span.title = url
-    span.append(text)
-    return span
-  }
-  const a = el('a', 'project-path project-link')
-  a.href = href
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  a.title = `Open ${url} in a new tab`
-  a.append(text)
-  return a
+  return form({ cls: 'stacked', autocomplete: 'off', children })
 }
 
 function nearby(key: string): string[] {
   const row = /^row:(.*):[a-z]+$/.exec(key)
-  if (row) return ['confirm', 'keep', 'toggle', 'count', 'new', 'more', 'remove'].map(a => `row:${row[1]}:${a}`)
+  if (row) return ['confirm', 'keep', 'count', 'new', 'more', 'remove'].map(a => `row:${row[1]}:${a}`)
   const host = /^host:(.*):[a-z]+$/.exec(key)
   if (host) return [`host:${host[1]}:replace`, 'token-more', 'token-save']
   if (key.startsWith('token-')) return ['token-more', 'token-save']
@@ -133,156 +87,147 @@ function nearby(key: string): string[] {
   return []
 }
 
-const COMMANDS: Record<string, string> = { plugin: 'claude --bg', acp: 'its ACP server' }
+
+let dispatchSerial = 0
 
 class DispatchForm {
-  form = el('form', 'dispatch')
-  agent = el('select', 'textbox')
+  form = form({ cls: 'dispatch', autocomplete: 'off' })
+  agent = dropdown({ name: 'agent' })
   why = el('div', 'small muted')
-  name = el('input', 'textbox')
-  model = el('select', 'textbox')
-  effort = el('select', 'textbox')
-  method = ''
-  kind = el('select', 'textbox')
-  expect = el('select', 'textbox')
-  caps = el('sf-caps-fields', 'dispatch-caps')
-  advanced = el('details', 'advanced-settings')
-  issue = el('sf-issue-picker', 'dispatch-issue')
+  name = textbox({ name: 'name' })
+  model = dropdown({ name: 'model' })
+  effort = dropdown({ name: 'effort' })
+  starter: Starter | undefined
+  expect = dropdown()
+  task = dropdown()
+  issue = el('sf-issue-picker')
   start = button('Start', 'primary small', undefined, 'submit')
   from: StartFromField
-  pair: PairField
-  bench: BenchmarkField
+  #agentField: HTMLDivElement
+  #modelField: HTMLDivElement
+  #effortField: HTMLDivElement
+  #expectField: HTMLDivElement
 
   constructor(p: Project, starters: Starter[], onCancel: () => void, sessions: SessionInfo[] = [], fork = '', forkAt = '') {
     const path = p.path
-    this.form.autocomplete = 'off'
-    this.name.name = 'name'
-    this.model.name = 'model'
-    this.name.placeholder = 'Name (optional)'
-    this.name.maxLength = 80
-    this.name.setAttribute('aria-label', 'Session name')
-    this.model.setAttribute('aria-label', 'Model')
-    options(this.model, MODELS)
-    this.effort.name = 'effort'
-    this.effort.setAttribute('aria-label', 'Effort')
-    this.effort.title = 'How hard the agent thinks. The default sends no effort, as before.'
-    this.kind.name = 'type'
-    this.kind.setAttribute('aria-label', 'Work type')
-    options(this.kind, [['', p.type ? `Work type: the project's default (${p.type})` : "Work type: pick before the first message"], ['feature', 'Feature'], ['fix', 'Fix'], ['incident', 'Incident'], ['docs', 'Docs only'], ['explore', 'Exploring']])
-    this.agent.name = 'agent'
-    this.agent.setAttribute('aria-label', 'Agent')
-    const list = starters.length ? starters : [{ id: 'claude', name: 'Claude Code', method: 'plugin', enabled: true }]
+    const n = ++dispatchSerial
+    this.name.id = `dispatch-name-${n}`
+    this.name.addEventListener('input', () => labelError(this.name, ''))
+    const list = starters
     for (const a of list) {
-      const o = el('option', '', a.enabled ? a.name : `${a.name} (not available)`)
-      o.value = a.id
-      o.disabled = !a.enabled
+      const o = option(a.enabled ? a.name : `${a.name} (not available)`, a.id, { disabled: !a.enabled })
       if (a.off) o.title = a.off
       this.agent.append(o)
     }
-    const first = list.find(a => a.enabled)
+    const first = list.find(a => a.default)
     if (first) this.agent.value = first.id
-    this.agent.hidden = list.length < 2
-    this.expect.setAttribute('aria-label', 'The sign-in you expect of this agent')
-    this.expect.title = 'The engine checks the agent\'s own sign-in before it starts, and refuses a start that differs from what you expect'
-    options(this.expect, [['any', 'Expect any sign-in'], ['subscription', 'Expect a subscription'], ['api-key', 'Expect an API key']])
+    options(this.expect, [['any', 'Any sign-in'], ['subscription', 'A subscription'], ['api-key', 'An API key']])
     this.expect.addEventListener('change', () => {
       const chosen = list.find(a => a.id === this.agent.value)
       if (chosen) chosen.expect = this.expect.value as Expect
       emit(this.form, 'sf-expect', { agent: this.agent.value, expect: this.expect.value as Expect })
     })
-    const row = el('div', 'opts field-row')
-    const picks = el('span', 'dispatch-picks')
-    picks.append(this.agent, this.model)
-    const go = el('span', 'dispatch-actions')
-    go.append(button('Cancel', 'ghost small', onCancel), this.start)
-    row.append(this.name, picks, go)
-    const more = el('div', 'opts field-row')
-    more.append(this.effort, this.kind, this.expect)
-    const note = el('p', 'small muted')
-    const command = el('code', '')
-    note.append('Fetches ', el('code', '', p.branch || 'the main branch'), ' from ', el('code', '', p.url || p.name), ', then runs ', command, " in a new worktree that starts there, once you've approved the repository files that agent loads at start and its own sign-in check passed. The session shows in this project's list when it connects; open it there to write its first message. This page controls it from the start. It starts in the agent's own asking mode, so it asks before it acts; auto and bypass modes can't be chosen here.")
-    const off = list.filter(a => !a.enabled && a.off && /install/i.test(a.off))
+    this.#agentField = field('Agent', this.agent)
+    this.#agentField.hidden = list.length < 2
+    this.#modelField = field('Model', this.model)
+    this.#effortField = field('Effort', this.effort)
+    this.#expectField = field('Expected sign-in', this.expect)
+    const off = list.filter(a => a.install && a.off)
     this.why.replaceChildren(...off.map(a => el('p', '', `${a.name}: ${a.off}`)))
     this.why.hidden = !off.length
     const sync = () => {
       const chosen = list.find(a => a.id === this.agent.value)
-      command.textContent = COMMANDS[chosen?.method ?? 'plugin'] ?? chosen?.id ?? ''
-      const plugin = chosen?.method === 'plugin'
-      this.model.hidden = !plugin
-      if (!plugin) this.model.value = ''
-      this.choices(chosen?.method ?? '')
+      const model = chosen?.fields?.model === true
+      this.#modelField.hidden = !model
+      if (!model) this.model.value = ''
+      this.choices(chosen)
       this.start.disabled = !chosen?.enabled
       this.expect.value = chosen?.expect ?? 'any'
-      this.expect.hidden = plugin
-      this.pair.follow(this.agent.value)
+      this.#expectField.hidden = chosen?.fields?.expect !== true
     }
     this.agent.addEventListener('change', sync)
-    this.caps.project = p.name
     this.from = new StartFromField(path, p.branch ?? '', sessions, fork, forkAt)
     this.issue.path = path
-    this.pair = new PairField(list, MODELS)
     sync()
-    this.bench = new BenchmarkField(path)
-    const deployed = el('p', 'small warn', "An incident is debugged at the commit that's deployed, and main is likely not what's running. Set Start from below to the branch whose head is deployed, and give the deployed commit or tag in the first message. When the session's start isn't that commit, knackpack diagnoses in a worktree of its own, outside this session's branch, and the page can't read or approve its root cause.")
-    deployed.hidden = true
-    this.kind.addEventListener('change', () => {
-      deployed.hidden = this.kind.value !== 'incident'
-      if (!deployed.hidden) this.advanced.open = true
-    })
-    this.advanced.append(el('summary', 'small', 'Advanced settings'), more, deployed, this.from.box, this.caps, note)
-    this.advanced.open = !!this.from.value()
-    this.form.append(row, this.why, this.advanced)
-    this.form.append(this.issue)
-    this.form.append(this.pair.box, this.bench.box)
-    this.form.addEventListener('submit', e => {
-      e.preventDefault()
+    options(this.task, [['', 'A blank session'], ['issue', 'An issue']])
+    this.task.addEventListener('change', () => this.#showIssue())
+    this.issue.hidden = true
+    this.issue.numberField.hidden = true
+    this.form.append(
+      fieldRow([
+        this.from.box, this.#agentField, this.#modelField, this.#effortField, this.#expectField,
+        field('Session name', this.name, { optional: true, cls: 'line-start' }), field('Begin with', this.task), this.issue.numberField,
+        this.issue,
+      ], 'columns'),
+      this.why,
+      actionsRow([button('Cancel', 'ghost small', onCancel), this.start]),
+    )
+    this.form.addEventListener('submit', () => {
       if (this.start.disabled) return
-      const caps = this.caps.checked()
-      if (caps === 'invalid') {
-        this.advanced.open = true
-        return
-      }
+      this.unrefuse()
       const from = this.from.value()
-      const issue = this.issue.chosen()
-      if (issue === 'refused') return
-      const bench = this.bench.chosen()
-      if (bench === 'refused') return
-      const pair = this.pair.value(!!bench)
-      if (pair === 'invalid') return
-      if (pair || bench) {
-        if (from) this.advanced.open = true
-        if (from || issue) return void this.pair.say('Start with both and a benchmark start from main, or from the merged pull request’s base, without an issue. Set Start from back to main and clear the issue first.')
-        const first: PairAgent = { agent: this.agent.value, ...(this.model.value ? { model: this.model.value } : {}), ...(this.effort.value ? { effort: this.effort.value } : {}) }
-        const agents: PairAgent[] = pair ? [first, { agent: first.agent, ...(pair.model ? { model: pair.model } : {}) }] : [first]
-        return void emit(this.form, 'sf-pair', { path, name: this.name.value, type: this.kind.value, agents, ...(pair?.message ? { message: pair.message } : {}), ...(bench ? { benchmark: bench } : {}), ...(caps ? { caps } : {}) })
-      }
-      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', type: this.kind.value, ...(caps ? { caps } : {}), ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
+      const issue = this.issue.hidden ? null : this.issue.chosen()
+      emit(this.form, 'sf-dispatch', { path, agent: this.agent.value, name: this.name.value, model: this.model.value, mode: '', ...(from ? { from } : {}), ...(issue ?? {}), ...(this.effort.value ? { effort: this.effort.value } : {}) })
     })
     this.model.addEventListener('change', () => this.efforts())
   }
 
-  choices(method: string) {
-    this.method = method
-    this.effort.hidden = method !== 'plugin'
-    if (method === 'plugin') {
-      const keep = this.model.value
-      this.model.replaceChildren()
-      options(this.model, MODELS)
-      if (MODELS.some(([v]) => v === keep)) this.model.value = keep
-    }
-    this.efforts()
+  #showIssue() {
+    const on = this.task.value === 'issue'
+    this.issue.hidden = !on
+    this.issue.numberField.hidden = !on
+    if (on) this.issue.opened()
+    else this.issue.reset()
   }
 
-  efforts() {
-    if (this.method !== 'plugin') return this.effort.replaceChildren()
-    const keep = this.effort.value
-    effortOptions(this.effort, 'Default effort')
+  refuse(a: EngineAnswer): boolean {
+    if (!a.message) return false
+    if (a.field === 'issue') {
+      this.task.value = 'issue'
+      this.#showIssue()
+      return this.issue.refuse(a.message)
+    }
+    const input = answerControl(this.form, a)
+    if (!input) return false
+    showAnswer(this.form, a)
+    return true
+  }
+
+  unrefuse() {
+    for (const input of [this.name, this.from.select]) labelError(input, '')
+  }
+
+  choices(starter: Starter | undefined) {
+    const fresh = this.starter !== starter
+    this.starter = starter
+    this.#effortField.hidden = starter?.fields?.effort !== true
+    if (starter?.fields?.model === true) {
+      const keep = fresh ? starter.defaultModel ?? '' : this.model.value
+      const models = modelChoices(starter)
+      this.model.replaceChildren()
+      options(this.model, models)
+      if (models.some(([v]) => v === keep)) this.model.value = keep
+    }
+    this.efforts(fresh)
+  }
+
+  efforts(fresh = false) {
+    if (this.starter?.fields?.effort !== true) return this.effort.replaceChildren()
+    const keep = fresh ? this.starter.defaultEffort ?? '' : this.effort.value
+    this.effort.replaceChildren()
+    options(this.effort, [['', 'Default effort'], ...(this.starter?.efforts ?? []).map((e): [string, string] => [e, visible(e)])])
     if ([...this.effort.options].some(o => o.value === keep)) this.effort.value = keep
   }
 
   busy(on: boolean) {
     this.start.disabled = !!this.agent.selectedOptions[0]?.disabled
     busy(this.start, on)
+  }
+
+  async suggestName(open: () => boolean) {
+    const a = await request('/api/session-name')
+    const name = a.ok && typeof a.body.name === 'string' ? a.body.name : ''
+    if (name && open() && !this.name.value) this.name.value = name
   }
 }
 
@@ -292,25 +237,22 @@ class SfProjects extends HTMLElement {
   #removing = ''
   #message: { path: string; text: string; bad: boolean } = { path: '', text: '', bad: false }
   #messageLine = statusLine('small status-slot')
-  #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; said: HTMLSpanElement }>()
+  #cloning = new Map<string, { url: string; li: HTMLLIElement; row: HTMLDivElement; bar: HTMLElementTagNameMap['sf-progress'] }>()
   #list = el('ul', 'boxlist projects')
   #rows = new Map<string, HTMLLIElement>()
   #said = new Map<string, HTMLParagraphElement>()
   #busy = false
-  #add = el('input', 'textbox')
+  #add = textbox({ type: 'url', placeholder: 'https://git.example.com/team/project.git', spellcheck: false, name: 'url' })
   #pending = new Map<'repo' | 'token', { key: string; after?: () => void }>()
   #addError = ''
-  #addAlert = false
-  #tokenHost = el('select', 'textbox')
-  #tokenValue = el('input', 'textbox')
+  #tokenHost = dropdown({ name: 'host' })
+  #tokenValue = textbox({ type: 'password', autocomplete: 'off', spellcheck: false, name: 'token' })
   #replacing = ''
-  #replaceValue = el('input', 'textbox')
-  #tokenHint = statusLine('small warn field-error status-slot')
-  #replaceHint = statusLine('small warn field-error status-slot')
+  #replaceValue = textbox({ type: 'password', autocomplete: 'off', spellcheck: false, name: 'token' })
   #hostField: HTMLElement
   #tokenField: HTMLElement
   #replaceField: HTMLElement
-  #replaceLabel: HTMLLabelElement
+  #replaceWords = document.createTextNode('New token')
   #tokenForm = stacked()
   #replaceForm = stacked()
   #hostList = el('ul', 'host-list')
@@ -321,18 +263,11 @@ class SfProjects extends HTMLElement {
   #hostEdited = false
   #addingRepo = false
   #sessions: SessionInfo[] = []
+  #acting = new Set<string>()
+  #asking: { sid: string; action: 'stop' | 'remove' } | null = null
   #sessionsKey = ''
   #expanded = new Map<string, boolean>()
-  #rules = new Map<string, HTMLElementTagNameMap['sf-allow-rules']>()
-  #facts = new Map<string, HTMLElementTagNameMap['sf-project-facts']>()
-  #caps = new Map<string, HTMLElementTagNameMap['sf-project-caps']>()
-  #team = new Map<string, HTMLElementTagNameMap['sf-team-rules']>()
   #expiry = new Map<string, HTMLElementTagNameMap['sf-token-expiry']>()
-  #commands = new Map<string, HTMLElementTagNameMap['sf-project-commands']>()
-  #metrics = new Map<string, HTMLElementTagNameMap['sf-project-metrics']>()
-  #decisions = new Map<string, HTMLElementTagNameMap['sf-decision-log']>()
-  #depth = new Map<string, HTMLElementTagNameMap['sf-review-depth']>()
-  #lessons = new Map<string, HTMLElementTagNameMap['sf-lessons']>()
   #menuOpen = ''
   #slot: HTMLElement | null = null
   #stale = false
@@ -347,6 +282,12 @@ class SfProjects extends HTMLElement {
       this.#render()
     })
     this.addEventListener('focusout', settle)
+    this.addEventListener('sf-session-ask', e => {
+      const { sid, action } = e.detail
+      this.#asking = action ? { sid, action } : null
+      this.#render()
+      this.#focus(action ? `ask:${sid}:confirm` : `more:${sid}`)
+    })
     this.addEventListener('toggle', settle, true)
     this.addEventListener('change', e => {
       if (e.target instanceof HTMLSelectElement && this.#stale) {
@@ -354,54 +295,38 @@ class SfProjects extends HTMLElement {
         this.#render()
       }
     })
-    this.#add.type = 'url'
     this.#add.id = 'repo-url'
-    this.#add.placeholder = 'https://git.example.com/team/project.git'
-    this.#add.spellcheck = false
-    this.#add.name = 'url'
-    this.#add.maxLength = 2048
+    this.#add.setAttribute('aria-required', 'true')
     this.#add.addEventListener('input', () => {
       if (!this.#addError) return
       this.#addError = ''
       this.#render()
     })
     this.#tokenHost.id = 'token-host'
-    this.#tokenHost.name = 'host'
     this.#tokenHost.addEventListener('change', () => {
+      labelError(this.#tokenHost, '')
       this.#hostEdited = true
       this.#render()
     })
-    for (const input of [this.#tokenValue, this.#replaceValue]) {
-      input.type = 'password'
-      input.autocomplete = 'off'
-      input.spellcheck = false
-      input.maxLength = 4096
-      input.name = 'token'
-    }
+    for (const input of [this.#tokenValue, this.#replaceValue]) input.setAttribute('aria-required', 'true')
     this.#tokenValue.id = 'token-value'
     this.#replaceValue.id = 'token-replace'
-    this.#tokenHint.id = 'token-value-hint'
-    this.#replaceHint.id = 'token-replace-hint'
-    this.#tokenValue.addEventListener('input', () => this.#hint())
-    this.#replaceValue.addEventListener('input', () => this.#hint())
+    for (const input of [this.#tokenValue, this.#replaceValue]) {
+      input.addEventListener('input', () => labelError(input, ''))
+    }
     this.#hostField = field('Host', this.#tokenHost)
     this.#tokenField = field('Token', secret(this.#tokenValue, 'token'))
-    this.#replaceField = field('New token', secret(this.#replaceValue, 'token'))
-    this.#replaceLabel = this.#replaceField.querySelector('label')!
+    this.#replaceField = field(this.#replaceWords, secret(this.#replaceValue, 'token'))
     this.#hostList.setAttribute('aria-label', 'Saved git host tokens')
-    this.#tokenForm.addEventListener('submit', e => {
-      e.preventDefault()
+    this.#tokenForm.addEventListener('submit', () => {
       const host = this.#tokenHost.value.trim()
       const token = this.#tokenValue.value
-      if (!host) return this.#tokenHost.focus()
-      if (!token) return this.#tokenValue.focus()
       this.#tokenSend('', { op: 'save', host, token }, 'token-save')
     })
-    this.#replaceForm.addEventListener('submit', e => {
-      e.preventDefault()
+    this.#replaceForm.addEventListener('submit', () => {
       const host = this.#replacing
       const token = this.#replaceValue.value
-      if (host && token) this.#tokenSend(host, { op: 'save', host, token }, `host:${host}:save`)
+      if (host) this.#tokenSend(host, { op: 'save', host, token }, `host:${host}:save`)
     })
   }
 
@@ -414,15 +339,6 @@ class SfProjects extends HTMLElement {
     this.#startTimer = undefined
   }
 
-  #hint() {
-    for (const [input, hint, host] of [[this.#tokenValue, this.#tokenHint, this.#tokenHost.value], [this.#replaceValue, this.#replaceHint, this.#replacing]] as const) {
-      const text = tokenShape(host, input.value)
-      sayIfChanged(hint, text, 'warn')
-      if (text) input.setAttribute('aria-describedby', hint.id)
-      else input.removeAttribute('aria-describedby')
-    }
-  }
-
   #viewKey = ''
 
   set view(value: ProjectsView) {
@@ -431,8 +347,16 @@ class SfProjects extends HTMLElement {
     this.#viewKey = key
     this.#view = value
     const kept = new Set(value.projects.map(p => p.path))
-    for (const m of [this.#rows, this.#said, this.#forms, this.#expanded, this.#rules, this.#facts, this.#caps, this.#team, this.#expiry, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
+    for (const m of [this.#rows, this.#said, this.#forms, this.#expanded, this.#expiry]) for (const path of m.keys()) if (!kept.has(path)) m.delete(path)
     this.#render()
+  }
+
+  get needsIdentity(): boolean {
+    return this.#needs('identity')
+  }
+
+  #needs(id: string): boolean {
+    return Array.isArray(this.#view.readiness) && this.#view.readiness.some(n => n && n.id === id)
   }
 
   set sideSlot(value: HTMLElement | null) {
@@ -460,34 +384,12 @@ class SfProjects extends HTMLElement {
     return (a instanceof HTMLSelectElement && this.contains(a)) || !!this.querySelector('.menu:popover-open')
   }
 
-  showPanel(path: string, which: 'rules' | 'team') {
-    const p = this.#view.projects.find(x => x.path === path)
-    if (!p) return
-    if (which === 'rules' && !this.#rules.has(path)) {
-      const panel = el('sf-allow-rules', 'project-rules')
-      panel.repo = p.name
-      this.#rules.set(path, panel)
-    }
-    if (which === 'team' && !this.#team.has(path)) {
-      const panel = el('sf-team-rules', 'project-rules')
-      panel.path = p.path
-      this.#team.set(path, panel)
-    }
-    this.reveal(path)
-    const panel = which === 'rules' ? this.#rules.get(path) : this.#team.get(path)
-    panel?.scrollIntoView({ block: 'nearest' })
-    if (panel) {
-      panel.tabIndex = -1
-      panel.focus()
-    }
-  }
-
   startIn(path: string) {
     if (!this.#view.projects.some(x => x.path === path)) return
     this.#expanded.set(path, true)
     if (this.#forms.has(path)) {
       this.#render()
-      this.#forms.get(path)?.name.focus()
+      this.#forms.get(path)?.from.select.focus()
       return
     }
     this.#open(path)
@@ -528,8 +430,18 @@ class SfProjects extends HTMLElement {
     this.#setBusy(false)
   }
 
-  verifiedOnMain(repo: string) {
-    for (const panel of this.#facts.values()) if (panel.repo === repo) panel.refresh()
+  startRefused(path: string, a: EngineAnswer): boolean {
+    const form = this.#forms.get(path)
+    return !!form?.form.isConnected && !!a.field && form.refuse(a)
+  }
+
+  acting(sid: string, on: boolean) {
+    if (on) this.#acting.add(sid)
+    else {
+      this.#acting.delete(sid)
+      if (this.#asking?.sid === sid) this.#asking = null
+    }
+    this.#render()
   }
 
   say(path: string, text: string, bad = false) {
@@ -574,9 +486,17 @@ class SfProjects extends HTMLElement {
 
   addFailed(text: string) {
     this.#addError = text
-    this.#addAlert = true
     this.#render()
     this.#add.focus()
+  }
+
+  tokenFailed(text: string, field: string): boolean {
+    const fresh = this.#tokenFrom === ''
+    const input = field === 'token' ? (fresh ? this.#tokenValue : this.#replaceValue) : field === 'host' && fresh ? this.#tokenHost : null
+    if (!input) return false
+    labelError(input, text)
+    input.focus()
+    return true
   }
 
   tokenDone() {
@@ -593,6 +513,7 @@ class SfProjects extends HTMLElement {
   }
 
   #tokenSend(from: string, detail: { op: 'save'; host: string; token: string } | { op: 'remove'; host: string }, key: string) {
+    for (const input of [this.#tokenHost, this.#tokenValue, this.#replaceValue]) labelError(input, '')
     this.#tokenFrom = from
     this.#hold('token', key)
     emit(this, 'sf-token', detail)
@@ -624,9 +545,9 @@ class SfProjects extends HTMLElement {
     for (const root of [this.#slot, this]) root?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus()
   }
 
-  #who(title: HTMLElement, p: Project): Element[] {
+  #who(title: HTMLElement): Element[] {
     const who = el('div', 'project-id')
-    who.append(title, urlText(p.url || p.path))
+    who.append(title)
     return [icon('folder', 'icon folder'), who]
   }
 
@@ -653,87 +574,7 @@ class SfProjects extends HTMLElement {
       b.append(mark, el('span', '', text))
       menu.append(b)
     }
-    item(this.#rules.has(p.path) ? 'Hide saved allow rules' : 'Saved allow rules', () => {
-      if (this.#rules.has(p.path)) this.#rules.delete(p.path)
-      else {
-        const panel = el('sf-allow-rules', 'project-rules')
-        panel.repo = p.name
-        this.#rules.set(p.path, panel)
-      }
-      this.#render()
-    }, 'warning')
-    item(this.#facts.has(p.path) ? 'Hide CI workflows and main\'s protection' : 'CI workflows and main\'s protection', () => {
-      if (this.#facts.has(p.path)) this.#facts.delete(p.path)
-      else {
-        const panel = el('sf-project-facts', 'project-rules')
-        panel.repo = p.name
-        this.#facts.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#team.has(p.path) ? 'Hide team rules from main' : 'Team rules from main', () => {
-      if (this.#team.has(p.path)) this.#team.delete(p.path)
-      else {
-        const panel = el('sf-team-rules', 'project-rules')
-        panel.path = p.path
-        this.#team.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#caps.has(p.path) ? 'Hide caps' : 'Caps', () => {
-      if (this.#caps.has(p.path)) this.#caps.delete(p.path)
-      else {
-        const panel = el('sf-project-caps', 'project-caps')
-        panel.project = p.name
-        this.#caps.set(p.path, panel)
-      }
-      this.#render()
-    }, 'warning')
-    item(this.#commands.has(p.path) ? 'Hide check and setup commands' : 'Check and setup commands', () => {
-      if (this.#commands.has(p.path)) this.#commands.delete(p.path)
-      else {
-        const panel = el('sf-project-commands', 'project-caps')
-        panel.project = p.name
-        this.#commands.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#metrics.has(p.path) ? 'Hide delivery and reviewer numbers' : 'Delivery and reviewer numbers', () => {
-      if (this.#metrics.has(p.path)) this.#metrics.delete(p.path)
-      else {
-        const panel = el('sf-project-metrics', 'project-caps')
-        panel.project = p.name
-        this.#metrics.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#decisions.has(p.path) ? 'Hide decision log' : 'Decision log', () => {
-      if (this.#decisions.has(p.path)) this.#decisions.delete(p.path)
-      else {
-        const panel = el('sf-decision-log', 'project-caps')
-        panel.project = p.name
-        this.#decisions.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#depth.has(p.path) ? 'Hide review depth' : 'Review depth', () => {
-      if (this.#depth.has(p.path)) this.#depth.delete(p.path)
-      else {
-        const panel = el('sf-review-depth', 'project-caps')
-        panel.path = p.path
-        this.#depth.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
-    item(this.#lessons.has(p.path) ? 'Hide lessons from reviews' : 'Lessons from reviews', () => {
-      if (this.#lessons.has(p.path)) this.#lessons.delete(p.path)
-      else {
-        const panel = el('sf-lessons', 'project-caps')
-        panel.project = p.name
-        this.#lessons.set(p.path, panel)
-      }
-      this.#render()
-    }, 'info')
+    item('Project settings', () => emit(this, 'sf-project-page', { name: p.name }), 'settings')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
@@ -768,26 +609,17 @@ class SfProjects extends HTMLElement {
       this.#expanded.set(p.path, !open)
       this.#render()
     }
-    if (list.length) {
-      const chevron = button('', 'ghost project-toggle', toggle, 'button', `row:${p.path}:toggle`)
-      chevron.append(icon('chevron'))
-      chevron.setAttribute('aria-expanded', String(open))
-      chevron.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} the sessions in ${p.name}`)
-      head.append(chevron)
-    } else head.append(el('span', 'project-toggle-space'))
-    head.append(...this.#who(name, p))
+    head.append(...this.#who(name))
     if (list.length && this.#removing !== p.path) {
-      const counted = button(count ? `${count} running` : `${list.length} stopped`, 'link project-count secondary', toggle, 'button', `row:${p.path}:count`)
+      const total = `${list.length} ${list.length === 1 ? 'session' : 'sessions'}`
+      const counted = button(total, 'link project-count secondary', toggle, 'button', `row:${p.path}:count`)
+      counted.append(icon('chevron', 'icon count-chevron'))
       counted.setAttribute('aria-expanded', String(open))
+      counted.setAttribute('aria-label', `${total}: ${open ? 'hide' : 'show'} the sessions in ${p.name}`)
       head.append(counted)
     }
     const acts = el('span', 'acts')
-    if (this.#removing === p.path && list.length) {
-      acts.append(el('span', 'small muted', `Delete its ${list.length === 1 ? 'session' : `${list.length} sessions`} first: open each, stop it, then delete it.`), button('OK', 'ghost small', () => {
-        this.#removing = ''
-        this.#render()
-      }, 'button', `row:${p.path}:keep`))
-    } else if (this.#removing === p.path) {
+    if (this.#removing === p.path) {
       acts.append(el('span', 'small muted', 'Remove it and delete its clone from the workspace?'), button('Cancel', 'ghost small', () => {
         this.#removing = ''
         this.#render()
@@ -808,7 +640,7 @@ class SfProjects extends HTMLElement {
     head.append(acts)
     const parts: HTMLElement[] = [head]
     if (open) {
-      parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true)), 'project-sessions with-menu', `Sessions in ${p.name}`))
+      parts.push(sessionTable(grouped(list).map(s => sessionRow(s, this.#sessions, `proj:${p.path}:${s.sid}`, true, this.#acting.has(s.sid), this.#asking?.sid === s.sid ? this.#asking.action : '')), 'project-sessions with-menu', `Sessions in ${p.name}`))
     }
     const said = this.#said.get(p.path) ?? statusLine('small status-slot')
     this.#said.set(p.path, said)
@@ -816,14 +648,7 @@ class SfProjects extends HTMLElement {
     sayIfChanged(said, mine ? this.#message.text : '', mine && this.#message.bad ? 'bad' : 'muted')
     parts.push(said)
     const form = this.#forms.get(p.path)
-    if (form) {
-      form.caps.project = p.name
-      parts.push(form.form)
-    }
-    for (const m of [this.#rules, this.#facts, this.#caps, this.#team, this.#commands, this.#metrics, this.#decisions, this.#depth, this.#lessons]) {
-      const panel = m.get(p.path)
-      if (panel) parts.push(panel)
-    }
+    if (form && this.#removing !== p.path) parts.push(form.form)
     let expiry = this.#expiry.get(p.path)
     if (!expiry) {
       expiry = el('sf-token-expiry', 'project-expiry')
@@ -839,7 +664,7 @@ class SfProjects extends HTMLElement {
     this.#forms.delete(path)
     this.#expanded.set(path, true)
     this.#open(path, sid, commit)
-    this.querySelector<HTMLElement>(`[data-key="${CSS.escape(`row:${path}:toggle`)}"]`)?.scrollIntoView({ block: 'nearest' })
+    this.#rows.get(path)?.scrollIntoView({ block: 'nearest' })
   }
 
   #open(path: string, fork = '', forkAt = '') {
@@ -851,38 +676,53 @@ class SfProjects extends HTMLElement {
     }, this.#sessionsIn(path), fork, forkAt)
     form.busy(this.#busy)
     this.#forms.set(path, form)
+    void form.suggestName(() => this.#forms.get(path) === form)
     if (this.#message.path === path) this.#message = { path: '', text: '', bad: false }
     this.#render()
-    form.name.focus()
+    form.from.select.focus()
   }
 
   #cloningRow(k: Cloning): HTMLElement {
     const kept = this.#cloning.get(k.name)
-    if (kept?.url === k.url) return kept.li
-    const c = kept ?? { url: k.url, li: el('li', 'boxlist-row'), row: el('div', 'row'), said: statusLine('acts small muted status-slot', 'span') }
+    if (kept?.url === k.url) {
+      drawProgress(kept.bar, k.progress)
+      return kept.li
+    }
+    const c = kept ?? { url: k.url, li: el('li', 'boxlist-row'), row: el('div', 'row'), bar: el('sf-progress', 'acts small muted') }
     c.url = k.url
+    c.bar.name = k.name
+    drawProgress(c.bar, k.progress)
     const who = el('div', 'project-id')
     const name = el('span', 'name')
     name.append(el('span', 'title', k.name))
-    who.append(name, urlText(k.url))
-    replaceKeeping(c.row, [el('span', 'project-toggle-space'), icon('folder', 'icon folder'), who, c.said])
+    who.append(name)
+    replaceKeeping(c.row, [icon('folder', 'icon folder'), who, c.bar])
     if (!kept) {
       c.li.append(c.row)
       this.#cloning.set(k.name, c)
-      sayWhenShown(c.said, 'Cloning…', 'muted')
     }
     return c.li
+  }
+
+  cloneProgress(url: string, name: string, progress: CloneProgress) {
+    const k = (this.#view.cloning ?? []).find(c => c.url === url && c.name === name)
+    if (!k) return false
+    k.progress = progress
+    const row = this.#cloning.get(name)
+    if (row?.url === url) drawProgress(row.bar, progress)
+    return true
   }
 
   #hostRow(h: TokenHost): HTMLElement {
     const li = this.#hostRows.get(h.host) ?? el('li')
     this.#hostRows.set(h.host, li)
-    const shownHost = visible(hostName(h.host))
+    const label = tokenHostHelp(h.host)?.label ?? hostName(h.host)
+    const shownHost = visible(label)
     const row = el('div', 'host-row')
     const who = el('div', 'host-who')
     const name = el('span', 'host-name')
     name.title = h.host
-    const text = el('bdi', '', hostName(h.host))
+    const text = el('bdi', '', label)
     text.dir = 'ltr'
     name.append(text)
     who.append(name, el('span', 'host-saved', h.savedAt ? `Saved ${savedAt(h.savedAt)}` : 'Saved'))
@@ -912,8 +752,7 @@ class SfProjects extends HTMLElement {
     }
     const parts: HTMLElement[] = [row]
     if (this.#forgetting === h.host) {
-      const confirm = el('div', 'stacked')
-      confirm.append(el('p', 'small muted', 'Remove this token? Clones and fetches from this host go without one.'), ...actions(button('Cancel', 'ghost', () => {
+      const confirm = stacked(el('p', 'small muted', 'Remove this token? Clones and fetches from this host go without one.'), ...actions(button('Cancel', 'ghost', () => {
         this.#forgetting = ''
         this.#render()
       }, 'button', `host:${h.host}:keep`), button('Remove token', 'danger', () => {
@@ -922,8 +761,8 @@ class SfProjects extends HTMLElement {
       parts.push(confirm)
     }
     if (this.#replacing === h.host) {
-      this.#replaceLabel.textContent = `New token for ${hostName(h.host)}`
-      replaceKeeping(this.#replaceForm, [this.#replaceField, this.#replaceHint, ...actions(button('Cancel', 'ghost', () => {
+      this.#replaceWords.data = `New token for ${label}`
+      replaceKeeping(this.#replaceForm, [this.#replaceField, ...actions(button('Cancel', 'ghost', () => {
         this.#replacing = ''
         blank(this.#replaceValue)
         this.#render()
@@ -935,33 +774,27 @@ class SfProjects extends HTMLElement {
   }
 
   #tokenHelp(host: string): HTMLElement[] {
-    const help = TOKEN_HOSTS[host]
+    const help = tokenHostHelp(host)
     if (!help) return []
     const link = el('a', 'small token-help', help.linkText)
     link.href = help.link
     link.target = '_blank'
     link.rel = 'noopener noreferrer'
-    return [el('p', 'small muted token-scopes', help.scopes), link]
+    const note = this.#view.hostNotes?.[host]
+    return [el('p', 'small muted token-scopes', typeof note === 'string' && note ? `${help.scopes} ${visible(note)}` : help.scopes), link]
   }
 
   #tokens(): HTMLElement[] {
-    this.#hint()
     const hosts = this.#view.hosts ?? []
-    const title = el('div', 'page-head')
-    const docs = button('View in docs', 'link small docs-link', undefined, 'button', 'token-docs')
-    docs.dataset.doc = 'git-host-tokens'
-    docs.prepend(icon('link'))
-    title.append(el('h2', 'label', 'Tokens'), docs)
-    const about = el('p', 'small muted page-intro', 'One per git host, to clone, push and open pull requests. Agents never see it.')
-    const parts: HTMLElement[] = [title, about]
-    const offered = [GITHUB, GITLAB, ...(developmentBuild() ? [DEV_HOST] : [])].filter(h => !hosts.some(saved => saved.host === h))
+    const parts: HTMLElement[] = pageHead({ title: 'Git host tokens', headingClass: 'label', intro: 'One per git host, to clone, push and open pull requests. Agents never see it.', docs: { doc: 'git-host-tokens', key: 'token-docs' } })
+    const offered = this.#view.offerHosts ?? []
     if (this.#replacing) parts.push(...this.#tokenHelp(this.#replacing))
     for (const host of this.#hostRows.keys()) if (!hosts.some(h => h.host === host)) this.#hostRows.delete(host)
     replaceKeeping(this.#hostList, hosts.map(h => this.#hostRow(h)))
     if (hosts.length) parts.push(this.#hostList)
     if (hosts.length && !this.#addingHost) {
       if (this.#replacing || this.#forgetting || !offered.length) return parts
-      const more = button('Add another host', 'primary add-host', () => {
+      parts.push(actionsRow([], [button('Add a git host', 'small', () => {
         this.#addingHost = true
         this.#replacing = ''
         this.#forgetting = ''
@@ -969,20 +802,12 @@ class SfProjects extends HTMLElement {
         blank(this.#tokenValue)
         this.#render()
         this.#tokenHost.focus()
-      }, 'button', 'token-more')
-      parts.push(more)
+      }, 'button', 'token-more')]))
       return parts
     }
     if (!offered.length) return parts
     const picked = this.#hostEdited && offered.includes(this.#tokenHost.value) ? this.#tokenHost.value : ''
-    const none = el('option', '', 'Select a git host')
-    none.value = ''
-    none.disabled = true
-    this.#tokenHost.replaceChildren(none, ...offered.map(h => {
-      const o = el('option', '', TOKEN_HOSTS[h]?.label ?? 'Development git server')
-      o.value = h
-      return o
-    }))
+    this.#tokenHost.replaceChildren(option('Select a git host', '', { disabled: true }), ...offered.map(h => option(tokenHostHelp(h)?.label ?? 'Development git server', h)))
     this.#tokenHost.value = picked
     const cancel = hosts.length ? [button('Cancel', 'ghost', () => {
       this.#addingHost = false
@@ -990,7 +815,7 @@ class SfProjects extends HTMLElement {
       this.#render()
     }, 'button', 'token-cancel')] : []
     const save = picked ? [button('Save token', 'primary', undefined, 'submit', 'token-save')] : []
-    const steps = picked ? [...this.#tokenHelp(picked), this.#tokenField, this.#tokenHint] : []
+    const steps = picked ? [...this.#tokenHelp(picked), this.#tokenField] : []
     replaceKeeping(this.#tokenForm, [this.#hostField, ...steps, ...actions(...cancel, ...save)])
     parts.push(this.#tokenForm)
     return parts
@@ -1011,47 +836,30 @@ class SfProjects extends HTMLElement {
         this.#render()
       }, 'button', 'add-cancel')] : []
       const box = field('Repository', this.#add)
-      if (this.#addError) {
-        const said = el('p', 'small bad field-error', this.#addError)
-        said.id = 'repo-url-error'
-        if (this.#addAlert) said.setAttribute('role', 'alert')
-        this.#addAlert = false
-        box.append(said)
-        this.#add.setAttribute('aria-invalid', 'true')
-        this.#add.setAttribute('aria-describedby', said.id)
-      } else {
-        this.#add.removeAttribute('aria-invalid')
-        this.#add.removeAttribute('aria-describedby')
-      }
+      labelError(this.#add, this.#addError)
       const add = stacked(box, ...actions(...cancel, button('Add repository', 'primary', undefined, 'submit', 'add')))
       add.classList.add('repo-add')
-      if (collapsible) add.classList.add('repo-add-card')
-      add.addEventListener('submit', e => {
-        e.preventDefault()
+      add.addEventListener('submit', () => {
         const url = this.#add.value.trim()
-        if (!url) return this.#add.focus()
+        this.#addError = ''
+        labelError(this.#add, '')
         this.#hold('repo', 'add')
         emit(this, 'sf-repo', { op: 'add', url })
       })
-      return add
+      if (!collapsible) return add
+      const card = el('div', 'repo-add-card')
+      card.append(add)
+      return card
     }
-    const head = el('div', 'page-head')
-    const docs = button('View in docs', 'link small docs-link', undefined, 'button', 'docs')
-    docs.dataset.doc = 'projects-and-new-sessions'
-    docs.prepend(icon('link'))
-    head.append(pageCrumb('Projects'), docs)
-    const sub = el('p', 'small muted page-intro', 'Your repositories. Each session works on its own branch, started from the latest main.')
-    const parts: HTMLElement[] = [head, sub]
+    const parts: HTMLElement[] = [
+      ...pageHead({ title: 'Projects', crumb: true, intro: 'Your repositories. Each session works on its own branch, started from the latest main.', docs: { doc: 'projects', key: 'docs' } }),
+    ]
     if (!empty && this.#addingRepo) parts.push(addControl(true))
     const message = this.#message.path === '' ? this.#message.text : ''
     sayIfChanged(this.#messageLine, message, this.#message.bad ? 'bad' : 'muted')
     parts.push(this.#messageLine)
     if (empty) {
-      const box = el('div', 'projects-empty')
-      const media = el('div', 'projects-empty-icon')
-      media.append(icon('folder', ''))
-      box.append(media, el('h3', '', 'No projects yet'), el('p', 'small muted', "Add a repository by its https address. If it's private, save a token for its git host first."), addControl(false))
-      parts.push(box)
+      parts.push(emptyState("Add a repository by its https address. If it's private, save a token for its git host first.", { title: 'No projects yet', icon: 'folder', action: addControl(false) }))
     }
     if (!empty && !this.#addingRepo) {
       const actions = el('div', 'projects-actions')
@@ -1090,6 +898,12 @@ class SfProjects extends HTMLElement {
     else refocus(this, focusKey, nearby)
   }
 
+}
+
+function drawProgress(bar: HTMLElementTagNameMap['sf-progress'], p: CloneProgress | undefined) {
+  bar.hidden = !p
+  bar.percent = typeof p?.percent === 'number' ? p.percent : null
+  bar.label = typeof p?.said === 'string' ? p.said : ''
 }
 
 customElements.define('sf-projects', SfProjects)

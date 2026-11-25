@@ -8,6 +8,11 @@ import (
 
 const identityRoute = "/api/commit-identity"
 
+const (
+	saidIdentitySaved     = "Saved the name and email agents commit with."
+	saidIdentityUnchanged = "No change: agents already commit with this name and email."
+)
+
 func identityJSON(id session.CommitIdentity) map[string]any {
 	if !id.Set() {
 		return map[string]any{"identity": nil}
@@ -22,31 +27,34 @@ func (s *Server) commitIdentity(w http.ResponseWriter, body map[string]any) {
 	}
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "set":
 		name, okName := body["name"].(string)
 		email, okEmail := body["email"].(string)
-		if !keysWithin(body, "op", "name", "email") || !okName || !okEmail || len(name) > 4*session.MaxIdentityName || len(email) > session.MaxIdentityEmail+64 {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "name", "email") || !okName || !okEmail {
+			refuseFields(w)
 			return
 		}
-		err := s.cfg.Identity.SetIdentity(name, email)
-		s.logger.Info("commit identity", "ok", err == nil)
+		changed, err := s.cfg.Identity.SetIdentity(name, email)
+		s.logger.Info("commit identity", "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		done := saveSaid(changed, saidIdentitySaved, saidIdentityUnchanged)
+		said = &done
 	default:
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	id, err := s.cfg.Identity.Identity()
@@ -55,5 +63,9 @@ func (s *Server) commitIdentity(w http.ResponseWriter, body map[string]any) {
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, identityJSON(id))
+	answer := identityJSON(id)
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }

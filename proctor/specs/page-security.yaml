@@ -18,7 +18,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token }
+        "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
@@ -45,6 +45,8 @@ tables:
       - ["t01_diagnostics", "/api/diagnostics"]
       - ["t01_dispatch", "/api/dispatch"]
       - ["t01_egress", "/api/egress"]
+      - ["t01_access", "/api/access"]
+      - ["t01_credentials", "/api/credentials"]
       - ["t01_exceptions", "/api/exceptions"]
       - ["t01_explain", "/api/explain"]
       - ["t01_export", "/api/export"]
@@ -65,7 +67,6 @@ tables:
       - ["t01_message", "/api/message"]
       - ["t01_override", "/api/override"]
       - ["t01_packs", "/api/packs"]
-      - ["t01_pair", "/api/pair"]
       - ["t01_plan_review", "/api/plan-review"]
       - ["t01_prefs", "/api/prefs"]
       - ["t01_project", "/api/project"]
@@ -121,7 +122,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: token }
+        "$.body": { error: token, message: "The page's key is missing or isn't one the engine issued. Reload the page to sign in." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin", "$.body.why"]
@@ -141,6 +142,7 @@ tables:
       - ["t01r_review_reply", "/api/review-reply"]
       - ["t01r_screenshot", "/api/screenshot"]
       - ["t01r_screenshots", "/api/screenshots"]
+      - ["t01r_session_name", "/api/session-name"]
 
   - id: SEC-T02
     name: "A POST route under another Host name, as DNS rebinding would send it, is refused as misdirected, even with the page key"
@@ -159,7 +161,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: host }
+        "$.body": { error: host, message: "The engine answers only at the address it serves the page on. Open the page at that address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -186,6 +188,8 @@ tables:
       - ["t02_diagnostics", "/api/diagnostics"]
       - ["t02_dispatch", "/api/dispatch"]
       - ["t02_egress", "/api/egress"]
+      - ["t02_access", "/api/access"]
+      - ["t02_credentials", "/api/credentials"]
       - ["t02_exceptions", "/api/exceptions"]
       - ["t02_explain", "/api/explain"]
       - ["t02_export", "/api/export"]
@@ -206,7 +210,6 @@ tables:
       - ["t02_message", "/api/message"]
       - ["t02_override", "/api/override"]
       - ["t02_packs", "/api/packs"]
-      - ["t02_pair", "/api/pair"]
       - ["t02_plan_review", "/api/plan-review"]
       - ["t02_prefs", "/api/prefs"]
       - ["t02_project", "/api/project"]
@@ -263,7 +266,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: host }
+        "$.body": { error: host, message: "The engine answers only at the address it serves the page on. Open the page at that address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -283,6 +286,7 @@ tables:
       - ["t02r_review_reply", "/api/review-reply"]
       - ["t02r_screenshot", "/api/screenshot"]
       - ["t02r_screenshots", "/api/screenshots"]
+      - ["t02r_session_name", "/api/session-name"]
 
   - id: SEC-T03
     name: "A POST route refuses another site's Origin, even with the page key"
@@ -301,7 +305,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -328,6 +332,8 @@ tables:
       - ["t03_diagnostics", "/api/diagnostics"]
       - ["t03_dispatch", "/api/dispatch"]
       - ["t03_egress", "/api/egress"]
+      - ["t03_access", "/api/access"]
+      - ["t03_credentials", "/api/credentials"]
       - ["t03_exceptions", "/api/exceptions"]
       - ["t03_explain", "/api/explain"]
       - ["t03_export", "/api/export"]
@@ -348,7 +354,6 @@ tables:
       - ["t03_message", "/api/message"]
       - ["t03_override", "/api/override"]
       - ["t03_packs", "/api/packs"]
-      - ["t03_pair", "/api/pair"]
       - ["t03_plan_review", "/api/plan-review"]
       - ["t03_prefs", "/api/prefs"]
       - ["t03_project", "/api/project"]
@@ -405,7 +410,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -425,6 +430,7 @@ tables:
       - ["t03r_review_reply", "/api/review-reply"]
       - ["t03r_screenshot", "/api/screenshot"]
       - ["t03r_screenshots", "/api/screenshots"]
+      - ["t03r_session_name", "/api/session-name"]
 
   - id: SEC-T04
     name: "A POST route refuses a cross-site fetch, even with the page key"
@@ -443,7 +449,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: site }
+        "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -470,6 +476,8 @@ tables:
       - ["t04_diagnostics", "/api/diagnostics"]
       - ["t04_dispatch", "/api/dispatch"]
       - ["t04_egress", "/api/egress"]
+      - ["t04_access", "/api/access"]
+      - ["t04_credentials", "/api/credentials"]
       - ["t04_exceptions", "/api/exceptions"]
       - ["t04_explain", "/api/explain"]
       - ["t04_export", "/api/export"]
@@ -490,7 +498,6 @@ tables:
       - ["t04_message", "/api/message"]
       - ["t04_override", "/api/override"]
       - ["t04_packs", "/api/packs"]
-      - ["t04_pair", "/api/pair"]
       - ["t04_plan_review", "/api/plan-review"]
       - ["t04_prefs", "/api/prefs"]
       - ["t04_project", "/api/project"]
@@ -547,7 +554,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: site }
+        "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -567,6 +574,7 @@ tables:
       - ["t04r_review_reply", "/api/review-reply"]
       - ["t04r_screenshot", "/api/screenshot"]
       - ["t04r_screenshots", "/api/screenshots"]
+      - ["t04r_session_name", "/api/session-name"]
 
   - id: SEC-T05
     name: "A POST route refuses a request with no Origin, even with the page key"
@@ -584,7 +592,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -611,6 +619,8 @@ tables:
       - ["t05_diagnostics", "/api/diagnostics"]
       - ["t05_dispatch", "/api/dispatch"]
       - ["t05_egress", "/api/egress"]
+      - ["t05_access", "/api/access"]
+      - ["t05_credentials", "/api/credentials"]
       - ["t05_exceptions", "/api/exceptions"]
       - ["t05_explain", "/api/explain"]
       - ["t05_export", "/api/export"]
@@ -631,7 +641,6 @@ tables:
       - ["t05_message", "/api/message"]
       - ["t05_override", "/api/override"]
       - ["t05_packs", "/api/packs"]
-      - ["t05_pair", "/api/pair"]
       - ["t05_plan_review", "/api/plan-review"]
       - ["t05_prefs", "/api/prefs"]
       - ["t05_project", "/api/project"]
@@ -687,7 +696,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -707,6 +716,7 @@ tables:
       - ["t05r_review_reply", "/api/review-reply"]
       - ["t05r_screenshot", "/api/screenshot"]
       - ["t05r_screenshots", "/api/screenshots"]
+      - ["t05r_session_name", "/api/session-name"]
 
   - id: SEC-T06
     name: "A POST route refuses a body that isn't declared JSON, even with the page key"
@@ -725,92 +735,93 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: type }
+        "$.body": { error: type, message: "${row.message}" }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 415 before the route's handler reads the body, since its Content-Type isn't the route's, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
     waive: { EXE-09: { rows: [t06_remove_repo, t06_remove_session, t06_packs], reason: "the remove-repo, remove-session and packs rows send the text {} as text/plain, which names no repository, session or pack, and every row is refused with 415 before the route's handler reads the body, so nothing can be removed" } }
     covers: not_json
-    columns: ["case", "route"]
+    columns: ["case", "route", "message"]
     rows:
-      - ["t06_add_repo", "/api/add-repo"]
-      - ["t06_allow_commit", "/api/allow-commit"]
-      - ["t06_allow_file", "/api/allow-file"]
-      - ["t06_allow_rules", "/api/allow-rules"]
-      - ["t06_answer", "/api/answer"]
-      - ["t06_approve_plan", "/api/approve-plan"]
-      - ["t06_approve_requirements", "/api/approve-requirements"]
-      - ["t06_bring_main", "/api/bring-main"]
-      - ["t06_claude_login", "/api/claude-login"]
-      - ["t06_claude_trust", "/api/claude-trust"]
-      - ["t06_clone_again", "/api/clone-again"]
-      - ["t06_commit_identity", "/api/commit-identity"]
-      - ["t06_commit_rewrite", "/api/commit-rewrite"]
-      - ["t06_control", "/api/control"]
-      - ["t06_decision_log", "/api/decision-log"]
-      - ["t06_diagnostics", "/api/diagnostics"]
-      - ["t06_dispatch", "/api/dispatch"]
-      - ["t06_egress", "/api/egress"]
-      - ["t06_exceptions", "/api/exceptions"]
-      - ["t06_explain", "/api/explain"]
-      - ["t06_export", "/api/export"]
-      - ["t06_file_match", "/api/file-match"]
-      - ["t06_files", "/api/files"]
-      - ["t06_finding_issues", "/api/finding-issues"]
-      - ["t06_flag_remove", "/api/flag-remove"]
-      - ["t06_forge_answer", "/api/forge-answer"]
-      - ["t06_halt", "/api/halt"]
-      - ["t06_handoff", "/api/handoff"]
-      - ["t06_import", "/api/import"]
-      - ["t06_interrupt", "/api/interrupt"]
-      - ["t06_issues", "/api/issues"]
-      - ["t06_keep", "/api/keep"]
-      - ["t06_lessons", "/api/lessons"]
-      - ["t06_limits", "/api/limits"]
-      - ["t06_lock_tests", "/api/lock-tests"]
-      - ["t06_message", "/api/message"]
-      - ["t06_override", "/api/override"]
-      - ["t06_packs", "/api/packs"]
-      - ["t06_pair", "/api/pair"]
-      - ["t06_plan_review", "/api/plan-review"]
-      - ["t06_prefs", "/api/prefs"]
-      - ["t06_project", "/api/project"]
-      - ["t06_project_commands", "/api/project-commands"]
-      - ["t06_project_facts", "/api/project-facts"]
-      - ["t06_pull_request", "/api/pull-request"]
-      - ["t06_push", "/api/push"]
-      - ["t06_push_answer", "/api/push-answer"]
-      - ["t06_push_record", "/api/push-record"]
-      - ["t06_recap", "/api/recap"]
-      - ["t06_release", "/api/release"]
-      - ["t06_remove_repo", "/api/remove-repo"]
-      - ["t06_remove_session", "/api/remove-session"]
-      - ["t06_remove_token", "/api/remove-token"]
-      - ["t06_replay", "/api/replay"]
-      - ["t06_review", "/api/review"]
-      - ["t06_review_depth", "/api/review-depth"]
-      - ["t06_review_models", "/api/review-models"]
-      - ["t06_reviewer_agents", "/api/reviewer-agents"]
-      - ["t06_save_token", "/api/save-token"]
-      - ["t06_saved_prompts", "/api/saved-prompts"]
-      - ["t06_send_findings", "/api/send-findings"]
-      - ["t06_session", "/api/session"]
-      - ["t06_session_work", "/api/session-work"]
-      - ["t06_sign_in_expect", "/api/sign-in-expect"]
-      - ["t06_size", "/api/size"]
-      - ["t06_split", "/api/split"]
-      - ["t06_start_points", "/api/start-points"]
-      - ["t06_stop_session", "/api/stop-session"]
-      - ["t06_team", "/api/team"]
-      - ["t06_test_list", "/api/test-list"]
-      - ["t06_update", "/api/update"]
-      - ["t06_upload", "/api/upload"]
-      - ["t06_verify", "/api/verify"]
-      - ["t06_viewed", "/api/viewed"]
-      - ["t06_wake", "/api/wake"]
-      - ["t06_walkthrough_check", "/api/walkthrough-check"]
-      - ["t06_workspace", "/api/workspace"]
+      - ["t06_add_repo", "/api/add-repo", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_allow_commit", "/api/allow-commit", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_allow_file", "/api/allow-file", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_allow_rules", "/api/allow-rules", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_answer", "/api/answer", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_approve_plan", "/api/approve-plan", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_approve_requirements", "/api/approve-requirements", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_bring_main", "/api/bring-main", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_claude_login", "/api/claude-login", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_claude_trust", "/api/claude-trust", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_clone_again", "/api/clone-again", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_commit_identity", "/api/commit-identity", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_commit_rewrite", "/api/commit-rewrite", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_control", "/api/control", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_decision_log", "/api/decision-log", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_diagnostics", "/api/diagnostics", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_dispatch", "/api/dispatch", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_egress", "/api/egress", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_access", "/api/access", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_credentials", "/api/credentials", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_exceptions", "/api/exceptions", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_explain", "/api/explain", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_export", "/api/export", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_file_match", "/api/file-match", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_files", "/api/files", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_finding_issues", "/api/finding-issues", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_flag_remove", "/api/flag-remove", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_forge_answer", "/api/forge-answer", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_halt", "/api/halt", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_handoff", "/api/handoff", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_import", "/api/import", "An import takes a backup file, sent with Content-Type application/gzip."]
+      - ["t06_interrupt", "/api/interrupt", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_issues", "/api/issues", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_keep", "/api/keep", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_lessons", "/api/lessons", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_limits", "/api/limits", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_lock_tests", "/api/lock-tests", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_message", "/api/message", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_override", "/api/override", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_packs", "/api/packs", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_plan_review", "/api/plan-review", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_prefs", "/api/prefs", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_project", "/api/project", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_project_commands", "/api/project-commands", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_project_facts", "/api/project-facts", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_pull_request", "/api/pull-request", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_push", "/api/push", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_push_answer", "/api/push-answer", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_push_record", "/api/push-record", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_recap", "/api/recap", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_release", "/api/release", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_remove_repo", "/api/remove-repo", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_remove_session", "/api/remove-session", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_remove_token", "/api/remove-token", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_replay", "/api/replay", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_review", "/api/review", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_review_depth", "/api/review-depth", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_review_models", "/api/review-models", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_reviewer_agents", "/api/reviewer-agents", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_save_token", "/api/save-token", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_saved_prompts", "/api/saved-prompts", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_send_findings", "/api/send-findings", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_session", "/api/session", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_session_work", "/api/session-work", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_sign_in_expect", "/api/sign-in-expect", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_size", "/api/size", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_split", "/api/split", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_start_points", "/api/start-points", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_stop_session", "/api/stop-session", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_team", "/api/team", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_test_list", "/api/test-list", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_update", "/api/update", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_upload", "/api/upload", "The engine takes an image as PNG, JPEG, GIF or WebP, or a file as application/octet-stream."]
+      - ["t06_verify", "/api/verify", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_viewed", "/api/viewed", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_wake", "/api/wake", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_walkthrough_check", "/api/walkthrough-check", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_workspace", "/api/workspace", "The engine takes this request as JSON only, sent with Content-Type application/json."]
 
   - id: SEC-T06R
     name: "A POST route refuses a body that isn't declared JSON, even with the page key (routes that only read)"
@@ -829,7 +840,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: type }
+        "$.body": { error: type, message: "The engine takes this request as JSON only, sent with Content-Type application/json." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -849,6 +860,7 @@ tables:
       - ["t06r_review_reply", "/api/review-reply"]
       - ["t06r_screenshot", "/api/screenshot"]
       - ["t06r_screenshots", "/api/screenshots"]
+      - ["t06r_session_name", "/api/session-name"]
 
   - id: SEC-T07
     name: "A JSON route refuses a body over 64 KiB"
@@ -867,7 +879,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: body }
+        "$.body": { error: body, message: "The request is over 64 KiB, the most the engine takes on this route." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -892,6 +904,8 @@ tables:
       - ["t07_diagnostics", "/api/diagnostics"]
       - ["t07_dispatch", "/api/dispatch"]
       - ["t07_egress", "/api/egress"]
+      - ["t07_access", "/api/access"]
+      - ["t07_credentials", "/api/credentials"]
       - ["t07_exceptions", "/api/exceptions"]
       - ["t07_explain", "/api/explain"]
       - ["t07_export", "/api/export"]
@@ -910,7 +924,6 @@ tables:
       - ["t07_lock_tests", "/api/lock-tests"]
       - ["t07_message", "/api/message"]
       - ["t07_override", "/api/override"]
-      - ["t07_pair", "/api/pair"]
       - ["t07_plan_review", "/api/plan-review"]
       - ["t07_prefs", "/api/prefs"]
       - ["t07_project", "/api/project"]
@@ -965,7 +978,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: body }
+        "$.body": { error: body, message: "The request is over 64 KiB, the most the engine takes on this route." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -985,6 +998,7 @@ tables:
       - ["t07r_review_reply", "/api/review-reply"]
       - ["t07r_screenshot", "/api/screenshot"]
       - ["t07r_screenshots", "/api/screenshots"]
+      - ["t07r_session_name", "/api/session-name"]
 
   - id: SEC-T08
     name: "The approval routes and the reviewer agents route refuse a body over 1 MiB"
@@ -1003,17 +1017,17 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: body }
+        "$.body": { error: body, message: "${row.message}" }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
     no_state_check: "refused with 413 while the body is read, before the route's handler runs, so the route changed nothing; no single read the page offers shows the state of every route in this table, and a table row can't name a read of its own"
     covers: json_over_1m
-    columns: ["case", "route"]
+    columns: ["case", "route", "message"]
     rows:
-      - ["t08_approve_plan", "/api/approve-plan"]
-      - ["t08_approve_requirements", "/api/approve-requirements"]
-      - ["t08_reviewer_agents", "/api/reviewer-agents"]
+      - ["t08_approve_plan", "/api/approve-plan", "The request is over 1 MiB, the most the engine takes on this route."]
+      - ["t08_approve_requirements", "/api/approve-requirements", "The request is over 1 MiB, the most the engine takes on this route."]
+      - ["t08_reviewer_agents", "/api/reviewer-agents", "The engine refused this agent file: it is over 1 MiB, the most a request to it carries."]
 
   - id: SEC-T09
     name: "A POST route refuses a query string, so nothing it takes travels in a URL"
@@ -1033,7 +1047,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: query }
+        "$.body": { error: query, message: "The engine's routes take no query string." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -1060,6 +1074,8 @@ tables:
       - ["t09_diagnostics", "/api/diagnostics"]
       - ["t09_dispatch", "/api/dispatch"]
       - ["t09_egress", "/api/egress"]
+      - ["t09_access", "/api/access"]
+      - ["t09_credentials", "/api/credentials"]
       - ["t09_exceptions", "/api/exceptions"]
       - ["t09_explain", "/api/explain"]
       - ["t09_export", "/api/export"]
@@ -1080,7 +1096,6 @@ tables:
       - ["t09_message", "/api/message"]
       - ["t09_override", "/api/override"]
       - ["t09_packs", "/api/packs"]
-      - ["t09_pair", "/api/pair"]
       - ["t09_plan_review", "/api/plan-review"]
       - ["t09_prefs", "/api/prefs"]
       - ["t09_project", "/api/project"]
@@ -1138,7 +1153,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: query }
+        "$.body": { error: query, message: "The engine's routes take no query string." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -1158,6 +1173,7 @@ tables:
       - ["t09r_review_reply", "/api/review-reply"]
       - ["t09r_screenshot", "/api/screenshot"]
       - ["t09r_screenshots", "/api/screenshots"]
+      - ["t09r_session_name", "/api/session-name"]
 
   - id: SEC-T10
     name: "A POST route refuses GET, even with the page key"
@@ -1175,7 +1191,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: method }
+        "$.body": { error: method, message: "The engine doesn't take that method on this route." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -1205,6 +1221,8 @@ tables:
       - ["t10_dispatch", "/api/dispatch"]
       - ["t10_docs", "/api/docs"]
       - ["t10_egress", "/api/egress"]
+      - ["t10_access", "/api/access"]
+      - ["t10_credentials", "/api/credentials"]
       - ["t10_exceptions", "/api/exceptions"]
       - ["t10_explain", "/api/explain"]
       - ["t10_export", "/api/export"]
@@ -1229,7 +1247,6 @@ tables:
       - ["t10_metrics", "/api/metrics"]
       - ["t10_override", "/api/override"]
       - ["t10_packs", "/api/packs"]
-      - ["t10_pair", "/api/pair"]
       - ["t10_plan_review", "/api/plan-review"]
       - ["t10_prefs", "/api/prefs"]
       - ["t10_project", "/api/project"]
@@ -1257,6 +1274,7 @@ tables:
       - ["t10_screenshots", "/api/screenshots"]
       - ["t10_send_findings", "/api/send-findings"]
       - ["t10_session", "/api/session"]
+      - ["t10_session_name", "/api/session-name"]
       - ["t10_session_work", "/api/session-work"]
       - ["t10_sign_in_expect", "/api/sign-in-expect"]
       - ["t10_size", "/api/size"]
@@ -1291,7 +1309,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: method }
+        "$.body": { error: method, message: "The engine doesn't take that method on this route." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -1323,6 +1341,8 @@ tables:
           - t11_put_dispatch
           - t11_put_docs
           - t11_put_egress
+          - t11_put_access
+          - t11_put_credentials
           - t11_put_exceptions
           - t11_put_explain
           - t11_put_export
@@ -1347,7 +1367,6 @@ tables:
           - t11_put_metrics
           - t11_put_override
           - t11_put_packs
-          - t11_put_pair
           - t11_put_plan_review
           - t11_put_prefs
           - t11_put_project
@@ -1375,6 +1394,7 @@ tables:
           - t11_put_screenshots
           - t11_put_send_findings
           - t11_put_session
+          - t11_put_session_name
           - t11_put_session_work
           - t11_put_sign_in_expect
           - t11_put_size
@@ -1413,6 +1433,8 @@ tables:
           - t11_delete_dispatch
           - t11_delete_docs
           - t11_delete_egress
+          - t11_delete_access
+          - t11_delete_credentials
           - t11_delete_exceptions
           - t11_delete_explain
           - t11_delete_export
@@ -1437,7 +1459,6 @@ tables:
           - t11_delete_metrics
           - t11_delete_override
           - t11_delete_packs
-          - t11_delete_pair
           - t11_delete_plan_review
           - t11_delete_prefs
           - t11_delete_project
@@ -1465,6 +1486,7 @@ tables:
           - t11_delete_screenshots
           - t11_delete_send_findings
           - t11_delete_session
+          - t11_delete_session_name
           - t11_delete_session_work
           - t11_delete_sign_in_expect
           - t11_delete_size
@@ -1503,6 +1525,8 @@ tables:
           - t11_patch_dispatch
           - t11_patch_docs
           - t11_patch_egress
+          - t11_patch_access
+          - t11_patch_credentials
           - t11_patch_exceptions
           - t11_patch_explain
           - t11_patch_export
@@ -1527,7 +1551,6 @@ tables:
           - t11_patch_metrics
           - t11_patch_override
           - t11_patch_packs
-          - t11_patch_pair
           - t11_patch_plan_review
           - t11_patch_prefs
           - t11_patch_project
@@ -1555,6 +1578,7 @@ tables:
           - t11_patch_screenshots
           - t11_patch_send_findings
           - t11_patch_session
+          - t11_patch_session_name
           - t11_patch_session_work
           - t11_patch_sign_in_expect
           - t11_patch_size
@@ -1596,6 +1620,8 @@ tables:
       - ["t11_put_dispatch", "/api/dispatch", "PUT"]
       - ["t11_put_docs", "/api/docs", "PUT"]
       - ["t11_put_egress", "/api/egress", "PUT"]
+      - ["t11_put_access", "/api/access", "PUT"]
+      - ["t11_put_credentials", "/api/credentials", "PUT"]
       - ["t11_put_exceptions", "/api/exceptions", "PUT"]
       - ["t11_put_explain", "/api/explain", "PUT"]
       - ["t11_put_export", "/api/export", "PUT"]
@@ -1620,7 +1646,6 @@ tables:
       - ["t11_put_metrics", "/api/metrics", "PUT"]
       - ["t11_put_override", "/api/override", "PUT"]
       - ["t11_put_packs", "/api/packs", "PUT"]
-      - ["t11_put_pair", "/api/pair", "PUT"]
       - ["t11_put_plan_review", "/api/plan-review", "PUT"]
       - ["t11_put_prefs", "/api/prefs", "PUT"]
       - ["t11_put_project", "/api/project", "PUT"]
@@ -1648,6 +1673,7 @@ tables:
       - ["t11_put_screenshots", "/api/screenshots", "PUT"]
       - ["t11_put_send_findings", "/api/send-findings", "PUT"]
       - ["t11_put_session", "/api/session", "PUT"]
+      - ["t11_put_session_name", "/api/session-name", "PUT"]
       - ["t11_put_session_work", "/api/session-work", "PUT"]
       - ["t11_put_sign_in_expect", "/api/sign-in-expect", "PUT"]
       - ["t11_put_size", "/api/size", "PUT"]
@@ -1686,6 +1712,8 @@ tables:
       - ["t11_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t11_delete_docs", "/api/docs", "DELETE"]
       - ["t11_delete_egress", "/api/egress", "DELETE"]
+      - ["t11_delete_access", "/api/access", "DELETE"]
+      - ["t11_delete_credentials", "/api/credentials", "DELETE"]
       - ["t11_delete_exceptions", "/api/exceptions", "DELETE"]
       - ["t11_delete_explain", "/api/explain", "DELETE"]
       - ["t11_delete_export", "/api/export", "DELETE"]
@@ -1710,7 +1738,6 @@ tables:
       - ["t11_delete_metrics", "/api/metrics", "DELETE"]
       - ["t11_delete_override", "/api/override", "DELETE"]
       - ["t11_delete_packs", "/api/packs", "DELETE"]
-      - ["t11_delete_pair", "/api/pair", "DELETE"]
       - ["t11_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t11_delete_prefs", "/api/prefs", "DELETE"]
       - ["t11_delete_project", "/api/project", "DELETE"]
@@ -1738,6 +1765,7 @@ tables:
       - ["t11_delete_screenshots", "/api/screenshots", "DELETE"]
       - ["t11_delete_send_findings", "/api/send-findings", "DELETE"]
       - ["t11_delete_session", "/api/session", "DELETE"]
+      - ["t11_delete_session_name", "/api/session-name", "DELETE"]
       - ["t11_delete_session_work", "/api/session-work", "DELETE"]
       - ["t11_delete_sign_in_expect", "/api/sign-in-expect", "DELETE"]
       - ["t11_delete_size", "/api/size", "DELETE"]
@@ -1776,6 +1804,8 @@ tables:
       - ["t11_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t11_patch_docs", "/api/docs", "PATCH"]
       - ["t11_patch_egress", "/api/egress", "PATCH"]
+      - ["t11_patch_access", "/api/access", "PATCH"]
+      - ["t11_patch_credentials", "/api/credentials", "PATCH"]
       - ["t11_patch_exceptions", "/api/exceptions", "PATCH"]
       - ["t11_patch_explain", "/api/explain", "PATCH"]
       - ["t11_patch_export", "/api/export", "PATCH"]
@@ -1800,7 +1830,6 @@ tables:
       - ["t11_patch_metrics", "/api/metrics", "PATCH"]
       - ["t11_patch_override", "/api/override", "PATCH"]
       - ["t11_patch_packs", "/api/packs", "PATCH"]
-      - ["t11_patch_pair", "/api/pair", "PATCH"]
       - ["t11_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t11_patch_prefs", "/api/prefs", "PATCH"]
       - ["t11_patch_project", "/api/project", "PATCH"]
@@ -1828,6 +1857,7 @@ tables:
       - ["t11_patch_screenshots", "/api/screenshots", "PATCH"]
       - ["t11_patch_send_findings", "/api/send-findings", "PATCH"]
       - ["t11_patch_session", "/api/session", "PATCH"]
+      - ["t11_patch_session_name", "/api/session-name", "PATCH"]
       - ["t11_patch_session_work", "/api/session-work", "PATCH"]
       - ["t11_patch_sign_in_expect", "/api/sign-in-expect", "PATCH"]
       - ["t11_patch_size", "/api/size", "PATCH"]
@@ -1860,7 +1890,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: method }
+        "$.body": { error: method, message: "The engine doesn't take that method on this route." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -1892,6 +1922,8 @@ tables:
           - t12_put_dispatch
           - t12_put_docs
           - t12_put_egress
+          - t12_put_access
+          - t12_put_credentials
           - t12_put_exceptions
           - t12_put_explain
           - t12_put_export
@@ -1916,7 +1948,6 @@ tables:
           - t12_put_metrics
           - t12_put_override
           - t12_put_packs
-          - t12_put_pair
           - t12_put_plan_review
           - t12_put_prefs
           - t12_put_project
@@ -1944,6 +1975,7 @@ tables:
           - t12_put_screenshots
           - t12_put_send_findings
           - t12_put_session
+          - t12_put_session_name
           - t12_put_session_work
           - t12_put_sign_in_expect
           - t12_put_size
@@ -1982,6 +2014,8 @@ tables:
           - t12_delete_dispatch
           - t12_delete_docs
           - t12_delete_egress
+          - t12_delete_access
+          - t12_delete_credentials
           - t12_delete_exceptions
           - t12_delete_explain
           - t12_delete_export
@@ -2006,7 +2040,6 @@ tables:
           - t12_delete_metrics
           - t12_delete_override
           - t12_delete_packs
-          - t12_delete_pair
           - t12_delete_plan_review
           - t12_delete_prefs
           - t12_delete_project
@@ -2034,6 +2067,7 @@ tables:
           - t12_delete_screenshots
           - t12_delete_send_findings
           - t12_delete_session
+          - t12_delete_session_name
           - t12_delete_session_work
           - t12_delete_sign_in_expect
           - t12_delete_size
@@ -2072,6 +2106,8 @@ tables:
           - t12_patch_dispatch
           - t12_patch_docs
           - t12_patch_egress
+          - t12_patch_access
+          - t12_patch_credentials
           - t12_patch_exceptions
           - t12_patch_explain
           - t12_patch_export
@@ -2096,7 +2132,6 @@ tables:
           - t12_patch_metrics
           - t12_patch_override
           - t12_patch_packs
-          - t12_patch_pair
           - t12_patch_plan_review
           - t12_patch_prefs
           - t12_patch_project
@@ -2124,6 +2159,7 @@ tables:
           - t12_patch_screenshots
           - t12_patch_send_findings
           - t12_patch_session
+          - t12_patch_session_name
           - t12_patch_session_work
           - t12_patch_sign_in_expect
           - t12_patch_size
@@ -2165,6 +2201,8 @@ tables:
       - ["t12_put_dispatch", "/api/dispatch", "PUT"]
       - ["t12_put_docs", "/api/docs", "PUT"]
       - ["t12_put_egress", "/api/egress", "PUT"]
+      - ["t12_put_access", "/api/access", "PUT"]
+      - ["t12_put_credentials", "/api/credentials", "PUT"]
       - ["t12_put_exceptions", "/api/exceptions", "PUT"]
       - ["t12_put_explain", "/api/explain", "PUT"]
       - ["t12_put_export", "/api/export", "PUT"]
@@ -2189,7 +2227,6 @@ tables:
       - ["t12_put_metrics", "/api/metrics", "PUT"]
       - ["t12_put_override", "/api/override", "PUT"]
       - ["t12_put_packs", "/api/packs", "PUT"]
-      - ["t12_put_pair", "/api/pair", "PUT"]
       - ["t12_put_plan_review", "/api/plan-review", "PUT"]
       - ["t12_put_prefs", "/api/prefs", "PUT"]
       - ["t12_put_project", "/api/project", "PUT"]
@@ -2217,6 +2254,7 @@ tables:
       - ["t12_put_screenshots", "/api/screenshots", "PUT"]
       - ["t12_put_send_findings", "/api/send-findings", "PUT"]
       - ["t12_put_session", "/api/session", "PUT"]
+      - ["t12_put_session_name", "/api/session-name", "PUT"]
       - ["t12_put_session_work", "/api/session-work", "PUT"]
       - ["t12_put_sign_in_expect", "/api/sign-in-expect", "PUT"]
       - ["t12_put_size", "/api/size", "PUT"]
@@ -2255,6 +2293,8 @@ tables:
       - ["t12_delete_dispatch", "/api/dispatch", "DELETE"]
       - ["t12_delete_docs", "/api/docs", "DELETE"]
       - ["t12_delete_egress", "/api/egress", "DELETE"]
+      - ["t12_delete_access", "/api/access", "DELETE"]
+      - ["t12_delete_credentials", "/api/credentials", "DELETE"]
       - ["t12_delete_exceptions", "/api/exceptions", "DELETE"]
       - ["t12_delete_explain", "/api/explain", "DELETE"]
       - ["t12_delete_export", "/api/export", "DELETE"]
@@ -2279,7 +2319,6 @@ tables:
       - ["t12_delete_metrics", "/api/metrics", "DELETE"]
       - ["t12_delete_override", "/api/override", "DELETE"]
       - ["t12_delete_packs", "/api/packs", "DELETE"]
-      - ["t12_delete_pair", "/api/pair", "DELETE"]
       - ["t12_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t12_delete_prefs", "/api/prefs", "DELETE"]
       - ["t12_delete_project", "/api/project", "DELETE"]
@@ -2307,6 +2346,7 @@ tables:
       - ["t12_delete_screenshots", "/api/screenshots", "DELETE"]
       - ["t12_delete_send_findings", "/api/send-findings", "DELETE"]
       - ["t12_delete_session", "/api/session", "DELETE"]
+      - ["t12_delete_session_name", "/api/session-name", "DELETE"]
       - ["t12_delete_session_work", "/api/session-work", "DELETE"]
       - ["t12_delete_sign_in_expect", "/api/sign-in-expect", "DELETE"]
       - ["t12_delete_size", "/api/size", "DELETE"]
@@ -2345,6 +2385,8 @@ tables:
       - ["t12_patch_dispatch", "/api/dispatch", "PATCH"]
       - ["t12_patch_docs", "/api/docs", "PATCH"]
       - ["t12_patch_egress", "/api/egress", "PATCH"]
+      - ["t12_patch_access", "/api/access", "PATCH"]
+      - ["t12_patch_credentials", "/api/credentials", "PATCH"]
       - ["t12_patch_exceptions", "/api/exceptions", "PATCH"]
       - ["t12_patch_explain", "/api/explain", "PATCH"]
       - ["t12_patch_export", "/api/export", "PATCH"]
@@ -2369,7 +2411,6 @@ tables:
       - ["t12_patch_metrics", "/api/metrics", "PATCH"]
       - ["t12_patch_override", "/api/override", "PATCH"]
       - ["t12_patch_packs", "/api/packs", "PATCH"]
-      - ["t12_patch_pair", "/api/pair", "PATCH"]
       - ["t12_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t12_patch_prefs", "/api/prefs", "PATCH"]
       - ["t12_patch_project", "/api/project", "PATCH"]
@@ -2397,6 +2438,7 @@ tables:
       - ["t12_patch_screenshots", "/api/screenshots", "PATCH"]
       - ["t12_patch_send_findings", "/api/send-findings", "PATCH"]
       - ["t12_patch_session", "/api/session", "PATCH"]
+      - ["t12_patch_session_name", "/api/session-name", "PATCH"]
       - ["t12_patch_session_work", "/api/session-work", "PATCH"]
       - ["t12_patch_sign_in_expect", "/api/sign-in-expect", "PATCH"]
       - ["t12_patch_size", "/api/size", "PATCH"]
@@ -2430,7 +2472,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: site }
+        "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -2457,6 +2499,8 @@ tables:
       - ["t13_diagnostics", "/api/diagnostics"]
       - ["t13_dispatch", "/api/dispatch"]
       - ["t13_egress", "/api/egress"]
+      - ["t13_access", "/api/access"]
+      - ["t13_credentials", "/api/credentials"]
       - ["t13_exceptions", "/api/exceptions"]
       - ["t13_explain", "/api/explain"]
       - ["t13_export", "/api/export"]
@@ -2477,7 +2521,6 @@ tables:
       - ["t13_message", "/api/message"]
       - ["t13_override", "/api/override"]
       - ["t13_packs", "/api/packs"]
-      - ["t13_pair", "/api/pair"]
       - ["t13_plan_review", "/api/plan-review"]
       - ["t13_prefs", "/api/prefs"]
       - ["t13_project", "/api/project"]
@@ -2534,7 +2577,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: site }
+        "$.body": { error: site, message: "The engine takes requests only from its own page, not from another site." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -2554,6 +2597,7 @@ tables:
       - ["t13r_review_reply", "/api/review-reply"]
       - ["t13r_screenshot", "/api/screenshot"]
       - ["t13r_screenshots", "/api/screenshots"]
+      - ["t13r_session_name", "/api/session-name"]
 
   - id: SEC-T14
     name: "A POST route refuses an Origin that only starts with the page's origin, even with the page key"
@@ -2572,7 +2616,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -2604,7 +2648,7 @@ tables:
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.referrer-policy": ["no-referrer"]
         "$.headers.cache-control": ["no-store"]
-        "$.body": { error: origin }
+        "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
       present: ["$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]
@@ -2631,7 +2675,7 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: route }
+            "$.body": { error: route, message: "The engine has no such route." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
@@ -2651,7 +2695,7 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: route }
+            "$.body": { error: route, message: "The engine has no such route." }
 
   - id: SEC-003
     name: "A CORS preflight from another site gets no grant"
@@ -2667,7 +2711,7 @@ scenarios:
           equal:
             "$.status": 403
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: origin }
+            "$.body": { error: origin, message: "The engine takes requests only from its own page. Open the page at its own address." }
           absent: ["$.headers.access-control-allow-origin", "$.headers.access-control-allow-methods", "$.headers.access-control-allow-headers"]
 
   - id: SEC-004
@@ -2684,7 +2728,7 @@ scenarios:
           equal:
             "$.status": 405
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: method }
+            "$.body": { error: method, message: "The engine doesn't take that method on this route." }
           absent: ["$.headers.access-control-allow-origin", "$.headers.access-control-allow-methods"]
 
   - id: SEC-005
@@ -2734,7 +2778,7 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: route }
+            "$.body": { error: route, message: "The engine has no such route." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
@@ -2754,7 +2798,7 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: route }
+            "$.body": { error: route, message: "The engine has no such route." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
@@ -2771,7 +2815,7 @@ scenarios:
           equal:
             "$.status": 404
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: route }
+            "$.body": { error: route, message: "The engine has no such route." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
@@ -2788,8 +2832,28 @@ scenarios:
           equal:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
-            "$.body": { error: op }
+            "$.body": { error: op, message: "That op isn't one this route takes. Reload the page and try again." }
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
         no_state_check: "the egress route refuses an op it doesn't take before it reads or changes the allowlist, so there is no change to read back"
+  - id: SEC-008
+    name: "The removed pair route, which started two sessions on one task, is refused as a path that names no route, even with the page key; its body holds only a field no route takes, so a pair route that came back would refuse it with 400 fields"
+    steps:
+      - id: pair-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/pair"
+          headers: { Origin: "${page.origin}" }
+          body: { proctorUnknownField: true }
+        expect:
+          equal:
+            "$.status": 404
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: route, message: "The engine has no such route." }
+          present: ["$.headers.x-sf-request"]
+          matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
+          absent: ["$.headers.x-sf-request[1]"]
+        no_state_check: "the path names no route, so no handler ran and there is no state of that route to read back"

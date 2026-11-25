@@ -284,7 +284,7 @@ func (l *Lessons) changeState(fn func(st *LessonState) error, failed func(err er
 	if err != nil {
 		l.cfg.Logger.Warn("lessons", "event", "records-unreadable")
 		failed(err)
-		return explained(conflict("records"), "The engine couldn't read its lessons from reviews.")
+		return conflict("records", "The engine couldn't read its lessons from reviews.")
 	}
 	if st.Projects == nil {
 		st.Projects = map[string]LessonProject{}
@@ -297,7 +297,7 @@ func (l *Lessons) changeState(fn func(st *LessonState) error, failed func(err er
 	if err != nil {
 		l.cfg.Logger.Warn("lessons", "event", "records-not-saved")
 		failed(err)
-		return explained(conflict("records"), "The engine couldn't save its lessons from reviews.")
+		return conflict("records", "The engine couldn't save its lessons from reviews.")
 	}
 	if trimmed > 0 {
 		l.cfg.Logger.Warn("lessons", "event", "removed-trimmed-to-fit", "records", trimmed)
@@ -429,13 +429,13 @@ func offeredOf(p LessonProject) []LessonFinding {
 
 func (l *Lessons) Lessons(project string) (LessonsView, error) {
 	if project == "" {
-		return LessonsView{}, explained(invalid("project"), "Name a project.")
+		return LessonsView{}, invalid("project", "Name a project.")
 	}
 	l.store.Lock()
 	all := l.load()
 	l.store.Unlock()
 	if all == nil {
-		return LessonsView{}, explained(conflict("records"), "The engine couldn't read its lessons from reviews.")
+		return LessonsView{}, conflict("records", "The engine couldn't read its lessons from reviews.")
 	}
 	p := all[project]
 	v := LessonsView{Project: project, After: LessonAfter}
@@ -534,17 +534,17 @@ func lessonFiles(given []LessonFinding, comments []PullComment) []SnapshotFile {
 
 func (l *Lessons) Suggest(ctx context.Context, project string, costOK bool) error {
 	if project == "" {
-		return explained(invalid("project"), "Name a project.")
+		return invalid("project", "Name a project.")
 	}
 	l.store.Lock()
 	all := l.load()
 	l.store.Unlock()
 	if all == nil {
-		return explained(conflict("records"), "The engine couldn't read its lessons from reviews.")
+		return conflict("records", "The engine couldn't read its lessons from reviews.")
 	}
 	given := offeredOf(all[project])
 	if len(given) == 0 {
-		return explained(conflict("nothing to suggest"), "No finding has blocked "+strconv.Itoa(LessonAfter)+" commits of this project without a line you approved, so there's nothing to suggest lines from.")
+		return conflict("nothing to suggest", "No finding has blocked "+strconv.Itoa(LessonAfter)+" commits of this project without a line you approved, so there's nothing to suggest lines from.")
 	}
 	key := "lessons:" + project
 	r := l.cfg.Reviews
@@ -665,14 +665,14 @@ func lessonNote(line string) string {
 
 func (l *Lessons) Approve(project, id, sid string) error {
 	if !lessonLineID.MatchString(id) {
-		return explained(invalid("id"), "That isn't a suggested line.")
+		return invalid("id", "That isn't a suggested line.")
 	}
 	if l.cfg.Note == nil {
-		return explained(conflict("no notes"), "This engine can't give a session a note.")
+		return conflict("no notes", "This engine can't give a session a note.")
 	}
 	in := slices.ContainsFunc(l.cfg.Sessions(), func(i Info) bool { return i.SID == sid && i.Project == project })
 	if !in {
-		return explained(conflict("session"), "Pick a session of this project to send the line to.")
+		return onField("sid", conflict("session", "Pick a session of this project to send the line to."))
 	}
 	if l.cfg.History != nil {
 		if err := l.cfg.History(sid); err != nil {
@@ -684,7 +684,7 @@ func (l *Lessons) Approve(project, id, sid string) error {
 		p := all[project]
 		i := slices.IndexFunc(p.Lines, func(x LessonLine) bool { return x.ID == id })
 		if i < 0 || p.Lines[i].State != LessonOffered {
-			return explained(conflict("not offered"), "That line isn't waiting for your answer any more. Read the list again.")
+			return conflict("not offered", "That line isn't waiting for your answer any more. Read the list again.")
 		}
 		p.Lines[i].State, p.Lines[i].Session, p.Lines[i].At = LessonApproved, sid, l.cfg.Now()
 		line = p.Lines[i]
@@ -702,13 +702,13 @@ func (l *Lessons) Approve(project, id, sid string) error {
 
 func (l *Lessons) Decline(project, id string) error {
 	if !lessonLineID.MatchString(id) {
-		return explained(invalid("id"), "That isn't a suggested line.")
+		return invalid("id", "That isn't a suggested line.")
 	}
 	err := l.change(func(all map[string]LessonProject) error {
 		p := all[project]
 		i := slices.IndexFunc(p.Lines, func(x LessonLine) bool { return x.ID == id })
 		if i < 0 || p.Lines[i].State != LessonOffered {
-			return explained(conflict("not offered"), "That line isn't waiting for your answer any more. Read the list again.")
+			return conflict("not offered", "That line isn't waiting for your answer any more. Read the list again.")
 		}
 		p.Lines[i].State, p.Lines[i].At = LessonDeclined, l.cfg.Now()
 		all[project] = p
@@ -753,7 +753,7 @@ func (r *Reviews) startProjectRun(ctx context.Context, key, project string, cost
 	r.mu.Lock()
 	if _, busy := r.running[key]; busy {
 		r.mu.Unlock()
-		return "", explained(conflict("writing"), "A run for "+what+" is going. Wait for it to finish.")
+		return "", conflict("writing", "A run for "+what+" is going. Wait for it to finish.")
 	}
 	if err := r.holdLocked(key); err != nil {
 		r.mu.Unlock()
@@ -772,7 +772,7 @@ func (r *Reviews) startProjectRun(ctx context.Context, key, project string, cost
 	pack, err := r.cfg.Plugins.ReviewerPack(project)
 	if err != nil {
 		r.release(key)
-		return "", explained(conflict("no plugin"), clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
+		return "", conflict("no plugin", clip("The reviewers' plugin isn't ready: "+err.Error(), maxOutput))
 	}
 	return pack.Path, nil
 }

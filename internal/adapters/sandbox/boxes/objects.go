@@ -105,10 +105,16 @@ func volumeShaped(name string, v volumeJSON) bool {
 	if v.Driver != volumeDriver {
 		return false
 	}
-	if name != volumeUploads {
+	want := ""
+	switch name {
+	case volumeUploads:
+		want = uploadsOptions
+	case volumeActions:
+		want = actionsOptions
+	default:
 		return len(v.Options) == 0
 	}
-	return len(v.Options) == 3 && v.Options["type"] == "tmpfs" && v.Options["device"] == "tmpfs" && v.Options["o"] == uploadsOptions
+	return len(v.Options) == 3 && v.Options["type"] == "tmpfs" && v.Options["device"] == "tmpfs" && v.Options["o"] == want
 }
 
 func optionsOf(opts map[string]string) string {
@@ -141,6 +147,9 @@ func (h *Helper) strays(ctx context.Context, workspace string) ([]string, error)
 			continue
 		}
 		if _, renamed := renamedBox(h.rec.project, c); renamed {
+			continue
+		}
+		if _, action := ownedAction(h.rec.project, strings.TrimPrefix(name, "/"), c.Labels); action {
 			continue
 		}
 		out = append(out, oneLine(strings.TrimPrefix(name, "/")))

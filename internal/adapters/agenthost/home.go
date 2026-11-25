@@ -49,6 +49,12 @@ var gitData = []string{"objects", "refs", "logs", "packed-refs", "index", "shall
 
 var homeSkipped = []string{".git", "node_modules"}
 
+var ownPluginStore = regexp.MustCompile(`^software-factory_inline-[0-9a-f]{12}\.json$`)
+
+func (w *homeWalk) ownStore(base, rel string, info fs.FileInfo) bool {
+	return filepath.Clean(base) == w.claude && path.Dir(rel) == "plugins/store" && ownPluginStore.MatchString(path.Base(rel)) && info.Mode().IsRegular()
+}
+
 type homeJSON struct {
 	MCP *commandJSON `json:"mcp,omitempty"`
 }
@@ -661,6 +667,9 @@ func (w *homeWalk) folder(root *os.Root, base, rel string, depth, limit int, met
 		}
 		if w.done() {
 			return
+		}
+		if w.ownStore(base, child, info) {
+			continue
 		}
 		if e.Name() == ".git" && info.Mode().IsRegular() {
 			w.add(w.shown(base, child, ""), session.HomeKindNames, metadataHash(info))

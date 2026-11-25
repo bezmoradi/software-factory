@@ -1,8 +1,14 @@
-import { actionButton, button, el, field, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { UNREAD, savedTone, type EngineAnswer } from '../api.ts'
+import { actionButton, button, el, focusedKey, labelError, refocus, say as sayLine, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
+import { dialogDocs, GATEWAY_HEADING } from '../lib/dialog-docs.ts'
+import { actions, answerControl, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { secret } from './secret.ts'
+import { docsId, emptyState, pageHead } from '../lib/page.ts'
+import { textbox, dropdown, option } from '../lib/controls.ts'
+import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 
-type Post = (path: string, body: unknown) => Promise<Response>
+type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
 const ROUTE = '/api/egress'
 const LOGIN_ROUTE = '/api/claude-login'
@@ -19,8 +25,6 @@ interface AddedHost {
 interface GatewayView {
   url: string
   host: string
-  agents: boolean
-  reviewers: boolean
 }
 
 interface EgressView {
@@ -31,12 +35,13 @@ interface EgressView {
   lists: { agents: string[]; reviewers: string[] }
   now: number
   gatewayKeyNote: string
-  pypiNote: string
+  expiries: { value: string; label: string }[]
 }
 
 interface Refusal {
   host: string
   reason: string
+  reasonLabel: string
   count: number
   last: number
   addable: boolean
@@ -44,17 +49,11 @@ interface Refusal {
   uploads: boolean
   probe: boolean
   suggest: string[]
+  note: string
 }
 
-type Answer = { ok: boolean; body: Record<string, unknown> }
+type Answer = EngineAnswer
 type Refill = 'gateway' | null
-
-async function call(post: Post, body: unknown, route = ROUTE): Promise<Answer> {
-  const res = await post(route, body).catch(() => null)
-  if (!res) return { ok: false, body: { message: 'The engine didn’t answer.' } }
-  const parsed: unknown = await res.json().catch(() => ({}))
-  return { ok: res.ok, body: parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : {} }
-}
 
 const text = (v: unknown): string => typeof v === 'string' ? v : ''
 const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
@@ -68,11 +67,11 @@ function viewOf(b: Record<string, unknown>): EgressView | null {
     saved: b.saved === true,
     pending: b.pending === true,
     added: b.added.map(record).map(h => ({ host: text(h.host), expires: Number(h.expires) || 0, uploads: h.uploads === true })).filter(h => h.host),
-    gateway: text(g.url) ? { url: text(g.url), host: text(g.host), agents: g.agents === true, reviewers: g.reviewers === true } : null,
+    gateway: text(g.url) ? { url: text(g.url), host: text(g.host) } : null,
     lists: { agents: strings(record(lists.agents).allow), reviewers: strings(record(lists.reviewers).allow) },
     now: Number(b.now) || Math.floor(Date.now() / 1000),
     gatewayKeyNote: text(b.gatewayKeyNote),
-    pypiNote: text(b.pypiNote),
+    expiries: Array.isArray(b.expiries) ? b.expiries.map(record).map(c => ({ value: text(c.value), label: text(c.label) })).filter(c => c.value) : [],
   }
 }
 
@@ -82,8 +81,8 @@ function refusalsOf(b: Record<string, unknown>): Record<string, Refusal[]> {
   for (const side of ['agents', 'reviewers']) {
     const list = Array.isArray(sides[side]) ? sides[side] as unknown[] : []
     out[side] = list.map(record).map(r => ({
-      host: text(r.host), reason: text(r.reason), count: Number(r.count) || 0, last: Number(r.last) || 0,
-      addable: r.addable === true, gitHost: r.gitHost === true, uploads: r.uploads === true, probe: r.probe === true, suggest: strings(r.suggest),
+      host: text(r.host), reason: text(r.reason), reasonLabel: text(r.reasonLabel), count: Number(r.count) || 0, last: Number(r.last) || 0,
+      addable: r.addable === true, gitHost: r.gitHost === true, uploads: r.uploads === true, probe: r.probe === true, suggest: strings(r.suggest), note: text(r.note),
     })).filter(r => r.host)
   }
   return out
@@ -102,77 +101,43 @@ function when(at: number): string {
   return at ? new Date(at * 1000).toLocaleString() : ''
 }
 
-const REASONS: Record<string, string> = {
-  not_allowlisted: 'not on the allowlist', git_host: 'a git host, always refused', port: 'a port other than 443', method: 'plain HTTP, not HTTPS',
-  ip_literal: 'an IP address, not a name', sni_mismatch: 'a TLS name sent through another host', private_address: 'a private address',
-  resolve_failed: 'the name didn’t resolve', dial_failed: 'the host didn’t answer', no_sni: 'no TLS name', ech: 'encrypted TLS hello', not_tls: 'not TLS', invalid_host: 'not a host name',
-}
 
 export function openEgress(post: Post): void {
   const say = statusLine('small warn')
-  const intro = el('p', 'small', 'Agents and reviewers reach the internet only through egress, which allows HTTPS to the hosts below and refuses every git host: the engine pushes for them. A change here takes effect at once, without a restart.')
-  const startNote = el('p', 'small muted')
+  const intro = el('p', 'small')
+  intro.append('Agents and reviewers reach the internet only through egress, which allows HTTPS to the hosts below. Changes take effect at once.')
   const pending = el('p', 'small bad')
-  const vendorNote = el('p', 'small muted', 'Once you save a change here, Claude Code’s own hosts are on both lists, except on a side a gateway is on for.')
   const addedList = el('ul', 'list egress-added')
-  const hostInput = el('input', 'textbox')
-  hostInput.name = 'host'
-  hostInput.maxLength = 253
-  hostInput.spellcheck = false
-  hostInput.autocomplete = 'off'
-  hostInput.placeholder = 'registry.npmjs.org'
+  const hostInput = textbox({ name: 'host', spellcheck: false, autocomplete: 'off', placeholder: 'registry.npmjs.org' })
   hostInput.dataset.key = 'host'
-  const reasonInput = el('input', 'textbox')
-  reasonInput.name = 'reason'
-  reasonInput.maxLength = 200
-  reasonInput.autocomplete = 'off'
-  reasonInput.placeholder = 'Why the agents need it (optional)'
-  const expiry = el('select', 'textbox')
-  for (const [value, words] of [['never', 'No expiry'], ['hour', 'For an hour'], ['day', 'For a day'], ['week', 'For a week']] as const) {
-    const o = el('option', '', words)
-    o.value = value
-    expiry.append(o)
-  }
+  const reasonInput = textbox({ name: 'reason', autocomplete: 'off', placeholder: 'Why the agents need it' })
+  const expiry = dropdown({ name: 'expires' })
   const hint = el('p', 'small muted')
   const uploadWarn = el('div', 'notice warn small')
   uploadWarn.hidden = true
   const refusedBox = el('div', 'egress-refused')
-  const gatewayURL = el('input', 'textbox')
-  gatewayURL.name = 'gateway'
-  gatewayURL.type = 'url'
-  gatewayURL.maxLength = 512
-  gatewayURL.spellcheck = false
-  gatewayURL.autocomplete = 'off'
-  gatewayURL.placeholder = 'https://llm-gateway.example.com'
-  const gwAgents = el('input')
-  gwAgents.type = 'checkbox'
-  const gwReviewers = el('input')
-  gwReviewers.type = 'checkbox'
-  const gwKey = el('input', 'textbox')
-  gwKey.type = 'password'
-  gwKey.name = 'gateway-key'
-  gwKey.maxLength = 512
-  gwKey.spellcheck = false
-  gwKey.autocomplete = 'off'
-  const gwNote = el('p', 'small muted')
+  const gatewayURL = textbox({ type: 'url', name: 'url', spellcheck: false, autocomplete: 'off', placeholder: 'https://llm-gateway.example.com' })
+  const gwKey = textbox({ type: 'password', name: 'gateway-key', spellcheck: false, autocomplete: 'off', placeholder: 'Leave empty to keep the saved one' })
+  const gwNote = el('span')
+  const gwIntro = el('p', 'small')
+  gwIntro.append('Sets Claude Code’s base URL for every session and the reviewers. ', gwNote)
   const gwSay = statusLine()
-  const listsNote = el('p', 'small muted')
   let view: EgressView | null = null
-  let gwFilled: { url: string; agents: boolean; reviewers: boolean } | null = null
-  const gwEdited = () => !!gwFilled && (gatewayURL.value !== gwFilled.url || gwAgents.checked !== gwFilled.agents || gwReviewers.checked !== gwFilled.reviewers)
-
-  const failed = (a: Answer, fallback: string) => {
-    say.textContent = text(a.body.message) ? visible(text(a.body.message)) : fallback
-  }
+  let gwFilled: { url: string } | null = null
+  const gwEdited = () => !!gwFilled && gatewayURL.value !== gwFilled.url
 
   const paint = (v: EgressView, refill: Refill = null) => {
     const key = focusedKey(m.dialog)
     const before = view?.added.map(h => h.host) ?? []
     view = v
-    startNote.textContent = v.saved ? '' : 'Until you save a change here, the lists are the starting values from SF_ALLOW and SF_EXTRA_ALLOW.'
+    if (expiry.options.length !== v.expiries.length || v.expiries.some((c, i) => expiry.options[i]?.value !== c.value)) {
+      const keep = expiry.value
+      expiry.replaceChildren(...v.expiries.map(c => option(visible(c.label), c.value)))
+      if (v.expiries.some(c => c.value === keep)) expiry.value = keep
+    }
     pending.textContent = v.pending ? 'egress hasn’t taken the latest list yet, so the sandbox check fails and sessions are Held until it does.' : ''
     addedList.replaceChildren()
-    if (!v.added.length) addedList.append(el('li', 'muted', 'No hosts added.'))
+    if (!v.added.length) addedList.append(emptyState('No hosts added.', { tag: 'li' }))
     for (const h of v.added) {
       const li = el('li', 'row')
       li.append(el('code', '', visible(h.host)), el('span', 'small muted', until(h.expires, v.now)), el('span', 'small', typeof h.reason === 'string' && h.reason ? `“${visible(h.reason)}”` : 'no reason given'))
@@ -182,12 +147,10 @@ export function openEgress(post: Post): void {
     }
     if (refill === 'gateway' || !gwEdited()) {
       gatewayURL.value = v.gateway?.url ?? ''
-      gwAgents.checked = v.gateway ? v.gateway.agents : true
-      gwReviewers.checked = v.gateway ? v.gateway.reviewers : true
-      gwFilled = { url: gatewayURL.value, agents: gwAgents.checked, reviewers: gwReviewers.checked }
+      removeGatewayButton.hidden = !v.gateway
+      gwFilled = { url: gatewayURL.value }
     }
     gwNote.textContent = v.gatewayKeyNote
-    listsNote.textContent = `Agents reach: ${v.lists.agents.map(visible).join(', ') || 'nothing'}. Reviewers reach: ${v.lists.reviewers.map(visible).join(', ') || 'nothing'}.`
     refocus(m.dialog, key, k => {
       if (!k.startsWith('remove:')) return []
       const at = before.indexOf(k.slice('remove:'.length))
@@ -195,36 +158,35 @@ export function openEgress(post: Post): void {
     })
   }
 
-  const answer = (a: Answer, fallback: string, refill: Refill = null): boolean => {
+  const answer = (a: Answer, place: HTMLElement, refill: Refill = null): boolean => {
     const v = viewOf(a.body)
     if (!a.ok || !v) {
-      failed(a, fallback)
+      if (showAnswer(place, a, say, { tone: 'warn' })) say.textContent = UNREAD
       void reload()
       return false
     }
-    say.textContent = ''
+    showAnswer(place, a, say)
     paint(v, refill)
     return true
   }
 
   const reload = async () => {
-    const a = await call(post, { op: 'read' })
+    const a = await post(ROUTE, { op: 'read' })
     const v = viewOf(a.body)
     if (v) paint(v)
-    else failed(a, 'The allowlist couldn’t be read.')
+    else say.textContent = a.ok ? UNREAD : a.message
   }
 
   const remove = async (host: string) => {
-    answer(await call(post, { op: 'remove', host }), 'The host wasn’t removed.')
+    answer(await post(ROUTE, { op: 'remove', host }), addedList)
   }
 
   const add = async (uploadsOk: boolean) => {
-    const host = hostInput.value.trim()
-    if (!host) return hostInput.focus()
-    const reason = reasonInput.value.trim()
-    const a = await call(post, { op: 'add', host, expires: expiry.value, ...(uploadsOk ? { uploadsOk: true } : {}), ...(reason ? { reason } : {}) })
-    if (!a.ok && a.body.error === 'uploads') {
-      uploadWarn.replaceChildren(el('p', '', visible(text(a.body.message))), button('Cancel', 'ghost small', () => {
+    const host = hostInput.value
+    const reason = reasonInput.value
+    const a = await post(ROUTE, { op: 'add', host, expires: expiry.value, ...(uploadsOk ? { uploadsOk: true } : {}), ...(reason ? { reason } : {}) })
+    if (!a.ok && a.error === 'uploads') {
+      uploadWarn.replaceChildren(el('p', '', a.message), button('Cancel', 'ghost small', () => {
         uploadWarn.hidden = true
         hostInput.focus()
       }), actionButton('Add anyway', 'ghost small', () => add(true)))
@@ -233,12 +195,14 @@ export function openEgress(post: Post): void {
     }
     const fromWarn = uploadWarn.contains(document.activeElement)
     uploadWarn.hidden = true
-    const added = answer(a, 'The host wasn’t added.')
+    const added = answer(a, addForm)
+    if (!added && answerControl(addForm, a)) return
+    if (!added && !fromWarn) return hostInput.focus()
     if (added) {
       hostInput.value = ''
       reasonInput.value = ''
-      hint.textContent = ''
-      void loadRefusals()
+      hint.textContent = visible(text(a.body.note))
+      void refusals?.now()
     }
     if (!fromWarn) return
     const shown = added ? view?.added.find(h => h.host.toLowerCase() === host.toLowerCase())?.host : undefined
@@ -248,56 +212,51 @@ export function openEgress(post: Post): void {
 
   const prefill = (r: Refusal) => {
     hostInput.value = r.suggest[0] ?? r.host
-    hint.textContent = r.suggest.length ? view?.pypiNote ?? '' : r.uploads ? `${visible(r.host)} also accepts uploads.` : ''
+    hint.textContent = visible(r.note)
     hostInput.focus()
   }
 
-  const loadRefusals = async () => {
-    const a = await call(post, { op: 'refusals' })
+  let refusals: WhileOpen | undefined
+  const showRefusals = (a: EngineAnswer) => {
     if (!a.ok) {
-      refusedBox.replaceChildren(el('p', 'small warn', text(a.body.message) ? visible(text(a.body.message)) : 'egress didn’t say what it refused.'))
+      refusedBox.replaceChildren(el('p', 'small warn', a.message))
       return
     }
     const sides = refusalsOf(a.body)
     refusedBox.replaceChildren()
+    if (!sides.agents?.length && !sides.reviewers?.length) {
+      refusedBox.append(emptyState('Nothing refused since egress started.'))
+      return
+    }
     for (const [side, title] of [['agents', 'Agents'], ['reviewers', 'Reviewers']] as const) {
       const list = sides[side] ?? []
       refusedBox.append(el('h4', 'label', title))
       if (!list.length) {
-        refusedBox.append(el('p', 'small muted', 'Nothing refused since egress started.'))
+        refusedBox.append(emptyState('Nothing refused since egress started.'))
         continue
       }
       const ul = el('ul', 'list')
       for (const r of list) {
         const li = el('li', 'row')
-        li.append(el('code', '', visible(r.host)), el('span', 'small muted', `${REASONS[r.reason] ?? visible(r.reason)} · ${r.count}× · last ${when(r.last)}`))
+        li.append(el('code', '', visible(r.host)), el('span', 'small muted', `${visible(r.reasonLabel || r.reason)} · ${r.count}× · last ${when(r.last)}`))
         if (r.gitHost) li.append(el('span', 'tag', 'git host'))
         if (r.probe) li.append(el('span', 'tag', 'the sandbox check tries this host'))
         li.append(el('span', 'spacer'))
-        if (r.addable) li.append(button('Add this host', 'ghost small', () => prefill(r)))
+        if (r.addable) li.append(button('Add this host', 'ghost small', () => prefill(r), 'button', `add:${side}:${r.host}`))
         ul.append(li)
       }
       refusedBox.append(ul)
     }
   }
 
-  const gwSides = (): ('agents' | 'reviewers')[] => {
-    const g = view?.gateway
-    if (!g) return []
-    return [...(g.agents ? ['agents' as const] : []), ...(g.reviewers ? ['reviewers' as const] : [])]
-  }
-
   const gwTell = (lines: string[], bad: boolean) => {
-    gwSay.textContent = lines.join(' ')
-    gwSay.classList.toggle('bad', bad)
+    sayLine(gwSay, lines.join(' '), bad ? 'bad' : undefined)
   }
 
-  const keySteps = async (body: (target: 'reviewers') => Record<string, string>, done: string, fallback: string) => {
-    const sides = gwSides()
-    const sessions = sides.includes('agents') ? ['For Claude Code sessions, paste the gateway’s key in each session’s sign-in panel, since each session runs in its own container.'] : []
-    if (!sides.includes('reviewers')) return gwTell(sessions, false)
-    const a = await call(post, body('reviewers'), LOGIN_ROUTE)
-    if (!a.ok) return gwTell([`Reviewers: ${text(a.body.message) ? visible(text(a.body.message)) : fallback}`, ...sessions], true)
+  const keySteps = async (body: (target: 'reviewers') => Record<string, string>, done: string) => {
+    const sessions = ['For Claude Code sessions, paste the gateway’s key in each session’s sign-in panel, since each session runs in its own container.']
+    const a = await post(LOGIN_ROUTE, body('reviewers'))
+    if (!a.ok) return gwTell([`Reviewers: ${a.message}`, ...sessions], true)
     gwTell([`${done} for the reviewers.`, ...sessions], false)
   }
 
@@ -306,72 +265,56 @@ export function openEgress(post: Post): void {
     gwKey.value = ''
     gwKey.type = 'password'
     gwTell([], false)
-    const a = await call(post, { op: 'gateway', url: clear ? '' : gatewayURL.value.trim(), agents: gwAgents.checked, reviewers: gwReviewers.checked })
-    if (!answer(a, 'The gateway wasn’t saved.', 'gateway') || !key || !gwSides().length) return
+    const a = await post(ROUTE, { op: 'gateway', url: clear ? '' : gatewayURL.value.trim() })
+    if (!answer(a, gwForm, 'gateway')) return
+    if (!key || !view?.gateway) return sayLine(gwSay, a.message, savedTone(a))
     gwTell(['Saving the key…'], false)
-    await keySteps(target => ({ step: 'key', target, key }), 'Key saved', 'The key wasn’t saved. Try again.')
+    await keySteps(target => ({ step: 'key', target, key }), 'Key saved')
   }
 
-  const removeKey = async () => {
-    if (!gwSides().length) return gwTell(['No gateway is set.'], true)
-    await keySteps(target => ({ step: 'clear-key', target }), 'Key removed', 'The key wasn’t removed.')
-  }
-
+  reasonInput.addEventListener('input', () => labelError(reasonInput, ''))
+  gatewayURL.addEventListener('input', () => labelError(gatewayURL, ''))
+  expiry.addEventListener('change', () => labelError(expiry, ''))
   hostInput.addEventListener('input', () => {
-    const h = hostInput.value.trim().toLowerCase()
-    hint.textContent = /(^|\.)(pypi\.org|pythonhosted\.org)$/.test(h) ? view?.pypiNote ?? '' : ''
+    labelError(hostInput, '')
+    hint.textContent = ''
   })
-  const addForm = el('form', 'row egress-add')
-  const hostLabel = el('label', 'small', 'Host')
-  hostLabel.append(hostInput)
-  const expiryLabel = el('label', 'small', 'Allowed')
-  expiryLabel.append(expiry)
-  const reasonLabel = el('label', 'small', 'Reason')
-  reasonLabel.append(reasonInput)
+  hostInput.setAttribute('aria-required', 'true')
   const addButton = button('Add', 'primary small', undefined, 'submit')
-  addForm.append(hostLabel, expiryLabel, reasonLabel, addButton)
-  addForm.addEventListener('submit', e => {
-    e.preventDefault()
-    void whileBusy(addButton, () => add(false))
+  const addForm = form({
+    inline: true,
+    cls: 'field-row egress-add',
+    children: [field('Host', hostInput), field('Allowed', expiry), field('Reason', reasonInput, { optional: true }), actions([addButton])],
+    onSubmit: () => void whileBusy(addButton, () => add(false)),
   })
-  const gwForm = el('form', 'egress-gateway')
-  const urlLabel = el('label', 'small', 'Base URL')
-  urlLabel.append(gatewayURL)
-  const aLabel = el('label', 'small row')
-  aLabel.append(gwAgents, el('span', '', 'Claude Code sessions'))
-  const rLabel = el('label', 'small row')
-  rLabel.append(gwReviewers, el('span', '', 'Reviewers'))
-  const keyField = field('Key or token (leave empty to keep the saved one)', secret(gwKey, 'key'), undefined, 'egress-key')
-  const gwActions = el('div', 'row')
-  const saveGatewayButton = button('Save gateway', 'ghost small', undefined, 'submit')
-  gwActions.append(saveGatewayButton, actionButton('Remove key', 'ghost small', removeKey), actionButton('Remove gateway', 'ghost small', () => saveGateway(true)))
-  gwForm.append(urlLabel, aLabel, rLabel, keyField, gwActions, gwSay)
-  gwForm.addEventListener('submit', e => {
-    e.preventDefault()
-    void whileBusy(saveGatewayButton, () => saveGateway(false))
+  const urlField = field('Base URL', gatewayURL)
+  const keyField = field('Key or token', secret(gwKey, 'key'), { cls: 'egress-key' })
+  const saveGatewayButton = button('Save', 'primary small', undefined, 'submit')
+  const removeGatewayButton = actionButton('Remove gateway', 'ghost small', () => saveGateway(true))
+  removeGatewayButton.hidden = true
+  const gwHead = pageHead({ title: GATEWAY_HEADING, level: 'h3', headingClass: 'label', docs: { doc: docsId(GATEWAY_HEADING), open: () => m.close() }, action: removeGatewayButton })[0]!
+  const gwForm = form({
+    cls: 'egress-gateway',
+    children: [fieldRow([urlField, keyField, actions([saveGatewayButton])], 'halves'), gwSay],
+    onSubmit: () => void whileBusy(saveGatewayButton, () => saveGateway(false)),
   })
-  const refreshRow = el('div', 'row')
-  refreshRow.append(el('h3', 'label', 'Refused requests'), el('span', 'spacer'), actionButton('Refresh', 'ghost small', loadRefusals))
   const m = modal({
     kind: 'egress',
-    title: 'Network access',
+    ...dialogDocs('egress'),
     body: [
-      intro, startNote, pending, say,
-      vendorNote,
+      intro, pending, say,
+      gwHead,
+      gwIntro, gwForm,
       el('h3', 'label', 'Hosts you added'),
-      el('p', 'small muted', 'For agents only; reviewers reach only Claude Code’s hosts and the gateway. A host you add gives every session a way out, so add only what a task needs, and give it an expiry when you can.'),
+      el('p', 'small muted', 'For agents only. Add only what a task needs: a name like registry.npmjs.org, or .example.com for every name under it.'),
       addedList, addForm, hint, uploadWarn,
-      refreshRow,
-      el('p', 'small muted', 'What egress refused since it started: host, count and last time, never the path. It keeps one count per host and reason across all sessions, so it doesn’t say which session asked.'),
+      el('h3', 'label', 'Refused requests'),
+      el('p', 'small muted', 'What egress refused since it started, across all sessions.'),
       refusedBox,
-      el('h3', 'label', 'Company LLM gateway'),
-      el('p', 'small', 'Sets Claude Code’s base URL (ANTHROPIC_BASE_URL) for the sessions and reviewers you choose, and adds the gateway’s host to their allowlist. While the gateway is on for a side, that side’s list leaves out Anthropic’s own hosts and Claude Code’s telemetry hosts (anthropic.com, claude.ai, claude.com, Statsig, Sentry, Datadog), unless the gateway is one of them, so a key pasted for the gateway can’t reach them; removing the gateway brings them back.'),
-      el('p', 'small warn', `${GATEWAY_WARNING}.`),
-      gwNote, gwForm,
-      listsNote,
     ],
     actions: [button('Close', 'ghost small', () => m.close())],
   })
+  refusals = whileOpen({ root: refusedBox, read: () => post(ROUTE, { op: 'refusals' }), show: showRefusals, everyMs: CHEAP_EVERY_MS })
+  m.onClose(() => refusals?.stop())
   void reload()
-  void loadRefusals()
 }

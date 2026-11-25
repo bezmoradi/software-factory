@@ -118,7 +118,7 @@ func (s *Server) backupAPI(w http.ResponseWriter, r *http.Request, body map[stri
 	switch r.URL.Path {
 	case exportRoute:
 		if !keysWithin(body) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(session.ExportFor))
@@ -137,7 +137,7 @@ func (s *Server) backupAPI(w http.ResponseWriter, r *http.Request, body map[stri
 		}
 	case backupRoute:
 		if !keysWithin(body) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := b.View()
@@ -186,15 +186,16 @@ func importKind(r *http.Request) bool {
 
 func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
 	if !importKind(r) {
-		refuse(w, http.StatusUnsupportedMediaType, "type")
+		refuse(w, http.StatusUnsupportedMediaType, "type", "An import takes a backup file, sent with Content-Type application/gzip.")
 		return
 	}
 	if len(r.Header.Values("X-SF-Name")) != 0 || len(r.Header.Values("X-SF-Session")) != 0 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuse(w, http.StatusBadRequest, "fields", "An import takes no X-SF-Name or X-SF-Session header. Reload the page and try again.")
 		return
 	}
+	tooBig := problem{Error: "body", Message: session.ImportTooBig}
 	if r.ContentLength > session.MaxImport {
-		refuse(w, http.StatusRequestEntityTooLarge, "body")
+		send(w, http.StatusRequestEntityTooLarge, tooBig)
 		return
 	}
 	b := s.backupPage()
@@ -208,7 +209,7 @@ func (s *Server) importState(w http.ResponseWriter, r *http.Request) {
 	body := &watchedBody{r: http.MaxBytesReader(w, r.Body, session.MaxImport)}
 	report, err := b.Import(body)
 	if err != nil && body.over {
-		refuse(w, http.StatusRequestEntityTooLarge, "body")
+		send(w, http.StatusRequestEntityTooLarge, tooBig)
 		return
 	}
 	shared.For(r.Context(), s.logger).Info("import", "ok", err == nil)

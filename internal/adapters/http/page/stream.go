@@ -12,43 +12,48 @@ const (
 )
 
 type sessionJSON struct {
-	SID          string      `json:"sid"`
-	Cwd          string      `json:"cwd"`
-	StartedAt    int64       `json:"startedAt"`
-	Name         string      `json:"name"`
-	ID           string      `json:"id"`
-	Kind         string      `json:"kind"`
-	Agent        string      `json:"agent,omitempty"`
-	Project      string      `json:"project,omitempty"`
-	Verified     bool        `json:"verified"`
-	Running      bool        `json:"running"`
-	Live         bool        `json:"live"`
-	Disputed     bool        `json:"disputed"`
-	Claims       []string    `json:"claims,omitempty"`
-	Outdated     bool        `json:"outdated"`
-	Controlled   bool        `json:"controlled"`
-	Mode         string      `json:"mode"`
-	Busy         bool        `json:"busy"`
-	Login        bool        `json:"login"`
-	Needs        int         `json:"needs"`
-	Checkout     string      `json:"checkout"`
-	Epoch        string      `json:"epoch"`
-	LastSeq      int64       `json:"lastSeq"`
-	Level        string      `json:"level"`
-	LevelReason  string      `json:"levelReason"`
-	LevelDropped bool        `json:"levelDropped"`
-	LevelLost    bool        `json:"levelLost,omitempty"`
-	Sandboxed    bool        `json:"sandboxed"`
-	Review       *reviewJSON `json:"review,omitempty"`
-	Push         *pushJSON   `json:"push,omitempty"`
-	Forge        []forgeJSON `json:"forge,omitempty"`
-	SignIn       *signInJSON `json:"signIn,omitempty"`
-	State        string      `json:"state,omitempty"`
-	Status       string      `json:"status,omitempty"`
-	WaitingFor   string      `json:"waitingFor,omitempty"`
-	Queued       int         `json:"queued,omitempty"`
-	Unbacked     []turnJSON  `json:"unbacked,omitempty"`
-	StopReason   string      `json:"stopReason,omitempty"`
+	SID          string           `json:"sid"`
+	Cwd          string           `json:"cwd"`
+	StartedAt    int64            `json:"startedAt"`
+	Name         string           `json:"name"`
+	ID           string           `json:"id"`
+	Kind         string           `json:"kind"`
+	Agent        string           `json:"agent,omitempty"`
+	Project      string           `json:"project,omitempty"`
+	Verified     bool             `json:"verified"`
+	Running      bool             `json:"running"`
+	Live         bool             `json:"live"`
+	Disputed     bool             `json:"disputed"`
+	Claims       []string         `json:"claims,omitempty"`
+	Outdated     bool             `json:"outdated"`
+	Controlled   bool             `json:"controlled"`
+	Mode         string           `json:"mode"`
+	ModeLabel    string           `json:"modeLabel"`
+	Step         string           `json:"step,omitempty"`
+	Checkpointed bool             `json:"checkpointSaved,omitempty"`
+	Busy         bool             `json:"busy"`
+	Login        bool             `json:"login"`
+	Needs        int              `json:"needs"`
+	Epoch        string           `json:"epoch"`
+	LastSeq      int64            `json:"lastSeq"`
+	Level        string           `json:"level"`
+	LevelReason  string           `json:"levelReason"`
+	LevelDropped bool             `json:"levelDropped"`
+	LevelLost    bool             `json:"levelLost,omitempty"`
+	Sandboxed    bool             `json:"sandboxed"`
+	Review       *reviewJSON      `json:"review,omitempty"`
+	Push         *pushJSON        `json:"push,omitempty"`
+	Forge        []forgeJSON      `json:"forge,omitempty"`
+	Access       []accessCardJSON `json:"access,omitempty"`
+	AccessMarker string           `json:"accessMarker,omitempty"`
+	AccessNotes  []accessNoteJSON `json:"accessNotes,omitempty"`
+	SignIn       *signInJSON      `json:"signIn,omitempty"`
+	State        string           `json:"state,omitempty"`
+	Status       string           `json:"status,omitempty"`
+	WaitingFor   string           `json:"waitingFor,omitempty"`
+	Queued       int              `json:"queued,omitempty"`
+	Unbacked     []turnJSON       `json:"unbacked,omitempty"`
+	StopReason   string           `json:"stopReason,omitempty"`
 
 	Uncommitted *uncommittedJSON `json:"uncommitted,omitempty"`
 	Overlaps    []overlapJSON    `json:"overlaps,omitempty"`
@@ -56,11 +61,55 @@ type sessionJSON struct {
 	Lineage     *lineageJSON     `json:"lineage,omitempty"`
 	Follow      *pullFollowJSON  `json:"follow,omitempty"`
 	Splits      []splitJSON      `json:"splits,omitempty"`
+	SplitGoal   *splitGoalJSON   `json:"splitGoal,omitempty"`
 	Box         string           `json:"box,omitempty"`
+	Commands    commandsJSON     `json:"commands"`
+	Filters     []string         `json:"filters"`
+	StartPoint  bool             `json:"startPoint,omitempty"`
 	SignInWait  bool             `json:"signInWait,omitempty"`
 	Doubled     bool             `json:"doubled"`
 	HomeHeld    bool             `json:"homeHeld,omitempty"`
 	Branch      string           `json:"branch,omitempty"`
+
+	Summary      statusJSON        `json:"summary"`
+	Warnings     []string          `json:"warnings"`
+	Control      controlJSON       `json:"control"`
+	Actions      map[string]string `json:"actions"`
+	ReadOnly     string            `json:"readOnly,omitempty"`
+	Stalled      bool              `json:"stalled,omitempty"`
+	StalledSince int64             `json:"stalledSince,omitempty"`
+}
+
+type statusJSON struct {
+	Word string `json:"word"`
+	Tone string `json:"tone"`
+}
+
+type controlJSON struct {
+	Text        string `json:"text"`
+	Action      string `json:"action"`
+	Label       string `json:"label,omitempty"`
+	Confirm     string `json:"confirm,omitempty"`
+	ConfirmText string `json:"confirmText,omitempty"`
+	Tone        string `json:"tone,omitempty"`
+	Alert       bool   `json:"alert,omitempty"`
+}
+
+func controlOf(i session.Info) controlJSON {
+	c := session.SessionControl(i)
+	return controlJSON{Text: c.Text, Action: c.Action, Label: c.Label, Confirm: c.Confirm, ConfirmText: c.ConfirmText, Tone: c.Tone, Alert: c.Alert}
+}
+
+type commandsJSON struct {
+	Container string `json:"container,omitempty"`
+	Attach    string `json:"attach,omitempty"`
+	Logs      string `json:"logs,omitempty"`
+	SignIn    string `json:"signIn"`
+}
+
+func commandsOf(agent, id, box string) commandsJSON {
+	c := session.CommandsFor(agent, id, box)
+	return commandsJSON{Container: c.Container, Attach: c.Attach, Logs: c.Logs, SignIn: c.SignIn}
 }
 
 type claimMarkJSON struct {
@@ -135,6 +184,8 @@ type roleJSON struct {
 
 	Progress *progressJSON `json:"progress,omitempty"`
 	Given    *givenJSON    `json:"given,omitempty"`
+	Said     saidJSON      `json:"said"`
+	Word     string        `json:"stateLabel"`
 }
 
 type findingRefJSON struct {
@@ -157,13 +208,14 @@ func findingRefsOf(list []session.FindingRef) []findingRefJSON {
 }
 
 type coverageJSON struct {
-	ID       string `json:"id"`
-	Status   string `json:"status"`
-	Evidence string `json:"evidence,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Line     int    `json:"line,omitempty"`
-	EndLine  int    `json:"endLine,omitempty"`
-	Note     string `json:"note,omitempty"`
+	ID       string   `json:"id"`
+	Status   string   `json:"status"`
+	Evidence string   `json:"evidence,omitempty"`
+	Path     string   `json:"path,omitempty"`
+	Line     int      `json:"line,omitempty"`
+	EndLine  int      `json:"endLine,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Said     saidJSON `json:"said"`
 }
 
 func coverageOf(r session.RoleReview) ([]string, []coverageJSON, int, bool) {
@@ -172,7 +224,8 @@ func coverageOf(r session.RoleReview) ([]string, []coverageJSON, int, bool) {
 	}
 	out := make([]coverageJSON, 0, len(r.Coverage.Lines))
 	for _, c := range r.Coverage.Lines {
-		out = append(out, coverageJSON{ID: c.ID, Status: c.Status, Evidence: c.Evidence, Path: c.Path, Line: c.Line, EndLine: c.EndLine, Note: c.Note})
+		said, _ := session.CoverageSaid(c.Status)
+		out = append(out, coverageJSON{ID: c.ID, Status: c.Status, Evidence: c.Evidence, Path: c.Path, Line: c.Line, EndLine: c.EndLine, Note: c.Note, Said: saidJSONOf(said)})
 	}
 	return r.ReqIDs, out, r.Coverage.Dropped, r.Coverage.Cut
 }
@@ -212,6 +265,8 @@ func reviewOf(v *session.ReviewView) *reviewJSON {
 		out.Roles[len(out.Roles)-1].Findings = findingRefsOf(r.Findings)
 		last := &out.Roles[len(out.Roles)-1]
 		last.ReqIDs, last.Coverage, last.CoverageDropped, last.CoverageCut = coverageOf(r)
+		last.Said = saidJSONOf(session.RoleSaid(string(r.State), r.Override != "", r.Advisory))
+		last.Word = session.RoleSaid(string(r.State), false, false).Label
 	}
 	return out
 }
@@ -222,6 +277,7 @@ type sessionsFrame struct {
 	Sessions   []sessionJSON `json:"sessions"`
 	Supervisor string        `json:"supervisor"`
 	Compose    string        `json:"compose,omitempty"`
+	ImageTypes []string      `json:"imageTypes,omitempty"`
 }
 
 func sessionsJSON(list []session.Info) []sessionJSON {
@@ -231,6 +287,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 		if !s.StartedAt.IsZero() {
 			started = s.StartedAt.UnixMilli()
 		}
+		splits := splitsOf(s.Splits)
 		out = append(out, sessionJSON{
 			SID: s.SID, Cwd: s.Cwd, StartedAt: started, Name: s.Name, ID: s.ID, Kind: s.Kind, Agent: s.Agent, Project: s.Project,
 			Verified: s.Verified, Running: s.Running, Live: s.Live, Disputed: s.Disputed, Claims: s.Claims,
@@ -238,8 +295,9 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Needs: s.Needs, Epoch: s.Epoch, LastSeq: s.LastSeq,
 			Level: string(s.Level), LevelReason: s.LevelReason, LevelDropped: s.LevelDropped, LevelLost: s.LevelLost, Sandboxed: s.Sandboxed,
 			Review: reviewOf(s.Review),
-			Push:   pushOf(s.Push),
+			Push:   pushOf(s.Push, s.Checks, s.Review),
 			Forge:  forgeOf(s.Forge),
+			Access: accessCardsOf(s.Access), AccessMarker: s.AccessMarker, AccessNotes: accessNotesOf(s.AccessNotes),
 			SignIn: signInOf(s.SignIn),
 			State:  s.State, Status: s.Status, WaitingFor: s.WaitingFor, Queued: s.Queued,
 			Unbacked:   unbackedOf(s.Unbacked),
@@ -250,12 +308,27 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Checks:      checksOf(s.Checks),
 			Lineage:     lineageOf(s.Lineage),
 			Follow:      pullFollowOf(s.Follow),
-			Splits:      splitsOf(s.Splits),
+			Splits:      splits,
+			SplitGoal:   splitGoalOf(s.SplitGoal, splits),
 			Box:         s.Box,
+			Commands:    commandsOf(s.Agent, s.ID, s.Box),
+			Filters:     session.SessionFilters(s),
+			StartPoint:  session.StartPoint(s),
 			Doubled:     s.Doubled,
 			SignInWait:  s.SignInWait,
 			HomeHeld:    s.HomeHeld,
 			Branch:      s.Branch,
+
+			ModeLabel:    session.ModeLabel(s.Mode),
+			Step:         s.Step,
+			Checkpointed: s.CheckpointSaved,
+			Summary:      statusJSON(session.SessionStatus(s)),
+			Warnings:     session.SessionWarnings(s),
+			Control:      controlOf(s),
+			Actions:      session.SessionActions(s),
+			ReadOnly:     session.ReadOnlyNote(s),
+			Stalled:      s.Stalled,
+			StalledSince: millis(s.StalledSince),
 		})
 	}
 	return out
@@ -304,7 +377,7 @@ func (s *stream) signal() {
 }
 
 func (s *stream) Hello(id string, list []session.Info) bool {
-	return s.push(sessionsFrame{Type: "hello", Stream: id, Sessions: sessionsJSON(list), Compose: session.Compose()})
+	return s.push(sessionsFrame{Type: "hello", Stream: id, Sessions: sessionsJSON(list), Compose: session.Compose(), ImageTypes: session.ImageTypeList()})
 }
 
 func (s *stream) Sessions(list []session.Info) bool {

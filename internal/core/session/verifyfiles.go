@@ -287,13 +287,13 @@ func (v *Verifier) pruneFiles() {
 
 func (v *Verifier) Attachment(_ context.Context, sid, id, name string) (VerifyAttachment, io.ReadCloser, error) {
 	if !ValidBox(id) {
-		return VerifyAttachment{}, nil, explained(invalid("id"), "A verification run's id is 16 hexadecimal digits.")
+		return VerifyAttachment{}, nil, invalid("id", "A verification run's id is 16 hexadecimal digits.")
 	}
 	if !ValidVerifyFile(name) {
-		return VerifyAttachment{}, nil, explained(invalid("name"), "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes.")
+		return VerifyAttachment{}, nil, invalid("name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes.")
 	}
 	if _, ok := v.targetOf(sid); !ok {
-		return VerifyAttachment{}, nil, explained(conflict("not started here"), "Only a session this engine started has verification runs here.")
+		return VerifyAttachment{}, nil, conflict("not started here", "Only a session this engine started has verification runs here.")
 	}
 	v.mu.Lock()
 	var found *VerifyAttachment
@@ -309,11 +309,11 @@ func (v *Verifier) Attachment(_ context.Context, sid, id, name string) (VerifyAt
 	}
 	v.mu.Unlock()
 	if found == nil || v.cfg.Files == nil {
-		return VerifyAttachment{}, nil, explained(notFound("attachment"), "That verification run kept no file of that name.")
+		return VerifyAttachment{}, nil, notFound("attachment", "That verification run kept no file of that name.")
 	}
 	rc, err := v.cfg.Files.Open(id, name)
 	if err != nil {
-		return VerifyAttachment{}, nil, explained(conflict("files"), "The engine couldn't read that file.")
+		return VerifyAttachment{}, nil, conflict("files", "The engine couldn't read that file.")
 	}
 	return *found, rc, nil
 }

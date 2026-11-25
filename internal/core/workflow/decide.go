@@ -1,16 +1,13 @@
 package workflow
 
 import (
+	"strconv"
 	"strings"
 )
 
-type Change struct {
-	Path   string
-	Status string
-}
-
 type Facts struct {
 	Profile       Profile
+	PlanChosen    bool
 	Head          string
 	PlanFile      string
 	ReqHash       string
@@ -22,6 +19,9 @@ type Facts struct {
 	UsesArtifacts bool
 	Artifacts     []string
 	ArtifactsOnly bool
+	Brief         BriefCheck
+	Untyped       bool
+	Offered       []string
 }
 
 type ActionKind string
@@ -42,12 +42,12 @@ type Action struct {
 }
 
 const (
-	order    = "In a Feature the steps run in order: Define, Plan, Implement, Code review, Deliver."
+	order    = "In a Code change the developer approves the requirements first, and chooses there whether a plan follows, which they then approve too, before Implement."
 	noDetour = "Don't make the change another way, such as through a shell command: the gate checks the working tree when the plan is approved and before every push."
 )
 
 func Decide(f Facts, a Action) string {
-	feature := f.Profile == Feature
+	change := f.Profile == Change
 	switch a.Kind {
 	case StartDefine:
 		return ""
@@ -60,14 +60,20 @@ func Decide(f Facts, a Action) string {
 		case f.Head == "":
 			return "The requirements weren't approved: the current commit couldn't be read."
 		}
-		return ""
+		return briefHold(f.Brief)
 	case StartPlan:
-		if feature && !f.ReqOk {
+		switch {
+		case change && !f.ReqOk:
 			return "Plan can't start until the developer approves the requirements on the software factory page. " + order
+		case change && !f.PlanChosen:
+			return "Plan doesn't run: the developer approved the requirements without a plan. To plan, they press Add a plan on the approved requirements, or, once work is committed, approve changed requirements with a plan."
 		}
 		return ""
 	case StartImplement:
-		if feature && !f.PlanOk {
+		switch {
+		case change && !f.ReqOk:
+			return "Implement can't start until the developer approves the requirements on the software factory page. " + order
+		case change && f.PlanChosen && !f.PlanOk:
 			return "Implement can't start until the developer approves the plan on the software factory page. " + order
 		}
 		return ""
@@ -79,15 +85,47 @@ func Decide(f Facts, a Action) string {
 	return ""
 }
 
+func briefHold(c BriefCheck) string {
+	switch c.Kind {
+	case BriefBlocked:
+		if len(c.Blocking) == 1 {
+			return "Can't approve yet: " + listed(c.Blocking, 8) + " is a blocking open question. Answer it with Claude, then approve."
+		}
+		return "Can't approve yet: " + listed(c.Blocking, 8) + " are blocking open questions. Answer them with Claude, then approve."
+	case BriefInvalid:
+		return "Can't approve yet: " + c.Problem + "."
+	case BriefNone:
+		return "Written before the checked format; ask Claude to rewrite it."
+	}
+	return ""
+}
+
+func listed(ids []string, most int) string {
+	shown := make([]string, 0, min(len(ids), most))
+	for _, id := range ids[:min(len(ids), most)] {
+		shown = append(shown, clip(id, 40))
+	}
+	switch {
+	case len(ids) > most:
+		return strings.Join(shown, ", ") + " and " + strconv.Itoa(len(ids)-most) + " more"
+	case len(shown) < 2:
+		return strings.Join(shown, "")
+	}
+	return strings.Join(shown[:len(shown)-1], ", ") + " and " + shown[len(shown)-1]
+}
+
 func approvePlan(f Facts, a Action) string {
 	if f.Profile == Incident {
 		return approveCause(f, a)
 	}
-	if f.Profile != Feature {
+	if f.Profile != Change {
 		return ""
 	}
 	if !f.ReqOk || f.ReqBaseline == "" {
 		return "The plan wasn't approved: approve the requirements first."
+	}
+	if !f.PlanChosen {
+		return "The plan wasn't approved: you approved the requirements without a plan. To plan, press Add a plan on the approved requirements, or, once work is committed, approve changed requirements with a plan."
 	}
 	if a.Hash != f.PlanHash {
 		return "The plan changed before your approval arrived, so it wasn't approved. Read the new version and approve it again."
@@ -120,16 +158,16 @@ func approveCause(f Facts, a Action) string {
 
 func editHold(f Facts, path string) string {
 	switch {
+	case f.Untyped:
+		return untypedHold(path, f.Offered)
 	case f.Profile == CodeReview:
-		return "This session's work type is Code review, which doesn't change files: " + path + " stays as it is. To fix what the review found, the developer picks Fix on the software factory page. " + noDetour
-	case f.Profile == Docs && !DocFile(path):
-		return "This session's work type is Docs only, which changes documentation only, and " + path + " isn't documentation. Pick Fix or Feature on the software factory page to change it. " + noDetour
-	case f.Profile != Feature || f.PlanOk || (f.UsesArtifacts && artifactPath(path, f.Artifacts)):
+		return "This session's work type is Code review, which doesn't change files: " + path + " stays as it is. To fix what the review found, the developer picks Code change on the software factory page. " + noDetour
+	case f.Profile != Change || f.ReqOk && (!f.PlanChosen || f.PlanOk) || (f.UsesArtifacts && artifactPath(path, f.Artifacts)):
 		return ""
 	}
-	needs := "the plan needs"
+	needs := "the plan, which the developer chose, needs"
 	if !f.ReqOk {
-		needs = "the requirements and then the plan need"
+		needs = "the requirements, and then the plan if the developer chooses one, need"
 	}
 	until := "Write notes, the requirements brief and the plan in your scratchpad, not in the repository."
 	if f.UsesArtifacts && len(f.Artifacts) > 0 {
@@ -138,9 +176,19 @@ func editHold(f Facts, path string) string {
 	return path + " can't change yet: " + needs + " the developer's approval on the software factory page first. " + order + " " + until + " " + noDetour
 }
 
+func untypedHold(path string, offered []string) string {
+	ids := make([]string, 0, min(len(offered), 12))
+	for _, id := range offered[:min(len(offered), 12)] {
+		ids = append(ids, clip(id, 40))
+	}
+	return path + " can't change yet: this session has no work type, and the work type decides which steps and reviews apply. Suggest one with the factory_work_type tool, giving type, one of " + strings.Join(ids, ", ") + ", and reason, one line saying why it fits. Then end your turn: the developer picks the work type on the software factory page, and your next message says when you can go on. " + noDetour
+}
+
 type Build struct {
 	Profile     Profile
 	Head        bool
+	ReqOk       bool
+	PlanChosen  bool
 	PlanOk      bool
 	Built       bool
 	Commits     int
@@ -150,7 +198,7 @@ type Build struct {
 
 func ImplementWait(w Build) string {
 	switch {
-	case w.Profile == CodeReview || w.Profile == Exploring:
+	case w.Profile == CodeReview || w.Profile == Explore:
 		return ""
 	case !w.Head:
 		return "the gate couldn't read the current commit"
@@ -158,13 +206,16 @@ func ImplementWait(w Build) string {
 		return "approve the root cause first"
 	case w.Profile == Incident && !w.Built:
 		return "commit the fix made since the root cause was approved"
-	case w.Profile == Feature && !w.PlanOk:
+	case w.Profile == Change && !w.ReqOk:
+		return "approve the requirements first"
+	case w.Profile == Change && w.PlanChosen && !w.PlanOk:
 		return "approve the plan first"
-	case w.Profile == Feature:
-		if w.Built {
-			return ""
-		}
+	case w.Profile == Change && w.Built:
+		return ""
+	case w.Profile == Change && w.PlanChosen:
 		return "commit the work made since the plan was approved"
+	case w.Profile == Change:
+		return "commit the work made since the requirements were approved"
 	case w.NoBase:
 		return ""
 	case !w.CommitsRead:

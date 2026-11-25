@@ -37,6 +37,7 @@ type splitCardJSON struct {
 	Edited  bool      `json:"edited,omitempty"`
 	Asked   time.Time `json:"asked"`
 	At      time.Time `json:"at"`
+	Queued  time.Time `json:"queued,omitzero"`
 }
 
 type splitsJSON struct {
@@ -61,7 +62,7 @@ func splitCardOf(c splitCardJSON) (session.SplitCard, bool) {
 	if !ok {
 		return session.SplitCard{}, false
 	}
-	return session.SplitCard{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked, At: c.At}, true
+	return session.SplitCard{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked, At: c.At, Queued: c.Queued}, true
 }
 
 func (s Splits) Load() ([]session.SplitCard, error) {
@@ -95,6 +96,9 @@ func (s Splits) Save(cards []session.SplitCard) error {
 	size := 0
 	for _, c := range cards {
 		j := splitCardJSON{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked.UTC(), At: c.At.UTC()}
+		if c.State == session.SplitQueued && !c.Queued.IsZero() {
+			j.Queued = c.Queued.UTC()
+		}
 		cost := 2*(len(j.Title)+len(j.Message)) + 512
 		if _, ok := splitCardOf(j); !ok || len(f.Cards) >= session.MaxSplitCards || size+cost > maxSplitBytes {
 			continue

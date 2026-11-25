@@ -21,6 +21,13 @@ const (
 	maxQueueText         = 80 << 10
 )
 
+const (
+	saidQueuedSaved       = "Saved. The session gets the new text when its turn comes."
+	saidQueuedUnchanged   = "No change: the queued message already says this."
+	saidCommandsSaved     = "Saved. New turns and new sessions use them."
+	saidCommandsUnchanged = "No change: these commands are already saved."
+)
+
 var (
 	runRoutes = map[string]bool{sessionWorkRoute: true, projectCommandsRoute: true, reviewModelsRoute: true}
 	queueID   = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -32,22 +39,26 @@ func (s *Server) UseSessionWork(w *session.SessionWork) {
 }
 
 type commandRunJSON struct {
-	Kind     string `json:"kind"`
-	State    string `json:"state"`
-	Code     int    `json:"code"`
-	Tail     string `json:"tail"`
-	Cut      bool   `json:"cut"`
-	Withheld bool   `json:"withheld"`
-	Reason   string `json:"reason"`
-	Retry    bool   `json:"retry"`
-	Started  int64  `json:"started"`
-	Ended    int64  `json:"ended"`
+	Kind     string   `json:"kind"`
+	State    string   `json:"state"`
+	Code     int      `json:"code"`
+	Tail     string   `json:"tail"`
+	Cut      bool     `json:"cut"`
+	Withheld bool     `json:"withheld"`
+	Reason   string   `json:"reason"`
+	Retry    bool     `json:"retry"`
+	Started  int64    `json:"started"`
+	Ended    int64    `json:"ended"`
+	Said     saidJSON `json:"said"`
 }
 
 type queuedJSON struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	At   int64  `json:"at"`
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	At       int64  `json:"at"`
+	Up       bool   `json:"up"`
+	Down     bool   `json:"down"`
+	Editable bool   `json:"editable"`
 }
 
 type queueViewJSON struct {
@@ -56,6 +67,8 @@ type queueViewJSON struct {
 	Waiting string       `json:"waiting"`
 	Sending bool         `json:"sending"`
 	Max     int          `json:"max"`
+	CanAdd  bool         `json:"canAdd"`
+	Full    string       `json:"full,omitempty"`
 }
 
 type agentModelJSON struct {
@@ -73,6 +86,7 @@ type sessionModelJSON struct {
 	NowEffort   string           `json:"nowEffort"`
 	From        string           `json:"from"`
 	Offered     []agentModelJSON `json:"offered"`
+	Efforts     []string         `json:"efforts"`
 }
 
 type portsJSON struct {
@@ -82,6 +96,7 @@ type portsJSON struct {
 }
 
 type sessionWorkJSON struct {
+	savedSaid
 	Agent    string           `json:"agent"`
 	Model    sessionModelJSON `json:"model"`
 	Queue    queueViewJSON    `json:"queue"`
@@ -90,13 +105,15 @@ type sessionWorkJSON struct {
 	Ports    *portsJSON       `json:"ports"`
 	HasCheck bool             `json:"hasCheck"`
 	HasSetup bool             `json:"hasSetup"`
+
+	CanSwitchModel bool `json:"canSwitchModel"`
 }
 
 func runJSONOf(r *session.CommandRun) *commandRunJSON {
 	if r == nil {
 		return nil
 	}
-	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended)}
+	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended), Said: saidJSONOf(session.RunSaid(r.State))}
 }
 
 func modelsJSONOf(list []session.AgentModel) []agentModelJSON {
@@ -111,16 +128,20 @@ func workJSONOf(v session.SessionWorkView) sessionWorkJSON {
 	now := v.Model.Now()
 	out := sessionWorkJSON{Agent: v.Agent,
 		Model: sessionModelJSON{Start: v.Model.StartModel, StartEffort: v.Model.StartEffort, Model: v.Model.Model, Effort: v.Model.Effort,
-			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered)},
-		Queue:    queueViewJSON{Items: []queuedJSON{}, Stopped: v.Queue.Stopped, Waiting: v.Queue.Waiting, Sending: v.Queue.Sending, Max: session.MaxQueue},
+			Now: now.Model, NowEffort: now.Effort, From: session.ModelsFrom, Offered: modelsJSONOf(v.Offered), Efforts: session.AgentEfforts(v.Agent)},
+		Queue:    queueViewJSON{Items: []queuedJSON{}, Stopped: v.Queue.Stopped, Waiting: v.Queue.Waiting, Sending: v.Queue.Sending, Max: session.MaxQueue, Full: session.QueueFull(len(v.Queue.Items))},
 		Check:    runJSONOf(v.Check),
 		Setup:    runJSONOf(v.Setup),
 		HasCheck: v.Commands.Check != "",
 		HasSetup: v.Commands.Setup != "",
+
+		CanSwitchModel: session.ModelSwitchable(v.Agent),
 	}
-	for _, m := range v.Queue.Items {
-		out.Queue.Items = append(out.Queue.Items, queuedJSON{ID: m.ID, Text: m.Text, At: millis(m.At)})
+	for i, m := range v.Queue.Items {
+		up, down, editable := session.QueueMoves(len(v.Queue.Items), i, v.Queue.Sending)
+		out.Queue.Items = append(out.Queue.Items, queuedJSON{ID: m.ID, Text: m.Text, At: millis(m.At), Up: up, Down: down, Editable: editable})
 	}
+	out.Queue.CanAdd = out.Queue.Full == ""
 	if v.Ports > 0 {
 		out.Ports = &portsJSON{First: v.Ports, Last: v.Ports + session.PortSpan - 1, Env: v.PortsEnv}
 	}
@@ -134,7 +155,7 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request, body map[string]an
 	}
 	op, okOp := body["op"].(string)
 	if !okOp {
-		refuse(w, http.StatusBadRequest, "op")
+		refuse(w, http.StatusBadRequest, "op", saidOp)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sessionWorkFor + writeFor))
@@ -148,7 +169,7 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request, body map[string]an
 	case reviewModelsRoute:
 		s.reviewModels(w, op, body)
 	default:
-		refuse(w, http.StatusNotFound, "route")
+		refuse(w, http.StatusNotFound, "route", saidRoute)
 	}
 }
 
@@ -159,48 +180,51 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 	text, okText := body["text"].(string)
 	okText = okText && len(text) <= maxQueueText
 	var err error
+	var said savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "sid") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 	case "model":
 		model, okModel := body["model"].(string)
 		effort, okEffort := body["effort"].(string)
 		if !keysWithin(body, "op", "sid", "model", "effort") || !okSID || !okModel || !okEffort || !modelText.MatchString(model) || len(effort) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.SwitchModel(ctx, sid, model, effort)
 	case "queue-add":
 		if !keysWithin(body, "op", "sid", "text") || !okSID || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueAdd(sid, text)
 	case "queue-edit":
 		if !keysWithin(body, "op", "sid", "id", "text") || !okSID || !okID || !okText {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
-		err = s.work.QueueEdit(sid, id, text)
+		var changed bool
+		changed, err = s.work.QueueEdit(sid, id, text)
+		said = saveSaid(changed, saidQueuedSaved, saidQueuedUnchanged)
 	case "queue-move":
 		to, okTo := integer(body["to"])
 		if !keysWithin(body, "op", "sid", "id", "to") || !okSID || !okID || !okTo || to < 0 || to >= session.MaxQueue {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueMove(sid, id, int(to))
 	case "queue-remove":
 		if !keysWithin(body, "op", "sid", "id") || !okSID || !okID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueRemove(sid, id)
 	case "queue-resume":
 		if !keysWithin(body, "op", "sid") || !okSID {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err = s.work.QueueResume(sid)
@@ -222,19 +246,22 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 		send(w, code, p)
 		return
 	}
-	send(w, http.StatusOK, workJSONOf(v))
+	answer := workJSONOf(v)
+	answer.savedSaid = said
+	send(w, http.StatusOK, answer)
 }
 
 func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[string]any) {
 	name, okName := body["name"].(string)
 	if !okName || name == "" || len(name) > 400 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
+	var said *savedSaid
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "name") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		if !s.knownProject(name) {
@@ -253,23 +280,29 @@ func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[stri
 		if raw, given := body["browser"]; given {
 			browser, okBrowser = raw.(string)
 		}
-		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser || len(check) > session.MaxProjectCommand+64 || len(setup) > session.MaxProjectCommand+64 || len(image) > session.MaxVerifyImage+64 || len(browser) > session.MaxProjectCommand+64 {
-			refuse(w, http.StatusBadRequest, "fields")
+		if !keysWithin(body, "op", "name", "check", "setup", "image", "browser") || !okCheck || !okSetup || !okImage || !okBrowser {
+			refuseFields(w)
 			return
 		}
-		err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser})
-		s.logger.Info("project commands", "op", op, "ok", err == nil)
+		changed, err := s.work.SetCommands(name, session.ProjectCommands{Check: check, Setup: setup, Image: image, Browser: browser})
+		s.logger.Info("project commands", "op", op, "ok", err == nil, "changed", changed)
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
 			return
 		}
+		done := saveSaid(changed, saidCommandsSaved, saidCommandsUnchanged)
+		said = &done
 	default:
 		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads and sets a project's commands only."})
 		return
 	}
 	c := s.work.Commands(name)
-	send(w, http.StatusOK, map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "browser": c.Browser, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage})
+	answer := map[string]any{"check": c.Check, "setup": c.Setup, "image": c.Image, "browser": c.Browser, "max": session.MaxProjectCommand, "maxImage": session.MaxVerifyImage}
+	if said != nil {
+		said.on(answer)
+	}
+	send(w, http.StatusOK, answer)
 }
 
 type roleModelJSON struct {
@@ -281,7 +314,7 @@ type roleModelJSON struct {
 func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]any) {
 	path, okPath := body["path"].(string)
 	if !okPath || path == "" || len(path) > session.MaxCwd {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var roles map[review.Role]session.ModelChoice
@@ -289,7 +322,7 @@ func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]
 	switch op {
 	case "read":
 		if !keysWithin(body, "op", "path") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		roles, err = s.work.RoleModels(path)
@@ -298,7 +331,7 @@ func (s *Server) reviewModels(w http.ResponseWriter, op string, body map[string]
 		model, okModel := body["model"].(string)
 		effort, okEffort := body["effort"].(string)
 		if !keysWithin(body, "op", "path", "role", "model", "effort") || !okRole || len(role) > 40 || !okModel || len(model) > 40 || !okEffort || len(effort) > 20 {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		roles, err = s.work.SetRoleModel(path, review.Role(role), model, effort)
@@ -328,7 +361,7 @@ func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	body, bad := readObject(w, r, MaxAgentBody)
 	if bad != 0 {
-		refuse(w, bad, "body")
+		agentRefuse(w, bad, "body")
 		return
 	}
 	again, okAgain := body["again"].(bool)
@@ -336,7 +369,7 @@ func (s *Server) turnCheck(w http.ResponseWriter, r *http.Request) {
 		okAgain = true
 	}
 	if !keysWithin(body, "again") || !okAgain {
-		refuse(w, http.StatusBadRequest, "fields")
+		agentRefuse(w, http.StatusBadRequest, "fields")
 		return
 	}
 	if s.work == nil {

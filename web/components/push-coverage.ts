@@ -1,11 +1,7 @@
 import { el, unspoofed, visible } from '../lib/dom.ts'
+import { isRecord, saidOf, tagClass } from '../lib/json.ts'
 import type { CoverageRole, CoverageRow, SessionReview } from '../types.ts'
 
-const STATUS: Record<string, { label: string, tone: string }> = {
-  verified: { label: 'verified', tone: 'ok' },
-  violated: { label: 'violated', tone: 'bad' },
-  'not-verified': { label: 'not verified', tone: '' },
-}
 const FINISHED = new Set(['pass', 'block', 'unknown'])
 
 function text(value: string): string {
@@ -18,7 +14,7 @@ function strings(v: unknown): string[] {
 
 function rowsOf(v: unknown): CoverageRow[] {
   if (!Array.isArray(v)) return []
-  return v.filter((r): r is CoverageRow => !!r && typeof r.id === 'string' && typeof r.status === 'string' && r.status in STATUS)
+  return v.filter((r): r is CoverageRow => !!r && typeof r.id === 'string' && typeof r.status === 'string' && isRecord(r.said) && typeof r.said.label === 'string')
 }
 
 export function reviewCoverage(review: SessionReview | undefined, commit: string): CoverageRole[] {
@@ -39,8 +35,8 @@ function cell(role: CoverageRole, id: string): HTMLElement {
     td.append(el('span', 'muted', 'not reported'))
     return td
   }
-  const status = STATUS[line.status] ?? { label: text(line.status), tone: '' }
-  td.append(el('span', `tag ${status.tone}`.trim(), status.label))
+  const status = saidOf(line.said, text(line.status))
+  td.append(el('span', tagClass(status), status.label))
   if (line.evidence) td.append(' ', el('code', '', text(line.evidence)))
   if (line.note) td.append(el('div', 'muted', text(line.note)))
   return td

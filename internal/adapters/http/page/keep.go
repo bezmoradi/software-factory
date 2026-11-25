@@ -82,7 +82,7 @@ func (s *Server) keepAPI(w http.ResponseWriter, r *http.Request, body map[string
 		okCommit = okCommit && op == "restore" && flagCommit.MatchString(commit)
 	}
 	if !okOp || !keysWithin(body, "op", "sid", "commit") || !okSID || !okCommit {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	var v session.KeepView

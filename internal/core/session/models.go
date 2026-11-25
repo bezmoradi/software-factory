@@ -151,10 +151,10 @@ func splitRoleKey(k string) [3]string {
 
 func claudeChoice(model, effort string) error {
 	if !slices.Contains(ClaudeModels, model) {
-		return explained(invalid("model"), "That agent can't be started with that model from the page.")
+		return invalid("model", "That agent can't be started with that model from the page.")
 	}
 	if effort != "" && !slices.Contains(ClaudeEfforts, effort) {
-		return explained(invalid("effort"), "Claude Code's effort is low, medium, high, xhigh or max.")
+		return invalid("effort", "Claude Code's effort is low, medium, high, xhigh or max.")
 	}
 	return nil
 }
@@ -164,7 +164,7 @@ func checkChoice(spec AgentSpec, model, effort string) error {
 		return claudeChoice(model, effort)
 	}
 	if model != "" || effort != "" {
-		return explained(invalid("model"), "That agent can't be started with that model from the page.")
+		return invalid("model", "That agent can't be started with that model from the page.")
 	}
 	return nil
 }
@@ -203,16 +203,16 @@ func (w *SessionWork) ClaudeOverride(sid string) ModelChoice {
 func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string) error {
 	info, ok := w.reg.workInfo(sid)
 	if !ok {
-		return explained(notFound("session"), "The engine has no session of that id.")
+		return notFound("session", "The engine has no session of that id.")
 	}
 	if err := w.branchHeld(sid); err != nil {
 		return err
 	}
 	if info.Agent != "claude" {
-		return explained(conflict("agent"), "This agent's model can't be switched from the page.")
+		return conflict("agent", "This agent's model can't be switched from the page.")
 	}
 	if model != "" && !slices.Contains(ClaudeModels[1:], model) {
-		return explained(invalid("model"), "Claude Code switches only to the models the start form offers.")
+		return invalid("model", "Claude Code switches only to the models the start form offers.")
 	}
 	if err := claudeChoice(model, effort); err != nil {
 		return err
@@ -220,7 +220,7 @@ func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string
 	w.mu.Lock()
 	if _, ok := w.models[sid]; !ok && len(w.models) >= maxModelSessions {
 		w.mu.Unlock()
-		return explained(limited("models"), "The engine keeps model choices for at most 1,000 sessions.")
+		return limited("models", "The engine keeps model choices for at most 1,000 sessions.")
 	}
 	m := w.models[sid]
 	m.Agent, m.Model, m.Effort = info.Agent, model, effort
@@ -259,7 +259,7 @@ func (w *SessionWork) repoOf(path string) (Repository, bool) {
 func (w *SessionWork) RoleModels(path string) (map[review.Role]ModelChoice, error) {
 	repo, ok := w.repoOf(path)
 	if !ok {
-		return nil, explained(notFound("project"), "That project is no longer in the list.")
+		return nil, notFound("project", "That project is no longer in the list.")
 	}
 	out := map[review.Role]ModelChoice{}
 	w.mu.Lock()
@@ -272,14 +272,14 @@ func (w *SessionWork) RoleModels(path string) (map[review.Role]ModelChoice, erro
 
 func (w *SessionWork) SetRoleModel(path string, role review.Role, model, effort string) (map[review.Role]ModelChoice, error) {
 	if !slices.Contains(review.Roles, role) {
-		return nil, explained(invalid("role"), "That isn't a review role.")
+		return nil, invalid("role", "That isn't a review role.")
 	}
 	if !ValidReviewChoice(model, effort) {
-		return nil, explained(invalid("model"), "A review role runs with one of the start form's models and Claude Code's efforts.")
+		return nil, invalid("model", "A review role runs with one of the start form's models and Claude Code's efforts.")
 	}
 	repo, ok := w.repoOf(path)
 	if !ok {
-		return nil, explained(notFound("project"), "That project is no longer in the list.")
+		return nil, notFound("project", "That project is no longer in the list.")
 	}
 	key := roleKey(repo.Name, repo.URL, role)
 	w.mu.Lock()
@@ -288,7 +288,7 @@ func (w *SessionWork) SetRoleModel(path string, role review.Role, model, effort 
 	} else {
 		if _, ok := w.roles[key]; !ok && len(w.roles) >= maxRoleModels {
 			w.mu.Unlock()
-			return nil, explained(limited("roles"), "The engine keeps model choices for at most 4,000 review roles.")
+			return nil, limited("roles", "The engine keeps model choices for at most 4,000 review roles.")
 		}
 		w.roles[key] = ModelChoice{Model: model, Effort: effort}
 	}

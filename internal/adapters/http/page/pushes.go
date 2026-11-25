@@ -40,12 +40,18 @@ type pushAuditJSON struct {
 type pushJSON struct {
 	Running     bool           `json:"running"`
 	Result      string         `json:"result"`
+	ResultSaid  *saidJSON      `json:"resultSaid,omitempty"`
 	Reason      string         `json:"reason"`
 	Card        string         `json:"card"`
 	Commit      string         `json:"commit"`
 	Branch      string         `json:"branch"`
 	Remote      string         `json:"remote"`
 	Missing     []string       `json:"missing"`
+	Items       []missingJSON  `json:"missingItems"`
+	Look        pushLookJSON   `json:"look"`
+	Decision    string         `json:"decision"`
+	Outcome     string         `json:"outcome"`
+	Flow        *flowJSON      `json:"flow,omitempty"`
 	NeedsReason bool           `json:"needsReason"`
 	Expires     int64          `json:"expires"`
 	At          int64          `json:"at"`
@@ -57,11 +63,68 @@ type pushJSON struct {
 	Findings     bool  `json:"findings"`
 	FindingsSent int64 `json:"findingsSent"`
 
-	Extra  *pushExtraJSON   `json:"extra,omitempty"`
-	Checks []agentCheckJSON `json:"checks,omitempty"`
+	Extra       *pushExtraJSON   `json:"extra,omitempty"`
+	Checks      []agentCheckJSON `json:"checks,omitempty"`
+	NotReported string           `json:"notReported,omitempty"`
+
+	CheckedBy *pushCheckedJSON `json:"checkedBy,omitempty"`
 }
 
-func pushOf(v *session.PushView) *pushJSON {
+type pushReviewerJSON struct {
+	Agent        string          `json:"agent"`
+	Name         string          `json:"name"`
+	Required     bool            `json:"required"`
+	Advisory     bool            `json:"advisory"`
+	State        string          `json:"state"`
+	Overridden   bool            `json:"overridden"`
+	Counted      bool            `json:"counted"`
+	SetAside     string          `json:"setAside"`
+	Unchecked    bool            `json:"unchecked"`
+	Runs         int             `json:"runs"`
+	Blocking     int             `json:"blocking"`
+	Requirements int             `json:"requirements"`
+	Verified     int             `json:"verified"`
+	Violated     int             `json:"violated"`
+	NotVerified  int             `json:"notVerified"`
+	Line         checkedLineJSON `json:"line"`
+}
+
+type pushRunJSON struct {
+	Kind  string          `json:"kind"`
+	State string          `json:"state"`
+	Code  int             `json:"code"`
+	Line  checkedLineJSON `json:"line"`
+}
+
+type pushCheckedJSON struct {
+	Reviewers  []pushReviewerJSON `json:"reviewers"`
+	Runs       []pushRunJSON      `json:"runs"`
+	Unreadable bool               `json:"unreadable"`
+}
+
+func checkedOf(c *session.PushChecked) *pushCheckedJSON {
+	if c == nil {
+		return nil
+	}
+	out := &pushCheckedJSON{Reviewers: make([]pushReviewerJSON, 0, len(c.Reviewers)), Runs: make([]pushRunJSON, 0, len(c.Runs)), Unreadable: c.Unreadable}
+	for _, r := range c.Reviewers {
+		out.Reviewers = append(out.Reviewers, pushReviewerJSON{Agent: r.Agent, Name: r.Name, Required: r.Required, Advisory: r.Advisory, State: r.State, Overridden: r.Overridden, Counted: r.Counted,
+			SetAside: r.SetAside, Unchecked: r.Unchecked, Runs: r.Runs, Blocking: r.Blocking, Requirements: r.Requirements, Verified: r.Verified, Violated: r.Violated, NotVerified: r.NotVerified,
+			Line: checkedLineOf(session.CheckedReviewerLine(r))})
+	}
+	for _, r := range c.Runs {
+		out.Runs = append(out.Runs, pushRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Line: checkedLineOf(session.CheckedRunLine(r))})
+	}
+	return out
+}
+
+type missingJSON struct {
+	Text  string `json:"text"`
+	Agent string `json:"agent,omitempty"`
+	Since string `json:"since,omitempty"`
+}
+
+func pushOf(v *session.PushView, all []session.AgentCheck, r *session.ReviewView) *pushJSON {
 	if v == nil {
 		return nil
 	}
@@ -69,7 +132,26 @@ func pushOf(v *session.PushView) *pushJSON {
 		Missing: nonNil(v.Missing), NeedsReason: v.NeedsReason, Expires: millis(v.Expires), At: millis(v.At), Handoff: v.Handoff, Passed: v.Passed, Overridden: v.Overridden,
 		Findings: v.Findings, FindingsSent: millis(v.FindingsSent)}
 	out.Extra = extraOf(v.Extra)
-	out.Checks = checksOf(v.Checks)
+	out.ResultSaid = saidPtr(session.PushResultSaid(v.Result))
+	look := session.PushResultLook(v.Result)
+	out.Look = pushLookJSON{Icon: look.Icon, Tone: look.Tone, Label: look.Label, Lead: look.Lead}
+	out.Decision, out.Outcome = session.PushDecision(*v), session.PushOutcome(*v)
+	out.Flow = flowOf(session.CardFlow(v))
+	out.Items = []missingJSON{}
+	for _, m := range session.PushMissing(v, r) {
+		out.Items = append(out.Items, missingJSON{Text: m.Text, Agent: m.Agent, Since: m.Since})
+	}
+	ran := v.Checks
+	if len(ran) == 0 {
+		ran = session.ChecksBefore(all, v.At)
+	}
+	out.Checks = checksOf(ran)
+	kinds := make([]string, 0, len(ran))
+	for _, c := range ran {
+		kinds = append(kinds, string(c.Kind))
+	}
+	out.NotReported = session.ChecksNotReported(kinds)
+	out.CheckedBy = checkedOf(v.CheckedBy)
 	if a := v.Audit; a != nil {
 		out.Audit = &pushAuditJSON{Time: millis(a.Time), By: a.By, Result: a.Result, Reason: a.Reason, Commit: a.Commit, Branch: a.Branch,
 			Remote: a.Remote, Missing: nonNil(a.Missing), PersonReason: a.PersonReason}
@@ -99,6 +181,7 @@ type fileJSON struct {
 	Stale  bool   `json:"stale"`
 	Size   int64  `json:"size,omitempty"`
 	Skip   string `json:"notDiffed,omitempty"`
+	Why    string `json:"notDiffedWhy,omitempty"`
 }
 
 type pointsJSON struct {
@@ -171,7 +254,7 @@ func changesOf(v session.ChangeView, viewed map[string]string) changesJSON {
 		}
 		mark, marked := viewed[f.Path]
 		n := skipped[f.Path]
-		out.Files = append(out.Files, fileJSON{Status: status, Path: f.Path, Blob: blob, Viewed: marked && blob != "" && mark == blob, Stale: marked && mark != blob, Size: n.Size, Skip: n.Why})
+		out.Files = append(out.Files, fileJSON{Status: status, Path: f.Path, Blob: blob, Viewed: marked && blob != "" && mark == blob, Stale: marked && mark != blob, Size: n.Size, Skip: n.Why, Why: session.NotDiffedWhy(n.Why)})
 	}
 	return out
 }
@@ -183,7 +266,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 	}
 	sid, ok := body["sid"].(string)
 	if !ok || sid == "" || len(sid) > 80 {
-		refuse(w, http.StatusBadRequest, "fields")
+		refuseFields(w)
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(manageFor + writeFor))
@@ -195,7 +278,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		commit, okCommit := optionalString(body, "commit")
 		at, okAt := session.ChangePointOf(from, commit)
 		if !keysWithin(body, "sid", "from", "commit") || !okFrom || !okCommit || !okAt {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		v, err := s.cfg.Pushes.Changes(ctx, sid, at)
@@ -207,7 +290,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		send(w, http.StatusOK, map[string]any{"changes": changesOf(v, s.viewedMarks(sid))})
 	case pushPageRoute:
 		if !keysWithin(body, "sid") {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Push(ctx, sid)
@@ -220,14 +303,14 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		reason := ""
 		if raw, present := body["reason"]; present {
 			text, ok := raw.(string)
-			if !ok || len(text) > 2000 {
-				refuse(w, http.StatusBadRequest, "reason")
+			if !ok {
+				refuse(w, http.StatusBadRequest, "reason", saidFields)
 				return
 			}
 			reason = text
 		}
 		if !keysWithin(body, "sid", "card", "commit", "allow", "reason") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) || !okAllow {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Answer(ctx, sid, card, commit, allow, reason)
@@ -237,7 +320,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		card, okCard := body["card"].(string)
 		commit, okCommit := body["commit"].(string)
 		if !keysWithin(body, "sid", "card", "commit") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.Handoff(ctx, sid, card, commit)
@@ -247,7 +330,7 @@ func (s *Server) pushPage(w http.ResponseWriter, r *http.Request, body map[strin
 		card, okCard := body["card"].(string)
 		commit, okCommit := body["commit"].(string)
 		if !keysWithin(body, "sid", "card", "commit") || !okCard || !pushCard.MatchString(card) || !okCommit || !commitHex.MatchString(commit) {
-			refuse(w, http.StatusBadRequest, "fields")
+			refuseFields(w)
 			return
 		}
 		err := s.cfg.Pushes.SendFindings(ctx, sid, card, commit)

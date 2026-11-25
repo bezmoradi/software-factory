@@ -694,6 +694,7 @@ func (h *Helper) watchVerifiers(ctx context.Context) {
 			return
 		case <-t.C:
 			h.killOverdue(ctx)
+			h.killOverdueActions(ctx)
 		}
 	}
 }
