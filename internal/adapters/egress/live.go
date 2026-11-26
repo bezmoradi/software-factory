@@ -17,7 +17,6 @@ type Lists struct {
 	Allow   []string
 	Ports   []string
 	Expires map[string]time.Time
-	Git     []string
 }
 
 type Live struct {

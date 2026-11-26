@@ -95,6 +95,8 @@ dimensions:
     - "/api/workspace"
   body_limited_routes: ["/api/approve-plan", "/api/approve-requirements", "/api/reviewer-agents"]
   other_methods: [PUT, DELETE, PATCH]
+  refused_key_variants: [unknown, basic_scheme, token_scheme, no_scheme]
+  replaced_key_variants: [replaced]
 sets:
   no_key:
     columns: { route: post_routes }
@@ -138,3 +140,28 @@ sets:
     columns: { route: post_routes, method: other_methods }
   same_site:
     columns: { route: post_routes }
+  other_key:
+    columns: { route: post_routes, variant: refused_key_variants }
+    except:
+      - cells: { route: "/api/session", variant: unknown }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it never reads a key in any form: a row would be a sign-in, which ends the run's key; sign-in.yaml checks its refusals"
+      - cells: { route: "/api/session", variant: basic_scheme }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it never reads a key in any form: a row would be a sign-in, which ends the run's key; sign-in.yaml checks its refusals"
+      - cells: { route: "/api/session", variant: token_scheme }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it never reads a key in any form: a row would be a sign-in, which ends the run's key; sign-in.yaml checks its refusals"
+      - cells: { route: "/api/session", variant: no_scheme }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it never reads a key in any form: a row would be a sign-in, which ends the run's key; sign-in.yaml checks its refusals"
+  replaced_key:
+    columns: { route: post_routes, variant: replaced_key_variants }
+    except:
+      - cells: { route: "/api/session", variant: replaced }
+        reason: "/api/session is the sign-in route, which the page serves before its key check, so it never reads a key in any form: a row would be a sign-in, which ends the run's key; sign-in.yaml checks its refusals"
+  unknown_field:
+    columns: { route: post_routes }
+    except:
+      - cells: { route: "/api/session" }
+        reason: "/api/session is the sign-in route, and each request to it counts toward the page's sign-in rate before its body is read, so a row there could make a later sign-in 429; sign-in.yaml's SGN-001 checks a sign-in with a field, refused with 400 body before a key is issued"
+      - cells: { route: "/api/upload" }
+        reason: "/api/upload takes an image or a file, not a JSON object, so a JSON body is refused with 415 before any field is read; bodies.yaml checks its bodies"
+      - cells: { route: "/api/import" }
+        reason: "/api/import takes application/gzip, not a JSON object, so a JSON body is refused with 415 before any field is read; bodies.yaml checks its bodies"

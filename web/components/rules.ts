@@ -21,7 +21,7 @@ export interface RulesView {
 type Answer = EngineAnswer
 
 const FIXED: { what: string; why: string; claude?: boolean }[] = [
-  { what: 'Reach a built-in git host or one on the deny list', why: 'Egress always refuses GitHub, githubusercontent.com, GitLab, Bitbucket and the hosts on its deny list. Another git host you add under Network access is reachable like any allowed host.' },
+  { what: 'Reach a git host Software Factory knows', why: 'Egress always refuses GitHub, githubusercontent.com, GitLab, Bitbucket, the hosts on its deny list and your projects’ hosts, and the engine refuses every grant and credential that would open one. A git host it can’t recognise, such as a mirror or another name for one, is reachable like any host you add under Network access.' },
   { what: 'Get the git host token', why: 'The token stays in the engine and never reaches the session’s container; the engine pushes with it, only through the gate. The agent can read its own container’s sign-in, a key you pasted for it included.' },
   { what: 'Run a push-shaped command', why: 'Claude Code’s plugin refuses it and tells the agent to call factory_push.', claude: true },
   { what: 'Hand the work to a vendor’s cloud', why: 'Commands such as claude --remote are refused, as the agent typed them; a script that runs one gets past this.', claude: true },

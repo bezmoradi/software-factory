@@ -86,10 +86,7 @@ func (p *Proxy) check(policy Policy, subnet, host string) string {
 		policy = Policy{deny: policy.deny}
 	}
 	reason := policy.Check(host)
-	switch {
-	case reason == ReasonNotAllowlisted && p.grants.allows(subnet, normalize(host)):
-		return ""
-	case reason == ReasonGitHost && p.grants.allowsGit(subnet, normalize(host)):
+	if reason == ReasonNotAllowlisted && p.grants.allows(subnet, normalize(host)) {
 		return ""
 	}
 	return reason
@@ -311,7 +308,7 @@ func (p *Proxy) dialPort(ctx context.Context, subnet, target string) (net.Conn, 
 	if slices.ContainsFunc(addrs, p.grants.ownNetwork) {
 		return nil, http.StatusForbidden, ReasonOwnNetwork
 	}
-	if slices.ContainsFunc(addrs, p.grants.known.gitAddress) && !p.grants.openedGit(subnet, target) {
+	if slices.ContainsFunc(addrs, p.grants.known.gitAddress) {
 		return nil, http.StatusForbidden, ReasonGitHost
 	}
 	for _, a := range addrs {

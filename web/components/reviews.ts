@@ -1,7 +1,7 @@
 import { request, UNREAD } from '../api.ts'
 import { busy, button, el, emit, fileLink, labelError, replaceKeeping, repoPath, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
-import { shortSha } from '../lib/format.ts'
+import { duration, shortSha } from '../lib/format.ts'
 import { saidOf } from '../lib/json.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
@@ -28,14 +28,6 @@ function provenance(role: ReviewRole): string {
 function alsoUsed(role: ReviewRole): string {
   const others = (role.models ?? []).slice(1)
   return others.length ? `Also used: ${others.map(text).join(', ')}` : ''
-}
-
-function duration(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  const pad = (n: number) => String(n).padStart(2, '0')
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`
-  return `${Math.floor(s / 3600)}h ${pad(Math.floor(s / 60) % 60)}m`
 }
 
 function runName(role: ReviewRole): string {

@@ -184,6 +184,8 @@ label:has(> .label-error) > .muted { display: none; }
 .form > p { margin: 0; }
 .form:has(> p:empty:last-child:not(.hint)) { margin-block-end: -.5rem; }
 :is(.form-inline, .form-row) { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+.form-row { align-items: start; }
+.form-row > :is(.form-actions, .field-check) { align-self: end; }
 .form-inline > .field { flex: 1 1 12rem; }
 .form-row.halves > .field { flex: 1 1 14rem; }
 .form-row.host-port > .field { flex: 1 1 14rem; }
@@ -393,7 +395,13 @@ pre {
 .tool.fail .tool-out { color: var(--bad-ink); }
 .tool.sub { padding-left: 1rem; }
 .sub-list { list-style: none; margin: .4rem 0 0; padding: 0; }
-.subagent > details > summary { min-height: 24px; color: var(--soft); }
+.subagent > details > summary, .fold > details > summary { min-height: 24px; color: var(--soft); }
+.timeline > li.fold { margin-bottom: .8rem; contain-intrinsic-block-size: auto 2rem; }
+.fold > details > .sub-list > li.tool { padding-left: 1rem; }
+.fold-running { margin-top: 0; }
+.fold-running:empty { display: none; }
+.fold > details:not([hidden]) + .fold-running { margin-top: .4rem; }
+.fold .sub-list > li.tool:last-child { margin-bottom: 0; }
 sf-changes details > summary { min-height: 24px; }
 
 .card {
@@ -407,7 +415,7 @@ sf-changes details > summary { min-height: 24px; }
 .card .meta { margin-bottom: .2rem; color: var(--warn-ink); }
 sf-permission > sf-code { margin: 0 0 .5rem; }
 .card .q + .q { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--line); }
-.options { display: flex; flex-wrap: wrap; gap: .45rem; margin: .5rem 0 0; }
+.options { display: grid; gap: .45rem; margin: .5rem 0 0; }
 .options button { text-align: left; }
 .options button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
 .options button[aria-pressed="true"]::before { content: "✓ " / ""; }
@@ -415,6 +423,8 @@ sf-permission > sf-code { margin: 0 0 .5rem; }
 .other input { flex: 1; min-width: 0; }
 sf-approval, sf-project-agents { display: block; margin-top: .4rem; }
 sf-approval .other > .field { flex-basis: 100%; }
+sf-approval > .approval-read { display: block; min-height: 24px; }
+body.side-full sf-approval > .approval-read, body:not(.side-full) sf-approval > .approval-doc { display: none; }
 input::placeholder, textarea::placeholder { color: var(--placeholder); }
 sf-check.unknown { color: var(--warn-ink); }
 sf-check .round { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -427,7 +437,9 @@ sf-reviewer-agents .list .row > :first-child { min-width: 0; overflow-wrap: anyw
 sf-project-agents .field-row > .textbox { flex: 1 1 10rem; min-width: 0; max-width: 100%; }
 sf-project-agents .list .row > :first-child { min-width: 0; overflow-wrap: anywhere; }
 .approval-why:empty { margin: .2rem 0 0; }
-.actions { display: flex; gap: .5rem; margin-top: .8rem; align-items: center; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; align-items: center; }
+.actions:has(> span:not(.spacer)) > button { flex: none; white-space: nowrap; }
+.actions > span:not(.spacer) { flex: 1 1 12rem; min-width: 0; }
 
 aside .label, .page-side .label { margin-bottom: .75rem; line-height: 1; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 24px; margin: 0 0 .75rem; }
@@ -1409,14 +1421,27 @@ sf-token-expiry > .notice { margin: .5rem 0 0; }
 .item-table .name .title { min-width: 0; }
 .credential-table .session-cells, .credential-table .sessions-head { grid-template-columns: minmax(0, min(14rem, 35%)) minmax(0, 1fr) auto; }
 .preset-table .session-cells, .preset-table .sessions-head { grid-template-columns: minmax(0, min(14rem, 35%)) minmax(0, 1fr) minmax(0, 9rem); }
-.action-table .session-cells, .action-table .sessions-head { grid-template-columns: minmax(0, min(12rem, 30%)) minmax(0, 1fr) minmax(0, min(13rem, 30%)); }
-.item-table .item-hosts, .item-table .item-command { min-width: 0; overflow-wrap: anywhere; }
+.item-table .item-hosts { min-width: 0; overflow-wrap: anywhere; }
 .item-table .row-note { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
+.action-table .item-command { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-table :is(.item-target, .item-credential, .item-minutes) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 40rem) {
   .item-table .session-cells, .item-table .sessions-head { grid-template-columns: minmax(0, 1fr) auto; }
   .item-table .sessions-head > :nth-child(2) { display: none; }
   .item-table .session-cells > :nth-child(2):not(.session-ask) { grid-column: 1 / -1; grid-row: 2; }
   .item-table .session-ask { grid-column: 1 / -1; }
+  .action-table .session-cells { grid-template-columns: minmax(0, max-content) minmax(0, max-content) minmax(0, 1fr); }
+  .action-table .session-cells > :first-child { grid-column: 1 / -1; }
+  .action-table .sessions-head { grid-template-columns: minmax(0, 1fr); }
+  .action-table .sessions-head > :not(:first-child) { display: none; }
+}
+@media not (max-width: 40rem) {
+  .action-table { display: grid; grid-template-columns: minmax(0, min(12rem, 25%)) minmax(0, 1fr) repeat(3, minmax(0, max-content)) auto; column-gap: .75rem; }
+  .action-table > :is(.sessions-head, .sessions), .action-table > .sessions > li.with-menu { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+  .action-table > .sessions-head { padding-right: .3rem; }
+  .action-table > .sessions > li.with-menu > .session-cells { grid-column: 1 / 6; grid-template-columns: subgrid; }
+  .action-table > .sessions > li.with-menu > :is(button, .icon-button) { grid-column: 6; }
+  .action-table > .sessions > li.asking > .session-cells { grid-column: 1 / -1; }
 }
 .team-rule-list { margin: .2rem 0 .4rem; padding-inline-start: 1.1rem; overflow-wrap: anywhere; }
 sf-lineage { display: block; }
@@ -1462,6 +1487,8 @@ sf-split .forge-body { max-height: 20rem; overflow: auto; white-space: pre-wrap;
 sf-split .split-title { max-height: 4rem; font-weight: 600; }
 sf-split .split-edit textarea, sf-split .split-edit input { inline-size: 100%; }
 sf-split .split-started { gap: .5rem; align-items: baseline; margin-top: .3rem; }
+sf-split .split-project { margin-top: .3rem; }
+sf-split .split-url { display: block; overflow-wrap: anywhere; font-size: .75rem; }
 dialog.backup .list li, dialog.backup p { overflow-wrap: anywhere; }
 dialog.backup .row { flex-wrap: wrap; gap: .4rem; }
 .state-notices { margin-top: 1rem; }

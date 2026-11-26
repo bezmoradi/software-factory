@@ -687,6 +687,10 @@ func (r *Registry) Report(given string, b Batch) error {
 			delete(frame, "away")
 			delete(frame, "reported")
 			delete(frame, "checkpoint")
+			for _, k := range foldKeys {
+				delete(frame, k)
+			}
+			maps.Copy(frame, foldOf(kind, ev))
 			if cp := r.checkpointOf(c.sid, kind, ev); cp != nil {
 				frame["checkpoint"] = cp
 			}

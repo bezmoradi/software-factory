@@ -27,15 +27,6 @@ type accessRiskJSON struct {
 	Label   string   `json:"label"`
 	Says    []string `json:"says"`
 	Accept  string   `json:"accept,omitempty"`
-	Git     []string `json:"git,omitempty"`
-}
-
-func shownGits(body map[string]any) ([]string, bool) {
-	v, given := body["git"]
-	if !given {
-		return nil, true
-	}
-	return stringList(v, session.MaxCredentialBound, maxEgressHost)
 }
 
 type accessCardJSON struct {
@@ -73,7 +64,7 @@ func accessCardOf(c session.AccessCard) accessCardJSON {
 		if says == nil {
 			says = []string{}
 		}
-		out.Risks = append(out.Risks, accessRiskJSON{Scope: r.Scope, Expires: r.Expires, Level: r.Level, Label: r.Label, Says: says, Accept: r.Accept, Git: r.Git})
+		out.Risks = append(out.Risks, accessRiskJSON{Scope: r.Scope, Expires: r.Expires, Level: r.Level, Label: r.Label, Says: says, Accept: r.Accept})
 	}
 	return out
 }
@@ -106,7 +97,7 @@ func accessViewJSON(v session.AccessView) map[string]any {
 		}
 		entry := map[string]any{
 			"id": g.ID, "host": g.Host, "scope": g.Scope, "scopeLabel": label, "own": g.Own, "expires": unixOr(g.Expires), "until": g.Until,
-			"who": g.Who, "reason": g.Reason, "made": unixOr(g.Made), "git": g.Git,
+			"who": g.Who, "reason": g.Reason, "made": unixOr(g.Made),
 		}
 		if g.Credential != "" {
 			entry["credential"], entry["bound"], entry["delivery"], entry["deliveryTag"] = g.Name, g.Bound, g.Delivery, g.DeliveryTag
@@ -116,9 +107,6 @@ func accessViewJSON(v session.AccessView) map[string]any {
 		}
 		if g.Port > 0 {
 			entry["port"], entry["target"] = g.Port, g.Target()
-		}
-		if g.Closed != "" {
-			entry["closed"] = g.Closed
 		}
 		grants = append(grants, entry)
 	}
@@ -133,9 +121,6 @@ func accessViewJSON(v session.AccessView) map[string]any {
 	out := map[string]any{
 		"grants": grants, "cards": cards, "scopes": choicesJSON(session.GrantScopes), "expiries": choicesJSON(session.GrantExpiries),
 		"network": v.Network, "now": v.Now.Unix(), "presets": presetsJSON(v.Presets), "credentials": creds,
-	}
-	if v.Git != "" {
-		out["git"] = v.Git
 	}
 	if v.ActionsOn {
 		out["actions"], out["actionGrants"], out["runs"] = actionViewsJSON(v.Actions), actionGrantsJSON(v.ActionGrants), actionRunsJSON(v.Runs)
@@ -232,16 +217,14 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, body map[string]
 		if v, given := body["confirmed"]; given {
 			q.Confirmed, okConfirmed = v.(bool)
 		}
-		var okGit bool
-		q.Git, okGit = shownGits(body)
 		named := 0
 		for _, v := range []string{q.Card, q.Host, q.Credential} {
 			if v != "" {
 				named++
 			}
 		}
-		if !keysWithin(body, "op", "sid", "card", "host", "port", "credential", "reason", "scope", "expires", "confirmed", "git") || !okScope || !okExp || len(q.Scope) > 16 || len(q.Expires) > 16 ||
-			!okCard || !okHost || !okPort || !okCred || !okReason || !okConfirmed || !okGit || named != 1 || q.Port != 0 && q.Host == "" {
+		if !keysWithin(body, "op", "sid", "card", "host", "port", "credential", "reason", "scope", "expires", "confirmed") || !okScope || !okExp || len(q.Scope) > 16 || len(q.Expires) > 16 ||
+			!okCard || !okHost || !okPort || !okCred || !okReason || !okConfirmed || named != 1 || q.Port != 0 && q.Host == "" {
 			refuseFields(w)
 			return
 		}

@@ -3193,3 +3193,57 @@
     - file: "internal/adapters/http/page/page.go"
       find: "\tsessionNameRoute: {},\n"
       replace: ""
+- id: SESS-677
+  title: "A credential bound to a git host by name is saved: a token bound to the dev git host or api.github.com is accepted instead of refused with 409 git host"
+  edits:
+    - file: "internal/core/session/credentials.go"
+      find: "\t\tif len(g.gitsOf([]string{name})) > 0 {\n"
+      replace: "\t\tif false {\n"
+- id: SESS-678
+  title: "A credential bound to a git host's port is saved: a token bound to ssh.github.com:22 is accepted instead of refused with 409 git host"
+  edits:
+    - file: "internal/core/session/credentials.go"
+      find: "\t\t\tif len(g.gitsOf([]string{PortTarget(host, n)})) > 0 {\n"
+      replace: "\t\t\tif false {\n"
+- id: SESS-679
+  title: "A grant or preset that opens a git host passes the target check: the Access dialog's check and a preset's risk answer a card for the dev git host instead of 409 git host"
+  edits:
+    - file: "internal/core/session/gitrefusal.go"
+      find: "\tcase len(a.gits) == 0:\n\t\treturn nil\n"
+      replace: "\tcase true:\n\t\treturn nil\n"
+- id: SESS-680
+  title: "factory_request_access for a git host over HTTPS isn't refused: the agent's request for the dev git host or api.github.com becomes a card for the person"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\t\tif a := g.hostTarget(host); len(a.gits) > 0 {\n"
+      replace: "\t\tif a := g.hostTarget(host); false && len(a.gits) > 0 {\n"
+- id: SESS-681
+  title: "factory_request_access for a git host's port isn't refused: the agent's request for port 22 of the dev git host becomes a card for the person"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\t\tif a := g.portTarget(host, q.Port); len(a.gits) > 0 {\n"
+      replace: "\t\tif a := g.portTarget(host, q.Port); false && len(a.gits) > 0 {\n"
+- id: SESS-682
+  title: "A shell call folds: the development agent's execute calls are marked with the files-read words, as if a Bash call were a read"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\"search\": searched,\n"
+      replace: "\t\"search\": searched,\n\t\"execute\": filesRead,\n"
+- id: SESS-683
+  title: "A failed call's end isn't marked unfold, so a failed or refused read would stay folded out of sight"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\tif ok, _ := ev[\"ok\"].(bool); !ok {\n"
+      replace: "\t\tif ok, _ := ev[\"ok\"].(bool); false && !ok {\n"
+- id: SESS-684
+  title: "A search call doesn't fold: the development agent's search calls carry no fold words"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\"search\": searched,\n"
+      replace: ""
+- id: SESS-685
+  title: "A successful call's end is marked unfold too, so no read ever stays in its folded line"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\tif ok, _ := ev[\"ok\"].(bool); !ok {\n"
+      replace: "\t\tif ok, _ := ev[\"ok\"].(bool); true || !ok {\n"

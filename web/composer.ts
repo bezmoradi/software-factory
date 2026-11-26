@@ -200,7 +200,7 @@ export function startComposer({ send }: ComposerDeps): Composer {
     const list = byId('conversations')
     if (list.style.paddingBottom === pad) return
     list.style.paddingBottom = pad
-    if (current()?.view.pinned) scroller.scrollTop = scroller.scrollHeight
+    current()?.view.stick()
   }
   const covered = new ResizeObserver(coverEnd)
   covered.observe(strip)

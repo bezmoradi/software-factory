@@ -95,6 +95,7 @@ var splitSaid = map[string]Said{
 	"starting":  {"starting", "warn"},
 	"started":   {"started", "ok"},
 	"dismissed": {"dismissed", ""},
+	"adding":    {"adding its project", "warn"},
 }
 
 func SplitSaid(state string) Said {

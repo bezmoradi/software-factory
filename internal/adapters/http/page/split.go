@@ -27,6 +27,7 @@ type splitJSON struct {
 	Card     string            `json:"card"`
 	Title    string            `json:"title"`
 	Message  string            `json:"message"`
+	Project  *splitProjectJSON `json:"project,omitempty"`
 	State    string            `json:"state"`
 	SID      string            `json:"sid,omitempty"`
 	Edited   bool              `json:"edited"`
@@ -38,6 +39,13 @@ type splitJSON struct {
 	Note     string            `json:"note,omitempty"`
 	Needs    *needsJSON        `json:"needs,omitempty"`
 	Actions  map[string]string `json:"actions,omitempty"`
+}
+
+type splitProjectJSON struct {
+	URL   string `json:"url"`
+	Added bool   `json:"added"`
+	Name  string `json:"name,omitempty"`
+	Said  string `json:"said"`
 }
 
 type splitGoalJSON struct {
@@ -66,6 +74,9 @@ func splitsOf(list []session.SplitView) []splitJSON {
 			Place: v.Place, Note: v.Note, Needs: needsOf(v.Needs), Actions: v.Actions}
 		if v.State != session.SplitStarted {
 			j.Message = v.Message
+		}
+		if v.Project != "" {
+			j.Project = &splitProjectJSON{URL: v.Project, Added: v.ProjectName != "", Name: v.ProjectName, Said: session.SplitProjectSaid(v.ProjectName)}
 		}
 		out = append(out, j)
 	}
@@ -103,11 +114,15 @@ func (s *Server) splitRequest(w http.ResponseWriter, r *http.Request) {
 		m, isObject := v.(map[string]any)
 		title, okTitle := m["title"].(string)
 		message, okMessage := m["message"].(string)
-		if !isObject || !keysWithin(m, "title", "message") || !okTitle || !okMessage {
+		project, okProject := m["project"].(string)
+		if _, given := m["project"]; !given {
+			okProject = true
+		}
+		if !isObject || !keysWithin(m, "title", "message", "project") || !okTitle || !okMessage || !okProject {
 			agentRefuse(w, http.StatusBadRequest, "input")
 			return
 		}
-		tasks = append(tasks, session.SplitTask{Title: title, Message: message})
+		tasks = append(tasks, session.SplitTask{Title: title, Message: message, Project: project})
 	}
 	sid, ok := s.forgeSession(w, r)
 	if !ok {
@@ -175,10 +190,14 @@ func (s *Server) splitPage(w http.ResponseWriter, r *http.Request, body map[stri
 		ctx, cancel := context.WithTimeout(r.Context(), dispatchFor)
 		defer cancel()
 		started, err := splits.Start(ctx, sid, card, consent)
-		shared.For(r.Context(), s.logger).Info("split start", "ok", err == nil)
+		shared.For(r.Context(), s.logger).Info("split start", "ok", err == nil, "adding", started.Adding != "")
 		if err != nil {
 			code, p := status(err)
 			send(w, code, p)
+			return
+		}
+		if started.Adding != "" {
+			send(w, http.StatusAccepted, map[string]any{"ok": true, "adding": true, "message": started.Adding})
 			return
 		}
 		send(w, http.StatusAccepted, map[string]any{"ok": true, "id": started.ID, "sid": started.SID})

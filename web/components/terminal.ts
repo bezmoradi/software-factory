@@ -35,7 +35,7 @@ export function openTerminal(commands: TerminalCommands, readOnly?: () => Promis
     docs: 'open-in-terminal',
     single: 'terminal',
     focus: 'heading',
-    body: [el('p', 'small', 'Run these in a terminal on this computer, in the folder that holds compose.yaml.'), ...rows, ...(hand ? [hand.line] : [])],
+    body: [el('p', 'small', 'Run these in a terminal on this computer.'), ...rows, ...(hand ? [hand.line] : [])],
     lead: hand ? [hand.make] : [],
     actions: [button('Close', 'ghost small', () => m.close())],
   })

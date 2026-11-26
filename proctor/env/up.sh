@@ -12,7 +12,7 @@ origin=$base
 demo_url=https://gitserver.test:8443/dev/demo.git
 demo_path=/workspace/base/demo
 knackpack_url=https://gitserver.test:8443/public/knackpack.git
-box_subnets=10.213.15.240/28
+box_subnets=10.213.15.240/28,10.213.15.224/28
 gid=""
 
 say() { printf 'sf-proctor: %s\n' "$*" >&2; }

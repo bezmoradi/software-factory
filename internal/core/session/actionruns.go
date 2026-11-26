@@ -676,7 +676,7 @@ func (g *Grants) spec(ctx context.Context, run ActionRun, a Action, c Credential
 }
 
 func actionList(target string) EgressList {
-	l := EgressList{Allow: []string{}, Ports: []string{}, Expires: map[string]time.Time{}, Git: []string{}}
+	l := EgressList{Allow: []string{}, Ports: []string{}, Expires: map[string]time.Time{}}
 	if portEntry(target) {
 		l.Ports = []string{target}
 	} else {

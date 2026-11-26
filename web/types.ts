@@ -87,11 +87,19 @@ export interface SessionControl {
   alert?: boolean
 }
 
+export interface SplitProject {
+  url: string
+  added: boolean
+  name?: string
+  said: string
+}
+
 export interface SplitCard {
   card: string
   title: string
   message: string
-  state: 'waiting' | 'queued' | 'starting' | 'started' | 'dismissed'
+  project?: SplitProject
+  state: 'waiting' | 'queued' | 'starting' | 'adding' | 'started' | 'dismissed'
   sid?: string
   edited: boolean
   asked: number
@@ -933,6 +941,13 @@ export interface ToolEvent extends Stamped {
   summary: string
   agentId?: string
   agentName?: string
+  fold?: FoldCount
+}
+
+export interface FoldCount {
+  verb: string
+  one: string
+  many: string
 }
 
 export interface ToolDoneEvent extends Stamped {
@@ -940,6 +955,7 @@ export interface ToolDoneEvent extends Stamped {
   id: string
   ok: boolean
   outcome: string
+  unfold?: boolean
 }
 
 export interface BusyEvent extends Stamped {
@@ -1094,7 +1110,6 @@ export interface AccessRisk {
   label: string
   says: string[]
   accept?: string
-  git: string[]
 }
 
 export interface AccessNote {
@@ -1496,6 +1511,7 @@ declare global {
     'sf-move': CustomEvent<{ id: string; index: number }>
     'sf-approve': CustomEvent<{ hash: string; plan?: boolean }>
     'sf-revise': CustomEvent<{ note: string }>
+    'sf-read-document': Event
     'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldTyped }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
     'sf-counts': CustomEvent<{ waiting: number; working: number; stopped: number }>

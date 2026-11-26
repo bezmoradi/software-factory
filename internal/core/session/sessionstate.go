@@ -226,7 +226,7 @@ func SessionActions(i Info) map[string]string {
 	case !control:
 		out[ActionSteps] = "Step buttons are off: this session is read-only on this page."
 	case i.Busy:
-		out[ActionSteps] = "Step buttons are available when " + finishes + " finishes."
+		out[ActionSteps] = finishes + " is in a turn."
 	default:
 		out[ActionSteps] = ""
 	}

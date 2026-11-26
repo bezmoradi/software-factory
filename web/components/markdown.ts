@@ -22,6 +22,15 @@ interface LinkMatch {
   end: number
 }
 
+export type SectionOf = (id: string) => string
+
+interface Paint {
+  exact: boolean
+  section: SectionOf | null
+}
+
+const PLAIN_PAINT: Paint = { exact: false, section: null }
+
 function startsBlock(line: string): boolean {
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line)
 }
@@ -168,7 +177,7 @@ function target(label: string, link: LinkMatch, href: string): HTMLElement | nul
   return parts.length ? el('span', 'muted link-target', ` (${parts.join(' ')})`) : null
 }
 
-function inline(parent: HTMLElement, text: string, links: boolean, exact: boolean) {
+function inline(parent: HTMLElement, text: string, links: boolean, o: Paint) {
   const dead = new Map<string, number>()
   const runs = tickRuns(text)
   const noTicks = new Set<number>()
@@ -217,21 +226,28 @@ function inline(parent: HTMLElement, text: string, links: boolean, exact: boolea
       i = link.end
     } else if (c === '[' && (link = linkEnd(text, i, runs))) {
       const href = links && safeUrl(link.href)
+      const section = links && !href && o.section && link.href.startsWith('#') ? o.section(link.href.slice(1)) : ''
       flush()
-      if (href) {
+      if (section) {
+        const a = el('a')
+        a.href = `#${section}`
+        a.dataset.section = section
+        inline(a, link.label, false, o)
+        parent.append(a)
+      } else if (href) {
         const a = anchor(href, link.title)
-        inline(a, link.label, false, exact)
+        inline(a, link.label, false, o)
         const shown = (a.textContent || '').trim()
         if (shown !== href && shown !== link.href) a.title = link.title ? `${link.title}\n${href}` : href
         parent.append(a)
-        const after = exact && target(shown, link, href)
+        const after = o.exact && target(shown, link, href)
         if (after) parent.append(after)
       } else {
         const span = el('span')
         if (link.href) span.title = link.href
-        inline(span, link.label, links, exact)
+        inline(span, link.label, links, o)
         parent.append(span)
-        const after = exact && target(span.textContent || '', link, link.href)
+        const after = o.exact && target(span.textContent || '', link, link.href)
         if (after) parent.append(after)
       }
       i = link.end
@@ -246,7 +262,7 @@ function inline(parent: HTMLElement, text: string, links: boolean, exact: boolea
       }
       flush()
       const [outer, innermost] = wrap(c, hit.n)
-      inline(innermost, hit.inner, links, exact)
+      inline(innermost, hit.inner, links, o)
       parent.append(outer)
       i = hit.end
     } else {
@@ -272,13 +288,13 @@ function cells(line: string): string[] {
   return out.map(c => c.trim())
 }
 
-function table(parent: HTMLElement, head: string[], delim: string[], rows: string[][], exact: boolean) {
+function table(parent: HTMLElement, head: string[], delim: string[], rows: string[][], o: Paint) {
   const align = delim.map(d => (d.startsWith(':') && d.endsWith(':') ? 'center' : d.endsWith(':') ? 'right' : ''))
   const row = (values: string[], tag: 'th' | 'td') => {
     const tr = el('tr')
     for (let k = 0; k < Math.max(head.length, values.length); k++) {
       const cell = el(tag, align[k])
-      inline(cell, values[k] ?? '', true, exact)
+      inline(cell, values[k] ?? '', true, o)
       tr.append(cell)
     }
     return tr
@@ -330,7 +346,7 @@ function item(lines: string[], i: number, bullet: string, ordered: boolean) {
   return { body, end: i, loose, more: Boolean(same), number: ordered ? parseInt(m[2]!, 10) : 0 }
 }
 
-function list(parent: HTMLElement, lines: string[], i: number, exact: boolean): number {
+function list(parent: HTMLElement, lines: string[], i: number, o: Paint): number {
   const first = ITEM.exec(lines[i]!)!
   const ordered = /\d/.test(first[2]!)
   const bullet = ordered ? first[2]!.slice(-1) : first[2]!
@@ -347,10 +363,10 @@ function list(parent: HTMLElement, lines: string[], i: number, exact: boolean): 
   }
   for (const { body, number } of items) {
     const li = el('li')
-    if (exact && ordered) li.value = number
+    if (o.exact && ordered) li.value = number
     const task = TASK.exec(body[0]!)
     if (task) body[0] = body[0]!.slice(task[0].length)
-    render(li, body, exact)
+    render(li, body, o)
     if (!loose)
       for (const p of [...li.children])
         if (p.tagName === 'P') {
@@ -371,12 +387,12 @@ function list(parent: HTMLElement, lines: string[], i: number, exact: boolean): 
   return i
 }
 
-function render(parent: HTMLElement, lines: string[], exact: boolean) {
+function render(parent: HTMLElement, lines: string[], o: Paint) {
   let para: string[] = []
   const flush = () => {
     if (!para.length) return
     const p = el('p')
-    inline(p, para.join('\n'), true, exact)
+    inline(p, para.join('\n'), true, o)
     parent.append(p)
     para = []
   }
@@ -389,7 +405,7 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
       i++
     } else if (para.length && (m = SETEXT.exec(line)) && !(m[1]![0] === '-' && ITEM.test(line) && m[1]!.length === 1)) {
       const h = el(m[1]![0] === '=' ? 'h1' : 'h2')
-      inline(h, para.join('\n'), true, exact)
+      inline(h, para.join('\n'), true, o)
       para = []
       parent.append(h)
       i++
@@ -400,7 +416,7 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
       const rows: string[][] = []
       i++
       while (i < lines.length && lines[i]!.trim() && !startsBlock(lines[i]!)) rows.push(cells(lines[i++]!))
-      table(parent, head, delim, rows, exact)
+      table(parent, head, delim, rows, o)
     } else if ((m = FENCE.exec(line)) && !(m[1]![0] === '`' && m[2]!.includes('`'))) {
       flush()
       const close = new RegExp(`^ {0,3}${m[1]![0]}{${m[1]!.length},}[ \\t]*$`)
@@ -416,7 +432,7 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
     } else if ((m = HEADING.exec(line))) {
       flush()
       const h = el(`h${m[1]!.length}`)
-      inline(h, m[2] ?? '', true, exact)
+      inline(h, m[2] ?? '', true, o)
       parent.append(h)
       i++
     } else if (RULE.test(line)) {
@@ -434,11 +450,11 @@ function render(parent: HTMLElement, lines: string[], exact: boolean) {
         i++
       }
       const quote = el('blockquote')
-      render(quote, inner, exact)
+      render(quote, inner, o)
       parent.append(quote)
     } else if ((m = ITEM.exec(line)) && (!para.length || (m[4]?.trim() && (!/\d/.test(m[2]!) || parseInt(m[2]!, 10) === 1)))) {
       flush()
-      i = list(parent, lines, i, exact)
+      i = list(parent, lines, i, o)
     } else {
       para.push(line.trim())
       i++
@@ -498,21 +514,21 @@ function linesOf(text: string): string[] {
 export function headings(text: string, level: number): string[] {
   const root = el('div')
   try {
-    render(root, linesOf(text), false)
+    render(root, linesOf(text), PLAIN_PAINT)
   } catch {
     return []
   }
   return [...root.querySelectorAll(`:scope > h${level}`)].map(h => (h.textContent ?? '').trim())
 }
 
-function paint(node: HTMLElement, text: string, exact: boolean) {
+function paint(node: HTMLElement, text: string, o: Paint) {
   const next = el('div')
-  const flat = () => el('p', '', exact ? named(text) : unspoofed(text))
+  const flat = () => el('p', '', o.exact ? named(text) : unspoofed(text))
   if (text.length > PLAIN_ABOVE) {
     next.append(el('p', 'small muted', `Over ${PLAIN_ABOVE / 1024} KiB, so shown as plain text, not formatted.`), flat())
   } else {
     try {
-      render(next, exact ? linesOf(text).map(named) : linesOf(unspoofed(text)), exact)
+      render(next, o.exact ? linesOf(text).map(named) : linesOf(unspoofed(text)), o)
     } catch {
       next.replaceChildren(flat())
     }
@@ -537,6 +553,7 @@ function paint(node: HTMLElement, text: string, exact: boolean) {
 class SfMarkdown extends HTMLElement {
   #text = ''
   #exact = false
+  #sections: SectionOf | null = null
   #frame = 0
   #watch = new ResizeObserver(() => this.#reach())
 
@@ -567,13 +584,19 @@ class SfMarkdown extends HTMLElement {
     this.#schedule()
   }
 
+  set sections(value: SectionOf | null) {
+    if (this.#sections === value) return
+    this.#sections = value
+    this.#schedule()
+  }
+
   #schedule() {
     if (!this.#frame) this.#frame = requestAnimationFrame(() => this.#paint())
   }
 
   #paint() {
     this.#frame = 0
-    paint(this, this.#text, this.#exact)
+    paint(this, this.#text, { exact: this.#exact, section: this.#sections })
     this.#reach()
     emit(this, 'sf-markdown-painted')
   }

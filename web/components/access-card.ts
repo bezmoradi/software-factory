@@ -40,7 +40,7 @@ export function accessCardOf(v: unknown): AccessCard | null {
   if ((!text(c.host) && !text(c.credential) && !text(c.action)) || !Array.isArray(c.risks)) return null
   const risks: AccessRisk[] = c.risks.map(record).map(r => ({
     scope: text(r.scope), expires: text(r.expires), level: text(r.level), label: text(r.label),
-    says: strings(r.says), accept: text(r.accept), git: strings(r.git),
+    says: strings(r.says), accept: text(r.accept),
   }))
   const port = typeof c.port === 'number' && Number.isInteger(c.port) && c.port > 0 ? c.port : undefined
   const action = text(c.action) ? { action: text(c.action), command: text(c.command), target: text(c.target), files: c.files === true, minutes: Number(c.minutes) || 0 } : {}
@@ -53,10 +53,6 @@ export function firstChoice(card: AccessCard): AccessChoice {
 
 function riskOf(card: AccessCard, c: AccessChoice): AccessRisk | undefined {
   return card.risks.find(r => r.scope === c.scope && r.expires === c.expires)
-}
-
-export function shownGit(card: AccessCard, c: AccessChoice): string[] {
-  return riskOf(card, c)?.git ?? []
 }
 
 function picker(name: string, list: GrantChoice[], value: string, disabled: boolean, change: (v: string) => void): HTMLSelectElement {
@@ -145,7 +141,6 @@ let headings = 0
 class SfAccessCards extends HTMLElement {
   #view: AccessCardsView | null = null
   #choices = new Map<string, AccessChoice>()
-  #gits = new Map<string, string>()
   #key = ''
 
   connectedCallback() {
@@ -162,13 +157,6 @@ class SfAccessCards extends HTMLElement {
     const v = this.#view
     const ids = new Set((v?.cards ?? []).map(c => c.id ?? ''))
     for (const id of this.#choices.keys()) if (!ids.has(id)) this.#choices.delete(id)
-    for (const id of this.#gits.keys()) if (!ids.has(id)) this.#gits.delete(id)
-    for (const c of v?.cards ?? []) {
-      const id = c.id ?? ''
-      const git = JSON.stringify(c.risks.map(r => r.git))
-      if (this.#gits.has(id) && this.#gits.get(id) !== git) this.#choices.delete(id)
-      this.#gits.set(id, git)
-    }
     const key = JSON.stringify(v ? [v.sid, v.cards, v.disabled, [...this.#choices]] : null)
     if (key === this.#key) return
     this.#key = key
@@ -187,9 +175,9 @@ class SfAccessCards extends HTMLElement {
         this.#choices.set(id, c)
         this.paint()
       },
-      accept: c => request(ACCESS_ROUTE, { op: 'allow', sid: v.sid, card: id, scope: c.scope, expires: c.expires, confirmed: c.confirmed, git: shownGit(card, c) }),
+      accept: c => request(ACCESS_ROUTE, { op: 'allow', sid: v.sid, card: id, scope: c.scope, expires: c.expires, confirmed: c.confirmed }),
       refuse: () => request(ACCESS_ROUTE, { op: 'refuse', sid: v.sid, card: id }),
-      savePreset: card.action ? undefined : c => openSavePreset(request, { sid: v.sid, ...(card.credential ? { credential: card.credential } : card.port ? { host: card.host, port: card.port } : { host: card.host }), scope: c.scope, expires: c.expires, confirmed: c.confirmed, git: shownGit(card, c) }),
+      savePreset: card.action ? undefined : c => openSavePreset(request, { sid: v.sid, ...(card.credential ? { credential: card.credential } : card.port ? { host: card.host, port: card.port } : { host: card.host }), scope: c.scope, expires: c.expires, confirmed: c.confirmed }),
       done: a => {
         this.#choices.delete(id)
         toast({ id: `access:${v.sid}`, title: a.message, tone: savedTone(a) })

@@ -26,7 +26,7 @@ var (
 	compose  = []string{"compose", "-f", "compose.yaml", "-f", "compose.live.yaml"}
 	images   = []string{"software-factory:local", "software-factory:dev"}
 	live     = []string{"engine", "egress"}
-	roots    = []string{"cmd", "configs", "internal", "tools", "web", "go.mod", "go.sum", "README.md", "compose.yaml", "plugin", "Dockerfile"}
+	roots    = []string{"cmd", "configs", "internal", "tools", "web", "go.mod", "go.sum", "compose.yaml", "plugin", "Dockerfile"}
 	skipDirs = map[string]bool{"node_modules": true, "dist": true, ".git": true}
 	watched  = map[string]bool{".go": true, ".ts": true, ".css": true, ".html": true, ".svg": true, ".json": true, ".md": true, ".mod": true, ".sum": true, ".yaml": true}
 )
@@ -183,7 +183,7 @@ func diff(before, after map[string]stamp) change {
 		switch {
 		case inImage(p):
 			c.image = true
-		case strings.HasPrefix(p, "web"+string(filepath.Separator)) || p == "README.md":
+		case strings.HasPrefix(p, "web"+string(filepath.Separator)):
 			c.page = true
 		default:
 			c.code = true

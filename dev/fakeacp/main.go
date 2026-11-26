@@ -48,7 +48,10 @@ var (
 
 var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split", "factory_work_type", "factory_request_access", "factory_action"}
 
-const noteMarker = "[Software Factory] "
+const (
+	noteMarker = "[Software Factory] "
+	lookUpTime = time.Second
+)
 
 func toolNamed(text string) string {
 	found, at := "", len(text)
@@ -390,6 +393,12 @@ func splitNote(text string) (string, string) {
 	return note, rest
 }
 
+func lookUp(callID, kind, title string, input map[string]any) {
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": title, "kind": kind, "status": "in_progress", "rawInput": input})
+	time.Sleep(lookUpTime)
+	update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": callID, "status": "completed"})
+}
+
 func scripted(id json.RawMessage, text string) bool {
 	lines := strings.Split(text, "\n")
 	said, done := false, false
@@ -411,6 +420,12 @@ func scripted(id json.RawMessage, text string) bool {
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": value}})
 		case "fail":
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "failed", "rawInput": map[string]any{"command": value}})
+		case "read":
+			lookUp(callID, "read", "Read "+value, map[string]any{"file_path": value})
+		case "grep":
+			lookUp(callID, "search", "grep "+value, map[string]any{"pattern": value})
+		case "glob":
+			lookUp(callID, "search", "glob "+value, map[string]any{"pattern": value})
 		case "cost":
 			if usd, err := strconv.ParseFloat(value, 64); err == nil {
 				update(map[string]any{"sessionUpdate": "usage_update", "used": 1200, "size": 200000, "cost": map[string]any{"amount": usd, "currency": "USD"}})

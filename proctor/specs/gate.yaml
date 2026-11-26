@@ -6279,3 +6279,1248 @@ scenarios:
           equal:
             "$.status": 409
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: GATE-012
+    name: "Software Factory refuses every grant that would open a git host (the owner's decision REQ-04 of 2026-11-25): factory_request_access is refused for the dev git host, a project's host, over HTTPS and on port 22, and for api.github.com under the deny list's github.com, each answer naming factory_push, factory_pull_request, factory_issue and factory_checks and saying a refusal isn't to be got around, and no card is shown; the Access dialog's check and allow refuse the same hosts with 409 git host on the host field, and the session holds no grant"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-access
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate access ${run.id}\nask-tool: a_host factory_request_access {\"host\":\"gitserver.test\",\"reason\":\"proctor ${run.id}\"}\nask-tool: a_port factory_request_access {\"host\":\"gitserver.test\",\"port\":22,\"reason\":\"proctor ${run.id}\"}\nask-tool: a_api factory_request_access {\"host\":\"api.github.com\",\"reason\":\"proctor ${run.id}\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: access-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/a_api.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/a_api.txt"] }
+      - id: check-host
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: check, sid: "${sid}", host: gitserver.test }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "git host", field: host, message: "A git host: only Software Factory reaches it." }
+        no_state_check: "refused with 409 by gitRefusal in Grants.CheckAccess or Grants.AllowAccess before a card is built or makeGrant saves a grant, so nothing changed; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's grants after it"
+      - id: check-port
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: check, sid: "${sid}", host: gitserver.test, port: 22 }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "git host", field: host, message: "A git host: only Software Factory reaches it." }
+        no_state_check: "refused with 409 by gitRefusal in Grants.CheckAccess or Grants.AllowAccess before a card is built or makeGrant saves a grant, so nothing changed; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's grants after it"
+      - id: allow-host
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", host: gitserver.test, scope: session, expires: hour, confirmed: true }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "git host", field: host, message: "A git host: only Software Factory reaches it." }
+        no_state_check: "refused with 409 by gitRefusal in Grants.CheckAccess or Grants.AllowAccess before a card is built or makeGrant saves a grant, so nothing changed; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's grants after it"
+      - id: allow-api
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", host: api.github.com, scope: project, expires: never, confirmed: true }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: "git host", field: host, message: "A git host: only Software Factory reaches it." }
+        no_state_check: "refused with 409 by gitRefusal in Grants.CheckAccess or Grants.AllowAccess before a card is built or makeGrant saves a grant, so nothing changed; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's grants after it"
+      - id: no-grant
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.grants": []
+            "$.body.cards": []
+        no_state_check: "op read changes nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: a-host-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_host.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_host.json", text: "{\"content\":[{\"text\":\"Refused: a grant can never open gitserver.test: gitserver.test is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"a grant can never open gitserver.test: gitserver.test is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why\",\"result\":\"refused\"}}\n" }
+      - id: a-host-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_host.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_host.txt", text: "mcp: called factory_request_access\n" }
+      - id: a-port-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_port.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_port.json", text: "{\"content\":[{\"text\":\"Refused: a grant can never open gitserver.test:22: gitserver.test is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"a grant can never open gitserver.test:22: gitserver.test is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why\",\"result\":\"refused\"}}\n" }
+      - id: a-port-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_port.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_port.txt", text: "mcp: called factory_request_access\n" }
+      - id: a-api-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_api.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_api.json", text: "{\"content\":[{\"text\":\"Refused: a grant can never open api.github.com: api.github.com is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"a grant can never open api.github.com: api.github.com is a git host, and Software Factory refuses every grant and credential that would open a git host. Software Factory reaches the git host for you: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks; don't reach the git host another way, and tell the person what was refused and why\",\"result\":\"refused\"}}\n" }
+      - id: a-api-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/a_api.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/a_api.txt", text: "mcp: called factory_request_access\n" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+
+  - id: GATE-014
+    name: "Work on another repository goes to a session there (the owner's decision REQ-05 of 2026-11-26): factory_split refuses a task whose project address Add repository refuses, with the same words (a .. part, a user name and password, http and ssh), and takes the session's own project's address, in any case and with a trailing slash, as this project; the card for another project shows its address as the engine normalised it and that it isn't in Projects, and the own project's card shows none; the person's Start adds the project the way Add repository does and answers that it's being added, and once the clone finishes the engine starts the session there as a task of the goal, with the card's text as its first message"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate split ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-split
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate split ${run.id}\nask-tool: p_dots factory_split {\"tasks\":[{\"title\":\"dots ${run.id}\",\"message\":\"x\",\"project\":\"https://gitserver.test:8443/dev/../demo.git\"}]}\nask-tool: p_user factory_split {\"tasks\":[{\"title\":\"user ${run.id}\",\"message\":\"x\",\"project\":\"https://u:p@gitserver.test:8443/demo.git\"}]}\nask-tool: p_http factory_split {\"tasks\":[{\"title\":\"http ${run.id}\",\"message\":\"x\",\"project\":\"http://gitserver.test:8443/demo.git\"}]}\nask-tool: p_ssh factory_split {\"tasks\":[{\"title\":\"ssh ${run.id}\",\"message\":\"x\",\"project\":\"ssh://git@gitserver.test:8443/demo.git\"}]}\nask-tool: p_new factory_split {\"tasks\":[{\"title\":\"other one ${run.id}\",\"message\":\"say: other one ${run.id}\\nwrite: o1-${run.id}.txt\",\"project\":\"https://gitserver.test:8443/demo.git\"},{\"title\":\"own ${run.id}\",\"message\":\"say: own ${run.id}\",\"project\":\"HTTPS://GITSERVER.TEST:8443/dev/demo.git/\"}]}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: split-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/p_new.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/p_new.txt"] }
+      - id: open-cards
+        do: http.open
+        identity: page
+        as: cards
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: carded
+        do: http.frames
+        on: cards
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions[0].sid": "${sid}"
+            "$.frames[0].json.sessions[0].splits[0].title": "other one ${run.id}"
+            "$.frames[0].json.sessions[0].splits[0].message": "say: other one ${run.id}\nwrite: o1-${run.id}.txt"
+            "$.frames[0].json.sessions[0].splits[0].project": { url: "https://gitserver.test:8443/demo.git", added: false, said: "For another project, not in Projects yet: Start adds it, as Add repository does, then starts the session there." }
+            "$.frames[0].json.sessions[0].splits[0].state": waiting
+            "$.frames[0].json.sessions[0].splits[0].said": { label: "waiting for you", tone: warn }
+            "$.frames[0].json.sessions[0].splits[0].actions": { start: "", edit: "", dismiss: "" }
+            "$.frames[0].json.sessions[0].splits[1].title": "own ${run.id}"
+            "$.frames[0].json.sessions[0].splits[1].message": "say: own ${run.id}"
+            "$.frames[0].json.sessions[0].splits[1].state": waiting
+            "$.frames[0].json.sessions[0].splitGoal": { running: 0, limit: 3, queue: [] }
+          matches: { "$.frames[0].json.sessions[0].splits[0].card": "[0-9a-f]{32}", "$.frames[0].json.sessions[0].splits[1].card": "[0-9a-f]{32}" }
+          absent: ["$.frames[0].json.sessions[0].splits[1].project", "$.frames[0].json.sessions[0].splits[2]", "$.frames[0].json.sessions[1]"]
+        save: { c1: "$.frames[0].json.sessions[0].splits[0].card" }
+      - id: not-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cloning": []
+          none:
+            "$.body.projects": { url: "https://gitserver.test:8443/demo.git" }
+          any:
+            "$.body.projects": { name: demo }
+      - id: start-adding
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/split"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", card: "${c1}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { ok: true, adding: true, message: "Adding https://gitserver.test:8443/demo.git to Projects. The task starts there once the clone finishes." }
+        no_state_check: "no page read declares /api/split among what it shows, since only a Start of a card for a project Projects doesn't have changes what /api/projects lists: listed asserts the clone this start began finished as demo-2, and task-listed and task-first-message that the engine then started the session there with the card's text"
+      - id: listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git", branch: main }
+          none:
+            "$.body.cloning": { url: "https://gitserver.test:8443/demo.git" }
+      - id: task-live
+        do: http.frames
+        on: cards
+        eventually: { within: 120s, every: 500ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].live": true, "json.sessions[1].live": true }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: p-dots-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_dots.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_dots.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: The path can't have . or .. parts. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: The path can't have . or .. parts\",\"result\":\"refused\"}}\n" }
+      - id: p-dots-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_dots.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_dots.txt", text: "mcp: called factory_split\n" }
+      - id: p-user-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_user.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_user.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: Leave out the user name and password. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: Leave out the user name and password\",\"result\":\"refused\"}}\n" }
+      - id: p-user-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_user.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_user.txt", text: "mcp: called factory_split\n" }
+      - id: p-http-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_http.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_http.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: Only https:// addresses are accepted; SSH and http aren't. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: Only https:// addresses are accepted; SSH and http aren't\",\"result\":\"refused\"}}\n" }
+      - id: p-http-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_http.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_http.txt", text: "mcp: called factory_split\n" }
+      - id: p-ssh-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_ssh.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_ssh.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: Only https:// addresses are accepted; SSH and http aren't. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: Only https:// addresses are accepted; SSH and http aren't\",\"result\":\"refused\"}}\n" }
+      - id: p-ssh-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_ssh.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_ssh.txt", text: "mcp: called factory_split\n" }
+      - id: p-new-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_new.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_new.json", text: "{\"content\":[{\"text\":\"Held: 2 tasks wait for the person as cards on Software Factory's page; the person reads, edits and starts each one, or doesn't, and each starts as its own session from main, a task for another project in that project, which the person adds first if Projects doesn't have it. End your turn, don't propose them again, and don't work on the other project here.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"2 tasks wait for the person as cards on Software Factory's page; the person reads, edits and starts each one, or doesn't, and each starts as its own session from main, a task for another project in that project, which the person adds first if Projects doesn't have it. End your turn, don't propose them again, and don't work on the other project here\",\"result\":\"held\"}}\n" }
+      - id: p-new-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_new.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_new.txt", text: "mcp: called factory_split\n" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "worktree is the engine's fixed name for the offer to delete a worktree with changes and can't carry ${run.id}; the task session's task-remove-dirty expects it in an offer whose value names that session's own worktree, sf-${t1id}, which no earlier run's session has" }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: open-task
+        do: http.open
+        identity: page
+        as: task
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: task-listed
+        do: http.frames
+        on: task
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions[0].name": "other one ${run.id}"
+            "$.frames[0].json.sessions[0].project": demo-2
+            "$.frames[0].json.sessions[0].lineage.group": "${sid}"
+            "$.frames[0].json.sessions[0].lineage.groupKind": goal
+          present: ["$.frames[0].json.sessions[0].sid", "$.frames[0].json.sessions[0].id"]
+          absent: ["$.frames[0].json.sessions[1]"]
+        save: { t1: "$.frames[0].json.sessions[0].sid", t1id: "$.frames[0].json.sessions[0].id" }
+      - id: task-first-message
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}", paths: ["o1-${run.id}.txt"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["o1-${run.id}.txt"] }
+      - id: task-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${t1}"
+          present: ["$.body.entries[0].box"]
+        save: { t1box: "$.body.entries[0].box" }
+      - id: task-stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: task-box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${t1box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: task-remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${t1id}" }
+      - id: task-not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${t1id}"
+      - id: task-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}", flag: worktree, value: "sf-${t1id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: task-home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${t1box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: task-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: repo-before-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git" }
+      - id: repo-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { name: demo-2 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: repo-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          none:
+            "$.body.projects": { url: "https://gitserver.test:8443/demo.git" }
+          any:
+            "$.body.projects": { name: demo }
+
+  - id: GATE-015
+    name: "A task for another repository that is in Projects already (the owner's decision REQ-05 of 2026-11-26): factory_split refuses a project address with a query or a fragment, with Add repository's words, and agent-host refuses a blank one before it reaches the engine; the card shows the address and the project's name in Projects, and the person's Start, with the goal session stopped (a stopped goal still starts its cards), starts the session there at once, as a task of the goal, with the card's text as its first message; the task session stops before the goal session is deleted, so the goal's container, which its delete wakes, never runs beside the task's"
+    steps:
+      - id: add-other
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/add-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { url: "https://gitserver.test:8443/demo.git" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true, url: "https://gitserver.test:8443/demo.git", name: demo }
+        waive: { FIX-05: "the dev git host serves only fixed repositories, so the URL can't carry ${run.id}; GATE-014 removed the copy its card added, and this scenario removes the one it adds" }
+      - id: other-listed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git", branch: main }
+          none:
+            "$.body.cloning": { url: "https://gitserver.test:8443/demo.git" }
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "gate split added ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: ask-split
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: gate split added ${run.id}\nask-tool: p_query factory_split {\"tasks\":[{\"title\":\"query ${run.id}\",\"message\":\"x\",\"project\":\"https://gitserver.test:8443/demo.git?x\"}]}\nask-tool: p_fragment factory_split {\"tasks\":[{\"title\":\"fragment ${run.id}\",\"message\":\"x\",\"project\":\"https://gitserver.test:8443/demo.git#x\"}]}\nask-tool: p_blank factory_split {\"tasks\":[{\"title\":\"blank ${run.id}\",\"message\":\"x\",\"project\":\" \"}]}\nask-tool: p_added factory_split {\"tasks\":[{\"title\":\"other one ${run.id}\",\"message\":\"say: other one ${run.id}\\nwrite: o1-${run.id}.txt\",\"project\":\"https://gitserver.test:8443/demo.git\"}]}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: split-asked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/p_added.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/p_added.txt"] }
+      - id: open-cards
+        do: http.open
+        identity: page
+        as: cards
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: carded
+        do: http.frames
+        on: cards
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions[0].sid": "${sid}"
+            "$.frames[0].json.sessions[0].splits[0].title": "other one ${run.id}"
+            "$.frames[0].json.sessions[0].splits[0].project": { url: "https://gitserver.test:8443/demo.git", added: true, name: demo-2, said: "For another project, demo-2 in Projects: Start starts the session there." }
+            "$.frames[0].json.sessions[0].splits[0].state": waiting
+            "$.frames[0].json.sessions[0].splits[0].actions": { start: "", edit: "", dismiss: "" }
+          matches: { "$.frames[0].json.sessions[0].splits[0].card": "[0-9a-f]{32}" }
+          absent: ["$.frames[0].json.sessions[0].splits[1]", "$.frames[0].json.sessions[1]"]
+        save: { c1: "$.frames[0].json.sessions[0].splits[0].card" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: start-direct
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/split"
+          headers: { Origin: "${page.origin}" }
+          body: { op: start, sid: "${sid}", card: "${c1}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+          absent: ["$.body.adding"]
+        save: { t1: "$.body.sid", t1id: "$.body.id" }
+        no_state_check: "no page read declares /api/split among what it shows; task-first-message asserts the session this start answered with got the card's text as its first message, task-gate that it works on its own branch sf/${t1id}, and task-listed in the stream that it runs in demo-2 as a task of the goal session"
+      - id: task-first-message
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}", paths: ["o1-${run.id}.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["o1-${run.id}.txt"] }
+      - id: task-gate
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${t1id}"
+      - id: open-task
+        do: http.open
+        identity: page
+        as: task
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: task-listed
+        do: http.frames
+        on: task
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+          any:
+            "$.frames[0].json.sessions": { sid: "${t1}", name: "other one ${run.id}", project: demo-2, "lineage.group": "${sid}", "lineage.groupKind": goal }
+      - id: task-audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${t1}"
+          present: ["$.body.entries[0].box"]
+        save: { t1box: "$.body.entries[0].box" }
+      - id: task-stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: task-box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${t1box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: p-query-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_query.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_query.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: Leave out the ? query and # fragment. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: Leave out the ? query and # fragment\",\"result\":\"refused\"}}\n" }
+      - id: p-query-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_query.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_query.txt", text: "mcp: called factory_split\n" }
+      - id: p-fragment-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_fragment.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_fragment.json", text: "{\"content\":[{\"text\":\"Refused: task 1's project: Leave out the ? query and # fragment. Don't retry factory_split with the same tasks; tell the person what you wanted instead.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"task 1's project: Leave out the ? query and # fragment\",\"result\":\"refused\"}}\n" }
+      - id: p-fragment-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_fragment.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_fragment.txt", text: "mcp: called factory_split\n" }
+      - id: p-blank-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_blank.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_blank.json", text: "{\"content\":[{\"text\":\"Task 1's project must be a repository's https address, such as https://github.com/team/repo.git.\",\"type\":\"text\"}],\"isError\":true}\n" }
+      - id: p-blank-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_blank.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_blank.txt", text: "mcp: called factory_split\n" }
+      - id: p-added-answer
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_added.json" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_added.json", text: "{\"content\":[{\"text\":\"Held: 1 tasks wait for the person as cards on Software Factory's page; the person reads, edits and starts each one, or doesn't, and each starts as its own session from main, a task for another project in that project, which the person adds first if Projects doesn't have it. End your turn, don't propose them again, and don't work on the other project here.\",\"type\":\"text\"}],\"isError\":false,\"structuredContent\":{\"reason\":\"1 tasks wait for the person as cards on Software Factory's page; the person reads, edits and starts each one, or doesn't, and each starts as its own session from main, a task for another project in that project, which the person adds first if Projects doesn't have it. End your turn, don't propose them again, and don't work on the other project here\",\"result\":\"held\"}}\n" }
+      - id: p-added-obeyed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "gate-answers/p_added.txt" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "gate-answers/p_added.txt", text: "mcp: called factory_split\n" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "worktree is the engine's fixed name for the offer to delete a worktree with changes and can't carry ${run.id}; the task session's task-remove-dirty expects it in an offer whose value names that session's own worktree, sf-${t1id}, which no earlier run's session has" }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: task-remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${t1id}" }
+      - id: task-not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${t1id}"
+      - id: task-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}", flag: worktree, value: "sf-${t1id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: task-home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${t1box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: task-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${t1}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: repo-before-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.projects": { name: demo-2, path: /workspace/base/demo-2, url: "https://gitserver.test:8443/demo.git" }
+      - id: repo-remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { name: demo-2 }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: repo-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+          none:
+            "$.body.projects": { url: "https://gitserver.test:8443/demo.git" }
+          any:
+            "$.body.projects": { name: demo }

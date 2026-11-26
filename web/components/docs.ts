@@ -1,7 +1,7 @@
 import { button, el } from '../lib/dom.ts'
 import { dialogLink, docsId, pageHead } from '../lib/page.ts'
 import { DIALOGS, dialogOpenedFrom } from '../lib/dialog-docs.ts'
-import { headings } from './markdown.ts'
+import { headings, type SectionOf } from './markdown.ts'
 import { icon } from './icon.ts'
 
 const FIRST = '## What you need'
@@ -64,6 +64,7 @@ class SfDocs extends HTMLElement {
   #slot: HTMLElement | null = null
   #toc: HTMLElement | null = null
   #entries: Entry[] = []
+  #known = new Set<string>()
   #current = -1
   #pinned = false
   #scroller: HTMLElement | null = null
@@ -79,6 +80,18 @@ class SfDocs extends HTMLElement {
 
   #unpin = () => {
     this.#pinned = false
+  }
+
+  #sectionOf: SectionOf = id => (this.#known.has(id) ? id : '')
+
+  #follow = (e: MouseEvent) => {
+    const link = (e.target as Element).closest<HTMLAnchorElement>('a[data-section]')
+    if (!link) return
+    e.preventDefault()
+    const heading = this.show(link.dataset.section!)
+    if (!heading) return
+    if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1
+    heading.focus({ preventScroll: true })
   }
 
   get loaded(): boolean {
@@ -100,12 +113,14 @@ class SfDocs extends HTMLElement {
   connectedCallback() {
     this.#scroller = this.closest<HTMLElement>('.scroller')
     this.#scroller?.addEventListener('scroll', this.#onScroll, { passive: true })
+    this.addEventListener('click', this.#follow)
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart']) addEventListener(type, this.#unpin, { passive: true, capture: true })
     if (this.#toc) this.#sized.observe(this.#toc)
   }
 
   disconnectedCallback() {
     this.#scroller?.removeEventListener('scroll', this.#onScroll)
+    this.removeEventListener('click', this.#follow)
     for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart']) removeEventListener(type, this.#unpin, { capture: true })
     this.#sized.disconnect()
     cancelAnimationFrame(this.#frame)
@@ -118,7 +133,7 @@ class SfDocs extends HTMLElement {
     for (const part of this.querySelectorAll<HTMLElement>('.docs-section')) addPageLinks(part, view)
   }
 
-  show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null) {
+  show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null): HTMLElement | null {
     this.#want = id
     this.#back = back
     let index = id ? this.#entries.findIndex(e => e.id === id) : -1
@@ -141,6 +156,7 @@ class SfDocs extends HTMLElement {
       target.scrollIntoView({ block: 'start' })
       this.#jumped(index)
     } else if (!id) this.closest<HTMLElement>('.scroller')?.scrollTo({ top: 0 })
+    return heading
   }
 
   #deep(id: string): HTMLElement | null {
@@ -211,6 +227,7 @@ class SfDocs extends HTMLElement {
 
   #render() {
     const list = sections(this.#text)
+    this.#known = new Set(list.flatMap(s => [s.id, ...[s.subs, headings(s.body, 4), headings(s.body, 5)].flat().map(docsId)]))
     this.#entries = []
     this.#current = -1
     this.#sized.disconnect()
@@ -218,7 +235,7 @@ class SfDocs extends HTMLElement {
       this.#nav = null
       this.#toc = null
       this.#slot?.replaceChildren()
-      this.replaceChildren(el('p', 'muted', "The docs couldn't be read. They're also in the README on GitHub."))
+      this.replaceChildren(el('p', 'muted', "The docs couldn't be read. They're also in web/docs.md in the repository on GitHub."))
       return
     }
     const nav = el('nav', 'docs-nav')
@@ -231,6 +248,7 @@ class SfDocs extends HTMLElement {
       part.dataset.doc = s.id
       const md = el('sf-markdown')
       md.addEventListener('sf-markdown-painted', () => addPageLinks(part, this.#session))
+      md.sections = this.#sectionOf
       md.text = s.body
       part.append(md)
       body.append(part)

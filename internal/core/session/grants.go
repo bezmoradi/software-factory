@@ -33,22 +33,21 @@ const (
 )
 
 type Grant struct {
-	ID          string
-	Host        string
-	Port        int
-	Credential  string
-	Name        string
-	Bound       []string
-	Delivery    string
-	Scope       string
-	Session     string
-	Project     string
-	Expires     time.Time
-	Reason      string
-	AskedBy     string
-	Preset      string
-	Made        time.Time
-	GitAccepted []string
+	ID         string
+	Host       string
+	Port       int
+	Credential string
+	Name       string
+	Bound      []string
+	Delivery   string
+	Scope      string
+	Session    string
+	Project    string
+	Expires    time.Time
+	Reason     string
+	AskedBy    string
+	Preset     string
+	Made       time.Time
 }
 
 func (gr Grant) Target() string {
@@ -208,6 +207,7 @@ func NewGrants(cfg GrantsConfig) (*Grants, error) {
 	} else {
 		g.presets = list
 	}
+	g.dropGitOnLoad()
 	return g, nil
 }
 
@@ -240,7 +240,7 @@ func (g *Grants) usableLocked(gr Grant) bool {
 }
 
 func (g *Grants) ForBox(box string) EgressList {
-	out := EgressList{Allow: []string{}, Ports: []string{}, Expires: map[string]time.Time{}, Git: []string{}}
+	out := EgressList{Allow: []string{}, Ports: []string{}, Expires: map[string]time.Time{}}
 	sid, ok := g.cfg.InBox(box)
 	if !ok {
 		return out
@@ -259,8 +259,7 @@ func (g *Grants) ForBox(box string) EgressList {
 		if !covers(gr, t) || !grantLive(gr, now) || !g.usableLocked(gr) {
 			continue
 		}
-		open, gits, _ := opens(gr, git)
-		for _, h := range open {
+		for _, h := range opens(gr, git) {
 			if gateway && ClaudeVendorHost(h) {
 				continue
 			}
@@ -271,9 +270,6 @@ func (g *Grants) ForBox(box string) EgressList {
 				}
 			case !slices.Contains(out.Allow, h):
 				out.Allow = append(out.Allow, h)
-			}
-			if slices.Contains(gits, h) && !slices.Contains(out.Git, h) {
-				out.Git = append(out.Git, h)
 			}
 			switch {
 			case gr.Expires.IsZero():
@@ -288,7 +284,6 @@ func (g *Grants) ForBox(box string) EgressList {
 	}
 	out.Allow = sortedHosts(out.Allow)
 	out.Ports = sortedHosts(out.Ports)
-	out.Git = sortedHosts(out.Git)
 	return out
 }
 
@@ -307,7 +302,10 @@ func (g *Grants) gitHosts() func(string) string {
 }
 
 func (g *Grants) gitsOf(entries []string) []string {
-	git := g.gitHosts()
+	return gitsIn(entries, g.gitHosts())
+}
+
+func gitsIn(entries []string, git func(string) string) []string {
 	var out []string
 	for _, e := range entries {
 		if git(e) != "" {
@@ -317,29 +315,14 @@ func (g *Grants) gitsOf(entries []string) []string {
 	return out
 }
 
-func opens(gr Grant, git func(string) string) ([]string, []string, []string) {
-	var open, gits, closed []string
+func opens(gr Grant, git func(string) string) []string {
+	var open []string
 	for _, h := range gr.Hosts() {
-		switch {
-		case git(h) == "":
+		if git(h) == "" {
 			open = append(open, h)
-		case slices.Contains(gr.GitAccepted, h):
-			open, gits = append(open, h), append(gits, h)
-		default:
-			closed = append(closed, h)
 		}
 	}
-	return open, gits, closed
-}
-
-func acceptedOf(accepted, hosts []string) []string {
-	var out []string
-	for _, h := range hosts {
-		if slices.Contains(accepted, h) && !slices.Contains(out, h) {
-			out = append(out, h)
-		}
-	}
-	return out
+	return open
 }
 
 func (g *Grants) overLimitLocked(next []Grant, gr Grant, targets []GrantTarget, now time.Time) bool {
@@ -426,10 +409,12 @@ func (g *Grants) Tend(ctx context.Context) {
 	for _, t := range g.cfg.Targets() {
 		targets[t.SID] = t
 	}
+	git := g.gitHosts()
 	g.mu.Lock()
 	var ended []endedGrant
 	kept := make([]Grant, 0, len(g.grants))
 	for _, gr := range g.grants {
+		gits := gitsIn(gr.Hosts(), git)
 		switch {
 		case !grantLive(gr, now):
 			ended = append(ended, endedGrant{gr, ResultExpired, grantWords(gr, ResultExpired)})
@@ -437,6 +422,8 @@ func (g *Grants) Tend(ctx context.Context) {
 			ended = append(ended, endedGrant{gr, ResultGrantEnded, grantWords(gr, ResultGrantEnded)})
 		case gr.Credential != "" && !g.credsBroken && !g.usableLocked(gr):
 			ended = append(ended, endedGrant{gr, ResultGrantEnded, gr.what() + " for " + scopeWords(gr.Scope, gr.Project) + ", which ended when its credential was deleted"})
+		case len(gits) > 0:
+			ended = append(ended, endedGrant{gr, ResultTakenBack, gr.what() + " for " + scopeWords(gr.Scope, gr.Project) + ", which the engine took back when " + hostList(gits) + " became a git host"})
 		default:
 			kept = append(kept, gr)
 		}
@@ -444,6 +431,13 @@ func (g *Grants) Tend(ctx context.Context) {
 	if len(ended) > 0 && !g.broken && g.saveLocked(kept) != nil {
 		ended = nil
 	}
+	var gitTaken []Grant
+	for _, e := range ended {
+		if e.result == ResultTakenBack {
+			gitTaken = append(gitTaken, e.grant)
+		}
+	}
+	dropped := g.dropGitCardsLocked(git)
 	var gone []string
 	for sid := range g.cards {
 		if !targets[sid].Live {
@@ -482,6 +476,10 @@ func (g *Grants) Tend(ctx context.Context) {
 	for _, e := range ended {
 		g.auditGrant(ctx, e.grant, ByEngine, e.result, e.words)
 	}
+	g.tellGitTaken(gitTaken, targets, git)
+	for _, d := range dropped {
+		g.cfg.Note(d.sid, "Software Factory can't allow your request for "+d.what+" any more: "+hostList(d.gits)+" became a git host, and "+GitHostOnlyEngine+". "+GitToolsWords+".")
+	}
 	g.autoApply(ctx, targets)
 	_ = g.apply(ctx)
 }
@@ -517,7 +515,7 @@ func (g *Grants) coveringLocked(t GrantTarget, now time.Time) []Grant {
 
 func grantFor(list []Grant, host string, git func(string) string) (Grant, bool) {
 	for _, gr := range list {
-		if open, _, _ := opens(gr, git); gr.Credential != "" || gr.Port > 0 || len(open) == 0 {
+		if gr.Credential != "" || gr.Port > 0 || len(opens(gr, git)) == 0 {
 			continue
 		}
 		if gr.Host == host || EntryCovers(gr.Host, host) {
@@ -529,7 +527,7 @@ func grantFor(list []Grant, host string, git func(string) string) (Grant, bool) 
 
 func portGrantFor(list []Grant, target string, git func(string) string) (Grant, bool) {
 	for _, gr := range list {
-		if open, _, _ := opens(gr, git); gr.Credential == "" && gr.Port > 0 && gr.Target() == target && len(open) > 0 {
+		if gr.Credential == "" && gr.Port > 0 && gr.Target() == target && len(opens(gr, git)) > 0 {
 			return gr, true
 		}
 	}
@@ -556,7 +554,7 @@ func (a *Allowlist) GitNames() []string {
 	if a.cfg.Repos != nil {
 		for _, r := range a.cfg.Repos() {
 			if r = HostName(r); ValidAllowEntry(r) && !strings.HasPrefix(r, ".") {
-				out = append(out, r)
+				out = append(out, withAPIHosts([]string{r})...)
 			} else if a, err := netip.ParseAddr(r); err == nil {
 				out = append(out, a.Unmap().String())
 			}
@@ -576,7 +574,7 @@ func (a *Allowlist) gitCheck() func(string) bool {
 	if a.cfg.Repos != nil {
 		for _, r := range a.cfg.Repos() {
 			if r = HostName(r); r != "" {
-				repos = append(repos, r)
+				repos = append(repos, withAPIHosts([]string{r})...)
 			}
 		}
 	}

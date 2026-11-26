@@ -36,7 +36,6 @@ type EgressList struct {
 	Allow   []string
 	Ports   []string
 	Expires map[string]time.Time
-	Git     []string
 }
 
 type EgressLists struct {
@@ -306,7 +305,7 @@ func (a *Allowlist) syncLocked(ctx context.Context) error {
 
 func SameList(want, got EgressList) bool {
 	if !slices.Equal(sortedHosts(want.Allow), sortedHosts(got.Allow)) || !slices.Equal(sortedHosts(want.Ports), sortedHosts(got.Ports)) ||
-		!slices.Equal(sortedHosts(want.Git), sortedHosts(got.Git)) || len(want.Expires) != len(got.Expires) {
+		len(want.Expires) != len(got.Expires) {
 		return false
 	}
 	for h, t := range want.Expires {
@@ -507,7 +506,7 @@ func (a *Allowlist) refuseHost(name string) error {
 		return conflict("outside host", "Covers the sandbox check's host; change SF_SANDBOX_OUTSIDE.")
 	}
 	if a.cfg.Repos != nil {
-		for _, r := range a.cfg.Repos() {
+		for _, r := range withAPIHosts(a.cfg.Repos()) {
 			if r = HostName(r); EntryCovers(name, r) || name == r {
 				return conflict("repository host", "Covers a repository's host; narrow it or use SF_EXTRA_DENY.")
 			}

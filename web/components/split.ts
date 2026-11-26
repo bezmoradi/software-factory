@@ -4,7 +4,7 @@ import type { Tone } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import { label } from '../lib/format.ts'
 import { saidOf } from '../lib/json.ts'
-import type { SessionInfo, SplitCard } from '../types.ts'
+import type { SessionInfo, SplitCard, SplitProject } from '../types.ts'
 import { textbox, textarea } from '../lib/controls.ts'
 import { toast } from './toasts.ts'
 
@@ -73,7 +73,7 @@ class SfSplit extends HTMLElement {
     const head = el('div', 'row split-head')
     head.append(el('h2', 'label', 'Tasks the agent proposed'))
     if (goal) head.append(el('span', 'small muted', `${goal.running} of ${goal.limit} of this goal's sessions running`))
-    const intro = el('p', 'small muted', `The agent wrote these with factory_split. Each card shows its text exactly as written; read it before you start it, since it becomes the new session's first message. Start runs a normal session from main with this session's agent and work type, through the usual start-up, sign-in and cost checks.${goal ? ` At most ${goal.limit} run at once; a Start beyond that queues the task, and the engine starts it when one of them stops.` : ''}`)
+    const intro = el('p', 'small muted', `The agent wrote these with factory_split. Each card shows its text exactly as written; read it before you start it, since it becomes the new session's first message. Start runs a normal session from main with this session's agent and work type, through the usual start-up, sign-in and cost checks. A card for another project shows that project's address in full; check it before you start, since its Start adds the project first when Projects doesn't have it, as Add repository does, and the session there gets that project's work type.${goal ? ` At most ${goal.limit} run at once; a Start beyond that queues the task, and the engine starts it when one of them stops.` : ''}`)
     return [head, intro, ...cards.map(c => this.#card(v, c))]
   }
 
@@ -83,7 +83,9 @@ class SfSplit extends HTMLElement {
     const head = el('div', 'row forge-head')
     head.append(el('span', `tag ${tone}`, word), el('span', 'tag', 'written by the agent'))
     if (c.edited) head.append(el('span', 'tag', 'edited by you'))
+    if (c.project) head.append(el('span', 'tag', 'another project'))
     box.append(head)
+    if (c.project) box.append(this.#project(c.project))
     const editing = this.#editing.get(c.card)
     const open = c.state === 'waiting' || c.state === 'queued'
     if (editing && open) box.append(this.#editor(v, c, editing))
@@ -111,7 +113,16 @@ class SfSplit extends HTMLElement {
     }
     const note = this.#notes.get(c.card)
     if (note) box.append(el('p', `small ${note.tone}`, note.text))
-    if (open && !editing && c.actions) box.append(this.#actions(v, c))
+    if (!(editing && open) && c.actions) box.append(this.#actions(v, c))
+    return box
+  }
+
+  #project(p: SplitProject): HTMLElement {
+    const box = el('div', 'split-project')
+    const url = el('code', 'split-url', shown(p.url))
+    url.tabIndex = 0
+    url.setAttribute('aria-label', 'Address of the project the task is for')
+    box.append(el('p', 'small', shown(p.said)), url)
     return box
   }
 
@@ -128,7 +139,7 @@ class SfSplit extends HTMLElement {
       if (this.#busy.get(c.card) === name) busy(b, true)
       row.append(b)
     }
-    add('start', button('Start', 'primary small', () => {
+    add('start', button(c.project && !c.project.added ? 'Add project and start' : 'Start', 'primary small', () => {
       if (!off && !offered.start) void this.#start(c)
     }, 'button', `start:${c.card}`))
     add('unqueue', button('Remove from queue', 'small', () => {
@@ -217,7 +228,8 @@ class SfSplit extends HTMLElement {
     this.paint()
     const a = await this.start(v.sid, c.card)
     this.#busy.delete(c.card)
-    if (a.ok) toast({ id: `split:${c.card}`, title: 'Started. It gets this text as its first message once it connects.', tone: 'ok' })
+    if (a.ok && a.body.adding === true) toast({ id: `split:${c.card}`, title: a.message, tone: 'ok' })
+    else if (a.ok) toast({ id: `split:${c.card}`, title: 'Started. It gets this text as its first message once it connects.', tone: 'ok' })
     else if (a.error === 'goal full') this.#notes.delete(c.card)
     else this.#notes.set(c.card, { text: a.message, tone: 'bad' })
     this.#key = ''

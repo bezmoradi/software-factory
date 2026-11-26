@@ -1,6 +1,6 @@
-import { button, el, emit, shown, statusLine, unspoofed, visible } from '../lib/dom.ts'
-import { plural } from '../lib/format.ts'
-import type { CardEvent, CardHost, ClaimMark, ContextView, SessionEvent, TurnMarks } from '../types.ts'
+import { button, el, emit, remembered, shown, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { duration, plural } from '../lib/format.ts'
+import type { CardEvent, CardHost, ClaimMark, ContextView, FoldCount, SessionEvent, ToolEvent, TurnMarks } from '../types.ts'
 import './markdown.ts'
 import { answering, hiddenMark, hidesText } from './cards.ts'
 
@@ -11,6 +11,24 @@ const CARD_TAGS = { permission: 'sf-permission', ask: 'sf-ask', plan: 'sf-plan' 
 const CARD_ORDER: string[] = Object.keys(CARD_TAGS)
 
 export type Spot = { turn: Element; offset: number }
+
+type Fold = {
+  li: HTMLLIElement
+  box: HTMLDetailsElement
+  summary: HTMLElement
+  done: HTMLOListElement
+  running: HTMLOListElement
+  calls: Map<string, { count: FoldCount; start: number }>
+  counts: Map<string, { count: FoldCount; n: number }>
+  start: number
+  end: number
+  after: HTMLLIElement | null
+}
+
+const foldCount = (f: unknown): FoldCount | null => {
+  const c = f as FoldCount | null | undefined
+  return c && typeof c.verb === 'string' && typeof c.one === 'string' && typeof c.many === 'string' ? c : null
+}
 
 const tokens = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}m` : n >= 1000 ? `${+(n / 1000).toFixed(1)}k` : String(n))
 
@@ -55,12 +73,15 @@ class SfConversation extends HTMLElement {
   #reply: { turnId: string; body: HTMLElementTagNameMap['sf-markdown'] } | null = null
   #tools = new Map<string, HTMLLIElement>()
   #groups = new Map<string, { list: HTMLOListElement; label: HTMLElement; count: number; name: string }>()
+  #fold: Fold | null = null
+  #folded = new Map<string, Fold>()
+  #foldOpen = new Map<string, boolean>()
   #cards = new Map<string, CardHost>()
   #pinned = true
   #top = 0
   #resized = new ResizeObserver(() => {
     this.#clip()
-    this.#stick()
+    this.stick()
   })
   #width = 0
   #fresh = new Set<HTMLElement>()
@@ -72,7 +93,7 @@ class SfConversation extends HTMLElement {
 
   #scrolled = () => {
     const s = this.scroller
-    if (!s || this.away) return
+    if (!s || !this.#shown()) return
     const gap = s.scrollHeight - s.clientHeight - s.scrollTop
     if (s.scrollTop < this.#top && gap > 1) this.#pinned = false
     else if (gap <= 80) this.#pinned = true
@@ -147,13 +168,17 @@ class SfConversation extends HTMLElement {
     s.scrollTop += spot.turn.getBoundingClientRect().top - s.getBoundingClientRect().top - spot.offset
   }
 
-  #stick() {
-    if (this.#pinned && !this.away && this.scroller) this.scroller.scrollTop = this.scroller.scrollHeight
+  #shown(): boolean {
+    return !this.away && this.getClientRects().length > 0
+  }
+
+  stick(): void {
+    if (this.#pinned && this.scroller && this.#shown()) this.scroller.scrollTop = this.scroller.scrollHeight
   }
 
   #pin() {
     this.#pinned = true
-    this.#stick()
+    this.stick()
   }
 
   #entry(cls: string, who?: string) {
@@ -180,6 +205,54 @@ class SfConversation extends HTMLElement {
     g.count++
     g.label.textContent = `${g.name ? `Subagent ${shown(g.name)}` : 'A subagent'}: ${g.count} ${plural(g.count, 'tool call')}`
     return g.list
+  }
+
+  #joinable(): Fold | null {
+    return this.#fold && this.#fold.li === this.#timeline!.lastElementChild ? this.#fold : null
+  }
+
+  #newFold(ev: ToolEvent): Fold {
+    const li = this.#entry('fold')
+    const summary = el('summary', 'small')
+    const done = el('ol', 'sub-list')
+    const box = remembered(this.#foldOpen, `${ev.epoch}:${ev.seq}`, false, summary, done)
+    box.hidden = true
+    box.addEventListener('toggle', () => {
+      if (box.open) this.#measure([...done.querySelectorAll<HTMLElement>('.tool .call')].filter(c => this.#unmeasured.has(c)))
+    })
+    const running = el('ol', 'sub-list fold-running')
+    li.append(box, running)
+    this.#fold = { li, box, summary, done, running, calls: new Map(), counts: new Map(), start: ev.ts, end: 0, after: null }
+    return this.#fold
+  }
+
+  #foldLine(g: Fold) {
+    const words = [...g.counts.values()].filter(c => c.n > 0).map(({ count, n }) => `${count.verb} ${n} ${n === 1 ? count.one : count.many}`).join(', ')
+    g.box.hidden = !words
+    g.summary.textContent = `${words.charAt(0).toUpperCase()}${words.slice(1)}${words && !g.running.childElementCount ? ` · ${duration(g.end - g.start)}` : ''}`
+  }
+
+  #foldEnded(ev: { id: string; ts: number; unfold?: boolean }, li: HTMLLIElement) {
+    const g = this.#folded.get(ev.id)
+    const call = g?.calls.get(ev.id)
+    if (!g || !call) return
+    this.#folded.delete(ev.id)
+    if (ev.unfold === true) {
+      g.calls.delete(ev.id)
+      ;(g.after ?? g.li).after(li)
+      g.after = li
+      if (this.#fold === g) this.#fold = null
+      g.start = Infinity
+      for (const c of g.calls.values()) g.start = Math.min(g.start, c.start)
+      if (!g.calls.size) g.li.remove()
+    } else {
+      g.end = Math.max(g.end, ev.ts)
+      const c = g.counts.get(call.count.verb) ?? { count: call.count, n: 0 }
+      c.n++
+      g.counts.set(call.count.verb, c)
+      g.done.append(li)
+    }
+    this.#foldLine(g)
   }
 
   #clip() {
@@ -235,6 +308,8 @@ class SfConversation extends HTMLElement {
     this.#tools.clear()
     this.#unmeasured.clear()
     this.#groups.clear()
+    this.#fold = null
+    this.#folded.clear()
     this.#cards.clear()
     this.#reply = null
     if (note) this.#timeline!.append(el('li', 'reset small muted', note))
@@ -280,11 +355,22 @@ class SfConversation extends HTMLElement {
       }
       case 'tool': {
         this.#reply = null
+        const count = ev.agentId || !ev.id ? null : foldCount(ev.fold)
+        const fold = count ? (this.#joinable() ?? this.#newFold(ev)) : null
         let li: HTMLLIElement
-        if (ev.agentId) {
+        if (fold && count) {
+          li = el('li', 'tool run')
+          fold.running.append(li)
+          fold.calls.set(ev.id, { count, start: ev.ts })
+          this.#folded.set(ev.id, fold)
+        } else if (ev.agentId) {
+          this.#fold = null
           li = el('li', 'tool run sub')
           this.#group(ev.agentId, ev.agentName).append(li)
-        } else li = this.#entry('tool run')
+        } else {
+          this.#fold = null
+          li = this.#entry('tool run')
+        }
         const mark = el('span', 'mark', '●')
         mark.setAttribute('aria-hidden', 'true')
         const call = el('div', 'call')
@@ -300,6 +386,7 @@ class SfConversation extends HTMLElement {
         li.title = visible(ev.summary || ev.tool)
         if (ev.id) this.#tools.set(ev.id, li)
         if (call.querySelector('.tool-path')) emit(li, 'sf-tool-path')
+        if (fold) this.#foldLine(fold)
         break
       }
       case 'tool_done': {
@@ -310,6 +397,7 @@ class SfConversation extends HTMLElement {
           li.querySelector('.tool-out')?.remove()
           if (ev.outcome) li.append(this.#outLine(visible(ev.outcome)))
           if (hidesText(ev.outcome)) li.append(hiddenMark(ev.outcome, 'This output'))
+          this.#foldEnded(ev, li)
         }
         break
       }
@@ -367,7 +455,7 @@ class SfConversation extends HTMLElement {
         moved = true
       }
     }
-    if (moved) this.#stick()
+    if (moved) this.stick()
   }
 
   #markItem(t: TurnMarks): HTMLLIElement {
@@ -393,6 +481,7 @@ class SfConversation extends HTMLElement {
 
   #showCard(ev: CardEvent, controlled?: boolean) {
     if (this.#cards.has(ev.id)) return
+    this.#fold = null
     const node: CardHost = el(CARD_TAGS[ev.type])
     node.dataset.kind = ev.type
     node.source = ev

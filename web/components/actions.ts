@@ -3,6 +3,7 @@ import { actionButton, button, el, labelError, statusLine, visible, visibleComma
 import { actions, field, fieldRow, form, reveal, showAnswer } from '../lib/form.ts'
 import { checkbox, dropdown, option, textarea, textbox } from '../lib/controls.ts'
 import { emptyState } from '../lib/page.ts'
+import { tooltip } from '../lib/tooltip.ts'
 import { codeBlock } from './code-block.ts'
 import { askRow, focusIfLost, focusKey, itemTable, rowMenu, rowName, rowNote, tableRow } from './row-table.ts'
 import { when } from './usage.ts'
@@ -164,21 +165,30 @@ export function savedActionsPart(post: Post, route: string, shown: (a: EngineAns
     credential.replaceChildren(...credentials.map(c => option(visible(c.label), c.value)))
     if (credentials.some(c => c.value === keep)) credential.value = keep
     const all = actionsOf(body.actions)
-    rows.replaceChildren(all.length ? itemTable('action-table', 'Actions', ['Action', 'Command', 'Target'], all.map(a => {
+    rows.replaceChildren(all.length ? itemTable('action-table', 'Actions', ['Action', 'Command', 'Target', 'Credential', 'Time limit'], all.map(a => {
       const level = el('span', 'tag access-level', visible(a.label))
       level.dataset.level = a.level
       const notes: HTMLElement[] = []
       if (a.files) notes.push(rowNote('With the session’s files, read-only.'))
       if (a.slots.length) notes.push(rowNote(`The agent fills ${a.slots.map(s => `{${visible(s.name)}}`).join(', ')}`))
       if (a.broken) notes.push(rowNote(visible(a.broken), 'warn'))
-      const cmd = el('code', 'item-command', visibleCommand(a.command))
-      const where = el('span', 'secondary item-hosts', `${visible(a.target)} with ${visible(a.credential || '?')}, ${a.minutes} min`)
+      const line = visibleCommand(a.command)
+      const trigger = el('button', 'tip-text item-command')
+      trigger.type = 'button'
+      trigger.append(el('span', 'sr-only', 'Command: '), el('code', '', line))
+      const cmd = tooltip(trigger, line)
+      const cell = (cls: string, label: string, value: string) => {
+        const c = el('span', `secondary ${cls}`)
+        c.append(el('span', 'sr-only', `${label}: `), value)
+        return c
+      }
+      const where = [cell('item-target', 'Target', visible(a.target)), cell('item-credential', 'Credential', visible(a.credential || '?')), cell('item-minutes', 'Time limit', `${a.minutes} min`)]
       if (asking === a.id) return askRow(rowName(visible(a.name), level), `Delete “${visible(a.name)}”?`, `action:${a.id}`, () => ask('', `action-more:${a.id}`), async () => {
         asking = ''
         said(await post(route, { op: 'action-delete', id: a.id }))
         focusIfLost(part, 'add-action')
       })
-      return tableRow([rowName(visible(a.name), level), cmd, where, ...notes], rowMenu(visible(a.name), `action-more:${a.id}`, [
+      return tableRow([rowName(visible(a.name), level), ...cmd, ...where, ...notes], rowMenu(visible(a.name), `action-more:${a.id}`, [
         { text: 'Replace', glyph: 'edit', run: from => {
           for (const marked of f.querySelectorAll<HTMLElement>('[aria-invalid="true"]')) labelError(marked, '')
           editing = a.id

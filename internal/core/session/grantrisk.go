@@ -13,8 +13,6 @@ const (
 	RiskHigh   = "high"
 )
 
-const GitRiskWords = "The agent can push to any repository with any token it holds, skipping reviews and checks."
-
 func handedWords(name string) string {
 	return "The agent can copy " + name + "'s secret, and a copy outlives the grant, so rotate it afterwards."
 }
@@ -39,7 +37,6 @@ type AccessRisk struct {
 	Label   string
 	Says    []string
 	Accept  string
-	Git     []string
 }
 
 var riskLabels = map[string]string{RiskLow: "Low risk", RiskMedium: "Medium risk", RiskHigh: "High risk"}
@@ -109,7 +106,7 @@ func hostList(hosts []string) string {
 }
 
 func riskFor(a accessTarget, scope, expires, project string) AccessRisk {
-	r := AccessRisk{Scope: scope, Expires: expires, Level: RiskLow, Git: slices.Clone(a.gits)}
+	r := AccessRisk{Scope: scope, Expires: expires, Level: RiskLow}
 	who := "The agent"
 	if scope == GrantProject {
 		who = "The agents of every " + clip(project, 100) + " session, later ones too,"
@@ -153,14 +150,6 @@ func riskFor(a accessTarget, scope, expires, project string) AccessRisk {
 		r.Says = append(r.Says, h+" is on your network: "+lowerFirst(who)+" can reach whatever answers on port "+strconv.Itoa(n)+".")
 		accept = append(accept, "the agent can reach "+e)
 	}
-	if len(a.gits) > 0 {
-		r.Level = RiskHigh
-		if a.gitAddr != "" {
-			r.Says = append(r.Says, a.host+" is an address of "+a.gitAddr+", a git host.")
-		}
-		r.Says = append(r.Says, GitRiskWords)
-		accept = append(accept, "the agent can push without reviews or checks")
-	}
 	for _, t := range a.tags {
 		switch t {
 		case TagProduction:
@@ -184,7 +173,7 @@ func riskFor(a accessTarget, scope, expires, project string) AccessRisk {
 				r.Says = append(r.Says, h+" accepts uploads, so anything the agent reads, your code included, can be sent there.")
 			}
 		}
-	case a.cred == "" && len(a.gits) == 0 && len(a.lans) == 0 && len(r.Says) > 0:
+	case a.cred == "" && len(a.lans) == 0 && len(r.Says) > 0:
 		r.Says[0] += " Anything sent there leaves this computer."
 	}
 	if scope == GrantProject && expires == "never" {
@@ -197,10 +186,6 @@ func riskFor(a accessTarget, scope, expires, project string) AccessRisk {
 	}
 	r.Label = riskLabels[r.Level]
 	return r
-}
-
-func unshownGits(gits, shown []string) []string {
-	return slices.DeleteFunc(slices.Clone(gits), func(h string) bool { return slices.Contains(shown, h) })
 }
 
 func risksFor(a accessTarget, project string) []AccessRisk {

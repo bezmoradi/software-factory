@@ -11,6 +11,7 @@ class SfApproval extends HTMLElement {
   #view: PlanApproval | null = null
   #key = ''
   #open = new Map<string, boolean>()
+  #doc: { details: HTMLDetailsElement; summary: HTMLElement; hash: string } | null = null
   #field = textbox({ name: 'note' })
   #fieldWords = document.createTextNode('What the agent should change in the plan')
   #fieldBox = field(this.#fieldWords, this.#field)
@@ -31,6 +32,15 @@ class SfApproval extends HTMLElement {
     const focused = focusedKey(this)
     this.#render()
     refocus(this, focused)
+  }
+
+  openDocument() {
+    const doc = this.#doc
+    if (!doc?.details.isConnected) return
+    this.#open.set(doc.hash, true)
+    doc.details.open = true
+    doc.summary.focus({ preventScroll: true })
+    doc.details.scrollIntoView({ block: 'start' })
   }
 
   sent(note: string) {
@@ -95,6 +105,7 @@ class SfApproval extends HTMLElement {
     const v = this.#view
     if (!v) {
       this.#why.textContent = ''
+      this.#doc = null
       return this.replaceChildren()
     }
     const reqs = v.kind === 'requirements'
@@ -109,13 +120,17 @@ class SfApproval extends HTMLElement {
     body.append(text)
     const file = visible(v.path.split('/').pop() ?? 'the plan')
     const draft = !!v.draft && !v.approved
-    const summary = el('summary', 'small', draft ? (reqs ? 'Read the draft requirements' : `Read the draft of ${file}`) : reqs ? 'Read the agreed requirements' : `Read ${file}`)
+    const words = draft ? (reqs ? 'Read the draft requirements' : `Read the draft of ${file}`) : reqs ? 'Read the agreed requirements' : `Read ${file}`
+    const summary = el('summary', 'small', words)
     summary.dataset.key = 'read'
     const details = remembered(this.#open, v.hash, false, summary, body)
-    if (draft) return this.#quiet([details])
+    details.classList.add('approval-doc')
+    this.#doc = { details, summary, hash: v.hash }
+    const read = button(words, 'link small approval-read', () => emit(this, 'sf-read-document'), 'button', 'read-link')
+    if (draft) return this.#quiet([read, details])
     const parts: HTMLElement[] = [el('p', `small ${v.approved ? 'ok' : 'warn'}`, status)]
     if (reqs && v.changed && !v.approved) parts.push(this.#changes(v))
-    parts.push(details)
+    parts.push(read, details)
     if (!reqs && !cause) {
       this.#planBox = this.#planReview(v)
       parts.push(this.#planBox)
@@ -126,8 +141,9 @@ class SfApproval extends HTMLElement {
     }
     const approveButton = (label: string, key: string, plan?: boolean) => button(label, 'ghost', () => {
       if (!this.#open.has(v.hash)) {
-        details.open = true
         this.#why.textContent = `Read this version of ${what} first: it is open above. Then approve.`
+        if (!details.getClientRects().length) return emit(this, 'sf-read-document')
+        details.open = true
         summary.focus()
         return
       }

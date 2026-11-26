@@ -263,7 +263,7 @@ scenarios:
           equal: { "$.frames[0].json.type": hello, "$.closed": false }
 
   - id: EVS-011
-    name: "A session's frames reach the open stream: its listing with the engine's control notice and allowed actions, its turns with the engine's turn-finished notice, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
+    name: "A session's frames reach the open stream: its listing with the engine's control notice and allowed actions, its turns with the engine's turn-finished notice, its tool calls, where the engine marks each read and search call (the development agent's read and search, Claude Code's Read, Grep and Glob) with the words its folded line counts it by, a shell or edit call with none, and a failed call's end as never folded, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
     steps:
       - id: open
         do: http.open
@@ -353,7 +353,7 @@ scenarios:
           method: POST
           path: "/api/message"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: proctor ${run.id}\nwrite: proctor-${run.id}.txt" }
+          body: { sid: "${sid}", text: "say: proctor ${run.id}\nread: proctor-${run.id}.md\ngrep: proctor-${run.id}\nglob: proctor-*.md\nrun: echo proctor-${run.id}\nfail: false proctor-${run.id}\nwrite: proctor-${run.id}.txt" }
         expect:
           equal:
             "$.status": 202
@@ -504,6 +504,19 @@ scenarios:
               - { json.type: prompt, json.sid: "${sid}", json.from: page, json.images: 1, json.text: "proctor look ${run.id}" }
               - { json.type: text, json.sid: "${sid}", json.text: "The fake agent received 2 content blocks:\n- text: \"I pasted an image on the Software Factory page; it is in this message, and also saved at /uploads/${box}/${sid}/${image}/image.png.\\n\\nproctor look ${run.id}\"\n- image: image/png, 15 bytes, sha256 27c0ab99197e1139, uri file:///uploads/${box}/${sid}/${image}/image.png, decoded: true" }
               - { json.type: notify, json.sid: "${sid}", json.what: turn finished }
+      - id: folds
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.tool: read, json.summary: "Read proctor-${run.id}.md", json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: search, json.summary: "grep proctor-${run.id}", json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: search, json.summary: "glob proctor-*.md", json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.command: "echo proctor-${run.id}" }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write proctor-${run.id}.txt" }
+              - { json.type: tool_done, json.sid: "${sid}", json.ok: false, json.command: "false proctor-${run.id}", json.unfold: true }
       - id: nothing-withheld
         do: http.frames
         on: events
@@ -514,6 +527,11 @@ scenarios:
               - { json.type: omitted, json.sid: "${sid}" }
               - { json.type: permission, json.sid: "${sid}" }
               - { json.type: dropped, json.sid: "${sid}" }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool_done, json.sid: "${sid}", json.ok: true, json.unfold: true }
       - id: unlisted
         do: http.frames
         on: events

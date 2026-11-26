@@ -63,7 +63,7 @@ import { openDiagnostics } from './components/diagnostics.ts'
 import { initUpdates } from './components/update.ts'
 import { sendState } from './api.ts'
 import { allowed, armed, changesSession, current, inTurn, offWhy, schedulePaint, sessions, setPainter, state, toast, waitingOf, waking, working, type AuditEntry, type HistoryLine, type Session } from './app-state.ts'
-import { barStatus, paintSide, queueBarFit, startLayout, startTopBar } from './layout.ts'
+import { barStatus, paintSide, queueBarFit, setSide, startLayout, startTopBar } from './layout.ts'
 import { fileLabel, files, keepTab, moveTab, openTabs, recent, reloadFile, restoreTabs, saveTabs, startNavigation } from './navigation.ts'
 import { ensure, requestReplay, showGone, startStream, updateSessions } from './stream.ts'
 import { answerAsking, askToManage, busyManage, confirmed, controlBusy, controlBusyWhile, explainAsking, footAsk, forgeAsking, forkable, once, planAsking, pushAsking, pushedHead, pushOutcome, pushSaid, removals, reviewAsking, startSessionActions, stepping, testAsking, waiting, whilePressed } from './session-actions.ts'
@@ -125,11 +125,6 @@ function syncChecks(list: Reviewer[]): { check: Check; node: HTMLElementTagNameM
     if (ul.children[i] !== hit.li) ul.insertBefore(hit.li, ul.children[i] ?? null)
   })
   return out
-}
-
-function stageOff(s: Session): string {
-  if (!state.connected) return 'Step buttons are available once the page reconnects to the engine.'
-  return offWhy(s, 'steps')
 }
 
 function onEvent(ev: StreamEvent) {
@@ -333,15 +328,9 @@ function paint() {
     s.view.marks(s.info.unbacked, s.epoch)
     paintCheckpoint(s)
     paintStall(s)
-    const off = stageOff(s)
+    const off = !state.connected || !!offWhy(s, 'steps')
     if (inTurn(s)) for (const k of [...stepping.keys()]) if (k.startsWith(`${s.sid}:`)) stepping.delete(k)
-    for (const b of byId('path-section').querySelectorAll<HTMLButtonElement>('button.stage')) {
-      b.setAttribute('aria-disabled', String(!!off || b.getAttribute('aria-busy') === 'true'))
-      if (off) b.setAttribute('aria-describedby', 'path-busy')
-      else b.removeAttribute('aria-describedby')
-    }
-    if (byId('path-busy').textContent !== off) byId('path-busy').textContent = off
-    byId('path-busy').hidden = !off
+    for (const b of byId('path-section').querySelectorAll<HTMLButtonElement>('button.stage')) b.setAttribute('aria-disabled', String(off || b.getAttribute('aria-busy') === 'true'))
     paintAgents(s)
     paintChecks(s)
     paintSide(s)
@@ -349,14 +338,14 @@ function paint() {
     byId<HTMLElementTagNameMap['sf-reviews']>('reviews').explain = { run: s.info.review?.explain ?? null, asking: explainAsking.has(s.sid) }
     byId<HTMLElementTagNameMap['sf-push-panel']>('push-panel').view = withCoverage(pushPanelOf(s), s)
     verifyPanel.view = state.connected && s.info.verified ? { sid: s.sid, disabled: '' } : null
-    byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: stageOff(s) } : null
-    byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: stageOff(s) } : null
+    byId<HTMLElementTagNameMap['sf-session-facts']>('session-facts').view = state.connected ? { uncommitted: s.info.uncommitted ?? null, overlaps: s.info.overlaps ?? [], disabled: offWhy(s, 'steps') } : null
+    byId<HTMLElementTagNameMap['sf-lineage']>('lineage').view = state.connected ? { info: s.info, disabled: offWhy(s, 'steps') } : null
     sessionWork.view = state.connected ? { sid: s.sid, disabled: !allowed(s, 'control'), reason: s.info.readOnly ?? '' } : null
     byId<HTMLElementTagNameMap['sf-screenshots']>('screenshots').view = state.connected ? { sid: s.sid, busy: inTurn(s) } : null
     keepPanel.view = state.connected ? { sid: s.sid, disabled: offWhy(s, 'restore') } : null
     byId<HTMLElementTagNameMap['sf-forge-panel']>('forge-panel').view = forgePanelOf(s)
     byId<HTMLElementTagNameMap['sf-pull-follow']>('pull-follow').view = pullFollowOf(s.sid, s.info, state.connected)
-    byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: stageOff(s) } : null
+    byId<HTMLElementTagNameMap['sf-split']>('split').view = state.connected ? { sid: s.sid, info: s.info, sessions: [...sessions.values()].map(x => x.info), disabled: offWhy(s, 'steps') } : null
     byId<HTMLElementTagNameMap['sf-intent']>('intent').record = s.gate?.adapter === 'knackpack' ? s.intent : null
     const rulesProject = projectFor(s)
     byId<HTMLElementTagNameMap['sf-rules']>('rules').view = state.connected && s.info.verified ? { sid: s.sid, name: label(s.info), claude: isClaude(s.info), repo: rulesProject?.name ?? s.info.project ?? '', path: rulesProject?.path ?? '', box: s.info.box ?? '' } : null
@@ -1093,6 +1082,13 @@ byId('approval').addEventListener('sf-approve', e => void whilePressed(() => app
 byId('cause-approval').addEventListener('sf-approve', e => void whilePressed(() => approve('plan', e.detail.hash)))
 byId('cause-approval').addEventListener('sf-revise', e => revise('cause-approval', 'root-cause', e.detail.note))
 byId('approval').addEventListener('sf-revise', e => revise('approval', 'plan', e.detail.note))
+for (const id of ['req-approval', 'approval', 'cause-approval']) {
+  const card = byId<HTMLElementTagNameMap['sf-approval']>(id)
+  card.addEventListener('sf-read-document', () => {
+    setSide(true)
+    requestAnimationFrame(() => card.openDocument())
+  })
+}
 function ask(step: string): Promise<boolean> {
   return send('', [], current(), false, [], { part: { ask: step } })
 }
@@ -1180,7 +1176,7 @@ function paintBranchMenu(s: Session) {
   if (!offered) return
   if (byId('menu-issues-text').textContent !== offered.label) byId('menu-issues-text').textContent = offered.label
   if (issuesTip.textContent !== offered.title) issuesTip.textContent = offered.title
-  item.disabled = !!stageOff(s)
+  item.disabled = !!offWhy(s, 'steps')
 }
 
 byId('menu-issues').addEventListener('click', () => {
@@ -1262,7 +1258,7 @@ watchLimits({ paint: paintNeeds })
 
 async function copy(command: string) {
   const ok = await copyText(command)
-  toast(ok ? { id: 'copy', title: `Copied ${command}`, description: 'Run it in a terminal on this computer, in the folder that holds compose.yaml.', tone: 'ok' } : { id: 'copy', title: 'The browser did not allow copying.', description: `Type ${command} in a terminal on this computer, in the folder that holds compose.yaml.`, tone: 'bad' })
+  toast(ok ? { id: 'copy', title: `Copied ${command}`, description: 'Run it in a terminal on this computer.', tone: 'ok' } : { id: 'copy', title: 'The browser did not allow copying.', description: `Type ${command} in a terminal on this computer.`, tone: 'bad' })
 }
 byId('ask-confirm').addEventListener('click', async () => {
   const s = current()

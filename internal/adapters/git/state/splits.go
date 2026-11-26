@@ -32,6 +32,7 @@ type splitCardJSON struct {
 	Goal    string    `json:"goal"`
 	Title   string    `json:"title"`
 	Message string    `json:"message"`
+	Project string    `json:"project,omitempty"`
 	State   string    `json:"state"`
 	SID     string    `json:"sid,omitempty"`
 	Edited  bool      `json:"edited,omitempty"`
@@ -47,22 +48,30 @@ type splitsJSON struct {
 
 func splitState(s string) bool {
 	switch s {
-	case session.SplitWaiting, session.SplitQueued, session.SplitStarting, session.SplitStarted, session.SplitDismissed:
+	case session.SplitWaiting, session.SplitQueued, session.SplitStarting, session.SplitStarted, session.SplitDismissed, session.SplitAdding:
 		return true
 	}
 	return false
 }
 
+func splitProject(u string) bool {
+	if u == "" {
+		return true
+	}
+	n, err := session.NormalizeURL(u)
+	return err == nil && n == u
+}
+
 func splitCardOf(c splitCardJSON) (session.SplitCard, bool) {
 	started := c.State == session.SplitStarted
-	ok := splitCardID.MatchString(c.Card) && sessionID.MatchString(c.Goal) && splitState(c.State) &&
+	ok := splitCardID.MatchString(c.Card) && splitProject(c.Project) && sessionID.MatchString(c.Goal) && splitState(c.State) &&
 		c.Title != "" && cleanText(c.Title, session.MaxSplitTitle) &&
 		c.Message != "" && utf8.ValidString(c.Message) && utf8.RuneCountInString(c.Message) <= session.MaxSplitMessage &&
 		(started && sessionID.MatchString(c.SID) || !started && c.SID == "") && !c.Asked.IsZero()
 	if !ok {
 		return session.SplitCard{}, false
 	}
-	return session.SplitCard{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked, At: c.At, Queued: c.Queued}, true
+	return session.SplitCard{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, Project: c.Project, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked, At: c.At, Queued: c.Queued}, true
 }
 
 func (s Splits) Load() ([]session.SplitCard, error) {
@@ -95,11 +104,11 @@ func (s Splits) Save(cards []session.SplitCard) error {
 	f := splitsJSON{Version: 1, Cards: []splitCardJSON{}}
 	size := 0
 	for _, c := range cards {
-		j := splitCardJSON{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked.UTC(), At: c.At.UTC()}
+		j := splitCardJSON{Card: c.Card, Goal: c.Goal, Title: c.Title, Message: c.Message, Project: c.Project, State: c.State, SID: c.SID, Edited: c.Edited, Asked: c.Asked.UTC(), At: c.At.UTC()}
 		if c.State == session.SplitQueued && !c.Queued.IsZero() {
 			j.Queued = c.Queued.UTC()
 		}
-		cost := 2*(len(j.Title)+len(j.Message)) + 512
+		cost := 2*(len(j.Title)+len(j.Message)+len(j.Project)) + 512
 		if _, ok := splitCardOf(j); !ok || len(f.Cards) >= session.MaxSplitCards || size+cost > maxSplitBytes {
 			continue
 		}

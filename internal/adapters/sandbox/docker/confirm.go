@@ -58,12 +58,8 @@ func hostName(h string) string {
 func Expects(cfg ProbeConfig) []Expect {
 	var out []Expect
 	for _, h := range cfg.GitHosts {
-		if !cfg.granted(h, "443") {
-			out = append(out, Expect{Check: ProxyCheck(h, "443"), Target: net.JoinHostPort(hostName(h), "443"), Reason: policyRefusals})
-		}
-		if !cfg.granted(h, "22") {
-			out = append(out, Expect{Check: ProxyCheck(h, "22"), Target: net.JoinHostPort(hostName(h), "22"), Reason: portRefusals})
-		}
+		out = append(out, Expect{Check: ProxyCheck(h, "443"), Target: net.JoinHostPort(hostName(h), "443"), Reason: policyRefusals},
+			Expect{Check: ProxyCheck(h, "22"), Target: net.JoinHostPort(hostName(h), "22"), Reason: portRefusals})
 	}
 	if cfg.Outside != "" {
 		out = append(out, Expect{Check: ProxyCheck(cfg.Outside, "443"), Target: net.JoinHostPort(hostName(cfg.Outside), "443"), Reason: policyRefusals})
@@ -71,9 +67,6 @@ func Expects(cfg ProbeConfig) []Expect {
 	if cfg.Front != "" {
 		front := net.JoinHostPort(hostName(cfg.Front), "443")
 		for _, h := range cfg.GitHosts {
-			if cfg.granted(h, "443") {
-				continue
-			}
 			out = append(out, Expect{Check: FrontCheck(cfg.Front, h), Target: front, Name: hostName(h), Reason: nameRefusals,
 				Or: &Expect{Target: front, Reason: frontFailures}})
 		}

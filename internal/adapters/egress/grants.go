@@ -84,10 +84,10 @@ func (g *Grants) Check(subnets []netip.Prefix, lists map[string]Lists) (map[stri
 		if err != nil || p.String() != key || !slices.Contains(subnets, p) {
 			return nil, fmt.Errorf("egress: grants name %q, which isn't a session container's subnet", key)
 		}
-		if len(l.Allow) > MaxEntries || len(l.Ports) > MaxEntries || len(l.Expires) > 2*MaxEntries || len(l.Git) > 2*MaxEntries {
+		if len(l.Allow) > MaxEntries || len(l.Ports) > MaxEntries || len(l.Expires) > 2*MaxEntries {
 			return nil, fmt.Errorf("egress: the grants for %s hold more than %d entries", key, MaxEntries)
 		}
-		pol, err := base.withGrant(l.Allow, l.Ports, l.Git, l.Expires)
+		pol, err := base.withGrant(l.Allow, l.Ports, l.Expires)
 		if err != nil {
 			return nil, fmt.Errorf("egress: grants for %s: %w", key, err)
 		}
@@ -140,26 +140,6 @@ func (g *Grants) allows(subnet, name string) bool {
 	return ok && !p.denied(name) && p.allowed(name)
 }
 
-func (g *Grants) allowsGit(subnet, name string) bool {
-	if g == nil || subnet == "" {
-		return false
-	}
-	g.mu.RLock()
-	p, ok := g.lists[subnet]
-	g.mu.RUnlock()
-	return ok && p.denied(name) && p.gitAllowed(name)
-}
-
-func (g *Grants) openedGit(subnet, target string) bool {
-	if g == nil || subnet == "" {
-		return false
-	}
-	g.mu.RLock()
-	p, ok := g.lists[subnet]
-	g.mu.RUnlock()
-	return ok && p.exact(p.git, target)
-}
-
 func (g *Grants) allowsPort(subnet, target string) bool {
 	if g == nil || subnet == "" {
 		return false
@@ -178,7 +158,7 @@ func (g *Grants) snapshot() map[string]sideJSON {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	for key, p := range g.lists {
-		sj := sideJSON{Allow: p.Allow(), Ports: p.Ports(), Expires: map[string]int64{}, Git: p.Git()}
+		sj := sideJSON{Allow: p.Allow(), Ports: p.Ports(), Expires: map[string]int64{}}
 		for h, t := range p.Expires() {
 			sj.Expires[h] = t.Unix()
 		}

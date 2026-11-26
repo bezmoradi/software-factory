@@ -149,7 +149,7 @@ func credentialOf(raw any) (session.Credential, bool) {
 
 func presetDraftOf(raw any) (session.PresetDraft, bool) {
 	body, ok := raw.(map[string]any)
-	if !ok || !keysWithin(body, "name", "host", "port", "credential", "scope", "expires", "project", "sid", "auto", "confirmed", "git") {
+	if !ok || !keysWithin(body, "name", "host", "port", "credential", "scope", "expires", "project", "sid", "auto", "confirmed") {
 		return session.PresetDraft{}, false
 	}
 	text := func(key string, limit int) string {
@@ -161,8 +161,6 @@ func presetDraftOf(raw any) (session.PresetDraft, bool) {
 		Scope: text("scope", 16), Expires: text("expires", 16), Project: text("project", 256), Session: text("sid", 80)}
 	port, okPort := accessPort(body)
 	d.Port, ok = port, ok && okPort
-	git, okGit := shownGits(body)
-	d.Git, ok = git, ok && okGit
 	for _, key := range []string{"auto", "confirmed"} {
 		v, given := body[key]
 		if !given {
@@ -243,7 +241,7 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request, body map[st
 			if says == nil {
 				says = []string{}
 			}
-			send(w, http.StatusOK, map[string]any{"risk": accessRiskJSON{Scope: risk.Scope, Expires: risk.Expires, Level: risk.Level, Label: risk.Label, Says: says, Accept: risk.Accept, Git: risk.Git}})
+			send(w, http.StatusOK, map[string]any{"risk": accessRiskJSON{Scope: risk.Scope, Expires: risk.Expires, Level: risk.Level, Label: risk.Label, Says: says, Accept: risk.Accept}})
 			return
 		}
 		said, err = s.cfg.Credentials.SavePreset(ctx, d)

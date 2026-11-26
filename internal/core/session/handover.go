@@ -75,13 +75,13 @@ func grantEnd(covering []Grant, id string) time.Time {
 	return end
 }
 
-func (g *Grants) handingsLocked(now []Grant) []handing {
+func (g *Grants) handingsLocked(now []Grant, git func(string) string) []handing {
 	var list []handing
 	var taken []string
 	slices.SortFunc(now, func(a, b Grant) int { return a.Made.Compare(b.Made) })
 	for _, gr := range now {
 		c, ok := g.credentialByID(gr.Credential)
-		if gr.Credential == "" || !ok || slices.ContainsFunc(list, func(h handing) bool { return h.cred.ID == c.ID }) {
+		if gr.Credential == "" || !ok || slices.ContainsFunc(list, func(h handing) bool { return h.cred.ID == c.ID }) || len(gitsIn(c.Bound, git)) > 0 {
 			continue
 		}
 		places := c.places()
@@ -129,8 +129,7 @@ func portsOf(now []Grant, handed []HandedCredential, git func(string) string) []
 		if gr.Credential != "" && !slices.ContainsFunc(handed, func(h HandedCredential) bool { return h.Name == gr.Name }) {
 			continue
 		}
-		open, _, _ := opens(gr, git)
-		for _, e := range open {
+		for _, e := range opens(gr, git) {
 			if portEntry(e) && !slices.Contains(list, e) {
 				list = append(list, e)
 			}
@@ -171,7 +170,7 @@ func (g *Grants) deliver(ctx context.Context) {
 		covering := g.coveringLocked(t, now)
 		j := job{box: t.Box, covering: covering}
 		if !g.credsBroken {
-			j.list = g.handingsLocked(slices.Clone(covering))
+			j.list = g.handingsLocked(slices.Clone(covering), git)
 		}
 		jobs = append(jobs, j)
 	}
