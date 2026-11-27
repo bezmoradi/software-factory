@@ -74,11 +74,11 @@ P=http://127.0.0.1:7799
 key() { curl -sS -X POST -H 'Content-Type: application/json' -H "Origin: $P" "$P/api/session" -d '{}' | sed -E 's/.*"token":"([^"]+)".*/\1/' > /tmp/sf-key; }
 sf() { curl -sS -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P$1" -d "$2"; }
 events() { curl -sS -N -m 5 -H "Origin: $P" -H "Authorization: Bearer $(cat /tmp/sf-key)" "$P/api/events" 2>/dev/null | head -n 1; }
-start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); [ "${2:-quick}" = none ] || sf /api/size "{\"sid\":\"${r%% *}\",\"size\":\"${2:-quick}\"}" >/dev/null; sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-$1; cat /tmp/sf-$1; }
-sid() { cut -d' ' -f1 /tmp/sf-$1; }
-branch() { echo sf/$(cut -d' ' -f2 /tmp/sf-$1); }
-wt() { cut -d' ' -f3 /tmp/sf-$1; }
-box() { cut -d' ' -f4 /tmp/sf-$1; }
+start() { r=$(sf /api/dispatch "{\"path\":\"/workspace/base/demo\",\"agent\":\"dev-acp\",\"name\":\"$1\"}" | sed -nE 's/.*"id":"([^"]+)".*"sid":"([^"]+)".*/\2 \1/p'); [ "${2:-quick}" = none ] || sf /api/size "{\"sid\":\"${r%% *}\",\"size\":\"${2:-quick}\"}" >/dev/null; sleep 3; w=$(docker compose -f compose.yaml -f compose.dev.yaml exec -T engine grep -A9 "\"sid\": \"${r%% *}\"" /var/lib/software-factory/sessions.json | sed -nE 's/.*"(cwd|box)": "([^"]+)".*/\2/p'); echo $r $w > /tmp/sf-hand/$1; cat /tmp/sf-hand/$1; }
+sid() { cut -d' ' -f1 /tmp/sf-hand/$1; }
+branch() { echo sf/$(cut -d' ' -f2 /tmp/sf-hand/$1); }
+wt() { cut -d' ' -f3 /tmp/sf-hand/$1; }
+box() { cut -d' ' -f4 /tmp/sf-hand/$1; }
 ctr() { echo software-factory-dev-box-$(box $1); }
 commit() { printf '%s\n' "$3" | docker exec -i -w "$(wt $1)" "$(ctr $1)" sh -c 'mkdir -p "$(dirname "$1")" && cat > "$1" && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm "$1" && git rev-parse HEAD' sh "$2"; }
 review() { sf /api/review "{\"sid\":\"$(sid $1)\",\"costOk\":true}"; }
@@ -90,6 +90,7 @@ audit() { docker compose -f compose.yaml -f compose.dev.yaml exec -T engine tail
 remote() { docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver git -C /srv/git/demo.git for-each-ref refs/heads/sf; }
 logs() { docker compose -f compose.yaml -f compose.dev.yaml logs --no-log-prefix "$1" | grep -E "$2"; }
 restart() { docker compose -f compose.yaml -f compose.dev.yaml restart engine && until curl -fs -o /dev/null "$P/healthz"; do sleep 1; done; key; }
+mkdir -p /tmp/sf-hand
 key
 sf /api/commit-identity '{"op":"set","name":"Dev Person","email":"12345+dev@users.noreply.github.com"}'
 sf /api/save-token '{"host":"gitserver.test:8443","token":"sf-dev-gitserver-token"}'
@@ -448,7 +449,7 @@ start d; commit d proctor/specs/credentials.yaml 'version: 2'; docker exec -w "$
 allow d proctor/specs/x.yaml "$(digest d proctor/specs/x.yaml)" 'x.yaml is retired'; audit; sf /api/flag-remove "{\"sid\":\"$(sid d)\",\"path\":\"proctor/specs/credentials.yaml\"}"; logs engine 'msg=flag '
 start b; docker exec -w "$(wt b)" "$(ctr b)" sh -c 'mkdir -p proctor/specs/many && for i in $(seq -w 1 5000); do echo same > proctor/specs/many/f$i.yaml; done && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm many'; gate b; n=$(logs engine 'by="agent, after reviews"' | wc -l); apush b; sleep 6; docker compose -f compose.yaml -f compose.dev.yaml exec -T engine sh -c 'tail -n 1 /var/lib/software-factory/audit.jsonl | wc -c'; until [ "$(logs engine 'by="agent, after reviews"' | wc -l)" -gt "$n" ]; do sleep 1; done
 start k; docker exec -w "$(wt k)" "$(ctr k)" sh -c 'mkdir -p mk && printf "proctor:\n\t@echo pass\n" > mk/x.mk && ln -s mk/x.mk Makefile && git add -A && git -c user.name=Dev -c user.email=dev@example.invalid commit -qm mklink'; gate k; allow k Makefile "$(digest k Makefile)" fine; apush k; sleep 3; audit
-start z; commit z proctor/specs/gone.yaml "unique $(date +%s%N)"; B=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse HEAD:proctor/specs/gone.yaml); G=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse --git-common-dir)
+start z; commit z proctor/specs/gone.yaml "unique $(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"; B=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse HEAD:proctor/specs/gone.yaml); G=$(docker exec -w "$(wt z)" "$(ctr z)" git rev-parse --git-common-dir)
 docker exec "$(ctr z)" rm -f "$G/objects/$(echo $B | cut -c1-2)/$(echo $B | cut -c3-)"; apush z; sleep 3; audit
 for r in /api/allow-file /allow-file /api/push-answer; do docker exec "$(ctr d)" curl -sS --noproxy '*' -w ' %{http_code}\n' -X POST -H 'Content-Type: application/json' http://engine-agents:8081$r -d '{}'; done
 ```
@@ -611,20 +612,21 @@ docker compose -f compose.yaml -f compose.dev.yaml exec -T gitserver sf-gitserve
 - The Reviews panel: each session's latest review is back, and every passing role that isn't advisory carries `"unchecked":true` in the event stream, which the page shows as the role's "not rechecked" tag, with the panel's line at its top saying how many passes haven't been rechecked since the restart. `/api/size` answers `{"ok":true} 200` and rechecks `h`, so the count falls by `h`'s two roles.
 - The update check: `update check event=newer`, from the engine before the restart or from the new one at start. If the restart logs `event=reused`, the stopping engine's line is the `newer` one, and the new engine logs another a minute after the stored check. Every `release-seen` line, for `/release-api/repos/bezmoradi/software-factory/tags` and `/release-api/repos/bezmoradi/software-factory/releases/tags/v9.9.9`, has `authorization=absent cookie=absent user-agent="software-factory-update-check"`, although the engine holds a token for this host (`gitserver.test:8443`, saved in Setup).
 
-**A verification run counts only for its commit, command and image, and only its exit code counts**. Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running.
+**A verification run counts only for its commit, command and image, and only its exit code counts**. Start the overlay with `SF_VERIFY_MINUTES=1 SF_VERIFY_MEMORY=512m` in your shell, set `IMG` to an image on this Docker pinned by digest that has `sh`, `wget` and `dd` (`docker images --digests`; `docker:29-dind` was used on 2026-11-19), and commit `iso.sh` from the change's description into the session's branch for the isolation check, since a command is one line of at most 300 bytes. `check <command>` sets the project's check command and image; `vstart`, `vread` and `vwait` start a run, read the panel and wait until no run is running; `vseen` waits up to 30 seconds for a run to be running, since the run a push starts begins in the background and `vwait` alone could return before it.
 
 ```bash
 check() { python3 -c 'import json,sys; print(json.dumps({"op":"set","name":"demo","check":sys.argv[1],"setup":"","image":sys.argv[2]}))' "$1" "${2-$IMG}" > /tmp/sf-cmd.json; sf /api/project-commands "$(cat /tmp/sf-cmd.json)"; }
 vread() { sf /api/verify "{\"op\":\"read\",\"sid\":\"$(sid $1)\"}"; }
 vstart() { sf /api/verify "{\"op\":\"start\",\"sid\":\"$(sid $1)\",\"kind\":\"check\"}"; }
 vwait() { for i in $(seq 200); do o=$(vread $1); echo "$o" | grep -q '"state":"running"' || break; sleep 2; done; echo "$o"; }
+vseen() { for i in $(seq 30); do vread $1 | grep -q '"state":"running"' && break; sleep 1; done; }
 start v; check 'test -f ok.txt'; commit v ok.txt yes; vstart v; vwait v
 commit v other.txt x; vread v
 commit v iso.sh "$(cat iso.sh)"; check 'sh iso.sh'; vstart v; sleep 4; docker inspect "$(docker ps -q --filter label=dev.software-factory.verifier)"; vwait v
 for c in 'sleep 120' 'dd if=/dev/zero of=/dev/null bs=700M count=1' 'exit 3' 'kill -9 $$' "printf 'ghp_%s\n' 0123456789abcdef0123456789abcdef0123"; do check "$c"; vstart v; vwait v; done; docker ps -a --filter label=dev.software-factory.verifier
 check 'sleep 60; exit 0'; vstart v; sleep 10; restart; vread v; logs engine 'msg=verify'
-team '{"version":1,"verify":["check"]}'; check 'exit 1'; reviewed v; push v; sleep 3; vwait v; push v
-check 'true'; push v; sleep 3; vwait v; push v; logs helper 'msg=verifier'
+team '{"version":1,"verify":["check"]}'; check 'exit 1'; reviewed v; push v; vseen v; vwait v; push v
+check 'true'; push v; vseen v; vwait v; push v; logs helper 'msg=verifier'
 ```
 
 - The first run is `passed`; after `commit v other.txt x` the panel has no current run and says the last run was of another commit. Changing the check command or the image makes `why` say the last run ran another one.

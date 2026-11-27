@@ -77,6 +77,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      COMPOSE_VERSION: v5.7.1
+      COMPOSE_SHA256: af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf
     outputs:
       dev: ${{ steps.images.outputs.dev }}
       local: ${{ steps.images.outputs.local }}
@@ -85,12 +88,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build the dev, runtime and gitserver images from the tested commit
+      - name: Install Compose
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/docker-compose" "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64"
+          echo "$COMPOSE_SHA256  $RUNNER_TEMP/docker-compose" | sha256sum --check --strict
+          mkdir -p "$HOME/.docker/cli-plugins"
+          install -m 0755 "$RUNNER_TEMP/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
+          compose=$(env -i PATH="$PATH" HOME="$HOME" docker compose version --short)
+          if [ "v${compose#v}" != "$COMPOSE_VERSION" ]; then
+            echo "::error::docker compose is version $compose, not the $COMPOSE_VERSION just installed, so the build would use another Compose."
+            exit 1
+          fi
+          echo "Docker Compose $compose"
+      - name: Build the dev, runtime and gitserver images from the tested commit with Compose, as make proctor does
         id: images
         run: |
-          docker build --target dev -t software-factory-proctor:dev .
-          docker build --target runtime -t software-factory-proctor:local .
-          docker build --target gitserver -t software-factory-proctor:gitserver .
+          env -i PATH="$PATH" HOME="$HOME" docker compose -p sf-proctor --project-directory "$GITHUB_WORKSPACE" \
+            -f "$GITHUB_WORKSPACE/compose.yaml" -f "$GITHUB_WORKSPACE/compose.dev.yaml" -f "$GITHUB_WORKSPACE/proctor/environments/compose.proctor.yaml" build
+          ok=1
+          for t in dev local gitserver; do
+            image="software-factory-proctor:$t"
+            project=$(docker image inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$image")
+            service=$(docker image inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$image")
+            version=$(docker image inspect --format '{{index .Config.Labels "com.docker.compose.version"}}' "$image")
+            if [ "$project" != sf-proctor ] || [ -z "$service" ] || [ "$service" = "<no value>" ] || [ -z "$version" ] || [ "$version" = "<no value>" ]; then
+              echo "::error::Compose didn't label $image as it labels the images make proctor builds (project '$project', service '$service', version '$version'); SES-001 and SES-004 would fail."
+              ok=0
+            else
+              echo "$image has Compose's labels: project $project, service $service, version $version"
+            fi
+          done
+          test "$ok" = 1
           docker save -o "$RUNNER_TEMP/images.tar" software-factory-proctor:dev software-factory-proctor:local software-factory-proctor:gitserver
           for t in dev local gitserver; do
             id=$(docker image inspect --format '{{.Id}}' "software-factory-proctor:$t")
