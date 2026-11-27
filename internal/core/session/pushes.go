@@ -985,6 +985,7 @@ type pushing struct {
 	quiet      bool
 	checked    *PushChecked
 	blocked    int
+	agentWhy   string
 }
 
 func (x *pushing) clean(s string) string {
@@ -1124,6 +1125,9 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 }
 
 func (x *pushing) agentReason(reason string, sent bool) string {
+	if x.agentWhy != "" {
+		reason = AuditEntry{Reason: x.clean(x.agentWhy)}.masked().Reason
+	}
 	if say := blockedSay(x.blocked, x.entry.Commit, x.findings, sent); say != "" {
 		return say + "; " + reason
 	}
@@ -1330,7 +1334,9 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		blocked, findings := p.blockedAt(ctx, sid, t, head)
 		x.blocked, x.findings = blocked, !x.handoff && findings
 		x.unmet, x.reviews = d.Unmet, d.MissingReviews
-		return x.end(gate.Held, note+p.afterReviews(ctx, by, sid, t, head)+d.Reason, d.Missing, ""), d
+		lead := note + p.afterReviews(ctx, by, sid, t, head)
+		x.agentWhy = lead + d.AgentReason()
+		return x.end(gate.Held, lead+d.Reason, d.Missing, ""), d
 	case d.Result == gate.Denied:
 		person := ""
 		if answer != nil {

@@ -61,6 +61,15 @@ type Decision struct {
 	MissingReviews []string
 	Exception      string
 	NeedsApproval  bool
+
+	agentReason string
+}
+
+func (d Decision) AgentReason() string {
+	if d.agentReason != "" {
+		return d.agentReason
+	}
+	return d.Reason
 }
 
 var (
@@ -169,6 +178,7 @@ func decide(r Request, f Facts) Decision {
 	}
 	missing := append([]string{}, f.Items...)
 	var unmet, reviews []string
+	toldAgent := map[int]string{}
 	unsandboxed := false
 	if item := SandboxItem(f.Level); item != "" {
 		missing = append(missing, item)
@@ -197,9 +207,14 @@ func decide(r Request, f Facts) Decision {
 		}
 		k := review.Key{Commit: r.Commit, Branch: r.Branch, Agent: q.Agent}
 		if why, at := review.Pooled(f.Reviews, k, q.RunCount(), offer); why != "" {
+			told, _ := review.PooledForAgent(f.Reviews, k, q.RunCount(), offer)
 			n := f.Capped[q.Agent]
 			if n > 0 {
 				why = CappedItem(q.Agent, n)
+				told = why
+			}
+			if told != why {
+				toldAgent[len(missing)] = told
 			}
 			missing = append(missing, why)
 			reviews = append(reviews, q.Agent)
@@ -235,5 +250,13 @@ func decide(r Request, f Facts) Decision {
 	if len(missing) == 0 {
 		return Decision{Result: Allowed}
 	}
-	return Decision{Result: Held, Reason: "held until it has: " + strings.Join(missing, "; "), Missing: missing, Unmet: unmet, MissingReviews: reviews}
+	return Decision{Result: Held, Reason: heldUntil(missing, nil), Missing: missing, Unmet: unmet, MissingReviews: reviews, agentReason: heldUntil(missing, toldAgent)}
+}
+
+func heldUntil(missing []string, told map[int]string) string {
+	items := slices.Clone(missing)
+	for i, t := range told {
+		items[i] = t
+	}
+	return "held until it has: " + strings.Join(items, "; ")
 }

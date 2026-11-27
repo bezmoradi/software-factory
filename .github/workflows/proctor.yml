@@ -157,7 +157,13 @@ jobs:
             echo "::error::proctor/env/, proctor/environments/, compose.yaml or compose.dev.yaml at the base holds something other than regular files."
             exit 1
           fi
-          git archive --format=tar "$BASE" -- proctor/env/ proctor/environments/ compose.yaml compose.dev.yaml | tar -x -C "$dest" --no-same-owner
+          set --
+          for p in proctor/env/ proctor/environments/ compose.yaml compose.dev.yaml; do
+            if [ -n "$(git ls-tree -r --full-tree --name-only "$BASE" -- "$p")" ]; then
+              set -- "$@" "$p"
+            fi
+          done
+          git archive --format=tar "$BASE" -- "$@" | tar -x -C "$dest" --no-same-owner
           for f in proctor/env/run.sh proctor/env/up.sh proctor/env/down.sh proctor/env/routes.sh proctor/environments/compose.proctor.yaml compose.yaml compose.dev.yaml; do
             if [ ! -f "$dest/$f" ] || [ -L "$dest/$f" ]; then
               echo "::error::The base $BASE has no $f, so the environment can't start until a change that adds it is merged."

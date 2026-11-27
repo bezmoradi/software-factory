@@ -48,6 +48,14 @@ type Record struct {
 }
 
 func Pooled(records map[Key]Record, k Key, runs int, offer *Offer) (string, Key) {
+	return pooled(records, k, runs, offer, Problem)
+}
+
+func PooledForAgent(records map[Key]Record, k Key, runs int, offer *Offer) (string, Key) {
+	return pooled(records, k, runs, offer, AgentProblem)
+}
+
+func pooled(records map[Key]Record, k Key, runs int, offer *Offer, problem func(map[Key]Record, Key, *Offer) string) (string, Key) {
 	n := min(max(runs, 1), MaxRuns)
 	for run := 1; run <= MaxRuns; run++ {
 		rk := k.AtRun(run)
@@ -57,7 +65,7 @@ func Pooled(records map[Key]Record, k Key, runs int, offer *Offer) (string, Key)
 				continue
 			}
 		}
-		why := Problem(records, rk, offer)
+		why := problem(records, rk, offer)
 		if why == "" {
 			if r, ok := records[rk]; ok && r.Advisory && r.Override == "" {
 				why = "a review by " + k.Agent + " that counts: its review of commit " + short(k.Commit) + " ran as an advisory role, which never counts for the gate; press Review"
@@ -92,6 +100,14 @@ func Outcome(records map[Key]Record, k Key, runs int) (recorded, passed, overrid
 }
 
 func Problem(records map[Key]Record, k Key, offer *Offer) string {
+	return missingItem(records, k, offer, true)
+}
+
+func AgentProblem(records map[Key]Record, k Key, offer *Offer) string {
+	return missingItem(records, k, offer, false)
+}
+
+func missingItem(records map[Key]Record, k Key, offer *Offer, withVerdict bool) string {
 	r, ok := records[k]
 	if !ok {
 		return "a review by " + k.Agent + " of commit " + short(k.Commit) + " on " + k.Branch
@@ -109,6 +125,9 @@ func Problem(records map[Key]Record, k Key, offer *Offer) string {
 	case Pass:
 		return ""
 	case Block:
+		if !withVerdict {
+			return "an override or a fix for the block from " + k.Agent
+		}
 		return "an override or a fix for the verdict \"" + r.Verdict + "\" from " + k.Agent
 	case Unknown:
 		if versionHeld[r.Channel] {
