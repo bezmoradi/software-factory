@@ -29,6 +29,7 @@ type sessionJSON struct {
 	Controlled   bool             `json:"controlled"`
 	Mode         string           `json:"mode"`
 	ModeLabel    string           `json:"modeLabel"`
+	ModeChanged  bool             `json:"modeChanged"`
 	Step         string           `json:"step,omitempty"`
 	Checkpointed bool             `json:"checkpointSaved,omitempty"`
 	Busy         bool             `json:"busy"`
@@ -62,6 +63,7 @@ type sessionJSON struct {
 	Follow      *pullFollowJSON  `json:"follow,omitempty"`
 	Splits      []splitJSON      `json:"splits,omitempty"`
 	SplitGoal   *splitGoalJSON   `json:"splitGoal,omitempty"`
+	Copies      []copyCardJSON   `json:"copies,omitempty"`
 	Box         string           `json:"box,omitempty"`
 	Commands    commandsJSON     `json:"commands"`
 	Filters     []string         `json:"filters"`
@@ -78,6 +80,53 @@ type sessionJSON struct {
 	ReadOnly     string            `json:"readOnly,omitempty"`
 	Stalled      bool              `json:"stalled,omitempty"`
 	StalledSince int64             `json:"stalledSince,omitempty"`
+	Subagents    []subagentJSON    `json:"subagents,omitempty"`
+	Tasks        []taskJSON        `json:"tasks,omitempty"`
+}
+
+type taskJSON struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	What  string `json:"what"`
+	State string `json:"state"`
+	Label string `json:"label"`
+	Start int64  `json:"start"`
+	End   int64  `json:"end,omitempty"`
+}
+
+func tasksOf(list []session.TaskRow) []taskJSON {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]taskJSON, 0, len(list))
+	for _, r := range list {
+		out = append(out, taskJSON{ID: r.ID, Kind: r.Kind, What: r.What, State: r.State, Label: r.Label, Start: millis(r.Start), End: millis(r.End)})
+	}
+	return out
+}
+
+type subagentJSON struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Task   string `json:"task"`
+	State  string `json:"state"`
+	Label  string `json:"label"`
+	Start  int64  `json:"start"`
+	End    int64  `json:"end,omitempty"`
+	Tool   string `json:"tool,omitempty"`
+	Line   string `json:"line,omitempty"`
+	Tokens int64  `json:"tokens,omitempty"`
+}
+
+func subagentsOf(list []session.SubagentRow) []subagentJSON {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]subagentJSON, 0, len(list))
+	for _, r := range list {
+		out = append(out, subagentJSON{ID: r.ID, Type: r.Type, Task: r.Task, State: r.State, Label: r.Label, Start: millis(r.Start), End: millis(r.End), Tool: r.Tool, Line: r.Line, Tokens: r.Tokens})
+	}
+	return out
 }
 
 type statusJSON struct {
@@ -310,6 +359,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Follow:      pullFollowOf(s.Follow),
 			Splits:      splits,
 			SplitGoal:   splitGoalOf(s.SplitGoal, splits),
+			Copies:      copiesOf(s.Copies),
 			Box:         s.Box,
 			Commands:    commandsOf(s.Agent, s.ID, s.Box),
 			Filters:     session.SessionFilters(s),
@@ -320,6 +370,7 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			Branch:      s.Branch,
 
 			ModeLabel:    session.ModeLabel(s.Mode),
+			ModeChanged:  session.ModeChanged(s),
 			Step:         s.Step,
 			Checkpointed: s.CheckpointSaved,
 			Summary:      statusJSON(session.SessionStatus(s)),
@@ -329,6 +380,8 @@ func sessionsJSON(list []session.Info) []sessionJSON {
 			ReadOnly:     session.ReadOnlyNote(s),
 			Stalled:      s.Stalled,
 			StalledSince: millis(s.StalledSince),
+			Subagents:    subagentsOf(s.SubagentRows),
+			Tasks:        tasksOf(s.TaskRows),
 		})
 	}
 	return out

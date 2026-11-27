@@ -66,7 +66,7 @@ func (r *Registry) queueMessage(sid, text string, typed, confirm bool) (*queue, 
 		first = r.firstStepFor(sid, text, false)
 	}
 	made, used, err := r.queueLocked(sid, text, confirm, first)
-	if first.Step != "" && used == "" {
+	if first.Fresh && used == "" {
 		r.unclaimStep(sid, first.Step)
 	}
 	return made, err
@@ -96,6 +96,10 @@ func (r *Registry) queueLocked(sid, text string, confirm bool, first FirstStep) 
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
 		return nil, "", invalid("command", commandRefused(a.Box, a.ID))
 	}
+	sent, noted, step, err := r.stepTextLocked(sid, text, first)
+	if err != nil {
+		return nil, "", err
+	}
 	if r.lastMode[sid] == "bypassPermissions" && !confirm {
 		return nil, "", conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
 	}
@@ -103,18 +107,17 @@ func (r *Registry) queueLocked(sid, text string, confirm bool, first FirstStep) 
 	if q != nil && len(q.msgs) >= maxQueued {
 		return nil, "", limited("queue", "Twenty messages already wait for this session to wake.")
 	}
-	sent, noted, step := r.stepTextLocked(sid, text, first)
 	msg := Fields{"kind": "prompt", "text": sent}
 	if q != nil {
 		q.msgs = append(q.msgs, msg)
-		q.marked = withStep(q.marked, step)
+		q.marked = withStep(q.marked, first.fresh(step))
 		if noted {
 			r.dropNotesLocked(sid)
 		}
 		r.announce(now)
 		return nil, step, nil
 	}
-	made := &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor), marked: withStep(nil, step)}
+	made := &queue{msgs: []Fields{msg}, at: now, until: now.Add(QueueFor), marked: withStep(nil, first.fresh(step))}
 	r.queued[sid] = made
 	if noted {
 		r.dropNotesLocked(sid)
@@ -342,8 +345,13 @@ func (d *Dispatcher) refreshBox(ctx context.Context, box, dir string, mine map[s
 			}
 			d.mu.Unlock()
 			if gone {
-				d.reg.Ended(row.SessionID, false)
-				shared.For(ctx, d.cfg.Logger).Info("agent session", "event", "stopped-by-itself")
+				if m, oom := d.ranOutOfMemory(ctx, host, box); oom {
+					d.reg.EndedOutOfMemory(row.SessionID, m.Limit)
+					shared.For(ctx, d.cfg.Logger).Info("agent session", "event", "stopped-by-itself", "cause", "out-of-memory", "kills", m.OOMKills)
+				} else {
+					d.reg.Ended(row.SessionID, false)
+					shared.For(ctx, d.cfg.Logger).Info("agent session", "event", "stopped-by-itself")
+				}
 				go d.idleBox(r)
 			}
 		}

@@ -47,7 +47,7 @@ function cancelTimers(): void {
 function show(t: Tip): void {
   cancelTimers()
   if (current && current !== t) hide()
-  if (!t.trigger.isConnected || !t.tip.isConnected) return
+  if (!t.trigger.isConnected || !t.tip.isConnected || !t.tip.textContent) return
   current = t
   listen()
   if (!t.tip.matches(':popover-open')) t.tip.showPopover()
@@ -162,4 +162,18 @@ export function tipText(text: string, tip: string, cls = ''): HTMLElement[] {
   const trigger = el('button', `tip-text ${cls}`.trim(), text)
   trigger.type = 'button'
   return tooltip(trigger, tip)
+}
+
+export function offTip(trigger: HTMLButtonElement, why: string): HTMLElement[] {
+  trigger.setAttribute('aria-disabled', String(!!why))
+  return why ? tooltip(trigger, why) : [trigger]
+}
+
+export function offered(trigger: HTMLButtonElement): (why: string) => void {
+  const tip = tooltip(trigger, '')[1]!
+  trigger.after(tip)
+  return why => {
+    trigger.setAttribute('aria-disabled', String(!!why))
+    if (tip.textContent !== why) tip.textContent = why
+  }
 }

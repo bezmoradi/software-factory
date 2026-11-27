@@ -1,4 +1,4 @@
-import { busy, button, el, emit, fileLink, focusedKey, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
+import { busy, button, el, emit, fileLink, focusedKey, fragment, refocus, remembered, replaceKeeping, statusLine, visible } from '../lib/dom.ts'
 import { actions, field } from '../lib/form.ts'
 import { plural, shortSha } from '../lib/format.ts'
 import { langFor, newState, tokens, type LexState, type Token } from '../lib/highlight.ts'
@@ -12,6 +12,7 @@ const MAX_HIGHLIGHT = 20000
 const MAX_HIGHLIGHT_CHARS = 400_000
 const CHUNK_ROWS = 50
 const LAYOUT_KEY = 'sf-diff-layout'
+const WANTED_MS = 10000
 const SHA = /^[0-9a-f]{40}$/
 
 function sizeWords(n: number): string {
@@ -251,6 +252,7 @@ class SfChanges extends HTMLElement {
   #diffGroup = el('details')
   #diffSummary = el('summary', 'small')
   #lines = el('div', 'diff-lines small')
+  #wanted = ''
   #status = statusLine('sr-only', 'span')
   #panel = el('div', 'line-comments small')
   #target = el('p', 'small muted')
@@ -288,14 +290,31 @@ class SfChanges extends HTMLElement {
     return this.#comments.get(this.#branch) ?? []
   }
 
-  openDiff() {
+  openDiff(file = '') {
     this.#open.set('diff', true)
+    this.#wanted = file
     const summary = this.querySelector<HTMLElement>('summary[data-key="group:diff"]')
     const d = summary?.parentElement
     if (d instanceof HTMLDetailsElement) d.open = true
     const target = d ? this.#lines : this.querySelector<HTMLElement>('select, summary')
     target?.focus({ preventScroll: true })
+    if (this.#showFile()) return
     this.scrollIntoView({ block: 'start' })
+    if (file) setTimeout(() => {
+      if (this.#wanted === file) this.#wanted = ''
+    }, WANTED_MS)
+  }
+
+  #showFile(): boolean {
+    const file = this.#wanted
+    if (!file) return false
+    const header = [...this.#lines.querySelectorAll<HTMLElement>('.diff-line.file')].find(h => h.dataset.file === file)
+    const first = this.#rows.findIndex((r, i) => r.file === file && this.#commentable(i))
+    if (!header) return false
+    this.#wanted = ''
+    header.scrollIntoView({ block: 'start' })
+    if (first >= 0) this.#pick(first, false)
+    return true
   }
 
   #commentable(i: number): boolean {
@@ -463,7 +482,7 @@ class SfChanges extends HTMLElement {
     } else {
       this.#rows.forEach((r, i) => nodes.push(r.kind === 'file' ? this.#fileHeader(r, files) : this.#unreadableLine(r, files) ?? this.#unifiedLine(r, i, highlight)))
     }
-    this.#lines.replaceChildren(...fileSections(nodes))
+    this.#lines.replaceChildren(fragment(fileSections(nodes)))
     if (picked >= 0 && this.#commentable(picked)) {
       for (const node of this.#lines.querySelectorAll<HTMLElement>(`[data-row="${picked}"]`)) node.classList.add('at')
     }
@@ -592,7 +611,7 @@ class SfChanges extends HTMLElement {
     const group = (key: string, title: string, items: HTMLElement[], openByDefault: boolean) => {
       if (!items.length) return
       const ul = el('ul', 'changes')
-      ul.append(...items)
+      ul.append(fragment(items))
       const summary = el('summary', 'small', title)
       summary.dataset.key = `group:${key}`
       parts.push(remembered(this.#open, key, openByDefault, summary, ul))
@@ -627,6 +646,10 @@ class SfChanges extends HTMLElement {
       this.#diffGroup.open = this.#open.get('diff') ?? true
       replaceKeeping(this.#diffGroup, [this.#diffSummary, ...notes, this.#lines, this.#status, this.#panel])
       parts.push(this.#diffGroup)
+      if (this.#wanted) requestAnimationFrame(() => {
+        this.#showFile()
+        this.#wanted = ''
+      })
     } else {
       this.#rows = []
       this.#diff = ''

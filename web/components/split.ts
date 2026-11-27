@@ -1,4 +1,5 @@
 import { request, savedTone, type EngineAnswer } from '../api.ts'
+import { offTip } from '../lib/tooltip.ts'
 import { busy, button, el, emit, focusedKey, labelError, refocus, shown, unspoofed, visibleCommand } from '../lib/dom.ts'
 import type { Tone } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
@@ -134,10 +135,9 @@ class SfSplit extends HTMLElement {
       const why = offered[name]
       if (why === undefined) return
       b.setAttribute('aria-disabled', String(off || !!why))
-      if (v.disabled) b.title = v.disabled
-      else if (why) b.title = shown(why)
       if (this.#busy.get(c.card) === name) busy(b, true)
-      row.append(b)
+      const reason = v.disabled || (why ? shown(why) : '')
+      row.append(...(reason ? offTip(b, reason) : [b]))
     }
     add('start', button(c.project && !c.project.added ? 'Add project and start' : 'Start', 'primary small', () => {
       if (!off && !offered.start) void this.#start(c)

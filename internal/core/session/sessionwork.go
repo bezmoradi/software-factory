@@ -29,6 +29,8 @@ type SessionWorkConfig struct {
 	Base     context.Context
 	Now      func() time.Time
 	Logger   shared.Logger
+
+	HelperCount func(box string) (int, error)
 }
 
 type sessionRuns struct {
@@ -54,12 +56,16 @@ type SessionWork struct {
 	pending  map[string]int
 	models   map[string]SessionModel
 	roles    map[string]ModelChoice
+	helperMu sync.Mutex
+	helping  map[string]int
+	swept    map[string]time.Time
 }
 
 type workFacts struct {
 	Agent   string
 	Cwd     string
 	Project string
+	Branch  string
 	Running bool
 	Idle    bool
 	Login   bool
@@ -86,7 +92,8 @@ func NewSessionWork(reg *Registry, d *Dispatcher, cfg SessionWorkConfig) *Sessio
 	}
 	cfg.Audit = masking(cfg.Audit)
 	w := &SessionWork{cfg: cfg, reg: reg, d: d, projects: map[ProjectID]ProjectCommands{}, runs: map[string]*sessionRuns{},
-		queues: map[string]*sessionQueue{}, ports: map[string]int{}, pending: map[string]int{}, models: map[string]SessionModel{}, roles: map[string]ModelChoice{}}
+		queues: map[string]*sessionQueue{}, ports: map[string]int{}, pending: map[string]int{}, models: map[string]SessionModel{}, roles: map[string]ModelChoice{},
+		helping: map[string]int{}, swept: map[string]time.Time{}}
 	w.load()
 	reg.mu.Lock()
 	reg.work = w
@@ -265,7 +272,7 @@ func (r *Registry) workInfo(sid string) (workFacts, bool) {
 	if a == nil {
 		return workFacts{}, false
 	}
-	out := workFacts{Agent: a.Agent, Cwd: a.Cwd, Project: a.Project, Running: a.running, Idle: a.turnSince.IsZero()}
+	out := workFacts{Agent: a.Agent, Cwd: a.Cwd, Project: a.Project, Branch: a.Branch, Running: a.running, Idle: a.turnSince.IsZero()}
 	for _, c := range r.conns {
 		if c.sid == sid && c.login {
 			out.Login = true
@@ -344,6 +351,9 @@ func (w *SessionWork) Forget(sid string) {
 	_, hadModel := w.models[sid]
 	delete(w.models, sid)
 	w.mu.Unlock()
+	w.helperMu.Lock()
+	delete(w.swept, sid)
+	w.helperMu.Unlock()
 	if hadQueue {
 		w.saveQueues()
 	}

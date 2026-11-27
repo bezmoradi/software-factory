@@ -5,6 +5,7 @@ import { shortSha } from '../lib/format.ts'
 import { bytes } from './workspace.ts'
 import { outcome } from './toasts.ts'
 import { sectionHead } from '../lib/page.ts'
+import { offTip } from '../lib/tooltip.ts'
 import type { Attention } from '../types.ts'
 
 const ROUTE = '/api/keep'
@@ -243,17 +244,8 @@ class SfKeep extends HTMLElement {
       go.setAttribute('aria-disabled', String(off))
       if (this.#busy) busy(go, true)
       const why = t.disabled || (!v.commit ? v.refusal : '')
-      if (why) {
-        go.title = visible(why)
-        go.setAttribute('aria-describedby', 'keep-why')
-      }
       const row = el('div', 'row')
-      row.append(go)
-      if (why) {
-        const said = el('span', 'small muted', visible(why))
-        said.id = 'keep-why'
-        row.append(said)
-      }
+      row.append(...(why ? offTip(go, visible(why)) : [go]))
       parts.push(row)
     } else parts.push(...this.#heads(t, v, off))
     parts.push(this.#status)
@@ -282,11 +274,6 @@ class SfKeep extends HTMLElement {
     const best = v.heads.find(h => h.passed)
     const passed = best ? v.heads.indexOf(best) : -1
     if (best) out.push(el('p', 'small ok', `Reviews recorded as passed at ${shortSha(best.commit)}, ${ago(passed)}.`))
-    if (t.disabled) {
-      const said = el('p', 'small muted', visible(t.disabled))
-      said.id = 'keep-why'
-      out.push(said)
-    }
     const list = el('ul', 'list reviews')
     v.heads.forEach((h, i) => {
       const li = el('li')
@@ -304,11 +291,7 @@ class SfKeep extends HTMLElement {
         go.setAttribute('aria-label', `Restore this commit, ${shortSha(h.commit)}`)
         go.setAttribute('aria-disabled', String(off))
         if (this.#busy && this.#asked === h.commit) busy(go, true)
-        if (t.disabled) {
-          go.title = visible(t.disabled)
-          go.setAttribute('aria-describedby', 'keep-why')
-        }
-        row.append(go)
+        row.append(...(t.disabled ? offTip(go, visible(t.disabled)) : [go]))
       }
       li.append(row, el('p', 'small muted', reviewsOf(h)))
       if (this.#confirm === h.commit && !off && h.restorable) li.append(...this.#confirmation(v, h.commit, i === 0))

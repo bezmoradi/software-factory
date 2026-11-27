@@ -6,10 +6,12 @@ import { saidOf } from '../lib/json.ts'
 import { money } from './consent.ts'
 import './walkthrough.ts'
 import { asideBox } from './aside-run.ts'
+import { flowCard } from './flow-card.ts'
 import { openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { AsideRun, CitedIDs, FindingRef, ReviewGiven, ReviewRole, ReviewsView, SessionReview, TestList } from '../types.ts'
-import { emptyState } from '../lib/page.ts'
+import { emptyState, signInLink } from '../lib/page.ts'
 import { textbox } from '../lib/controls.ts'
+import { tooltip } from '../lib/tooltip.ts'
 
 
 function text(value: string): string {
@@ -85,7 +87,7 @@ class SfReviews extends HTMLElement {
   #flowSid = ''
   #flowShown: FlowDialog | null = null
   #flowShownSid = ''
-  #flowOpen = button('Open diagram', 'small', () => this.#showFlow(), 'button', 'reviews-diagram')
+  #flowCard = flowCard('reviews-diagram', () => this.#showFlow())
   #flowRow = el('div', 'reviews-diagram')
   #pushSaid = statusLine('small push-said status-slot', 'span')
   #reasons = new Map<string, string>()
@@ -94,11 +96,11 @@ class SfReviews extends HTMLElement {
   #wholes = new Map<string, Promise<WholeReport | string>>()
   #timer = 0
   #all = false
+  #short = true
 
   constructor() {
     super()
-    this.#flowOpen.title = "Opens the latest commit's reviewers, the gate and its routes as a diagram that follows them live"
-    this.#flowRow.append(this.#flowOpen)
+    this.#flowRow.append(this.#flowCard.button)
   }
 
   connectedCallback() {
@@ -130,6 +132,7 @@ class SfReviews extends HTMLElement {
   #follow(value: ReviewsView | null) {
     this.#flow = value?.flow ?? null
     this.#flowSid = value?.sid ?? ''
+    if (this.#flow) this.#flowCard.show(this.#flow)
     const shown = this.#flowShown
     if (!shown) return
     if (this.#flow && this.#flowShownSid === this.#flowSid) shown.diagram.model = this.#flow
@@ -138,7 +141,7 @@ class SfReviews extends HTMLElement {
 
   #showFlow() {
     if (!this.#flow || this.#flowShown) return
-    const shown = openFlow('How the latest commit is being checked', this.#flow)
+    const shown = openFlow('How the latest commit is being checked', 'The reviewers check a read-only copy of the latest commit, then the engine decides whether it can be pushed.', this.#flow)
     this.#flowShown = shown
     this.#flowShownSid = this.#flowSid
     shown.modal.onClose(() => {
@@ -156,6 +159,14 @@ class SfReviews extends HTMLElement {
     return true
   }
 
+  set short(value: boolean) {
+    if (value === this.#short) return
+    this.#short = value
+    if (!this.#last) return
+    this.#key = ''
+    this.view = this.#last
+  }
+
   set view(value: ReviewsView | null) {
     const key = JSON.stringify(value)
     if (key === this.#key) return
@@ -163,6 +174,7 @@ class SfReviews extends HTMLElement {
     this.hidden = !value
     this.#follow(value)
     if (!value) {
+      this.#last = null
       this.replaceChildren()
       return
     }
@@ -174,11 +186,12 @@ class SfReviews extends HTMLElement {
     const pushFocused = document.activeElement === this.#push
     const r = value.review
     const running = !!r?.running || value.asking
-    const off = running || !!value.disabled
+    const waits = running ? '' : value.reviewWait ?? ''
+    const off = running || !!value.disabled || !!waits
     const decided = (state: string) => state === 'pass' || state === 'block' || state === 'overridden'
     const verdicts = !r?.running && ((value.gate ?? []).some(x => decided(x.state)) || (!!r && (!value.head || value.head === r.commit) && r.roles.some(x => decided(x.state))))
     const againBusy = verdicts && value.asking && this.#all
-    const b = button('Review', 'primary small', () => {
+    const b = button('Review', value.reviewPrimary ? 'primary small' : 'small', () => {
       if (b.getAttribute('aria-disabled') === 'true') return
       this.#all = false
       emit(this, 'sf-review', { all: false })
@@ -186,6 +199,7 @@ class SfReviews extends HTMLElement {
     b.setAttribute('aria-disabled', String(off))
     if (running && !againBusy) busy(b, true)
     b.title = 'Runs the required reviewers that have no verdict on this session branch\'s latest commit yet, the work type\'s roles and those the changed files call for, in a reviewer container each, compared with what the remote\'s main branch lacks'
+    const reviewTip = waits ? tooltip(b, waits) : [b]
     const again = verdicts ? button('Run all again', 'small', () => {
       if (again?.getAttribute('aria-disabled') === 'true') return
       this.#all = true
@@ -196,7 +210,9 @@ class SfReviews extends HTMLElement {
       if (againBusy) busy(again, true)
       again.title = 'Runs every required reviewer on the latest commit again, those that already passed or blocked it included, for fresh verdicts: each one is a run in a reviewer container of its own'
     }
-    const pushOff = value.pushing || !!value.disabled
+    const againTip = again && waits ? tooltip(again, waits) : again ? [again] : []
+    const pushWaits = value.pushing ? '' : value.pushWait ?? ''
+    const pushOff = value.pushing || !!value.disabled || !!pushWaits
     const p = button('Push', 'small', () => {
       if (p.getAttribute('aria-disabled') === 'true') return
       emit(this, 'sf-push-request')
@@ -204,12 +220,12 @@ class SfReviews extends HTMLElement {
     p.setAttribute('aria-disabled', String(pushOff))
     if (value.pushing) busy(p, true)
     p.title = 'Asks the engine to push this session\'s branch at its latest commit: the gate checks the reviews and the remote\'s main branch first'
-    const heading: Node[] = [el('h2', 'label', 'Reviews'), el('span', 'spacer'), b]
-    if (again) heading.push(again)
+    const pushTip = pushWaits ? tooltip(p, pushWaits) : [p]
+    const heading: Node[] = [el('h2', 'label', 'Reviews'), el('span', 'spacer'), ...reviewTip, ...againTip]
     const tone = value.pushSaid?.tone
     sayIfChanged(this.#pushSaid, value.pushSaid?.text ?? '', tone === 'warn' || tone === 'bad' ? tone : undefined)
     heading.push(this.#pushSaid)
-    if (!value.pushed) heading.push(p)
+    if (!value.pushed) heading.push(...pushTip)
     replaceKeeping(this.#head, heading)
     const parts: Node[] = [this.#head]
     if (this.#flow) parts.push(this.#flowRow)
@@ -243,18 +259,24 @@ class SfReviews extends HTMLElement {
       described.push(p.id)
       parts.push(p)
     }
-    if (described.length) b.setAttribute('aria-describedby', described.join(' '))
+    if (described.length) b.setAttribute('aria-describedby', [b.getAttribute('aria-describedby'), ...described].filter(Boolean).join(' '))
     const who = value.reviewer
     if (who) {
       const run = r?.signIn
       const si = who.signIn && (!run || (who.signIn.checkedAt ?? 0) >= (run.checkedAt ?? 0)) ? who.signIn : run ?? who.signIn
+      const out = si?.method === 'not-signed-in' && !si.stale
+      const asks = out || (!!si?.costs && !si.stale)
       const said = !si ? "The reviewers' sign-in hasn't been checked yet."
         : si.stale ? 'The reviewers’ sign-in changed after it was last checked; the engine checks it again before the next review.'
-        : si.method === 'not-signed-in' ? 'The reviewers aren’t signed in. Sign them in with Reviewers’ sign-in in the command palette.'
+        : out ? 'The reviewers aren’t signed in. Sign them in with '
         : `The reviewers are signed in with ${text(si.words)}${si.costs ? '. Reviews cost money; the page asks first, and the engine starts none by itself' : ''}.`
-      parts.push(el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said))
+      const line = el('p', `small ${si?.costs || si?.method === 'not-signed-in' ? 'warn' : 'muted'}`, said)
+      if (out) {
+        line.append(signInLink(), '.')
+      }
+      if (asks || !this.#short) parts.push(line)
     }
-    if (value.planned?.length) {
+    if (value.planned?.length && !this.#short) {
       parts.push(el('p', 'small muted', `Review runs ${value.planned.length === 1 ? 'this reviewer' : `these ${value.planned.length} reviewers`} on the latest commit, each one a run in a reviewer container of its own, except one that already passed or blocked it:`))
       const list = el('ul', 'small planned')
       for (const x of value.planned) {
@@ -265,8 +287,8 @@ class SfReviews extends HTMLElement {
       parts.push(list)
     }
     if (value.catalog?.state === 'refused') parts.push(el('p', 'small warn', `knackpack's reviewer catalog was refused: ${sentence(text(value.catalog.why || 'it could not be read'))} The engine's built-in list chooses the file reviewers.`))
-    else if (value.catalog?.state === 'used') parts.push(el('p', 'small muted', "knackpack's reviewer catalog chooses the file reviewers. It names reviewers and the files they cover; it grants no tool or permission."))
-    else if (value.catalog?.state === 'off') parts.push(el('p', 'small muted', 'This project\'s pack isn\'t knackpack, so no file reviewer is added for the files the branch changes: only the roles its pack fills and the agents you add review it.'))
+    else if (value.catalog?.state === 'used' && !this.#short) parts.push(el('p', 'small muted', "knackpack's reviewer catalog chooses the file reviewers. It names reviewers and the files they cover; it grants no tool or permission."))
+    else if (value.catalog?.state === 'off' && !this.#short) parts.push(el('p', 'small muted', 'This project\'s pack isn\'t knackpack, so no file reviewer is added for the files the branch changes: only the roles its pack fills and the agents you add review it.'))
     if (r) {
       const cost = money(r.costUsd)
       const total = money(r.sessionCostUsd)
@@ -329,7 +351,7 @@ class SfReviews extends HTMLElement {
       id: 'explain-button', title: 'Explain this change', start: 'Explain this change', busy: 'Explaining…', label: 'The explanation of the change',
       hint: "Asks Claude Code in a reviewer container of its own, with read-only tools, to explain the session branch's change against the remote's main branch. It isn't a review: the push gate and the agent never see it",
       intro: 'On request, a reviewer run explains what the branch changes and where to look closely. It costs one run, and nothing reads it but you.',
-      run: t, asking: this.#explainState.asking, disabled: !!value.disabled,
+      run: t, asking: this.#explainState.asking, disabled: !!value.disabled, off: value.explainOff,
       stale: t && value.head && value.head !== t.commit ? ", which isn't the branch's latest commit any more" : '',
       press: () => emit(this, 'sf-explain'),
     })

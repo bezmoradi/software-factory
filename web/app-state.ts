@@ -82,7 +82,7 @@ export function inTurn(s: Session): boolean {
 }
 
 export function working(s: Session): boolean {
-  return inTurn(s) || !!s.compacting || s.agents.some(a => a.status === 'running')
+  return inTurn(s) || !!s.compacting || (s.info.subagents ?? []).some(r => r.state === 'running')
 }
 
 

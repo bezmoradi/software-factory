@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,7 @@ const (
 	debugIncident = "/knackpack:debug-incident"
 	fixIncident   = "/knackpack:fix-incident"
 	incidentTask  = "fake-incident"
+	rootCauseFile = "ROOT-CAUSE.md"
 )
 
 var (
@@ -30,11 +30,6 @@ func incidentLine(text string) (string, bool) {
 		return incidentFix(text), true
 	}
 	return "", false
-}
-
-func incidentPath() (string, string) {
-	rel := filepath.Join(".knackpack", incidentTask, "ROOT-CAUSE.md")
-	return rel, filepath.Join(worktreeTop(), rel)
 }
 
 func fileStatus(text string) string {
@@ -53,34 +48,31 @@ func fileStatus(text string) string {
 }
 
 func incidentStep() string {
-	rel, abs := incidentPath()
+	abs, ok := docsFile(rootCauseFile)
+	if !ok {
+		return "The fake agent has no documents folder: " + docsVariable + " isn't an absolute path, so it ran no incident step."
+	}
 	old, _ := os.ReadFile(abs)
 	status := nextStatus[fileStatus(string(old))]
 	if status == "" {
-		return "The fake agent can't tell the next incident step from " + rel + "."
+		return "The fake agent can't tell the next incident step from " + abs + "."
 	}
 	text := "# Root cause: the fake export fails\n\n## Status\n\n" + status + "\n\n## Incident\n\n- Task: " + incidentTask + "\n- Symptom: the fake export answers 500\n\n## Evidence\n\n## Missing evidence\n\n## Reproduction\n\n## Hypotheses\n\n## Cause\n\n"
 	if status == "CONFIRMED" {
 		text += "The fake cause, confirmed by the fake reproduction.\n\n"
 	}
 	text += "## Remaining uncertainty\n"
-	feature, _ := json.Marshal(map[string]string{"feature_directory": ".knackpack/" + incidentTask})
-	if os.MkdirAll(filepath.Dir(abs), 0o755) != nil || os.WriteFile(abs, []byte(text), 0o644) != nil || os.WriteFile(filepath.Join(worktreeTop(), ".knackpack", "feature.json"), append(feature, '\n'), 0o644) != nil {
-		return "The fake agent couldn't write " + rel + "."
-	}
-	commit, ok := commitFiles("docs(knackpack): root cause for "+incidentTask, rel, ".knackpack/feature.json")
-	if !ok {
-		return "The fake agent wrote " + rel + " with Status " + status + ", and couldn't commit it."
-	}
-	sum := sha256.Sum256([]byte(text))
-	return "The fake agent ran one incident step: " + rel + " now says " + status + ", committed as " + commit + ", SHA-256 " + hex.EncodeToString(sum[:]) + "."
+	return "The fake agent ran one incident step, Status " + status + ": " + writeDoc(rootCauseFile, "root cause", text)
 }
 
 func incidentFix(text string) string {
-	rel, abs := incidentPath()
+	abs, ok := docsFile(rootCauseFile)
+	if !ok {
+		return "refused: " + docsVariable + " isn't an absolute path, so there's no diagnosis to read"
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
-		return "refused: " + rel + " doesn't exist, so there's no diagnosis to fix"
+		return "refused: " + abs + " doesn't exist, so there's no diagnosis to fix"
 	}
 	if s := fileStatus(string(data)); s != "CONFIRMED" {
 		return "refused: its Status is " + s + ", not CONFIRMED"

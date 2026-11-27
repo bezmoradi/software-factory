@@ -41,6 +41,7 @@ tables:
       - ["t01_commit_identity", "/api/commit-identity"]
       - ["t01_commit_rewrite", "/api/commit-rewrite"]
       - ["t01_control", "/api/control"]
+      - ["t01_copies", "/api/copies"]
       - ["t01_decision_log", "/api/decision-log"]
       - ["t01_diagnostics", "/api/diagnostics"]
       - ["t01_dispatch", "/api/dispatch"]
@@ -69,6 +70,7 @@ tables:
       - ["t01_packs", "/api/packs"]
       - ["t01_plan_review", "/api/plan-review"]
       - ["t01_prefs", "/api/prefs"]
+      - ["t01_preview", "/api/preview"]
       - ["t01_project", "/api/project"]
       - ["t01_project_commands", "/api/project-commands"]
       - ["t01_project_facts", "/api/project-facts"]
@@ -184,6 +186,7 @@ tables:
       - ["t02_commit_identity", "/api/commit-identity"]
       - ["t02_commit_rewrite", "/api/commit-rewrite"]
       - ["t02_control", "/api/control"]
+      - ["t02_copies", "/api/copies"]
       - ["t02_decision_log", "/api/decision-log"]
       - ["t02_diagnostics", "/api/diagnostics"]
       - ["t02_dispatch", "/api/dispatch"]
@@ -212,6 +215,7 @@ tables:
       - ["t02_packs", "/api/packs"]
       - ["t02_plan_review", "/api/plan-review"]
       - ["t02_prefs", "/api/prefs"]
+      - ["t02_preview", "/api/preview"]
       - ["t02_project", "/api/project"]
       - ["t02_project_commands", "/api/project-commands"]
       - ["t02_project_facts", "/api/project-facts"]
@@ -328,6 +332,7 @@ tables:
       - ["t03_commit_identity", "/api/commit-identity"]
       - ["t03_commit_rewrite", "/api/commit-rewrite"]
       - ["t03_control", "/api/control"]
+      - ["t03_copies", "/api/copies"]
       - ["t03_decision_log", "/api/decision-log"]
       - ["t03_diagnostics", "/api/diagnostics"]
       - ["t03_dispatch", "/api/dispatch"]
@@ -356,6 +361,7 @@ tables:
       - ["t03_packs", "/api/packs"]
       - ["t03_plan_review", "/api/plan-review"]
       - ["t03_prefs", "/api/prefs"]
+      - ["t03_preview", "/api/preview"]
       - ["t03_project", "/api/project"]
       - ["t03_project_commands", "/api/project-commands"]
       - ["t03_project_facts", "/api/project-facts"]
@@ -472,6 +478,7 @@ tables:
       - ["t04_commit_identity", "/api/commit-identity"]
       - ["t04_commit_rewrite", "/api/commit-rewrite"]
       - ["t04_control", "/api/control"]
+      - ["t04_copies", "/api/copies"]
       - ["t04_decision_log", "/api/decision-log"]
       - ["t04_diagnostics", "/api/diagnostics"]
       - ["t04_dispatch", "/api/dispatch"]
@@ -500,6 +507,7 @@ tables:
       - ["t04_packs", "/api/packs"]
       - ["t04_plan_review", "/api/plan-review"]
       - ["t04_prefs", "/api/prefs"]
+      - ["t04_preview", "/api/preview"]
       - ["t04_project", "/api/project"]
       - ["t04_project_commands", "/api/project-commands"]
       - ["t04_project_facts", "/api/project-facts"]
@@ -615,6 +623,7 @@ tables:
       - ["t05_commit_identity", "/api/commit-identity"]
       - ["t05_commit_rewrite", "/api/commit-rewrite"]
       - ["t05_control", "/api/control"]
+      - ["t05_copies", "/api/copies"]
       - ["t05_decision_log", "/api/decision-log"]
       - ["t05_diagnostics", "/api/diagnostics"]
       - ["t05_dispatch", "/api/dispatch"]
@@ -643,6 +652,7 @@ tables:
       - ["t05_packs", "/api/packs"]
       - ["t05_plan_review", "/api/plan-review"]
       - ["t05_prefs", "/api/prefs"]
+      - ["t05_preview", "/api/preview"]
       - ["t05_project", "/api/project"]
       - ["t05_project_commands", "/api/project-commands"]
       - ["t05_project_facts", "/api/project-facts"]
@@ -758,6 +768,7 @@ tables:
       - ["t06_commit_identity", "/api/commit-identity", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_commit_rewrite", "/api/commit-rewrite", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_control", "/api/control", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_copies", "/api/copies", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_decision_log", "/api/decision-log", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_diagnostics", "/api/diagnostics", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_dispatch", "/api/dispatch", "The engine takes this request as JSON only, sent with Content-Type application/json."]
@@ -786,6 +797,7 @@ tables:
       - ["t06_packs", "/api/packs", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_plan_review", "/api/plan-review", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_prefs", "/api/prefs", "The engine takes this request as JSON only, sent with Content-Type application/json."]
+      - ["t06_preview", "/api/preview", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_project", "/api/project", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_project_commands", "/api/project-commands", "The engine takes this request as JSON only, sent with Content-Type application/json."]
       - ["t06_project_facts", "/api/project-facts", "The engine takes this request as JSON only, sent with Content-Type application/json."]
@@ -900,6 +912,7 @@ tables:
       - ["t07_commit_identity", "/api/commit-identity"]
       - ["t07_commit_rewrite", "/api/commit-rewrite"]
       - ["t07_control", "/api/control"]
+      - ["t07_copies", "/api/copies"]
       - ["t07_decision_log", "/api/decision-log"]
       - ["t07_diagnostics", "/api/diagnostics"]
       - ["t07_dispatch", "/api/dispatch"]
@@ -926,6 +939,7 @@ tables:
       - ["t07_override", "/api/override"]
       - ["t07_plan_review", "/api/plan-review"]
       - ["t07_prefs", "/api/prefs"]
+      - ["t07_preview", "/api/preview"]
       - ["t07_project", "/api/project"]
       - ["t07_project_commands", "/api/project-commands"]
       - ["t07_project_facts", "/api/project-facts"]
@@ -1070,6 +1084,7 @@ tables:
       - ["t09_commit_identity", "/api/commit-identity"]
       - ["t09_commit_rewrite", "/api/commit-rewrite"]
       - ["t09_control", "/api/control"]
+      - ["t09_copies", "/api/copies"]
       - ["t09_decision_log", "/api/decision-log"]
       - ["t09_diagnostics", "/api/diagnostics"]
       - ["t09_dispatch", "/api/dispatch"]
@@ -1098,6 +1113,7 @@ tables:
       - ["t09_packs", "/api/packs"]
       - ["t09_plan_review", "/api/plan-review"]
       - ["t09_prefs", "/api/prefs"]
+      - ["t09_preview", "/api/preview"]
       - ["t09_project", "/api/project"]
       - ["t09_project_commands", "/api/project-commands"]
       - ["t09_project_facts", "/api/project-facts"]
@@ -1216,6 +1232,7 @@ tables:
       - ["t10_commit_identity", "/api/commit-identity"]
       - ["t10_commit_rewrite", "/api/commit-rewrite"]
       - ["t10_control", "/api/control"]
+      - ["t10_copies", "/api/copies"]
       - ["t10_decision_log", "/api/decision-log"]
       - ["t10_diagnostics", "/api/diagnostics"]
       - ["t10_dispatch", "/api/dispatch"]
@@ -1249,6 +1266,7 @@ tables:
       - ["t10_packs", "/api/packs"]
       - ["t10_plan_review", "/api/plan-review"]
       - ["t10_prefs", "/api/prefs"]
+      - ["t10_preview", "/api/preview"]
       - ["t10_project", "/api/project"]
       - ["t10_project_commands", "/api/project-commands"]
       - ["t10_project_facts", "/api/project-facts"]
@@ -1336,6 +1354,7 @@ tables:
           - t11_put_commit_identity
           - t11_put_commit_rewrite
           - t11_put_control
+          - t11_put_copies
           - t11_put_decision_log
           - t11_put_diagnostics
           - t11_put_dispatch
@@ -1369,6 +1388,7 @@ tables:
           - t11_put_packs
           - t11_put_plan_review
           - t11_put_prefs
+          - t11_put_preview
           - t11_put_project
           - t11_put_project_commands
           - t11_put_project_facts
@@ -1428,6 +1448,7 @@ tables:
           - t11_delete_commit_identity
           - t11_delete_commit_rewrite
           - t11_delete_control
+          - t11_delete_copies
           - t11_delete_decision_log
           - t11_delete_diagnostics
           - t11_delete_dispatch
@@ -1461,6 +1482,7 @@ tables:
           - t11_delete_packs
           - t11_delete_plan_review
           - t11_delete_prefs
+          - t11_delete_preview
           - t11_delete_project
           - t11_delete_project_commands
           - t11_delete_project_facts
@@ -1520,6 +1542,7 @@ tables:
           - t11_patch_commit_identity
           - t11_patch_commit_rewrite
           - t11_patch_control
+          - t11_patch_copies
           - t11_patch_decision_log
           - t11_patch_diagnostics
           - t11_patch_dispatch
@@ -1553,6 +1576,7 @@ tables:
           - t11_patch_packs
           - t11_patch_plan_review
           - t11_patch_prefs
+          - t11_patch_preview
           - t11_patch_project
           - t11_patch_project_commands
           - t11_patch_project_facts
@@ -1615,6 +1639,7 @@ tables:
       - ["t11_put_commit_identity", "/api/commit-identity", "PUT"]
       - ["t11_put_commit_rewrite", "/api/commit-rewrite", "PUT"]
       - ["t11_put_control", "/api/control", "PUT"]
+      - ["t11_put_copies", "/api/copies", "PUT"]
       - ["t11_put_decision_log", "/api/decision-log", "PUT"]
       - ["t11_put_diagnostics", "/api/diagnostics", "PUT"]
       - ["t11_put_dispatch", "/api/dispatch", "PUT"]
@@ -1648,6 +1673,7 @@ tables:
       - ["t11_put_packs", "/api/packs", "PUT"]
       - ["t11_put_plan_review", "/api/plan-review", "PUT"]
       - ["t11_put_prefs", "/api/prefs", "PUT"]
+      - ["t11_put_preview", "/api/preview", "PUT"]
       - ["t11_put_project", "/api/project", "PUT"]
       - ["t11_put_project_commands", "/api/project-commands", "PUT"]
       - ["t11_put_project_facts", "/api/project-facts", "PUT"]
@@ -1707,6 +1733,7 @@ tables:
       - ["t11_delete_commit_identity", "/api/commit-identity", "DELETE"]
       - ["t11_delete_commit_rewrite", "/api/commit-rewrite", "DELETE"]
       - ["t11_delete_control", "/api/control", "DELETE"]
+      - ["t11_delete_copies", "/api/copies", "DELETE"]
       - ["t11_delete_decision_log", "/api/decision-log", "DELETE"]
       - ["t11_delete_diagnostics", "/api/diagnostics", "DELETE"]
       - ["t11_delete_dispatch", "/api/dispatch", "DELETE"]
@@ -1740,6 +1767,7 @@ tables:
       - ["t11_delete_packs", "/api/packs", "DELETE"]
       - ["t11_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t11_delete_prefs", "/api/prefs", "DELETE"]
+      - ["t11_delete_preview", "/api/preview", "DELETE"]
       - ["t11_delete_project", "/api/project", "DELETE"]
       - ["t11_delete_project_commands", "/api/project-commands", "DELETE"]
       - ["t11_delete_project_facts", "/api/project-facts", "DELETE"]
@@ -1799,6 +1827,7 @@ tables:
       - ["t11_patch_commit_identity", "/api/commit-identity", "PATCH"]
       - ["t11_patch_commit_rewrite", "/api/commit-rewrite", "PATCH"]
       - ["t11_patch_control", "/api/control", "PATCH"]
+      - ["t11_patch_copies", "/api/copies", "PATCH"]
       - ["t11_patch_decision_log", "/api/decision-log", "PATCH"]
       - ["t11_patch_diagnostics", "/api/diagnostics", "PATCH"]
       - ["t11_patch_dispatch", "/api/dispatch", "PATCH"]
@@ -1832,6 +1861,7 @@ tables:
       - ["t11_patch_packs", "/api/packs", "PATCH"]
       - ["t11_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t11_patch_prefs", "/api/prefs", "PATCH"]
+      - ["t11_patch_preview", "/api/preview", "PATCH"]
       - ["t11_patch_project", "/api/project", "PATCH"]
       - ["t11_patch_project_commands", "/api/project-commands", "PATCH"]
       - ["t11_patch_project_facts", "/api/project-facts", "PATCH"]
@@ -1917,6 +1947,7 @@ tables:
           - t12_put_commit_identity
           - t12_put_commit_rewrite
           - t12_put_control
+          - t12_put_copies
           - t12_put_decision_log
           - t12_put_diagnostics
           - t12_put_dispatch
@@ -1950,6 +1981,7 @@ tables:
           - t12_put_packs
           - t12_put_plan_review
           - t12_put_prefs
+          - t12_put_preview
           - t12_put_project
           - t12_put_project_commands
           - t12_put_project_facts
@@ -2009,6 +2041,7 @@ tables:
           - t12_delete_commit_identity
           - t12_delete_commit_rewrite
           - t12_delete_control
+          - t12_delete_copies
           - t12_delete_decision_log
           - t12_delete_diagnostics
           - t12_delete_dispatch
@@ -2042,6 +2075,7 @@ tables:
           - t12_delete_packs
           - t12_delete_plan_review
           - t12_delete_prefs
+          - t12_delete_preview
           - t12_delete_project
           - t12_delete_project_commands
           - t12_delete_project_facts
@@ -2101,6 +2135,7 @@ tables:
           - t12_patch_commit_identity
           - t12_patch_commit_rewrite
           - t12_patch_control
+          - t12_patch_copies
           - t12_patch_decision_log
           - t12_patch_diagnostics
           - t12_patch_dispatch
@@ -2134,6 +2169,7 @@ tables:
           - t12_patch_packs
           - t12_patch_plan_review
           - t12_patch_prefs
+          - t12_patch_preview
           - t12_patch_project
           - t12_patch_project_commands
           - t12_patch_project_facts
@@ -2196,6 +2232,7 @@ tables:
       - ["t12_put_commit_identity", "/api/commit-identity", "PUT"]
       - ["t12_put_commit_rewrite", "/api/commit-rewrite", "PUT"]
       - ["t12_put_control", "/api/control", "PUT"]
+      - ["t12_put_copies", "/api/copies", "PUT"]
       - ["t12_put_decision_log", "/api/decision-log", "PUT"]
       - ["t12_put_diagnostics", "/api/diagnostics", "PUT"]
       - ["t12_put_dispatch", "/api/dispatch", "PUT"]
@@ -2229,6 +2266,7 @@ tables:
       - ["t12_put_packs", "/api/packs", "PUT"]
       - ["t12_put_plan_review", "/api/plan-review", "PUT"]
       - ["t12_put_prefs", "/api/prefs", "PUT"]
+      - ["t12_put_preview", "/api/preview", "PUT"]
       - ["t12_put_project", "/api/project", "PUT"]
       - ["t12_put_project_commands", "/api/project-commands", "PUT"]
       - ["t12_put_project_facts", "/api/project-facts", "PUT"]
@@ -2288,6 +2326,7 @@ tables:
       - ["t12_delete_commit_identity", "/api/commit-identity", "DELETE"]
       - ["t12_delete_commit_rewrite", "/api/commit-rewrite", "DELETE"]
       - ["t12_delete_control", "/api/control", "DELETE"]
+      - ["t12_delete_copies", "/api/copies", "DELETE"]
       - ["t12_delete_decision_log", "/api/decision-log", "DELETE"]
       - ["t12_delete_diagnostics", "/api/diagnostics", "DELETE"]
       - ["t12_delete_dispatch", "/api/dispatch", "DELETE"]
@@ -2321,6 +2360,7 @@ tables:
       - ["t12_delete_packs", "/api/packs", "DELETE"]
       - ["t12_delete_plan_review", "/api/plan-review", "DELETE"]
       - ["t12_delete_prefs", "/api/prefs", "DELETE"]
+      - ["t12_delete_preview", "/api/preview", "DELETE"]
       - ["t12_delete_project", "/api/project", "DELETE"]
       - ["t12_delete_project_commands", "/api/project-commands", "DELETE"]
       - ["t12_delete_project_facts", "/api/project-facts", "DELETE"]
@@ -2380,6 +2420,7 @@ tables:
       - ["t12_patch_commit_identity", "/api/commit-identity", "PATCH"]
       - ["t12_patch_commit_rewrite", "/api/commit-rewrite", "PATCH"]
       - ["t12_patch_control", "/api/control", "PATCH"]
+      - ["t12_patch_copies", "/api/copies", "PATCH"]
       - ["t12_patch_decision_log", "/api/decision-log", "PATCH"]
       - ["t12_patch_diagnostics", "/api/diagnostics", "PATCH"]
       - ["t12_patch_dispatch", "/api/dispatch", "PATCH"]
@@ -2413,6 +2454,7 @@ tables:
       - ["t12_patch_packs", "/api/packs", "PATCH"]
       - ["t12_patch_plan_review", "/api/plan-review", "PATCH"]
       - ["t12_patch_prefs", "/api/prefs", "PATCH"]
+      - ["t12_patch_preview", "/api/preview", "PATCH"]
       - ["t12_patch_project", "/api/project", "PATCH"]
       - ["t12_patch_project_commands", "/api/project-commands", "PATCH"]
       - ["t12_patch_project_facts", "/api/project-facts", "PATCH"]
@@ -2495,6 +2537,7 @@ tables:
       - ["t13_commit_identity", "/api/commit-identity"]
       - ["t13_commit_rewrite", "/api/commit-rewrite"]
       - ["t13_control", "/api/control"]
+      - ["t13_copies", "/api/copies"]
       - ["t13_decision_log", "/api/decision-log"]
       - ["t13_diagnostics", "/api/diagnostics"]
       - ["t13_dispatch", "/api/dispatch"]
@@ -2523,6 +2566,7 @@ tables:
       - ["t13_packs", "/api/packs"]
       - ["t13_plan_review", "/api/plan-review"]
       - ["t13_prefs", "/api/prefs"]
+      - ["t13_preview", "/api/preview"]
       - ["t13_project", "/api/project"]
       - ["t13_project_commands", "/api/project-commands"]
       - ["t13_project_facts", "/api/project-facts"]
@@ -2716,6 +2760,7 @@ tables:
       - ["t15_unknown_commit_identity", "/api/commit-identity", "unknown"]
       - ["t15_unknown_commit_rewrite", "/api/commit-rewrite", "unknown"]
       - ["t15_unknown_control", "/api/control", "unknown"]
+      - ["t15_unknown_copies", "/api/copies", "unknown"]
       - ["t15_unknown_decision_log", "/api/decision-log", "unknown"]
       - ["t15_unknown_diagnostics", "/api/diagnostics", "unknown"]
       - ["t15_unknown_dispatch", "/api/dispatch", "unknown"]
@@ -2744,6 +2789,7 @@ tables:
       - ["t15_unknown_packs", "/api/packs", "unknown"]
       - ["t15_unknown_plan_review", "/api/plan-review", "unknown"]
       - ["t15_unknown_prefs", "/api/prefs", "unknown"]
+      - ["t15_unknown_preview", "/api/preview", "unknown"]
       - ["t15_unknown_project", "/api/project", "unknown"]
       - ["t15_unknown_project_commands", "/api/project-commands", "unknown"]
       - ["t15_unknown_project_facts", "/api/project-facts", "unknown"]
@@ -2793,6 +2839,7 @@ tables:
       - ["t15_basic_scheme_commit_identity", "/api/commit-identity", "basic_scheme"]
       - ["t15_basic_scheme_commit_rewrite", "/api/commit-rewrite", "basic_scheme"]
       - ["t15_basic_scheme_control", "/api/control", "basic_scheme"]
+      - ["t15_basic_scheme_copies", "/api/copies", "basic_scheme"]
       - ["t15_basic_scheme_decision_log", "/api/decision-log", "basic_scheme"]
       - ["t15_basic_scheme_diagnostics", "/api/diagnostics", "basic_scheme"]
       - ["t15_basic_scheme_dispatch", "/api/dispatch", "basic_scheme"]
@@ -2821,6 +2868,7 @@ tables:
       - ["t15_basic_scheme_packs", "/api/packs", "basic_scheme"]
       - ["t15_basic_scheme_plan_review", "/api/plan-review", "basic_scheme"]
       - ["t15_basic_scheme_prefs", "/api/prefs", "basic_scheme"]
+      - ["t15_basic_scheme_preview", "/api/preview", "basic_scheme"]
       - ["t15_basic_scheme_project", "/api/project", "basic_scheme"]
       - ["t15_basic_scheme_project_commands", "/api/project-commands", "basic_scheme"]
       - ["t15_basic_scheme_project_facts", "/api/project-facts", "basic_scheme"]
@@ -2870,6 +2918,7 @@ tables:
       - ["t15_token_scheme_commit_identity", "/api/commit-identity", "token_scheme"]
       - ["t15_token_scheme_commit_rewrite", "/api/commit-rewrite", "token_scheme"]
       - ["t15_token_scheme_control", "/api/control", "token_scheme"]
+      - ["t15_token_scheme_copies", "/api/copies", "token_scheme"]
       - ["t15_token_scheme_decision_log", "/api/decision-log", "token_scheme"]
       - ["t15_token_scheme_diagnostics", "/api/diagnostics", "token_scheme"]
       - ["t15_token_scheme_dispatch", "/api/dispatch", "token_scheme"]
@@ -2898,6 +2947,7 @@ tables:
       - ["t15_token_scheme_packs", "/api/packs", "token_scheme"]
       - ["t15_token_scheme_plan_review", "/api/plan-review", "token_scheme"]
       - ["t15_token_scheme_prefs", "/api/prefs", "token_scheme"]
+      - ["t15_token_scheme_preview", "/api/preview", "token_scheme"]
       - ["t15_token_scheme_project", "/api/project", "token_scheme"]
       - ["t15_token_scheme_project_commands", "/api/project-commands", "token_scheme"]
       - ["t15_token_scheme_project_facts", "/api/project-facts", "token_scheme"]
@@ -2947,6 +2997,7 @@ tables:
       - ["t15_no_scheme_commit_identity", "/api/commit-identity", "no_scheme"]
       - ["t15_no_scheme_commit_rewrite", "/api/commit-rewrite", "no_scheme"]
       - ["t15_no_scheme_control", "/api/control", "no_scheme"]
+      - ["t15_no_scheme_copies", "/api/copies", "no_scheme"]
       - ["t15_no_scheme_decision_log", "/api/decision-log", "no_scheme"]
       - ["t15_no_scheme_diagnostics", "/api/diagnostics", "no_scheme"]
       - ["t15_no_scheme_dispatch", "/api/dispatch", "no_scheme"]
@@ -2975,6 +3026,7 @@ tables:
       - ["t15_no_scheme_packs", "/api/packs", "no_scheme"]
       - ["t15_no_scheme_plan_review", "/api/plan-review", "no_scheme"]
       - ["t15_no_scheme_prefs", "/api/prefs", "no_scheme"]
+      - ["t15_no_scheme_preview", "/api/preview", "no_scheme"]
       - ["t15_no_scheme_project", "/api/project", "no_scheme"]
       - ["t15_no_scheme_project_commands", "/api/project-commands", "no_scheme"]
       - ["t15_no_scheme_project_facts", "/api/project-facts", "no_scheme"]
@@ -3142,6 +3194,7 @@ tables:
       - ["t16_commit_identity", "/api/commit-identity", "replaced"]
       - ["t16_commit_rewrite", "/api/commit-rewrite", "replaced"]
       - ["t16_control", "/api/control", "replaced"]
+      - ["t16_copies", "/api/copies", "replaced"]
       - ["t16_decision_log", "/api/decision-log", "replaced"]
       - ["t16_diagnostics", "/api/diagnostics", "replaced"]
       - ["t16_dispatch", "/api/dispatch", "replaced"]
@@ -3170,6 +3223,7 @@ tables:
       - ["t16_packs", "/api/packs", "replaced"]
       - ["t16_plan_review", "/api/plan-review", "replaced"]
       - ["t16_prefs", "/api/prefs", "replaced"]
+      - ["t16_preview", "/api/preview", "replaced"]
       - ["t16_project", "/api/project", "replaced"]
       - ["t16_project_commands", "/api/project-commands", "replaced"]
       - ["t16_project_facts", "/api/project-facts", "replaced"]
@@ -3293,6 +3347,7 @@ tables:
       - ["t17_commit_identity", "/api/commit-identity"]
       - ["t17_commit_rewrite", "/api/commit-rewrite"]
       - ["t17_control", "/api/control"]
+      - ["t17_copies", "/api/copies"]
       - ["t17_decision_log", "/api/decision-log"]
       - ["t17_diagnostics", "/api/diagnostics"]
       - ["t17_dispatch", "/api/dispatch"]
@@ -3320,6 +3375,7 @@ tables:
       - ["t17_packs", "/api/packs"]
       - ["t17_plan_review", "/api/plan-review"]
       - ["t17_prefs", "/api/prefs"]
+      - ["t17_preview", "/api/preview"]
       - ["t17_project", "/api/project"]
       - ["t17_project_commands", "/api/project-commands"]
       - ["t17_project_facts", "/api/project-facts"]

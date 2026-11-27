@@ -179,7 +179,7 @@ func ServeMCP(ctx context.Context, args []string) error {
 		socket = agenthost.DefaultSocket
 	}
 	ask := agenthost.SocketAsker(socket, os.Getenv("SF_PUSH_TOKEN"))
-	return agenthost.NewMCP(ask, Version, os.Stdout).Screenshots(os.Getenv(session.ScreenshotsVariable)).Serve(ctx, os.Stdin)
+	return agenthost.NewMCP(ask, Version, os.Stdout).Screenshots(os.Getenv(session.ScreenshotsVariable)).Docs(os.Getenv(session.DocsVariable)).Serve(ctx, os.Stdin)
 }
 
 const bodyFor = 30 * time.Second

@@ -8,7 +8,8 @@ export type Kept = { written: string[]; ran: Ran[] }
 const TEXT_MAX = 100000
 const NAME = /^[A-Za-z0-9][\w.:@-]{0,119}$/
 const fileOf = (base: string) => new RegExp(`(?:^|/)${base}(-[\\w.-]+)?\\.md$`)
-export const SESSION_FILE = fileOf('(?:PLAN|RESEARCH|REQUIREMENTS)')
+export const SESSION_FILE = fileOf('(?:PLAN|RESEARCH|REQUIREMENTS|ROOT-CAUSE)')
+const MIRRORED = { requirements: 'REQUIREMENTS.md', plan: 'PLAN.md', rootCause: 'ROOT-CAUSE.md' } as const
 
 export function keptOf(raw: unknown): Kept {
   const v = raw && typeof raw === 'object' ? (raw as { written?: unknown; ran?: unknown }) : {}
@@ -67,7 +68,28 @@ async function currentIntent($: EngineInterface, sid: string): Promise<{ body: s
 async function textOf($: EngineInterface, path: string): Promise<{ path: string; text: string } | null> {
   if (!path) return null
   const text = await $.fs.read(path).catch(() => null)
-  return text === null ? null : { path, text: clip(text, TEXT_MAX) }
+  return text === null ? null : { path, text }
+}
+
+function shown(doc: { path: string; text: string } | null): { path: string; text: string } | null {
+  return doc && { path: doc.path, text: clip(doc.text, TEXT_MAX) }
+}
+
+async function docsFolder($: EngineInterface): Promise<string> {
+  const given = ((await $.env.get('SF_DOCS').catch(() => undefined)) ?? '').replace(/\/+$/, '')
+  if (!given.startsWith('/') || given.split('/').some(part => part === '.' || part === '..') || given.includes('\0')) return ''
+  const dir = await $.fs.stat(given, { resolve: true }).catch(() => null)
+  return dir && dir.kind === 'dir' && !dir.isLink && dir.realPath === given ? given : ''
+}
+
+async function mirrorDoc($: EngineInterface, dir: string, name: string, doc: { path: string; text: string } | null) {
+  if (!doc || doc.text.length > TEXT_MAX || doc.path.startsWith(`${dir}/`)) return
+  const target = `${dir}/${name}`
+  const [source, there] = await Promise.all([$.fs.stat(doc.path).catch(() => null), $.fs.stat(target).catch(() => null)])
+  if (!source || source.kind !== 'file' || source.isLink) return
+  if (there && (there.kind !== 'file' || there.isLink || there.mtimeMs >= source.mtimeMs)) return
+  if (there && (await $.fs.read(target).catch(() => null)) === doc.text) return
+  await $.fs.write(target, doc.text).catch(() => undefined)
 }
 
 async function jobScratch($: EngineInterface, sid: string): Promise<string> {
@@ -92,21 +114,26 @@ export async function workflowReport($: EngineInterface, sid: string, kept: Kept
   const tmp = ((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
   const scratch = `${tmp}/claude-${sid}`
   const here = [...await filesIn($, await jobScratch($, sid).catch(() => '')), ...await filesIn($, scratch)]
+  const docs = await docsFolder($).catch(() => '')
+  const mirrored = docs ? (await filesIn($, docs)).filter(p => Object.values(MIRRORED).some(name => p === `${docs}/${name}`)) : []
   const intent = await currentIntent($, sid).catch(() => null)
   const body = intent?.body ?? ''
   const listed = (/^- Files: (.*)$/m.exec(body)?.[1] ?? '').split(/,\s+/).filter(p => p.startsWith('/') && !p.includes('/../'))
   const pick = async (base: string): Promise<string> => {
     const re = fileOf(base)
-    for (const p of [...here, ...[...kept.written].reverse(), ...listed]) if (re.test(p) && (await plainFile($, p))) return p
+    for (const p of [...here, ...[...kept.written].reverse(), ...listed, ...mirrored]) if (re.test(p) && (await plainFile($, p))) return p
     return ''
   }
-  const [plan, research, requirements] = await Promise.all([pick('PLAN'), pick('RESEARCH'), pick('REQUIREMENTS')])
+  const [planPath, research, requirementsPath, rootCausePath] = await Promise.all([pick('PLAN'), pick('RESEARCH'), pick('REQUIREMENTS'), pick('ROOT-CAUSE')])
+  const [plan, requirements, rootCause] = await Promise.all([textOf($, planPath), textOf($, requirementsPath), textOf($, rootCausePath)])
+  if (docs) await Promise.all([mirrorDoc($, docs, MIRRORED.requirements, requirements), mirrorDoc($, docs, MIRRORED.plan, plan), mirrorDoc($, docs, MIRRORED.rootCause, rootCause)])
   return {
     type: 'workflow',
     knackpack,
-    plan: await textOf($, plan),
+    plan: shown(plan),
     research: research ? { path: research } : null,
-    requirements: await textOf($, requirements),
+    requirements: shown(requirements),
+    rootCause: shown(rootCause),
     intent: intent
       ? {
           path: intent.path,

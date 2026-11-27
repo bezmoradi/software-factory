@@ -87,6 +87,7 @@ export function paintSide(s: Session | null) {
   const was = document.body.classList.contains('side-full')
   if (full && !was) sideScroll = scroller.scrollTop
   document.body.classList.toggle('side-full', full)
+  byId<HTMLElementTagNameMap['sf-reviews']>('reviews').short = !full
   placeSide()
   if (!full && was) scroller.scrollTop = sideScroll
   const needs = !!(full && s && waitingOf(s).length)

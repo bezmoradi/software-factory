@@ -43,6 +43,7 @@ type PresetView struct {
 	ExpiresLabel string
 	Level        string
 	Label        string
+	Off          string
 }
 
 type PresetDraft struct {

@@ -34,7 +34,7 @@ const (
 	packBugFinder = "---\nname: bug-finder\ndescription: Finds bugs in the change\ntools: Read, Grep, Glob, Bash\nmodel: sonnet\nomitClaudeMd: true\n---\nRead change.diff and the files it touches. Report each bug with its location.\n"
 	packSimpler   = "---\nname: simplicity-checker\ndescription: Finds what the change could drop\ndisallowedTools: Bash\n---\nRead change.diff. Name what could be simpler.\n"
 	packHooks     = "{\n  \"hooks\": {\n    \"SessionStart\": [{ \"hooks\": [{ \"type\": \"command\", \"command\": \"sh ${CLAUDE_PLUGIN_ROOT}/hooks/start.sh\" }] }]\n  }\n}\n"
-	packSkill     = "---\nname: notes\ndescription: Keeps notes on the task\n---\nWrite what you learned to .acme/NOTES.md.\n"
+	packSkill     = "---\nname: notes\ndescription: Keeps notes on the task\n---\nWrite what you learned to NOTES.md in the folder $SF_DOCS names, never in the worktree, and commit nothing there.\n"
 )
 
 func packBase() map[string]string {
@@ -46,7 +46,7 @@ func packBase() map[string]string {
 		"hooks/hooks.json":             packHooks,
 		"hooks/start.sh":               "#!/bin/sh\necho acme pack session start\n",
 		"skills/notes/SKILL.md":        packSkill,
-		"commands/requirements.md":     "---\ndescription: Agree the requirements\n---\nWrite .acme/REQUIREMENTS.md.\n",
+		"commands/requirements.md":     "---\ndescription: Agree the requirements\n---\nWrite REQUIREMENTS.md in the folder $SF_DOCS names, never in the worktree, and don't commit it.\n",
 	}
 }
 

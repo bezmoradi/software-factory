@@ -11,11 +11,23 @@
 + engineered: designed, reviewed, documented
 ```
 
-<sub>✅ Merged only through a pull request · 15 required checks passed, Claude's approval among them · No bypass, admins included</sub>
+<sub>✅ Approved by human reviewers · All checks passed</sub>
 
 # Software Factory
 
 Software Factory runs Claude Code in sandboxed containers on your own computer, one container per session, and lets you follow and steer every session from one page in your browser. The agents can't reach your git host: only the engine pushes their work, to a branch of its own, after independent reviewers have passed that exact commit.
+
+## Table of Contents
+
+- [What you need](#what-you-need)
+- [Install](#install)
+- [Get started](#get-started)
+- [Docs](#docs)
+- [Built on](#built-on)
+- [Contributing](#contributing)
+- [Privacy](#privacy)
+- [Author](#author)
+- [License](#license)
 
 ## What you need
 
@@ -52,13 +64,26 @@ make up
 
 The page has the full documentation: press **Docs** (the book icon) in the activity bar, or **Guides and how-tos** on the Welcome page. Every dialog's **View in docs** link opens its section there.
 
+## Built on
+
+Software Factory relies on two projects by the same author. You don't install either one to use it.
+
+| Project | What it does here | Who needs it |
+|---|---|---|
+| [knackpack](https://github.com/bezmoradi/knackpack) | The Claude Code plugin behind each session's Define and Plan steps and the code reviewers. | Nobody installs it: the engine downloads it with Claude Code at first start, and checks for a newer one at every start. |
+| [Proctor](https://github.com/bezmoradi/proctor) | Checks the engine's API against its written specifications, so a change can't quietly alter what the engine does. | Only contributors, to run `make proctor`. |
+
 ## Contributing
 
-[CLAUDE.md](CLAUDE.md) has the code layout, the commands and the checks.
+[CLAUDE.md](CLAUDE.md) has the code layout, the commands and the checks. Changes that touch more than Markdown also need [Proctor](https://github.com/bezmoradi/proctor) installed, to run `make proctor`.
 
 ## Privacy
 
 Software Factory runs on your own computer. Its author runs no server for it and receives none of your data. [Privacy](web/docs.md#privacy) in the full docs says what leaves your computer.
+
+## Author
+
+This project is maintained by [Bez Moradi](https://github.com/bezmoradi).
 
 ## License
 

@@ -33,6 +33,12 @@ export function dialogLink(o: DialogLinkOptions): HTMLButtonElement {
   return link
 }
 
+export function signInLink(): HTMLButtonElement {
+  const link = button('Reviewers’ sign-in', 'link')
+  link.dataset.dialog = 'signIn'
+  return link
+}
+
 export function crumbTrail(items: Node[] = []): HTMLElement {
   const nav = el('nav', 'crumbs')
   nav.setAttribute('aria-label', 'Breadcrumb')

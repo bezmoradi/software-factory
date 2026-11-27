@@ -68,11 +68,11 @@ class SfApproval extends HTMLElement {
   }
 
   #planBox: HTMLElement | null = null
-  #planState: { run: AsideRun | null; asking: boolean } = { run: null, asking: false }
+  #planState: { run: AsideRun | null; asking: boolean; offered: boolean } = { run: null, asking: false, offered: false }
   #planKey = ''
 
-  set planReview(value: { run: AsideRun | null; asking: boolean } | null) {
-    const next = value ?? { run: null, asking: false }
+  set planReview(value: { run: AsideRun | null; asking: boolean; offered: boolean } | null) {
+    const next = value ?? { run: null, asking: false, offered: false }
     const key = JSON.stringify(next)
     if (key === this.#planKey) return
     this.#planKey = key
@@ -88,12 +88,18 @@ class SfApproval extends HTMLElement {
 
   #planReview(v: PlanApproval): HTMLElement {
     const t = this.#planState.run
+    const offered = this.#planState.offered
+    if (!offered && !t) {
+      const none = el('div')
+      none.hidden = true
+      return none
+    }
     const stale = t && t.planHash && t.planHash !== v.hash ? ', of an earlier version of the plan' : ''
     return asideBox({
       id: 'plan-review-button', title: 'Second opinion on the plan', start: 'Review this plan', busy: 'Reviewing the plan…', label: 'The review of the plan',
       hint: 'Asks Claude Code in a reviewer container of its own, with read-only tools, to review this version of the plan against the code. It approves nothing and changes no gate state',
       intro: 'Before you approve, a reviewer run can read the plan against the code and list what looks wrong or missing. It costs one run, and nothing reads it but you.',
-      run: t, asking: this.#planState.asking, disabled: v.disabled, stale,
+      run: t, asking: this.#planState.asking, disabled: v.disabled, closed: !offered, stale,
       press: () => emit(this, 'sf-plan-review', { hash: v.hash }),
     })
   }
@@ -136,10 +142,9 @@ class SfApproval extends HTMLElement {
       parts.push(this.#planBox)
     }
     if (v.approved) {
-      if (reqs && v.planSwitch) parts.push(this.#planSwitch(v, v.planSwitch))
       return this.#quiet(parts)
     }
-    const approveButton = (label: string, key: string, plan?: boolean) => button(label, 'ghost', () => {
+    const approve = button(reqs ? 'Approve requirements' : cause ? 'Approve root cause' : 'Approve plan', 'ghost', () => {
       if (!this.#open.has(v.hash)) {
         this.#why.textContent = `Read this version of ${what} first: it is open above. Then approve.`
         if (!details.getClientRects().length) return emit(this, 'sf-read-document')
@@ -147,11 +152,8 @@ class SfApproval extends HTMLElement {
         summary.focus()
         return
       }
-      if (!v.hold) emit(this, 'sf-approve', plan === undefined ? { hash: v.hash } : { hash: v.hash, plan })
-    }, 'button', key)
-    const approves = reqs && v.planChoice
-      ? [approveButton('Approve and plan', 'approve-plan', true), approveButton('Approve and implement', 'approve-implement', false)]
-      : [approveButton(reqs ? 'Approve requirements' : cause ? 'Approve root cause' : 'Approve plan', 'approve')]
+      if (!v.hold) emit(this, 'sf-approve', { hash: v.hash })
+    }, 'button', 'approve')
     const ask = button('Ask for changes', 'ghost', undefined, 'submit', 'ask')
     const revise = form({
       inline: true,
@@ -162,28 +164,19 @@ class SfApproval extends HTMLElement {
         emit(this, 'sf-revise', { note: this.#field.value })
       },
     })
-    for (const control of [...approves, ask, this.#field]) control.disabled = v.disabled
-    if (v.hold) for (const approve of approves) approve.setAttribute('aria-disabled', 'true')
+    for (const control of [approve, ask, this.#field]) control.disabled = v.disabled
+    if (v.hold) approve.setAttribute('aria-disabled', 'true')
     const row = el('div', 'choices field-row')
-    row.append(...approves)
+    row.append(approve)
     parts.push(row)
     if (v.note) parts.push(el('p', 'small muted', v.note))
     const why = v.refused || v.hold || ''
     this.#why.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-approval-why`
     this.#noteWhy.id = `${reqs ? 'req' : cause ? 'cause' : 'plan'}-note-why`
-    if (why) for (const approve of approves) approve.setAttribute('aria-describedby', this.#why.id)
+    if (why) approve.setAttribute('aria-describedby', this.#why.id)
     this.#why.classList.remove('status-slot')
     replaceKeeping(this, [...parts, this.#why, revise, this.#noteWhy])
     if (this.#why.textContent !== why) this.#why.textContent = why
-  }
-
-  #planSwitch(v: PlanApproval, offered: 'add' | 'skip'): HTMLElement {
-    const add = offered === 'add'
-    const change = button(add ? 'Add a plan' : 'Skip the plan', 'ghost small', () => emit(this, 'sf-approve', { hash: v.hash, plan: add }), 'button', 'plan-switch')
-    change.disabled = v.disabled
-    const row = el('div', 'choices field-row')
-    row.append(change)
-    return row
   }
 
   #quiet(parts: HTMLElement[]) {

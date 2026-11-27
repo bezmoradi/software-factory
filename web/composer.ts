@@ -65,6 +65,7 @@ export function startComposer({ send }: ComposerDeps): Composer {
       if (!d.text && !d.images.length && !d.files.length) drafts.delete(from)
     }
     text.value = drafts.get(to)?.text ?? ''
+    grow()
     paintAttached()
   }
 
@@ -237,9 +238,16 @@ export function startComposer({ send }: ComposerDeps): Composer {
   })
   const grow = () => {
     if (!text.offsetParent) return
-    text.style.height = 'auto'
-    text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`
+    text.style.height = ''
+    if (text.scrollHeight > text.clientHeight) text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`
   }
+  let wide = 0
+  new ResizeObserver(() => {
+    if (text.clientWidth === wide) return
+    wide = text.clientWidth
+    grow()
+  }).observe(text)
+  new MutationObserver(grow).observe(document.documentElement, { attributes: true, attributeFilter: ['data-scale'] })
   text.addEventListener('input', grow)
   text.addEventListener('paste', e => {
     const files = [...(e.clipboardData?.items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter((f): f is File => !!f)

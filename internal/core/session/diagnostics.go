@@ -36,6 +36,7 @@ type DiagnosticsConfig struct {
 	Sessions func() []Info
 	Reviews  func() (map[review.Key]ReviewEntry, error)
 	Events   func() []shared.Event
+	Usage    func() []DiagFact
 	Now      func() time.Time
 }
 
@@ -120,6 +121,9 @@ func (x *Diagnostics) Diagnostics(ctx context.Context) (string, error) {
 		facts("settings", x.cfg.Settings())
 	}
 	facts("counts", x.counts())
+	if x.cfg.Usage != nil {
+		facts("usage", x.cfg.Usage())
+	}
 	line("")
 	events := []shared.Event{}
 	if x.cfg.Events != nil {

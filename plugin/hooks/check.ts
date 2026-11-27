@@ -22,9 +22,11 @@ const CLOUD_REASON = "this runs on the vendor's servers, outside Software Factor
 const LEAD = String.raw`(?:(?:sudo|doas|env|command|exec|nohup)(?:\s+-\S+)*\s+)*`
 const DOWNLOADER = String.raw`(?:curl|wget|fetch|aria2c|irm|iwr|invoke-webrequest|invoke-restmethod)`
 const RUNNER = String.raw`(?:sh|bash|zsh|dash|ksh|ash|fish|python[\d.]*|node|perl|ruby|php|iex|invoke-expression)`
+const WORD_END = String.raw`(?:[\s;&|()<>'"\x60,\]}\\]|$)`
+const CLAUDE_WORD = new RegExp(String.raw`(?:^|[\s;&|()'"\x60={\[,/\\])claude(?:-code/|(?:-code)?(?:@[^\s/;&|()<>'"\x60,\]}\\]*)?(?:\.[cm]?js)?${WORD_END})`, 'i')
 const LOOSE_CLOUD: RegExp[][] = [
-  [/\bclaude\b/i, /--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b/i],
-  [/\bclaude\b/i, /\bultrareview\b/i, /--post\b/i],
+  [CLAUDE_WORD, new RegExp(String.raw`(?:^|[\s'"])(?:--(?:remote|cloud|teleport|remote-control|rc)(?:=|${WORD_END})|\/?(?:remote-control|rc)${WORD_END})`, 'i')],
+  [CLAUDE_WORD, /\bultrareview\b/i, /--post\b/i],
 ]
 const LOOSE_UNDONE: RegExp[][] = [
   [/\bgit\b/i, /\breset\b/i, /--hard/i],
@@ -32,7 +34,7 @@ const LOOSE_UNDONE: RegExp[][] = [
   [/\b(?:terraform|tofu|terragrunt)\b/i, /\bdestroy\b/i],
   [/\b(?:kubectl|oc)\b/i, /\bdelete\b/i],
   [/\b(?:drop|truncate|dropdb)\b/i],
-  [/\bclaude\b/i],
+  [CLAUDE_WORD],
   [new RegExp(String.raw`\b${DOWNLOADER}\b`, 'i'), new RegExp(String.raw`\|&?\s*${LEAD}${RUNNER}\b`, 'i')],
   [new RegExp(String.raw`(?:^|[\s;&|])\.\s+<\(\s*${DOWNLOADER}\b`, 'i')],
 ]

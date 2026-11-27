@@ -58,24 +58,19 @@ func (r *Registry) Workflow(sid string) (Workflow, bool) {
 	return *w, true
 }
 
-func (r *Registry) OnDocsReported(f func(sid string)) {
+func (r *Registry) OnDocsCheck(f func(sid string)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.docsMoved = f
 }
 
-func docsDiffer(was, now *Workflow) bool {
-	if was == nil {
-		return true
+func (r *Registry) checkDocs(sid string) {
+	r.mu.Lock()
+	f := r.docsMoved
+	r.mu.Unlock()
+	if f != nil {
+		go f(sid)
 	}
-	return reportedKey(was.Requirements) != reportedKey(now.Requirements) || reportedKey(was.Plan) != reportedKey(now.Plan)
-}
-
-func reportedKey(d *Doc) string {
-	if d == nil {
-		return ""
-	}
-	return d.Hash + " " + d.Path
 }
 
 func hashText(s string) string {

@@ -5,6 +5,7 @@ import { actions, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { dropdown, option, textbox } from '../lib/controls.ts'
 import { emptyState } from '../lib/page.ts'
 import { CHEAP_EVERY_MS, whileOpen } from '../lib/refresh.ts'
+import { offTip } from '../lib/tooltip.ts'
 import { GIT_HOST_NOTE, openSavePreset, presetLine, presetsOf } from './credentials.ts'
 import { ACCESS_ROUTE, accessCardOf, accessCardView, firstChoice, type AccessChoice } from './access-card.ts'
 import { sessionActionsPart } from './actions.ts'
@@ -89,11 +90,15 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
     presetsPart.hidden = !rows.length
     for (const p of rows) {
       const li = el('li', 'row')
-      li.append(presetLine(p), el('span', 'spacer'), actionButton('Apply', 'ghost small', async () => {
-        const r = await post(ACCESS_ROUTE, { op: 'apply', sid, preset: p.id })
-        tell(r)
-        if (r.ok) paint(r)
-      }, 'button', `apply:${p.id}`))
+      const apply = button('Apply', 'ghost small', () => {
+        if (apply.getAttribute('aria-disabled') === 'true') return
+        void whileBusy(apply, async () => {
+          const r = await post(ACCESS_ROUTE, { op: 'apply', sid, preset: p.id })
+          tell(r)
+          if (r.ok) paint(r)
+        })
+      }, 'button', `apply:${p.id}`)
+      li.append(presetLine(p), el('span', 'spacer'), ...offTip(apply, visible(p.off)))
       presets.append(li)
     }
     list.replaceChildren()

@@ -103,7 +103,7 @@ steps:
                   - "plan"
                   - "implement"
                   - "review"
-                  - "deliver"
+                  - "push"
               - builtin: true
                 edits: "any"
                 id: "incident"
@@ -116,7 +116,7 @@ steps:
                 steps:
                   - "implement"
                   - "review"
-                  - "deliver"
+                  - "push"
               - builtin: true
                 edits: "any"
                 id: "explore"

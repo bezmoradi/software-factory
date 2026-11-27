@@ -51,6 +51,7 @@ func (d *Dispatcher) woke(r *run) {
 		changed = strings.TrimSpace(changed + " " + d.cfg.Packs.WakeNote(repo, pack))
 	}
 	d.showVersions(sid, changed)
+	d.reg.checkDocs(sid)
 }
 
 func (d *Dispatcher) MarkStopping() int {

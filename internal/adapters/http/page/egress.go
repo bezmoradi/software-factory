@@ -56,7 +56,7 @@ func egressViewJSON(v session.EgressView) map[string]any {
 		gateway = map[string]any{"url": v.Gateway.URL, "host": v.Gateway.Host}
 	}
 	return map[string]any{
-		"saved": v.Saved, "pending": v.Pending, "added": added, "gateway": gateway,
+		"saved": v.Saved, "pending": v.Pending, "added": added, "gateway": gateway, "gatewayOff": v.GatewayOff,
 		"lists": map[string]any{"agents": egressListJSON(v.Lists.Agents), "reviewers": egressListJSON(v.Lists.Reviewers)},
 		"base":  v.Base, "deny": v.Deny, "now": v.Now.Unix(),
 		"gatewayKeyNote": session.GatewayKeyNote, "pypiNote": session.PyPIReadHostsNote, "expiries": expiriesJSON(),

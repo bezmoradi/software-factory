@@ -196,6 +196,12 @@ export function replaceKeeping(parent: Element, parts: Node[]): void {
   }
 }
 
+export function fragment(nodes: Iterable<Node | string>): DocumentFragment {
+  const out = document.createDocumentFragment()
+  for (const n of nodes) out.append(n)
+  return out
+}
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
@@ -231,6 +237,28 @@ function refuseBusy(e: Event): void {
 if (typeof document !== 'undefined') {
   document.addEventListener('click', refuseBusy, true)
   document.addEventListener('submit', refuseBusy, true)
+}
+
+const SPIN = 'spin'
+const SPIN_SHOWN_BY = ['class', 'aria-busy', 'hidden', 'open']
+let spinsQueued = false
+
+function alignSpins(): void {
+  spinsQueued = false
+  for (const a of document.getAnimations()) if (a instanceof CSSAnimation && a.animationName === SPIN && a.startTime !== 0) a.startTime = 0
+}
+
+function queueSpins(): void {
+  if (spinsQueued) return
+  spinsQueued = true
+  requestAnimationFrame(alignSpins)
+}
+
+if (typeof document !== 'undefined' && typeof CSSAnimation === 'function' && typeof MutationObserver === 'function' && typeof document.getAnimations === 'function') {
+  new MutationObserver(queueSpins).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: SPIN_SHOWN_BY })
+  document.addEventListener('animationstart', e => {
+    if (e.animationName === SPIN) queueSpins()
+  }, true)
 }
 
 const BUSY_SAID = 'Working…'

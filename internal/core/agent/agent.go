@@ -24,12 +24,15 @@ const (
 )
 
 type Tool struct {
-	ID     string
-	Title  string
-	Kind   string
-	Status string
-	Input  json.RawMessage
-	Whole  bool
+	ID         string
+	Title      string
+	Kind       string
+	Status     string
+	Input      json.RawMessage
+	Whole      bool
+	Name       string
+	Parent     string
+	Background string
 }
 
 type Option struct {

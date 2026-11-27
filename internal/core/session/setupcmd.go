@@ -1,6 +1,6 @@
 package session
 
-func (w *SessionWork) startSetup(sid, project, cwd string) {
+func (w *SessionWork) startSetup(sid, project, branch, cwd string) {
 	command := w.command(project, CommandSetup)
 	if command == "" || !w.hosted() || sid == "" || cwd == "" {
 		return
@@ -14,7 +14,7 @@ func (w *SessionWork) startSetup(sid, project, cwd string) {
 		w.mu.Lock()
 		w.runsOf(sid).setting = false
 		w.mu.Unlock()
-		w.audit(AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: project, By: "engine", Kind: AuditSetupRun, Result: done.State})
+		w.audit(AuditEntry{Time: w.cfg.Now(), Session: sid, Repository: project, Branch: branch, By: "engine", Kind: AuditSetupRun, Result: done.State})
 		w.changed(sid)
 		w.pump(sid, "")
 	}()

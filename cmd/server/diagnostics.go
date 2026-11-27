@@ -36,7 +36,7 @@ var (
 		{devReviewMinutes, numberWithin(1, 19)},
 	}
 	namedSettings = []string{"SF_PAGE_HOST", "SF_PAGE_NAME", "SF_COMPOSE_PROJECT", "SF_REVIEWS", "SF_REVIEWER_PROXY", "SF_HELPER", "SF_BOX_SUBNETS", "SF_EGRESS_PROXY", "SF_EGRESS_STATUS",
-		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_AGENTS_INSTALL", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER", devUpdateAPI, devKnackpackURL}
+		"SF_EGRESS_KEY_FILE", "EGRESS_ALLOW", "EGRESS_DENY", "SF_NPM_REGISTRY", "SF_DEV_ACP_AGENT", "SF_DEV_GIT_CA", "SF_DEV_OSV", "SF_DEV_ADVISORY_PIN", "SF_DEV_REVIEWER", devUpdateAPI, devKnackpackURL}
 	digits     = regexp.MustCompile(`^[0-9]{1,9}$`)
 	umaskDigit = regexp.MustCompile(`^0?[0-7]{3}$`)
 )
@@ -175,7 +175,7 @@ func versionsShown(helper session.Boxes, pins *npm.Plugins) func(ctx context.Con
 func diagnosticsPage(parts engineParts, reg *session.Registry, updates session.UpdatesPage, logger shared.Logger) session.DiagnosticsPage {
 	shown := settingsShown(os.Getenv)
 	settings := func() []session.DiagFact { return append(shown(), updateFacts(updates)...) }
-	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes, parts.plugins), Settings: settings, Sessions: reg.Sessions}
+	cfg := session.DiagnosticsConfig{Version: Version, Versions: versionsShown(parts.boxes, parts.plugins), Settings: settings, Sessions: reg.Sessions, Usage: reg.Limits().UsageFacts}
 	if parts.repos != nil {
 		cfg.Projects = parts.repos.List
 	}

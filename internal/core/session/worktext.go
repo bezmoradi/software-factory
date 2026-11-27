@@ -1,47 +1,92 @@
 package session
 
-import (
-	"cmp"
-	"slices"
-)
+type KeptText struct {
+	Hash string
+	Text string
+}
 
-const maxApprovedTexts = 1 << 20
+type ApprovedTexts struct {
+	Requirements KeptText
+	Plan         KeptText
+}
 
-func keepApprovedTexts(sessions map[string]SavedWork, current string) {
-	type kept struct {
-		sid  string
-		size int
-		at   int64
+type ApprovedStore interface {
+	Load(sid string) (ApprovedTexts, error)
+	Save(sid string, t ApprovedTexts) error
+	Drop(sid string) error
+	Keep(sids []string) error
+}
+
+func keptOf(a *workApproval) KeptText {
+	if a == nil || a.Text == "" {
+		return KeptText{}
 	}
-	var list []kept
-	total := 0
-	for sid, v := range sessions {
-		if v.Requirements == nil || v.Requirements.Text == "" {
-			continue
-		}
-		n := len(v.Requirements.Text)
-		total += n
-		list = append(list, kept{sid: sid, size: n, at: v.Requirements.At.UnixNano()})
+	return KeptText{Hash: a.Hash, Text: a.Text}
+}
+
+func (t ApprovedTexts) key() string {
+	if t.Requirements.Hash == "" && t.Plan.Hash == "" {
+		return ""
 	}
-	slices.SortFunc(list, func(x, y kept) int {
-		return cmp.Or(cmp.Compare(boolRank(x.sid == current), boolRank(y.sid == current)), cmp.Compare(x.at, y.at))
-	})
-	for _, k := range list {
-		if total <= maxApprovedTexts {
-			return
-		}
-		v := sessions[k.sid]
-		a := *v.Requirements
-		a.Text = ""
-		v.Requirements = &a
-		sessions[k.sid] = v
-		total -= k.size
+	return t.Requirements.Hash + " " + t.Plan.Hash
+}
+
+func (w *Work) textsOf(sid string) ApprovedTexts {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.sessions[sid]
+	if s == nil {
+		return ApprovedTexts{}
+	}
+	return ApprovedTexts{Requirements: keptOf(s.req), Plan: keptOf(s.plan)}
+}
+
+func (w *Work) saveTexts(sid string) {
+	if w.cfg.Texts == nil {
+		return
+	}
+	w.textMu.Lock()
+	defer w.textMu.Unlock()
+	t := w.textsOf(sid)
+	key := t.key()
+	had, known := w.textKeys[sid]
+	if known && had == key || !known && key == "" {
+		return
+	}
+	var err error
+	if key == "" {
+		err = w.cfg.Texts.Drop(sid)
+	} else {
+		err = w.cfg.Texts.Save(sid, t)
+	}
+	switch {
+	case err != nil:
+		delete(w.textKeys, sid)
+		w.cfg.Logger.Warn("work", "event", "approved-texts-not-saved")
+	case key == "":
+		delete(w.textKeys, sid)
+	default:
+		w.textKeys[sid] = key
 	}
 }
 
-func boolRank(b bool) int {
-	if b {
-		return 1
+func (w *Work) loadTexts(sid string) ApprovedTexts {
+	if w.cfg.Texts == nil {
+		return ApprovedTexts{}
 	}
-	return 0
+	t, err := w.cfg.Texts.Load(sid)
+	if err != nil {
+		w.cfg.Logger.Warn("work", "event", "approved-texts-unreadable")
+		return ApprovedTexts{}
+	}
+	return t
+}
+
+func (w *Work) keepTexts(sids []string) {
+	if w.cfg.Texts == nil {
+		return
+	}
+	if err := w.cfg.Texts.Keep(sids); err != nil {
+		w.cfg.Logger.Warn("work", "event", "approved-texts-not-pruned")
+	}
 }

@@ -1,5 +1,6 @@
 import { request, savedTone, UNREAD, type EngineAnswer } from '../api.ts'
-import { button, say, statusLine, whileBusy } from '../lib/dom.ts'
+import { button, say, statusLine, visible, whileBusy } from '../lib/dom.ts'
+import { offered } from '../lib/tooltip.ts'
 import { actions, field, form, showAnswer } from '../lib/form.ts'
 import { checkbox } from '../lib/controls.ts'
 import { pageHead } from '../lib/page.ts'
@@ -24,6 +25,7 @@ class SfPackageLookups extends HTMLElement {
   #failed = false
   #dirty = false
   #saving = false
+  #saveOff: (why: string) => void = () => {}
 
   connectedCallback() {
     if (this.#built) {
@@ -46,6 +48,7 @@ class SfPackageLookups extends HTMLElement {
       }),
       this.#said,
     )
+    this.#saveOff = offered(this.#save)
     this.#watch()
   }
 
@@ -74,9 +77,11 @@ class SfPackageLookups extends HTMLElement {
     if (this.#failed) say(this.#said, '')
     this.#failed = false
     this.#on.checked = on
+    this.#saveOff(typeof a.body.onOff === 'string' ? visible(a.body.onOff) : '')
   }
 
   async #store() {
+    if (this.#save.getAttribute('aria-disabled') === 'true') return
     const on = this.#on.checked
     say(this.#said, '')
     this.#saving = true

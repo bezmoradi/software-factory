@@ -357,7 +357,6 @@ var pluginSaid = map[string]Said{
 	PluginKept:     {"Not updated", "warn"},
 	PluginMissing:  {"Not installed", "bad"},
 	PluginChecking: {"Checking", "muted"},
-	PluginCheckOff: {"Not checked", "muted"},
 }
 
 func PluginSaid(check string) Said {
@@ -387,8 +386,6 @@ func PluginCheckLine(check, branch, from, problem string, kept bool) (line, tone
 		return "nothing could be installed. " + problem, "bad", true
 	case "checking":
 		return "Checking the head of " + branch + " now.", "muted", false
-	case "off":
-		return "Not checked at this start: SF_AGENTS_INSTALL is manual, so the engine made no network call for it; install-agents checks and updates it.", "muted", false
 	}
 	return "Not checked yet at this start.", "muted", false
 }

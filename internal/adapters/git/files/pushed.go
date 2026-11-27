@@ -27,7 +27,7 @@ func (Reader) Pushed(ctx context.Context, repoPath, base, head string, reviewed 
 			return out, err
 		}
 		if len(commits) > maxScanCommits {
-			commits, out.Complete = commits[:maxScanCommits], false
+			commits, out.Complete, out.CommitsCut = commits[:maxScanCommits], false, true
 		}
 		hc, err := r.commit(head)
 		if err != nil {

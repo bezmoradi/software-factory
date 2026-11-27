@@ -37,6 +37,7 @@ type AccessRisk struct {
 	Label   string
 	Says    []string
 	Accept  string
+	Off     string
 }
 
 var riskLabels = map[string]string{RiskLow: "Low risk", RiskMedium: "Medium risk", RiskHigh: "High risk"}

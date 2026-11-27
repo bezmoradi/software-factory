@@ -1,4 +1,4 @@
-import { el, emit, named, unspoofed } from '../lib/dom.ts'
+import { el, emit, fragment, named, unspoofed } from '../lib/dom.ts'
 import { checkbox } from '../lib/controls.ts'
 import { langForInfo } from '../lib/highlight.ts'
 import { codeBlock, type CodeOptions } from './code-block.ts'
@@ -371,7 +371,7 @@ function list(parent: HTMLElement, lines: string[], i: number, o: Paint): number
       for (const p of [...li.children])
         if (p.tagName === 'P') {
           if (p.previousSibling) p.before('\n')
-          p.replaceWith(...p.childNodes)
+          p.replaceWith(fragment([...p.childNodes]))
         }
     if (task) {
       const box = checkbox({ checked: task[1] !== ' ' })
@@ -547,7 +547,7 @@ function paint(node: HTMLElement, text: string, o: Paint) {
     same++
   }
   for (const n of old.slice(same)) n.remove()
-  node.append(...fresh.slice(same).map(upgraded))
+  node.append(fragment(fresh.slice(same).map(upgraded)))
 }
 
 class SfMarkdown extends HTMLElement {

@@ -209,8 +209,8 @@ class SfAgentReport extends HTMLElement {
     li.append(' ', ...tipTag(label, tone, tip))
     if (!p.commit) li.append(el('p', 'small bad', `No ${visible(p.name)} is installed: reviews can't start, so every push needs your Allow with a reason.`))
     const unused = `reviews can't start, so every push needs your Allow with a reason, and new sessions start without ${visible(p.name)}`
-    if (p.commit && p.refusedWhy) li.append(el('p', 'small bad', `Commit ${visible(short(p.commit))} doesn't pass this engine's install checks, so it isn't used: ${unused}. ${visible(p.refusedWhy)} At each start the engine installs the head of ${visible(p.branch)} if it passes them; with SF_AGENTS_INSTALL=manual, run install-agents once it does.`))
-    else if (p.commit && p.refused) li.append(el('p', 'small bad', `This engine's list of refused ${visible(p.name)} commits names ${visible(short(p.commit))}, so it isn't used: ${unused}. At each start the engine installs the head of ${visible(p.branch)} if it isn't refused; with SF_AGENTS_INSTALL=manual, run install-agents once it isn't.`))
+    if (p.commit && p.refusedWhy) li.append(el('p', 'small bad', `Commit ${visible(short(p.commit))} doesn't pass this engine's install checks, so it isn't used: ${unused}. ${visible(p.refusedWhy)} At each start the engine installs the head of ${visible(p.branch)} if it passes them.`))
+    else if (p.commit && p.refused) li.append(el('p', 'small bad', `This engine's list of refused ${visible(p.name)} commits names ${visible(short(p.commit))}, so it isn't used: ${unused}. At each start the engine installs the head of ${visible(p.branch)} if it isn't refused.`))
     return li
   }
 

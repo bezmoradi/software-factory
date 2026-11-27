@@ -152,6 +152,7 @@ type FollowView struct {
 	IssueSent  bool
 	Sent       time.Time
 	Done       bool
+	OpenOff    string
 }
 
 type PullsPage interface {
@@ -809,6 +810,9 @@ func (fl *Follows) viewLocked(x *follow, auto bool) *FollowView {
 	s := x.saved
 	v := &FollowView{Number: s.Number, URL: s.URL, Opened: s.Opened, Rounds: s.Rounds, AutoStop: s.AutoStop, Polled: x.polled, Note: x.note, Issue: s.Issue,
 		IssueSent: s.IssueSent, Sent: x.sent, Auto: auto}
+	if s.Pushed.IsZero() {
+		v.OpenOff = saidPushFirst
+	}
 	switch {
 	case s.Done != "":
 		v.State, v.Done = s.Done, true

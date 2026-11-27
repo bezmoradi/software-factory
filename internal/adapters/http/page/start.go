@@ -70,6 +70,7 @@ type projectJSON struct {
 	AutoFindings bool           `json:"autoFindings"`
 	PRComment    bool           `json:"prComment"`
 	Hold         holdJSON       `json:"hold"`
+	RemoveOff    string         `json:"removeOff,omitempty"`
 }
 
 func (s *Server) projects(w http.ResponseWriter) {
@@ -93,7 +94,8 @@ func (s *Server) projects(w http.ResponseWriter) {
 	}
 	projects := make([]projectJSON, 0, len(list))
 	for _, r := range list {
-		p := projectJSON{Path: r.Path, Name: r.Name, URL: r.URL, Branch: r.Branch, AddedAt: millis(r.AddedAt), Agents: []string{}, Rounds: session.DefaultRounds, RoundsMax: session.RoundsMax, Instructions: []string{}, Types: typesJSON(workflow.Builtin)}
+		p := projectJSON{Path: r.Path, Name: r.Name, URL: r.URL, Branch: r.Branch, AddedAt: millis(r.AddedAt), Agents: []string{}, Rounds: session.DefaultRounds, RoundsMax: session.RoundsMax, Instructions: []string{}, Types: typesJSON(workflow.Builtin),
+			RemoveOff: s.cfg.Repos.RemoveOff(r.Name, r.URL)}
 		if s.cfg.Work != nil {
 			info := s.cfg.Work.Project(r.Name)
 			p.Rounds, p.Type, p.Instructions, p.PRComment = info.Rounds, info.Type, nonNil(info.Instructions), info.PRComment

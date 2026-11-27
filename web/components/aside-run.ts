@@ -2,6 +2,7 @@ import { busy, button, el, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { money } from './consent.ts'
 import './markdown.ts'
+import { offTip } from '../lib/tooltip.ts'
 import type { AsideRun } from '../types.ts'
 
 export interface AsideBox {
@@ -15,6 +16,8 @@ export interface AsideBox {
   run: AsideRun | null
   asking: boolean
   disabled: boolean
+  closed?: boolean
+  off?: string
   stale: string
   press: () => void
 }
@@ -32,7 +35,8 @@ export function asideBox(o: AsideBox): HTMLElement {
   const box = el('div', 'aside-run')
   const t = o.run
   const running = t?.state === 'running' || o.asking
-  const off = running || o.disabled
+  const why = running || o.disabled ? '' : o.off ?? ''
+  const off = running || o.disabled || !!why
   const b = button(running ? o.busy : o.start, 'small', () => {
     if (b.getAttribute('aria-disabled') === 'true') return
     o.press()
@@ -41,9 +45,10 @@ export function asideBox(o: AsideBox): HTMLElement {
   b.dataset.key = o.id
   b.setAttribute('aria-disabled', String(off))
   if (running) busy(b, true)
-  b.title = o.hint
+  if (!why) b.title = o.hint
   const head = el('div', 'row aside-run-head')
-  head.append(el('h4', 'label', o.title), el('span', 'spacer'), b)
+  head.append(el('h4', 'label', o.title))
+  if (!o.closed) head.append(el('span', 'spacer'), ...(why ? offTip(b, why) : [b]))
   box.append(head)
   if (!t) {
     box.append(el('p', 'small muted', o.intro))

@@ -114,6 +114,8 @@ type EgressView struct {
 	Base    []string
 	Deny    []string
 	Now     time.Time
+
+	GatewayOff string
 }
 
 type RefusalView struct {
@@ -444,14 +446,20 @@ func (a *Allowlist) HoldGateway() func() {
 
 func (a *Allowlist) EgressView() (EgressView, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	s := a.current()
 	v := EgressView{Saved: a.saved, Pending: a.pending, Lists: a.lists(), Base: slices.Clone(a.cfg.Base), Deny: slices.Clone(a.cfg.Deny), Now: a.cfg.Now(), Added: slices.Clone(s.Added)}
 	if s.Gateway.URL != "" {
 		g := s.Gateway
 		v.Gateway = &g
 	}
-	if a.broken {
+	broken, keys := a.broken, a.keys
+	a.mu.Unlock()
+	if v.Gateway != nil && keys != nil {
+		if err := gatewayRunning(append(keys.RunningOn(SideAgents), keys.RunningOn(SideReviewers)...)); err != nil {
+			v.GatewayOff = err.Message
+		}
+	}
+	if broken {
 		return v, conflict("state", "The engine couldn't read egress.json, so it uses the starting list from SF_ALLOW and SF_EXTRA_ALLOW and saves no change. Move the file out of the engine's state folder to start again.")
 	}
 	return v, nil
@@ -599,6 +607,13 @@ func (a *Allowlist) SetGateway(ctx context.Context, raw string) (bool, error) {
 	})
 }
 
+func gatewayRunning(running []string) *Error {
+	if len(running) == 0 {
+		return nil
+	}
+	return conflict("running", "Stop these sessions first: "+runningWords(running)+". They started with the old gateway setting, and Claude Code would send the next key you paste to the address they started with. Reviews finish by themselves; wait for them.")
+}
+
 func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	a.mu.Lock()
 	broken, was, keys := a.broken, a.current().Gateway, a.keys
@@ -613,8 +628,8 @@ func (a *Allowlist) gatewayMayChange(ctx context.Context, next Gateway) error {
 	if was.Host != next.Host {
 		running = append(keys.RunningOn(SideAgents), keys.RunningOn(SideReviewers)...)
 	}
-	if len(running) > 0 {
-		return conflict("running", "Stop these sessions first: "+runningWords(running)+". They started with the old gateway setting, and Claude Code would send the next key you paste to the address they started with. Reviews finish by themselves; wait for them.")
+	if err := gatewayRunning(running); err != nil {
+		return err
 	}
 	if next.Host == "" {
 		return nil

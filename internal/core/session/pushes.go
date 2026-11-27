@@ -188,6 +188,7 @@ type PushesConfig struct {
 	TurnBase       func(sid string) string
 	Branch         BranchWalker
 	Checks         func(sid string) []AgentCheck
+	Offers         PageOffers
 }
 
 type pushVerifyRef struct{ v PushVerify }
@@ -225,6 +226,7 @@ type heldPush struct {
 	findings bool
 	sent     time.Time
 	req      string
+	told     int
 }
 
 type Pushes struct {
@@ -312,7 +314,11 @@ func (p *Pushes) Request(ctx context.Context, sid string) push.Reply {
 		p.mu.Unlock()
 		why := "factory_push was called more than " + strconv.Itoa(PushCalls) + " times in " + strconv.Itoa(int(PushWindow/time.Minute)) + " minutes for this session; end your turn and let the person push from the page"
 		if first {
-			p.record(AuditEntry{Time: now, Session: sid, By: ByAgent, Result: string(gate.Refused), Reason: why, Req: shared.RequestOf(ctx)})
+			e := AuditEntry{Time: now, Session: sid, By: ByAgent, Result: string(gate.Refused), Reason: why, Req: shared.RequestOf(ctx)}
+			if t, ok := p.cfg.Targets(sid); ok {
+				e.Repository, e.Branch = t.Name, t.Branch
+			}
+			p.record(e)
 		}
 		return push.Reply{Decision: push.DecisionRefused, Reason: why}
 	}
@@ -741,6 +747,9 @@ func (p *Pushes) Push(ctx context.Context, sid string) error {
 	if _, ok := p.cfg.Targets(sid); !ok {
 		return notStartedHere(p.cfg.Doubled, sid, "Only a session this engine started can be pushed from here.")
 	}
+	if err := p.cfg.Offers.Push(ctx, sid); err != nil {
+		return err
+	}
 	if err := p.claim(sid); err != nil {
 		return err
 	}
@@ -972,6 +981,7 @@ type pushing struct {
 	refresh    bool
 	quiet      bool
 	checked    *PushChecked
+	blocked    int
 }
 
 func (x *pushing) clean(s string) string {
@@ -1023,7 +1033,11 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 		p.mu.Unlock()
 		return kept("card")
 	}
-	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent}
+	h := &heldPush{card: old.card, commit: old.commit, branch: old.branch, remote: old.remote, missing: slices.Clone(missing), expires: old.expires, handoff: x.handoff, findings: x.findings, sent: old.sent, told: old.told}
+	tell := e.By == ByReviews && x.blocked > 0 && x.blocked != old.told
+	if tell {
+		h.told = x.blocked
+	}
 	p.held[x.sid] = h
 	v := PushView{Result: string(gate.Held), Reason: e.Reason, Commit: h.commit, Branch: h.branch, Remote: h.remote, Missing: boundItems(missing), At: e.Time, Passed: x.passed, Overridden: x.overridden, Unmet: slices.Clone(x.unmet),
 		Card: h.card, NeedsReason: len(missing) > 0, Expires: h.expires, Handoff: h.handoff, Findings: h.findings, FindingsSent: h.sent, Audit: p.views[x.sid].Audit, CheckedBy: x.checked.clone()}
@@ -1031,7 +1045,11 @@ func (x *pushing) refreshCard(result gate.Result, reason string, missing []strin
 	v.Checks = p.checksAt(x.sid, e.Time)
 	p.show(x.sid, v)
 	shared.Tagged(p.cfg.Logger, x.entry.Req).Info("push", "event", "card-refreshed", "missing", len(missing))
-	return push.Reply{Decision: push.DecisionHeld, Reason: e.Reason}
+	agent := x.agentReason(e.Reason, !h.sent.IsZero())
+	if tell {
+		p.cfg.Note(x.sid, x.said(gate.Held, agent, len(missing) > 0))
+	}
+	return push.Reply{Decision: push.DecisionHeld, Reason: agent}
 }
 
 func (x *pushing) end(result gate.Result, reason string, missing []string, person string) push.Reply {
@@ -1055,14 +1073,22 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	}
 	old := p.held[x.sid]
 	delete(p.held, x.sid)
+	sent := false
 	if result == gate.Held && e.Commit != "" && e.Remote != "" {
 		h := &heldPush{card: randomHex(16), commit: e.Commit, branch: e.Branch, remote: e.Remote, missing: slices.Clone(missing), expires: e.Time.Add(AllowFor), handoff: x.handoff, findings: x.findings, req: e.Req}
+		if e.By != ByPage {
+			h.told = x.blocked
+		}
 		if old != nil && old.commit == h.commit && old.branch == h.branch && old.remote == h.remote {
 			h.sent = old.sent
+			if e.By == ByPage {
+				h.told = old.told
+			}
 			if e.Time.Before(old.expires) {
 				h.card, h.expires = old.card, old.expires
 			}
 		}
+		sent = !h.sent.IsZero()
 		p.held[x.sid] = h
 		v.Card, v.NeedsReason, v.Expires, v.Handoff = h.card, len(missing) > 0, h.expires, h.handoff
 		v.Findings, v.FindingsSent = h.findings, h.sent
@@ -1075,8 +1101,9 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	v.Audit = &e
 	p.show(x.sid, v)
 	shared.Tagged(p.cfg.Logger, e.Req).Info("push", "event", string(result), "by", e.By)
-	said := x.said(result, reason, len(missing) > 0)
-	if result == gate.Held && e.By == ByReviews && (x.quiet || slices.ContainsFunc(missing, verifyItem)) {
+	agent := x.agentReason(reason, sent)
+	said := x.said(result, agent, len(missing) > 0)
+	if result == gate.Held && e.By == ByReviews && x.blocked == 0 && (x.quiet || slices.ContainsFunc(missing, verifyItem)) {
 		said = ""
 	}
 	if e.By == ByAgent {
@@ -1090,7 +1117,28 @@ func (x *pushing) end(result gate.Result, reason string, missing []string, perso
 	if decision == "" {
 		decision = push.DecisionRefused
 	}
-	return push.Reply{Decision: decision, Reason: reason}
+	return push.Reply{Decision: decision, Reason: agent}
+}
+
+func (x *pushing) agentReason(reason string, sent bool) string {
+	if say := blockedSay(x.blocked, x.entry.Commit, x.findings, sent); say != "" {
+		return say + "; " + reason
+	}
+	return reason
+}
+
+func blockedSay(n int, commit string, findings, sent bool) string {
+	if n <= 0 {
+		return ""
+	}
+	said := countOf(n, "reviewer", "reviewers") + " blocked commit " + shortSHA7(commit)
+	switch {
+	case sent:
+		return said + "; Software Factory already sent you the findings in a message"
+	case findings:
+		return said + "; the findings aren't in this container and reach you only in a message from Software Factory, sent with Send findings on the push card"
+	}
+	return said + "; the person reads the findings on the page"
 }
 
 func (x *pushing) said(result gate.Result, reason string, missing bool) string {
@@ -1276,7 +1324,8 @@ func (p *Pushes) decide(ctx context.Context, sid, by string, answer *gate.Answer
 		p.announcePushed(x, t, facts, len(d.Missing))
 		return out, d
 	case d.Result == gate.Held:
-		x.findings = !x.handoff && p.hasFindings(ctx, sid, t, head)
+		blocked, findings := p.blockedAt(ctx, sid, t, head)
+		x.blocked, x.findings = blocked, !x.handoff && findings
 		x.unmet = d.Unmet
 		return x.end(gate.Held, note+p.afterReviews(ctx, by, sid, t, head)+d.Reason, d.Missing, ""), d
 	case d.Result == gate.Denied:

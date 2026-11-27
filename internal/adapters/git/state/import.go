@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -205,6 +206,7 @@ func unpack(r io.Reader, in string) (session.ImportReport, error) {
 		report.LeftOut = append(report.LeftOut, text(l.Name)+": "+text(l.Why)+" (left out by the exporting engine)")
 	}
 	seen := map[string]bool{}
+	approved := 0
 	for n := 0; ; n++ {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -218,6 +220,15 @@ func unpack(r io.Reader, in string) (session.ImportReport, error) {
 		}
 		if h.Typeflag != tar.TypeReg {
 			return report, errors.New("it holds something other than plain files")
+		}
+		if inner, ok := strings.CutPrefix(h.Name, ApprovedFolder+"/"); ok {
+			if !approvedEntry(inner) || seen[h.Name] || approved >= maxSessions {
+				return report, errors.New("it holds a file name an export doesn't use")
+			}
+			seen[h.Name] = true
+			approved++
+			n--
+			continue
 		}
 		name, nested, ok := cleanEntryName(h.Name)
 		if !ok || seen[h.Name] {
@@ -246,7 +257,15 @@ func unpack(r io.Reader, in string) (session.ImportReport, error) {
 			return report, err
 		}
 	}
+	if approved > 0 {
+		report.LeftOut = append(report.LeftOut, plural(approved, "approved-text file")+" under "+ApprovedFolder+"/: the engine's copies of what the person approved in the exported sessions, which come back as history only, with no approval to count them for")
+	}
 	return report, nil
+}
+
+func approvedEntry(name string) bool {
+	sid, ok := strings.CutSuffix(name, approvedSuffix)
+	return ok && sessionID.MatchString(sid)
 }
 
 func place(dir, name string, r io.Reader, size int64) error {

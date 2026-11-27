@@ -1,4 +1,5 @@
 import type { EngineAnswer } from '../api.ts'
+import { offTip } from '../lib/tooltip.ts'
 import { actionButton, around, busy, button, el, focusedKey, refocus, statusLine, visible, whileBusy } from '../lib/dom.ts'
 import { modal } from '../lib/dialog.ts'
 import { dialogDocs } from '../lib/dialog-docs.ts'
@@ -99,12 +100,13 @@ export function openWorkspace(post: Post, labelOf: (sid: string) => string, dele
       head.append(el('span', 'small', size))
       li.append(head)
       const acts = el('div', 'row')
-      const del = button('Delete session', 'ghost small', () => void whileBusy(del, () => remove(r)), 'button', `delete:${r.sid}`)
+      const del = button('Delete session', 'ghost small', () => {
+        if (del.getAttribute('aria-disabled') !== 'true') void whileBusy(del, () => remove(r))
+      }, 'button', `delete:${r.sid}`)
       del.setAttribute('aria-label', `Delete the session ${visible(name)} and its worktree`)
-      if (!r.deletable) del.disabled = true
-      else if (deleting.has(r.sid)) busy(del, true)
-      acts.append(del)
-      if (!r.deletable && r.why) acts.append(el('span', 'small muted', visible(r.why)))
+      if (r.deletable && deleting.has(r.sid)) busy(del, true)
+      acts.append(...(r.deletable ? [del] : offTip(del, visible(r.why))))
+      if (!r.deletable && !r.why) del.setAttribute('aria-disabled', 'true')
       li.append(acts)
       list.append(li)
     }

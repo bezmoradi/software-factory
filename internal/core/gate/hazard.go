@@ -13,6 +13,8 @@ const (
 	downloader = `(?:curl|wget|fetch|aria2c|irm|iwr|invoke-webrequest|invoke-restmethod)`
 	runner     = `(?:sh|bash|zsh|dash|ksh|ash|fish|python[\d.]*|node|perl|ruby|php|iex|invoke-expression)`
 	lead       = `(?:(?:sudo|doas|env|command|exec|nohup)(?:[` + space + `]+-\S+)*[` + space + `]+)*`
+	wordEnd    = `(?:[` + space + `;&|()<>'"` + "`" + `,\]}\\]|$)`
+	claudeWord = `(?:^|[` + space + `;&|()'"` + "`" + `={\[,/\\])claude(?:-code/|(?:-code)?(?:@[^` + space + `/;&|()<>'"` + "`" + `,\]}\\]*)?(?:\.[cm]?js)?` + wordEnd + `)`
 )
 
 var (
@@ -36,8 +38,8 @@ var (
 	stdinRunners     = set("iex", "invoke-expression")
 	downloadPipe     = regexp.MustCompile(`(?i)\b` + downloader + `\b(?s:.)*?\|&?[` + space + `]*` + lead + runner + `\b`)
 	downloadRuns     = regexp.MustCompile(`(?i)\b(?:` + runner + `|eval|source)\b[^\n;|&]*?(?:<\(|\$\(|` + "`" + `)[` + space + `]*` + lead + downloader + `\b|(?:^|[` + space + `;&|])\.[` + space + `]+<\([` + space + `]*` + downloader + `\b`)
-	looseCloud       = regexp.MustCompile(`(?i)\bclaude\b(?s:.)*?(?:--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b|\bultrareview\b(?s:.)*?--post\b)`)
-	looseUndone      = regexp.MustCompile(`(?i)\brm\b[^\n;&|]*[` + space + `]-(?:-recursive|[a-z]*r)|\bgit\b(?s:.)*?\breset\b(?s:.)*?--hard|\bgit\b(?s:.)*?\bclean\b(?s:.)*?[` + space + `]-(?:-force|[a-z]*f)|\bfind\b(?s:.)*?[` + space + `]-delete\b|\b(?:terraform|tofu|terragrunt)\b(?s:.)*?\bdestroy\b|\b(?:kubectl|oc)\b(?s:.)*?\bdelete\b|\b(?:drop|truncate|dropdb)\b|\bclaude\b`)
+	looseCloud       = regexp.MustCompile(`(?i)` + claudeWord + `(?:(?:(?s:.)*?[` + space + `'"])?(?:--(?:remote|cloud|teleport|remote-control|rc)(?:=|` + wordEnd + `)|/?(?:remote-control|rc)` + wordEnd + `)|(?s:.)*?\bultrareview\b(?s:.)*?--post\b)`)
+	looseUndone      = regexp.MustCompile(`(?i)\brm\b[^\n;&|]*[` + space + `]-(?:-recursive|[a-z]*r)|\bgit\b(?s:.)*?\breset\b(?s:.)*?--hard|\bgit\b(?s:.)*?\bclean\b(?s:.)*?[` + space + `]-(?:-force|[a-z]*f)|\bfind\b(?s:.)*?[` + space + `]-delete\b|\b(?:terraform|tofu|terragrunt)\b(?s:.)*?\bdestroy\b|\b(?:kubectl|oc)\b(?s:.)*?\bdelete\b|\b(?:drop|truncate|dropdb)\b|` + claudeWord)
 )
 
 type hazardScan struct {

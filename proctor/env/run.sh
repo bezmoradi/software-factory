@@ -5,6 +5,8 @@ umask 077
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 state=${PROCTOR_SF_STATE:-/tmp/sf-proctor}
+authoritative=${PROCTOR_SF_AUTHORITATIVE:-0}
+checkout=${PROCTOR_SF_CHECKOUT:-$repo}
 
 say() { printf 'sf-proctor: %s\n' "$*" >&2; }
 
@@ -20,9 +22,34 @@ while [ "$n" -gt 0 ]; do
 			say "$a is set by this script; the report is $state/report.json"
 			exit 2
 			;;
+		--authoritative | --authoritative=*)
+			say "set PROCTOR_SF_AUTHORITATIVE=1 instead of $a, so up.sh starts the loaded images rather than building its own"
+			exit 2
+			;;
 		*) set -- "$@" "$a" ;;
 	esac
 done
+
+case "$authoritative" in
+	0) ;;
+	1) set -- --authoritative "$@" ;;
+	*)
+		say "PROCTOR_SF_AUTHORITATIVE must be 0 or 1, got $authoritative"
+		exit 2
+		;;
+esac
+case "$checkout" in
+	/*) ;;
+	*)
+		say "PROCTOR_SF_CHECKOUT must be an absolute path, got $checkout"
+		exit 2
+		;;
+esac
+[ -d "$checkout" ] || {
+	say "PROCTOR_SF_CHECKOUT isn't a folder: $checkout"
+	exit 2
+}
+export PROCTOR_SF_CHECKOUT="$checkout"
 
 if [ -n "${PROCTOR:-}" ]; then
 	[ -f "$PROCTOR" ] && [ -x "$PROCTOR" ] || {
@@ -38,7 +65,7 @@ else
 fi
 say "Proctor $("$proctor_bin" version 2>/dev/null || echo unknown) at $proctor_bin"
 
-needed="app_logs app_logs.logfmt approved_logs docker exe09.related_guard exe09.waivers_guard_nothing exe11.fact_paths http.body_base64 http.body_fill http.destructive http.reads http.shows http.stream matchers.differs matchers.excludes matchers.matches matchers.matches_numbers matchers.overflow policy_from relations report.always step.timeout tables.covers time14.accumulates transcripts waive.rows"
+needed="app_logs app_logs.logfmt approved_logs cleanup docker exe09.related_guard exe09.waivers_guard_nothing exe11.fact_paths http.body_base64 http.body_fill http.destructive http.reads http.shows http.stream matchers.differs matchers.excludes matchers.matches matchers.matches_numbers matchers.overflow policy_from relations report.always step.timeout tables.covers time14.accumulates transcripts waive.rows"
 if ! features=$("$proctor_bin" version --features 2>/dev/null); then
 	say "this Proctor build can't list its features (proctor version --features), so it is older than the specifications need; set PROCTOR to a newer build, one with the features $needed (.claude/rules/proctor.md)"
 	exit 2
@@ -55,7 +82,7 @@ fi
 sh "$here/routes.sh"
 
 set +e
-checked=$(cd "$repo" && "$proctor_bin" validate -r . 2>&1)
+checked=$(cd "$checkout" && "$proctor_bin" validate -r . 2>&1)
 code=$?
 set -e
 if [ "$code" -ne 0 ]; then
@@ -84,7 +111,7 @@ set +e
 	set -a
 	. "$state/proctor.env"
 	set +a
-	cd "$repo"
+	cd "$checkout"
 	exec "$proctor_bin" run -r . -b "$state/binding.yaml" --report "$state/report.json" "$@"
 )
 code=$?

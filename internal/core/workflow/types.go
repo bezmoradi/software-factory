@@ -14,10 +14,10 @@ const (
 	Plan      Step = "plan"
 	Implement Step = "implement"
 	Review    Step = "review"
-	Deliver   Step = "deliver"
+	Push      Step = "push"
 )
 
-var StepOrder = []Step{Define, Plan, Implement, Review, Deliver}
+var StepOrder = []Step{Define, Plan, Implement, Review, Push}
 
 type Edits string
 
@@ -69,11 +69,11 @@ type WorkType struct {
 	Builtin bool
 }
 
-var codeChange = WorkType{ID: DefaultType, Name: "Code change", Steps: []Step{Define, Plan, Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true}
+var codeChange = WorkType{ID: DefaultType, Name: "Code change", Steps: []Step{Define, Plan, Implement, Review, Push}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true}
 
 var Builtin = []WorkType{
 	codeChange,
-	{ID: IncidentType, Name: "Incident", Steps: []Step{Implement, Review, Deliver}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
+	{ID: IncidentType, Name: "Incident", Steps: []Step{Implement, Review, Push}, Edits: AnyEdits, Push: true, Roles: []review.Role{review.BugHunter, review.Simplicity}, Builtin: true},
 	{ID: "explore", Name: "Explore", Steps: []Step{Implement}, Edits: AnyEdits, Roles: []review.Role{}, Builtin: true},
 }
 
@@ -146,7 +146,7 @@ func TypeProblems(t WorkType) []string {
 		say("a plan needs an implement step after it")
 	}
 	if t.Push {
-		for _, s := range []Step{Implement, Review, Deliver} {
+		for _, s := range []Step{Implement, Review, Push} {
 			if !seen[s] {
 				article := "a"
 				if s == Implement {
@@ -164,8 +164,8 @@ func TypeProblems(t WorkType) []string {
 			say("a work type that changes no file can't push")
 		}
 	} else {
-		if seen[Deliver] {
-			say("deliver needs a work type that pushes")
+		if seen[Push] {
+			say("a push step needs a work type that pushes")
 		}
 		if t.Edits == AnyEdits && (seen[Define] || seen[Plan] || seen[Review]) {
 			say("a work type that changes files and doesn't push has only an implement step, as Explore does")

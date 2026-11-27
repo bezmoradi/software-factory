@@ -158,15 +158,28 @@ func autoRuns(entries map[review.Key]ReviewEntry, branch string) int {
 	return n
 }
 
-func (p *Pushes) hasFindings(ctx context.Context, sid string, t PushTarget, head string) bool {
+func (p *Pushes) blockedAt(ctx context.Context, sid string, t PushTarget, head string) (int, bool) {
 	if p.cfg.Reviews == nil {
-		return false
+		return 0, false
 	}
 	entries, err := p.cfg.Reviews.Entries()
 	if err != nil {
-		return false
+		return 0, false
 	}
-	return len(blockingRoles(entries, t.Branch, head, p.requiredAgents(ctx, sid, t, head), nil)) > 0
+	agents := p.requiredAgents(ctx, sid, t, head)
+	return blockedReviewers(entries, t.Branch, head, agents), len(blockingRoles(entries, t.Branch, head, agents, nil)) > 0
+}
+
+func blockedReviewers(entries map[review.Key]ReviewEntry, branch, commit string, agents []string) int {
+	n := 0
+	for _, agent := range slices.Compact(slices.Sorted(slices.Values(agents))) {
+		if slices.ContainsFunc(runsOf(entries, review.Key{Commit: commit, Branch: branch, Agent: agent}), func(e ReviewEntry) bool {
+			return e.Record.State == review.Block && e.Record.Override == "" && !e.Record.Advisory
+		}) {
+			n++
+		}
+	}
+	return n
 }
 
 func (p *Pushes) SendFindings(ctx context.Context, sid, card, commit string) error {

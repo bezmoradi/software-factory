@@ -14,12 +14,42 @@ export interface ModalOptions {
   single?: string
   docs: string | false
   searchOnly?: boolean
+  expand?: boolean
 }
 
 export interface Modal {
   dialog: HTMLDialogElement
   close(): void
   onClose(fn: () => void): void
+}
+
+function sized(d: HTMLDialogElement, onClose: (fn: () => void) => void): HTMLButtonElement {
+  const b = button('', 'dialog-expand')
+  const mark = el('sf-icon', 'icon')
+  b.setAttribute('aria-label', 'Expand')
+  const paint = (on: boolean) => {
+    d.classList.toggle('expanded', on)
+    b.setAttribute('aria-pressed', String(on))
+    b.title = on ? 'Restore' : 'Expand'
+    mark.setAttribute('name', on ? 'collapse' : 'expand')
+  }
+  const fit = () => {
+    if (d.classList.contains('expanded')) return
+    const root = document.documentElement
+    const rem = parseFloat(getComputedStyle(root).fontSize)
+    b.hidden = d.getBoundingClientRect().width >= root.clientWidth - 3 * rem
+  }
+  b.append(mark)
+  b.addEventListener('click', () => paint(!d.classList.contains('expanded')))
+  paint(false)
+  const watch = new ResizeObserver(fit)
+  watch.observe(d)
+  addEventListener('resize', fit)
+  onClose(() => {
+    watch.disconnect()
+    removeEventListener('resize', fit)
+  })
+  return b
 }
 
 const singles = new Map<string, { modal: Modal; focus: () => void }>()
@@ -76,7 +106,9 @@ export function modal(o: ModalOptions): Modal {
   }
   if (o.focus === 'heading') heading.tabIndex = -1
   const docs = o.docs === false ? undefined : docsLink({ doc: o.docs, open: () => handle.close() })
-  const head = pageHead({ title: heading, ...(docs ? { action: docs } : {}) })[0]!
+  const tools = [docs, o.expand ? sized(d, handle.onClose) : undefined].filter(t => t !== undefined)
+  const head = pageHead({ title: heading })[0]!
+  head.append(...tools)
   d.append(head, ...(o.body ?? []))
   if (o.lead?.length || o.actions?.length) d.append(actions(o.actions ?? [], o.lead ?? []))
   d.addEventListener('cancel', e => {
@@ -111,13 +143,14 @@ export function modal(o: ModalOptions): Modal {
   return handle
 }
 
-export function confirmDialog(title: string, docs: string, parts: Node[], yes: string, tone: 'primary' | 'danger', no = 'Cancel'): Promise<boolean> {
+export function confirmDialog(title: string, docs: string, parts: Node[], yes: string, tone: 'primary' | 'danger', no = 'Cancel', expand = false): Promise<boolean> {
   return new Promise(resolve => {
     let answer = false
     const m = modal({
       kind: '',
       title,
       docs,
+      expand,
       body: parts,
       actions: [
         button(no, 'ghost small', () => m.close()),

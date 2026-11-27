@@ -1,6 +1,7 @@
-import { button, el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
+import { el, replaceKeeping, unspoofed, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
+import { flowCard } from './flow-card.ts'
 import { openFlow, type FlowDialog, type FlowModel } from './push-flow.ts'
 import type { CheckedLine, PushCheckedBy, PushCheckedReviewer, PushCheckedRun, SessionPush } from '../types.ts'
 import { emptyState } from '../lib/page.ts'
@@ -58,15 +59,14 @@ class SfPushChecked extends HTMLElement {
   #title = el('h3', 'small push-checked-title', 'How this change was checked')
   #model: FlowModel | null = null
   #shown: FlowDialog | null = null
-  #open = button('Open diagram', 'small', () => this.#show(), 'button', 'push-checked-diagram')
+  #open = flowCard('push-checked-diagram', () => this.#show())
   #diagram = el('div', 'push-checked-diagram')
 
   constructor() {
     super()
     this.#title.id = `push-checked-title-${++made}`
     this.#box.setAttribute('aria-labelledby', this.#title.id)
-    this.#open.title = "Opens the reviews, verification runs and gate's decision of this commit as a diagram"
-    this.#diagram.append(this.#open)
+    this.#diagram.append(this.#open.button)
   }
 
   connectedCallback() {
@@ -84,6 +84,7 @@ class SfPushChecked extends HTMLElement {
     this.hidden = !p
     const checked = p ? checkedOf(p.checkedBy) : null
     this.#model = p?.flow ?? null
+    if (this.#model) this.#open.show(this.#model)
     if (this.#shown && this.#model) this.#shown.diagram.model = this.#model
     else this.#shown?.modal.close()
     const key = JSON.stringify(p)
@@ -99,7 +100,7 @@ class SfPushChecked extends HTMLElement {
 
   #show() {
     if (!this.#model || this.#shown) return
-    const shown = openFlow('How this change was checked', this.#model)
+    const shown = openFlow('How this change was checked', 'How the reviewers checked this commit, and what the engine decided about pushing it.', this.#model)
     this.#shown = shown
     shown.modal.onClose(() => {
       if (this.#shown === shown) this.#shown = null
@@ -108,7 +109,7 @@ class SfPushChecked extends HTMLElement {
 
   #facts(p: SessionPush, checked: PushCheckedBy | null, decision: string): Node[] {
     const commit = p.commit ? ` of commit ${shortSha(p.commit)}` : ''
-    const parts: Node[] = [this.#title, el('p', 'small muted', `From the engine's own records${commit}: the reviews, the verification runs and the gate's decision. Nothing the agent reported about itself is here.`), this.#diagram]
+    const parts: Node[] = [this.#title, el('p', 'small muted', `From the engine's own records${commit}: the reviews, the verification runs and the gate's decision. Nothing the agent reported about itself is here.`), ...(this.#model ? [this.#diagram] : [])]
     if (!checked) parts.push(el('p', 'small muted', 'The engine decided this card before it looked at the reviews, so no reviewer is listed.'))
     else {
       if (checked.unreadable) parts.push(el('p', 'small warn', "The engine couldn't read its review records, so this list may be incomplete."))

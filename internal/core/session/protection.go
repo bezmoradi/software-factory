@@ -73,6 +73,7 @@ type ProjectFactsView struct {
 type ProjectFactsPage interface {
 	ProjectFacts(ctx context.Context, repo string) (ProjectFactsView, error)
 	Lookups(repo string) (bool, error)
+	LookupsOff(repo string) string
 	SetLookups(repo string, on bool) (bool, error)
 }
 
@@ -224,6 +225,17 @@ func (f *ProjectFacts) Lookups(repo string) (bool, error) {
 	return f.on[repo], nil
 }
 
+const saidLookupsFull = "The package lookup is on for too many projects."
+
+func (f *ProjectFacts) LookupsOff(repo string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.on[repo] || len(f.on) < MaxLookupProjects {
+		return ""
+	}
+	return saidLookupsFull
+}
+
 func (f *ProjectFacts) SetLookups(repo string, on bool) (bool, error) {
 	if f.cfg.Repos == nil || f.cfg.Lookups == nil {
 		return false, conflict("not-yet", "This engine keeps no project settings.")
@@ -248,7 +260,7 @@ func (f *ProjectFacts) SetLookups(repo string, on bool) (bool, error) {
 		delete(next, repo)
 	}
 	if len(next) > MaxLookupProjects {
-		return false, conflict("full", "The package lookup is on for too many projects.")
+		return false, conflict("full", saidLookupsFull)
 	}
 	if err := f.cfg.Lookups.Save(LookupState{Projects: next, Removed: slices.Clone(f.removed)}); err != nil {
 		return false, conflict("records", "The engine couldn't save the package lookup setting.")

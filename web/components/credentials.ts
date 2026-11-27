@@ -55,6 +55,7 @@ export interface PresetRow {
   auto: boolean
   level: string
   label: string
+  off: string
 }
 
 interface CredentialsView {
@@ -79,7 +80,7 @@ export function presetsOf(v: unknown): PresetRow[] {
   return Array.isArray(v)
     ? v.map(record).map(p => ({
         id: text(p.id), name: text(p.name), kind: text(p.kind), what: text(p.what), scopeLabel: text(p.scopeLabel), expiresLabel: text(p.expiresLabel),
-        project: text(p.project), auto: p.auto === true, level: text(p.level), label: text(p.label),
+        project: text(p.project), auto: p.auto === true, level: text(p.level), label: text(p.label), off: text(p.off),
       })).filter(p => p.id)
     : []
 }

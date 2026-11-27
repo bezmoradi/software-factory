@@ -17,7 +17,7 @@ var foldList = map[string]foldCount{
 	"search": searched,
 }
 
-var foldKeys = []string{"fold", "unfold"}
+var foldKeys = []string{"fold", "unfold", "line"}
 
 func foldOf(kind string, ev Fields) Fields {
 	switch kind {
@@ -37,4 +37,18 @@ func foldOf(kind string, ev Fields) Fields {
 		}
 	}
 	return nil
+}
+
+func (r *Registry) worktreeOf(c *conn) string {
+	if a := r.admitted[c.sid]; a != nil && a.Cwd != "" {
+		return a.Cwd
+	}
+	return c.cwd
+}
+
+func (r *Registry) areaOf(c *conn) string {
+	if a := r.admitted[c.sid]; a != nil {
+		return SessionArea(a.Cwd, a.Box)
+	}
+	return ""
 }

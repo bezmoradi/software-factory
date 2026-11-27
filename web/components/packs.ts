@@ -4,6 +4,7 @@ import { actions, field, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { textbox, filePicker } from '../lib/controls.ts'
 import { toast, type Tone as ToastTone } from './toasts.ts'
+import { offTip } from '../lib/tooltip.ts'
 
 interface PackSource {
   kind: string
@@ -23,6 +24,7 @@ interface PackView {
   agents: string[]
   codeFiles: string[]
   usedBy: string[]
+  removeOff: string
 }
 
 interface PacksView {
@@ -64,7 +66,7 @@ function readPack(x: unknown): PackView | null {
   return {
     digest: p.digest, sessionDigest: typeof p.sessionDigest === 'string' ? p.sessionDigest : '', name: p.name, version: p.version,
     source: { kind: String(src.kind ?? ''), url: String(src.url ?? ''), commit: String(src.commit ?? '') },
-    roles: record(p.roles), steps: record(p.steps), documents: p.documents === true, agents: strings(p.agents), codeFiles: strings(p.codeFiles), usedBy: strings(p.usedBy),
+    roles: record(p.roles), steps: record(p.steps), documents: p.documents === true, agents: strings(p.agents), codeFiles: strings(p.codeFiles), usedBy: strings(p.usedBy), removeOff: typeof p.removeOff === 'string' ? p.removeOff : '',
   }
 }
 
@@ -255,7 +257,7 @@ class SfPacks extends HTMLElement {
     )
     const steps = Object.entries(p.steps).map(([step, cmd]) => `${visible(step)}: ${visible(cmd)}`)
     if (steps.length) box.append(el('p', 'muted', `Steps: ${steps.join(' · ')}`))
-    if (!p.documents) box.append(el('p', 'muted', 'It names no documents folder, so its sessions get Code change without Define and Plan: the engine can\'t approve requirements or a plan it can\'t read from a commit.'))
+    if (!p.documents) box.append(el('p', 'muted', 'It names no documents, so its sessions get Code change without Define and Plan: there are no requirements or plan for the engine to read and approve.'))
     return box
   }
 
@@ -319,9 +321,11 @@ class SfPacks extends HTMLElement {
           use.setAttribute('aria-label', `Use the pack ${visible(p.name)} ${visible(p.version)} for this project`)
           actions.append(use)
         }
-        const remove = this.#button('Remove', `remove:${p.digest}`, () => void this.#remove(p))
+        const remove: HTMLButtonElement = this.#button('Remove', `remove:${p.digest}`, () => {
+          if (remove.getAttribute('aria-disabled') !== 'true') void this.#remove(p)
+        })
         remove.setAttribute('aria-label', `Remove the pack ${visible(p.name)} ${visible(p.version)} from the engine`)
-        actions.append(remove)
+        actions.append(...offTip(remove, remove.disabled ? '' : visible(p.removeOff)))
         row.append(what, actions)
         li.append(row)
         list.append(li)

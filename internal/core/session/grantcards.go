@@ -111,6 +111,7 @@ type AccessView struct {
 	Actions      []ActionView
 	ActionGrants []ActionGrantView
 	Runs         []ActionRunView
+	ActionsOff   string
 }
 
 type AccessAsk struct {
@@ -547,6 +548,14 @@ func (g *Grants) AccessView(sid string) (AccessView, error) {
 	cards := g.cardsLocked(sid, t.Project)
 	broken := g.broken
 	v := AccessView{Cards: cards, Network: AccessNetworkNote, Now: now, Presets: g.presetViewsLocked(t.Project, true), ActionsOn: g.cfg.Actions.Store != nil, Actions: g.actionViewsLocked()}
+	if !t.Live {
+		v.ActionsOff = saidActionStopped
+		for i := range v.Presets {
+			if v.Presets[i].Scope == GrantSession {
+				v.Presets[i].Off = saidGrantStopped
+			}
+		}
+	}
 	v.ActionGrants, v.Runs = g.actionViewFor(t, now)
 	if !g.credsBroken {
 		for _, c := range g.creds {
@@ -644,8 +653,17 @@ func (g *Grants) CheckAccess(sid string, q AccessAsk) (AccessCard, error) {
 	if !ok {
 		return AccessCard{}, onField("credential", notFound("credential", "No credential of that name is saved."))
 	}
+	if !t.Live {
+		for i := range v.Risks {
+			if v.Risks[i].Scope == GrantSession {
+				v.Risks[i].Off = saidGrantStopped
+			}
+		}
+	}
 	return v, nil
 }
+
+const saidGrantStopped = "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project."
 
 type grantMaking struct {
 	host    string
@@ -689,7 +707,7 @@ func (g *Grants) makeGrant(ctx context.Context, t GrantTarget, m grantMaking) (G
 		return Grant{}, onField("expires", invalid("expires", "Choose 1 hour, 1 day, 1 week or until taken back."))
 	}
 	if m.scope == GrantSession && !t.Live {
-		return Grant{}, conflict("stopped", "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project.")
+		return Grant{}, conflict("stopped", saidGrantStopped)
 	}
 	now := g.cfg.Now()
 	gr := Grant{ID: newGrantID(), Scope: m.scope, Session: t.SID, Project: t.Project, Reason: m.reason, AskedBy: m.askedBy, Preset: m.preset, Made: now.Truncate(time.Second)}

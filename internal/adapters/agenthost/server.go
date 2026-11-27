@@ -79,6 +79,8 @@ type Server struct {
 	key      []byte
 	handMu   sync.Mutex
 	fwd      *forwards
+	outMu    sync.Mutex
+	outputs  map[string]*keptOutput
 }
 
 type commandJSON struct {
@@ -296,14 +298,19 @@ var routes = map[string]string{
 	"/v1/trust":            http.MethodPost,
 	"/v1/worktrees":        http.MethodPost,
 	"/v1/worktrees/remove": http.MethodPost,
+	helpersRoute:           http.MethodPost,
+	helpersRemoveRoute:     http.MethodPost,
+	helpersSweepRoute:      http.MethodPost,
 	identityRoute:          http.MethodPost,
 	allowRulesRoute:        http.MethodPost,
 	removeRuleRoute:        http.MethodPost,
 	homeRoute:              http.MethodPost,
 	reviewRunRoute:         http.MethodPost,
 	projectCommandRoute:    http.MethodPost,
+	commandOutputRoute:     http.MethodPost,
 	screenshotsRemoveRoute: http.MethodPost,
 	clearRoute:             http.MethodPost,
+	memoryRoute:            http.MethodPost,
 	handoverRoute:          http.MethodPost,
 }
 
@@ -428,6 +435,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.reviewRun(w, r)
 	case projectCommandRoute:
 		s.projectCommand(w, r)
+	case commandOutputRoute:
+		s.commandOutput(w, r)
 	case "/v1/sign-in":
 		var q signInJSON
 		if p := decode(w, r, &q); p != nil {
@@ -510,8 +519,45 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(w, http.StatusOK, worktreeRemoveReply{OK: true, SetAside: aside})
+	case helpersRoute:
+		var q helperJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		path, p := s.addHelper(r.Context(), q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, worktreeReply{Path: path})
+	case helpersRemoveRoute:
+		var q helperRemoveJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		if p := s.removeHelper(r.Context(), q); p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, map[string]bool{"ok": true})
+	case helpersSweepRoute:
+		var q sweepJSON
+		if p := decode(w, r, &q); p != nil {
+			refuse(w, p)
+			return
+		}
+		out, p := s.sweepHelpers(r.Context(), q)
+		if p != nil {
+			refuse(w, p)
+			return
+		}
+		send(w, http.StatusOK, out)
 	case clearRoute:
 		s.clear(w, r)
+	case memoryRoute:
+		s.memoryEvents(w, r)
 	case handoverRoute:
 		var q handoverJSON
 		if p := decodeWithin(w, r, &q, maxHandoverBody); p != nil {

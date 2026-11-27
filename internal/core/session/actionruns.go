@@ -480,7 +480,7 @@ func (g *Grants) StartAction(ctx context.Context, sid, id string, given map[stri
 		return "", err
 	}
 	if !t.Live {
-		return "", conflict("stopped", "Actions run for a running session. Wake it first.")
+		return "", conflict("stopped", saidActionStopped)
 	}
 	g.mu.Lock()
 	if g.actionsBroken {
@@ -568,12 +568,14 @@ func (g *Grants) runningLocked() int {
 	return len(g.liveRuns)
 }
 
+const saidActionStopped = "Actions run for a running session. Wake it first."
+
 func (g *Grants) startRun(ctx context.Context, t GrantTarget, a Action, argv []string, by, allowed, grant string) (ActionRun, error) {
 	if err := g.actionsOff(); err != nil {
 		return ActionRun{}, err
 	}
 	if !t.Live {
-		return ActionRun{}, conflict("stopped", "Actions run for a running session. Wake it first.")
+		return ActionRun{}, conflict("stopped", saidActionStopped)
 	}
 	if a.Files && t.Worktree == "" {
 		return ActionRun{}, conflict("worktree", "The engine doesn't know this session's worktree, so it runs no action with the session's files.")

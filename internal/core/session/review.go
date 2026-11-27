@@ -268,6 +268,7 @@ type Reviews struct {
 	changeTypes  TypeChanges
 
 	asides     map[string]AsideView
+	nothing    map[string]string
 	roleModels func(path string, role review.Role) ModelChoice
 	cited      CitedLookup
 	citedNow   map[review.Key]citedRun
@@ -398,6 +399,7 @@ func (r *Reviews) Forget(sid string) {
 	delete(r.views, sid)
 	delete(r.rebuilt, sid)
 	delete(r.approvals, sid)
+	delete(r.nothing, sid)
 	r.mu.Unlock()
 }
 

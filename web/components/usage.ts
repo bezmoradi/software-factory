@@ -23,9 +23,31 @@ export interface RateWindowView {
 export interface MeterSide {
   side: string
   sid: string
-  label: string
-  plan: string
   windows: RateWindowView[]
+}
+
+export interface AccountWindow {
+  kind: string
+  name: string
+  label: string
+  utilization: number
+  resetsAt: number
+  status: string
+  level: string
+  near: boolean
+  continued: boolean
+}
+
+export interface AccountUsage {
+  plan: string
+  windows: AccountWindow[]
+}
+
+interface WindowShown {
+  name: string
+  utilization: number
+  resetsAt: number
+  status: string
 }
 
 export interface Stuck {
@@ -73,6 +95,7 @@ export interface Pause {
 }
 
 export interface LimitsView {
+  usage: AccountUsage
   meter: MeterSide[]
   sessions: Map<string, SessionLimits>
   projects: Map<string, CapsValues>
@@ -82,7 +105,7 @@ export interface LimitsView {
 }
 
 const SID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
-const EMPTY: LimitsView = { meter: [], sessions: new Map(), projects: new Map(), expiry: [], paused: [], unread: false }
+const EMPTY: LimitsView = { usage: { plan: '', windows: [] }, meter: [], sessions: new Map(), projects: new Map(), expiry: [], paused: [], unread: false }
 
 let view: LimitsView = EMPTY
 let current = ''
@@ -105,13 +128,21 @@ export function limitsOf(raw: unknown): LimitsView | null {
     const s = rec(m)
     const sid = text(s.sid, 40)
     return {
-      side: text(s.side, 40), sid: SID.test(sid) ? sid : '', label: text(s.label), plan: text(s.plan, 40),
+      side: text(s.side, 40), sid: SID.test(sid) ? sid : '',
       windows: list(s.windows, 8).map((w): RateWindowView => {
         const x = rec(w)
         return { kind: text(x.kind, 60), name: text(x.name), short: text(x.short), utilization: num(x.utilization, 10), resetsAt: num(x.resetsAt, 1e15), status: text(x.status, 40), near: x.near === true, continued: x.continued === true }
       }),
     }
   })
+  const u = rec(r.usage)
+  const usage: AccountUsage = {
+    plan: text(u.plan, 60),
+    windows: list(u.windows, 8).map((w): AccountWindow => {
+      const x = rec(w)
+      return { kind: text(x.kind, 60), name: text(x.name), label: text(x.label), utilization: num(x.utilization, 10), resetsAt: num(x.resetsAt, 1e15), status: text(x.status, 40), level: text(x.level, 20), near: x.near === true, continued: x.continued === true }
+    }),
+  }
   const sessions = new Map<string, SessionLimits>()
   for (const item of list(r.sessions)) {
     const s = rec(item)
@@ -147,7 +178,7 @@ export function limitsOf(raw: unknown): LimitsView | null {
     const sid = text(p.sid, 40)
     return SID.test(sid) ? [{ sid, side: text(p.side, 40), kind: text(p.kind, 60), what: text(p.what, 20), at: num(p.at, 1e15) }] : []
   })
-  return { meter, sessions, projects, expiry, paused, unread: r.unread === true }
+  return { usage, meter, sessions, projects, expiry, paused, unread: r.unread === true }
 }
 
 export function setLimits(raw: unknown): void {
@@ -224,19 +255,19 @@ export function day(ms: number): string {
   return ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''
 }
 
-export function windowLine(w: RateWindowView): HTMLElement {
+export function windowLine(w: WindowShown, warn: boolean, name = w.name): HTMLElement {
   const row = el('div', 'usage-window')
   const share = Math.round(w.utilization * 100)
   const bar = el('meter')
   bar.min = 0
   bar.max = 100
-  bar.low = 75
-  bar.high = 90
+  bar.low = 90
+  bar.high = 100
   bar.optimum = 0
   bar.value = Math.min(share, 100)
   bar.setAttribute('aria-label', visible(w.name))
-  const label = el('span', 'usage-name', visible(w.name))
-  const value = el('span', w.near ? 'warn' : 'muted', `${share}% used${w.resetsAt ? ` · resets ${when(w.resetsAt)}` : ''}${w.status === 'rejected' ? ' · used up' : ''}`)
+  const label = el('span', 'usage-name', visible(name))
+  const value = el('span', warn ? 'warn' : 'muted', `${share}% used${w.resetsAt ? ` · resets ${when(w.resetsAt)}` : ''}${w.status === 'rejected' ? ' · used up' : ''}`)
   row.append(label, bar, value)
   return row
 }
@@ -252,7 +283,7 @@ class SfUsage extends HTMLElement {
 
   connectedCallback() {
     this.setAttribute('role', 'region')
-    this.setAttribute('aria-label', 'Usage limits')
+    this.setAttribute('aria-label', 'Claude usage limits')
     this.#stop = watchLimits(this)
     this.paint()
   }
@@ -263,35 +294,29 @@ class SfUsage extends HTMLElement {
 
   paint() {
     const focused = focusedKey(this)
-    const heads = new Map<string, string>()
     const parts: Node[] = []
-    for (const m of view.meter) {
-      if (m.sid) continue
-      const box = el('section', 'usage-side')
-      const head = el('h3', 'label', visible(m.label))
+    const u = view.usage
+    if (u.windows.length) {
+      const head = el('h2', 'label', 'Claude usage limits')
       head.tabIndex = -1
-      head.dataset.key = `side:${m.side}`
-      if (m.plan) head.append(el('span', 'muted small', ` · plan ${visible(m.plan)}`))
-      box.append(head)
-      for (const w of m.windows) {
-        box.append(windowLine(w))
-        heads.set(`continue:${m.side}:${w.kind}`, `side:${m.side}`)
+      head.dataset.key = 'usage-head'
+      parts.push(head, el('p', 'small muted', `${u.plan ? `${visible(u.plan)} plan. ` : ''}Shared by every session and reviewer signed in with this account.`))
+      for (const w of u.windows) {
+        parts.push(windowLine(w, w.level === 'warn90', w.label))
         if (w.near) {
           const ask = el('div', 'usage-ask small')
-          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actions([actionButton('Keep them running', 'ghost small', () => this.#continue(m.side, w.kind), 'button', `continue:${m.side}:${w.kind}`)]))
-          box.append(ask)
-        } else if (w.continued) box.append(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
+          ask.append(el('p', 'warn', 'Automatic reviews and automatic Send findings are paused near this limit. Your own messages and the Review button still work.'), actions([actionButton('Keep them running', 'ghost small', () => this.#continue('reviewers', w.kind), 'button', `continue:${w.kind}`)]))
+          parts.push(ask)
+        } else if (w.continued) parts.push(el('p', 'small muted', 'You chose to keep automatic work running until this limit resets.'))
       }
-      parts.push(box)
     }
     for (const e of view.expiry) if (e.what === 'sign-in') parts.push(el('p', 'notice warn small', expiryText(e)))
     if (view.unread) parts.push(el('p', 'notice warn small', "The engine couldn't read caps.json in its state folder, so it counts every session as at its cap: it refuses messages, starts no automatic review, and saves no change. Fix or remove the file, then restart the engine."))
     const shown = parts.length > 0 || !!this.#said.textContent
-    if (shown && view.meter.some(m => !m.sid)) parts.unshift(el('h2', 'label', 'Usage limits'))
     parts.push(this.#said)
     this.hidden = !shown
     replaceKeeping(this, parts)
-    refocus(this, focused, key => [heads.get(key) ?? ''])
+    refocus(this, focused, key => [key.startsWith('continue:') ? 'usage-head' : ''])
   }
 
   async #continue(side: string, kind: string) {

@@ -157,6 +157,7 @@ type PackView struct {
 	CodeFiles     []string
 	AddedAt       time.Time
 	UsedBy        []string
+	RemoveOff     string
 }
 
 type PacksView struct {
@@ -442,6 +443,22 @@ func (p *Packs) byPath(path string) (Repository, error) {
 	return r, nil
 }
 
+func (p *Packs) inUse(st PackState, listed []Repository, sp StoredPack) *Error {
+	var users []string
+	for _, l := range listed {
+		if choiceOf(st, l) == sp.Digest {
+			users = append(users, l.Name)
+		}
+	}
+	if len(users) > 0 {
+		return conflict("in use", clip("The pack "+sp.Name+" reviews "+strings.Join(users, ", ")+". Pick another pack for "+plural(len(users), "that project", "those projects")+" first.", maxOutput))
+	}
+	if p.sessionsUsing(sp.Digest) {
+		return conflict("in use", "A saved session runs the pack "+sp.Name+", and keeps it across Stop and Wake. Delete that session first.")
+	}
+	return nil
+}
+
 func packViewOf(sp StoredPack) PackView {
 	v := PackView{Digest: sp.Digest, SessionDigest: sp.SessionDigest, Name: sp.Name, Version: sp.Version, Source: sp.Source,
 		Roles: map[review.Role]string{}, Steps: map[workflow.Step]string{}, Documents: sp.Manifest.Documents != nil,
@@ -461,6 +478,9 @@ func (p *Packs) viewFor(r Repository, st PackState) PacksView {
 			if choiceOf(st, l) == sp.Digest {
 				pv.UsedBy = append(pv.UsedBy, l.Name)
 			}
+		}
+		if err := p.inUse(st, listed, sp); err != nil {
+			pv.RemoveOff = err.Message
 		}
 		v.Packs = append(v.Packs, pv)
 	}
@@ -710,17 +730,8 @@ func (p *Packs) RemovePack(path, digest string) (PacksView, error) {
 		if !ok {
 			return notFound("pack", "The engine keeps no pack with that digest.")
 		}
-		var users []string
-		for _, l := range listed {
-			if choiceOf(*st, l) == digest {
-				users = append(users, l.Name)
-			}
-		}
-		if len(users) > 0 {
-			return conflict("in use", clip("The pack "+sp.Name+" reviews "+strings.Join(users, ", ")+". Pick another pack for "+plural(len(users), "that project", "those projects")+" first.", maxOutput))
-		}
-		if p.sessionsUsing(digest) {
-			return conflict("in use", "A saved session runs the pack "+sp.Name+", and keeps it across Stop and Wake. Delete that session first.")
+		if err := p.inUse(*st, listed, sp); err != nil {
+			return err
 		}
 		if err := p.cfg.Files.Remove(digest); err != nil {
 			return conflict("files", "The engine couldn't remove the pack's files from the agents volume.")

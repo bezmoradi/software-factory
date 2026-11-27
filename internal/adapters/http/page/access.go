@@ -27,6 +27,7 @@ type accessRiskJSON struct {
 	Label   string   `json:"label"`
 	Says    []string `json:"says"`
 	Accept  string   `json:"accept,omitempty"`
+	Off     string   `json:"off,omitempty"`
 }
 
 type accessCardJSON struct {
@@ -64,7 +65,7 @@ func accessCardOf(c session.AccessCard) accessCardJSON {
 		if says == nil {
 			says = []string{}
 		}
-		out.Risks = append(out.Risks, accessRiskJSON{Scope: r.Scope, Expires: r.Expires, Level: r.Level, Label: r.Label, Says: says, Accept: r.Accept})
+		out.Risks = append(out.Risks, accessRiskJSON{Scope: r.Scope, Expires: r.Expires, Level: r.Level, Label: r.Label, Says: says, Accept: r.Accept, Off: r.Off})
 	}
 	return out
 }
@@ -124,6 +125,9 @@ func accessViewJSON(v session.AccessView) map[string]any {
 	}
 	if v.ActionsOn {
 		out["actions"], out["actionGrants"], out["runs"] = actionViewsJSON(v.Actions), actionGrantsJSON(v.ActionGrants), actionRunsJSON(v.Runs)
+		if v.ActionsOff != "" {
+			out["actionsOff"] = v.ActionsOff
+		}
 	}
 	return out
 }

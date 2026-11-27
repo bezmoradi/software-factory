@@ -43,6 +43,7 @@ FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git netcat-openbsd openssh-client rsync sshpass \
  && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory '/workspace/s/*' \
  && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh /opt/yarn-* \
  && userdel --remove node \
  && groupadd --gid 10000 sf \

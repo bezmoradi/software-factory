@@ -459,6 +459,13 @@ func AttachedNote(parts []Attachment, inline bool) string {
 	return strings.Join(notes, "\n\n")
 }
 
+func WithAttachedNote(text, note string) string {
+	if commandName(text) != "" {
+		return strings.TrimSpace(text + "\n\n" + note)
+	}
+	return strings.TrimSpace(note + "\n\n" + text)
+}
+
 func pronoun(n int, one, many string) string {
 	if n == 1 {
 		return one

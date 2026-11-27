@@ -67,6 +67,7 @@ class SfDocs extends HTMLElement {
   #known = new Set<string>()
   #current = -1
   #pinned = false
+  #focusWhenLoaded = false
   #scroller: HTMLElement | null = null
   #frame = 0
   #sized = new ResizeObserver(() => this.#mark(this.#current))
@@ -88,10 +89,19 @@ class SfDocs extends HTMLElement {
     const link = (e.target as Element).closest<HTMLAnchorElement>('a[data-section]')
     if (!link) return
     e.preventDefault()
-    const heading = this.show(link.dataset.section!)
+    this.reveal(link.dataset.section!)
+  }
+
+  #focusHeading(heading: HTMLElement | null) {
     if (!heading) return
     if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1
     heading.focus({ preventScroll: true })
+  }
+
+  #focusIdle(): boolean {
+    const a = document.activeElement
+    if (this.hidden || document.querySelector('dialog[open]')) return false
+    return !(a instanceof HTMLElement) || a === document.body || a.tabIndex < 0 || a.offsetParent === null || this.contains(a)
   }
 
   get loaded(): boolean {
@@ -133,7 +143,13 @@ class SfDocs extends HTMLElement {
     for (const part of this.querySelectorAll<HTMLElement>('.docs-section')) addPageLinks(part, view)
   }
 
-  show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null): HTMLElement | null {
+  reveal(id: string, back?: { view: string; label: string } | null) {
+    const heading = this.#show(id, back)
+    this.#focusWhenLoaded = !!id && !this.loaded
+    this.#focusHeading(heading)
+  }
+
+  #show(id: string, back: { view: string; label: string } | null = this.#want === id ? this.#back : null): HTMLElement | null {
     this.#want = id
     this.#back = back
     let index = id ? this.#entries.findIndex(e => e.id === id) : -1
@@ -273,8 +289,11 @@ class SfDocs extends HTMLElement {
     this.replaceChildren(body)
     this.#placeNav()
     requestAnimationFrame(() => {
-      if (this.#want) this.show(this.#want)
-      else this.#spy()
+      const focus = this.#focusWhenLoaded
+      this.#focusWhenLoaded = false
+      if (!this.#want) this.#spy()
+      else if (focus && this.#focusIdle()) this.#focusHeading(this.#show(this.#want))
+      else this.#show(this.#want)
     })
   }
 

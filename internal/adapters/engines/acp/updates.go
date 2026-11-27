@@ -15,12 +15,19 @@ type toolState struct {
 	status  string
 	input   json.RawMessage
 	version int
+	name    string
+	parent  string
 }
 
 var toolKinds = map[string]bool{
 	"read": true, "edit": true, "delete": true, "move": true, "search": true,
 	"execute": true, "think": true, "fetch": true, "switch_mode": true, "other": true,
 }
+
+const (
+	maxMetaField       = 200
+	maxBackgroundState = 40
+)
 
 var toolStatuses = map[string]bool{"pending": true, "in_progress": true, "completed": true, "failed": true}
 
@@ -142,6 +149,9 @@ func (c *Client) applyToolLocked(raw json.RawMessage, create bool) (agent.Tool, 
 	if status, ok := stringField(fields, "status"); ok && toolStatuses[status] {
 		st.status = status
 	}
+	if name, parent, ok := claudeMeta(fields["_meta"]); ok {
+		st.name, st.parent = name, parent
+	}
 	if input, ok := fields["rawInput"]; ok {
 		input = bytes.TrimSpace(input)
 		if len(input) > 0 && !bytes.Equal(input, []byte("null")) && !bytes.Equal(input, st.input) {
@@ -152,7 +162,9 @@ func (c *Client) applyToolLocked(raw json.RawMessage, create bool) (agent.Tool, 
 		}
 	}
 	c.evictToolsLocked(id)
-	return snapshot(st), toolText(fields["content"]), true
+	tool := snapshot(st)
+	tool.Background = backgroundMeta(fields["_meta"])
+	return tool, toolText(fields["content"]), true
 }
 
 func snapshot(st *toolState) agent.Tool {
@@ -163,7 +175,38 @@ func snapshot(st *toolState) agent.Tool {
 		Status: st.status,
 		Input:  append(json.RawMessage(nil), st.input...),
 		Whole:  st.input != nil,
+		Name:   st.name,
+		Parent: st.parent,
 	}
+}
+
+func claudeMeta(raw json.RawMessage) (string, string, bool) {
+	var m struct {
+		ClaudeCode struct {
+			ToolName        string `json:"toolName"`
+			ParentToolUseID string `json:"parentToolUseId"`
+		} `json:"claudeCode"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
+		return "", "", false
+	}
+	name, parent := m.ClaudeCode.ToolName, m.ClaudeCode.ParentToolUseID
+	if len(name) > maxMetaField || len(parent) > maxMetaField {
+		return "", "", false
+	}
+	return name, parent, name != "" || parent != ""
+}
+
+func backgroundMeta(raw json.RawMessage) string {
+	var m struct {
+		SoftwareFactory struct {
+			Background string `json:"background"`
+		} `json:"softwareFactory"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil || len(m.SoftwareFactory.Background) > maxBackgroundState {
+		return ""
+	}
+	return m.SoftwareFactory.Background
 }
 
 func (c *Client) trackToolLocked(id string) {

@@ -45,11 +45,21 @@ type commandRunJSON struct {
 	Tail     string   `json:"tail"`
 	Cut      bool     `json:"cut"`
 	Withheld bool     `json:"withheld"`
+	Full     bool     `json:"full"`
 	Reason   string   `json:"reason"`
 	Retry    bool     `json:"retry"`
 	Started  int64    `json:"started"`
 	Ended    int64    `json:"ended"`
 	Said     saidJSON `json:"said"`
+}
+
+type commandOutputJSON struct {
+	Kind   string `json:"kind"`
+	Text   string `json:"text"`
+	Lead   string `json:"lead"`
+	Size   int64  `json:"size"`
+	Cut    bool   `json:"cut"`
+	Masked bool   `json:"masked"`
 }
 
 type queuedJSON struct {
@@ -113,7 +123,7 @@ func runJSONOf(r *session.CommandRun) *commandRunJSON {
 	if r == nil {
 		return nil
 	}
-	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended), Said: saidJSONOf(session.RunSaid(r.State))}
+	return &commandRunJSON{Kind: r.Kind, State: r.State, Code: r.Code, Tail: r.Tail, Cut: r.Cut, Withheld: r.Withheld, Full: r.Output != "", Reason: r.Reason, Retry: r.Retry, Started: millis(r.Started), Ended: millis(r.Ended), Said: saidJSONOf(session.RunSaid(r.State))}
 }
 
 func modelsJSONOf(list []session.AgentModel) []agentModelJSON {
@@ -187,6 +197,14 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 			refuseFields(w)
 			return
 		}
+	case "output":
+		kind, okKind := body["kind"].(string)
+		if !keysWithin(body, "op", "sid", "kind") || !okSID || !okKind || kind != session.CommandCheck && kind != session.CommandSetup {
+			refuseFields(w)
+			return
+		}
+		s.commandOutput(ctx, w, sid, kind)
+		return
 	case "model":
 		model, okModel := body["model"].(string)
 		effort, okEffort := body["effort"].(string)
@@ -229,7 +247,7 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 		}
 		err = s.work.QueueResume(sid)
 	default:
-		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads a session's work, switches its model and changes its queue only."})
+		send(w, http.StatusBadRequest, problem{Error: "op", Message: "The engine reads a session's work and its commands' output, switches its model and changes its queue only."})
 		return
 	}
 	if op != "read" {
@@ -249,6 +267,16 @@ func (s *Server) sessionWork(ctx context.Context, w http.ResponseWriter, op stri
 	answer := workJSONOf(v)
 	answer.savedSaid = said
 	send(w, http.StatusOK, answer)
+}
+
+func (s *Server) commandOutput(ctx context.Context, w http.ResponseWriter, sid, kind string) {
+	out, err := s.work.CommandOutput(ctx, sid, kind)
+	if err != nil {
+		code, p := status(err)
+		send(w, code, p)
+		return
+	}
+	send(w, http.StatusOK, commandOutputJSON{Kind: out.Kind, Text: out.Text, Lead: out.Lead, Size: out.Size, Cut: out.Cut, Masked: out.Masked})
 }
 
 func (s *Server) projectCommands(w http.ResponseWriter, op string, body map[string]any) {

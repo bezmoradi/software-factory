@@ -125,9 +125,10 @@
     <div id="team-row" class="small team-row" hidden><p id="team-note" class="small warn" hidden></p> <button type="button" class="ghost small" id="team-open" aria-controls="team-view" aria-expanded="false">Review the team file</button></div>
     <div id="team-view" class="small team-view" hidden><p class="small muted" id="team-path"></p><p class="small muted" id="team-remote"></p><pre id="team-text" class="team-text" tabindex="0" role="region" aria-label="Team file"></pre><ul id="team-problems" class="small warn"></ul><div id="team-setup" class="small team-setup"></div><div class="row team-actions"><button type="button" class="primary small" id="team-approve">Approve this team file</button><button type="button" class="ghost small" id="team-forget">Stop using a team file</button></div></div>
     <section id="path-section">
-      <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"><span></span></div><p class="path-card-detail small muted"></p><button type="button" class="primary small path-card-open" id="side-open">Open execution path</button></div>
+      <div class="path-card" id="path-card"><p class="path-card-head"><strong class="path-card-step"></strong> <span class="path-card-count small muted"></span></p><div class="path-card-bar" aria-hidden="true"></div><p class="path-card-detail small muted"></p><button type="button" class="primary small path-card-open" id="side-open">Open execution path</button></div>
       <div id="size-row"><select id="size" class="textbox" title="Sets what a push needs; the steps below show it"></select></div>
       <p id="size-note" class="small warn" hidden></p>
+      <p id="docs-note" class="small warn" hidden></p>
       <ol id="path" class="path">
         <li data-stage="define"><span class="mark" aria-hidden="true"></span><div><strong>Define</strong> <button type="button" class="link stage" data-ask="define">Start</button><p class="small muted stage-detail"></p><sf-approval id="req-approval" hidden></sf-approval></div></li>
         <li data-stage="plan"><span class="mark" aria-hidden="true"></span><div><strong>Plan</strong> <button type="button" class="link stage" data-ask="plan">Start</button><p class="small muted stage-detail"></p><sf-approval id="approval" hidden></sf-approval></div></li>
@@ -136,7 +137,7 @@
         <li data-stage="cause" hidden><span class="mark" aria-hidden="true"></span><div><strong>Root cause</strong> <button type="button" class="link stage" data-ask="cause">Continue</button><p class="small muted stage-detail"></p><sf-approval id="cause-approval" hidden></sf-approval></div></li>
         <li data-stage="implement"><span class="mark" aria-hidden="true"></span><div><strong>Implement</strong> <button type="button" class="link stage" data-ask="fix" hidden>Start</button> <button type="button" class="link stage" data-ask="commit" title="Asks this session to commit every uncommitted change, and to ask you about any file that shouldn't be committed">Commit</button><p class="small muted stage-detail"></p></div></li>
         <li data-stage="verify"><span class="mark" aria-hidden="true"></span><div><strong>Code review</strong><p class="small muted stage-detail" id="verify-detail"></p><ul id="checks" class="list"></ul><sf-project-agents id="project-agents" hidden></sf-project-agents><sf-packs id="packs" hidden></sf-packs><sf-reviewer-agents id="reviewer-agents" hidden></sf-reviewer-agents></div></li>
-        <li data-stage="deliver"><span class="mark" aria-hidden="true"></span><div><strong>Deliver</strong> <button type="button" class="link stage" data-ask="incident-review" hidden>Write the incident review</button><p class="small muted stage-detail"></p><ul class="small muted missing"></ul><div class="small muted exceptions" id="exceptions" hidden></div></div></li>
+        <li data-stage="push"><span class="mark" aria-hidden="true"></span><div><strong>Push</strong> <button type="button" class="link stage" data-ask="incident-review" hidden>Write the incident review</button><p class="small muted stage-detail"></p><ul class="small muted missing"></ul><div class="small muted exceptions" id="exceptions" hidden></div></div></li>
       </ol>
     </section>
     <sf-reviews id="reviews" hidden></sf-reviews>
@@ -144,6 +145,7 @@
     <sf-verify id="verify" hidden></sf-verify>
     <sf-forge-panel id="forge-panel" hidden></sf-forge-panel>
     <sf-split id="split" hidden></sf-split>
+    <sf-copies id="copies" hidden></sf-copies>
     <sf-pull-follow id="pull-follow" hidden></sf-pull-follow>
     <sf-intent id="intent" hidden></sf-intent>
     <section id="changes-card" class="changes-card" hidden><h2 class="label">Changes</h2><p class="small muted" id="changes-summary"></p><button type="button" class="ghost small" id="changes-open">Open Changes</button></section>
@@ -172,15 +174,16 @@
     <sf-work-type-card id="work-type-card" hidden></sf-work-type-card>
     <div id="access-marker" class="control small session-notice warn" hidden><span id="access-marker-text"></span> <button type="button" class="ghost small" id="access-marker-open">Access</button></div>
     <sf-access-cards id="access-cards" hidden></sf-access-cards>
+    <sf-subagents id="subagents"></sf-subagents>
+    <sf-background-tasks id="tasks"></sf-background-tasks>
     <div class="strip">
-      <span class="dots" id="working" role="img" aria-label="Claude is working" hidden><i></i><i></i><i></i></span>
       <span class="strip-note small muted compacting" id="strip-note" role="status"></span>
       <span class="jump" id="jump"><button type="button" class="ghost" id="jump-start" hidden>↑ Start</button><button type="button" class="ghost" id="jump-latest" hidden>↓ Latest</button></span>
     </div>
     <div class="field">
       <ul id="complete" class="complete surface" role="listbox" aria-label="Suggestions" hidden></ul>
       <textarea id="text" class="textbox" rows="1" placeholder="Type a message and press Enter" aria-label="Message to the session"></textarea>
-      <button type="button" class="stop-turn" id="stop" title="Stop Claude's turn" aria-label="Stop Claude's turn" hidden><span class="stop-mark" aria-hidden="true"></span></button>
+      <button type="button" class="stop-turn" id="stop" aria-label="Stop Claude's turn" hidden><span class="stop-mark" aria-hidden="true"></span></button><span class="sr-only" id="stop-said"></span>
     </div>
     <div class="session-foot small" id="session-foot" hidden>
       <span class="session-foot-text" id="foot-text"></span>
@@ -195,6 +198,7 @@
       <button type="button" role="menuitem" id="menu-issues" data-ask="issues" hidden><span class="mark"><sf-icon class="icon" name="edit"></sf-icon></span><span id="menu-issues-text"></span></button>
       <button type="button" role="menuitem" id="menu-fork" hidden><span class="mark"><sf-icon class="icon" name="branch"></sf-icon></span><span>New session from this one</span></button>
       <button type="button" role="menuitem" id="menu-access" hidden><span class="mark"><sf-icon class="icon" name="link"></sf-icon></span><span>Access</span></button>
+      <button type="button" role="menuitem" id="menu-preview" hidden><span class="mark"><sf-icon class="icon" name="eye"></sf-icon></span><span>Preview</span></button>
       <button type="button" role="menuitem" id="menu-terminal" hidden><span class="mark"><sf-icon class="icon" name="terminal"></sf-icon></span><span>Open in terminal</span></button>
       <hr role="separator" id="menu-sep-manage">
       <button type="button" role="menuitem" id="menu-manage" hidden><span class="mark"><sf-icon class="icon" name="stop"></sf-icon></span><span id="menu-manage-text"></span></button>

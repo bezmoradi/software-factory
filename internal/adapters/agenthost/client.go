@@ -205,6 +205,35 @@ func (c *Client) RemoveWorktree(ctx context.Context, repo, name string, force bo
 	return out.SetAside, nil
 }
 
+func (c *Client) AddHelper(ctx context.Context, repo, name, branch, base string, id session.CommitIdentity) (string, error) {
+	var out worktreeReply
+	if err := c.call(ctx, http.MethodPost, helpersRoute, helperJSON{Repo: repo, Name: name, Branch: branch, Base: base, Identity: identityOf(id)}, &out); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(out.Path, "/") || strings.ContainsRune(out.Path, 0) || len(out.Path) > 1000 {
+		return "", &session.HostError{Code: "reply", Message: "agent-host answered an unusable helper copy path"}
+	}
+	return out.Path, nil
+}
+
+func (c *Client) RemoveHelper(ctx context.Context, repo, name, branch string) error {
+	return c.call(ctx, http.MethodPost, helpersRemoveRoute, helperRemoveJSON{Repo: repo, Name: name, Session: branch}, nil)
+}
+
+func (c *Client) SweepHelpers(ctx context.Context, repo, branch string) (session.HelperSweep, error) {
+	var out sweepReply
+	if err := c.call(ctx, http.MethodPost, helpersSweepRoute, sweepJSON{Repo: repo, Session: branch}, &out); err != nil {
+		return session.HelperSweep{}, err
+	}
+	removed := make([]string, 0, min(len(out.Removed), maxHelpersListed))
+	for _, name := range out.Removed[:min(len(out.Removed), maxHelpersListed)] {
+		if session.HelperFolderName(name) {
+			removed = append(removed, name)
+		}
+	}
+	return session.HelperSweep{Removed: removed, Kept: max(out.Kept, 0), Debris: max(out.Debris, 0)}, nil
+}
+
 func (c *Client) Run(ctx context.Context, cmd session.Command) (session.RunResult, error) {
 	var out runReply
 	if err := c.call(ctx, http.MethodPost, "/v1/run", wire(cmd), &out); err != nil {

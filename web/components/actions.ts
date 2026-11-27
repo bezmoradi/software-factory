@@ -3,7 +3,7 @@ import { actionButton, button, el, labelError, statusLine, visible, visibleComma
 import { actions, field, fieldRow, form, reveal, showAnswer } from '../lib/form.ts'
 import { checkbox, dropdown, option, textarea, textbox } from '../lib/controls.ts'
 import { emptyState } from '../lib/page.ts'
-import { tooltip } from '../lib/tooltip.ts'
+import { offTip, tooltip } from '../lib/tooltip.ts'
 import { codeBlock } from './code-block.ts'
 import { askRow, focusIfLost, focusKey, itemTable, rowMenu, rowName, rowNote, tableRow } from './row-table.ts'
 import { when } from './usage.ts'
@@ -225,7 +225,7 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
   let savedKey = ''
   const part = el('div', 'session-actions-part')
   part.append(heading, intro, saved, granted, runsHead, runs)
-  const runForm = (a: ActionRow): HTMLElement => {
+  const runForm = (a: ActionRow, off: string): HTMLElement => {
     const inputs = a.slots.map(s => {
       const t = textbox({ name: s.name, spellcheck: false, autocomplete: 'off', placeholder: s.pattern })
       t.addEventListener('input', () => labelError(t, ''))
@@ -235,8 +235,8 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
     const run = button(`Run ${visible(a.name)}`, 'primary small', undefined, 'submit')
     const f = form({
       cls: 'action-run',
-      children: [...inputs.map((t, i) => field(`{${visible(a.slots[i]!.name)}}`, t)), actions([run]), line],
-      onSubmit: () => void whileBusy(run, async () => {
+      children: [...inputs.map((t, i) => field(`{${visible(a.slots[i]!.name)}}`, t)), actions(offTip(run, off)), line],
+      onSubmit: () => run.getAttribute('aria-disabled') === 'true' ? undefined : void whileBusy(run, async () => {
         const args: Record<string, string> = {}
         a.slots.forEach((s, i) => (args[s.name] = inputs[i]!.value))
         const r = await post(route, { op: 'action-run', sid, action: a.id, args })
@@ -255,7 +255,8 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
       const rows = runsOf(body.runs)
       part.hidden = !all.length && !grants.length && !rows.length
       intro.hidden = saved.hidden = !all.length
-      const key = JSON.stringify(all)
+      const off = typeof body.actionsOff === 'string' ? visible(body.actionsOff) : ''
+      const key = JSON.stringify([all, off])
       if (key !== savedKey) {
         savedKey = key
         saved.replaceChildren()
@@ -263,7 +264,7 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
           const li = el('li', 'session-action')
           li.append(actionHead(a), commandBlock(a.name, a.command))
           if (a.broken) li.append(el('p', 'small warn', visible(a.broken)))
-          else li.append(runForm(a))
+          else li.append(runForm(a, off))
           saved.append(li)
         }
       }

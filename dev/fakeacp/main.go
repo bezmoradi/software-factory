@@ -46,11 +46,14 @@ var (
 	calls   int
 )
 
-var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split", "factory_work_type", "factory_request_access", "factory_action"}
+var tools = []string{"factory_push", "factory_issue", "factory_pull_request", "factory_checks", "factory_review_comments", "factory_split", "factory_work_type", "factory_request_access", "factory_action", "factory_copy_repository"}
 
 const (
-	noteMarker = "[Software Factory] "
-	lookUpTime = time.Second
+	noteMarker      = "[Software Factory] "
+	lookUpTime      = time.Second
+	failedLines     = 8
+	backgroundAgent = 3 * time.Second
+	maxBackground   = 3600
 )
 
 func toolNamed(text string) string {
@@ -399,6 +402,61 @@ func lookUp(callID, kind, title string, input map[string]any) {
 	update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": callID, "status": "completed"})
 }
 
+func subagent(callID, key, value string) {
+	kind, task, _ := strings.Cut(value, " => ")
+	kind, task = strings.TrimSpace(kind), strings.TrimSpace(task)
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": task, "kind": "think", "status": "in_progress", "rawInput": map[string]any{"subagent_type": kind, "description": task, "prompt": task}, "_meta": map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}}})
+	inner := func(n int) {
+		search := "grep"
+		if n > 1 {
+			search = "glob"
+		}
+		update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": fmt.Sprintf("%s-%d", callID, n), "title": search + " " + task, "kind": "search", "status": "completed", "rawInput": map[string]any{"pattern": task}, "_meta": map[string]any{"claudeCode": map[string]any{"toolName": "Grep", "parentToolUseId": callID}}})
+	}
+	inner(1)
+	end := func(status string) {
+		update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": callID, "status": status, "_meta": map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}}})
+	}
+	switch key {
+	case "agent":
+		end("completed")
+	case "agent-fail":
+		end("failed")
+	default:
+		go func() {
+			time.Sleep(backgroundAgent)
+			inner(2)
+			end("completed")
+		}()
+	}
+}
+
+func background(callID, key, value string) {
+	wait, what, _ := strings.Cut(value, " ")
+	seconds, err := strconv.Atoi(wait)
+	what = strings.TrimSpace(what)
+	if err != nil || seconds < 1 || seconds > maxBackground || what == "" {
+		return
+	}
+	name, kind, end := "Bash", "execute", "completed"
+	input := map[string]any{"command": what, "run_in_background": true}
+	switch key {
+	case "bg-fail":
+		end = "failed"
+	case "watch":
+		name, kind, end = "Monitor", "other", "killed"
+		input = map[string]any{"description": what, "command": "tail -f watch.log", "timeout_ms": seconds * 1000}
+	}
+	meta := func(state string) map[string]any {
+		return map[string]any{"claudeCode": map[string]any{"toolName": name}, "softwareFactory": map[string]any{"background": state}}
+	}
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": what, "kind": kind, "status": "completed", "rawInput": input, "_meta": meta("running")})
+	go func() {
+		time.Sleep(time.Duration(seconds) * time.Second)
+		update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": callID, "_meta": meta(end)})
+	}()
+}
+
 func scripted(id json.RawMessage, text string) bool {
 	lines := strings.Split(text, "\n")
 	said, done := false, false
@@ -420,6 +478,19 @@ func scripted(id json.RawMessage, text string) bool {
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": value}})
 		case "fail":
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "failed", "rawInput": map[string]any{"command": value}})
+		case "described":
+			said, command, _ := strings.Cut(value, " => ")
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "completed", "rawInput": map[string]any{"command": strings.TrimSpace(command), "description": strings.TrimSpace(said)}})
+		case "exit":
+			code, command, _ := strings.Cut(value, " ")
+			var out strings.Builder
+			out.WriteString("Exit code " + code + "\n")
+			for i := 1; i <= failedLines; i++ {
+				fmt.Fprintf(&out, "%s: line %d\n", command, i)
+			}
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Terminal", "kind": "execute", "status": "failed", "rawInput": map[string]any{"command": command}, "content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": out.String()}}}})
+		case "outside":
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": "completed", "rawInput": map[string]any{"file_path": value, "content": "ok\n"}})
 		case "read":
 			lookUp(callID, "read", "Read "+value, map[string]any{"file_path": value})
 		case "grep":
@@ -439,14 +510,14 @@ func scripted(id json.RawMessage, text string) bool {
 				_, _ = f.WriteString("\n")
 				_ = f.Close()
 			}
-			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Edit " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Edit " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file, "old_string": "", "new_string": "\n"}})
 		case "write":
 			file := filepath.Join(cwd, filepath.Clean("/"+value))
 			status := "completed"
 			if err := os.WriteFile(file, []byte("ok\n"), 0o644); err != nil {
 				status = "failed"
 			}
-			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Write " + value, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file, "content": "ok\n"}})
 		case "commit":
 			rel := strings.TrimPrefix(filepath.Clean("/"+value), "/")
 			file := filepath.Join(worktreeTop(), rel)
@@ -457,6 +528,12 @@ func scripted(id json.RawMessage, text string) bool {
 				status = "failed"
 			}
 			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Commit " + rel, "kind": "edit", "status": status, "rawInput": map[string]any{"file_path": file}})
+		case "remove":
+			removeLine(callID, value)
+		case "agent", "agent-fail", "agent-bg":
+			subagent(callID, key, value)
+		case "bg", "bg-fail", "watch":
+			background(callID, key, value)
 		case "grow-for":
 			growFor(callID, value)
 		case "say":
@@ -477,8 +554,20 @@ func scripted(id json.RawMessage, text string) bool {
 	return true
 }
 
+func afterFirstStep(text string) string {
+	for _, command := range []string{challengeRequirements, debugIncident} {
+		if rest, ok := strings.CutPrefix(text, command+" "); ok {
+			return rest
+		}
+	}
+	return ""
+}
+
 func answer(id json.RawMessage, text string) bool {
 	if scripted(id, text) {
+		return true
+	}
+	if script := afterFirstStep(text); script != "" && scripted(id, script) {
 		return true
 	}
 	if said, ok := incidentLine(text); ok {
@@ -585,4 +674,22 @@ func growFile(file string, size int64) bool {
 	}
 	grown := f.Truncate(size) == nil
 	return f.Close() == nil && grown
+}
+
+func removeLine(callID, value string) {
+	rel := strings.TrimPrefix(filepath.Clean("/"+value), "/")
+	file := filepath.Join(worktreeTop(), rel)
+	first, _, _ := strings.Cut(rel, "/")
+	status := "completed"
+	switch {
+	case rel == "" || strings.EqualFold(first, ".git"):
+		status = "failed"
+	case os.RemoveAll(file) != nil:
+		status = "failed"
+	default:
+		if _, ok := commitFiles("Remove "+rel, rel); !ok {
+			status = "failed"
+		}
+	}
+	update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": callID, "title": "Remove " + rel, "kind": "delete", "status": status, "rawInput": map[string]any{"file_path": file}})
 }

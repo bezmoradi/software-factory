@@ -25,6 +25,7 @@ const (
 
 var (
 	assetName  = regexp.MustCompile(`^[a-z][a-z0-9-]*\.(js|css|svg)$`)
+	oldAsset   = regexp.MustCompile(`^/s/[0-9a-f]{12}/`)
 	themeRule  = regexp.MustCompile(`(?m)^\[data-theme="([a-z0-9-]+)"\] \{`)
 	scaleRule  = regexp.MustCompile(`(?m)^:root\[data-scale="(\d+)"\]`)
 	assetTypes = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}

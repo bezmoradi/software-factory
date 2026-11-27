@@ -196,7 +196,7 @@ func (w *Workspace) row(s WorkspaceSession, pushed map[string][]string) Workspac
 	row.Head, row.State = head, state
 	switch {
 	case s.Running:
-		row.Why = "Stop the session before deleting it."
+		row.Why = saidStopFirst
 	case state == TreeMerged || state == TreePushed:
 		row.Deletable = true
 	default:

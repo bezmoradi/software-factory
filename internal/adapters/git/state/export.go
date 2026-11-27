@@ -77,6 +77,7 @@ var stores = map[string]storeRow{
 	waitingFile:         {class: classDropped, version: 1, label: "automatic pushes waiting on reviews"},
 	splitsFile:          {class: classDropped, version: 1, label: "tasks an agent proposed from a goal, waiting for the person"},
 	forgeCardsFile:      {class: classDropped, version: 1, label: "waiting issue and pull request cards"},
+	copiesFile:          {class: classDropped, version: copiesVersion, label: "read-only copies of other repositories, whose files stay with the engine that fetched them"},
 	queuesFile:          {class: classDropped, version: 1, label: "queued messages"},
 	notesFile:           {class: classDropped, version: 1, label: "notes waiting for agents"},
 	homeSettingsFile:    {class: classDropped, version: 2, label: "the baseline of the agents' user settings"},
@@ -99,6 +100,7 @@ var stores = map[string]storeRow{
 	dropsFile:           {class: classKept, version: 1, place: placeKeepOwn, label: "counts of dropped records"},
 	prefsFile:           {class: classKept, limit: maxPrefsFile, place: placeKeepOwn, label: "the page's preferences"},
 	updateFile:          {class: classKept, version: 1, place: placeKeepOwn, label: "whether the engine checks for updates, and the release put off with Remind me later"},
+	ApprovedFolder:      {class: classDisplay, version: approvedVersion, label: "the engine's copies of the requirements, plans and root causes the person approved, one file per session, for display only"},
 	auditFile:           {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit"},
 	"audit.1.jsonl":     {class: classKept, limit: maxAuditFile, place: placeAudit, label: "the audit's older part"},
 	tokensFile:          {class: classOut, label: "git host tokens are never exported"},
@@ -340,6 +342,10 @@ func (a Archive) plan() ([]exportItem, []leftOutJSON, error) {
 			items = append(items, a.importedItems()...)
 			continue
 		}
+		if e.IsDir() && name == ApprovedFolder {
+			items = append(items, a.approvedItems()...)
+			continue
+		}
 		row, known := rowOf(name)
 		switch {
 		case e.IsDir() && known && row.class == classOut:
@@ -386,6 +392,15 @@ func (a Archive) importedItems() []exportItem {
 	_ = f.Close()
 	row, _ := rowOf(reviewsFile)
 	return []exportItem{{name: importedFolder + "/" + reviewsFile, stored: filepath.Join(importedFolder, reviewsFile), row: row}}
+}
+
+func (a Archive) approvedItems() []exportItem {
+	row, _ := rowOf(ApprovedFolder)
+	var out []exportItem
+	for _, name := range approvedFiles(a.Dir) {
+		out = append(out, exportItem{name: ApprovedFolder + "/" + name, stored: filepath.Join(ApprovedFolder, name), row: row})
+	}
+	return out
 }
 
 func (a Archive) Export(w io.Writer) (session.ExportResult, error) {

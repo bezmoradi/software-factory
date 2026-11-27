@@ -89,6 +89,10 @@ type Server struct {
 	verify     session.VerifyPage
 
 	splits *session.Splits
+	copies *session.Copies
+
+	previews    *session.Previews
+	previewPort int
 
 	backups session.BackupPage
 
@@ -200,6 +204,8 @@ var pageRoutes = map[string]bool{
 	metricsRoute: true, decisionLogRoute: true,
 	keepRoute: true, verifyRoute: true,
 	splitPageRoute: true,
+	copiesRoute:    true,
+	previewRoute:   true,
 	exportRoute:    true, importRoute: true, backupRoute: true, cloneAgainRoute: true,
 	lessonsRoute: true, reviewDepthRoute: true,
 	reviewReplyRoute: true,
@@ -216,6 +222,8 @@ func (s *Server) pageRoute(r *http.Request) string {
 		return p
 	case strings.HasPrefix(p, s.assets.prefix):
 		return "asset"
+	case oldAsset.MatchString(p):
+		return "old-asset"
 	}
 	return "other"
 }
@@ -495,6 +503,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		s.splitPage(w, r, body)
 		return
 	}
+	if r.URL.Path == copiesRoute {
+		s.copiesPage(w, r, body)
+		return
+	}
+	if r.URL.Path == previewRoute {
+		s.preview(w, r, body)
+		return
+	}
 	if lessonRoutes[r.URL.Path] {
 		s.lessonsAPI(w, r, body)
 		return
@@ -531,6 +547,7 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Clear-Site-Data", `"storage"`)
+		w.Header().Set("Content-Security-Policy", s.pageCSP())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, html)

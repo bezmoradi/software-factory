@@ -126,18 +126,15 @@ func portNote(base int, inEnv bool) string {
 }
 
 func (d *Dispatcher) claudeSettings(r *run) string {
-	env := map[string]string{}
-	knackpack := r.pack.Choice == "" || r.pack.Choice == PackKnackpack
-	if d.cfg.DocsInRepo && knackpack {
-		env["KNACKPACK_DOCS"] = "repo"
+	env := map[string]string{KnackpackDocsVariable: KnackpackDocsOff}
+	if folder := DocsFolder(BoxFolder(d.cfg.Workspace, r.box), r.docs); folder != "" {
+		env[DocsVariable] = folder
+	}
+	if folder := ScratchFolder(BoxFolder(d.cfg.Workspace, r.box), r.docs); folder != "" {
+		env[TempVariable] = folder
+		env[ClaudeTempVar] = folder
 	}
 	maps.Copy(env, claudePortEnv(r.ports))
-	if len(env) == 0 {
-		return ""
-	}
-	if d.cfg.DocsInRepo && knackpack && len(env) == 1 {
-		return DocsSettings
-	}
 	data, err := json.Marshal(map[string]map[string]string{"env": env})
 	if err != nil {
 		return ""
@@ -165,6 +162,6 @@ func (d *Dispatcher) startedWork(r *run, err error) {
 	}
 	w.recordStart(r.sid, r.spec.ID, r.model, r.effort)
 	if err == nil {
-		w.startSetup(r.sid, r.repo, r.cwd)
+		w.startSetup(r.sid, r.repo, r.branch, r.cwd)
 	}
 }

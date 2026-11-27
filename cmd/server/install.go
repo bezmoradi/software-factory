@@ -19,13 +19,12 @@ const devKnackpackURL = "SF_DEV_KNACKPACK_URL"
 type InstallConfig struct {
 	Dir          string
 	Registry     string
-	AtStart      bool
 	DevKnackpack string
 	DevGitCA     string
 }
 
 func parseInstall(getenv func(string) string) (InstallConfig, error) {
-	cfg := InstallConfig{Dir: DefaultAgentsDir, Registry: npm.DefaultRegistry, AtStart: true}
+	cfg := InstallConfig{Dir: DefaultAgentsDir, Registry: npm.DefaultRegistry}
 	switch v := getenv("SF_AGENTS_DIR"); {
 	case v == "off":
 		cfg.Dir = ""
@@ -39,13 +38,6 @@ func parseInstall(getenv func(string) string) (InstallConfig, error) {
 		cfg.Registry = v
 	}
 	cfg.DevKnackpack, cfg.DevGitCA = getenv(devKnackpackURL), getenv("SF_DEV_GIT_CA")
-	switch v := getenv("SF_AGENTS_INSTALL"); v {
-	case "", "start":
-	case "manual":
-		cfg.AtStart = false
-	default:
-		return cfg, fmt.Errorf("SF_AGENTS_INSTALL must be start or manual, got %q", v)
-	}
 	return cfg, nil
 }
 

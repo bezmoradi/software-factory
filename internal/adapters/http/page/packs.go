@@ -32,6 +32,7 @@ type packJSON struct {
 	CodeFiles     []string          `json:"codeFiles"`
 	AddedAt       int64             `json:"addedAt,omitempty"`
 	UsedBy        []string          `json:"usedBy"`
+	RemoveOff     string            `json:"removeOff,omitempty"`
 }
 
 type packsJSON struct {
@@ -49,7 +50,7 @@ type packsJSON struct {
 func packOfView(v session.PackView) packJSON {
 	out := packJSON{Digest: v.Digest, SessionDigest: v.SessionDigest, Name: v.Name, Version: v.Version,
 		Source: packSourceJSON{Kind: v.Source.Kind, URL: v.Source.URL, Commit: v.Source.Commit}, Roles: map[string]string{}, Steps: map[string]string{},
-		Documents: v.Documents, Agents: nonNil(v.Agents), CodeFiles: nonNil(v.CodeFiles), UsedBy: nonNil(v.UsedBy)}
+		Documents: v.Documents, Agents: nonNil(v.Agents), CodeFiles: nonNil(v.CodeFiles), UsedBy: nonNil(v.UsedBy), RemoveOff: v.RemoveOff}
 	if !v.AddedAt.IsZero() {
 		out.AddedAt = millis(v.AddedAt)
 	}

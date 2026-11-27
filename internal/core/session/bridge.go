@@ -66,6 +66,7 @@ type bridge struct {
 	polling   bool
 	waiting   []Fields
 	cut       bool
+	subs      []Fields
 }
 
 func randomHex(n int) string {
@@ -353,7 +354,7 @@ func (b *bridge) prompt(text string, m Fields) {
 		if a, ok := sess.(AttachingSession); ok && len(parts) > 0 {
 			err = a.PromptWith(ctx, text, parts)
 		} else if len(parts) > 0 {
-			err = sess.Prompt(ctx, strings.TrimSpace(AttachedNote(parts, false)+"\n\n"+text))
+			err = sess.Prompt(ctx, WithAttachedNote(text, AttachedNote(parts, false)))
 		} else {
 			err = sess.Prompt(ctx, text)
 		}
@@ -419,16 +420,21 @@ func (b *bridge) onEvent(ev agent.Event) {
 		}
 	case agent.ToolCall:
 		if ev.Tool != nil && ev.Tool.ID != "" {
-			b.recordLocked(withCommand(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)}, ev.Tool))
+			b.subagentLocked(ev.Tool)
+			b.recordLocked(inLoop(withInput(withCommand(Fields{"type": "tool", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "summary": clip(ev.Tool.Title, maxSummary)}, ev.Tool), ev.Tool), ev.Tool))
 			if done, ok := toolDone(ev.Tool.Status); ok {
-				b.recordLocked(withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""}, ev.Tool))
+				b.recordLocked(inLoop(toolEnded(ev, done), ev.Tool))
 			}
+			b.subagentEndedLocked(ev.Tool)
+			b.taskLocked(ev.Tool)
 		}
 	case agent.ToolUpdate:
 		if ev.Tool != nil && ev.Tool.ID != "" {
-			if done, ok := toolDone(ev.Tool.Status); ok {
-				b.recordLocked(withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "ok": done, "outcome": ""}, ev.Tool))
+			if done, ok := toolDone(ev.Tool.Status); ok && !taskEnded(ev.Tool) {
+				b.recordLocked(inLoop(toolEnded(ev, done), ev.Tool))
 			}
+			b.subagentEndedLocked(ev.Tool)
+			b.taskLocked(ev.Tool)
 		}
 	case agent.Permission:
 		if ev.Request != nil {
@@ -498,6 +504,71 @@ func withCommand(f Fields, t *agent.Tool) Fields {
 	}
 	if command != "" && len(command) <= maxCommand {
 		f["command"] = maskSecrets(command)
+	}
+	return f
+}
+
+func toolInput(t *agent.Tool) map[string]any {
+	if len(t.Input) == 0 {
+		return nil
+	}
+	var in map[string]any
+	if json.Unmarshal(t.Input, &in) != nil {
+		return nil
+	}
+	return in
+}
+
+func withInput(f Fields, t *agent.Tool) Fields {
+	in := toolInput(t)
+	if in == nil {
+		return f
+	}
+	switch t.Kind {
+	case "execute":
+		if d, ok := in["description"].(string); ok && d != "" {
+			f["description"] = clip(d, maxSummary)
+		}
+	case "read", "edit", "delete", "move":
+		for _, k := range []string{"file_path", "path", "notebook_path"} {
+			if p, ok := in[k].(string); ok && p != "" && len(p) <= maxLinePath {
+				f["path"] = p
+				break
+			}
+		}
+	}
+	return f
+}
+
+func toolEnded(ev agent.Event, done bool) Fields {
+	f := withCommand(Fields{"type": "tool_done", "id": clip(ev.Tool.ID, maxToolID), "tool": toolName(ev.Tool), "ok": done, "outcome": ""}, ev.Tool)
+	if ev.Tool.Background == TaskReportRunning {
+		f["background"] = true
+	}
+	switch {
+	case ev.Tool.Kind == "execute" && !done && ev.Text != "":
+		code, coded, tail := failureTail(ev.Text)
+		if coded {
+			f["exit"] = float64(code)
+		}
+		if len(tail) > 0 {
+			list := make([]any, len(tail))
+			for i, l := range tail {
+				list[i] = l
+			}
+			f["tail"] = list
+		}
+	case ev.Tool.Kind == "edit" && done:
+		in := toolInput(ev.Tool)
+		oldText, _ := in["old_string"].(string)
+		newText, hasNew := in["new_string"].(string)
+		if !hasNew {
+			newText, hasNew = in["content"].(string)
+		}
+		if hasNew {
+			added, removed := editedLines(oldText, newText)
+			f["added"], f["removed"] = float64(added), float64(removed)
+		}
 	}
 	return f
 }

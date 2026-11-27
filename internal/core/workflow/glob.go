@@ -25,8 +25,6 @@ var posixClasses = map[string][]runeRange{
 	"print":  {{' ', '~'}},
 }
 
-var artifactRefused = regexp.MustCompile(`(?i)(^|/)\.\.(/|$)|^/|^\.git(/|$)|^\.claude(/|$)|(^|/)\.gitignore$|^software-factory\.json$`)
-
 func classOf(ranges []runeRange) string {
 	var b strings.Builder
 	for _, r := range ranges {
@@ -163,19 +161,4 @@ func globRegexp(pattern string, fold bool) (*regexp.Regexp, bool) {
 	out.WriteString("$")
 	re, err := regexp.Compile(out.String())
 	return re, err == nil
-}
-
-func artifactPath(path string, patterns []string) bool {
-	if path == "" || artifactRefused.MatchString(path) {
-		return false
-	}
-	for _, p := range patterns {
-		if artifactRefused.MatchString(p) || len([]rune(p)) > 200 || strings.Count(p, "*") > 4 {
-			continue
-		}
-		if re, ok := globRegexp(p, false); ok && re.MatchString(path) {
-			return true
-		}
-	}
-	return false
 }

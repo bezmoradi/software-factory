@@ -36,6 +36,9 @@ func presetsJSON(list []session.PresetView) []map[string]any {
 			"id": p.ID, "name": p.Name, "kind": kind, "what": p.What, "scope": p.Scope, "scopeLabel": p.ScopeLabel, "expires": p.Expires, "expiresLabel": p.ExpiresLabel,
 			"project": p.Project, "auto": p.Auto, "level": p.Level, "label": p.Label,
 		})
+		if p.Off != "" {
+			out[len(out)-1]["off"] = p.Off
+		}
 	}
 	return out
 }

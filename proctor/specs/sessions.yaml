@@ -114,6 +114,7 @@ scenarios:
               - { type: volume, destination: /home/agent, read_only: false, volume: "sf-proctor-home-${box}", subpath: null, source: null }
               - { type: volume, destination: /opt/software-factory/agents, read_only: true, volume: sf-proctor_agents, subpath: null, source: null }
               - { type: volume, destination: "/uploads/${box}", read_only: true, volume: sf-proctor_uploads, subpath: "${box}", source: null }
+              - { type: volume, destination: /workspace/refs, read_only: true, volume: sf-proctor_workspace, subpath: "r/${box}", source: null }
               - { type: volume, destination: "/workspace/s/${box}", read_only: false, volume: sf-proctor_workspace, subpath: "s/${box}", source: null }
           length: { "$.container.labels": 6 }
           any:
@@ -317,7 +318,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body": { head: "${head}", branch: "sf/${id}", command: "", hasCheck: false, image: "", required: false, busy: false, queued: false, current: null, why: "", runs: [], browser: { command: "", hasCommand: false, required: false, queued: false, current: null, why: "" } }
+            "$.body": { head: "${head}", branch: "sf/${id}", command: "", hasCheck: false, image: "", required: false, busy: false, queued: false, current: null, why: "", off: "This project has no check command, so there is nothing to verify. Set one under Check and setup commands on the project's card.", runs: [], browser: { command: "", hasCommand: false, required: false, queued: false, current: null, why: "", off: "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card." } }
       - id: verify-without-check
         do: http.request
         identity: page
@@ -625,7 +626,7 @@ scenarios:
             "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
 
   - id: SES-003
-    name: "A session's disk cap: caps without disk answer as before and never measure, a folder past the cap is measured at once, interrupts the session and refuses its messages with the reason and a Raise of a cap it isn't at, Check again keeps it while it's over and clears it once the files are gone, and Raise the cap clears it too"
+    name: "A session's disk cap: caps without disk answer as before and never measure, a folder past the cap is measured at once, interrupts the session and refuses its messages with the reason and a Raise of a cap it isn't at, Check again keeps it while it's over and clears it once the files are gone, and Raise the cap clears it too; the answer shows no usage limit, since every reading the run's fake reviewer reports is under 75% used"
     steps:
       - id: start
         do: http.request
@@ -699,6 +700,7 @@ scenarios:
             "$.body.unread": false
             "$.body.message": "Saved. This session runs with these caps."
             "$.body.tone": ok
+          length: { "$.body.usage.windows": 0 }
           any:
             "$.body.sessions": { sid: "${sid}", own: true, reached: "", reachedAt: 0, caps: { money: 5, minutes: 600, turns: 50, disk: 0 }, levels: { money: "", time: "", turns: "", disk: "" }, used.costUsd: 0, used.diskBytes: 0, used.diskMore: false, used.diskAt: 0 }
       - id: grow
@@ -1700,6 +1702,8 @@ scenarios:
             "$.body.image": "proctor@${helper_image}"
             "$.body.command": "sleep 8 && test -f README.md && echo ${run.id}"
             "$.body.runs[0].state": running
+            "$.body.off": "A verification run of this session is running. Wait for it, or stop it first."
+            "$.body.browser.off": "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card."
             "$.body.runs[0].by": page
             "$.body.runs[0].image": "proctor@${helper_image}"
           length: { "$.body.runs": 1 }
@@ -1777,6 +1781,7 @@ scenarios:
           body: { op: read, sid: "${sid}" }
         expect:
           equal:
+            "$.body.off": ""
             "$.status": 200
             "$.body.current.id": "${run}"
             "$.body.current.commit": "${head}"
@@ -1932,6 +1937,7 @@ scenarios:
           body: { op: read, sid: "${sid}" }
         expect:
           equal:
+            "$.body.browser.off": ""
             "$.status": 200
             "$.body.browser.current.id": "${browser_run}"
             "$.body.browser.current.kind": browser
@@ -2225,3 +2231,220 @@ scenarios:
             "$.status": 400
             "$.headers.content-type": ["application/json; charset=utf-8"]
             "$.body": { error: fields, message: "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again." }
+  - id: SES-007
+    name: "A setup command's whole output is kept in the session's container and the page reads it through the engine: past 4 MiB agent-host keeps the first 1 MiB and the last 3 MiB, the engine sends the page the first 256 KiB and the last 768 KiB of that with one line saying how many bytes were left out, cut at line ends, and hides a token-shaped line; the session's view marks the run as having whole output while its 8 KiB tail stays withheld; a command that hasn't run and a stopped container have no output"
+    steps:
+      - id: set-commands
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "", setup: "sleep 5; : ${run.id}; seq 1 700000; echo ghp_$(printf %036d 0)", image: "", browser: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "", setup: "sleep 5; : ${run.id}; seq 1 700000; echo ghp_$(printf %036d 0)", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; setup-ended shows the session running the setup command saved here"
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor output ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: setup-ended
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 120s, every: 1s }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: setup-command, by: engine, result: passed, session: "${sid}" }
+      - id: check-not-run
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-work"
+          headers: { Origin: "${page.origin}" }
+          body: { op: output, sid: "${sid}", kind: check }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: no-output, message: "The check hasn't run in this session, so there is no output to show." }
+        no_state_check: "op output only reads the run's output from the session's container; /api/session-work isn't declared a read, since its queue and model ops change the session"
+      - id: setup-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-work"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.hasSetup": true
+            "$.body.hasCheck": false
+            "$.body.check": null
+            "$.body.setup.kind": setup
+            "$.body.setup.state": passed
+            "$.body.setup.code": 0
+            "$.body.setup.tail": ""
+            "$.body.setup.cut": true
+            "$.body.setup.withheld": true
+            "$.body.setup.full": true
+        no_state_check: "op read changes nothing; /api/session-work isn't declared a read, since its queue and model ops change the session"
+      - id: setup-output
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-work"
+          headers: { Origin: "${page.origin}" }
+          body: { op: output, sid: "${sid}", kind: setup }
+        expect:
+          equal:
+            "$.status": 200
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body.kind": setup
+            "$.body.size": 4788936
+            "$.body.cut": true
+            "$.body.masked": true
+            "$.body.lead": "The command printed 4.6 MiB. The session's container keeps its first 1 MiB and its last 3 MiB for the agent to read. This shows the first 256 KiB and the last 768 KiB. Text that looks like a token is hidden."
+          matches:
+            "$.body.text": "1\n2\n3\n(?s:.*)\n45540\n45541\n\\[Software Factory left out 3,740,368 bytes here\\.\\]\n587660\n587661\n(?s:.*)\n699999\n700000\n\\[hidden: looks like a secret\\]\n"
+          excludes:
+            "$.body.text": ["ghp_", "0000000000000000000000000000000000"]
+        no_state_check: "op output only reads the run's output from the session's container; /api/session-work isn't declared a read, since its queue and model ops change the session"
+      - id: clear-commands
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "", setup: "", image: "", browser: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+        no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; cleared reads them back empty"
+      - id: cleared
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, name: demo }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.setup": ""
+            "$.body.check": ""
+        no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: output-gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/session-work"
+          headers: { Origin: "${page.origin}" }
+          body: { op: output, sid: "${sid}", kind: setup }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: container, message: "The engine can't reach the session's container, so it can't read the output. A container that stopped keeps none." }
+        no_state_check: "op output only reads the run's output from the session's container, which is stopped here; /api/session-work isn't declared a read, since its queue and model ops change the session"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: home-gone
+        do: docker.volume
+        with: { name: "sf-proctor-home-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+    cleanup:
+      - id: commands-cleared-after
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/project-commands"
+          headers: { Origin: "${page.origin}" }
+          body: { op: set, name: demo, check: "", setup: "", image: "", browser: "" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { check: "", setup: "", image: "", browser: "", max: 300, maxImage: 300, message: "No change: these commands are already saved.", tone: warn }

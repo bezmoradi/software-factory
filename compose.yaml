@@ -35,6 +35,8 @@ services:
       SF_PUBLIC_PORT: ${SF_PORT:-7799}
       SF_PAGE_NAME: engine-page
       SF_AGENT_ADDRESS: 0.0.0.0:8081
+      SF_PREVIEW_ADDRESS: 0.0.0.0:8082
+      SF_PREVIEW_PUBLIC_PORT: ${SF_PREVIEW_PORT:-7800}
       SF_REVIEWS: /reviews
       SF_VERIFY: /verify
       SF_ACTIONS: /actions
@@ -53,6 +55,9 @@ services:
     ports:
       - target: 8080
         published: "${SF_PORT:-7799}"
+        host_ip: 127.0.0.1
+      - target: 8082
+        published: "${SF_PREVIEW_PORT:-7800}"
         host_ip: 127.0.0.1
     networks:
       controlnet: {}

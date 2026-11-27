@@ -11,7 +11,7 @@
 + engineered: designed, reviewed, documented
 ```
 
-<sub>✅ Merged only through a pull request · 15 required checks passed, Claude's approval among them · No bypass, admins included</sub>
+<sub>✅ Approved by human reviewers · All checks passed</sub>
 
 # Software Factory
 
@@ -63,12 +63,13 @@ Most settings are on the page. These environment variables are read when the sta
 | Variable | Default | Purpose |
 |---|---|---|
 | `SF_PORT` | `7799` | The page's port on `127.0.0.1` |
+| `SF_PREVIEW_PORT` | `7800` | The [preview](#preview)'s port on `127.0.0.1` |
 | `SF_ALLOW` | `api.anthropic.com,claude.ai,claude.com,platform.claude.com` | Hosts agents and reviewers may reach, over HTTPS. Replaces the whole list |
 | `SF_EXTRA_ALLOW` | empty | Hosts added to that list, such as `gateway.example.com` |
 | `SF_EXTRA_DENY` | empty | Git hosts to refuse besides GitHub, GitLab and Bitbucket. If an allowed host covers a project's host, the sandbox check fails until that host is here |
 | `SF_OSV` | empty | `off` stops the OSV lookups (see [Privacy](#privacy)) |
 | `SF_NO_UPDATE_CHECK` | empty | `1` stops the daily release check (see [Update to Software Factory](#update-to-software-factory)) |
-| `SF_BOX_MEMORY`, `SF_BOX_CPUS` | `2g`, `2` | Each session's memory (swap included), `256m` to `256g`, and CPUs, `0.1` to `256` |
+| `SF_BOX_MEMORY`, `SF_BOX_CPUS` | `2g`, `2` | Each session's memory (swap included), `256m` to `256g`, and CPUs, `0.1` to `256`. A session whose container runs out of memory stops and shows **stopped: out of memory**; Wake it, and run fewer programs in it at once or raise the memory |
 | `SF_REVIEWER_MEMORY`, `SF_REVIEWER_CPUS` | `2g`, `2` | The same for each reviewer container |
 | `SF_MAX_BOXES` | empty | The most sessions running or starting at once, `1` to `256`; empty is no limit |
 | `SF_BOX_SUBNETS` | `10.213.0.0/20` | IPv4 networks for the sessions, one `/28` each, separated by commas. The helper won't start if they overlap a Docker network or Docker's default pools. Two stacks can share the range |
@@ -93,7 +94,7 @@ Set a variable before the command (`SF_PORT=8080 docker compose up -d --remove-o
 | Key | Effect |
 |---|---|
 | `adapter` | `"knackpack"`, the only workflow |
-| `workTypes` | Extra work types: `id` (not `change`, `incident` or `explore`), `name`, `steps` (`define`, `plan`, `implement`, `review`, `deliver`), `edits` (`"any"`), `push` (true or false), `roles` (`bug-hunter`, `simplicity`) |
+| `workTypes` | Extra work types: `id` (not `change`, `incident` or `explore`), `name`, `steps` (`define`, `plan`, `implement`, `review`, `push`), `edits` (`"any"`), `push` (true or false), `roles` (`bug-hunter`, `simplicity`) |
 | `defaultType` | The work type new sessions start as |
 | `agents` | Up to 20 installed reviewers every push needs |
 | `fileRules` | Up to 20 rules: a path `pattern` with an `agent` that must review it, an `instruction` for its reviewers (one line, up to 300 characters), or both. A file whose instruction looks like a secret is refused |
@@ -285,7 +286,7 @@ If Claude Code shows a screen the engine doesn't know, the page tells you. Answe
 A project is a repository the engine clones from an `https://` address. There are no local folders, so an agent can't plant git hooks that run on your computer. SSH, `http://`, and addresses with a user, password, query or fragment are refused.
 
 - The row shows the start branch and the instruction file. Its session count shows the sessions.
-- **Remove**, in the ⋯ menu, needs no sessions and deletes the clone. Adding the same repository again brings back its settings.
+- **Remove**, in the ⋯ menu, needs no sessions (it's greyed until then) and deletes the clone. Adding the same repository again brings back its settings.
 
 **Splitting a goal.** An agent can propose up to 8 tasks with `factory_split`, as cards you can edit or dismiss. **Start** starts a session from main with the card's text as its first message. At most 3 run at once; the rest queue (**Remove from queue** takes one out). Nothing starts until you press Start.
 
@@ -338,7 +339,9 @@ Open it with **Project settings** in the project's ⋯ menu, or from the command
 Two one-line commands of up to 300 bytes, such as `npm ci` (setup) and `make check` (check). Empty is off. They're set on the page only and run in the session's container with model keys cleared.
 
 - **Setup** runs once per session, up to 15 minutes, after you approve the start-up files.
-- **Check** runs when a turn ends, up to 5 minutes. On failure the agent gets the last 8 KiB of output and one more try.
+- **Check** runs when a turn ends, up to 5 minutes. On failure the agent gets the last 8 KiB of output, the path of the whole output, and one more try.
+- Each run's whole output is kept in a file in the session's container, under `/tmp/software-factory/commands/`, where the agent can read it. It is never in the worktree, so it is never committed. Up to 4 MiB is kept; past that, the first 1 MiB and the last 3 MiB, with a line that says how many bytes were left out. The next run of the same command replaces the file, and it goes when the container stops.
+- **Setup** and **Check** in [Session settings](#session-settings) show the end of the output. **Show all output** there opens the whole output, up to 1 MiB of it, with text that looks like a token hidden. Past 20,000 lines it shows the last 20,000; **Copy** copies all of it.
 
 **The check in the session is advisory: it never counts for a push.** A verification run does.
 
@@ -464,6 +467,7 @@ Type to the agent; Enter sends. Follow its work in the side panel (execution pat
 | Feature | What to know |
 |---|---|
 | Messages | A message to a stopped session wakes it; up to 20 wait 2 minutes. `!` lines aren't run |
+| Top bar and footer | The top bar shows the session's state and how many background tasks run, and its mode only when it isn't the one it started in (Manual). Point at it for the session ID and mode; [Session settings](#session-settings) shows them too. In a Claude Code session, the footer's token count includes cache reads and writes, as the cost estimate does |
 | `/` commands | Skills and plugin commands, and `/clear`, `/compact`, `/context`, `/cost`, `/usage`, `/help`, `/status`, `/review`, `/security-review`, `/init`, `/todos`, `/export`, `/release-notes`. Others: in Claude Code itself |
 | `@` files | Worktree files; secret-like names hidden. Opens files up to 512 KB |
 | Attachments | 4 images (resized to 1,568 px and 2.5 MiB) and 4 files of 10 MiB; removed after 1 hour if not sent |
@@ -471,14 +475,20 @@ Type to the agent; Enter sends. Follow its work in the side panel (execution pat
 | **Away** | Denies new permission cards for you; off by default |
 | Hidden text | Output with control characters is marked "hides text" |
 | Folded reads, subagents | Read, Grep and Glob calls fold into one line; each subagent's calls get a group |
+| Agents | While a subagent runs, a list above the message box shows each one: its type, its task, Running, Done, Failed or Stopped, how long it ran, its tokens and its latest tool line. Select a row to open its calls in the conversation. A subagent that finishes while another still runs stays in the list until your next message; once none runs, the list goes away, and their calls stay in the conversation. **Working** stays on while a background subagent runs |
+| Helpers' own copies | A helper agent Claude starts with worktree isolation gets its own copy of the project in the session's helpers folder, `/workspace/s/<box>/helpers/h-<name>`, on a branch `helper/<name>` from the session branch's current commit; at most 8 at once. Its work counts only once Claude merges that branch into the session's branch, where the gate checks it. Only the session's branch is pushed. A helper's writes get the session's holds and refusals, and show as **In a helper's copy**. Once a copy's branch is merged and the copy has nothing uncommitted, it goes when the session is idle; deleting the session removes every copy |
+| Background tasks | In a Claude Code session, a list under Agents shows each shell command run in the background, Monitor watch and workflow: what it runs, Running, Done, Failed or Stopped, and how long. They don't keep **Working** on: an idle session's state says, for example, "Idle · 2 tasks running". A task that ends while another still runs stays in the list until your next message; once none runs, the list goes away, and the agent's reply says how they went. Stop a task in Claude Code; the page has no button for it |
+| Tool lines | Paths are relative to the worktree. A shell call shows the agent's description and the programs the engine reads from the command; **Show command** shows the whole command. A failed call keeps its exit code and last lines in view |
+| Grouped edits | Edits in a row fold into one line, such as "Edited README.md 4 times · +8 −3"; open it for each edit and a link to each file's diff |
+| Never folded | sudo, docker, a call outside Claude Code's sandbox, a write outside the worktree, failures and Software Factory's refusals |
 | Plans | Approve a plan-mode plan in Claude Code: **Approve in Claude Code**, then attach |
-| Stop | The round button stops the current turn |
+| Stop | The round button in the message box stops the agent's own turn. A ring turns around it while the agent works (it stands still if your system reduces motion). While only subagents or a compaction run, the button is grey: point at it for why |
 | Catching up | What happened while you were away, from the engine's records |
 | Line comments | In Changes: up to 50, 2,000 characters each, 20,000 in all |
 | What this session may and may not do | Its fixed refusals, allowed hosts and saved rules (see [Saved allow rules](#saved-allow-rules)) |
 | Command palette | Ctrl+K (⌘K on a Mac) |
 | Notifications | Turn on in Settings; shown while the tab is in the background |
-| Bring in the latest main | ⋯ menu; the engine fetches main for the agent. Refused during a turn |
+| Bring in the latest main | ⋯ menu; the engine fetches main for the agent. Greyed during a turn |
 | Long conversations | With knackpack, **Save a checkpoint** before you compact |
 | "Not backed by this turn's actions" | A hint for claims nothing in the turn backs; English only, and the agent can hide it |
 | Uncommitted edits, parallel sessions | Warnings only; they never hold a push |
@@ -494,7 +504,7 @@ Type to the agent; Enter sends. Follow its work in the side panel (execution pat
 
 #### Stopping and deleting
 
-**Stop session** removes the container and keeps the home, folder and conversation; **Wake** makes the container again. **Delete session** removes everything. **If the branch has unpushed work, the page offers to discard it: that work is lost.** Both ask first.
+**Stop session** removes the container and keeps the home, folder and conversation; **Wake** makes the container again. Claude's scratch folder (its notes, briefs, plans, checkpoints and drafts, and its commands' temporary files: `$TMPDIR`) is `/workspace/s/<box>/scratch/<session id>/`, outside the worktree, so it survives Stop, Wake and a rebuild, and it counts toward the session's disk cap. **Delete session** removes everything. **If the branch has unpushed work, the page offers to discard it: that work is lost.** Both ask first.
 
 #### Trust levels
 
@@ -506,13 +516,13 @@ If one session's check fails, that session is held and stopped. If the stack-wid
 
 ### Session settings
 
-**Session settings**, first in the ⋯ menu, has these parts:
+**Session settings**, first in the ⋯ menu, shows the session ID and mode, then these parts:
 
 | Part | What it does |
 |---|---|
 | **Model** | Switches model and effort from the next turn |
 | **Queue** | Up to 10 messages, sent one per turn; it stops when you're needed, and **Resume** goes on |
-| **Setup**, **Check** | The last runs of the project's commands |
+| **Setup**, **Check** | The last runs of the project's commands; **Show all output** opens a run's whole output |
 | **Caps** | Use against the caps, and this session's caps |
 | **Ports** | 10 ports from 41000; Claude Code gets the first in `PORT` and `SF_PORT_BASE` |
 | **Locked tests** | Claude Code's file tools ask before each write to committed test files (up to 2,000), and the push card shows locked files that changed. A shell command doesn't ask, and neither holds a push |
@@ -535,6 +545,14 @@ Run these in a terminal on this computer:
 
 A stopped session wakes first. Press **Make it read-only** to answer in the terminal; **Let this page control it** switches back.
 
+### Preview
+
+Shows the app a running session serves, such as `npm run dev`, inside the page. Choose **Preview** in the session's ⋯ menu, then pick one of the session's 10 ports; the first is the one in `PORT`. **Open in a new tab** shows it full size.
+
+The app must listen on that port on all addresses, not only `localhost`: for Vite, `--host`. Hot reload works. One preview is open at a time, at `127.0.0.1:7800` (`SF_PREVIEW_PORT`); opening another ends the one before.
+
+The preview runs code the agent wrote in your browser. It can't read the page's key or use the page, but treat it like any site you don't know.
+
 ### Keyboard shortcuts
 
 Press **?** outside a text field, or choose **Keyboard shortcuts** in Settings (the gear) or the command palette. The list can turn the **?** key off.
@@ -548,6 +566,7 @@ Press **?** outside a text field, or choose **Keyboard shortcuts** in Settings (
 - [Network access](#network-access): hosts for every session.
 - [Access](#access): a host, port or credential for one session or project, for a time.
 - [Credentials](#credentials): secrets for grants and actions.
+- [Copies of other repositories](#copies-of-other-repositories): another repository's code, read-only, for one session.
 
 ### Network access
 
@@ -563,7 +582,7 @@ A gateway's base URL, set under **Network access**, applies to all sessions and 
 
 **The gateway sees all code and decides every tool call: use only your own company's gateway.**
 
-Paste its key for the reviewers beside the address, and for each session in its sign-in panel. It's saved for Claude Code's `apiKeyHelper`, sent as `Authorization: Bearer` and `x-api-key`, never shown again, and replaces a saved API key. **Turning the gateway on, changing its host or removing it (Remove gateway) deletes the saved keys.** Changes are refused while sessions or reviews run. If `egress.json` can't be read at a start, the key is removed first and Claude Code doesn't start.
+Paste its key for the reviewers beside the address, and for each session in its sign-in panel. It's saved for Claude Code's `apiKeyHelper`, sent as `Authorization: Bearer` and `x-api-key`, never shown again, and replaces a saved API key. **Turning the gateway on, changing its host or removing it (Remove gateway) deletes the saved keys.** Changes are refused, and Remove gateway is greyed, while sessions or reviews run. If `egress.json` can't be read at a start, the key is removed first and Claude Code doesn't start.
 
 ### Credentials
 
@@ -601,7 +620,7 @@ A grant starts when:
 - **you give it** with **Give access**, then **Check the risk**;
 - **a preset applies it** (see [Presets](#presets)).
 
-The card shows the host, the agent's reason (which may come from planted instructions), the risk, who and how long. **Accept the risk** grants it; a project grant with no expiry needs its box ticked.
+The card shows the host, the agent's reason (which may come from planted instructions), the risk, who and how long. **Accept the risk** grants it (for This session only while the session runs); a project grant with no expiry needs its box ticked.
 
 | Grant | Risk |
 |---|---|
@@ -650,7 +669,7 @@ A fixed command Software Factory runs for a session with one of your credentials
 
 Refused programs: `git`, shells, wrappers like `env` and `sudo`, interpreters like `python` and `node`, task runners like `make` and `npm`, and links to them.
 
-The agent calls `factory_action`; the card shows the command line, target and risk. It's red with the session's files, a handed-over or `write`/`production` credential, a target on your network, or a `./` program. **Accept the risk** runs it **Once**, or for **1 hour** or **1 day** with the same arguments. **Don't allow** bars that command line for 10 minutes. One waits at a time, 20 an hour, 2 run at once. You can also run one from **Access** with no card. It runs in a short-lived locked-down container that reaches only the target; the credential is there for that run only.
+The agent calls `factory_action`; the card shows the command line, target and risk. It's red with the session's files, a handed-over or `write`/`production` credential, a target on your network, or a `./` program. **Accept the risk** runs it **Once**, or for **1 hour** or **1 day** with the same arguments. **Don't allow** bars that command line for 10 minutes. One waits at a time, 20 an hour, 2 run at once. You can also run one from **Access** with no card, while the session runs. It runs in a short-lived locked-down container that reaches only the target; the credential is there for that run only.
 
 The agent gets the exit code and the last 64 KiB of output, with secrets replaced. **A secret in another form, such as base64, gets through.** The latest 8 runs are kept in memory; the audit records each run, never its output.
 
@@ -666,6 +685,20 @@ pi@192.168.1.20:/srv/site/
 
 The agent builds `dist/` and calls `factory_action`; the card is red, and **Accept the risk** runs it.
 
+### Copies of other repositories
+
+An agent can ask to read another repository with `factory_copy_repository`: an `https://` address on any git host, and a branch or tag if it wants one. The session's container still can't reach any git host. The engine fetches the copy.
+
+- **The card** shows the address, the branch or tag, the host, whether the engine uses the token you saved for that host, and where the files will be. The engine fetches nothing until you press **Approve**. **Decline** tells the agent, and it can't ask for the same copy again for 10 minutes.
+- **The token.** The engine uses a saved token only for its own host, and only when the card said so. The token never reaches the session's container, and the engine follows no redirect.
+- **What arrives.** Only the files of one commit, read-only: no `.git` folder, no history, no submodules and no Git LFS files. A repository with a `.git` entry or a symbolic link that points outside it is refused.
+- **Where.** In the session's container, under `/workspace/refs/<host>/<path>@<branch or tag>` (`@HEAD` for the main branch). That is outside the worktree, so nothing there is committed or pushed.
+- **Limits.** At most 512 MiB fetched, counted while it downloads, at most 1 GiB or 100,000 files written, 5 minutes for each fetch, and 5 copies for each session. Past a limit the fetch stops, nothing is kept, and the card and the agent say which limit.
+- **Refused addresses:** `http://`, SSH, a user name or password in the address, an IP address, and a local name such as `localhost`. The engine looks up no host name before you approve. When it connects, it refuses a host that resolves to a loopback, private or link-local address or to Software Factory's own networks, and the card says why.
+- **Kept** until you press **Remove** on its card or delete the session. The same address and branch or tag asked again gives the same copy.
+
+**The risk: the agent will read this code. Text in it can try to steer the agent; nothing in it runs.** Approve only repositories you'd let the agent read.
+
 ### Saved allow rules
 
 The "don't ask again" rules Claude Code saved, from the worktree's and clone folder's `.claude/settings.local.json` and the container's `~/.claude/settings.json`. Wide rules (any Bash, network tools, wildcards) are marked.
@@ -678,23 +711,31 @@ The "don't ask again" rules Claude Code saved, from the worktree's and clone fol
 
 | Work type | Steps | What a push needs |
 |---|---|---|
-| Code change | Define, Plan, Implement, Code review, Deliver | Approved requirements (and plan, if chosen), then the bug hunter's and simplicity checker's reviews |
-| Incident | Triage, Reproduce, Root cause, Fix, Code review, Deliver | Those reviews, and an approved root cause when code changes |
+| Code change | Define, Plan, Implement, Code review, Push | Approved requirements and plan, then the bug hunter's and simplicity checker's reviews |
+| Incident | Triage, Reproduce, Root cause, Fix, Code review, Push | Those reviews, and an approved root cause when code changes |
 | Explore | None | Never pushes; **Draft issues** turns findings into issues |
 
-- With no type yet, the first file change waits on a card where you pick one. **The card sees only Claude Code's file tools; a shell write isn't held.**
+- The agent saves the requirements brief, the plan and the root cause in the session's documents folder, `/workspace/s/<box>/docs/<session id>/` (`$SF_DOCS`), outside the worktree. They're never committed, and they're deleted with the session. A file tool's write under `.knackpack/` or the pack's documents folder is denied.
+- **A push that adds or changes a file under `.knackpack/` or the pack's documents folder is refused, with no Allow**, even if a later commit deletes it. A push that only deletes such files passes.
+- With no type yet, the first file change waits on a card where you pick one. Define's brief, outside the worktree, doesn't wait, so Define can finish first. **The card sees only Claude Code's file tools; a shell write isn't held.**
 - With no pack that writes requirements, there are no Define or Plan steps.
-- Your first message goes as Define's or Triage's command. **Continue defining** and **Continue triage** run the step again.
+- Only the step the agent works on reads **Working**, or else the next step reads **Now**. If the agent works on a later step first, for example a plan started by a typed command, the earlier step reads **Waiting for your approval** (or **Not done**). The step card names the step the agent works on in one short line, with the full sentence in the expanded view, and its bar fills one segment per finished step and half of the step it names.
+- **Implement** is done once the work is committed, the agent has stopped working and nothing is left uncommitted; until then it stays the current step and says why. **Code review** reads **Working** only while a reviewer runs.
+- While the agent works (its turn, a compaction or a running subagent), the path offers no step button, and the requirements, plan and root cause show as drafts with no **Approve**.
+- The first message of a Code change session starts Define, and an Incident's starts triage, with your words sent as its input; the conversation shows your words, marked **Started Define** or **Started triage**. Each message you type, unless it starts with `/`, goes as Define's or Triage's command, with its attached files (with no type picked yet, Define's, as for a Code change), until the engine reads the requirements brief (Incident: the triage in `ROOT-CAUSE.md`) in the documents folder. After that, messages go as you type them. A message too long to send with the command isn't sent: the page says how much to cut. **Continue defining** and **Continue triage** run the step again.
+- If the agent changes files in a Code change, or with no type picked yet, before you approve the requirements, the path says so. **Ask for the requirements** sends Define's command. If it works before you approve the requirements or the plan without changing anything in the project, the path says that too.
 
-**Code change:** read the requirements, then **Approve and plan**, **Approve and implement** or **Ask for changes**. `Blocking: yes` or a missing `Acceptance:` blocks approval. Changed requirements show a diff before you approve again. **Add a plan** and **Skip the plan** change your choice. File tools are blocked until you approve. **An approval counts only for the committed text,** and a document already on main can't be approved.
+**Code change:** read the requirements, then **Approve requirements** or **Ask for changes**. `Blocking: yes` or a missing `Acceptance:` blocks approval. Changed requirements show a diff before you approve again. The plan always follows, and can't be skipped. File tools are blocked until you approve the plan. **The engine keeps its own copy of what you approve, and that copy counts:** an edit to the file clears the approval, while a file it can't read keeps it. The plan can be approved only while the branch has no commits since the requirements were approved.
 
-**Incident:** start at the deployed commit, with the evidence in your first message. The session gets no production access. When `ROOT-CAUSE.md` says `CONFIRMED`, read it and **Approve** its SHA-256; until then there's no **Fix**, and a push that changes more than documentation is held. Then **Write the incident review**. If you didn't start at the deployed commit, the panel can't read the root cause.
+**Incident:** start at the deployed commit, with the evidence in your first message. The session gets no production access. When `ROOT-CAUSE.md` says `CONFIRMED`, read it and **Approve** its SHA-256; until then there's no **Fix**, and a push that changes more than documentation is held. An edit to the file clears the approval. Then **Write the incident review**.
 
 **Review settings**, in this panel: rounds (3, 1 to 20), the default work type, automatic findings (off), a pull request comment after each push (off), holding the agent's push after a block or above a size (off), the pack (see [Packs](#packs)) and your own agents (see [Your own reviewer agents](#your-own-reviewer-agents)).
 
 ### Reviews and the push gate
 
-**Review** runs the required reviewers on the latest commit, each in its own container, on a read-only copy. Reviewers can't run commands, and they don't follow commit messages. Only committed work is reviewed; **Run all again** gets fresh verdicts. **What this review was given** shows the prompt.
+**Review** runs the required reviewers on the latest commit, each in its own container, on a read-only copy. Reviewers can't run commands or write files, and they don't follow commit messages. Each gives its whole report in its reply. Only committed work is reviewed; **Run all again** gets fresh verdicts. **What this review was given** shows the prompt.
+
+While the agent works, **Review**, **Run all again** and **Push** are greyed, with the reason in their tooltip: the agent's own push starts the reviews. **Review** is filled green only when it's the next step: Implement is done and a required review has no verdict on the latest commit.
 
 With knackpack, the reviewers are the bug hunter, the simplicity checker, reviewers for the changed files (chosen by knackpack's catalog when it has one), and the team file's agents.
 
@@ -702,9 +743,9 @@ With knackpack, the reviewers are the bug hunter, the simplicity checker, review
 
 - Later rounds review only what changed.
 - A pass stops counting after a new approval, a team rules change, or a new minimum reviewer version.
-- **Write a manual test list**, **Explain this change** and **Review this plan** are read-only aids, never verdicts. They share the limit of 8 reviewer runs at once.
+- **Write a manual test list**, **Explain this change** and **Review this plan** are read-only aids, never verdicts. They share the limit of 8 reviewer runs at once. **Review this plan** is offered only while the plan waits for your approval; a report made earlier stays readable. Once the engine finds the branch has nothing beyond main, **Explain this change** stays greyed for that commit.
 
-**Push** (or the agent's `factory_push`) pushes the latest commit when every required review passed, the reviews cover current main, the session stayed Locked, and nothing is flagged. It pushes `sf/<id>` only: never forced, never to main.
+**Push** (or the agent's `factory_push`) pushes the latest commit when every required review passed, the reviews cover current main, the session stayed Locked, and nothing is flagged. It pushes `sf/<id>` only: never forced, never to main. **Push** is greyed, with the reason in its tooltip, while something only the agent or a review can fix is missing: an approval, committed work, a review still to run or a block. When all that's missing is something you may allow, it stays on, and the held push's **Allow** decides.
 
 **A held push** shows what is missing:
 
@@ -714,7 +755,7 @@ With knackpack, the reviewers are the bug hunter, the simplicity checker, review
 | **Deny** | Ends the request; reviews that finish later don't push it. Remembered for the newest 20 commits |
 | **Override** | Counts a block as a pass for that commit, with a reason |
 | **Allow it** | Allows a flagged file version or commit field, with a reason |
-| **Ask the agent to remove it** / **rewrite it** | Asks the agent to fix a flagged file or commit |
+| **Ask the agent to remove it** / **rewrite it** | Asks the agent to fix a flagged file or commit. This, Send findings and Hand off are greyed while the page can't message the session |
 | **Send findings** | Sends the blocking reports to the agent once per commit, marked untrusted. The push stays held |
 | **Hand off** | After the round limit: asks for a handoff, then denies |
 
@@ -722,6 +763,7 @@ With knackpack, the reviewers are the bug hunter, the simplicity checker, review
 
 - After the round limit, a reviewer isn't run again; you decide.
 - **About this change** and the requirements table are facts to check, not gates.
+- When reviewers block an agent's push, the agent is told how many blocked and that you can send it their findings. It gets the findings only through **Send findings**, yours or the automatic one.
 - An agent's push starts its reviews and pushes when they pass. It can ask 5 times in 10 minutes, with up to 12 reviewer runs per branch. When 8 runs are going, it queues.
 - **On a billed sign-in, the engine starts no review by itself:** press **Review**.
 - After a restart, a waiting automatic push is picked up again.
@@ -730,11 +772,11 @@ With knackpack, the reviewers are the bug hunter, the simplicity checker, review
 
 ### How the latest commit is being checked
 
-**Open diagram** in the Reviews panel shows the latest commit's reviewers, the gate and its routes, live. It closes when you open another session.
+The **How this commit is checked** card under the Reviews heading says first what the gate decided, then the commit and its reviews, with a small strip from the commit through each required reviewer and the gate to the push. Press it to open the diagram, which follows them live and closes when you open another session. The same line sits above the diagram. Each container has its own colour, and green, amber and red mark what passed, waits on you or failed; every state also keeps its icon and word.
 
 ### How this change was checked
 
-A decided push's card lists, from the engine's records, the reviews, verification runs and the gate's decision for that commit. **Open diagram** shows them as a diagram.
+A decided push's card lists, from the engine's records, the reviews, verification runs and the gate's decision for that commit. Its **How this commit is checked** card opens them as a diagram.
 
 ### Packs
 
@@ -759,7 +801,7 @@ A session keeps its pack across Stop and Wake. A pack's session files are on the
 }
 ```
 
-`name` can't be `knackpack` or `software-factory`. Other keys are refused, among them `tools`, `model`, `effort`, `permissions`, `network`, `hosts`, `verdict`, `required`, `rounds`, `hooks`, `mcpServers` and `env`. Reviewers get only the pack's `agents/*.md`; a pack that could run programs is refused, with the reason. Each reviewer must end with `Verdict: pass` or `Verdict: block`. The audit records packs by digest. Import turns packs off.
+`documents` names the files the engine reads from the session's documents folder; `folder` must be `.<name>`, and a push that adds or changes a file there is refused. `name` can't be `knackpack` or `software-factory`, start with `git`, or be `forgejo`, `gogs` or `azuredevops`, since those folders belong to git or a git host. Other keys are refused, among them `tools`, `model`, `effort`, `permissions`, `network`, `hosts`, `verdict`, `required`, `rounds`, `hooks`, `mcpServers` and `env`. Reviewers get only the pack's `agents/*.md`; a pack that could run programs is refused, with the reason. Each reviewer must end with `Verdict: pass` or `Verdict: block`. The audit records packs by digest. Import turns packs off.
 
 ### Your own reviewer agents
 
@@ -779,7 +821,7 @@ Issues and pull requests wait as cards. **Read each one: the engine posts it und
 
 - **A comment after each push** (off; GitHub only) holds only engine records.
 - **Following the pull request:** once a minute, the engine reads its state, checks and new comments from you and the bots you list. **Send to the agent** sends them marked untrusted; automatic sending is for subscriptions only, up to 5 times. A merged or closed pull request marks the session done. It backs off near the rate limit and writes nothing.
-- **Open pull request** and **Ready for review** work from the page. The engine can assign what it opens to you.
+- **Open pull request** (once the engine has pushed the branch) and **Ready for review** work from the page. The engine can assign what it opens to you.
 - **Open issues for these** makes issue cards from non-blocking findings.
 - The audit records every push request and answer, permission answers by hash. Git LFS and SHA-256 repositories are refused.
 
@@ -796,6 +838,7 @@ The engine, helper, reviewers and proxy are trusted; the sessions' containers ar
 - **No route to a git host.** Each session's network leads only to the proxy, which allows only model API hosts and refuses git hosts. The engine checks this before every start and every 5 minutes.
 - **The containers.** Only the helper makes them, from a fixed recipe, checked before each start: no capabilities, a read-only root, no ports, no host folders. The helper holds Docker's socket, and the sessions can't reach it.
 - **The push.** Only the engine holds the git token.
+- **Copies of other repositories.** The engine fetches one only after your **Approve**, and the session sees its files read-only.
 - **The verdicts.** Each reviewer runs alone on a read-only copy, unreachable from sessions.
 - **Your decisions.** Approvals, Allow, Deny and Override come only from the page. From the sessions, the engine accepts only reports and requests, never a decision, a verdict or a push.
 
@@ -811,7 +854,7 @@ Software Factory holds no model key. Usage goes to your own subscription or API 
 - Costs shown are estimates.
 - Models: Opus and high effort by default; reviewers use their default unless a role sets one.
 - Cost is kept down by reviewing each commit once, reviewing only changes later, the round limit, 12 runs per branch, and [Caps](#caps).
-- **Usage limits:** past 90%, automatic reviews pause. **Keep them running** or **Wake at reset**.
+- **Usage limits:** a Claude limit belongs to the account, so every session and reviewer signed in with that account shares it. The Sessions page shows a limit from 75% used, or when Claude refuses work on it, and in a warning color from 90%. From 90%, automatic reviews pause: **Keep them running** or **Wake at reset**. [Diagnostics](#diagnostics) lists every reading.
 - **Looks stuck:** the same call 3 times in 8 shows **Interrupt**.
 - **Expiry warnings:** 10 days before a claude.ai sign-in ends (it can end up to 3 days earlier), and 7 days before a GitHub token expires.
 
@@ -885,7 +928,7 @@ Only when the log keeps showing `event=folders-not-removed box=<box>`. The engin
    ```bash
    box=<the 16-character id from the log line>
    [ "${#box}" -eq 16 ] && printf '%s' "$box" | grep -Eqx '[0-9a-f]{16}' && docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10002:10000 -v software-factory_workspace:/workspace --entrypoint rm software-factory:local -rf -- "/workspace/s/$box"
-   [ "${#box}" -eq 16 ] && printf '%s' "$box" | grep -Eqx '[0-9a-f]{16}' && docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10000 -v software-factory_workspace:/workspace --entrypoint rm software-factory:local -rf -- "/workspace/s/$box"
+   [ "${#box}" -eq 16 ] && printf '%s' "$box" | grep -Eqx '[0-9a-f]{16}' && docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 10001:10000 -v software-factory_workspace:/workspace --entrypoint rm software-factory:local -rf -- "/workspace/s/$box" "/workspace/r/$box"
    ```
 
 "Permission denied" in the first pass is expected. For a release, use the image from `compose.release.yaml` (`ghcr.io/bezmoradi/software-factory@sha256:<image digest>`) in place of `software-factory:local`; for another project name, its `<project>_workspace` volume.
@@ -908,7 +951,7 @@ Only `engine-state` can be exported; nothing backs up the rest.
 | Volume | Holds |
 |---|---|
 | `engine-state` | Projects, tokens, reviews, approvals, settings, sessions, browser check files, the audit |
-| `workspace` | Repository copies and each session's clone, worktree and screenshots |
+| `workspace` | Repository copies, each session's clone, worktree and screenshots, and the read-only copies of other repositories it asked for |
 | `agents` | The installed agents and knackpack |
 | `<project>-home-<box>` | A session's login and conversation; not removed by `down -v` |
 | `<project>-reviewer-home` | The reviewers' login; not removed by `down -v` |
@@ -923,7 +966,7 @@ Once a day the engine checks GitHub's tags. When a newer published release exist
 
 ### Diagnostics
 
-**Diagnostics** builds a text file for bug reports: versions, digests, the OS, non-secret settings, counts and the last 500 events. No names, hosts, paths, tokens or prompts. It's built once per opening and never sent. It also shows **Vulnerabilities**, **Agent settings** (changed settings in each session) and **Agent versions**. Recheck an agent: `docker compose exec engine software-factory install-agents <id>`.
+**Diagnostics** builds a text file for bug reports: versions, digests, the OS, non-secret settings, counts, every usage-limit reading and the last 500 events. No names, hosts, paths, tokens or prompts. It's built once per opening and never sent. It also shows **Vulnerabilities**, **Agent settings** (changed settings in each session) and **Agent versions**. Recheck an agent: `docker compose exec engine software-factory install-agents <id>`.
 
 ### Export and import
 

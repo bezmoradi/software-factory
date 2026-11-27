@@ -1,4 +1,5 @@
 import { button, el, emit, replaceKeeping, sayIfChanged, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
+import { offTip } from '../lib/tooltip.ts'
 import type { Overlap, SessionFactsView, Uncommitted } from '../types.ts'
 
 const SHOWN = 20
@@ -55,8 +56,8 @@ class SfSessionFacts extends HTMLElement {
       if (!disabled) emit(this, 'sf-commit-ask')
     }, 'button', 'commit-ask')
     ask.setAttribute('aria-disabled', String(!!disabled))
-    ask.title = disabled || 'Sends the session a message asking it to commit every uncommitted change, and to ask you about any file that shouldn\'t be committed'
-    replaceKeeping(box, [lead, paths(list, Math.max(0, count - list.length)), el('p', 'muted', 'A push sends commits only, so these edits are left out of the push, the reviews and the pull request. The engine read the worktree itself when the turn ended.'), ask])
+    if (!disabled) ask.title = 'Sends the session a message asking it to commit every uncommitted change, and to ask you about any file that shouldn\'t be committed'
+    replaceKeeping(box, [lead, paths(list, Math.max(0, count - list.length)), el('p', 'muted', 'A push sends commits only, so these edits are left out of the push, the reviews and the pull request. The engine read the worktree itself when the turn ended.'), ...(disabled ? offTip(ask, disabled) : [ask])])
     return box
   }
 

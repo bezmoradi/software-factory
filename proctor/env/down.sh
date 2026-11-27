@@ -34,7 +34,7 @@ run_compose() {
 		${DOCKER_TLS_VERIFY:+DOCKER_TLS_VERIFY="$DOCKER_TLS_VERIFY"} \
 		COMPOSE_PROJECT_NAME="$project" SF_PORT="$port" SF_DOCKER_GID=0 \
 		docker compose -p "$project" --project-directory "$repo" \
-		-f "$repo/compose.yaml" -f "$repo/compose.dev.yaml" -f "$here/compose.proctor.yaml" "$@"
+		-f "$repo/compose.yaml" -f "$repo/compose.dev.yaml" -f "$repo/proctor/environments/compose.proctor.yaml" "$@"
 }
 compose() { (run_compose "$@"); }
 

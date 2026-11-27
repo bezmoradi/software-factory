@@ -16,16 +16,16 @@ import (
 )
 
 const (
-	binDir    = ".sf-dev/bin"
-	binName   = "software-factory"
-	pollEvery = 500 * time.Millisecond
-	settle    = 300 * time.Millisecond
+	binDir       = ".sf-dev/bin"
+	binName      = "software-factory"
+	runtimeImage = "software-factory:local"
+	pollEvery    = 500 * time.Millisecond
+	settle       = 300 * time.Millisecond
 )
 
 var (
 	compose  = []string{"compose", "-f", "compose.yaml", "-f", "compose.live.yaml"}
-	images   = []string{"software-factory:local", "software-factory:dev"}
-	live     = []string{"engine", "egress"}
+	live     = []string{"engine", "egress", "helper"}
 	roots    = []string{"cmd", "configs", "internal", "tools", "web", "go.mod", "go.sum", "compose.yaml", "plugin", "Dockerfile"}
 	skipDirs = map[string]bool{"node_modules": true, "dist": true, ".git": true}
 	watched  = map[string]bool{".go": true, ".ts": true, ".css": true, ".html": true, ".svg": true, ".json": true, ".md": true, ".mod": true, ".sum": true, ".yaml": true}
@@ -63,14 +63,23 @@ func run(ctx context.Context) error {
 	if err := build(ctx, arch, change{page: true, code: true}); err != nil {
 		return err
 	}
-	if err := start(ctx, true, false); err != nil {
+	if err := buildImages(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("the images didn't build (%w), so make dev stopped instead of starting the stack on the old images; a stack already running was left as it was. Fix the error, then run make dev again", err)
+	}
+	if err := socketGroup(ctx); err != nil {
+		return err
+	}
+	if err := start(ctx, nil); err != nil {
 		return err
 	}
 	url := address(ctx)
 	say("Software Factory is running the code in this folder: %s", url)
 	say("Watching for changes. Ctrl-C stops watching and leaves the stack running; make up goes back to the image.")
 	say("Stop make dev before a pull, a branch switch or a checkout of code you haven't read: whatever is in this folder runs as the engine, which holds your git tokens.")
-	say("The Dockerfile, plugin/, configs/claude-code/ and the box helper come from the %s images as they were last built.", strings.Join(images, " and "))
+	say("A save to the Dockerfile, plugin/ or configs/claude-code/ rebuilds the images and recreates the whole stack; a page save recreates the engine, and any other save the engine, egress and box helper.")
 	openPage(url)
 	var owed change
 	head := checkedOut()
@@ -80,22 +89,35 @@ func run(ctx context.Context) error {
 			return err
 		}
 		seen = next
-		if c.image {
-			say("The Dockerfile, plugin/ and configs/claude-code/ are built into the images, which make dev doesn't rebuild: press Ctrl-C, run docker %s build, then make dev again.", strings.Join(compose, " "))
-		}
-		if !c.page && !c.code {
-			continue
-		}
 		owed.page = owed.page || c.page
 		owed.code = owed.code || c.code
+		owed.image = owed.image || c.image
 		say("Change seen, rebuilding…")
-		if err := build(ctx, arch, owed); err != nil {
-			owed.page = true
-			say("The build failed, so the running stack wasn't touched. Fix the error and save again; the next build makes the page again too.")
-			continue
+		if owed.page || owed.code {
+			if err := build(ctx, arch, owed); err != nil {
+				owed.page = true
+				say("The build failed, so the running stack wasn't touched. Fix the error and save again; the next build makes the page again too.")
+				continue
+			}
 		}
-		pageOnly := !owed.code
-		if err := start(ctx, false, pageOnly); err != nil {
+		if owed.image {
+			if err := buildImages(ctx); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				say("The images didn't build, so the running stack was left as it was. Fix the error and save again; the next save builds the images again too.")
+				continue
+			}
+		}
+		pageOnly := !owed.code && !owed.image
+		services := live
+		switch {
+		case owed.image:
+			services = nil
+		case pageOnly:
+			services = []string{"engine"}
+		}
+		if err := start(ctx, services); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -105,11 +127,15 @@ func run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		image := owed.image
 		owed = change{}
-		if pageOnly {
+		switch {
+		case image:
+			say("Rebuilt the images and recreated the whole stack. The restart stopped the running sessions: each gets the new plugin and settings in a new container when you wake it, and each reviewer container from its next start. The page reloads itself once it reconnects.")
+		case pageOnly:
 			say("Only the page changed, so only the engine was restarted. The page reloads itself once it reconnects.")
-		} else {
-			say("Restarted the engine and egress with the new code; each session's container runs it from its next start or wake, and each reviewer container from its start. The page reloads itself once it reconnects.")
+		default:
+			say("Restarted the engine, egress and box helper with the new code; each session's container runs it from its next start or wake, and each reviewer container from its start. The page reloads itself once it reconnects.")
 		}
 	}
 }
@@ -230,30 +256,18 @@ func build(ctx context.Context, arch string, c change) error {
 	return os.Rename(tmp, filepath.Join(binDir, binName))
 }
 
-func start(ctx context.Context, first, engineOnly bool) error {
-	if first {
-		for _, image := range images {
-			if cmd(ctx, nil, "docker", "image", "inspect", "--format", "{{.Id}}", image) != nil {
-				say("The %s image isn't built yet; building the images once.", image)
-				if err := cmd(ctx, nil, "docker", append(append([]string{}, compose...), "build")...); err != nil {
-					return err
-				}
-				break
-			}
-		}
-		if err := socketGroup(ctx); err != nil {
-			return err
-		}
-	}
+func buildImages(ctx context.Context) error {
+	say("Building the images; Docker reuses what hasn't changed.")
+	return cmd(ctx, nil, "docker", append(append([]string{}, compose...), "build")...)
+}
+
+func start(ctx context.Context, services []string) error {
 	if err := copyBinary(ctx); err != nil {
 		return err
 	}
 	args := append(append([]string{}, compose...), "up", "-d", "--wait", "--force-recreate", "--remove-orphans")
-	switch {
-	case engineOnly:
-		args = append(args, "--no-deps", "engine")
-	case !first:
-		args = append(append(args, "--no-deps"), live...)
+	if len(services) > 0 {
+		args = append(append(args, "--no-deps"), services...)
 	}
 	c := exec.Command("docker", args...)
 	c.Stdout = os.Stdout
@@ -281,7 +295,7 @@ func socketGroup(ctx context.Context) error {
 	if socket == "" {
 		socket = "/var/run/docker.sock"
 	}
-	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-v", socket+":/s:ro", "--entrypoint", "stat", images[0], "-c", "%g", "/s").Output()
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-v", socket+":/s:ro", "--entrypoint", "stat", runtimeImage, "-c", "%g", "/s").Output()
 	gid := strings.TrimSpace(string(out))
 	if err != nil || gid == "" || strings.Trim(gid, "0123456789") != "" {
 		return errors.New("the group that owns Docker's socket couldn't be read: set SF_DOCKER_GID to it, then run make dev again")

@@ -161,6 +161,15 @@ func subject(message string) string {
 	return CleanLine(first, 200)
 }
 
+const saidPushFirst = "Push the branch first: a pull request opens from a pushed branch."
+
+func (fl *Follows) pushedOnce(sid string) bool {
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+	x := fl.list[sid]
+	return x != nil && !x.saved.Pushed.IsZero()
+}
+
 func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	f := fl.cfg.Forges
 	t, ok := f.cfg.Targets(sid)
@@ -174,6 +183,9 @@ func (fl *Follows) OpenPull(ctx context.Context, sid string) error {
 	ft, why := f.target(sid, NeedPulls)
 	if why != "" {
 		return conflict("target", strings.ToUpper(why[:1])+why[1:]+".")
+	}
+	if !fl.pushedOnce(sid) {
+		return conflict("not pushed", saidPushFirst)
 	}
 	rctx, cancel := context.WithTimeout(ctx, ForgeFor)
 	head, err := f.cfg.API.Branch(rctx, ft.repo, t.Branch)

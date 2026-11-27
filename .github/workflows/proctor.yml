@@ -1,0 +1,328 @@
+name: Proctor
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: proctor-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PROCTOR_REPO: bezmoradi/proctor
+
+jobs:
+  kind:
+    name: Proctor change kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}
+    steps:
+      - name: Map the proctor label to a change kind
+        id: kind
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          kind=$(printf '%s' "$LABELS" | jq -r '
+            [(. // [])[] | select(type == "string" and (ascii_downcase | startswith("proctor:")))]
+            | if length > 1 then "several"
+              elif length == 0 then "none"
+              else {"proctor:refactor": "refactor", "proctor:docs": "docs", "proctor:fix": "fix", "proctor:feature": "feature"}[.[0]] // "unknown"
+              end')
+          case "$kind" in
+            none) kind="" ;;
+            refactor | docs | fix | feature) ;;
+            several)
+              echo "::error::The pull request has more than one proctor: label; keep one of proctor:refactor, proctor:docs, proctor:fix and proctor:feature."
+              exit 1
+              ;;
+            *)
+              echo "::error::The pull request has a proctor: label that names no change kind; use proctor:refactor, proctor:docs, proctor:fix or proctor:feature."
+              exit 1
+              ;;
+          esac
+          echo "change kind: ${kind:-none}"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Proctor release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      tag: ${{ steps.latest.outputs.tag }}
+    steps:
+      - name: Find the latest Proctor release, once for the whole run
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view -R "$PROCTOR_REPO" --json tagName --jq .tagName)
+          if ! printf '%s\n' "$tag" | grep -qxE 'v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::The latest release of $PROCTOR_REPO is tagged '$tag', not v<major>.<minor>.<patch>."
+            exit 1
+          fi
+          echo "Proctor $tag is the latest release; every later job of this run uses it."
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Proctor build
+    needs: kind
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      dev: ${{ steps.images.outputs.dev }}
+      local: ${{ steps.images.outputs.local }}
+      gitserver: ${{ steps.images.outputs.gitserver }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the dev, runtime and gitserver images from the tested commit
+        id: images
+        run: |
+          docker build --target dev -t software-factory-proctor:dev .
+          docker build --target runtime -t software-factory-proctor:local .
+          docker build --target gitserver -t software-factory-proctor:gitserver .
+          docker save -o "$RUNNER_TEMP/images.tar" software-factory-proctor:dev software-factory-proctor:local software-factory-proctor:gitserver
+          for t in dev local gitserver; do
+            id=$(docker image inspect --format '{{.Id}}' "software-factory-proctor:$t")
+            echo "software-factory-proctor:$t is $id"
+            echo "$t=$id" >> "$GITHUB_OUTPUT"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proctor-images
+          path: ${{ runner.temp }}/images.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  verify:
+    name: Proctor run
+    needs: [kind, release, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check that the runner meets the stack's needs
+        run: |
+          ok=1
+          [ "$(uname -m)" = x86_64 ] || { echo "::error::The stack's images and Proctor's archive here are amd64; this runner is $(uname -m)."; ok=0; }
+          engine=$(docker version --format '{{.Server.Version}}')
+          compose=$(docker compose version --short)
+          [ "$(printf '28.0.0\n%s\n' "$engine" | sort -V | head -n 1)" = 28.0.0 ] || { echo "::error::Docker Engine $engine is older than 28."; ok=0; }
+          [ "$(printf '2.24.4\n%s\n' "$compose" | sort -V | head -n 1)" = 2.24.4 ] || { echo "::error::Docker Compose $compose is older than 2.24.4."; ok=0; }
+          mem=$(awk '$1 == "MemTotal:" { print int($2 / 1048576) }' /proc/meminfo)
+          [ "$mem" -ge 7 ] || { echo "::error::The runner has $mem GiB of memory; GATE-014 runs two 2 GiB session containers beside the stack, which needs at least 7."; ok=0; }
+          for tool in curl jq gh lsof openssl sed tr sha256sum; do
+            command -v "$tool" >/dev/null 2>&1 || { echo "::error::$tool isn't on this runner."; ok=0; }
+          done
+          echo "Docker Engine $engine, Compose $compose, $mem GiB of memory, $(nproc) CPUs"
+          test "$ok" = 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Find the base
+        id: base
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse --verify 'HEAD^2^{commit}')" = "$PR_HEAD"
+          base=$(git rev-parse --verify 'HEAD^1^{commit}')
+          echo "tested $(git rev-parse HEAD), the test merge of $PR_HEAD into $base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Take the environment's definition from the base
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          dest="$RUNNER_TEMP/base-env"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          git ls-tree -r -z --full-tree "$BASE" -- proctor/env/ proctor/environments/ compose.yaml compose.dev.yaml > "$RUNNER_TEMP/env-tree"
+          if [ ! -s "$RUNNER_TEMP/env-tree" ]; then
+            echo "::error::The base $BASE has none of proctor/env/, proctor/environments/, compose.yaml and compose.dev.yaml, so the environment can't start until a change that adds them is merged."
+            exit 1
+          fi
+          if tr '\0' '\n' < "$RUNNER_TEMP/env-tree" | grep -vqE '^100(644|755) blob '; then
+            echo "::error::proctor/env/, proctor/environments/, compose.yaml or compose.dev.yaml at the base holds something other than regular files."
+            exit 1
+          fi
+          git archive --format=tar "$BASE" -- proctor/env/ proctor/environments/ compose.yaml compose.dev.yaml | tar -x -C "$dest" --no-same-owner
+          for f in proctor/env/run.sh proctor/env/up.sh proctor/env/down.sh proctor/env/routes.sh proctor/environments/compose.proctor.yaml compose.yaml compose.dev.yaml; do
+            if [ ! -f "$dest/$f" ] || [ -L "$dest/$f" ]; then
+              echo "::error::The base $BASE has no $f, so the environment can't start until a change that adds it is merged."
+              exit 1
+            fi
+          done
+          if ! grep -q PROCTOR_SF_AUTHORITATIVE "$dest/proctor/env/run.sh"; then
+            echo "::error::The base's proctor/env/run.sh has no authoritative path (PROCTOR_SF_AUTHORITATIVE), so this run can't start the loaded images until the change that adds it is merged."
+            exit 1
+          fi
+          for v in PROCTOR_SF_BUILT_DEV_DIGEST PROCTOR_SF_BUILT_LOCAL_DIGEST PROCTOR_SF_BUILT_GITSERVER_DIGEST; do
+            if ! grep -q "$v" "$dest/proctor/env/up.sh"; then
+              echo "::error::The base's proctor/env/up.sh doesn't take $v, so it can't prove that the stack runs each image built from the tested commit until the change that adds it is merged."
+              exit 1
+            fi
+          done
+          echo "the environment's definition from $BASE:"
+          (cd "$dest" && find . -type f -print0 | sort -z | xargs -0 sha256sum)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: proctor-images
+          path: ${{ runner.temp }}/images
+      - name: Load the images built from the tested commit
+        env:
+          DEV: ${{ needs.build.outputs.dev }}
+          LOCAL: ${{ needs.build.outputs.local }}
+          GITSERVER: ${{ needs.build.outputs.gitserver }}
+        run: |
+          docker load -i "$RUNNER_TEMP/images/images.tar"
+          rm -f "$RUNNER_TEMP/images/images.tar"
+          test "$(docker image inspect --format '{{.Id}}' software-factory-proctor:dev)" = "$DEV"
+          test "$(docker image inspect --format '{{.Id}}' software-factory-proctor:local)" = "$LOCAL"
+          test "$(docker image inspect --format '{{.Id}}' software-factory-proctor:gitserver)" = "$GITSERVER"
+          echo "loaded dev $DEV, local $LOCAL, gitserver $GITSERVER"
+      - name: Download the earlier attempts' reports
+        if: fromJSON(github.run_attempt) > 1
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: proctor-report-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/earlier-reports
+      - name: Download Proctor and check its signed provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          if ! printf '%s\n' "$TAG" | grep -qxE 'v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::The release job gave the tag '$TAG', not v<major>.<minor>.<patch>."
+            exit 1
+          fi
+          version=${TAG#v}
+          name="proctor-$version-linux-amd64"
+          dl="$RUNNER_TEMP/proctor-download"
+          rm -rf "$dl"
+          mkdir -p "$dl"
+          for f in "$name.tar.gz" SHA256SUMS; do
+            curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$dl/$f" "https://github.com/$PROCTOR_REPO/releases/download/$TAG/$f"
+            gh attestation verify "$dl/$f" -R "$PROCTOR_REPO" --signer-workflow "$PROCTOR_REPO/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          done
+          sum=$(awk -v n="$name.tar.gz" 'NF == 2 && $2 == n { print $1 }' "$dl/SHA256SUMS")
+          if ! printf '%s\n' "$sum" | grep -qxE '[0-9a-f]{64}'; then
+            echo "::error::The release's SHA256SUMS has no single line for $name.tar.gz."
+            exit 1
+          fi
+          echo "$sum  $dl/$name.tar.gz" | sha256sum --strict -c -
+          dist="$RUNNER_TEMP/proctor-dist"
+          rm -rf "$dist"
+          mkdir -p "$dist"
+          tar -xzf "$dl/$name.tar.gz" -C "$dist" --no-same-owner
+          bin="$dist/$name"
+          (cd "$bin" && sha256sum --strict -c SHA256SUMS)
+          test "$("$bin/proctor" version)" = "$version"
+          test -x "$bin/proctor-driver-docker"
+          test -x "$bin/proctor-driver-http"
+          echo "Proctor $TAG, archive sha256 $sum, proctor sha256 $(sha256sum "$bin/proctor" | cut -d' ' -f1)"
+          echo "PROCTOR=$bin/proctor" >> "$GITHUB_ENV"
+      - name: Run Proctor's specifications on the stack
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          CHANGE_KIND: ${{ needs.kind.outputs.kind }}
+          PROCTOR_SF_BUILT_DEV_DIGEST: ${{ needs.build.outputs.dev }}
+          PROCTOR_SF_BUILT_LOCAL_DIGEST: ${{ needs.build.outputs.local }}
+          PROCTOR_SF_BUILT_GITSERVER_DIGEST: ${{ needs.build.outputs.gitserver }}
+        run: |
+          echo "running proctor with sha256 $(sha256sum "$PROCTOR" | cut -d' ' -f1)"
+          mkdir -p "$RUNNER_TEMP/earlier-reports"
+          set -- --pr-head "$PR_HEAD" --earlier-reports "$RUNNER_TEMP/earlier-reports" --no-progress
+          if [ -n "$CHANGE_KIND" ]; then
+            set -- "$@" --change-kind "$CHANGE_KIND" --change-kind-source label
+          fi
+          state="$RUNNER_TEMP/sf-proctor"
+          rc=0
+          PROCTOR_SF_AUTHORITATIVE=1 PROCTOR_SF_CHECKOUT="$GITHUB_WORKSPACE" PROCTOR_SF_STATE="$state" \
+            sh "$RUNNER_TEMP/base-env/proctor/env/run.sh" "$@" || rc=$?
+          if [ -f "$state/report.json" ] && [ ! -L "$state/report.json" ]; then
+            cp "$state/report.json" "$RUNNER_TEMP/report-$GITHUB_RUN_ATTEMPT.json"
+          fi
+          exit "$rc"
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proctor-report-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/report-${{ github.run_attempt }}.json
+          if-no-files-found: error
+      - name: Tear the stack down
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/base-env/proctor/env/down.sh" ]; then
+            PROCTOR_SF_STATE="$RUNNER_TEMP/sf-proctor" sh "$RUNNER_TEMP/base-env/proctor/env/down.sh" --purge || true
+          fi
+
+  verdict:
+    name: Proctor verdict
+    needs: [kind, release, build, verify]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Download this attempt's report
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: proctor-report-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/report
+      - name: Every job succeeded and the report passed
+        env:
+          KIND: ${{ needs.kind.result }}
+          RELEASE: ${{ needs.release.result }}
+          BUILD: ${{ needs.build.result }}
+          VERIFY: ${{ needs.verify.result }}
+          TAG: ${{ needs.release.outputs.tag }}
+          TESTED: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          echo "change kind: $KIND, release: $RELEASE, build: $BUILD, run: $VERIFY"
+          ok=1
+          for result in "$KIND" "$RELEASE" "$BUILD" "$VERIFY"; do
+            [ "$result" = success ] || ok=0
+          done
+          report="$RUNNER_TEMP/report/report-$RUN_ATTEMPT.json"
+          if [ ! -f "$report" ] || [ -L "$report" ]; then
+            echo "::error::This attempt left no Proctor report."
+            ok=0
+          elif ! jq -e -s --arg tested "$TESTED" --arg run "$RUN_ID" --arg attempt "$RUN_ATTEMPT" --arg version "${TAG#v}" '
+              length == 1 and (.[0] | type == "object"
+                and .mode == "authoritative"
+                and .result == "passed" and .exit_code == 0
+                and (.provenance | type == "object")
+                and .provenance.tested_commit == $tested
+                and .provenance.ci_run_id == $run
+                and .provenance.ci_run_attempt == $attempt
+                and .provenance.proctor_version == $version
+                and (.scenarios | type == "array"))' "$report" > /dev/null; then
+            echo "::error::The report isn't a passing authoritative report of Proctor ${TAG:-(unknown)} for $TESTED from this attempt."
+            ok=0
+          elif ! jq -e '.trust.workflow_identity | type == "object"' "$report" > /dev/null; then
+            echo "::error::Proctor couldn't verify this workflow's identity, since the job got no OIDC token. A pull request from a fork gets none; push a copy of its branch to this repository instead."
+            ok=0
+          else
+            jq -r '"report: \(.result), exit \(.exit_code), Proctor \(.provenance.proctor_version), tested \(.provenance.tested_commit), base \(.provenance.base), workflow changed: \(.trust.workflow_changed), approval required: \(.trust.approval_required)"' "$report"
+          fi
+          test "$ok" = 1

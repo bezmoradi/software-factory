@@ -80,6 +80,14 @@ func (d *Dispatcher) Explain(ctx context.Context, sid string, costOK bool) error
 	return d.cfg.Reviews.Explain(ctx, ReviewTarget{SID: sid, Repo: t.Repo, Name: t.Name, Branch: t.Branch, CostOK: costOK})
 }
 
+const SaidNothingToExplain = "The session's branch has nothing the remote's main branch lacks, so there's nothing to explain. Commit the work first."
+
+func (r *Reviews) NothingToExplain(sid string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.nothing[sid]
+}
+
 func (r *Reviews) Explain(ctx context.Context, t ReviewTarget) error {
 	return r.startAside(ctx, t, asideRun{kind: AsideExplain, what: "the explanation of the change", busy: "An explanation of this session's change is being written.", prompt: ExplainPrompt})
 }
@@ -171,7 +179,13 @@ func (r *Reviews) startAside(ctx context.Context, t ReviewTarget, a asideRun) er
 	}
 	if base == head && !a.empty {
 		release()
-		return conflict("no change", "The session's branch has nothing the remote's main branch lacks, so there's nothing to explain. Commit the work first.")
+		r.mu.Lock()
+		if r.nothing == nil {
+			r.nothing = map[string]string{}
+		}
+		r.nothing[t.SID] = head
+		r.mu.Unlock()
+		return conflict("no change", SaidNothingToExplain)
 	}
 	r.setAside(t.SID, AsideView{Kind: a.kind, Commit: head, Branch: t.Branch, State: TestListRunning, At: r.cfg.Now(), PlanHash: a.planHash, PlanPath: a.planPath})
 	shared.For(ctx, r.cfg.Logger).Info("reviewer run", "kind", a.kind, "event", "started")

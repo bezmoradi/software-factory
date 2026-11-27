@@ -29,7 +29,6 @@ const (
 	findAttempts = 5
 	launchMode   = "default"
 	PushServer   = "software-factory"
-	DocsSettings = `{"env":{"KNACKPACK_DOCS":"repo"}}`
 	NotRunReason = "this engine has no sandbox check configured, so this session started without one"
 )
 
@@ -115,7 +114,6 @@ type DispatcherConfig struct {
 	Note         func(sid, text string)
 	Audit        Audit
 	Identity     *Identities
-	DocsInRepo   bool
 	KeyRoutes    KeyRoutes
 	DevChecks    bool
 	Logger       shared.Logger
@@ -132,6 +130,7 @@ type run struct {
 	box        string
 	clone      string
 	sid        string
+	docs       string
 	id         string
 	display    string
 	running    bool
@@ -470,7 +469,14 @@ func (d *Dispatcher) admission(r *run, control bool) Admission {
 		signIn = &s
 	}
 	return Admission{ID: r.id, Name: name, Kind: "background", Agent: r.spec.ID, Cwd: r.cwd, Project: r.repo, StartedAt: d.reg.now(), Control: control, SignIn: signIn,
-		Lineage: lineageOf(r), Box: r.box, Branch: r.branch, Doubled: r.doubled}
+		Lineage: lineageOf(r), Box: r.box, Branch: r.branch, Doubled: r.doubled, Docs: r.docsID()}
+}
+
+func (r *run) docsID() string {
+	if sidPattern.MatchString(r.docs) {
+		return r.docs
+	}
+	return r.sid
 }
 
 func launched(a Admission) Admission {
@@ -488,6 +494,7 @@ func (d *Dispatcher) claude(args ...string) []string {
 
 func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) error {
 	sid := newSID()
+	r.docs = sid
 	argv := slices.Clone(r.spec.Command)
 	if d.cfg.PluginDir != "" {
 		argv = append(argv, "--plugin-dir="+d.cfg.PluginDir)
@@ -523,6 +530,8 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 	d.reg.Admit(sid, launched(d.admission(&pending, true)))
 	d.observeStart(sid, r.check)
 	d.reg.makeScreenshots(sid)
+	d.reg.makeDocs(r.docs, r.box)
+	d.reg.makeScratch(r.docs, r.box)
 	res, err := d.host(r).Run(ctx, Command{Argv: argv, Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 	if err != nil {
 		d.reg.Forget(sid)
@@ -554,7 +563,7 @@ func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) erro
 			d.reg.Forget(sid)
 			return conflict("claude", "The session's container listed a session id that another session already has, so the engine doesn't take it.")
 		}
-		d.reg.Forget(sid)
+		d.reg.forget(sid, false)
 		sid = found
 	}
 	r.id = foundID
@@ -646,6 +655,10 @@ func (d *Dispatcher) mcpFor(b *bridge, spec AgentSpec, box string) *MCPServer {
 	if folder := ScreenshotFolder(BoxFolder(d.cfg.Workspace, box), b.sid); folder != "" {
 		d.reg.makeScreenshots(b.sid)
 		env[ScreenshotsVariable] = folder
+	}
+	if folder := DocsFolder(BoxFolder(d.cfg.Workspace, box), b.sid); folder != "" {
+		d.reg.makeDocs(b.sid, box)
+		env[DocsVariable] = folder
 	}
 	return &MCPServer{Name: PushServer, Command: d.cfg.MCPCommand, Args: []string{"mcp"}, Env: env}
 }
@@ -982,6 +995,8 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 		d.cfg.Work.Begin(sid, r.repo, r.typ)
 	}
 	if r.spec.Method == MethodPlugin {
+		d.reg.makeDocs(r.docsID(), r.box)
+		d.reg.makeScratch(r.docsID(), r.box)
 		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 		if err != nil {
 			return conflict("claude", hostMessage(err))
@@ -1051,7 +1066,7 @@ func (d *Dispatcher) Remove(ctx context.Context, sid string, given *Offer) (*Off
 	d.mu.Unlock()
 	chose := held
 	if running {
-		return nil, conflict("running", "Stop the session before deleting it.")
+		return nil, conflict("running", saidStopFirst)
 	}
 	if r.history || r.box == "" {
 		d.forgetHistory(sid)
@@ -1225,6 +1240,9 @@ func (d *Dispatcher) goneOffer(r *run, lead string) (*Offer, string) {
 }
 
 func (d *Dispatcher) Review(ctx context.Context, sid string, costOK, every bool) error {
+	if err := (PageOffers{Info: d.reg.Session}).Review(sid); err != nil {
+		return err
+	}
 	scope := ScopeUnfinished
 	if every {
 		scope = ScopeEvery

@@ -5,3 +5,4 @@ internal/adapters/http/page/dist/*
 !internal/adapters/http/page/dist/.gitkeep
 .sf-dev/
 /software-factory-findings-2026-11-17.md
+.claude/worktrees/

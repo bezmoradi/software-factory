@@ -25,20 +25,17 @@ var (
 )
 
 type workDocJSON struct {
-	Path       string `json:"path"`
-	Text       string `json:"text"`
-	Hash       string `json:"hash"`
-	Approved   bool   `json:"approved"`
-	Changed    bool   `json:"changed"`
-	Clipped    bool   `json:"clipped"`
-	Previous   string `json:"previous,omitempty"`
-	Commit     string `json:"commit,omitempty"`
-	ApprovedAt string `json:"approvedAt,omitempty"`
-	Reported   bool   `json:"reported,omitempty"`
-	OnBase     bool   `json:"onBase,omitempty"`
-	Note       string `json:"note"`
-	Kind       string `json:"kind"`
-	Status     string `json:"status"`
+	Path     string `json:"path"`
+	Text     string `json:"text"`
+	Hash     string `json:"hash"`
+	Approved bool   `json:"approved"`
+	Changed  bool   `json:"changed"`
+	Clipped  bool   `json:"clipped"`
+	Previous string `json:"previous,omitempty"`
+	Unread   bool   `json:"unread,omitempty"`
+	Note     string `json:"note"`
+	Kind     string `json:"kind"`
+	Status   string `json:"status"`
 }
 
 type workTypeJSON struct {
@@ -87,9 +84,9 @@ type gateJSON struct {
 	PlanHash     string             `json:"planHash"`
 	Approved     bool               `json:"approved"`
 	Research     string             `json:"research"`
+	DocsFolder   string             `json:"docsFolder"`
+	DocsNote     string             `json:"docsNote,omitempty"`
 	Define       bool               `json:"define"`
-	PlanChoice   bool               `json:"planChoice"`
-	PlanSwitch   string             `json:"planSwitch"`
 	Reviewers    []gateReviewerJSON `json:"reviewers"`
 	Missing      []string           `json:"missing"`
 	Allowed      bool               `json:"allowed"`
@@ -97,7 +94,6 @@ type gateJSON struct {
 	Implemented  bool               `json:"implemented"`
 	Holds        map[string]string  `json:"holds"`
 	Rounds       int                `json:"rounds"`
-	Committed    bool               `json:"committed"`
 	Flagged      []flagJSON         `json:"flagged"`
 	FlagsRead    bool               `json:"flagsRead"`
 	LFS          []string           `json:"lfs"`
@@ -108,6 +104,8 @@ type gateJSON struct {
 	TypeChange   *typeChangeJSON    `json:"typeChange,omitempty"`
 	Started      any                `json:"started"`
 	Review       reviewOfferJSON    `json:"review"`
+	PushOffer    offerJSON          `json:"pushOffer"`
+	PlanReview   planReviewJSON     `json:"planReview"`
 	Pushed       bool               `json:"pushed"`
 	Path         pathJSON           `json:"path"`
 	Flow         *flowJSON          `json:"flow"`
@@ -124,41 +122,48 @@ type pathStageJSON struct {
 	ID      string           `json:"id"`
 	Name    string           `json:"name"`
 	State   string           `json:"state"`
+	Status  string           `json:"status"`
 	Active  bool             `json:"active"`
 	Detail  string           `json:"detail"`
 	Actions []pathActionJSON `json:"actions"`
 }
 
 type pathCardJSON struct {
-	Step   string  `json:"step"`
-	Count  string  `json:"count"`
-	Detail string  `json:"detail"`
-	Done   float64 `json:"done"`
+	Step   string    `json:"step"`
+	Count  string    `json:"count"`
+	Detail string    `json:"detail"`
+	Bar    []float64 `json:"bar"`
 }
 
 type pathLineJSON struct {
 	Text    string           `json:"text"`
 	Actions []pathActionJSON `json:"actions"`
+	Tone    string           `json:"tone,omitempty"`
 }
 
 type pathJSON struct {
 	Stages        []pathStageJSON  `json:"stages"`
 	Line          *pathLineJSON    `json:"line"`
+	Notice        *pathLineJSON    `json:"notice"`
 	Card          pathCardJSON     `json:"card"`
 	Missing       []string         `json:"missing"`
 	ReviewsActive bool             `json:"reviewsActive"`
 	Required      []string         `json:"required"`
 	Asks          []pathActionJSON `json:"asks"`
+	Busy          bool             `json:"busy"`
 }
 
 func pathOf(m session.PathModel) pathJSON {
-	out := pathJSON{Stages: make([]pathStageJSON, 0, len(m.Stages)), Card: pathCardJSON{Step: m.Card.Step, Count: m.Card.Count, Detail: m.Card.Detail, Done: m.Card.Done},
-		Missing: nonNil(m.Missing), ReviewsActive: m.ReviewsActive, Required: nonNil(m.Required), Asks: pathActionsOf(m.Asks)}
+	out := pathJSON{Stages: make([]pathStageJSON, 0, len(m.Stages)), Card: pathCardJSON{Step: m.Card.Step, Count: m.Card.Count, Detail: m.Card.Detail, Bar: m.Card.Bar},
+		Missing: nonNil(m.Missing), ReviewsActive: m.ReviewsActive, Required: nonNil(m.Required), Asks: pathActionsOf(m.Asks), Busy: m.Busy}
 	for _, s := range m.Stages {
-		out.Stages = append(out.Stages, pathStageJSON{ID: s.ID, Name: s.Name, State: s.State, Active: s.Active, Detail: s.Detail, Actions: pathActionsOf(s.Actions)})
+		out.Stages = append(out.Stages, pathStageJSON{ID: s.ID, Name: s.Name, State: s.State, Status: s.Status, Active: s.Active, Detail: s.Detail, Actions: pathActionsOf(s.Actions)})
 	}
 	if m.Line != nil {
 		out.Line = &pathLineJSON{Text: m.Line.Text, Actions: pathActionsOf(m.Line.Actions)}
+	}
+	if m.Notice != nil {
+		out.Notice = &pathLineJSON{Text: m.Notice.Text, Actions: pathActionsOf(m.Notice.Actions), Tone: m.Notice.Tone}
 	}
 	return out
 }
@@ -181,7 +186,19 @@ type plannedJSON struct {
 type reviewOfferJSON struct {
 	Available bool          `json:"available"`
 	Reason    string        `json:"reason"`
+	Wait      string        `json:"wait"`
+	Primary   bool          `json:"primary"`
 	Planned   []plannedJSON `json:"planned"`
+	Explain   string        `json:"explainOff,omitempty"`
+}
+
+type offerJSON struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason"`
+}
+
+type planReviewJSON struct {
+	Offered bool `json:"offered"`
 }
 
 func startedJSON(s session.BranchStart) any {
@@ -198,7 +215,7 @@ func startedJSON(s session.BranchStart) any {
 
 func offerOf(i session.Info, v session.GateView) reviewOfferJSON {
 	o := session.OfferReview(i, v)
-	out := reviewOfferJSON{Available: o.Reason == "", Reason: o.Reason, Planned: []plannedJSON{}}
+	out := reviewOfferJSON{Available: o.Reason == "", Reason: o.Reason, Wait: session.ReviewWait(i), Primary: session.ReviewNext(i, v), Planned: []plannedJSON{}, Explain: o.Explain}
 	for _, r := range o.Planned {
 		out.Planned = append(out.Planned, plannedJSON{Name: r.Name, Agent: r.Agent, Why: r.Why, Summary: r.Summary})
 	}
@@ -276,7 +293,7 @@ func docJSON(d *session.WorkDoc, clipped string, v session.GateView) *workDocJSO
 	}
 	kind := session.DocKind(d == v.Requirements, v.Profile)
 	return &workDocJSON{Kind: kind, Status: session.DocStatus(kind, *d), Path: d.Path, Text: d.Text, Hash: d.Hash, Approved: d.Approved, Changed: d.Changed, Clipped: d.Clipped, Previous: d.Previous,
-		Commit: d.Commit, ApprovedAt: d.ApprovedAt, Reported: d.Reported, OnBase: d.OnBase, Note: session.DocNote(*d, clipped, v.PlanApprovals, v.Head)}
+		Unread: d.Unread, Note: session.DocNote(*d, clipped)}
 }
 
 func typesJSON(list []workflow.WorkType) []workTypeJSON {
@@ -299,9 +316,9 @@ func gateOf(v session.GateView) gateJSON {
 	out := gateJSON{Head: v.Head, Branch: v.Branch, Adapter: string(v.Adapter), Size: string(v.Profile), WorkType: v.Type, Chosen: v.Chosen,
 		SizeNote: v.Note, Upload: v.Profile.UploadWarning(), Types: typesJSON(v.Types), Commands: map[string]string{},
 		Team: map[string]any{"approved": v.TeamApproved, "note": v.TeamNote}, Requirements: docJSON(v.Requirements, "", v), Plan: docJSON(v.Plan, session.PlanDocWord(v.Profile), v),
-		Research: v.Research, Define: v.Define, PlanChoice: v.PlanChoice, PlanSwitch: string(v.PlanSwitch), Reviewers: []gateReviewerJSON{},
+		Research: v.Research, DocsFolder: v.DocsFolder, DocsNote: v.DocsNote, Define: v.Define, Reviewers: []gateReviewerJSON{},
 		Missing: nonNil(v.Missing), Allowed: v.Allowed, Waiting: v.Waiting, Implemented: v.Waiting == "" && v.Profile != workflow.Explore,
-		Holds: v.Holds, Rounds: v.Rounds, Committed: v.PlanApprovals, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
+		Holds: v.Holds, Rounds: v.Rounds, Flagged: flagsJSON(v.Flagged), FlagsRead: v.FlagsRead, LFS: nonNil(v.LFS), Handoff: v.Handoff,
 		Catalog: string(v.Catalog), CatalogWhy: v.CatalogWhy, TestLock: testLockOf(v.Lock), TypeChange: typeChangeOf(v.Change), Started: startedJSON(v.Started)}
 	for step, c := range v.Commands {
 		out.Commands[string(step)] = c
@@ -315,21 +332,6 @@ func gateOf(v session.GateView) gateJSON {
 			Round: r.Round, Limit: r.Limit, Capped: r.Capped, Override: r.Override, Since: r.Since, Incremental: r.Since != "", SetAside: r.SetAside, Summary: r.Summary})
 	}
 	return out
-}
-
-func planChoiceOf(body map[string]any) (session.PlanChoice, bool) {
-	v, set := body["plan"]
-	if !set {
-		return session.PlanUnstated, true
-	}
-	on, ok := v.(bool)
-	switch {
-	case !ok:
-		return session.PlanUnstated, false
-	case on:
-		return session.PlanWanted, true
-	}
-	return session.PlanSkipped, true
 }
 
 type teamViewJSON struct {
@@ -397,6 +399,8 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		g := gateOf(v)
 		info, _ := s.reg.Session(sid)
 		g.Review, g.Pushed = offerOf(info, v), session.HeadPushed(info, v.Head)
+		why := session.PushWait(info, v)
+		g.PushOffer, g.PlanReview = offerJSON{Available: why == "", Reason: why}, planReviewJSON{Offered: session.PlanReviewOffered(v)}
 		g.Path = pathOf(session.Path(info, v, g.Pushed))
 		g.Flow = flowOf(session.LiveFlow(info, v, g.Pushed))
 		g.TypeAsk = typeCardOf(session.WorkTypeCard(info, v))
@@ -414,17 +418,12 @@ func (s *Server) workflowAPI(w http.ResponseWriter, r *http.Request, path string
 		hash, okHash := body["hash"].(string)
 		text, okText := body["text"].(string)
 		plan := path == "/api/approve-plan"
-		keys := []string{"sid", "hash", "text"}
-		if !plan {
-			keys = append(keys, "plan")
-		}
-		choice, okChoice := planChoiceOf(body)
-		if !keysWithin(body, keys...) || sid == "" || !okHash || !hash256.MatchString(hash) || !okText || !okChoice {
+		if !keysWithin(body, "sid", "hash", "text") || sid == "" || !okHash || !hash256.MatchString(hash) || !okText {
 			refuseFields(w)
 			return
 		}
-		err := s.cfg.Work.Approve(r.Context(), sid, plan, hash, text, choice)
-		shared.For(r.Context(), s.logger).Info("approval", "plan", path == "/api/approve-plan", "ok", err == nil)
+		err := s.cfg.Work.Approve(r.Context(), sid, plan, hash, text)
+		shared.For(r.Context(), s.logger).Info("approval", "plan", plan, "ok", err == nil)
 		reply(w, err, http.StatusOK)
 	case lockTestsRoute:
 		op, okOp := body["op"].(string)

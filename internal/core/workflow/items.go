@@ -17,7 +17,7 @@ type Progress struct {
 	Flagged         []Flag
 	ReqOk           bool
 	ReqWasApproved  bool
-	PlanChosen      bool
+	PlanNeeded      bool
 	PlanFile        string
 	PlanOk          bool
 	PlanWasApproved bool
@@ -35,7 +35,7 @@ func Items(p Progress) ([]string, bool) {
 		unapproved = true
 	}
 	change := p.Type.Profile() == Change
-	planned := change && p.PlanChosen
+	planned := change && p.PlanNeeded
 	incident := p.Type.Profile() == Incident && !p.PlanOk && p.ChangesCode
 	if !p.FilesListed {
 		note := ""
@@ -79,7 +79,7 @@ func Items(p Progress) ([]string, bool) {
 	}
 	switch {
 	case incident && p.PlanFile == "":
-		say("the developer's approval of the root cause, since this branch changes code: the root cause isn't approved, and no " + RootCauseFile + " from the Triage, Reproduce and Root cause steps is committed on the branch yet")
+		say("the developer's approval of the root cause, since this branch changes code: the root cause isn't approved, and the engine has read no " + RootCauseFile + " from the Triage, Reproduce and Root cause steps in the session's documents folder yet")
 	case incident && p.PlanWasApproved:
 		ask("the developer's approval of the root cause again, since this branch changes code: the root cause isn't approved, because " + RootCauseFile + " changed after they approved it")
 	case incident:

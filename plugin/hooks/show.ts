@@ -1,3 +1,5 @@
+import type { ModelUsage } from 'claude-code'
+
 const HIDDEN = '\\u000b-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2069\\ufe00-\\ufe0f\\ufeff'
 const INVISIBLE = new RegExp(`[\\u0000-\\u0008${HIDDEN}]|[\\u{e0000}-\\u{e007f}]`, 'gu')
 const SHELLS = new Set(['Bash', 'Monitor', 'PowerShell'])
@@ -21,17 +23,60 @@ export function summarize(tool: string, input: Record<string, unknown>): string 
   return clip(pick('file_path', 'path', 'pattern', 'url', 'query', 'notebook_path') ?? '', 200)
 }
 
+export function spent(usage: ModelUsage | undefined): number {
+  if (!usage) return 0
+  const n = usage.input_tokens + usage.output_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+  return Number.isSafeInteger(n) && n > 0 ? n : 0
+}
+
+export function agentTurn(e: { agentId?: string; reason: string; usage?: ModelUsage }): Record<string, unknown> & { type: string } {
+  const tokens = spent(e.usage)
+  return { type: 'agent_turn', agentId: clip(e.agentId, 200), reason: clip(e.reason, 40), ...(Number.isSafeInteger(tokens) && tokens > 0 ? { tokens } : {}) }
+}
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 function size(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`
 }
 
-function changes(hunks: unknown): string {
+function counted(hunks: unknown): { added: number; removed: number } {
   const lines = Array.isArray(hunks) ? hunks.flatMap(hunk => (Array.isArray((hunk as { lines?: unknown }).lines) ? ((hunk as { lines: unknown[] }).lines as string[]) : [])) : []
-  const added = lines.filter(l => typeof l === 'string' && l.startsWith('+')).length
-  const removed = lines.filter(l => typeof l === 'string' && l.startsWith('-')).length
+  return { added: lines.filter(l => typeof l === 'string' && l.startsWith('+')).length, removed: lines.filter(l => typeof l === 'string' && l.startsWith('-')).length }
+}
+
+function changes(hunks: unknown): string {
+  const { added, removed } = counted(hunks)
   return `Added ${plural(added, 'line')}, removed ${plural(removed, 'line')}`
+}
+
+export function callFacts(tool: string, input: Record<string, unknown>): Record<string, unknown> {
+  if (!SHELLS.has(tool)) return {}
+  const facts: Record<string, unknown> = {}
+  if (typeof input.command === 'string' && input.command) facts.command = clip(input.command, 4000)
+  if (typeof input.description === 'string' && input.description) facts.description = clip(input.description, 300)
+  if (input.dangerouslyDisableSandbox === true) facts.unsandboxed = true
+  return facts
+}
+
+export function endFacts(tool: string, ran: { deny?: string; isError?: boolean; text?: string; result?: unknown }): Record<string, unknown> {
+  try {
+    if (ran.deny !== undefined) return { denied: true }
+    if (SHELLS.has(tool) && ran.isError) {
+      const lines = String(ran.text ?? '').split('\n')
+      const code = /^Exit code (\d{1,3})\s*$/.exec(lines[0] ?? '')
+      if (code) lines.shift()
+      const tail = lines.filter(l => l.trim()).slice(-5).map(l => clip(l, 300))
+      return { ...(code ? { exit: Number(code[1]) } : {}), ...(tail.length ? { tail } : {}) }
+    }
+    if (ran.isError) return {}
+    const r = (ran.result ?? {}) as Record<string, any>
+    if (tool === 'Write' && r.type === 'create') return { added: String(r.content ?? '').replace(/\n$/, '').split('\n').length, removed: 0 }
+    if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'Write') return Array.isArray(r.structuredPatch) ? counted(r.structuredPatch) : {}
+  } catch {
+    return {}
+  }
+  return {}
 }
 
 export function outcome(tool: string, ran: { deny?: string; isError?: boolean; text?: string; result?: unknown }): string {

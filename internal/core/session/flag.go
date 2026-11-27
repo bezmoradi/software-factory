@@ -110,6 +110,7 @@ type PushedSet struct {
 	Commits    []PushedCommit
 	Attributes map[string][]byte
 	Complete   bool
+	CommitsCut bool
 }
 
 type PushContents interface {
@@ -161,6 +162,8 @@ type scanned struct {
 	specOver []string
 	linkOver bool
 	failed   bool
+	paths    []string
+	cut      bool
 }
 
 func secretName(p string) bool {
@@ -241,7 +244,7 @@ func addVersion(fl *Flag, sha string) {
 }
 
 func scanPushed(set PushedSet, specs bool) scanned {
-	out := scanned{complete: set.Complete}
+	out := scanned{complete: set.Complete, cut: set.CommitsCut}
 	byPath := map[string]int{}
 	plain, specCount := 0, 0
 	over := map[string]bool{}
@@ -329,6 +332,7 @@ func scanPushed(set PushedSet, specs bool) scanned {
 		}
 	}
 	out.lfs = workflow.LFSPaths(set.Attributes, paths)
+	out.paths = paths
 	return out
 }
 

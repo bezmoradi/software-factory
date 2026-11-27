@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"encoding/json"
 	"regexp"
 	"slices"
 	"strconv"
@@ -11,69 +10,22 @@ import (
 )
 
 const (
-	KnackpackFeature = ".knackpack/feature.json"
-	RootCauseFile    = "ROOT-CAUSE.md"
-	Confirmed        = "CONFIRMED"
+	KnackpackFolder = ".knackpack"
+	RootCauseFile   = "ROOT-CAUSE.md"
+	Confirmed       = "CONFIRMED"
 )
 
-var featureName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
-
-func KnackpackFeatureDir(featureJSON []byte) string {
-	return FeatureDir(featureJSON, ".knackpack")
-}
-
-func FeatureDir(featureJSON []byte, folder string) string {
-	if folder == "" || len(featureJSON) == 0 || len(featureJSON) > 65536 {
+func DocumentFolder(p string, folders []string) string {
+	first, _, nested := strings.Cut(p, "/")
+	if !nested {
 		return ""
 	}
-	var v map[string]any
-	if json.Unmarshal(featureJSON, &v) != nil {
-		return ""
-	}
-	s, ok := v["feature_directory"].(string)
-	name, inside := strings.CutPrefix(s, folder+"/")
-	if !ok || !inside || !featureName.MatchString(name) {
-		return ""
-	}
-	return s
-}
-
-func StepArtifacts(adapter AdapterID, steps []Step, dir string) []string {
-	a, ok := Adapters[adapter]
-	if !ok {
-		return nil
-	}
-	return StepArtifactsOf(a, steps, dir)
-}
-
-func StepArtifactsOf(a Adapter, steps []Step, dir string) []string {
-	ok := a.AnyFolder != ""
-	if ok && dir == "" {
-		dir = a.AnyFolder
-	}
-	if !ok || dir == "" {
-		return nil
-	}
-	var out []string
-	for _, s := range steps {
-		for _, p := range a.Artifacts[s] {
-			out = append(out, dir+"/"+p)
-		}
-		out = append(out, a.RootArtifacts[s]...)
-	}
-	return out
-}
-
-func OnlyArtifacts(paths, patterns []string) bool {
-	if len(patterns) == 0 {
-		return false
-	}
-	for _, p := range paths {
-		if !artifactPath(p, patterns) {
-			return false
+	for _, f := range folders {
+		if f != "" && strings.EqualFold(first, f) {
+			return f
 		}
 	}
-	return true
+	return ""
 }
 
 func AgentProblems(t *Team, installed []string) []string {

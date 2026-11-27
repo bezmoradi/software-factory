@@ -46,6 +46,7 @@ var _ session.RunStore = Sessions{}
 
 type runJSON struct {
 	SID       string    `json:"sid"`
+	Docs      string    `json:"docs,omitempty"`
 	ID        string    `json:"id"`
 	Agent     string    `json:"agent"`
 	Repo      string    `json:"repo"`
@@ -138,6 +139,7 @@ func (s Sessions) Load() ([]session.SavedRun, error) {
 		if session.ValidBox(r.Box) {
 			v.Box = r.Box
 		}
+		v.Docs = matching(r.Docs, sessionID)
 		lineageInto(&v, r)
 		seen[v.SID] = true
 		out = append(out, v)
@@ -164,6 +166,7 @@ func (s Sessions) Save(runs []session.SavedRun) error {
 		if session.ValidBox(r.Box) {
 			f.Sessions[len(f.Sessions)-1].Box = r.Box
 		}
+		f.Sessions[len(f.Sessions)-1].Docs = matching(r.Docs, sessionID)
 	}
 	return write(s.Dir, sessionsFile, f)
 }
@@ -175,18 +178,14 @@ func approvalOf(a *workApprovalJSON) (*session.SavedApproval, bool) {
 	if !teamSHA.MatchString(a.Hash) || !commitID.MatchString(a.Commit) {
 		return nil, false
 	}
-	v := &session.SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Plan: a.Plan}
-	if utf8.ValidString(a.Text) {
-		v.Text = a.Text
-	}
-	return v, true
+	return &session.SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At}, true
 }
 
 func approvalJSONOf(a *session.SavedApproval) *workApprovalJSON {
 	if a == nil {
 		return nil
 	}
-	return &workApprovalJSON{Hash: a.Hash, Commit: a.Commit, At: a.At.UTC(), Text: a.Text, Plan: a.Plan}
+	return &workApprovalJSON{Hash: a.Hash, Commit: a.Commit, At: a.At.UTC()}
 }
 
 func relPath(p string) bool {

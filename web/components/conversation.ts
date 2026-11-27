@@ -1,25 +1,33 @@
-import { button, el, emit, remembered, shown, statusLine, unspoofed, visible } from '../lib/dom.ts'
+import { button, el, emit, ensureId, fragment, remembered, shown, statusLine, unspoofed, visible, visibleCommand } from '../lib/dom.ts'
 import { duration, plural } from '../lib/format.ts'
-import type { CardEvent, CardHost, ClaimMark, ContextView, FoldCount, SessionEvent, ToolEvent, TurnMarks } from '../types.ts'
+import type { CallLine, CardEvent, CardHost, ClaimMark, ContextView, EndLine, FoldCount, SessionEvent, ToolDoneEvent, ToolEvent, TurnMarks } from '../types.ts'
 import './markdown.ts'
 import { answering, hiddenMark, hidesText } from './cards.ts'
+import { codeBlock } from './code-block.ts'
 
 const NOTE = '[Software Factory] '
 const TOOL_NAMES = new Map([['WebFetch', 'Fetch']])
-const FILE_TOOLS = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
+const FILE_TOOLS = new Set(['Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'read', 'edit'])
 const CARD_TAGS = { permission: 'sf-permission', ask: 'sf-ask', plan: 'sf-plan' } as const
 const CARD_ORDER: string[] = Object.keys(CARD_TAGS)
 
 export type Spot = { turn: Element; offset: number }
 
+type FoldKind = 'read' | 'edit'
+
+type Edited = { n: number; added: number; removed: number; counted: boolean }
+
 type Fold = {
+  kind: FoldKind
   li: HTMLLIElement
   box: HTMLDetailsElement
   summary: HTMLElement
+  diffs: HTMLElement
   done: HTMLOListElement
   running: HTMLOListElement
-  calls: Map<string, { count: FoldCount; start: number }>
+  calls: Map<string, { count: FoldCount | null; file: string; start: number }>
   counts: Map<string, { count: FoldCount; n: number }>
+  files: Map<string, Edited>
   start: number
   end: number
   after: HTMLLIElement | null
@@ -28,6 +36,19 @@ type Fold = {
 const foldCount = (f: unknown): FoldCount | null => {
   const c = f as FoldCount | null | undefined
   return c && typeof c.verb === 'string' && typeof c.one === 'string' && typeof c.many === 'string' ? c : null
+}
+
+const callLine = (l: unknown): CallLine => (l && typeof l === 'object' ? (l as CallLine) : {})
+const endLine = (l: unknown): EndLine => (l && typeof l === 'object' ? (l as EndLine) : {})
+const text = (v: unknown): string => (typeof v === 'string' ? v : '')
+const count = (v: unknown): number => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : 0)
+
+function lineCounts(added: number, removed: number): HTMLElement {
+  const box = el('span', 'tool-counts')
+  const seen = el('span', '', `+${added} −${removed}`)
+  seen.setAttribute('aria-hidden', 'true')
+  box.append(' · ', seen, el('span', 'sr-only', `${added} ${plural(added, 'line')} added, ${removed} removed`))
+  return box
 }
 
 const tokens = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}m` : n >= 1000 ? `${+(n / 1000).toFixed(1)}k` : String(n))
@@ -72,7 +93,8 @@ class SfConversation extends HTMLElement {
   #said: HTMLParagraphElement | null = null
   #reply: { turnId: string; body: HTMLElementTagNameMap['sf-markdown'] } | null = null
   #tools = new Map<string, HTMLLIElement>()
-  #groups = new Map<string, { list: HTMLOListElement; label: HTMLElement; count: number; name: string }>()
+  #groups = new Map<string, { box: HTMLDetailsElement; list: HTMLOListElement; label: HTMLElement; count: number; name: string }>()
+  #names = new Map<string, string>()
   #fold: Fold | null = null
   #folded = new Map<string, Fold>()
   #foldOpen = new Map<string, boolean>()
@@ -198,41 +220,86 @@ class SfConversation extends HTMLElement {
       const list = el('ol', 'sub-list')
       box.append(label, list)
       li.append(box)
-      g = { list, label, count: 0, name: '' }
+      g = { box, list, label, count: 0, name: this.#names.get(id) ?? '' }
       this.#groups.set(id, g)
     }
     if (name) g.name = name
     g.count++
-    g.label.textContent = `${g.name ? `Subagent ${shown(g.name)}` : 'A subagent'}: ${g.count} ${plural(g.count, 'tool call')}`
+    this.#groupLabel(g)
     return g.list
   }
 
-  #joinable(): Fold | null {
-    return this.#fold && this.#fold.li === this.#timeline!.lastElementChild ? this.#fold : null
+  #groupLabel(g: { label: HTMLElement; count: number; name: string }) {
+    g.label.textContent = `${g.name ? `Subagent ${shown(g.name)}` : 'A subagent'}: ${g.count} ${plural(g.count, 'tool call')}`
   }
 
-  #newFold(ev: ToolEvent): Fold {
-    const li = this.#entry('fold')
+  set agentNames(list: { id: string; type: string }[]) {
+    for (const { id, type } of list) {
+      if (!type || this.#names.get(id) === type) continue
+      this.#names.set(id, type)
+      const g = this.#groups.get(id)
+      if (g && !g.name) {
+        g.name = type
+        this.#groupLabel(g)
+      }
+    }
+  }
+
+  openGroup(id: string): boolean {
+    const g = this.#groups.get(id)
+    if (!g || !g.box.isConnected || this.away) return false
+    g.box.open = true
+    this.#pinned = false
+    g.label.focus({ preventScroll: true })
+    g.box.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    return true
+  }
+
+  #joinable(kind: FoldKind): Fold | null {
+    return this.#fold && this.#fold.kind === kind && this.#fold.li === this.#timeline!.lastElementChild ? this.#fold : null
+  }
+
+  #newFold(ev: ToolEvent, kind: FoldKind): Fold {
+    const li = this.#entry(kind === 'edit' ? 'fold edits' : 'fold')
     const summary = el('summary', 'small')
     const done = el('ol', 'sub-list')
-    const box = remembered(this.#foldOpen, `${ev.epoch}:${ev.seq}`, false, summary, done)
+    const diffs = el('p', 'small fold-diffs')
+    const box = kind === 'edit' ? remembered(this.#foldOpen, `${ev.epoch}:${ev.seq}`, false, summary, diffs, done) : remembered(this.#foldOpen, `${ev.epoch}:${ev.seq}`, false, summary, done)
     box.hidden = true
     box.addEventListener('toggle', () => {
       if (box.open) this.#measure([...done.querySelectorAll<HTMLElement>('.tool .call')].filter(c => this.#unmeasured.has(c)))
     })
     const running = el('ol', 'sub-list fold-running')
     li.append(box, running)
-    this.#fold = { li, box, summary, done, running, calls: new Map(), counts: new Map(), start: ev.ts, end: 0, after: null }
+    this.#fold = { kind, li, box, summary, diffs, done, running, calls: new Map(), counts: new Map(), files: new Map(), start: ev.ts, end: 0, after: null }
     return this.#fold
   }
 
   #foldLine(g: Fold) {
+    if (g.kind === 'edit') return this.#editLine(g)
     const words = [...g.counts.values()].filter(c => c.n > 0).map(({ count, n }) => `${count.verb} ${n} ${n === 1 ? count.one : count.many}`).join(', ')
     g.box.hidden = !words
     g.summary.textContent = `${words.charAt(0).toUpperCase()}${words.slice(1)}${words && !g.running.childElementCount ? ` · ${duration(g.end - g.start)}` : ''}`
   }
 
-  #foldEnded(ev: { id: string; ts: number; unfold?: boolean }, li: HTMLLIElement) {
+  #editLine(g: Fold) {
+    const files = [...g.files].filter(([, f]) => f.n > 0)
+    g.box.hidden = !files.length
+    if (!files.length) return g.summary.replaceChildren()
+    const names = files.map(([p]) => visible(p))
+    const times = files[0]![1].n
+    const what = files.length === 1 ? `${names[0]}${times > 1 ? ` ${times} times` : ''}` : files.length === 2 ? `${names[0]} and ${names[1]}` : `${files.length} files`
+    g.summary.replaceChildren(`Edited ${what}`)
+    if (files.every(([, f]) => f.counted)) g.summary.append(lineCounts(files.reduce((n, [, f]) => n + f.added, 0), files.reduce((n, [, f]) => n + f.removed, 0)))
+    const links = files.map(([p]) => {
+      const link = button(visible(p), 'link', () => emit(link, 'sf-diff-file', { path: p }))
+      link.setAttribute('aria-label', `Open the diff of ${visible(p)} in Changes`)
+      return link
+    })
+    g.diffs.replaceChildren(el('span', 'muted', `${files.length === 1 ? 'Its diff' : 'Their diffs'} in Changes: `), fragment(links.flatMap((l, i) => (i ? [', ', l] : [l]))))
+  }
+
+  #foldEnded(ev: { id: string; ts: number; unfold?: boolean; line?: EndLine }, li: HTMLLIElement) {
     const g = this.#folded.get(ev.id)
     const call = g?.calls.get(ev.id)
     if (!g || !call) return
@@ -247,9 +314,19 @@ class SfConversation extends HTMLElement {
       if (!g.calls.size) g.li.remove()
     } else {
       g.end = Math.max(g.end, ev.ts)
-      const c = g.counts.get(call.count.verb) ?? { count: call.count, n: 0 }
-      c.n++
-      g.counts.set(call.count.verb, c)
+      if (call.count) {
+        const c = g.counts.get(call.count.verb) ?? { count: call.count, n: 0 }
+        c.n++
+        g.counts.set(call.count.verb, c)
+      } else {
+        const end = endLine(ev.line)
+        const f = g.files.get(call.file) ?? { n: 0, added: 0, removed: 0, counted: true }
+        f.n++
+        f.added += count(end.added)
+        f.removed += count(end.removed)
+        f.counted = f.counted && typeof end.added === 'number' && typeof end.removed === 'number'
+        g.files.set(call.file, f)
+      }
       g.done.append(li)
     }
     this.#foldLine(g)
@@ -301,6 +378,60 @@ class SfConversation extends HTMLElement {
     return out
   }
 
+  #reveal(show: string, hide: string, make: () => HTMLElement): HTMLElement {
+    const box = el('div', 'tool-detail')
+    let shown: HTMLElement | null = null
+    const toggle = button(show, 'link tool-reveal', () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true'
+      if (open && !shown) {
+        shown = make()
+        box.append(shown)
+        toggle.setAttribute('aria-controls', ensureId(shown))
+      }
+      if (shown) shown.hidden = !open
+      toggle.setAttribute('aria-expanded', String(open))
+      toggle.textContent = open ? hide : show
+    })
+    toggle.setAttribute('aria-expanded', 'false')
+    box.append(toggle)
+    return box
+  }
+
+  #detail(block: HTMLElement): HTMLElement {
+    const box = el('div', 'tool-detail')
+    box.append(block)
+    return box
+  }
+
+  #call(ev: ToolEvent, line: CallLine): HTMLElement {
+    const call = el('div', 'call')
+    call.append(el('b', '', TOOL_NAMES.get(ev.tool) || visible(ev.tool)))
+    const programs = Array.isArray(line.programs) ? line.programs.filter(p => typeof p === 'string') : []
+    const path = text(line.path)
+    const command = text(line.command)
+    if (text(line.said) && programs.length) {
+      const more = count(line.more)
+      call.append(' ', el('span', 'tool-said', shown(text(line.said))), el('span', 'tool-programs', ` · ${programs.map(p => visible(p)).join(', ')}${more ? ` and ${more} more` : ''}`))
+    } else if (command) call.append(`(${visible(command)})`)
+    else if (path && FILE_TOOLS.has(ev.tool) && !line.outside) {
+      const link = el('span', 'tool-path', visible(path))
+      link.dataset.path = path
+      call.append('(', link, ')')
+    } else if (path) call.append(`(${visible(path)})`)
+    else if (ev.summary) call.append(`(${visible(ev.summary)})`)
+    return call
+  }
+
+  #ended(ev: ToolDoneEvent, li: HTMLLIElement) {
+    const end = endLine(ev.line)
+    const result = text(end.result)
+    const tail = Array.isArray(end.tail) ? end.tail.filter(l => typeof l === 'string') : []
+    if (result) li.append(this.#outLine(visible(result)))
+    if (!ev.ok && tail.length) li.append(this.#detail(codeBlock({ text: visibleCommand(tail.join('\n')), label: 'The last lines of the output', title: 'Last lines of the output', tone: 'bad', keep: 'end', wrap: true, size: 'small' })))
+    else if (result && ev.ok && ev.outcome && li.dataset.kept !== 'true') li.append(this.#reveal('Show output', 'Hide output', () => codeBlock({ text: visibleCommand(ev.outcome), label: 'The output', wrap: true, size: 'small' })))
+    else if (ev.outcome) li.append(this.#outLine(visible(ev.outcome)))
+  }
+
   reset(note: string): void {
     this.#timeline!.replaceChildren()
     this.#needs!.replaceChildren(this.#heading!)
@@ -308,6 +439,7 @@ class SfConversation extends HTMLElement {
     this.#tools.clear()
     this.#unmeasured.clear()
     this.#groups.clear()
+    this.#names.clear()
     this.#fold = null
     this.#folded.clear()
     this.#cards.clear()
@@ -330,6 +462,7 @@ class SfConversation extends HTMLElement {
         }
         if (noted && !text && !ev.images && !ev.files?.length) break
         const item = this.#entry(ev.from === 'task' ? 'prompt task' : 'prompt', who)
+        if (ev.started) item.firstElementChild?.append(' ', el('span', 'tag', ev.started))
         if (text) item.append(el('div', 'body', unspoofed(text)))
         if (ev.images) item.append(el('span', 'who count', `${ev.images} ${plural(ev.images, 'image')}`))
         if (ev.files?.length) item.append(el('span', 'who count', `${ev.files.length === 1 ? 'Copy' : 'Copies'} of ${ev.files.join(', ')}`))
@@ -355,13 +488,16 @@ class SfConversation extends HTMLElement {
       }
       case 'tool': {
         this.#reply = null
-        const count = ev.agentId || !ev.id ? null : foldCount(ev.fold)
-        const fold = count ? (this.#joinable() ?? this.#newFold(ev)) : null
+        const line = callLine(ev.line)
+        const reads = ev.agentId || !ev.id ? null : foldCount(ev.fold)
+        const edited = !ev.agentId && ev.id && line.edit === true && !line.kept ? text(line.path) : ''
+        const kind: FoldKind | null = reads ? 'read' : edited ? 'edit' : null
+        const fold = kind ? (this.#joinable(kind) ?? this.#newFold(ev, kind)) : null
         let li: HTMLLIElement
-        if (fold && count) {
+        if (fold) {
           li = el('li', 'tool run')
           fold.running.append(li)
-          fold.calls.set(ev.id, { count, start: ev.ts })
+          fold.calls.set(ev.id, { count: reads, file: edited, start: ev.ts })
           this.#folded.set(ev.id, fold)
         } else if (ev.agentId) {
           this.#fold = null
@@ -373,15 +509,23 @@ class SfConversation extends HTMLElement {
         }
         const mark = el('span', 'mark', '●')
         mark.setAttribute('aria-hidden', 'true')
-        const call = el('div', 'call')
-        call.append(el('b', '', TOOL_NAMES.get(ev.tool) || visible(ev.tool)))
-        if (ev.summary && FILE_TOOLS.has(ev.tool) && ev.summary.startsWith('/') && !ev.summary.endsWith('…')) {
-          const path = el('span', 'tool-path', visible(ev.summary))
-          path.dataset.path = ev.summary
-          call.append('(', path, ')')
-        } else if (ev.summary) call.append(`(${visible(ev.summary)})`)
-        li.append(mark, call, this.#outLine('Running…'))
+        const call = this.#call(ev, line)
+        li.append(mark, call)
+        const kept = text(line.kept)
+        const command = text(line.command)
+        if (kept) {
+          li.dataset.kept = 'true'
+          const why = el('div', 'tool-kept')
+          why.append(el('span', 'tag warn', visible(kept)))
+          li.append(why)
+        }
+        if (command && text(line.said) && call.querySelector('.tool-programs')) {
+          const block = () => codeBlock({ text: visibleCommand(command), label: 'The whole command line', look: 'terminal', wrap: true, size: 'small' })
+          li.append(kept ? this.#detail(block()) : this.#reveal('Show command', 'Hide command', block))
+        }
+        li.append(this.#outLine('Running…'))
         if (hidesText(ev.summary)) li.append(hiddenMark(ev.summary, 'This call'))
+        if (hidesText(text(line.said))) li.append(hiddenMark(text(line.said), 'This description'))
         this.#fresh.add(call)
         li.title = visible(ev.summary || ev.tool)
         if (ev.id) this.#tools.set(ev.id, li)
@@ -395,7 +539,7 @@ class SfConversation extends HTMLElement {
           li.classList.remove('run')
           li.classList.add(ev.ok ? 'ok' : 'fail')
           li.querySelector('.tool-out')?.remove()
-          if (ev.outcome) li.append(this.#outLine(visible(ev.outcome)))
+          this.#ended(ev, li)
           if (hidesText(ev.outcome)) li.append(hiddenMark(ev.outcome, 'This output'))
           this.#foldEnded(ev, li)
         }
