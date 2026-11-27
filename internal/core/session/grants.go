@@ -110,6 +110,8 @@ type GrantsConfig struct {
 	Apply      func(ctx context.Context) error
 	Show       func(sid string, v AccessShown)
 	Note       func(sid, text string)
+	Tell       func(sid, text string) error
+	Idle       func(sid string) bool
 	Actions    ActionsConfig
 	Audit      Audit
 	Now        func() time.Time
@@ -166,6 +168,9 @@ func NewGrants(cfg GrantsConfig) (*Grants, error) {
 	}
 	if cfg.Note == nil {
 		cfg.Note = func(string, string) {}
+	}
+	if cfg.Tell == nil || cfg.Idle == nil {
+		cfg.Tell, cfg.Idle = nil, func(string) bool { return false }
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

@@ -53,6 +53,7 @@ type pushJSON struct {
 	Outcome     string         `json:"outcome"`
 	Flow        *flowJSON      `json:"flow,omitempty"`
 	NeedsReason bool           `json:"needsReason"`
+	AllowAsk    string         `json:"allowAsk"`
 	Expires     int64          `json:"expires"`
 	At          int64          `json:"at"`
 	Audit       *pushAuditJSON `json:"audit"`
@@ -137,6 +138,7 @@ func pushOf(v *session.PushView, all []session.AgentCheck, r *session.ReviewView
 	out.Look = pushLookJSON{Icon: look.Icon, Tone: look.Tone, Label: look.Label, Lead: look.Lead}
 	out.Decision, out.Outcome = session.PushDecision(*v), session.PushOutcome(*v)
 	out.Flow = flowOf(session.CardFlow(v))
+	out.AllowAsk = session.PushAllowAsk(v, r)
 	out.Items = []missingJSON{}
 	for _, m := range session.PushMissing(v, r) {
 		out.Items = append(out.Items, missingJSON{Text: m.Text, Agent: m.Agent, Since: m.Since})

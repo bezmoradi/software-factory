@@ -1,9 +1,12 @@
 package session
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/review"
 )
 
 type Said struct {
@@ -492,6 +495,25 @@ func PushMissing(p *PushView, r *ReviewView) []MissingItem {
 		out = append(out, item)
 	}
 	return out
+}
+
+func PushAllowAsk(p *PushView, r *ReviewView) string {
+	if p == nil || r == nil || p.Card == "" || r.Commit != p.Commit || r.Branch != p.Branch {
+		return ""
+	}
+	n := 0
+	for _, role := range r.Roles {
+		if role.State == review.Running && !role.Advisory && slices.Contains(p.MissingReviews, role.Agent) {
+			n++
+		}
+	}
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 review is still running. Push before its verdict?"
+	}
+	return strconv.Itoa(n) + " reviews are still running. Push before their verdicts?"
 }
 
 func CloneWords(p CloneProgress, host string) string {

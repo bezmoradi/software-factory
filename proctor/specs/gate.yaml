@@ -7678,6 +7678,20 @@ scenarios:
           equal:
             "$.status": 200
             "$.body": { found: ["after-${run.id}.txt"] }
+      - id: marker-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.changes.commits": { subject: "Add after-${run.id}.txt" }
       - id: stop
         do: http.request
         identity: page

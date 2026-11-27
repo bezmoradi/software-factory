@@ -1,6 +1,7 @@
 import { download as downloadFile } from '../api.ts'
 import { actionButton, busy, button, el, emit, labelError, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { saveFile } from '../lib/download.ts'
+import { confirmDialog } from '../lib/dialog.ts'
 import { actions, field as formField, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
@@ -361,12 +362,16 @@ class SfPushPanel extends HTMLElement {
     const off = value.answering || !!value.disabled || p.running
     const asked = off ? '' : text(value.ask ?? '')
     const tips: HTMLElement[] = []
-    const answer = (allow: boolean) => () => {
-      if (off) return
+    const send = (allow: boolean) => {
       const reason = input.value
       this.#unrefuse(input)
       this.#answered = allow ? 'allow' : 'deny'
       emit(this, 'sf-push-answer', { card: p.card, commit: p.commit, allow, reason })
+    }
+    const answer = (allow: boolean) => async () => {
+      if (off) return
+      if (allow && p.allowAsk && !(await confirmDialog(text(p.allowAsk), 'reviews-and-the-push-gate', [], 'Allow', 'danger'))) return
+      send(allow)
     }
     const allow = button('Allow', 'primary small', answer(true), 'button', `push-allow:${p.card}`)
     const deny = button('Deny', 'small', answer(false), 'button', `push-deny:${p.card}`)

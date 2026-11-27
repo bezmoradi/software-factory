@@ -87,6 +87,6 @@ This project is maintained by [Bez Moradi](https://github.com/bezmoradi).
 
 ## License
 
-Software Factory is licensed under [MIT](LICENSE). The image includes the license texts of the Go modules linked into it, Go's own and TypeScript's in `/usr/share/doc/software-factory/`.
+Software Factory is licensed under [MIT](LICENSE). The image includes the license texts of the Go modules linked into it, Go's own, TypeScript's, Node's and npm's in `/usr/share/doc/software-factory/`.
 
 The page's icons are [Codicons](https://github.com/microsoft/vscode-codicons) from VS Code, © Microsoft Corporation, used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Its eight themes take their colors from these VS Code themes, adjusted for WCAG AA contrast: [Solarized](https://ethanschoonover.com/solarized/) Dark and Light, VS Code's own Dark Modern and Light Modern ([microsoft/vscode](https://github.com/microsoft/vscode)), GitHub Dark Default and GitHub Light Default ([primer/github-vscode-theme](https://github.com/primer/github-vscode-theme)), [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) and [Dracula](https://draculatheme.com).

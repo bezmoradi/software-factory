@@ -14,6 +14,8 @@ const (
 	DocsVariable      = "SF_DOCS"
 	MaxDocBytes       = 400 << 10
 	ScratchFolderName = "scratch"
+	ScratchAt         = "/t"
+	scratchNameBytes  = 8
 	TempVariable      = "TMPDIR"
 	ClaudeTempVar     = "CLAUDE_CODE_TMPDIR"
 
@@ -57,6 +59,7 @@ type docBook struct {
 	files  DocFiles
 	logger shared.Logger
 	what   string
+	short  bool
 }
 
 func DocsFolder(workspace, sid string) string {
@@ -66,11 +69,39 @@ func DocsFolder(workspace, sid string) string {
 	return path.Join(workspace, DocsFolderName, sid) + "/"
 }
 
-func ScratchFolder(workspace, sid string) string {
-	if workspace == "" || !sidPattern.MatchString(sid) {
+func ScratchName(sid string) string {
+	if !sidPattern.MatchString(sid) {
 		return ""
 	}
-	return path.Join(workspace, ScratchFolderName, sid)
+	return sid[:scratchNameBytes]
+}
+
+func ScratchFolder(sid string) string {
+	name := ScratchName(sid)
+	if name == "" {
+		return ""
+	}
+	return ScratchAt + "/" + name
+}
+
+func (d *Dispatcher) scratchFreeSID(r *run) string {
+	for {
+		sid := newSID()
+		if !d.scratchTaken(r, ScratchName(sid)) {
+			return sid
+		}
+	}
+}
+
+func (d *Dispatcher) scratchTaken(r *run, name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, o := range d.runs {
+		if o != r && o.box == r.box && ScratchName(o.docsID()) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func docName(name string) bool {
@@ -92,24 +123,36 @@ func (r *Registry) docFiles() docBook {
 func (r *Registry) UseScratch(files DocFiles, logger shared.Logger) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.scratch = docBook{files: files, logger: logger, what: "scratch"}
+	r.scratch = docBook{files: files, logger: logger, what: "scratch", short: true}
+}
+
+func (b docBook) folderName(docs string) string {
+	if !sidPattern.MatchString(docs) {
+		return ""
+	}
+	if b.short {
+		return ScratchName(docs)
+	}
+	return docs
 }
 
 func (b docBook) make(docs, box string) {
-	if b.files == nil || !sidPattern.MatchString(docs) || !ValidBox(box) {
+	name := b.folderName(docs)
+	if b.files == nil || name == "" || !ValidBox(box) {
 		return
 	}
-	if err := b.files.Make(box, docs); err != nil && b.logger != nil {
+	if err := b.files.Make(box, name); err != nil && b.logger != nil {
 		b.logger.Warn(cmp.Or(b.what, "documents"), "event", "folder-not-made", "docs", docs)
 	}
 }
 
 func (b docBook) drop(box, docs string) {
-	if b.files == nil || !sidPattern.MatchString(docs) || !ValidBox(box) {
+	name := b.folderName(docs)
+	if b.files == nil || name == "" || !ValidBox(box) {
 		return
 	}
 	go func() {
-		if err := b.files.Drop(box, docs); err != nil && b.logger != nil {
+		if err := b.files.Drop(box, name); err != nil && b.logger != nil {
 			b.logger.Warn(cmp.Or(b.what, "documents"), "event", "not-removed", "docs", docs)
 		}
 	}()

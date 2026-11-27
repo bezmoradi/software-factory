@@ -493,7 +493,7 @@ func (d *Dispatcher) claude(args ...string) []string {
 }
 
 func (d *Dispatcher) startClaude(ctx context.Context, r *run, model string) error {
-	sid := newSID()
+	sid := d.scratchFreeSID(r)
 	r.docs = sid
 	argv := slices.Clone(r.spec.Command)
 	if d.cfg.PluginDir != "" {
@@ -997,6 +997,7 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 	if r.spec.Method == MethodPlugin {
 		d.reg.makeDocs(r.docsID(), r.box)
 		d.reg.makeScratch(r.docsID(), r.box)
+		d.reg.makeScreenshots(sid)
 		res, err := d.host(r).Run(ctx, Command{Argv: d.claude("respawn", r.id), Dir: r.cwd, Pass: r.spec.Pass, Timeout: claudeRun})
 		if err != nil {
 			return conflict("claude", hostMessage(err))
@@ -1016,6 +1017,9 @@ func (d *Dispatcher) wakeFor(ctx context.Context, sid string, consent Consent, b
 		d.booted(r)
 		woke = true
 		d.homeServers(r)
+		if w := d.workOf(); w != nil {
+			w.SweepAfterWake(sid)
+		}
 		d.lifecycle(ctx, AuditSessionWake, r, by, ResultWoken, why)
 		return nil
 	}

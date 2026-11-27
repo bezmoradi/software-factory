@@ -487,9 +487,9 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 		}
 		g.mu.Unlock()
 		if c.key() == key {
-			return AccessAnswer{Result: AccessHeld, Reason: "your request for " + what + " is still waiting for the person's answer on Software Factory's page; the answer reaches you with your next message"}
+			return AccessAnswer{Result: AccessHeld, Reason: "your request for " + what + " is still waiting for the person's answer on Software Factory's page; Software Factory sends you the answer once they give it"}
 		}
-		return refuse("this session already has a request waiting for the person; wait for its answer, which reaches you with your next message")
+		return refuse("this session already has a request waiting for the person; wait for its answer, which Software Factory sends you once they give it")
 	}
 	if !g.asks.allow(sid, now) {
 		g.mu.Unlock()
@@ -504,7 +504,7 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 	g.mu.Unlock()
 	g.show(sid)
 	g.cfg.Logger.Info("grants", "event", "asked")
-	return AccessAnswer{Result: AccessHeld, Reason: "Software Factory's page shows your request for " + what + " to the person, who decides whether to allow it, for how long and for which sessions; the answer reaches you with your next message. Go on with other work, or end your turn if you can't go on without it"}
+	return AccessAnswer{Result: AccessHeld, Reason: "Software Factory's page shows your request for " + what + " to the person, who decides whether to allow it, for how long and for which sessions; Software Factory sends you their answer in a message once they give it, or with your next message if you're still working then. Go on with other work, or end your turn if you can't go on without it"}
 }
 
 func (g *Grants) Tried(box, raw string, last time.Time) {
@@ -779,7 +779,7 @@ func (g *Grants) makeGrant(ctx context.Context, t GrantTarget, m grantMaking) (G
 	g.noteAnsweredLocked(t.SID, key, now)
 	g.mu.Unlock()
 	g.auditGrant(ctx, gr, ByPage, ResultGranted, grantWords(gr, ResultGranted))
-	if cred.ID != "" {
+	if cred.ID != "" && m.askedBy != AskedByAgent {
 		g.cfg.Note(t.SID, madeNote(cred, gr))
 	}
 	return gr, nil
@@ -846,11 +846,9 @@ func (g *Grants) AllowAccess(ctx context.Context, sid string, q AccessChoice) (s
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case kind == AccessRequest && gr.Credential == "" && gr.Port > 0:
-		g.cfg.Note(sid, "The person allowed "+gr.Target()+" for "+scopeWords(gr.Scope, gr.Project)+", "+untilWords(gr.Expires)+", on Software Factory's page, so you can reach it now: "+PortReachWords(gr.Host, gr.Port)+".")
-	case kind == AccessRequest && gr.Credential == "":
-		g.cfg.Note(sid, "The person allowed "+gr.Host+" for "+scopeWords(gr.Scope, gr.Project)+", "+untilWords(gr.Expires)+", on Software Factory's page, so you can reach it over HTTPS through the proxy now.")
+	told := ""
+	if kind == AccessRequest {
+		told = g.allowedWords(gr)
 	}
 	said := "Allowed " + gr.what() + " for " + scopeWords(gr.Scope, gr.Project) + ", " + grantForWords[q.Expires] + "."
 	switch {
@@ -862,8 +860,12 @@ func (g *Grants) AllowAccess(ctx context.Context, sid string, q AccessChoice) (s
 		said = "Handed over " + gr.Name + " to " + scopeWords(gr.Scope, gr.Project) + ", " + grantForWords[q.Expires] + "."
 	}
 	if g.apply(ctx) != nil {
+		if told != "" {
+			g.cfg.Note(sid, told)
+		}
 		return said, conflict("egress", "Saved, but egress didn't take it yet, so the agent can't reach "+hostList(gr.Hosts())+" until it does. The engine sets it again within 30 seconds.")
 	}
+	g.answerAgent(ctx, sid, told)
 	return said, nil
 }
 
@@ -959,7 +961,7 @@ func (g *Grants) RefuseAccess(ctx context.Context, sid, id string) (string, erro
 	gr := Grant{Host: c.host, Port: c.port, Scope: GrantSession, Session: sid, Project: t.Project}
 	g.auditGrant(ctx, gr, ByPage, ResultNotGranted, refusedWords(what, c.kind == AccessRequest))
 	if c.kind == AccessRequest {
-		g.cfg.Note(sid, "The person didn't allow "+what+" on Software Factory's page. Don't ask for it again for 10 minutes; if you still need it, say why in your reply.")
+		g.answerAgent(ctx, sid, refusedNote(what))
 	}
 	return "Didn't allow " + what + ". The agent can't ask for it again for 10 minutes.", nil
 }

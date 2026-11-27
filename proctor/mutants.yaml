@@ -4156,3 +4156,87 @@
     - file: "internal/core/session/outofmemory.go"
       find: "\t\treturn strconv.FormatInt(n/gib, 10) + \" GiB\"\n"
       replace: "\t\treturn strconv.FormatInt(n/gib, 10) + \" MiB\"\n"
+- id: SESS-950
+  title: "The gate no longer names the reviews a held push is missing, so Allow on a held card never asks before pushing past reviews that are still running"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "\t\t\treviews = append(reviews, q.Agent)\n"
+      replace: ""
+- id: SESS-951
+  title: "An advisory run that is still running makes Allow ask, though its verdict never counts for the gate"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "role.State == review.Running && !role.Advisory && "
+      replace: "role.State == review.Running && "
+- id: SESS-952
+  title: "Allow asks about reviews of another commit that are running, not only the held card's"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: " || r.Commit != p.Commit"
+      replace: ""
+- id: SESS-953
+  title: "Allow's question counts every review the card is missing, finished ones too, not only those still running"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "if role.State == review.Running && !role.Advisory && "
+      replace: "if !role.Advisory && "
+- id: SESS-954
+  title: "Allow's question with one review still running says \"1 reviews are still running. Push before their verdicts?\""
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "\tcase 1:\n\t\treturn \"1 review is still running. Push before its verdict?\"\n"
+      replace: ""
+- id: SESS-955
+  title: "The held card's allowAsk is always empty, so the page's Allow never asks"
+  edits:
+    - file: "internal/adapters/http/page/pushes.go"
+      find: "\tout.AllowAsk = session.PushAllowAsk(v, r)\n"
+      replace: ""
+- id: SESS-940
+  title: "The helper takes an image with no browser for a browser run"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/verifiers.go"
+      find: "\t\tcase http.StatusOK:\n\t\t\treturn nil\n\t\tcase http.StatusNotFound:\n"
+      replace: "\t\tcase http.StatusOK, http.StatusNotFound:\n\t\t\treturn nil\n"
+- id: SESS-956
+  title: "An answer to the agent's own access request never starts its turn: it only waits as a note for the next message"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "if g.cfg.Idle(sid) && g.cfg.Tell(sid, NoteMarker+text) == nil {"
+      replace: "if false {"
+- id: SESS-957
+  title: "An answer to the agent's own access request is sent as a message even while the agent's turn runs"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "if g.cfg.Idle(sid) && g.cfg.Tell(sid, NoteMarker+text) == nil {"
+      replace: "if g.cfg.Tell(sid, NoteMarker+text) == nil {"
+- id: SESS-958
+  title: "A grant the person gives from the Access dialog, with no card, sends the agent a message too"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\tif kind == AccessRequest {\n\t\ttold = g.allowedWords(gr)\n"
+      replace: "\tif kind != AccessAction {\n\t\ttold = g.allowedWords(gr)\n"
+- id: SESS-959
+  title: "Declining the agent's own access request only leaves a note, so the agent waits for the person to type"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "g.answerAgent(ctx, sid, refusedNote(what))"
+      replace: "g.cfg.Note(sid, refusedNote(what))"
+- id: SESS-960
+  title: "The engine's answer to an access request goes without the [Software Factory] marker, so it reads as the person's own words"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "g.cfg.Tell(sid, NoteMarker+text) == nil"
+      replace: "g.cfg.Tell(sid, text) == nil"
+- id: SESS-944
+  title: "A session's container mounts its whole folder at the short scratch path /t instead of only its scratch folder, s/<box>/scratch"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Subpath: \"s/\" + box + \"/\" + session.ScratchFolderName}}"
+      replace: "Subpath: \"s/\" + box}}"
+- id: SESS-945
+  title: "A session's container mounts its scratch folder read-only, so Claude Code and its commands can't write their temporary files"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Target: session.ScratchAt, VolumeOptions:"
+      replace: "Target: session.ScratchAt, ReadOnly: true, VolumeOptions:"

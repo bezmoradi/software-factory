@@ -278,6 +278,21 @@ func (w *SessionWork) SweepHelpers(sid string) {
 	}
 }
 
+func (w *SessionWork) SweepAfterWake(sid string) {
+	w.helperMu.Lock()
+	delete(w.swept, sid)
+	w.helperMu.Unlock()
+	w.reg.sweepIfIdle(sid)
+}
+
+func (r *Registry) sweepIfIdle(sid string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if live := r.liveFor(sid, r.now()); len(live) == 1 {
+		r.helpersIdle(live[0])
+	}
+}
+
 func (r *Registry) helpersIdle(c *conn) {
 	a := r.admitted[c.sid]
 	if r.work == nil || a == nil || c.busy || a.compacting || a.agents.running(c.epoch) {

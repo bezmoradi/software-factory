@@ -11,6 +11,7 @@ paths:
   - "internal/core/session/specs.go"
   - "internal/core/session/flag.go"
   - "internal/core/session/copies.go"
+  - "internal/core/session/grant*.go"
   - "internal/core/session/work.go"
   - "internal/core/session/login.go"
   - "internal/core/session/resume.go"
@@ -185,6 +186,28 @@ sf /api/remove-token '{"host":"example.org"}'; sf /api/credentials "{\"op\":\"de
 - After it: the action's `broken` is "Its target example.org is a git host now, and an action never reaches one, so it can't run. Save it with another target."; Run from the Access dialog is refused 409 `git host` with "Its target example.org is a git host now, and an action never reaches one, so the action can't run. Save it with another target.", and `grants` lists no /28 for a run; the fake agent's reply shows `factory_action` refused with "the action ex-get can't run: its target example.org is a git host now, and an action never reaches one; tell the person", and no card appears. Saving another action against it answers 409 `git host`, "A git host; an action never reaches one.".
 - Egress drops such a list on its own too, for a run that started before the engine knew: the engine starts no run once it knows, but a running action keeps the list it started with, which the engine sends in every `PUT /boxes` until the run ends (`actionSubnetsLocked` in `cmd/server/actions.go`), so egress drops it at each send; that part is read from `PUT /boxes` in `internal/adapters/egress/status.go`, which drops an action /28's list whose one entry is among the `git` names it was sent, the deny list's or `session.ForgeSSHNames`, or an address it knows is a git host's, and logs `egress event=action-git-refused`.
 
+**An access card the agent asked for answers the agent by itself** (T-67). `acc` is the check above's. `cid <name>` prints the session's first waiting card's id, and `nsay <name> <text>` sends the fake agent a script.
+
+```bash
+cid() { acc $1 '"op":"read"' | python3 -I -c 'import sys,json; t=sys.stdin.read(); print(json.loads(t[:t.rindex(" ")])["cards"][0]["id"])'; }
+nsay() { sf /api/message "{\"sid\":\"$(sid $1)\",\"text\":\"$2\"}"; }
+start n
+nsay n 'ask-tool: n1 factory_request_access {\"host\":\"a.example.net\",\"reason\":\"docs\"}'; sleep 5
+acc n "\"op\":\"allow\",\"card\":\"$(cid n)\",\"scope\":\"session\",\"expires\":\"never\",\"confirmed\":true"; sleep 3
+nsay n 'ask-tool: n2 factory_request_access {\"host\":\"b.example.net\",\"reason\":\"docs\"}'; sleep 5
+acc n "\"op\":\"refuse\",\"card\":\"$(cid n)\""; sleep 3
+nsay n 'ask-tool: n3 factory_request_access {\"host\":\"c.example.net\",\"reason\":\"docs\"}\nread: 1.md\nread: 2.md\nread: 3.md\nread: 4.md\nread: 5.md\nread: 6.md\nread: 7.md\nread: 8.md'; sleep 3
+acc n "\"op\":\"allow\",\"card\":\"$(cid n)\",\"scope\":\"session\",\"expires\":\"never\",\"confirmed\":true"; sleep 10
+acc n '"op":"allow","host":"d.example.net","scope":"session","expires":"never","confirmed":true'; sleep 3
+nsay n 'say: after'
+logs engine 'event=answer-(sent|noted)'
+```
+
+- After the Accept of `n1`, with nothing typed, the conversation shows a message from the engine, `[Software Factory] The person allowed a.example.net for this session, until taken back, on Software Factory's page, so you can reach it over HTTPS through the proxy now. Carry on with your task.`, and the fake agent's reply `The fake agent got a note: …` with the same words; the engine logs `grants event=answer-sent`.
+- After the Decline of `n2`, the same with `[Software Factory] The person didn't allow b.example.net on Software Factory's page. Don't ask for it again for 10 minutes; if you still need it, say why in your reply. Carry on without it where you can.`
+- `n3` is answered while its turn still runs: no message starts then (`answer-noted`), and its words ride as a note at the front of `say: after`. The grant of `d.example.net`, made with no card, sends nothing and adds no note.
+- One message per card: a session has at most one request waiting, and each answer is its own request on the page. An answer while the agent is in a turn, while the session isn't running or connected, while a cap holds its messages, or in a `bypassPermissions` session (whose messages need the person's confirmation) becomes a note with the next message, which a stopped session gets after Wake. A credential's message names it and where it is, never its value.
+
 **A read-only copy of another repository comes only through the engine, and only after the person's Approve** (the owner's decision REQ-27 of 2026-11-26). The fake agent asks with `factory_copy_repository` through agent-host's MCP server; `kcard <name> <n>` prints the session's `n`th copy card from the event stream, `kask <name> <id> <json>` asks for one, and `kanswer <name> <id>` prints the tool's answer. `out-link` is a branch of the dev git host's `demo` whose one new file is a symbolic link to `/etc/passwd`.
 
 ```bash
@@ -291,6 +314,19 @@ start k; commit k SLOW-REVIEW slow; push k; sleep 2; review k; sleep 5; commit k
 ```
 
 `gate m` lists `a review by knackpack:adversarial-reviewer of commit <7 hex> on sf/<id>` for the new commit, and the same for `knackpack:slop-reviewer`. On `k`, the reviews of the held card's commit finish after the branch moved: `push event=card-kept why=head-moved`, the card stays as it was, and nothing is pushed.
+
+**Allow asks first while the card's reviews still run** (T-65, the owner's choice A). `allowask <name>` prints the session's held card's `allowAsk` from the event stream.
+
+```bash
+allowask() { events | python3 -I -c 'import sys,json; j=json.loads(sys.stdin.readline()); print(json.dumps(next(s for s in j["sessions"] if s["sid"]==sys.argv[1])["push"]["allowAsk"]))' "$(sid $1)"; }
+n=$(logs engine 'msg=review event=finished' | wc -l)
+start q; commit q SLOW-REVIEW 60; push q; sleep 2; review q; sleep 5; allowask q
+until [ "$(logs engine 'msg=review event=finished' | wc -l)" -ge $((n + 2)) ]; do sleep 2; done; sleep 3; allowask q
+```
+
+- While both reviews run, `allowask q` prints `"2 reviews are still running. Push before their verdicts?"`; once both have finished, `""`. The singular, `1 review is still running. Push before its verdict?`, needs one required run still running while the other has ended, which the fakes can't arrange (both read the same `SLOW-REVIEW`), so it is read from `PushAllowAsk` in `internal/core/session/wording.go`.
+- On the page, while the reviews run, the card's **Allow** with a reason opens a dialog titled with that question, a **View in docs** link to Reviews and the push gate, and **Cancel** and a red **Allow**. **Cancel**, Escape or a click outside sends nothing: `logs engine 'msg=push event='` gains no line and `audit` is unchanged. Once the reviews have finished, **Allow** sends at once, with no dialog.
+- Mutants SESS-950 to SESS-955 break this rule.
 
 **A review stops counting when main no longer holds its base.** A main that only moves forward still contains the base, so this rewinds it, then puts it back.
 
@@ -602,12 +638,12 @@ check 'true'; push v; vwait v; push v; logs helper 'msg=verifier'
 - Two sessions at one commit (the second started from the first, `from: {sid}`): with the push slot taken, the second's agent push queues its run, the first's person presses Verify, and when the slot frees the second still runs its own copy (or is decided again when the first's run ends) and pushes.
 - `GOTOOLCHAIN=local` and `NODE_VERSION=26.13.0` are kept; a 64-hex `NODE_VERSION`, a 7-digit version group, a `PATH` with an empty part, `PYTHONUNBUFFERED=yes`, `TZ` and `NODE_ENV` are emptied.
 
-Browser checks need the stack with the browser image (`COMPOSE_FILE=compose.yaml:compose.dev.yaml:compose.browser.yaml`, `SF_BROWSER_STAGE=dev-browser`) and that image, by its ID, as the project's image; set the command with `{"op":"set",…,"browser":"…"}` on `/api/project-commands` and start with `"kind":"browser"`:
+Browser checks need the development image, `software-factory:dev`, which has Chromium, by its ID, as the project's image (`docker image inspect --format '{{.Id}}' software-factory:dev`); set the command with `{"op":"set",…,"browser":"…"}` on `/api/project-commands` and start with `"kind":"browser"`:
 
 - `index.html` holding `<h1>ok</h1>` and `chromium --headless --dump-dom file://$PWD/index.html | grep -q '<h1>ok</h1>' && chromium --headless --window-size=800,600 --screenshot=$SF_OUT/home.png file://$PWD/index.html` is `passed` with one image, which `{"op":"attachment",…,"name":"home.png"}` answers as a PNG; `ok` changed to `no` in the grep is `failed` with exit 1, whatever images exist.
 - `ln -s /etc/passwd $SF_OUT/a.png; mkdir $SF_OUT/d; head -c 20000000 /dev/zero > $SF_OUT/big.png; echo x > $SF_OUT/n.png` keeps nothing and names `a.png (a link)`, `d (a folder)`, `big.png` (over 10 MiB) and `n.png` (not an image) in `fileNote`, and the run's state is the command's own.
 - `printf 'PK\005\006%018d' 0 | tr 0 '\000' > $SF_OUT/t.zip` is kept as a trace, and `attachment` answers it as `application/octet-stream` with `Content-Disposition: attachment; filename="t.zip"` and `nosniff`.
-- The same start with the standard image as the project's: the run is `error` with "has no browser at /usr/bin/chromium, …", and no container ran.
+- The same start with an image that has no browser as the project's, such as `software-factory:gitserver`: the run is `error` with "has no browser at /usr/bin/chromium, …", and no container ran.
 - `docker volume ls --filter label=dev.software-factory.verifier` is empty after each run and after a helper restart.
 - Without the push slot taken, the first session's person presses Verify, and the second session (at the same commit) pushes while that run goes: its push waits and goes out when the run passes.
 - An image's variables other than tooling names are empty in the run (`check 'test -z "$PLAIN" && test -n "$PATH"'` with `PLAIN=keepme` in the image), and `LANGUAGE=en_US:en` is kept.

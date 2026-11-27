@@ -323,6 +323,7 @@ func (b *boxRoutes) watch(ctx context.Context) {
 type boxFolders struct {
 	workspace string
 	uploads   *page.UploadDir
+	scratch   page.DocFiles
 }
 
 var _ session.BoxFolders = boxFolders{}
@@ -332,6 +333,9 @@ func (f boxFolders) Make(box string) error {
 		return err
 	}
 	if err := (remote.Copies{Workspace: f.workspace}).MakeBox(box); err != nil {
+		return err
+	}
+	if err := f.scratch.MakeTop(box); err != nil {
 		return err
 	}
 	if f.uploads != nil {

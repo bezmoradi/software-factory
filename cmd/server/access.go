@@ -36,7 +36,7 @@ func useGrants(base context.Context, cfg PageConfig, allow *session.Allowlist, d
 	g, err := session.NewGrants(session.GrantsConfig{
 		Store: state.NewGrants(cfg.StateDir), Creds: state.NewCredentials(cfg.StateDir), Presets: state.NewPresets(cfg.StateDir), SSH: sshsign.Keys{}, AWS: sts.New(), Allow: allow,
 		Session: d.GrantTarget, Targets: d.GrantTargets, InBox: d.BoxSession, Host: routes.handoverHost, Projects: projectNames(repos), Stack: routes.ownNetworks, GitAddress: routes.known.GitHost, Apply: routes.syncGrants,
-		Show: reg.SetAccess, Note: reg.NotesFor("access"), Actions: acts, Audit: state.NewAudit(cfg.StateDir), Logger: logger,
+		Show: reg.SetAccess, Note: reg.NotesFor("access"), Tell: tellSession(reg), Idle: func(sid string) bool { return reg.TurnSince(sid).IsZero() }, Actions: acts, Audit: state.NewAudit(cfg.StateDir), Logger: logger,
 	})
 	if err != nil {
 		return nil, err

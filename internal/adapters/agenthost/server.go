@@ -81,6 +81,7 @@ type Server struct {
 	fwd      *forwards
 	outMu    sync.Mutex
 	outputs  map[string]*keptOutput
+	started  time.Time
 }
 
 type commandJSON struct {
@@ -168,7 +169,7 @@ func New(cfg Config) (*Server, error) {
 	if log == nil {
 		log = quiet{}
 	}
-	s := &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID(), fwd: newForwards(session.PortProxy, log)}
+	s := &Server{cfg: cfg, log: log, procs: map[string]*process{}, boot: randomID(), started: time.Now(), fwd: newForwards(session.PortProxy, log)}
 	s.prepareAccess()
 	return s, nil
 }

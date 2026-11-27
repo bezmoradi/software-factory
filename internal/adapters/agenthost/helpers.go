@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,7 +20,10 @@ const (
 	maxHelpersListed   = 256
 	helperGrace        = 2 * time.Minute
 	debrisFolder       = ".claude/worktrees"
+	claudeAgentLock    = "claude agent "
 )
+
+var claudeAgentTree = regexp.MustCompile(`^agent-a(?:[0-9a-f]{7}|[0-9a-f]{16})$`)
 
 type helperJSON struct {
 	Repo     string        `json:"repo"`
@@ -304,10 +308,19 @@ func (s *Server) sweepDebris(ctx context.Context, repo, debris string, trees map
 	under := canonDir(debris) + string(filepath.Separator)
 	n := 0
 	for path, tree := range trees {
-		if !strings.HasPrefix(path, under) || strings.Contains(strings.TrimPrefix(path, under), string(filepath.Separator)) || tree.locked {
+		if !strings.HasPrefix(path, under) || strings.Contains(strings.TrimPrefix(path, under), string(filepath.Separator)) {
+			continue
+		}
+		if tree.locked && !s.staleLock(repo, path, tree.reason) {
 			continue
 		}
 		if !pointsBack(repo, path) || s.cleanTree(ctx, repo, path) != nil {
+			continue
+		}
+		if tree.locked {
+			if s.removeStale(ctx, repo, path, tree.reason) {
+				n++
+			}
 			continue
 		}
 		if _, err := s.git(ctx, repo, "worktree", "remove", "--", path); err == nil {
@@ -315,4 +328,33 @@ func (s *Server) sweepDebris(ctx context.Context, repo, debris string, trees map
 		}
 	}
 	return n
+}
+
+func (s *Server) staleLock(repo, path, reason string) bool {
+	name := filepath.Base(path)
+	if !claudeAgentTree.MatchString(name) || !strings.HasPrefix(reason, claudeAgentLock) {
+		return false
+	}
+	admin, err := openPlainFolder(filepath.Join(repo, ".git", worktreesFolder, name))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = admin.Close() }()
+	_, info, err := readPlain(admin, "locked", maxGitFile)
+	return err == nil && info.ModTime().Before(s.started)
+}
+
+func (s *Server) removeStale(ctx context.Context, repo, path, reason string) bool {
+	if _, err := s.git(ctx, repo, "worktree", "unlock", "--", path); err != nil {
+		s.log.Warn("agent-host helper", "event", "unlock-failed")
+		return false
+	}
+	if _, err := s.git(ctx, repo, "worktree", "remove", "--", path); err != nil {
+		if _, lerr := s.git(ctx, repo, "worktree", "lock", "--reason="+reason, "--", path); lerr != nil {
+			s.log.Warn("agent-host helper", "event", "relock-failed")
+		}
+		return false
+	}
+	s.log.Info("agent-host helper", "event", "stale-lock-removed")
+	return true
 }

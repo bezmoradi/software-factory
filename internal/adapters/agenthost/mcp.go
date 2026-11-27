@@ -183,7 +183,7 @@ func (m *MCP) instructions() string {
 	if m.shots == "" {
 		return out
 	}
-	return out + " To show the person a screenshot (in the browser image, chromium --headless --screenshot=<file> <url> takes one), save it as a PNG, JPEG or GIF file of at most 10 MiB and 8,192 pixels a side in " + m.shots + ", creating that folder if needed, and never in the worktree, so it isn't committed; Software Factory's page shows it, and the folder is deleted with the session."
+	return out + " To show the person a screenshot (Chromium is in the container: chromium --headless --screenshot=<file> <url> takes one), save it as a PNG, JPEG or GIF file of at most 10 MiB and 8,192 pixels a side in " + m.shots + ", creating that folder if needed, and never in the worktree, so it isn't committed; Software Factory's page shows it, and the folder is deleted with the session."
 }
 
 func (m *MCP) Serve(ctx context.Context, in io.Reader) error {

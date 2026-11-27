@@ -113,6 +113,7 @@ scenarios:
             "$.container.mounts":
               - { type: volume, destination: /home/agent, read_only: false, volume: "sf-proctor-home-${box}", subpath: null, source: null }
               - { type: volume, destination: /opt/software-factory/agents, read_only: true, volume: sf-proctor_agents, subpath: null, source: null }
+              - { type: volume, destination: /t, read_only: false, volume: sf-proctor_workspace, subpath: "s/${box}/scratch", source: null }
               - { type: volume, destination: "/uploads/${box}", read_only: true, volume: sf-proctor_uploads, subpath: "${box}", source: null }
               - { type: volume, destination: /workspace/refs, read_only: true, volume: sf-proctor_workspace, subpath: "r/${box}", source: null }
               - { type: volume, destination: "/workspace/s/${box}", read_only: false, volume: sf-proctor_workspace, subpath: "s/${box}", source: null }
@@ -1647,6 +1648,13 @@ scenarios:
         expect:
           equal: { "$.found": true }
         save: { helper_image: "$.container.image" }
+      - id: run-image
+        do: docker.container
+        with: { name: sf-proctor-gitserver-1 }
+        expect:
+          equal: { "$.found": true }
+          differs: { "$.container.image": "${helper_image}" }
+        save: { run_image: "$.container.image" }
       - id: set-image
         do: http.request
         identity: page
@@ -1654,11 +1662,11 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${run_image}" }
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${run_image}", browser: "", max: 300, maxImage: 300, message: "Saved. New turns and new sessions use them.", tone: ok }
         no_state_check: "no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back, and verify-start's answer and run-container show the run using them"
       - id: set-image-again
         do: http.request
@@ -1667,11 +1675,11 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+          body: { op: set, name: demo, check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${run_image}" }
         expect:
           equal:
             "$.status": 200
-            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}", browser: "", max: 300, maxImage: 300, message: "No change: these commands are already saved.", tone: warn }
+            "$.body": { check: "sleep 8 && test -f README.md && echo ${run.id}", setup: "", image: "proctor@${run_image}", browser: "", max: 300, maxImage: 300, message: "No change: these commands are already saved.", tone: warn }
         no_state_check: "saves nothing, since the commands are already these, as the answer's No change says; no declared read shows a project's commands: only /api/project-commands op read and /api/verify answer them, and each acts for another op on the same path (op set saves the commands, op start starts a run), so neither can be declared a read; image-read-back reads them back"
       - id: image-read-back
         do: http.request
@@ -1684,7 +1692,7 @@ scenarios:
         expect:
           equal:
             "$.status": 200
-            "$.body.image": "proctor@${helper_image}"
+            "$.body.image": "proctor@${run_image}"
             "$.body.check": "sleep 8 && test -f README.md && echo ${run.id}"
         no_state_check: "op read changes nothing; /api/project-commands isn't declared a read, since op set on the same path saves the commands"
       - id: verify-start
@@ -1699,13 +1707,13 @@ scenarios:
           equal:
             "$.status": 200
             "$.body.hasCheck": true
-            "$.body.image": "proctor@${helper_image}"
+            "$.body.image": "proctor@${run_image}"
             "$.body.command": "sleep 8 && test -f README.md && echo ${run.id}"
             "$.body.runs[0].state": running
             "$.body.off": "A verification run of this session is running. Wait for it, or stop it first."
             "$.body.browser.off": "This project has no browser command, so there is no browser check to run. Set one under Check and setup commands on the project's card."
             "$.body.runs[0].by": page
-            "$.body.runs[0].image": "proctor@${helper_image}"
+            "$.body.runs[0].image": "proctor@${run_image}"
           length: { "$.body.runs": 1 }
           matches: { "$.body.runs[0].id": "[0-9a-f]{16}" }
         save: { run: "$.body.runs[0].id", head: "$.body.head" }
@@ -1716,7 +1724,7 @@ scenarios:
         expect:
           equal:
             "$.found": true
-            "$.container.image": "${helper_image}"
+            "$.container.image": "${run_image}"
             "$.container.state.running": true
             "$.container.user": "10006:10006"
             "$.container.init": true
@@ -1787,7 +1795,7 @@ scenarios:
             "$.body.current.commit": "${head}"
             "$.body.current.state": passed
             "$.body.current.code": 0
-            "$.body.current.imageId": "${helper_image}"
+            "$.body.current.imageId": "${run_image}"
             "$.body.current.limitSeconds": 900
             "$.body.current.withheld": false
             "$.body.why": ""
@@ -1798,7 +1806,7 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "test -f README.md && echo ${run.id}", setup: "", image: "proctor@${helper_image}" }
+          body: { op: set, name: demo, check: "test -f README.md && echo ${run.id}", setup: "", image: "proctor@${run_image}" }
         expect:
           equal:
             "$.status": 200
@@ -1825,7 +1833,7 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${helper_image}" }
+          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${run_image}" }
         expect:
           equal:
             "$.status": 200
@@ -1886,7 +1894,7 @@ scenarios:
           method: POST
           path: "/api/project-commands"
           headers: { Origin: "${page.origin}" }
-          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${helper_image}", browser: "chromium --version && echo ${run.id}" }
+          body: { op: set, name: demo, check: "echo ${run.id} && exit 3", setup: "", image: "proctor@${run_image}", browser: "chromium --version && echo ${run.id}" }
         expect:
           equal:
             "$.status": 200

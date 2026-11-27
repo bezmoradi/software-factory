@@ -54,12 +54,13 @@ type Facts struct {
 }
 
 type Decision struct {
-	Result        Result
-	Reason        string
-	Missing       []string
-	Unmet         []string
-	Exception     string
-	NeedsApproval bool
+	Result         Result
+	Reason         string
+	Missing        []string
+	Unmet          []string
+	MissingReviews []string
+	Exception      string
+	NeedsApproval  bool
 }
 
 var (
@@ -167,7 +168,7 @@ func decide(r Request, f Facts) Decision {
 		return refuse("a push that rewrites the remote's main branch, or a branch the engine can't tell apart from it, is never allowed")
 	}
 	missing := append([]string{}, f.Items...)
-	var unmet []string
+	var unmet, reviews []string
 	unsandboxed := false
 	if item := SandboxItem(f.Level); item != "" {
 		missing = append(missing, item)
@@ -201,6 +202,7 @@ func decide(r Request, f Facts) Decision {
 				why = CappedItem(q.Agent, n)
 			}
 			missing = append(missing, why)
+			reviews = append(reviews, q.Agent)
 			rec, found := f.Reviews[at]
 			unmet = append(unmet, unmetReview(q.Agent, rec, found, n))
 		}
@@ -214,24 +216,24 @@ func decide(r Request, f Facts) Decision {
 			if note := Reason(f.Answer.Reason); note != "" {
 				why += ": " + note
 			}
-			return Decision{Result: Denied, Reason: why, Missing: missing, Unmet: unmet}
+			return Decision{Result: Denied, Reason: why, Missing: missing, Unmet: unmet, MissingReviews: reviews}
 		}
 		if len(missing) == 0 {
 			return Decision{Result: Allowed}
 		}
 		if unsandboxed && f.Level.Waiting {
-			return Decision{Result: Held, Reason: "no Allow pushes until the first sandbox check since the engine started passes, because nothing checked the agent container while the engine was down; Allow works once it passes", Missing: missing, Unmet: unmet}
+			return Decision{Result: Held, Reason: "no Allow pushes until the first sandbox check since the engine started passes, because nothing checked the agent container while the engine was down; Allow works once it passes", Missing: missing, Unmet: unmet, MissingReviews: reviews}
 		}
 		if unsandboxed {
-			return Decision{Result: Held, Reason: "no Allow pushes while the sandbox check fails, because the work may have come from an agent that could reach a git host; fix the check, then start a new session, review the work there and push it", Missing: missing, Unmet: unmet}
+			return Decision{Result: Held, Reason: "no Allow pushes while the sandbox check fails, because the work may have come from an agent that could reach a git host; fix the check, then start a new session, review the work there and push it", Missing: missing, Unmet: unmet, MissingReviews: reviews}
 		}
 		if why := Reason(f.Answer.Reason); why != "" {
-			return Decision{Result: Allowed, Missing: missing, Exception: why}
+			return Decision{Result: Allowed, Missing: missing, MissingReviews: reviews, Exception: why}
 		}
-		return Decision{Result: Held, Reason: "allowing a push with items missing needs the developer's reason", Missing: missing, Unmet: unmet}
+		return Decision{Result: Held, Reason: "allowing a push with items missing needs the developer's reason", Missing: missing, Unmet: unmet, MissingReviews: reviews}
 	}
 	if len(missing) == 0 {
 		return Decision{Result: Allowed}
 	}
-	return Decision{Result: Held, Reason: "held until it has: " + strings.Join(missing, "; "), Missing: missing, Unmet: unmet}
+	return Decision{Result: Held, Reason: "held until it has: " + strings.Join(missing, "; "), Missing: missing, Unmet: unmet, MissingReviews: reviews}
 }

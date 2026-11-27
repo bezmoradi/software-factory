@@ -64,6 +64,15 @@ func (d DocFiles) Make(box, sid string) error {
 	return groupFolder(top, sid, shotsFolderMode)
 }
 
+func (d DocFiles) MakeTop(box string) error {
+	root, err := d.box(box)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return groupFolder(root, d.folder(), shotsTopMode)
+}
+
 func (d DocFiles) Read(box, sid, name string, limit int64) ([]byte, error) {
 	if !localName(sid) || !localName(name) {
 		return nil, errOutside

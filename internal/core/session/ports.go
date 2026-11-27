@@ -127,10 +127,14 @@ func portNote(base int, inEnv bool) string {
 
 func (d *Dispatcher) claudeSettings(r *run) string {
 	env := map[string]string{KnackpackDocsVariable: KnackpackDocsOff}
-	if folder := DocsFolder(BoxFolder(d.cfg.Workspace, r.box), r.docs); folder != "" {
+	area := BoxFolder(d.cfg.Workspace, r.box)
+	if folder := DocsFolder(area, r.docs); folder != "" {
 		env[DocsVariable] = folder
 	}
-	if folder := ScratchFolder(BoxFolder(d.cfg.Workspace, r.box), r.docs); folder != "" {
+	if folder := ScreenshotFolder(area, r.docs); folder != "" {
+		env[ScreenshotsVariable] = folder
+	}
+	if folder := ScratchFolder(r.docs); folder != "" && area != "" {
 		env[TempVariable] = folder
 		env[ClaudeTempVar] = folder
 	}

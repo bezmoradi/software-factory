@@ -130,7 +130,7 @@ async function screenshotContext($: EngineInterface): Promise<string> {
   const dir = cwd || await $.session.cwd().catch(() => '')
   if (!SESSION_ID.test(id)) return ''
   const workspace = /^(\/[A-Za-z0-9._/-]+)\/(?:worktrees\/sf-[0-9a-f]{8}|helpers\/h-[a-z0-9][a-z0-9-]{0,55})$/.exec(dir)?.[1] ?? '/workspace'
-  return `To show the person a screenshot (in the browser image, chromium --headless --screenshot=<file> <url> takes one), save it as a PNG, JPEG or GIF file of at most 10 MiB and 8,192 pixels a side in ${workspace}/screenshots/${id}/, creating that folder if needed, and never in the worktree, so it isn't committed; Software Factory's page shows it, and the folder is deleted with the session.`
+  return `Chromium is at /usr/bin/chromium, to take screenshots and check pages headless (chromium --headless --screenshot=<file> <url> takes one). To show the person a screenshot, save it as a PNG file (or JPEG or GIF) of at most 10 MiB and 8,192 pixels a side in $SF_SCREENSHOTS, ${workspace}/screenshots/${id}/, creating that folder if needed, and never in the worktree, so it isn't committed; it appears under Screenshots above the conversation on Software Factory's page, and the folder is deleted with the session. Open each screenshot you take and look at it, to check it shows what you meant.`
 }
 
 const forgeTools = new Map<string, string>()

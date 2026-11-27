@@ -235,24 +235,6 @@ With a release, give `SF_BOX_RUNTIME=runsc` to the install script and on every `
 
 Limits: only the fixed names in `/etc/hosts` resolve (no DNS); git, installs and builds are slower; a release, a real session and a review under gVisor aren't checked yet.
 
-### A headless browser for screenshots
-
-`compose.browser.yaml` adds Chromium to the sessions' image, so an agent can screenshot the UI it builds. It builds from source only. **It recreates the helper, which stops running sessions.**
-
-```bash
-export COMPOSE_FILE=compose.yaml:compose.browser.yaml
-docker compose up -d --build --wait --remove-orphans
-```
-
-With gVisor: `COMPOSE_FILE=compose.yaml:compose.gvisor.yaml:compose.browser.yaml`. With the development fakes: set `SF_BROWSER_STAGE=dev-browser` and list `compose.dev.yaml` before `compose.browser.yaml`.
-
-- Chromium 156.0.8078.79 and its fonts come from snapshot.debian.org as of 2026-11-03 01:35:55 UTC. To update, move the date and versions in the `Dockerfile`'s `browser` stage together. The image is about 700 MB larger.
-- Chromium's own sandbox is off; the container's hardening isolates it.
-- Example: `chromium --headless --window-size=1280,800 --screenshot=<file> http://localhost:3000`.
-- Agents save screenshots in `/workspace/s/<box>/screenshots/<session id>/`, outside the worktree, so they are never committed or pushed. They're deleted with the session.
-- **Screenshots** above the conversation lists the newest 50 and updates itself.
-- The engine shows only PNG, JPEG or GIF files up to 10 MiB and 8,192 pixels a side, re-encoded as PNG. It's not a live preview.
-
 ## Get started
 
 ### Usage
@@ -336,7 +318,7 @@ Open it with **Project settings** in the project's ⋯ menu, or from the command
 
 #### Check and setup commands
 
-Two one-line commands of up to 300 bytes, such as `npm ci` (setup) and `make check` (check). Empty is off. They're set on the page only and run in the session's container with model keys cleared.
+Two one-line commands of up to 300 bytes, such as `npm ci` (setup) and `make check` (check). Empty is off. They're set on the page only and run in the session's container with model keys cleared. The container has Node with npm and npx, and `ps`, which `npm run` needs.
 
 - **Setup** runs once per session, up to 15 minutes, after you approve the start-up files.
 - **Check** runs when a turn ends, up to 5 minutes. On failure the agent gets the last 8 KiB of output, the path of the whole output, and one more try.
@@ -504,7 +486,7 @@ Type to the agent; Enter sends. Follow its work in the side panel (execution pat
 
 #### Stopping and deleting
 
-**Stop session** removes the container and keeps the home, folder and conversation; **Wake** makes the container again. Claude's scratch folder (its notes, briefs, plans, checkpoints and drafts, and its commands' temporary files: `$TMPDIR`) is `/workspace/s/<box>/scratch/<session id>/`, outside the worktree, so it survives Stop, Wake and a rebuild, and it counts toward the session's disk cap. **Delete session** removes everything. **If the branch has unpushed work, the page offers to discard it: that work is lost.** Both ask first.
+**Stop session** removes the container and keeps the home, folder and conversation; **Wake** makes the container again. Claude's scratch folder (its notes, briefs, plans, checkpoints and drafts, and its commands' temporary files: `$TMPDIR`) is `/t/<first 8 characters of the session id>/`, on the workspace volume and outside the worktree, so it survives Stop, Wake and a rebuild, and it counts toward the session's disk cap. **Delete session** removes everything. **If the branch has unpushed work, the page offers to discard it: that work is lost.** Both ask first.
 
 #### Trust levels
 
@@ -552,6 +534,17 @@ Shows the app a running session serves, such as `npm run dev`, inside the page. 
 The app must listen on that port on all addresses, not only `localhost`: for Vite, `--host`. Hot reload works. One preview is open at a time, at `127.0.0.1:7800` (`SF_PREVIEW_PORT`); opening another ends the one before.
 
 The preview runs code the agent wrote in your browser. It can't read the page's key or use the page, but treat it like any site you don't know.
+
+### Screenshots
+
+Every session's container has Chromium, so an agent can screenshot the UI it builds. Nothing to turn on: `make up` and `make dev` include it.
+
+- To take one: `chromium --headless --window-size=1280,800 --screenshot=<file> http://localhost:3000`.
+- Agents save screenshots in `$SF_SCREENSHOTS`, `/workspace/s/<box>/screenshots/<session id>/`, outside the worktree, so they are never committed or pushed. They're deleted with the session.
+- **Screenshots** above the conversation lists the newest 50 and updates itself.
+- The engine shows only PNG, JPEG or GIF files up to 10 MiB and 8,192 pixels a side, re-encoded as PNG. It's not a live preview.
+- Chromium's own sandbox is off; the container's hardening isolates it.
+- Chromium 156.0.8078.79 and its fonts come from snapshot.debian.org as of 2026-11-03 01:35:55 UTC. To update, move the date and versions in the `Dockerfile`'s `base` stage together. Chromium makes the image about 0.7 GB larger.
 
 ### Keyboard shortcuts
 
@@ -621,6 +614,8 @@ A grant starts when:
 - **a preset applies it** (see [Presets](#presets)).
 
 The card shows the host, the agent's reason (which may come from planted instructions), the risk, who and how long. **Accept the risk** grants it (for This session only while the session runs); a project grant with no expiry needs its box ticked.
+
+When you answer a card the agent asked for, the engine tells the agent what you allowed or declined in a message of its own, so it carries on without your typing (while it's still working, the answer goes with its next message instead; a grant you give yourself sends no message).
 
 | Grant | Risk |
 |---|---|
@@ -751,7 +746,7 @@ With knackpack, the reviewers are the bug hunter, the simplicity checker, review
 
 | Action | What it does |
 |---|---|
-| **Allow** | Pushes anyway, with a reason, once, for that commit, within 15 minutes. **Never while the sandbox check fails** |
+| **Allow** | Pushes anyway, with a reason, once, for that commit, within 15 minutes. While a review the card lists is still running, it first asks whether to push before its verdict. **Never while the sandbox check fails** |
 | **Deny** | Ends the request; reviews that finish later don't push it. Remembered for the newest 20 commits |
 | **Override** | Counts a block as a pass for that commit, with a reason |
 | **Allow it** | Allows a flagged file version or commit field, with a reason |
@@ -1007,6 +1002,6 @@ This project is maintained by [Bez Moradi](https://github.com/bezmoradi).
 
 ## License
 
-Software Factory is licensed under [MIT](../LICENSE). The image includes the license texts of the Go modules linked into it, Go's own and TypeScript's in `/usr/share/doc/software-factory/`.
+Software Factory is licensed under [MIT](../LICENSE). The image includes the license texts of the Go modules linked into it, Go's own, TypeScript's, Node's and npm's in `/usr/share/doc/software-factory/`.
 
 The page's icons are [Codicons](https://github.com/microsoft/vscode-codicons) from VS Code, © Microsoft Corporation, used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Its eight themes take their colors from these VS Code themes, adjusted for WCAG AA contrast: [Solarized](https://ethanschoonover.com/solarized/) Dark and Light, VS Code's own Dark Modern and Light Modern ([microsoft/vscode](https://github.com/microsoft/vscode)), GitHub Dark Default and GitHub Light Default ([primer/github-vscode-theme](https://github.com/primer/github-vscode-theme)), [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) and [Dracula](https://draculatheme.com).

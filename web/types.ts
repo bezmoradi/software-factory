@@ -508,6 +508,7 @@ export interface SessionPush {
   remote: string
   missing: string[]
   needsReason: boolean
+  allowAsk: string
   expires: number
   at: number
   audit: PushAudit | null
