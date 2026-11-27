@@ -85,12 +85,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build the dev, runtime and gitserver images from the tested commit
+      - name: Build the dev, runtime and gitserver images from the tested commit with Compose, as make proctor does
         id: images
         run: |
-          docker build --target dev -t software-factory-proctor:dev .
-          docker build --target runtime -t software-factory-proctor:local .
-          docker build --target gitserver -t software-factory-proctor:gitserver .
+          env -i PATH="$PATH" HOME="$HOME" docker compose -p sf-proctor --project-directory "$GITHUB_WORKSPACE" \
+            -f "$GITHUB_WORKSPACE/compose.yaml" -f "$GITHUB_WORKSPACE/compose.dev.yaml" -f "$GITHUB_WORKSPACE/proctor/environments/compose.proctor.yaml" build
           docker save -o "$RUNNER_TEMP/images.tar" software-factory-proctor:dev software-factory-proctor:local software-factory-proctor:gitserver
           for t in dev local gitserver; do
             id=$(docker image inspect --format '{{.Id}}' "software-factory-proctor:$t")
