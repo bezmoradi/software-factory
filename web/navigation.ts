@@ -18,7 +18,7 @@ export interface Navigation {
   go: (key: string) => void
   closeTab: (key: string) => void
   pruneTabs: () => void
-  openChanges: (s: Session) => void
+  openChanges: (s: Session, file?: string) => void
   openFile: (sid: string, path: string, commit?: string, line?: number) => void
   loadDocs: () => Promise<void>
   openDocs: (id: string, back?: { view: string; label: string } | null) => void
@@ -170,9 +170,9 @@ export function startNavigation({ composer }: NavigationDeps): Navigation {
     else paint()
   }
 
-  function openChanges(s: Session) {
+  function openChanges(s: Session, file = '') {
     go(`c:${s.sid}`)
-    requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff())
+    requestAnimationFrame(() => byId<HTMLElementTagNameMap['sf-changes']>('changes').openDiff(file))
   }
 
   function openFile(sid: string, path: string, commit = '', line = 0) {
@@ -201,7 +201,7 @@ export function startNavigation({ composer }: NavigationDeps): Navigation {
 
   function openDocs(id: string, back: { view: string; label: string } | null = null) {
     go('docs')
-    byId<HTMLElementTagNameMap['sf-docs']>('docs').show(id, back)
+    byId<HTMLElementTagNameMap['sf-docs']>('docs').reveal(id, back)
   }
 
   return { go, closeTab, pruneTabs, openChanges, openFile, loadDocs, openDocs }

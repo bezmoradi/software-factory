@@ -3,21 +3,28 @@ package session
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 const firstStepRead = 10 * time.Second
 
+var startedWords = map[string]string{AskDefine: "Started Define", AskTriage: "Started triage", ReviseRootCause: "Corrected the diagnosis"}
+
 type FirstStep struct {
 	Step    string
 	Command string
+	Fresh   bool
 }
 
 type FirstSteps interface {
-	FirstStep(ctx context.Context, sid string, ran []string) (FirstStep, bool)
+	FirstStep(ctx context.Context, sid string) (FirstStep, bool)
+	FirstCommands(sid string) map[string]string
 	UnclaimStep(sid, step string)
 }
 
@@ -48,14 +55,18 @@ func withStep(list []string, step string) []string {
 	return append(list, step)
 }
 
+func readDoc(d *WorkDoc) bool {
+	return d != nil && d.Hash != ""
+}
+
 func firstStepOf(v GateView) (FirstStep, bool) {
 	step := firstStepKind(v.Profile)
 	switch {
-	case !v.Chosen || step == "" || slices.Contains(v.Ran, step):
+	case step == "":
 		return FirstStep{}, false
-	case step == AskDefine && (v.Define || v.Requirements != nil && v.Requirements.Hash != "" || v.Holds["define"] != ""):
+	case step == AskDefine && (v.Define || readDoc(v.Requirements) || v.Holds["define"] != ""):
 		return FirstStep{}, false
-	case step == AskTriage && v.Plan != nil && CauseStatus(v.Plan.Text) != "":
+	case step == AskTriage && readDoc(v.Plan) && CauseStatus(v.Plan.Text) != "":
 		return FirstStep{}, false
 	}
 	command := stageCommands(v)[step]
@@ -65,13 +76,9 @@ func firstStepOf(v GateView) (FirstStep, bool) {
 	return FirstStep{Step: step, Command: command}, true
 }
 
-func (w *Work) FirstStep(ctx context.Context, sid string, ran []string) (FirstStep, bool) {
+func (w *Work) FirstStep(ctx context.Context, sid string) (FirstStep, bool) {
 	ws, ok := w.session(sid)
-	if !ok || !ws.chosen {
-		return FirstStep{}, false
-	}
-	step := firstStepKind(workflow.TypeOr(w.packSetup(sid, ws.repo).setup.Types, ws.typeID).Profile())
-	if step == "" || slices.Contains(ran, step) || slices.Contains(ws.ran, step) {
+	if !ok || firstStepKind(workflow.TypeOr(w.packSetup(sid, ws.repo).setup.Types, ws.typeID).Profile()) == "" {
 		return FirstStep{}, false
 	}
 	v, err := w.View(ctx, sid)
@@ -79,10 +86,27 @@ func (w *Work) FirstStep(ctx context.Context, sid string, ran []string) (FirstSt
 		return FirstStep{}, false
 	}
 	f, ok := firstStepOf(v)
-	if !ok || !w.claimStep(sid, f.Step) {
+	if !ok {
 		return FirstStep{}, false
 	}
+	f.Fresh = w.claimStep(sid, f.Step)
 	return f, true
+}
+
+func (w *Work) FirstCommands(sid string) map[string]string {
+	ws, ok := w.session(sid)
+	if !ok {
+		return nil
+	}
+	setup := w.packSetup(sid, ws.repo).setup
+	all := stageCommands(GateView{Commands: setup.Workflow.Commands, Profile: workflow.TypeOr(setup.Types, ws.typeID).Profile()})
+	out := map[string]string{}
+	for _, step := range []string{AskDefine, AskTriage} {
+		if c := all[step]; c != "" {
+			out[step] = c
+		}
+	}
+	return out
 }
 
 func (w *Work) claimStep(sid, step string) bool {
@@ -119,7 +143,7 @@ func (r *Registry) UseFirstSteps(f FirstSteps) {
 }
 
 func typedPlain(text string, attached bool) bool {
-	return !attached && text != "" && !strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "!")
+	return (text != "" || attached) && !strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "!")
 }
 
 func (r *Registry) firstStepFor(sid, text string, attached bool) FirstStep {
@@ -129,21 +153,24 @@ func (r *Registry) firstStepFor(sid, text string, attached bool) FirstStep {
 	r.mu.Lock()
 	fs := r.firstSteps
 	a := r.admitted[sid]
-	var ran []string
-	if a != nil {
-		ran = slices.Clone(a.stepsRan)
-	}
 	r.mu.Unlock()
 	if fs == nil || a == nil {
 		return FirstStep{}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), firstStepRead)
 	defer cancel()
-	f, ok := fs.FirstStep(ctx, sid, ran)
+	f, ok := fs.FirstStep(ctx, sid)
 	if !ok {
 		return FirstStep{}
 	}
 	return f
+}
+
+func (f FirstStep) fresh(step string) string {
+	if f.Fresh {
+		return step
+	}
+	return ""
 }
 
 func (r *Registry) unclaimStep(sid, step string) {
@@ -167,14 +194,85 @@ func (r *Registry) unclaimLocked(sid string, steps []string) {
 	}()
 }
 
-func (r *Registry) stepTextLocked(sid, text string, f FirstStep) (sent string, noted bool, step string) {
+func (r *Registry) stepTextLocked(sid, text string, f FirstStep) (sent string, noted bool, step string, err error) {
 	sent, noted = r.noted(sid, text)
 	if f.Step == "" || refusedName(commandName(f.Command), r.catalogs[sid]) {
-		return sent, noted, ""
+		return sent, noted, "", nil
 	}
-	wrapped := f.Command + " " + sent
-	if utf16Len(wrapped) > MaxText {
-		return sent, noted, ""
+	wrap := func(s string) string { return strings.TrimSpace(f.Command + " " + s) }
+	if w := wrap(sent); utf16Len(w) <= MaxText {
+		return w, noted, f.Step, nil
 	}
-	return wrapped, noted, f.Step
+	if w := wrap(text); noted && utf16Len(w) <= MaxText {
+		return w, false, f.Step, nil
+	}
+	return "", false, "", tooLongForStep(f.Step, utf16Len(wrap(text))-MaxText)
+}
+
+func (r *Registry) promptCommands(given string, b Batch) map[string]string {
+	if !slices.ContainsFunc(b.Events, func(raw any) bool {
+		ev, ok := raw.(map[string]any)
+		return ok && ev["type"] == "prompt"
+	}) {
+		return nil
+	}
+	r.mu.Lock()
+	c := r.conns[given]
+	fs := r.firstSteps
+	r.mu.Unlock()
+	if c == nil || fs == nil {
+		return nil
+	}
+	return fs.FirstCommands(c.sid)
+}
+
+func stepStarted(text string, commands map[string]string) (string, string, bool) {
+	rest, notes := text, ""
+	for strings.HasPrefix(rest, NoteMarker) {
+		note, after, found := strings.Cut(rest, noteBreak)
+		if !found {
+			return "", "", false
+		}
+		notes += note + noteBreak
+		rest = after
+	}
+	for _, step := range []string{AskDefine, AskTriage} {
+		command := commands[step]
+		after, ok := strings.CutPrefix(rest, command)
+		next, _ := utf8.DecodeRuneInString(after)
+		if command == "" || !ok || (after != "" && !unicode.IsSpace(next)) {
+			continue
+		}
+		shown := strings.TrimSpace(after)
+		if step == AskTriage && strings.HasPrefix(shown, correctDiagnosis) {
+			step = ReviseRootCause
+		}
+		return strings.TrimSuffix(notes+shown, noteBreak), step, true
+	}
+	return "", "", false
+}
+
+func stepShown(kind string, ev, frame Fields, commands map[string]string) {
+	if kind != "prompt" {
+		return
+	}
+	delete(frame, "step")
+	delete(frame, "started")
+	text, _ := ev["text"].(string)
+	if from, _ := ev["from"].(string); from != "page" && from != "history" {
+		return
+	}
+	shown, step, ok := stepStarted(text, commands)
+	_, images := ev["images"]
+	_, files := ev["files"]
+	if !ok || (shown == "" && !images && !files) {
+		return
+	}
+	frame["text"] = shown
+	frame["step"] = step
+	frame["started"] = startedWords[step]
+}
+
+func tooLongForStep(step string, over int) error {
+	return invalid("text", "This message is too long to send as "+stageNames[step]+"'s command, which goes in front of it. Shorten it by at least "+strconv.Itoa(over)+" "+pronoun(over, "character", "characters")+" and send it again, or put the long part in a file and attach it.")
 }

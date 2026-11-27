@@ -1,5 +1,6 @@
 import { request, savedTone, type EngineAnswer } from '../api.ts'
-import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, sayIfChanged, shown, statusLine } from '../lib/dom.ts'
+import { busy, button, el, emit, focusedKey, labelError, refocus, replaceKeeping, sayIfChanged, shown, statusLine, visible } from '../lib/dom.ts'
+import { offTip } from '../lib/tooltip.ts'
 import type { Tone } from '../lib/dom.ts'
 import { actions, field, form } from '../lib/form.ts'
 import type { PullComment, PullFollow, PullFollowView, SessionInfo } from '../types.ts'
@@ -55,7 +56,8 @@ function reviewKey(v: PullFollowView): string {
 
 export function pullFollowOf(sid: string, info: SessionInfo, connected: boolean): PullFollowView | null {
   if (!info.verified) return null
-  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.readOnly || (connected ? '' : 'Actions work once the page is connected again.'), connected }
+  const off = (a: 'ask' | 'bringMainNow' | 'deleteNow' | 'pullOpen') => visible(info.actions?.[a] ?? '')
+  return { sid, follow: info.follow ?? null, review: info.review ?? null, running: !!info.running, disabled: info.readOnly || (connected ? '' : 'Actions work once the page is connected again.'), connected, ask: off('ask'), main: off('bringMainNow'), deleteOff: off('deleteNow'), openOff: off('pullOpen') }
 }
 
 class SfPullFollow extends HTMLElement {
@@ -153,32 +155,34 @@ class SfPullFollow extends HTMLElement {
     return !!this.#busy || !!this.#view?.disabled
   }
 
-  #action(text: string, op: string, cls: string, key: string, run: () => void, title = ''): HTMLButtonElement {
+  #action(text: string, op: string, cls: string, key: string, run: () => void, title = '', why = ''): HTMLElement[] {
+    const reason = this.#off() ? '' : why
     const b = button(text, cls, () => {
-      if (!this.#off()) run()
+      if (!this.#off() && !reason) run()
     }, 'button', key)
     b.setAttribute('aria-disabled', String(this.#off()))
     if (this.#busy === op) busy(b, true)
+    if (reason) return offTip(b, reason)
     if (title) b.title = title
-    return b
+    return [b]
   }
 
   #state(v: PullFollowView, f: PullFollow | null): HTMLElement {
     const box = el('div', 'pull-state')
     const openPull = () => this.#action('Open pull request', 'open', 'small', `pull-open:${v.sid}`,
       () => void this.#run('open', '/api/pull-request', { op: 'open', sid: v.sid }, 'A pull request card waits under Issues and pull requests. Read it, then open it from there.'),
-      'Makes a pull request card from the engine\'s records: the branch, its commits and the approved requirements\' title. It opens as a draft unless you clear that on the card.')
+      'Makes a pull request card from the engine\'s records: the branch, its commits and the approved requirements\' title. It opens as a draft unless you clear that on the card.', v.openOff)
     if (!f || !f.state) {
       box.append(el('p', 'small muted', 'Once the branch is pushed, the engine follows its pull request: CI results, your own comments and the bots this project names.'))
       const row = el('div', 'actions')
-      row.append(openPull())
+      row.append(...openPull())
       box.append(row)
       return box
     }
     if (f.state === 'looking') {
       box.append(el('p', 'small muted', 'The branch is pushed. No pull request is open for it yet; the engine looks once a minute.'))
       const row = el('div', 'actions')
-      row.append(openPull())
+      row.append(...openPull())
       box.append(row)
       return box
     }
@@ -188,7 +192,7 @@ class SfPullFollow extends HTMLElement {
       box.append(line)
       box.append(el('p', 'small muted', 'Delete removes the session and its worktree. The engine refuses while the session runs or has commits that aren\'t pushed.'))
       const row = el('div', 'actions')
-      row.append(this.#action('Delete', 'delete', 'small', `pull-delete:${v.sid}`, () => void this.#delete(v.sid)))
+      row.append(...this.#action('Delete', 'delete', 'small', `pull-delete:${v.sid}`, () => void this.#delete(v.sid), '', v.deleteOff))
       box.append(row)
       return box
     }
@@ -210,12 +214,12 @@ class SfPullFollow extends HTMLElement {
   #open(v: PullFollowView, f: PullFollow): Node[] {
     const out: Node[] = []
     const actions = el('div', 'actions pull-actions')
-    if (f.draft && f.opened) actions.append(this.#action('Ready for review', 'ready', 'small', `pull-ready:${v.sid}`,
+    if (f.draft && f.opened) actions.append(...this.#action('Ready for review', 'ready', 'small', `pull-ready:${v.sid}`,
       () => void this.#run('ready', '/api/pull-request', { op: 'ready', sid: v.sid }, 'It is ready for review now.'), 'Marks the engine\'s draft pull request ready for review on the git host, with your saved token'))
     if (f.conflict) {
       out.push(el('p', 'small warn', `The branch conflicts with main (GitHub says ${shown(f.mergeState || 'not mergeable')}).`))
-      actions.append(this.#action('Ask the agent to bring in main', 'main', 'small', `pull-main:${v.sid}`,
-        () => void this.#run('main', '/api/bring-main', { sid: v.sid }, 'The agent was asked to bring in main.')))
+      actions.append(...this.#action('Ask the agent to bring in main', 'main', 'small', `pull-main:${v.sid}`,
+        () => void this.#run('main', '/api/bring-main', { sid: v.sid }, 'The agent was asked to bring in main.'), '', v.main))
     }
     const total = f.failing + f.passing + f.running
     if (total) {
@@ -248,8 +252,8 @@ class SfPullFollow extends HTMLElement {
     if (f.dropped) out.push(el('p', 'small warn', `${f.dropped} new ${f.dropped === 1 ? 'comment holds' : 'comments hold'} what looks like a token, so the engine won't send ${f.dropped === 1 ? 'it' : 'them'} to the agent. Read ${f.dropped === 1 ? 'it' : 'them'} on the git host.`))
     if (f.checksNew || f.comments.length) {
       out.push(el('p', 'small muted', 'The agent gets this as text from the git host, marked untrusted: feedback to weigh, not instructions.'))
-      actions.append(this.#action('Send to the agent', 'send', 'primary small', `pull-send:${v.sid}`,
-        () => void this.#run('send', '/api/pull-request', { op: 'send', sid: v.sid }, 'Sent to the agent.')))
+      actions.append(...this.#action('Send to the agent', 'send', 'primary small', `pull-send:${v.sid}`,
+        () => void this.#run('send', '/api/pull-request', { op: 'send', sid: v.sid }, 'Sent to the agent.'), '', v.ask))
     } else if (f.sent) out.push(el('p', 'small muted', `Last sent to the agent ${clock(f.sent)}. Nothing new since.`))
     if (f.auto) out.push(el('p', `small ${f.autoStop ? 'warn' : 'muted'}`, f.autoStop ? `Sending on its own stopped: ${shown(f.autoStop)}. Send it yourself to start again.` : `This project sends what's new to the agent on its own: ${f.rounds} of 5 rounds used.`))
     if (actions.childElementCount) out.push(actions)
@@ -275,7 +279,7 @@ class SfPullFollow extends HTMLElement {
     if (found.opened) box.append(el('p', 'small muted', 'Their issue cards were offered under Issues and pull requests.'))
     else if (n) {
       const row = el('div', 'actions')
-      row.append(this.#action('Open issues for these', 'findings', 'small', `pull-findings:${v.sid}`, () => void this.#openFindings(v, found),
+      row.append(...this.#action('Open issues for these', 'findings', 'small', `pull-findings:${v.sid}`, () => void this.#openFindings(v, found),
         'Makes one issue card per finding, pre-filled from it. Each opens only when you approve its own card.'))
       box.append(row)
     }

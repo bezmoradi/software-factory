@@ -52,6 +52,11 @@ func capsFields(c Caps) Fields {
 	return Fields{"money": c.MoneyUSD, "minutes": float64(c.Minutes), "turns": float64(c.Turns), "disk": float64(c.DiskGiB)}
 }
 
+const (
+	capLevelLow  = "warn75"
+	capLevelHigh = "warn90"
+)
+
 func capLevel(kind string, c Caps, u CapsUsed) string {
 	limit := capValue(kind, c)
 	if limit <= 0 {
@@ -62,9 +67,9 @@ func capLevel(kind string, c Caps, u CapsUsed) string {
 	case share >= 1:
 		return "reached"
 	case share >= capWarnHigh:
-		return "warn90"
+		return capLevelHigh
 	case share >= capWarnLow:
-		return "warn75"
+		return capLevelLow
 	}
 	return ""
 }
@@ -88,10 +93,10 @@ func (l *Limits) Frame() Fields {
 		for _, w := range list {
 			at, acked := l.acks[usageAck{side: side, box: box, kind: w.Kind}]
 			continued := acked && at.Equal(w.ResetsAt)
-			windows = append(windows, Fields{"kind": w.Kind, "name": windowName(side, w), "short": windowShort(w), "utilization": math.Round(w.Utilization*1000) / 1000, "resetsAt": ms(w.ResetsAt), "status": w.Status,
+			windows = append(windows, Fields{"kind": w.Kind, "name": windowName(w), "short": windowShort(w), "utilization": math.Round(w.Utilization*1000) / 1000, "resetsAt": ms(w.ResetsAt), "status": w.Status,
 				"near": !continued && (w.Utilization >= UsageNear || w.Status == StatusRejected), "continued": continued})
 		}
-		meter = append(meter, Fields{"side": side, "sid": sid, "label": sideWords[side], "plan": l.planLocked(side, box), "windows": windows, "at": ms(l.meter[meterKey{side: side, box: box}].at)})
+		meter = append(meter, Fields{"side": side, "sid": sid, "windows": windows, "at": ms(l.meter[meterKey{side: side, box: box}].at)})
 	}
 	addMeter(SideReviewers, "", "")
 	for _, sid := range sids {
@@ -159,7 +164,7 @@ func (l *Limits) Frame() Fields {
 		paused = append(paused, Fields{"sid": p.sid, "side": p.side, "kind": p.kind, "what": p.what, "at": ms(p.at)})
 	}
 	unread := l.unreadLocked()
-	return Fields{"type": "limits", "meter": meter, "sessions": sessions, "projects": projects, "expiry": expiry, "paused": paused, "unread": unread}
+	return Fields{"type": "limits", "usage": l.accountLocked(now), "meter": meter, "sessions": sessions, "projects": projects, "expiry": expiry, "paused": paused, "unread": unread}
 }
 
 var _ ProjectData = (*Limits)(nil)

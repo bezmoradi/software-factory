@@ -11,16 +11,6 @@ import (
 	"github.com/bezmoradi/software-factory/internal/core/shared"
 )
 
-func approvedRequirements(work *session.Work) func(ctx context.Context, sid string) string {
-	return func(ctx context.Context, sid string) string {
-		v, err := work.View(ctx, sid)
-		if err != nil || v.Requirements == nil || !v.Requirements.Approved {
-			return ""
-		}
-		return v.Requirements.Text
-	}
-}
-
 func usePulls(base context.Context, srv *page.Server, reg *session.Registry, parts engineParts, cfg PageConfig, logger shared.Logger) {
 	if parts.forges == nil || parts.dispatcher == nil || parts.repos == nil {
 		return
@@ -36,7 +26,7 @@ func usePulls(base context.Context, srv *page.Server, reg *session.Registry, par
 		Audit: state.NewAudit(cfg.StateDir), MainCommit: parts.repos.Main, Logger: logger,
 	}
 	if parts.work != nil {
-		fc.Approved = approvedRequirements(parts.work)
+		fc.Approved = parts.work.ApprovedRequirements
 	}
 	if parts.reviews != nil {
 		fc.Reviews, fc.Replies = parts.reviews.Entries, parts.reviews.ReplyOf

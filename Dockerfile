@@ -5,7 +5,6 @@ WORKDIR /src
 COPY web/package.json web/package-lock.json web/
 RUN npm ci --prefix web --ignore-scripts --no-audit --no-fund
 COPY web/ web/
-COPY README.md ./
 RUN mkdir -p internal/adapters/http/page/dist && npm --prefix web run build
 
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9 AS go
@@ -40,11 +39,12 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/s
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/sf-fake-claude ./fakeclaude \
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/sf-gitserver ./gitserver
 
-FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS base
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS system
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git netcat-openbsd openssh-client rsync sshpass \
+ && apt-get install -y --no-install-recommends ca-certificates curl git netcat-openbsd openssh-client procps rsync sshpass \
  && rm -rf /var/lib/apt/lists/* \
- && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh /opt/yarn-* \
+ && git config --system --add safe.directory '/workspace/s/*' \
+ && rm -rf /usr/local/lib/node_modules/corepack /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh /opt/yarn-* \
  && userdel --remove node \
  && groupadd --gid 10000 sf \
  && chgrp sf /usr/bin/nc.openbsd /usr/bin/rsync /usr/bin/scp /usr/bin/sftp /usr/bin/ssh /usr/bin/sshpass \
@@ -69,7 +69,35 @@ RUN apt-get update \
  && install -d -o engine -g sf -m 0755 /verify \
  && install -d -o engine -g sf -m 0710 /actions \
  && install -d -o action -g action -m 0700 /home/action \
- && install -d -m 0755 /usr/share/doc/software-factory/node
+ && install -d -m 0755 /usr/share/doc/software-factory/node /usr/share/doc/software-factory/npm \
+ && install -m 0644 /usr/local/lib/node_modules/npm/LICENSE /usr/share/doc/software-factory/npm/LICENSE
+
+FROM system AS gitserver
+RUN userdel reviewer \
+ && useradd --uid 10004 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin gitsrv \
+ && install -d -o gitsrv -g gitsrv -m 0755 /srv/git /srv/ca
+COPY --from=fakes /out/sf-gitserver /usr/local/bin/sf-gitserver
+USER gitsrv
+EXPOSE 8443
+ENTRYPOINT ["/usr/local/bin/sf-gitserver"]
+
+FROM system AS base
+RUN sed -i \
+      -e 's#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/20261103T013555Z#' \
+      -e 's#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/20261103T013555Z#' \
+      /etc/apt/sources.list.d/debian.sources \
+ && ! grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --no-install-recommends \
+      chromium=156.0.8078.79-1~deb13u1 \
+      chromium-common=156.0.8078.79-1~deb13u1 \
+      fonts-dejavu-core=2.37-8 \
+      fonts-liberation=1:2.1.5-3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && install -d -m 0755 /etc/chromium.d \
+ && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/software-factory \
+ && chmod 0644 /etc/chromium.d/software-factory \
+ && install -d -o 10006 -g 10006 -m 0700 /out
 COPY --from=go /out/software-factory /usr/local/bin/software-factory
 COPY --chown=root:root --chmod=a=rX,u+w plugin/.claude-plugin/plugin.json /opt/software-factory/plugin/.claude-plugin/plugin.json
 COPY --chown=root:root --chmod=a=rX,u+w plugin/hooks/ /opt/software-factory/plugin/hooks/
@@ -93,39 +121,6 @@ USER root
 RUN install -d -m 0755 /usr/share/software-factory \
  && install -m 0444 /dev/null /usr/share/software-factory/dev-image
 USER engine
-COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
-COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
-
-FROM base AS gitserver
-USER root
-RUN userdel reviewer \
- && useradd --uid 10004 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin gitsrv \
- && install -d -o gitsrv -g gitsrv -m 0755 /srv/git /srv/ca
-COPY --from=fakes /out/sf-gitserver /usr/local/bin/sf-gitserver
-USER gitsrv
-EXPOSE 8443
-ENTRYPOINT ["/usr/local/bin/sf-gitserver"]
-
-FROM base AS browser
-USER root
-RUN sed -i \
-      -e 's#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/20261103T013555Z#' \
-      -e 's#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/20261103T013555Z#' \
-      /etc/apt/sources.list.d/debian.sources \
- && ! grep -q 'deb.debian.org' /etc/apt/sources.list.d/debian.sources \
- && apt-get -o Acquire::Check-Valid-Until=false update \
- && apt-get install -y --no-install-recommends \
-      chromium=156.0.8078.79-1~deb13u1 \
-      chromium-common=156.0.8078.79-1~deb13u1 \
-      fonts-liberation=1:2.1.5-3 \
- && rm -rf /var/lib/apt/lists/* \
- && install -d -m 0755 /etc/chromium.d \
- && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/software-factory \
- && chmod 0644 /etc/chromium.d/software-factory \
- && install -d -o 10006 -g 10006 -m 0700 /out
-USER engine
-
-FROM browser AS dev-browser
 COPY --from=fakes /out/sf-fake-acp /usr/local/bin/sf-fake-acp
 COPY --from=fakes /out/sf-fake-claude /usr/local/bin/sf-fake-claude
 

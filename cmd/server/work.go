@@ -18,12 +18,13 @@ func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, 
 	wc := session.WorkConfig{
 		Targets: targets, Doubled: doubled, Held: held, Heads: files.Reviews{}, History: files.Reader{}, Files: files.Reader{}, Bounded: files.Reader{}, Blobs: files.Reader{}, Repos: repos,
 		Reported: reg.Workflow, Store: state.NewWork(cfg.StateDir), Logger: logger,
-		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), Note: reg.NoteFor("work-type"), HistoryOnly: history, DocsInRepo: true,
-		Changes: files.Reader{}, Level: reg.PushLevel, Uncommitted: reg.SettledUncommitted,
+		Contents: files.Reader{}, Audit: state.NewAudit(cfg.StateDir), Tell: tellSession(reg), Note: reg.NoteFor("work-type"), HistoryOnly: history, Texts: state.NewApprovedTexts(cfg.StateDir),
+		Changes: files.Reader{}, Level: reg.PushLevel,
 	}
 	if reviews != nil {
 		wc.Reviews = reviews
 		wc.ApprovalMoved = reviews.ApprovalMoved
+		wc.NothingToExplain = reviews.NothingToExplain
 	}
 	if pins != nil {
 		wc.Installed = func() []string { return pins.Agents("knackpack") }
@@ -40,8 +41,8 @@ func workflowParts(cfg PageConfig, reg *session.Registry, repos *session.Repos, 
 		repos.UseProjectData(w)
 		reg.UseFirstSteps(w)
 	}
-	if err == nil && reviews != nil {
-		reg.OnDocsReported(w.RecheckApproval)
+	if err == nil {
+		reg.OnDocsCheck(w.DocsCheck)
 	}
 	return w, err
 }

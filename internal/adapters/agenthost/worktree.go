@@ -359,27 +359,38 @@ func (s *Server) forgetTree(ctx context.Context, repo, path string) *problem {
 }
 
 func (s *Server) listedTree(ctx context.Context, repo, path string) (listedTree, *problem) {
+	trees, p := s.listedTrees(ctx, repo)
+	if p != nil {
+		return listedTree{}, p
+	}
+	return trees[canonPath(path)], nil
+}
+
+func (s *Server) listedTrees(ctx context.Context, repo string) (map[string]listedTree, *problem) {
 	out := &capped{limit: maxTreeList}
 	if err := s.gitTo(ctx, repo, repo, out, nil, "worktree", "list", "--porcelain", "-z"); err != nil || out.over {
 		s.log.Warn("agent-host worktree", "event", "list-failed")
-		return listedTree{}, fail(http.StatusConflict, "git", "agent-host couldn't read the clone's list of worktrees.")
+		return nil, fail(http.StatusConflict, "git", "agent-host couldn't read the clone's list of worktrees.")
 	}
-	want := canonPath(path)
-	var tree listedTree
-	in := false
+	trees := map[string]listedTree{}
+	at := ""
 	for field := range strings.SplitSeq(string(out.buf), "\x00") {
 		switch {
 		case field == "":
-			in = false
+			at = ""
 		case strings.HasPrefix(field, "worktree "):
-			in = canonPath(strings.TrimPrefix(field, "worktree ")) == want
-			tree.listed = tree.listed || in
-		case in && (field == "locked" || strings.HasPrefix(field, "locked ")):
+			at = canonPath(strings.TrimPrefix(field, "worktree "))
+			tree := trees[at]
+			tree.listed = true
+			trees[at] = tree
+		case at != "" && (field == "locked" || strings.HasPrefix(field, "locked ")):
+			tree := trees[at]
 			tree.locked = true
 			tree.reason = strings.TrimPrefix(strings.TrimPrefix(field, "locked"), " ")
+			trees[at] = tree
 		}
 	}
-	return tree, nil
+	return trees, nil
 }
 
 func pointsBack(repo, path string) bool {

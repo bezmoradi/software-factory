@@ -10,6 +10,7 @@ import { textarea, dropdown, option } from '../lib/controls.ts'
 import { outcome } from './toasts.ts'
 import './caps.ts'
 import { codeBlock } from './code-block.ts'
+import { openCommandOutput } from './command-output.ts'
 
 export interface AgentModel {
   id: string
@@ -24,6 +25,7 @@ interface CommandRun {
   tail: string
   cut: boolean
   withheld: boolean
+  full: boolean
   reason: string
   retry: boolean
   started: number
@@ -79,7 +81,7 @@ export function effortOptions(select: HTMLSelectElement, first: string, efforts:
 
 function readRun(v: unknown): CommandRun | null {
   if (!isRecord(v) || typeof v.state !== 'string') return null
-  return { kind: String(v.kind ?? ''), state: v.state, code: Number(v.code) || 0, tail: typeof v.tail === 'string' ? v.tail : '', cut: v.cut === true, withheld: v.withheld === true, reason: typeof v.reason === 'string' ? v.reason : '', retry: v.retry === true, started: Number(v.started) || 0, ended: Number(v.ended) || 0, said: saidOf(v.said, v.state) }
+  return { kind: String(v.kind ?? ''), state: v.state, code: Number(v.code) || 0, tail: typeof v.tail === 'string' ? v.tail : '', cut: v.cut === true, withheld: v.withheld === true, full: v.full === true, reason: typeof v.reason === 'string' ? v.reason : '', retry: v.retry === true, started: Number(v.started) || 0, ended: Number(v.ended) || 0, said: saidOf(v.said, v.state) }
 }
 
 function readView(v: unknown): WorkView | null {
@@ -474,6 +476,14 @@ class SfSessionWork extends HTMLElement {
       if (run.cut) parts.push(el('p', 'small muted', 'The last 8 KiB of its output:'))
       const tail = visible(run.tail)
       parts.push(codeBlock({ text: tail, label: `${title} output`, copy: { text: tail, label: 'Copy the output' }, keep: 'end', wrap: true, size: 'small', tone: run.said.tone === 'bad' ? 'bad' : undefined }))
+    }
+    const sid = this.#target?.sid
+    if (run.full && sid) {
+      const all = button('Show all output', 'link small', () => openCommandOutput(sid, run.kind, title), 'button', `work-output-${section}`)
+      all.setAttribute('aria-haspopup', 'dialog')
+      const line = el('p', 'small')
+      line.append(all)
+      parts.push(line)
     }
     return parts
   }

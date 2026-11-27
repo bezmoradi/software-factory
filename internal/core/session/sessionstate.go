@@ -36,7 +36,22 @@ const (
 	ActionCheckpoint = "checkpoint"
 	ActionReview     = "review"
 	ActionRules      = "rules"
+	ActionAsk        = "ask"
+	ActionMainNow    = "bringMainNow"
+	ActionDeleteNow  = "deleteNow"
+	ActionPullOpen   = "pullOpen"
+	ActionPreview    = "preview"
 	bypassPermission = "bypassPermissions"
+
+	saidDisputed    = "Two connections claim this session, so the engine takes nothing for it from the page. Press Release on the session to keep the newer one."
+	saidOffline     = "The session isn't connected to the engine now. Wait for it to reconnect, or wake it."
+	saidUnverified  = "The engine didn't start this session, so it takes nothing for it from the page."
+	saidNotRunning  = "The session isn't running. Wake it first."
+	saidOutdated    = "The session runs an older plugin than this engine takes. Stop it and wake it again."
+	saidReadOnly    = "This session is read-only on this page."
+	saidMainInTurn  = "The session is in its turn. Wait for it to end, then bring in the latest main."
+	saidMainStopped = "The session isn't running. Wake it, then bring in the latest main."
+	saidStopFirst   = "Stop the session before deleting it."
 )
 
 type Status struct {
@@ -74,7 +89,7 @@ func Controllable(i Info) bool {
 }
 
 func Sleeping(i Info) bool {
-	return i.Kind == "background" && i.Verified && !i.Doubled && !i.Running && !i.Live && claudeSessionID(i.ID)
+	return i.Kind == "background" && i.Verified && !i.Doubled && !i.Running && !i.Live && claudeSessionID(i.ID) && i.Box != ""
 }
 
 func loginNeeded(i Info) bool {
@@ -108,6 +123,8 @@ func SessionStatus(i Info) Status {
 		return Status{"stopped: process lost", ToneOff}
 	case !i.Running && i.StopReason != "":
 		return Status{"stopped: " + i.StopReason, ToneOff}
+	case !i.Running && i.OutOfMemory:
+		return Status{outOfMemoryTag, ToneOff}
 	case !i.Running && i.State == "done":
 		return Status{"done", ToneDone}
 	case !i.Running:
@@ -119,11 +136,26 @@ func SessionStatus(i Info) Status {
 	case i.Outdated:
 		return Status{"older plugin version", ToneOff}
 	case i.Needs > 0:
-		return Status{"needs you", ToneNeed}
-	case i.Busy || i.Compacting || i.Subagents:
-		return Status{"working", ToneBusy}
+		return Status{withTasks("needs you", i.TasksRunning), ToneNeed}
+	case agentWorking(i):
+		return Status{withTasks("working", i.TasksRunning), ToneBusy}
 	}
-	return Status{"idle", ""}
+	return Status{withTasks("idle", i.TasksRunning), ""}
+}
+
+func agentWorking(i Info) bool {
+	return i.Busy || i.Compacting || i.Subagents
+}
+
+func withTasks(word string, running int) string {
+	if running == 0 {
+		return word
+	}
+	return word + " · " + BackgroundNote(running)
+}
+
+func ModeChanged(i Info) bool {
+	return i.Mode != "" && ModeLabel(i.Mode) != ModeLabel(launchMode)
 }
 
 func firstOf(words ...string) string {
@@ -152,6 +184,9 @@ func SessionWarnings(i Info) []string {
 	}
 	if i.SignInWait {
 		out = append(out, "Waiting for sign-in: "+AgentWord(i.Agent)+" in this session's container isn't signed in. Press Wake to open the session's sign-in panel, sign in there, then continue.")
+	}
+	if i.Verified && i.OutOfMemory {
+		out = append(out, OutOfMemoryNote(i.MemoryLimit))
 	}
 	if i.HomeHeld {
 		out = append(out, "Its settings changed since its last start: "+AgentWord(i.Agent)+"'s user settings in this session's container changed, so it didn't wake. Press Wake to review them.")
@@ -210,7 +245,7 @@ func SessionActions(i Info) map[string]string {
 	finishes := AgentWord(i.Agent)
 	out := map[string]string{
 		ActionControl:   off(control, "Read-only on this page."),
-		ActionStop:      off(control && i.Busy, "no turn is running that this page controls"),
+		ActionStop:      stopOff(i, control, finishes),
 		ActionWake:      off(Sleeping(i), "it isn’t a stopped Claude Code background session"),
 		ActionManage:    off(owned && claudeSessionID(i.ID), "only a Claude Code background session this engine started is stopped or deleted here"),
 		ActionModel:     off(i.Agent == "claude" && i.Controlled && !i.Doubled, "only a Claude Code session this page controls switches its model here"),
@@ -220,13 +255,28 @@ func SessionActions(i Info) map[string]string {
 		ActionReview:    off(i.Verified && i.Project != "", "reviews and pushes run for a session this engine started in a project of your list"),
 		ActionRules:     off(i.Verified, "only a session this engine started has this view"),
 	}
+	out[ActionAsk] = MessageOff(i)
+	out[ActionDeleteNow] = off(!i.Running, saidStopFirst)
+	out[ActionPreview] = previewOff(i)
+	out[ActionPullOpen] = saidPushFirst
+	if i.Follow != nil {
+		out[ActionPullOpen] = i.Follow.OpenOff
+	}
+	switch {
+	case !i.Running:
+		out[ActionMainNow] = saidMainStopped
+	case i.Busy:
+		out[ActionMainNow] = saidMainInTurn
+	default:
+		out[ActionMainNow] = ""
+	}
 	switch {
 	case i.Doubled:
 		out[ActionSteps] = DoubledNote
 	case !control:
 		out[ActionSteps] = "Step buttons are off: this session is read-only on this page."
 	case i.Busy:
-		out[ActionSteps] = "Step buttons are available when " + finishes + " finishes."
+		out[ActionSteps] = finishes + " is in a turn."
 	default:
 		out[ActionSteps] = ""
 	}
@@ -249,6 +299,38 @@ func SessionActions(i Info) map[string]string {
 	return out
 }
 
+func MessageOff(i Info) string {
+	switch {
+	case i.Disputed:
+		return saidDisputed
+	case !i.Live:
+		return saidOffline
+	case !i.Verified:
+		return saidUnverified
+	case !i.Running:
+		return saidNotRunning
+	case i.Outdated:
+		return saidOutdated
+	case !i.Controlled:
+		return saidReadOnly
+	}
+	return ""
+}
+
+func stopOff(i Info, control bool, who string) string {
+	switch {
+	case !control:
+		return "Read-only on this page."
+	case i.Busy:
+		return ""
+	case i.Compacting:
+		return who + " is compacting the conversation; Stop works on " + who + "’s own turn."
+	case i.Subagents:
+		return who + "’s subagents are working; Stop works on " + who + "’s own turn."
+	}
+	return "no turn is running that this page controls"
+}
+
 func off(allowed bool, why string) string {
 	if allowed {
 		return ""
@@ -266,6 +348,7 @@ func ReadOnlyNote(i Info) string {
 type ReviewOffer struct {
 	Reason  string
 	Planned []WorkReviewer
+	Explain string
 }
 
 func OfferReview(i Info, v GateView) ReviewOffer {
@@ -278,6 +361,7 @@ func OfferReview(i Info, v GateView) ReviewOffer {
 	case v.Started == StartedNone:
 		o.Reason = "Nothing to review or push yet: this session has no commits."
 	}
+	o.Explain = v.ExplainOff
 	if !v.Chosen || v.Head == "" || i.Review != nil && i.Review.Commit == v.Head {
 		return o
 	}
@@ -294,15 +378,11 @@ func HeadPushed(i Info, head string) bool {
 	return p != nil && !p.Running && (p.Result == "pushed" || p.Result == "up-to-date") && head != "" && p.Commit == head
 }
 
-func DocNote(d WorkDoc, clipped string, committed bool, head string) string {
-	note := ""
+func DocNote(d WorkDoc, clipped string) string {
 	if d.Clipped && clipped != "" {
-		note = clipped + " is longer than the page shows, so it can't be approved as a whole."
+		return clipped + " is longer than the page shows, so it can't be approved as a whole."
 	}
-	if committed && !d.Reported {
-		note += " Read from commit " + shortSHA7(firstOf(d.Commit, head)) + " by the engine."
-	}
-	return strings.TrimSpace(note)
+	return ""
 }
 
 func PlanDocWord(p workflow.Profile) string {

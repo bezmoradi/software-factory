@@ -137,7 +137,7 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 		return VerifyRun{}, conflict("running", "A run of the check on main is running for this project. Wait for it.")
 	case len(v.live) >= MaxVerifyRuns:
 		v.mu.Unlock()
-		return VerifyRun{}, limited("verify-busy", "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
+		return VerifyRun{}, limited("verify-busy", saidVerifyBusy)
 	}
 	if v.mains == nil {
 		v.mains = map[string]bool{}
@@ -169,7 +169,7 @@ func (v *Verifier) StartMain(ctx context.Context, repo string, kind VerifyKind, 
 	v.mu.Lock()
 	if len(v.live) >= MaxVerifyRuns {
 		v.mu.Unlock()
-		return VerifyRun{}, limited("verify-busy", "The engine runs at most "+strconv.Itoa(MaxVerifyRuns)+" verification runs at once. Try again when one finishes.")
+		return VerifyRun{}, limited("verify-busy", saidVerifyBusy)
 	}
 	v.live[run] = live
 	v.runs = append(v.runs, rec)

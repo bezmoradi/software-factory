@@ -231,7 +231,7 @@ func (w *SessionWork) SwitchModel(ctx context.Context, sid, model, effort string
 	if result == "" {
 		result = "start model"
 	}
-	w.audit(AuditEntry{Req: shared.RequestOf(ctx), Time: w.cfg.Now(), Session: sid, Repository: info.Project, By: "page", Kind: AuditModelSwitch, Result: result, Reason: effort})
+	w.audit(AuditEntry{Req: shared.RequestOf(ctx), Time: w.cfg.Now(), Session: sid, Repository: info.Project, Branch: info.Branch, By: "page", Kind: AuditModelSwitch, Result: result, Reason: effort})
 	w.changed(sid)
 	return nil
 }

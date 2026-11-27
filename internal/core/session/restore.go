@@ -11,6 +11,7 @@ import (
 
 type SavedRun struct {
 	SID       string
+	Docs      string
 	ID        string
 	Agent     string
 	Repo      string
@@ -98,6 +99,7 @@ func (d *Dispatcher) saveRuns() {
 		out[len(out)-1].RmDone = r.rmDone
 		out[len(out)-1].Aside = r.aside
 		out[len(out)-1].Box = r.box
+		out[len(out)-1].Docs = r.docs
 		out[len(out)-1].Pack = r.pack.Choice
 	}
 	d.mu.Unlock()
@@ -133,7 +135,7 @@ func (d *Dispatcher) Restore() int {
 			continue
 		}
 		r := &run{spec: spec, repo: s.Repo, repoPath: s.RepoPath, base: s.Base, name: s.Name, branch: s.Branch, cwd: s.Cwd,
-			sid: s.SID, id: s.ID, display: s.Display, at: s.StartedAt,
+			sid: s.SID, docs: s.Docs, id: s.ID, display: s.Display, at: s.StartedAt,
 			stamp: runStamp{interruptedAt: s.InterruptedAt, agent: s.AgentVersion, engine: s.EngineVersion, workflow: s.WorkflowCommit,
 				reviewer: s.ReviewerClaude, reviewerPlugin: s.ReviewerPlugin}}
 		r.stamp.interruptedAt = cutAt(s)

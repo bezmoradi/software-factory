@@ -101,6 +101,8 @@ func (r *recipe) mounts(box string, vols stackVolumes) []mountJSON {
 		{Type: "volume", Source: vols.Agents, Target: agentsTarget, ReadOnly: true, VolumeOptions: &volumeOptionsJSON{NoCopy: true}},
 		{Type: "volume", Source: homeName(r.project, box), Target: homeTarget},
 		{Type: "volume", Source: vols.Uploads, Target: boxUploads + box, ReadOnly: true, VolumeOptions: &volumeOptionsJSON{NoCopy: true, Subpath: box}},
+		{Type: "volume", Source: vols.Workspace, Target: session.CopiesAt, ReadOnly: true, VolumeOptions: &volumeOptionsJSON{NoCopy: true, Subpath: session.CopiesFolder + "/" + box}},
+		{Type: "volume", Source: vols.Workspace, Target: session.ScratchAt, VolumeOptions: &volumeOptionsJSON{NoCopy: true, Subpath: "s/" + box + "/" + session.ScratchFolderName}},
 	}
 	if r.cfg.Live {
 		out = append(out, mountJSON{Type: "volume", Source: vols.DevBin, Target: liveTarget, ReadOnly: true, VolumeOptions: &volumeOptionsJSON{NoCopy: true}})

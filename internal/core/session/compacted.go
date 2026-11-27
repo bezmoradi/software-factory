@@ -9,6 +9,7 @@ import (
 
 	"github.com/bezmoradi/software-factory/internal/core/gate"
 	"github.com/bezmoradi/software-factory/internal/core/review"
+	"github.com/bezmoradi/software-factory/internal/core/workflow"
 )
 
 const (
@@ -35,11 +36,15 @@ func (w *Work) ApprovedDocs(sid string) []ApprovedDoc {
 		return nil
 	}
 	var out []ApprovedDoc
+	plan := "plan"
+	if v.Profile == workflow.Incident {
+		plan = "root cause"
+	}
 	for _, d := range []struct {
 		kind string
 		doc  *WorkDoc
-	}{{"requirements", v.Requirements}, {"plan", v.Plan}} {
-		if d.doc == nil || d.doc.Reported || d.doc.OnBase {
+	}{{"requirements", v.Requirements}, {plan, v.Plan}} {
+		if d.doc == nil {
 			continue
 		}
 		a := ApprovedDoc{Kind: d.kind, Approved: d.doc.Approved, Changed: d.doc.Changed}
@@ -84,7 +89,7 @@ func docFacts(docs []ApprovedDoc) []string {
 		}
 		switch {
 		case d.Approved:
-			out = append(out, "The person approved the "+name+".")
+			out = append(out, "The person approved the "+name+", and the engine keeps its own copy of that text.")
 		case d.Changed:
 			out = append(out, "The "+name+" changed after the person approved it, so it isn't approved now.")
 		default:

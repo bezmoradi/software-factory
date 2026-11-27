@@ -26,7 +26,6 @@ type ApprovedText struct {
 	Steps    bool
 	Incident bool
 	Files    []SnapshotFile
-	Unkept   []string
 	Withheld []string
 	given    []string
 	reqIDs   []string
@@ -81,7 +80,7 @@ func (a ApprovalGiven) hold(entries map[review.Key]ReviewEntry, branch, head str
 }
 
 const (
-	approvalHeldWhy = "it reviewed before the current approval of the requirements, with its choice of whether a plan follows, the plan or the root cause, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
+	approvalHeldWhy = "it reviewed before the current approval of the requirements, the plan or the root cause, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 	teamHeldWhy     = "the team rules changed since it reviewed: the per-path rules of the approved " + TeamFile + " that apply to this change aren't the ones it was given, so its pass doesn't count; review again: it runs again when the agent next asks to push or the person presses Review"
 )
 
@@ -126,47 +125,25 @@ func (w *Work) approvedOf(g gathered) ApprovedText {
 			out.reqIDs = RequirementIDs(f.Text)
 		}
 	}
-	unkept := func(what string, a *workApproval) {
-		out.Unkept = append(out.Unkept, what)
-		hash := ""
-		if a != nil {
-			hash = a.Hash
-		}
-		out.given = append(out.given, what+" unkept "+hash)
-	}
 	if incident {
-		switch {
-		case !g.planOk:
-		case g.docs.held && g.docs.plan != nil && !g.docs.plan.Clipped:
-			add("root cause", approvedName(names.RootCause, "root-cause.md"), "as the engine read it from commit "+g.docs.plan.Commit, g.docs.plan.Text)
-		default:
-			unkept("root cause", ws.plan)
+		if g.planOk && ws.plan != nil {
+			add("root cause", approvedName(names.RootCause, "root-cause.md"), keptIt, ws.plan.Text)
 		}
 		return out
 	}
-	if g.reqOk {
-		name := approvedName(names.Requirements, "requirements.md")
-		switch {
-		case g.docs.held && g.docs.req != nil && !g.docs.req.Clipped:
-			add("requirements", name, "as the engine read them from commit "+g.docs.req.Commit, g.docs.req.Text)
-		case !g.docs.held && ws.req != nil && ws.req.Text != "":
-			add("requirements", name, "as the engine saved them when the person approved them", ws.req.Text)
-		default:
-			unkept("requirements", ws.req)
-		}
-		if g.chosen.Plans() {
-			out.given = append(out.given, "plan chosen "+strconv.FormatBool(g.planChosen))
-		}
+	if g.reqOk && ws.req != nil {
+		add("requirements", approvedName(names.Requirements, "requirements.md"), keptThem, ws.req.Text)
 	}
-	if g.planOk {
-		if g.docs.held && g.docs.plan != nil && !g.docs.plan.Clipped {
-			add("plan", approvedName(names.Plan, "plan.md"), "as the engine read it from commit "+g.docs.plan.Commit, g.docs.plan.Text)
-		} else {
-			unkept("plan", ws.plan)
-		}
+	if g.planOk && ws.plan != nil {
+		add("plan", approvedName(names.Plan, "plan.md"), keptIt, ws.plan.Text)
 	}
 	return out
 }
+
+const (
+	keptIt   = "as the engine saved it when the person approved it"
+	keptThem = "as the engine saved them when the person approved them"
+)
 
 var approvedBase = regexp.MustCompile(`^[a-z0-9-]{1,40}\.md$`)
 

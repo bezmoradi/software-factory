@@ -47,8 +47,6 @@ type workApprovalJSON struct {
 	Hash   string    `json:"hash"`
 	Commit string    `json:"commit"`
 	At     time.Time `json:"at"`
-	Text   string    `json:"text,omitempty"`
-	Plan   bool      `json:"plan,omitempty"`
 }
 
 type sessionWorkJSON struct {

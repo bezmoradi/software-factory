@@ -767,7 +767,7 @@ func (h *Helper) browserIn(ctx context.Context, id, image string) *Refusal {
 			return refuse(http.StatusBadGateway, ReasonDocker, "Docker answered HTTP %d when the helper looked for a browser in the verification container", resp.StatusCode)
 		}
 	}
-	return refuse(http.StatusConflict, ReasonNoBrowser, "the image %s has no browser at %s, so a browser run has nothing to drive; name an image that holds one, such as the stack's browser stage or Playwright's image", image, strings.Join(browserPaths, ", "))
+	return refuse(http.StatusConflict, ReasonNoBrowser, "the image %s has no browser at %s, so a browser run has nothing to drive; name an image that holds one, such as Software Factory's own image or Playwright's image", image, strings.Join(browserPaths, ", "))
 }
 
 type limitedBody struct {

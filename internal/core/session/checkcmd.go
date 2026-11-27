@@ -50,10 +50,13 @@ type CommandResult struct {
 	Tail     string
 	Cut      bool
 	TimedOut bool
+	Run      string
+	File     bool
 }
 
 type CommandHost interface {
 	ProjectCommand(ctx context.Context, cwd, kind, command string) (CommandResult, error)
+	CommandOutput(ctx context.Context, kind, run string) (KeptOutput, error)
 }
 
 func (w *SessionWork) hosted() bool {
@@ -97,6 +100,8 @@ type CommandRun struct {
 	Tail     string
 	Cut      bool
 	Withheld bool
+	Output   string
+	File     bool
 	Reason   string
 	Turn     int
 	Retry    bool
@@ -173,6 +178,9 @@ func (w *SessionWork) runCommand(ctx context.Context, sid, kind, command, cwd st
 		done.State, done.Reason = RunError, hostMessage(err)
 	default:
 		done.State, done.Code, done.Cut = resultState(res), res.Code, res.Cut
+		if ValidOutputRun(res.Run) {
+			done.Output, done.File = res.Run, res.File
+		}
 		tail := strings.TrimRight(ansi.ReplaceAllString(res.Tail, ""), "\n ")
 		if secretText(tail) {
 			done.Withheld = true
@@ -223,6 +231,9 @@ func failureLines(run CommandRun, command, tail string, room int) string {
 		lead += "It was ended by a signal or couldn't start, so it has no exit code."
 	default:
 		lead += "It exited with code " + strconv.Itoa(run.Code) + "."
+	}
+	if run.File {
+		lead += " Its whole output is in " + CommandOutputPath(run.Kind, run.Output) + "."
 	}
 	if tail == "" {
 		return lead + " It printed nothing."

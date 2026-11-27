@@ -3,6 +3,7 @@ import { actionButton, button, el, labelError, statusLine, visible, visibleComma
 import { actions, field, fieldRow, form, reveal, showAnswer } from '../lib/form.ts'
 import { checkbox, dropdown, option, textarea, textbox } from '../lib/controls.ts'
 import { emptyState } from '../lib/page.ts'
+import { offTip, tooltip } from '../lib/tooltip.ts'
 import { codeBlock } from './code-block.ts'
 import { askRow, focusIfLost, focusKey, itemTable, rowMenu, rowName, rowNote, tableRow } from './row-table.ts'
 import { when } from './usage.ts'
@@ -164,21 +165,30 @@ export function savedActionsPart(post: Post, route: string, shown: (a: EngineAns
     credential.replaceChildren(...credentials.map(c => option(visible(c.label), c.value)))
     if (credentials.some(c => c.value === keep)) credential.value = keep
     const all = actionsOf(body.actions)
-    rows.replaceChildren(all.length ? itemTable('action-table', 'Actions', ['Action', 'Command', 'Target'], all.map(a => {
+    rows.replaceChildren(all.length ? itemTable('action-table', 'Actions', ['Action', 'Command', 'Target', 'Credential', 'Time limit'], all.map(a => {
       const level = el('span', 'tag access-level', visible(a.label))
       level.dataset.level = a.level
       const notes: HTMLElement[] = []
       if (a.files) notes.push(rowNote('With the session’s files, read-only.'))
       if (a.slots.length) notes.push(rowNote(`The agent fills ${a.slots.map(s => `{${visible(s.name)}}`).join(', ')}`))
       if (a.broken) notes.push(rowNote(visible(a.broken), 'warn'))
-      const cmd = el('code', 'item-command', visibleCommand(a.command))
-      const where = el('span', 'secondary item-hosts', `${visible(a.target)} with ${visible(a.credential || '?')}, ${a.minutes} min`)
+      const line = visibleCommand(a.command)
+      const trigger = el('button', 'tip-text item-command')
+      trigger.type = 'button'
+      trigger.append(el('span', 'sr-only', 'Command: '), el('code', '', line))
+      const cmd = tooltip(trigger, line)
+      const cell = (cls: string, label: string, value: string) => {
+        const c = el('span', `secondary ${cls}`)
+        c.append(el('span', 'sr-only', `${label}: `), value)
+        return c
+      }
+      const where = [cell('item-target', 'Target', visible(a.target)), cell('item-credential', 'Credential', visible(a.credential || '?')), cell('item-minutes', 'Time limit', `${a.minutes} min`)]
       if (asking === a.id) return askRow(rowName(visible(a.name), level), `Delete “${visible(a.name)}”?`, `action:${a.id}`, () => ask('', `action-more:${a.id}`), async () => {
         asking = ''
         said(await post(route, { op: 'action-delete', id: a.id }))
         focusIfLost(part, 'add-action')
       })
-      return tableRow([rowName(visible(a.name), level), cmd, where, ...notes], rowMenu(visible(a.name), `action-more:${a.id}`, [
+      return tableRow([rowName(visible(a.name), level), ...cmd, ...where, ...notes], rowMenu(visible(a.name), `action-more:${a.id}`, [
         { text: 'Replace', glyph: 'edit', run: from => {
           for (const marked of f.querySelectorAll<HTMLElement>('[aria-invalid="true"]')) labelError(marked, '')
           editing = a.id
@@ -215,7 +225,7 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
   let savedKey = ''
   const part = el('div', 'session-actions-part')
   part.append(heading, intro, saved, granted, runsHead, runs)
-  const runForm = (a: ActionRow): HTMLElement => {
+  const runForm = (a: ActionRow, off: string): HTMLElement => {
     const inputs = a.slots.map(s => {
       const t = textbox({ name: s.name, spellcheck: false, autocomplete: 'off', placeholder: s.pattern })
       t.addEventListener('input', () => labelError(t, ''))
@@ -225,8 +235,8 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
     const run = button(`Run ${visible(a.name)}`, 'primary small', undefined, 'submit')
     const f = form({
       cls: 'action-run',
-      children: [...inputs.map((t, i) => field(`{${visible(a.slots[i]!.name)}}`, t)), actions([run]), line],
-      onSubmit: () => void whileBusy(run, async () => {
+      children: [...inputs.map((t, i) => field(`{${visible(a.slots[i]!.name)}}`, t)), actions(offTip(run, off)), line],
+      onSubmit: () => run.getAttribute('aria-disabled') === 'true' ? undefined : void whileBusy(run, async () => {
         const args: Record<string, string> = {}
         a.slots.forEach((s, i) => (args[s.name] = inputs[i]!.value))
         const r = await post(route, { op: 'action-run', sid, action: a.id, args })
@@ -245,7 +255,8 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
       const rows = runsOf(body.runs)
       part.hidden = !all.length && !grants.length && !rows.length
       intro.hidden = saved.hidden = !all.length
-      const key = JSON.stringify(all)
+      const off = typeof body.actionsOff === 'string' ? visible(body.actionsOff) : ''
+      const key = JSON.stringify([all, off])
       if (key !== savedKey) {
         savedKey = key
         saved.replaceChildren()
@@ -253,7 +264,7 @@ export function sessionActionsPart(post: Post, route: string, sid: string, done:
           const li = el('li', 'session-action')
           li.append(actionHead(a), commandBlock(a.name, a.command))
           if (a.broken) li.append(el('p', 'small warn', visible(a.broken)))
-          else li.append(runForm(a))
+          else li.append(runForm(a, off))
           saved.append(li)
         }
       }

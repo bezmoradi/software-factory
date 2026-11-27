@@ -7,6 +7,7 @@ import { secret } from './secret.ts'
 import { docsId, emptyState, pageHead } from '../lib/page.ts'
 import { textbox, dropdown, option } from '../lib/controls.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
+import { offered } from '../lib/tooltip.ts'
 
 type Post = (path: string, body: unknown) => Promise<EngineAnswer>
 
@@ -35,6 +36,7 @@ interface EgressView {
   lists: { agents: string[]; reviewers: string[] }
   now: number
   gatewayKeyNote: string
+  gatewayOff: string
   expiries: { value: string; label: string }[]
 }
 
@@ -71,6 +73,7 @@ function viewOf(b: Record<string, unknown>): EgressView | null {
     lists: { agents: strings(record(lists.agents).allow), reviewers: strings(record(lists.reviewers).allow) },
     now: Number(b.now) || Math.floor(Date.now() / 1000),
     gatewayKeyNote: text(b.gatewayKeyNote),
+    gatewayOff: text(b.gatewayOff),
     expiries: Array.isArray(b.expiries) ? b.expiries.map(record).map(c => ({ value: text(c.value), label: text(c.label) })).filter(c => c.value) : [],
   }
 }
@@ -151,6 +154,7 @@ export function openEgress(post: Post): void {
       gwFilled = { url: gatewayURL.value }
     }
     gwNote.textContent = v.gatewayKeyNote
+    gatewayOff(visible(v.gatewayOff))
     refocus(m.dialog, key, k => {
       if (!k.startsWith('remove:')) return []
       const at = before.indexOf(k.slice('remove:'.length))
@@ -290,9 +294,12 @@ export function openEgress(post: Post): void {
   const urlField = field('Base URL', gatewayURL)
   const keyField = field('Key or token', secret(gwKey, 'key'), { cls: 'egress-key' })
   const saveGatewayButton = button('Save', 'primary small', undefined, 'submit')
-  const removeGatewayButton = actionButton('Remove gateway', 'ghost small', () => saveGateway(true))
+  const removeGatewayButton = button('Remove gateway', 'ghost small', () => {
+    if (removeGatewayButton.getAttribute('aria-disabled') !== 'true') void whileBusy(removeGatewayButton, () => saveGateway(true))
+  })
   removeGatewayButton.hidden = true
   const gwHead = pageHead({ title: GATEWAY_HEADING, level: 'h3', headingClass: 'label', docs: { doc: docsId(GATEWAY_HEADING), open: () => m.close() }, action: removeGatewayButton })[0]!
+  const gatewayOff = offered(removeGatewayButton)
   const gwForm = form({
     cls: 'egress-gateway',
     children: [fieldRow([urlField, keyField, actions([saveGatewayButton])], 'halves'), gwSay],

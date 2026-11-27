@@ -80,6 +80,9 @@ func (r *Reviews) reviewAs(ctx context.Context, e ReviewEntry, dir, plugin, prom
 		}
 	}
 	switch {
+	case len(out.outside) > 0 && v.State == review.Block:
+		e.Reason = "it also tried to read outside the review folder (" + strings.Join(out.outside, ", ") + "); its block still counts"
+		kind = "denied-read"
 	case len(out.outside) > 0:
 		e.Record.State, e.Record.Channel = review.Unknown, review.DeniedRead
 		e.Reason = "it tried to read outside the review folder (" + strings.Join(out.outside, ", ") + "), so the code may have steered it; counts as no verdict"

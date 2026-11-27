@@ -64,6 +64,11 @@ app_logs:
       - { name: req, field: req }
       - { name: time, pattern: '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})' }
 time_limits: { max_call: 110s }
+mutation:
+  mutants: mutants.yaml
+  up: env/mutant-up.sh
+  down: env/mutant-down.sh
+  binding: /tmp/sf-proctor/binding.yaml
 transcripts:
   max_bytes: 524288
   scrub:

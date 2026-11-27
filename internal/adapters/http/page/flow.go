@@ -31,26 +31,32 @@ type flowZoneJSON struct {
 	Untrusted bool   `json:"untrusted"`
 }
 
+type flowWireJSON struct {
+	Label string `json:"label"`
+	Phase string `json:"phase"`
+	Tone  string `json:"tone"`
+}
+
 type flowKeyJSON struct {
 	Swatch string `json:"swatch"`
 	Words  string `json:"words"`
 }
 
 type flowJSON struct {
-	Commit         string          `json:"commit"`
-	Reviews        []flowNodeJSON  `json:"reviews"`
-	Runs           []flowNodeJSON  `json:"runs"`
-	Gate           flowNodeJSON    `json:"gate"`
-	Routes         []flowRouteJSON `json:"routes"`
-	RoutesLabel    string          `json:"routesLabel"`
-	Wires          []string        `json:"wires"`
-	OutLive        bool            `json:"outLive"`
-	Zones          []flowZoneJSON  `json:"zones"`
-	Key            []flowKeyJSON   `json:"key"`
-	Caption        string          `json:"caption"`
-	Expires        int64           `json:"expires,omitempty"`
-	ExpiredNote    string          `json:"expiredNote,omitempty"`
-	ExpiredCaption string          `json:"expiredCaption,omitempty"`
+	Commit        string          `json:"commit"`
+	Reviews       []flowNodeJSON  `json:"reviews"`
+	Runs          []flowNodeJSON  `json:"runs"`
+	Gate          flowNodeJSON    `json:"gate"`
+	Routes        []flowRouteJSON `json:"routes"`
+	RoutesLabel   string          `json:"routesLabel"`
+	Wires         []flowWireJSON  `json:"wires"`
+	Zones         []flowZoneJSON  `json:"zones"`
+	Key           []flowKeyJSON   `json:"key"`
+	Status        flowLookJSON    `json:"status"`
+	Detail        string          `json:"detail"`
+	Expires       int64           `json:"expires,omitempty"`
+	ExpiredNote   string          `json:"expiredNote,omitempty"`
+	ExpiredStatus *flowLookJSON   `json:"expiredStatus,omitempty"`
 }
 
 type checkedLineJSON struct {
@@ -89,9 +95,13 @@ func flowOf(m *session.FlowModel) *flowJSON {
 	if m == nil {
 		return nil
 	}
-	out := &flowJSON{Commit: m.Commit, Gate: flowNodeOf(m.Gate), RoutesLabel: m.RoutesLabel, Wires: nonNil(m.Wires), OutLive: m.OutLive, Caption: m.Caption,
-		Expires: millis(m.Expires), ExpiredNote: m.ExpiredNote, ExpiredCaption: m.ExpiredCaption,
-		Reviews: []flowNodeJSON{}, Runs: []flowNodeJSON{}, Routes: []flowRouteJSON{}, Zones: []flowZoneJSON{}, Key: []flowKeyJSON{}}
+	out := &flowJSON{Commit: m.Commit, Gate: flowNodeOf(m.Gate), RoutesLabel: m.RoutesLabel,
+		Status: flowLookOf(m.Status), Detail: m.Detail, Expires: millis(m.Expires), ExpiredNote: m.ExpiredNote,
+		Reviews: []flowNodeJSON{}, Runs: []flowNodeJSON{}, Routes: []flowRouteJSON{}, Wires: []flowWireJSON{}, Zones: []flowZoneJSON{}, Key: []flowKeyJSON{}}
+	if m.ExpiredStatus.Word != "" {
+		late := flowLookOf(m.ExpiredStatus)
+		out.ExpiredStatus = &late
+	}
 	for _, n := range m.Reviews {
 		out.Reviews = append(out.Reviews, flowNodeOf(n))
 	}
@@ -100,6 +110,9 @@ func flowOf(m *session.FlowModel) *flowJSON {
 	}
 	for _, r := range m.Routes {
 		out.Routes = append(out.Routes, flowRouteJSON{Label: r.Label, Look: flowLookOf(r.Look), Taken: r.Taken, Decided: r.Decided, Note: r.Note})
+	}
+	for _, w := range m.Wires {
+		out.Wires = append(out.Wires, flowWireJSON{Label: w.Label, Phase: w.Phase, Tone: w.Tone})
 	}
 	for _, z := range m.Zones {
 		out.Zones = append(out.Zones, flowZoneJSON{Kind: z.Kind, Name: z.Name, Note: z.Note, Untrusted: z.Untrusted})

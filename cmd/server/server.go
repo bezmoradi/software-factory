@@ -40,6 +40,8 @@ type PageConfig struct {
 	PublicPort   int
 	PageName     string
 	AgentAddress string
+	PreviewAddr  string
+	PreviewPort  int
 	StateDir     string
 	Helper       string
 	HelperKey    string
@@ -94,6 +96,9 @@ func ParsePageConfig(getenv func(string) string) (PageConfig, error) {
 			cfg.AgentAddress = v
 		}
 	}
+	if err := parsePreview(&cfg, getenv); err != nil {
+		return cfg, err
+	}
 	dir, err := stateDir(getenv)
 	if err != nil {
 		return cfg, err
@@ -109,6 +114,23 @@ func ParsePageConfig(getenv func(string) string) (PageConfig, error) {
 		return cfg, err
 	}
 	return cfg, parseSandbox(&cfg, getenv)
+}
+
+func parsePreview(cfg *PageConfig, getenv func(string) string) error {
+	if v := getenv("SF_PREVIEW_ADDRESS"); v != "" && v != "off" {
+		if _, _, err := net.SplitHostPort(v); err != nil {
+			return fmt.Errorf("SF_PREVIEW_ADDRESS must be host:port or off, got %q", v)
+		}
+		cfg.PreviewAddr = v
+	}
+	if v := getenv("SF_PREVIEW_PUBLIC_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("SF_PREVIEW_PUBLIC_PORT must be a port number, got %q", v)
+		}
+		cfg.PreviewPort = n
+	}
+	return nil
 }
 
 func parseStarts(cfg *PageConfig, getenv func(string) string) error {
@@ -378,7 +400,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Boxes:        helper,
 		BoxStore:     state.NewBoxes(cfg.StateDir),
 		Routes:       routes,
-		Folders:      boxFolders{workspace: cfg.Workspace, uploads: uploads},
+		Folders:      boxFolders{workspace: cfg.Workspace, uploads: uploads, scratch: page.DocFiles{Workspace: cfg.Workspace, OpenBox: files.OpenBox, Folder: session.ScratchFolderName}},
 		Clones:       remote.Remote{Workspace: cfg.Workspace, CAFile: cfg.DevGitCA, OpenBox: files.OpenBox},
 		CloneReader:  files.Reader{},
 		Stdio:        acp.Opener{Logger: logger},
@@ -403,7 +425,6 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 		Note:         reg.NoteFor("restart"),
 		Audit:        state.NewAudit(cfg.StateDir),
 		Identity:     identity,
-		DocsInRepo:   true,
 		KeyRoutes:    state.NewKeyRoutes(cfg.StateDir),
 		DevChecks:    devChecks,
 		Logger:       logger,
@@ -427,6 +448,7 @@ func starter(base, sends context.Context, cfg PageConfig, reg *session.Registry,
 	}
 	if work != nil {
 		work.UseSessionPacks(d.SessionPackOf)
+		work.UseDocs(d)
 	}
 	if repos != nil {
 		repos.UseSessions(d.SessionsOf)
@@ -473,11 +495,12 @@ func pusher(base context.Context, cfg PageConfig, reg *session.Registry, d *sess
 		Pusher: gitpush.Pusher{Reader: files.Reader{}, Client: client}, Heads: files.Reviews{}, History: files.Reader{}, Changes: files.Reader{},
 		Repos: repos, Audit: state.NewAudit(cfg.StateDir), Targets: d.PushTarget, Doubled: d.Doubled, Held: d.HeldTarget, Level: reg.PushLevel, Show: reg.SetPush, Base: base, Logger: logger,
 		Tell: tellSession(reg), Note: reg.NoteFor("push"), Denials: state.NewDenials(cfg.StateDir), Waiting: state.NewWaiting(cfg.StateDir),
-		TurnBase: reg.TurnBase, Branch: files.Reader{}, Checks: reg.AgentChecks,
+		TurnBase: reg.TurnBase, Branch: files.Reader{}, Checks: reg.AgentChecks, Offers: session.PageOffers{Info: reg.Session},
 	}
 	if work != nil {
 		pc.Work = work
 		pc.AutoFindings = work.AutoFindings
+		pc.Offers.View = work.View
 	}
 	if agentFiles != nil {
 		pc.RoleAgents = agentFiles
@@ -577,6 +600,10 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		return err
 	}
 	shots := useScreenshots(reg, cfg.Workspace, parts.routes, parts.dispatcher, logger)
+	if cfg.Workspace != "" {
+		reg.UseDocs(page.DocFiles{Workspace: cfg.Workspace, OpenBox: files.OpenBox}, logger)
+		reg.UseScratch(page.DocFiles{Workspace: cfg.Workspace, OpenBox: files.OpenBox, Folder: session.ScratchFolderName}, logger)
+	}
 	updates := newUpdates(os.Getenv, cfg, logger)
 	go updates.Watch(sends)
 	srv, err := page.New(page.Config{PublicPort: public, StateDir: cfg.StateDir, Version: Version, Out: os.Stdout, Starter: parts.starter(), Reviews: parts.reviewing(), Repos: parts.admin(), Push: parts.requests(), Pushes: parts.pushing(), ReviewerSignIn: parts.reviewerSignIn(), Work: parts.workPage(), Workspace: cfg.Workspace, Audit: parts.auditPage(cfg), Logins: parts.logins(), Forge: parts.forging(), ReviewerAgents: parts.reviewerAgentsPage(), Packs: parts.packsPage(), Identity: parts.identities(), OpenTree: files.OpenTree, HelperDown: parts.helperDown(), Diagnostics: diagnosticsPage(parts, reg, updates, logger)}, reg, logger)
@@ -624,6 +651,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	useProjectViews(srv, parts, cfg, reg, logger)
 	useKeep(srv, reg, parts, cfg, logger)
 	useStarts(sends, srv, reg, parts, cfg, logger)
+	useCopies(sends, srv, reg, parts, cfg, logger)
 	restart := &restartHook{}
 	useBackups(srv, parts, cfg, begun, restart, logger)
 	useReviewExtras(srv, reg, parts, cfg, logger)
@@ -654,9 +682,17 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		}
 		return err
 	}
+	previewLn, err := previewListener(ctx, cfg, parts, srv, logger)
+	if err != nil {
+		_ = pageLn.Close()
+		if agentLn != nil {
+			_ = agentLn.Close()
+		}
+		return err
+	}
 
 	servers := []*http.Server{}
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
 	pageServer := httpServer(srv.Page(), base)
 	servers = append(servers, pageServer)
 	go func() {
@@ -670,6 +706,15 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		servers = append(servers, agentServer)
 		go func() {
 			errs <- agentServer.Serve(page.LimitListener(agentLn, page.AgentConns, nil))
+		}()
+	}
+	previewAddress := "off"
+	if previewLn != nil {
+		previewAddress = previewLn.Addr().String()
+		previewServer := httpServer(srv.Preview(), base)
+		servers = append(servers, previewServer)
+		go func() {
+			errs <- previewServer.Serve(page.LimitListener(previewLn, page.PreviewConns, nil))
 		}()
 	}
 	go srv.Run(ctx)
@@ -733,7 +778,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 		cancelPrune()
 	}
 	prunePacks(ctx, parts, logger)
-	if parts.installer != nil && cfg.Install.AtStart {
+	if parts.installer != nil {
 		go func() {
 			if err := parts.installer.InstallMissing(ctx, nil); err != nil {
 				logger.Warn("agent install", "event", "not-installed", "fix", session.Compose()+" exec engine software-factory install-agents")
@@ -753,7 +798,7 @@ func Serve(ctx context.Context, logger shared.Logger) error {
 	if parts.reviews == nil {
 		reviewerHost = "off"
 	}
-	logger.Info("engine listening", "page", pageLn.Addr().String(), "public_port", public, "agent", agentAddress, "helper", helperAddress, "reviewer", reviewerHost, "version", Version)
+	logger.Info("engine listening", "page", pageLn.Addr().String(), "public_port", public, "agent", agentAddress, "preview", previewAddress, "helper", helperAddress, "reviewer", reviewerHost, "version", Version)
 	if !srv.Built() {
 		logger.Warn("the page isn't built into this engine", "fix", "npm --prefix web run build")
 	}
@@ -799,6 +844,34 @@ func (p engineParts) endReviews(limit time.Duration, logger shared.Logger) <-cha
 		}
 	}()
 	return done
+}
+
+func previewListener(ctx context.Context, cfg PageConfig, parts engineParts, srv *page.Server, logger shared.Logger) (net.Listener, error) {
+	if cfg.PreviewAddr == "" || parts.dispatcher == nil {
+		return nil, nil
+	}
+	host, _, err := net.SplitHostPort(cfg.PreviewAddr)
+	if err != nil {
+		return nil, fmt.Errorf("preview listener: %w", err)
+	}
+	ln, err := net.Listen("tcp", cfg.PreviewAddr)
+	if err != nil {
+		return nil, fmt.Errorf("preview listener: %w", err)
+	}
+	only := cfg
+	only.Host = host
+	filtered, err := pageOnly(ctx, ln, only)
+	if err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	public := cfg.PreviewPort
+	if public == 0 {
+		public = ln.Addr().(*net.TCPAddr).Port
+	}
+	srv.UsePreviews(session.NewPreviews(parts.dispatcher, nil), public)
+	logger.Info("preview", "event", "on", "public_port", public)
+	return filtered, nil
 }
 
 func pageOnly(ctx context.Context, pageLn net.Listener, cfg PageConfig) (net.Listener, error) {

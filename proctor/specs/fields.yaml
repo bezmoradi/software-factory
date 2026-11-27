@@ -23,11 +23,14 @@ tables:
       - ["fld_interrupt", "/api/interrupt", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_answer", "/api/answer", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_control", "/api/control", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_copies", "/api/copies", { op: approve, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_copies_extra", "/api/copies", { op: remove, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef", proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_control_unconfirmed", "/api/control", { sid: "00000000-0000-4000-8000-000000000000", on: true }, "confirm", "Changing who controls this session needs your confirmation. Reload the page and try again."]
       - ["fld_release", "/api/release", { proctorUnknownField: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_session", "/api/session", { proctorUnknownField: true }, "body", "Signing in takes an empty JSON object. Reload the page."]
       - ["fld_prefs", "/api/prefs", { proctorUnknownField: true }, "prefs", "The engine saves only a theme and a text size the page offers. Reload the page and pick again."]
       - ["fld_message", "/api/message", { proctorUnknownField: true }, "text", "The message's parts aren't ones the engine reads. Reload the page and try again."]
+      - ["fld_session_work_output_kind", "/api/session-work", { op: output, sid: "00000000-0000-4000-8000-000000000000", kind: deploy }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_issues_number_type", "/api/issues", { op: read, path: /workspace/base/demo, number: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_issues_number_list", "/api/issues", { op: read, path: /workspace/base/demo, number: ["42"] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_issues_number_missing", "/api/issues", { op: read, path: /workspace/base/demo }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
@@ -75,6 +78,7 @@ tables:
       - ["fld_approve_plan", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: abc, text: plan }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_requirements", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_requirements_plan_type", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: "no" }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_approve_requirements_plan_choice", "/api/approve-requirements", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_approve_plan_plan_choice", "/api/approve-plan", { sid: "00000000-0000-4000-8000-000000000000", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", text: x, plan: true }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_lock_op", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: open }, "op", "That op isn't one this route takes. Reload the page and try again."]
       - ["fld_lock_no_head", "/api/lock-tests", { sid: "00000000-0000-4000-8000-000000000000", op: lock }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
@@ -155,6 +159,8 @@ tables:
       - ["fld_credentials_action_delete_id", "/api/credentials", { op: action-delete, id: deploy-pi }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, git: example.org }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
       - ["fld_credentials_preset_git", "/api/credentials", { op: preset-save, preset: { name: proctor, host: example.org, scope: session, expires: hour, project: demo, git: [1] } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_access_allow_git_list", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, confirmed: true, git: [example.org] }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
+      - ["fld_credentials_preset_git_list", "/api/credentials", { op: preset-save, preset: { name: proctor, host: example.org, scope: session, expires: hour, project: demo, git: [example.org] } }, "fields", "The request holds a field this route doesn't take, or a field of the wrong type. Reload the page and try again."]
 
   - id: FLD-T01R
     name: "A route that only reads refuses a body its field check doesn't accept, naming the field, with a message in words"
@@ -215,6 +221,7 @@ tables:
       - ["msg_verify_main_op", "/api/verify", { op: stop, repo: demo, id: "0123456789abcdef" }, "op", "The engine reads and starts a project's verification runs on main only."]
       - ["msg_verify_main_kind", "/api/verify", { op: start, repo: demo, kind: browser }, "kind", "The engine runs verification runs of one kind on main: check."]
       - ["msg_split_op", "/api/split", { op: queue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "op", "A task card is edited, dismissed, started or taken out of the queue, nothing else."]
+      - ["msg_copies_op", "/api/copies", { op: fetch, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "op", "A copy is approved, declined or removed, nothing else."]
       - ["msg_access_op", "/api/access", { op: write, sid: "00000000-0000-4000-8000-000000000000" }, "op", "The engine reads, checks, allows, refuses, applies and takes back access grants, and runs and stops actions, nothing else."]
       - ["msg_credentials_op", "/api/credentials", { op: write }, "op", "The engine reads, saves and deletes credentials, presets and actions, and checks a preset's risk, nothing else."]
       - ["msg_verify_attachment_name", "/api/verify", { op: attachment, sid: "00000000-0000-4000-8000-000000000000", id: "0123456789abcdef", name: "trace.webm" }, "name", "A browser run's file is a .png, .jpg, .jpeg, .gif or .zip with a plain name of at most 124 bytes."]
@@ -431,6 +438,53 @@ tables:
       - ["split_unqueue_unknown", "/api/split", { op: unqueue, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't in the queue any more."]
       - ["split_dismiss_unknown", "/api/split", { op: dismiss, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't waiting any more."]
 
+  - id: FLD-T40
+    name: "Approving, declining or removing a read-only copy whose card isn't there is refused with 404 and a message"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "${row.route}"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 404
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "${row.error}", message: "${row.message}" }
+    no_state_check: "refused with 404 by Copies.Approve, Copies.Decline and Copies.Remove because no session with this id holds that card, so nothing was fetched, declined or removed; /api/copies isn't a declared read, since its op decides what it does"
+    columns: ["case", "route", "body", "error", "message"]
+    rows:
+      - ["copies_approve_unknown", "/api/copies", { op: approve, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't there any more."]
+      - ["copies_decline_unknown", "/api/copies", { op: decline, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That card isn't there any more."]
+      - ["copies_remove_unknown", "/api/copies", { op: remove, sid: "00000000-0000-4000-8000-000000000000", card: "0123456789abcdef0123456789abcdef" }, "card", "That copy isn't there any more."]
+
+  - id: FLD-T13
+    name: "Software Factory refuses every credential, preset and preset risk that would open a git host, naming the field, since the engine is the only way to a git host (the owner's decision REQ-04 of 2026-11-25): a credential bound to the dev git host, a project's host, to api.github.com under the deny list's github.com, to ssh.github.com on port 22, to .github.com, or to an ordinary host and the dev git host together; a preset or a preset's risk for the dev git host over HTTPS or on port 22, or for api.github.com"
+    do: http.request
+    identity: page
+    with:
+      method: POST
+      path: "/api/credentials"
+      headers: { Origin: "${page.origin}" }
+      body: "${row.body}"
+    expect:
+      equal:
+        "$.status": 409
+        "$.headers.content-type": ["application/json; charset=utf-8"]
+        "$.body": { error: "git host", field: "${row.field}", message: "${row.message}" }
+    no_state_check: "refused with 409 by Grants.checkCredential or draftPreset before SaveCredential or SavePreset reads or writes the credentials or presets file, and preset-check saves nothing at all, so the route changed nothing; /api/credentials isn't a declared read, since its op decides read or write"
+    columns: ["case", "body", "field", "message"]
+    rows:
+      - ["git_credential_project_host", { op: save, credential: { name: proctor-git, type: token, bound: "gitserver.test", variable: PROCTOR_TOKEN, value: proctor } }, "bound", "Holds a git host: only Software Factory reaches it."]
+      - ["git_credential_api_host", { op: save, credential: { name: proctor-git, type: token, bound: "api.github.com", variable: PROCTOR_TOKEN, value: proctor } }, "bound", "Holds a git host: only Software Factory reaches it."]
+      - ["git_credential_ssh_port", { op: save, credential: { name: proctor-git, type: token, bound: "ssh.github.com:22", variable: PROCTOR_TOKEN, value: proctor } }, "bound", "Holds a git host: only Software Factory reaches it."]
+      - ["git_credential_wildcard", { op: save, credential: { name: proctor-git, type: token, bound: ".github.com", variable: PROCTOR_TOKEN, value: proctor } }, "bound", "Holds a git host: only Software Factory reaches it."]
+      - ["git_credential_one_of_two", { op: save, credential: { name: proctor-git, type: token, bound: "registry.example.org, gitserver.test", variable: PROCTOR_TOKEN, value: proctor } }, "bound", "Holds a git host: only Software Factory reaches it."]
+      - ["git_preset_host", { op: preset-save, preset: { name: proctor-git, host: gitserver.test, scope: session, expires: hour, project: demo } }, "host", "A git host: only Software Factory reaches it."]
+      - ["git_preset_port", { op: preset-save, preset: { name: proctor-git, host: gitserver.test, port: 22, scope: session, expires: hour, project: demo } }, "host", "A git host: only Software Factory reaches it."]
+      - ["git_preset_risk_api_host", { op: preset-check, preset: { name: proctor-git, host: api.github.com, scope: project, expires: never, project: demo } }, "host", "A git host: only Software Factory reaches it."]
+
   - id: FLD-T09
     name: "/api/lessons refuses approving a suggested line with no session picked, naming the field, so the page marks the Send to list instead of checking it itself"
     do: http.request
@@ -481,13 +535,14 @@ tables:
       - ["unk_message_revise_plan", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: plan, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_revise_cause", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", revise: { kind: root-cause, note: proctor } }, "Only a session this engine started has a workflow here."]
       - ["unk_message_ask_define", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: define }, "Only a session this engine started has a workflow here."]
+      - ["unk_message_ask_requirements", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: requirements }, "Only a session this engine started has a workflow here."]
       - ["unk_size", "/api/size", { sid: "00000000-0000-4000-8000-000000000000", size: change }, "Only a session this engine started has a work type here."]
       - ["unk_message_ask_fix", "/api/message", { sid: "00000000-0000-4000-8000-000000000000", ask: fix }, "Only a session this engine started has a workflow here."]
       - ["unk_access_read", "/api/access", { op: read, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
       - ["unk_access_revoke_all", "/api/access", { op: revoke-all, sid: "00000000-0000-4000-8000-000000000000" }, "Only a session this engine started has access grants here."]
       - ["unk_access_check_port", "/api/access", { op: check, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22 }, "Only a session this engine started has access grants here."]
       - ["unk_access_allow_port", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: "192.168.1.20", port: 22, scope: session, expires: hour, confirmed: true }, "Only a session this engine started has access grants here."]
-      - ["unk_access_allow_git", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, confirmed: true, git: [example.org] }, "Only a session this engine started has access grants here."]
+      - ["unk_access_allow_host", "/api/access", { op: allow, sid: "00000000-0000-4000-8000-000000000000", host: example.org, scope: session, expires: hour, confirmed: true }, "Only a session this engine started has access grants here."]
       - ["unk_access_action_run", "/api/access", { op: action-run, sid: "00000000-0000-4000-8000-000000000000", action: "0123456789abcdef0123456789abcdef", args: { tag: "v1" } }, "Only a session this engine started has access grants here."]
       - ["unk_access_action_stop", "/api/access", { op: action-stop, sid: "00000000-0000-4000-8000-000000000000", run: "0123456789abcdef" }, "Only a session this engine started has access grants here."]
 

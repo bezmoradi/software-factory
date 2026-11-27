@@ -9,18 +9,14 @@ func savedApproval(a *workApproval) *SavedApproval {
 	if a == nil {
 		return nil
 	}
-	return &SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Text: a.Text, Plan: a.Plan}
+	return &SavedApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Text: a.Text}
 }
 
-func workApprovalOf(a *SavedApproval) *workApproval {
-	if a == nil {
+func workApprovalOf(a *SavedApproval, kept KeptText) *workApproval {
+	if a == nil || kept.Hash != a.Hash || kept.Text == "" || textHash(kept.Text) != a.Hash {
 		return nil
 	}
-	v := &workApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Plan: a.Plan}
-	if a.Text != "" && textHash(a.Text) == a.Hash {
-		v.Text = a.Text
-	}
-	return v
+	return &workApproval{Hash: a.Hash, Commit: a.Commit, At: a.At, Text: kept.Text}
 }
 
 func (w *Work) saved(sid string) *SavedWork {
@@ -41,13 +37,13 @@ func (w *Work) saved(sid string) *SavedWork {
 }
 
 func (w *Work) persist(sid string) {
+	w.saveTexts(sid)
 	err := w.change(func(st *WorkState) error {
 		if v := w.saved(sid); v != nil {
 			st.Sessions[sid] = *v
 		} else {
 			delete(st.Sessions, sid)
 		}
-		keepApprovedTexts(st.Sessions, sid)
 		return nil
 	})
 	if err != nil {
@@ -61,12 +57,19 @@ func (w *Work) Restore(sids []string) {
 		keep[sid] = true
 	}
 	st := w.load()
+	texts := map[string]ApprovedTexts{}
+	for sid, v := range st.Sessions {
+		if keep[sid] && (v.Requirements != nil || v.Plan != nil) {
+			texts[sid] = w.loadTexts(sid)
+		}
+	}
 	w.mu.Lock()
 	for sid, v := range st.Sessions {
 		if !keep[sid] || w.sessions[sid] != nil {
 			continue
 		}
-		s := &workSession{repo: v.Repo, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements), plan: workApprovalOf(v.Plan), lock: testLockOf(v.Lock), ran: firstStepsRan(v.Ran)}
+		t := texts[sid]
+		s := &workSession{repo: v.Repo, typeID: v.Type, chosen: v.Chosen, req: workApprovalOf(v.Requirements, t.Requirements), plan: workApprovalOf(v.Plan, t.Plan), lock: testLockOf(v.Lock), ran: firstStepsRan(v.Ran)}
 		if len(v.Allowed) > 0 {
 			s.allowed = map[string]map[string]bool{}
 			for p, blobs := range v.Allowed {
@@ -78,8 +81,14 @@ func (w *Work) Restore(sids []string) {
 			}
 		}
 		w.sessions[sid] = s
+		if key := (ApprovedTexts{Requirements: keptOf(s.req), Plan: keptOf(s.plan)}).key(); key != "" {
+			w.textMu.Lock()
+			w.textKeys[sid] = key
+			w.textMu.Unlock()
+		}
 	}
 	w.mu.Unlock()
+	w.keepTexts(sids)
 	err := w.change(func(st *WorkState) error {
 		maps.DeleteFunc(st.Sessions, func(sid string, _ SavedWork) bool { return !keep[sid] })
 		return nil

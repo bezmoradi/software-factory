@@ -7,7 +7,7 @@
     "node": "^22 || ^24 || >=26"
   },
   "scripts": {
-    "build": "rm -rf ../internal/adapters/http/page/dist/* && tsc -p tsconfig.json && mkdir -p ../internal/adapters/http/page/dist/styles && cp index.html icon.svg ../internal/adapters/http/page/dist/ && cp styles/*.css ../internal/adapters/http/page/dist/styles/ && cp ../README.md ../internal/adapters/http/page/dist/docs.md",
+    "build": "rm -rf ../internal/adapters/http/page/dist/* && tsc -p tsconfig.json && mkdir -p ../internal/adapters/http/page/dist/styles && cp index.html icon.svg ../internal/adapters/http/page/dist/ && cp styles/*.css ../internal/adapters/http/page/dist/styles/ && cp docs.md ../internal/adapters/http/page/dist/docs.md",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

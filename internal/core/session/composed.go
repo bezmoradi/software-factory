@@ -15,6 +15,7 @@ const (
 	ReviseRequirements = "requirements"
 	RevisePlan         = "plan"
 	ReviseRootCause    = "root-cause"
+	correctDiagnosis   = "Correct the diagnosis in "
 )
 
 type LineComment struct {
@@ -89,7 +90,7 @@ func ReviseMessage(kind, note string, docPath func() (string, error)) (string, e
 		if kind == RevisePlan {
 			text = "Before going on, change the plan in " + path + ": " + note
 		} else {
-			text = "/knackpack:debug-incident Correct the diagnosis in " + path + ": " + note
+			text = "/knackpack:debug-incident " + correctDiagnosis + path + ": " + note
 		}
 	default:
 		return "", invalid("text", "The engine asks for a change to the requirements, the plan or the root cause only.")
@@ -134,9 +135,11 @@ func CommentsMessage(list []LineComment) (string, error) {
 
 const (
 	CheckpointCommand = "/knackpack:checkpoint"
+	RequirementsAsk   = "Files are changing in this session before the developer approved any requirements. Stop changing them: agree the requirements for this change with the developer first, then wait for their approval on the software factory page."
 	CommitAsk         = "Commit every uncommitted change on this branch, new files included, so a push sends all of it. If a file shouldn't be committed, such as a secret, a local setting or a scratch file, don't commit it: ask me whether to delete it or add it to .gitignore. Each commit message says what changed and why."
 
 	AskDefine         = "define"
+	AskRequirements   = "requirements"
 	AskPlan           = "plan"
 	AskTriage         = "triage"
 	AskReproduce      = "reproduce"
@@ -152,7 +155,7 @@ var gateFree = map[string]string{AskCommit: CommitAsk, AskCheckpoint: Checkpoint
 
 func ValidAsk(ask string) bool {
 	switch ask {
-	case AskDefine, AskPlan, AskTriage, AskReproduce, AskCause, AskFix, AskCommit, AskIssues, AskIncidentReview, AskCheckpoint:
+	case AskDefine, AskRequirements, AskPlan, AskTriage, AskReproduce, AskCause, AskFix, AskCommit, AskIssues, AskIncidentReview, AskCheckpoint:
 		return true
 	}
 	return false
@@ -164,7 +167,7 @@ func AskNeedsGate(ask string) bool {
 }
 
 func fixIncidentMessage(d WorkDoc) string {
-	return "/knackpack:fix-incident The developer approved " + d.Path + " on the Software Factory page: its committed text has the SHA-256 " + d.Hash + ". Run incident-check.sh with KNACKPACK_INCIDENT_APPROVED_SHA256=" + d.Hash + " in its environment, as in KNACKPACK_INCIDENT_APPROVED_SHA256=" + d.Hash + " sh \"${CLAUDE_PLUGIN_ROOT}/scripts/incident-check.sh\" followed by that file's absolute path."
+	return "/knackpack:fix-incident The developer approved " + d.Path + " on the Software Factory page: the text they approved, which the engine keeps, has the SHA-256 " + d.Hash + ". Run incident-check.sh with KNACKPACK_INCIDENT_APPROVED_SHA256=" + d.Hash + " in its environment, as in KNACKPACK_INCIDENT_APPROVED_SHA256=" + d.Hash + " sh \"${CLAUDE_PLUGIN_ROOT}/scripts/incident-check.sh\" followed by that file's absolute path."
 }
 
 func stageCommands(v GateView) map[string]string {
@@ -173,6 +176,9 @@ func stageCommands(v GateView) map[string]string {
 		if c := v.Commands[step]; c != "" {
 			out[string(step)] = c
 		}
+	}
+	if c := out[string(workflow.Define)]; c != "" && v.Early != nil {
+		out[AskRequirements] = c + " " + RequirementsAsk
 	}
 	incident := v.Profile == workflow.Incident
 	if incident {

@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +10,35 @@ import (
 
 const (
 	challengeRequirements = "/knackpack:challenge-requirements"
-	requirementsTask      = "fake-feature"
+	docsVariable          = "SF_DOCS"
 )
+
+func docsFile(name string) (string, bool) {
+	dir := os.Getenv(docsVariable)
+	for _, s := range stdio {
+		for _, e := range s.Env {
+			if e.Name == docsVariable && e.Value != "" {
+				dir = e.Value
+			}
+		}
+	}
+	if dir == "" || !filepath.IsAbs(dir) || filepath.Clean(dir) != strings.TrimRight(dir, "/") {
+		return "", false
+	}
+	return filepath.Join(dir, name), true
+}
+
+func writeDoc(name, what, text string) string {
+	abs, ok := docsFile(name)
+	if !ok {
+		return "The fake agent has no documents folder: " + docsVariable + " isn't an absolute path, so it wrote no " + what + "."
+	}
+	if err := os.WriteFile(abs, []byte(text), 0o644); err != nil {
+		return "The fake agent couldn't write " + abs + "."
+	}
+	sum := sha256.Sum256([]byte(text))
+	return "The fake agent wrote the " + what + " to " + abs + ", SHA-256 " + hex.EncodeToString(sum[:]) + ", and committed nothing."
+}
 
 func requirementsLine(text string) (string, bool) {
 	rest, ok := strings.CutPrefix(text, challengeRequirements)
@@ -24,18 +50,7 @@ func requirementsLine(text string) (string, bool) {
 }
 
 func requirementsStep(text string) string {
-	rel := filepath.Join(".knackpack", requirementsTask, "REQUIREMENTS.md")
-	abs := filepath.Join(worktreeTop(), rel)
-	feature, _ := json.Marshal(map[string]string{"feature_directory": ".knackpack/" + requirementsTask})
-	if os.MkdirAll(filepath.Dir(abs), 0o755) != nil || os.WriteFile(abs, []byte(text), 0o644) != nil || os.WriteFile(filepath.Join(worktreeTop(), ".knackpack", "feature.json"), append(feature, '\n'), 0o644) != nil {
-		return "The fake agent couldn't write " + rel + "."
-	}
-	commit, ok := commitFiles("docs(knackpack): requirements for "+requirementsTask, rel, ".knackpack/feature.json")
-	if !ok {
-		return "The fake agent wrote " + rel + " and couldn't commit it."
-	}
-	sum := sha256.Sum256([]byte(text))
-	return "The fake agent wrote the requirements brief: " + rel + ", committed as " + commit + ", SHA-256 " + hex.EncodeToString(sum[:]) + "."
+	return writeDoc("REQUIREMENTS.md", "requirements brief", text)
 }
 
 const planImplementation = "/knackpack:plan-implementation"
@@ -50,15 +65,5 @@ func planLine(text string) (string, bool) {
 }
 
 func planStep() string {
-	rel := filepath.Join(".knackpack", requirementsTask, "PLAN.md")
-	abs := filepath.Join(worktreeTop(), rel)
-	if os.MkdirAll(filepath.Dir(abs), 0o755) != nil || os.WriteFile(abs, []byte(fakePlan), 0o644) != nil {
-		return "The fake agent couldn't write " + rel + "."
-	}
-	commit, ok := commitFiles("docs(knackpack): plan for "+requirementsTask, rel)
-	if !ok {
-		return "The fake agent wrote " + rel + " and couldn't commit it."
-	}
-	sum := sha256.Sum256([]byte(fakePlan))
-	return "The fake agent wrote the plan: " + rel + ", committed as " + commit + ", SHA-256 " + hex.EncodeToString(sum[:]) + "."
+	return writeDoc("PLAN.md", "plan", fakePlan)
 }

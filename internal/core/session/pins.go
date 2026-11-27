@@ -22,7 +22,6 @@ const (
 	PluginKept     = "kept"
 	PluginMissing  = "not-installed"
 	PluginChecking = "checking"
-	PluginCheckOff = "off"
 )
 
 type TrackedPlugin struct {

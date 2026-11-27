@@ -169,7 +169,6 @@ type agentReport struct {
 	home       *session.HomeSettings
 	installer  *npm.Installer
 	plugins    *npm.Plugins
-	atStart    bool
 	advisories *advisories
 }
 
@@ -187,13 +186,13 @@ func (r agentReport) AgentReport() session.AgentReport {
 	}
 	if r.plugins != nil {
 		for _, p := range r.plugins.List() {
-			out.Plugins = append(out.Plugins, trackedPlugin(r.plugins, p, r.atStart))
+			out.Plugins = append(out.Plugins, trackedPlugin(r.plugins, p))
 		}
 	}
 	return out
 }
 
-func trackedPlugin(pins *npm.Plugins, p npm.Tracked, atStart bool) session.TrackedPlugin {
+func trackedPlugin(pins *npm.Plugins, p npm.Tracked) session.TrackedPlugin {
 	t := session.TrackedPlugin{ID: p.ID, Name: p.Name, Source: p.URL, Branch: p.Branch}
 	if cur, ok := pins.Current(p.ID); ok {
 		t.Version, t.Commit, t.InstalledAt, t.Refused = cur.Version, cur.Commit, cur.At, cur.Refused
@@ -205,8 +204,6 @@ func trackedPlugin(pins *npm.Plugins, p npm.Tracked, atStart bool) session.Track
 		t.CheckResult = session.PluginChecking
 	case check.Result != "":
 		t.CheckedAt, t.CheckResult, t.CheckHead, t.CheckFrom, t.Problem = check.At, check.Result, check.Head, check.From, check.Problem
-	case !atStart:
-		t.CheckResult = session.PluginCheckOff
 	}
 	return t
 }
@@ -223,7 +220,7 @@ func mcpList(cfg PageConfig) func() *session.Command {
 }
 
 func useAgentReports(base context.Context, srv *page.Server, parts engineParts, cfg PageConfig, logger shared.Logger) {
-	report := agentReport{installer: parts.installer, plugins: parts.plugins, atStart: cfg.Install.AtStart, advisories: watchAdvisories(base, os.Getenv, installedKnackpack(parts.plugins), logger)}
+	report := agentReport{installer: parts.installer, plugins: parts.plugins, advisories: watchAdvisories(base, os.Getenv, installedKnackpack(parts.plugins), logger)}
 	var rules session.AllowRulesPage
 	if parts.routes != nil && parts.dispatcher != nil && parts.repos != nil {
 		report.home = &session.HomeSettings{Store: state.NewHomeSettings(cfg.StateDir), MCP: mcpList(cfg), Logger: logger}

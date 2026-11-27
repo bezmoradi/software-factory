@@ -13,6 +13,7 @@ import (
 	"github.com/bezmoradi/software-factory/internal/adapters/agenthost"
 	"github.com/bezmoradi/software-factory/internal/adapters/egress"
 	"github.com/bezmoradi/software-factory/internal/adapters/git/files"
+	"github.com/bezmoradi/software-factory/internal/adapters/git/remote"
 	"github.com/bezmoradi/software-factory/internal/adapters/http/page"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/boxes"
 	"github.com/bezmoradi/software-factory/internal/adapters/sandbox/docker"
@@ -322,12 +323,19 @@ func (b *boxRoutes) watch(ctx context.Context) {
 type boxFolders struct {
 	workspace string
 	uploads   *page.UploadDir
+	scratch   page.DocFiles
 }
 
 var _ session.BoxFolders = boxFolders{}
 
 func (f boxFolders) Make(box string) error {
 	if err := files.MakeBox(f.workspace, box); err != nil {
+		return err
+	}
+	if err := (remote.Copies{Workspace: f.workspace}).MakeBox(box); err != nil {
+		return err
+	}
+	if err := f.scratch.MakeTop(box); err != nil {
 		return err
 	}
 	if f.uploads != nil {
@@ -338,6 +346,9 @@ func (f boxFolders) Make(box string) error {
 
 func (f boxFolders) Remove(box string) error {
 	err := files.RemoveBox(f.workspace, box)
+	if cerr := (remote.Copies{Workspace: f.workspace}).RemoveBox(box); err == nil {
+		err = cerr
+	}
 	if f.uploads != nil {
 		if uerr := f.uploads.DropBox(box); err == nil {
 			err = uerr

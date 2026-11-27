@@ -57,6 +57,8 @@ const (
 	lead       = `(?:(?:sudo|doas|env|command|exec|nohup)(?:\s+-\S+)*\s+)*`
 	downloader = `(?:curl|wget|fetch|aria2c|irm|iwr|invoke-webrequest|invoke-restmethod)`
 	runner     = `(?:sh|bash|zsh|dash|ksh|ash|fish|python[\d.]*|node|perl|ruby|php|iex|invoke-expression)`
+	wordEnd    = "(?:[\\s;&|()<>'\"`,\\]}\\\\]|$)"
+	claudeWord = "(?i)(?:^|[\\s;&|()'\"`={\\[,/\\\\])claude(?:-code/|(?:-code)?(?:@[^\\s/;&|()<>'\"`,\\]}\\\\]*)?(?:\\.[cm]?js)?" + wordEnd + ")"
 )
 
 func steps(patterns ...string) []*regexp.Regexp {
@@ -70,8 +72,8 @@ func steps(patterns ...string) []*regexp.Regexp {
 var (
 	loosePush  = [][]*regexp.Regexp{steps(`\bgit\b`, `\b(push|send-pack)\b`), steps("(^|[\\s;&|(`$])(gh|glab)\\s")}
 	looseCloud = [][]*regexp.Regexp{
-		steps(`(?i)\bclaude\b`, `(?i)--(?:remote|cloud|teleport|remote-control|rc)\b|\b(?:remote-control|rc)\b`),
-		steps(`(?i)\bclaude\b`, `(?i)\bultrareview\b`, `(?i)--post\b`),
+		steps(claudeWord, `(?i)(?:^|[\s'"])(?:--(?:remote|cloud|teleport|remote-control|rc)(?:=|`+wordEnd+`)|/?(?:remote-control|rc)`+wordEnd+`)`),
+		steps(claudeWord, `(?i)\bultrareview\b`, `(?i)--post\b`),
 	}
 	looseUndoneAll = [][]*regexp.Regexp{
 		steps(`(?i)\bgit\b`, `(?i)\breset\b`, `(?i)--hard`),
@@ -79,7 +81,7 @@ var (
 		steps(`(?i)\b(?:terraform|tofu|terragrunt)\b`, `(?i)\bdestroy\b`),
 		steps(`(?i)\b(?:kubectl|oc)\b`, `(?i)\bdelete\b`),
 		steps(`(?i)\b(?:drop|truncate|dropdb)\b`),
-		steps(`(?i)\bclaude\b`),
+		steps(claudeWord),
 		steps(`(?i)\b`+downloader+`\b`, `(?i)\|&?\s*`+lead+runner+`\b`),
 		steps(`(?i)(?:^|[\s;&|])\.\s+<\(\s*` + downloader + `\b`),
 	}

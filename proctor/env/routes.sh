@@ -2,7 +2,7 @@
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/../.." && pwd)
+repo=${PROCTOR_SF_CHECKOUT:-$(cd "$here/../.." && pwd)}
 pagedir=$repo/internal/adapters/http/page
 dims=$repo/proctor/dimensions.yaml
 config=$repo/proctor/proctor.yaml

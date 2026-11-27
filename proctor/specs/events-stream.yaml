@@ -263,7 +263,7 @@ scenarios:
           equal: { "$.frames[0].json.type": hello, "$.closed": false }
 
   - id: EVS-011
-    name: "A session's frames reach the open stream: its listing with the engine's control notice and allowed actions, its turns with the engine's turn-finished notice, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
+    name: "A session's frames reach the open stream: its listing with the engine's control notice and allowed actions, its turns with the engine's turn-finished notice, its tool calls, where the engine marks each read and search call (the development agent's read and search, Claude Code's Read, Grep and Glob) with the words its folded line counts it by, a shell or edit call with none, and a failed call's end as never folded, and the agent's reply to a message carrying an uploaded image, which shows the agent received the image whole; the frames are read after the session is removed, so a failed read leaves no session behind"
     steps:
       - id: open
         do: http.open
@@ -353,7 +353,7 @@ scenarios:
           method: POST
           path: "/api/message"
           headers: { Origin: "${page.origin}" }
-          body: { sid: "${sid}", text: "say: proctor ${run.id}\nwrite: proctor-${run.id}.txt" }
+          body: { sid: "${sid}", text: "say: proctor ${run.id}\nread: proctor-${run.id}.md\ngrep: proctor-${run.id}\nglob: proctor-*.md\nrun: echo proctor-${run.id}\nfail: false proctor-${run.id}\nwrite: proctor-${run.id}.txt" }
         expect:
           equal:
             "$.status": 202
@@ -504,6 +504,19 @@ scenarios:
               - { json.type: prompt, json.sid: "${sid}", json.from: page, json.images: 1, json.text: "proctor look ${run.id}" }
               - { json.type: text, json.sid: "${sid}", json.text: "The fake agent received 2 content blocks:\n- text: \"I pasted an image on the Software Factory page; it is in this message, and also saved at /uploads/${box}/${sid}/${image}/image.png.\\n\\nproctor look ${run.id}\"\n- image: image/png, 15 bytes, sha256 27c0ab99197e1139, uri file:///uploads/${box}/${sid}/${image}/image.png, decoded: true" }
               - { json.type: notify, json.sid: "${sid}", json.what: turn finished }
+      - id: folds
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.tool: read, json.summary: "Read proctor-${run.id}.md", json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: search, json.summary: "grep proctor-${run.id}", json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: search, json.summary: "glob proctor-*.md", json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.command: "echo proctor-${run.id}" }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write proctor-${run.id}.txt" }
+              - { json.type: tool_done, json.sid: "${sid}", json.ok: false, json.command: "false proctor-${run.id}", json.unfold: true }
       - id: nothing-withheld
         do: http.frames
         on: events
@@ -514,6 +527,11 @@ scenarios:
               - { json.type: omitted, json.sid: "${sid}" }
               - { json.type: permission, json.sid: "${sid}" }
               - { json.type: dropped, json.sid: "${sid}" }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.fold: { verb: read, one: file, many: files } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.fold: { verb: searched, one: time, many: times } }
+              - { json.type: tool_done, json.sid: "${sid}", json.ok: true, json.unfold: true }
       - id: unlisted
         do: http.frames
         on: events
@@ -541,3 +559,3922 @@ scenarios:
           present: ["$.headers.x-sf-request"]
           matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
           absent: ["$.headers.x-sf-request[1]"]
+
+  - id: EVS-013
+    name: "A session's tool calls reach the open stream with the engine's words for each line: a write or edit in the worktree shows its path relative to the worktree, groups with the edits around it and carries the lines it added and removed, a write outside the worktree keeps its whole path and is never grouped, a shell call with the agent's own description shows it with the program names the engine reads from the command itself, so a description that says less than the command still names rm and sh, sudo keeps the call in view, a command the engine can't read shows no description, a finished call says Done, and a failed one says its exit code and keeps its last lines; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor lines ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor lines ${run.id}\nwrite: lines-${run.id}.md\nedit: lines-${run.id}.md\nedit: lines-${run.id}.md\nedit: missing-${run.id}.md\noutside: /srv/outside-${run.id}.txt\ndescribed: List the notes for ${run.id} => ls notes-${run.id}; rm -rf build-${run.id} | sh\ndescribed: Look around ${run.id} => sudo ls /root\ndescribed: Print the date ${run.id} => echo `date` ${run.id}\nrun: echo plain-${run.id}\nexit: 3 test-${run.id}\nwrite: last-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["lines-${run.id}.md", "last-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["lines-${run.id}.md", "last-${run.id}.md"] }
+      - id: file-text
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", path: "lines-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { path: "lines-${run.id}.md", text: "ok\n\n\n" }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: lines
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write lines-${run.id}.md", json.line: { path: "lines-${run.id}.md", edit: true } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Edit lines-${run.id}.md", json.line: { path: "lines-${run.id}.md", edit: true } }
+              - { json.type: tool_done, json.sid: "${sid}", json.tool: edit, json.ok: true, json.line: { added: 1, removed: 0 } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Edit missing-${run.id}.md", json.line: { path: "missing-${run.id}.md", edit: true } }
+              - { json.type: tool_done, json.sid: "${sid}", json.tool: edit, json.ok: false, json.unfold: true }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write /srv/outside-${run.id}.txt", json.line: { path: "/srv/outside-${run.id}.txt", outside: true, kept: "Writes outside the worktree" } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.command: "ls notes-${run.id}; rm -rf build-${run.id} | sh", json.description: "List the notes for ${run.id}", json.line: { command: "ls notes-${run.id}; rm -rf build-${run.id} | sh", said: "List the notes for ${run.id}", programs: [ls, rm, sh] } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.command: "sudo ls /root", json.line: { command: "sudo ls /root", said: "Look around ${run.id}", programs: [sudo, ls], kept: "Runs with sudo" } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.description: "Print the date ${run.id}", json.line: { command: "echo `date` ${run.id}" } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.command: "echo plain-${run.id}", json.line: { command: "echo plain-${run.id}" } }
+              - { json.type: tool_done, json.sid: "${sid}", json.tool: execute, json.command: "echo plain-${run.id}", json.ok: true, json.line: { result: Done } }
+              - { json.type: tool_done, json.sid: "${sid}", json.tool: execute, json.command: "test-${run.id}", json.ok: false, json.unfold: true, json.line: { result: "Failed (exit 3)", tail: ["test-${run.id}: line 4", "test-${run.id}: line 5", "test-${run.id}: line 6", "test-${run.id}: line 7", "test-${run.id}: line 8"] } }
+      - id: nothing-grouped-outside
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.line.outside: true, json.line.edit: true }
+              - { json.type: tool, json.sid: "${sid}", json.line.kept: "Runs with sudo", json.line.edit: true }
+              - { json.type: tool, json.sid: "${sid}", json.tool: execute, json.line.said: "Print the date ${run.id}" }
+              - { json.type: tool_done, json.sid: "${sid}", json.ok: false, json.line.result: Done }
+      - id: unlisted
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, json.sessions: [] }
+  - id: EVS-014
+    name: "A session's subagents reach the open stream as the engine's rows in the session listing: each with its type, its task with control characters and runs of space made one space and cut at 120 characters, Running, Done or Failed, its start and end, and its latest tool line; a subagent that ends while another still runs stays listed as Done or Failed, and once none runs the list is empty, so the last one to end is never listed as ended; Working stays on while a background subagent runs after the turn ended, and a message sent while it still runs drops the finished rows; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor agents ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor agents ${run.id}\nagent-bg: general-purpose => Check notes ${run.id}\nagent: Explore => Find\tnotes   ${run.id}\nagent-fail: Plan => Plan ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ${run.id}\nwrite: agents-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["agents-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["agents-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor again ${run.id}\nagent: Explore => Second ${run.id}\nwrite: again-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: again-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["again-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["again-${run.id}.md"] }
+      - id: turns-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 2 }
+      - id: background-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: agents, json.sid: "${sid}", "json.agents[0].type": general-purpose, "json.agents[0].status": completed }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: rows
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[1].type": Explore, "json.sessions[0].subagents[1].task": "Find notes ${run.id}", "json.sessions[0].subagents[1].state": running, "json.sessions[0].subagents[1].label": Running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[1].type": Explore, "json.sessions[0].subagents[1].task": "Find notes ${run.id}", "json.sessions[0].subagents[1].state": done, "json.sessions[0].subagents[1].label": Done, "json.sessions[0].subagents[1].tool": search, "json.sessions[0].subagents[1].line": "grep Find notes ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[2].type": Plan, "json.sessions[0].subagents[2].task": "Plan pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…", "json.sessions[0].subagents[2].state": failed, "json.sessions[0].subagents[2].label": Failed }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": working, "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].task": "Check notes ${run.id}", "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[0].line": "grep Check notes ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[0].label": Running, "json.sessions[0].subagents[0].line": "glob Check notes ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].type": general-purpose, "json.sessions[0].subagents[0].state": running, "json.sessions[0].subagents[1].task": "Second ${run.id}", "json.sessions[0].subagents[1].state": done, "json.sessions[0].subagents[1].label": Done }
+              - { json.type: agents, json.sid: "${sid}", "json.agents[1].type": Explore, "json.agents[1].status": completed }
+      - id: rows-cleaned
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[1].task": "Find\tnotes   ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[2].task": "Plan ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": idle, "json.sessions[0].subagents[0].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[1].task": "Second ${run.id}", "json.sessions[0].subagents[2].type": Plan }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].subagents[0].state": done }
+  - id: EVS-015
+    name: "A Claude Code session's background tasks reach the open stream as the engine's rows in the session listing, from the reports the development agent sends as Claude Code's plugin does: each with its kind, Command or Monitor, what it runs with control characters and runs of space made one space and cut at 160 characters, and Running, Done, Failed or Stopped; a task that ends while another still runs stays listed as Done, Failed or Stopped, and once none runs the list is empty, so the last one to end is never listed as ended; a running task doesn't keep the session Working, and the idle state says how many run instead, as idle · 3 tasks running; the listing says the session is still in the mode it started in, Manual, with modeChanged false; the reports themselves never reach the page, and a message sent while a task still runs drops the finished rows; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor tasks ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor tasks ${run.id}\nbg: 8 sleep 8 && echo tasks-${run.id}\nwatch: 4 Watch\tlog   ${run.id}\nbg-fail: 2 make pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ${run.id}\nwrite: tasks-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["tasks-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["tasks-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: watch-stopped
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[1].state": stopped }
+      - id: again
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor again ${run.id}\nbg: 1 echo again-${run.id}\nread: again-${run.id}-1.md\nread: again-${run.id}-2.md\nread: again-${run.id}-3.md\nread: again-${run.id}-4.md\nread: again-${run.id}-5.md\nwrite: again-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: again-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["again-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["again-${run.id}.md"] }
+      - id: turns-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 2 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: rows
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": "idle · 3 tasks running", "json.sessions[0].mode": default, "json.sessions[0].modeLabel": Manual, "json.sessions[0].modeChanged": false, "json.sessions[0].tasks[0].kind": Command, "json.sessions[0].tasks[0].what": "sleep 8 && echo tasks-${run.id}", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[0].label": Running, "json.sessions[0].tasks[1].kind": Monitor, "json.sessions[0].tasks[1].what": "Watch log ${run.id}", "json.sessions[0].tasks[1].state": running, "json.sessions[0].tasks[2].kind": Command, "json.sessions[0].tasks[2].what": "make pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…", "json.sessions[0].tasks[2].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": "idle · 2 tasks running", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[2].state": failed, "json.sessions[0].tasks[2].label": Failed }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[1].state": stopped, "json.sessions[0].tasks[1].label": Stopped, "json.sessions[0].tasks[2].state": failed }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[0].what": "sleep 8 && echo tasks-${run.id}", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[1].what": "echo again-${run.id}", "json.sessions[0].tasks[1].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[0].what": "sleep 8 && echo tasks-${run.id}", "json.sessions[0].tasks[0].state": running, "json.sessions[0].tasks[1].what": "echo again-${run.id}", "json.sessions[0].tasks[1].state": done, "json.sessions[0].tasks[1].label": Done }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": idle }
+      - id: rows-cleaned
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[1].what": "Watch\tlog   ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[2].what": "make pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp ${run.id}" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": working, "json.sessions[0].tasks[0].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": "working · 1 task running", "json.sessions[0].tasks[0].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": "working · 2 tasks running", "json.sessions[0].tasks[0].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": "working · 3 tasks running", "json.sessions[0].tasks[0].state": running }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[1].what": "echo again-${run.id}", "json.sessions[0].tasks[2].kind": Command }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].tasks[0].state": done }
+              - { json.type: task, json.sid: "${sid}" }
+              - { json.type: tasks, json.sid: "${sid}" }
+  - id: EVS-019
+    name: "A Code change session's typed messages that go as Define's command reach the open stream with the person's own words and the step they started, not the command (the owner's decision REQ-55 of 2026-11-26): each carries step define and the engine's label Started Define, while the agent still gets Define's command, which the fake shows by writing the brief from the lines after the command's own; a page reload's replay of the session's events shows both again with the same words and label; once the brief is there, a message goes as typed and its frame carries no step; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+          present: ["$.frames[0].json.stream"]
+        save: { stream: "$.frames[0].json.stream" }
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor define ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: defaulted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": false
+            "$.body.gate.workType": change
+            "$.body.gate.requirements": null
+      - id: question
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Which orders, and for whom? ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: request
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "Export the orders\nfor managers ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: defined
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements.path": "/workspace/s/${box}/docs/${sid}/REQUIREMENTS.md"
+            "$.body.gate.requirements.text": "for managers ${run.id}\n"
+      - id: reload
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/replay"
+          headers: { Origin: "${page.origin}" }
+          body: { stream: "${stream}", sid: "${sid}", since: 0 }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+        no_state_check: "no page read shows a replay, which sends the session's events again on this stream only, as a page reload asks; the agent handles it before the marker message sent next, and labelled, after the session is removed, counts each labelled message twice, once as it happened and once from this replay"
+      - id: marker
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: define after ${run.id}\ncommit: define-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: marker-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["define-${run.id}.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["define-${run.id}.txt"] }
+      - id: marker-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.changes.commits": { subject: "Add define-${run.id}.txt" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: labelled
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "Export the orders\nfor managers ${run.id}", json.step: define, json.started: Started Define }
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "say: define after ${run.id}\ncommit: define-${run.id}.txt" }
+          count:
+            "$.frames": { where: { json.type: prompt, json.sid: "${sid}", json.from: page, json.step: define, json.started: Started Define }, is: 4 }
+      - id: no-command-shown
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.text: "/knackpack:challenge-requirements Export the orders\nfor managers ${run.id}" }
+              - { json.type: prompt, json.sid: "${sid}", json.text: "say: define after ${run.id}\ncommit: define-${run.id}.txt", json.step: define }
+  - id: EVS-020
+    name: "An Incident session's typed messages that go as triage's command reach the open stream with the person's own words and the step they started, not the command (the owner's decision REQ-55 of 2026-11-26): each carries step triage and the engine's label Started triage, while the agent still gets triage's command, which the fake shows by writing the triage in ROOT-CAUSE.md; once the triage is there, a message goes as typed and its frame carries no step; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor triage ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: incident }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": incident
+            "$.body.gate.planDoc": null
+      - id: question
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Since which deploy? ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: report
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "The export answers 500\nsince the deploy ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: triaged
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": "/workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md"
+            "$.body.gate.planDoc.hash": "e9bc2ee3f29d14b8a753896fe507d0a9f80649c4e01554690135fb306fbcddb0"
+      - id: marker
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: triage after ${run.id}\ncommit: triage-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: marker-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["triage-${run.id}.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["triage-${run.id}.txt"] }
+      - id: marker-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.changes.commits": { subject: "Add triage-${run.id}.txt" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: labelled
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "The export answers 500\nsince the deploy ${run.id}", json.step: triage, json.started: Started triage }
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "say: triage after ${run.id}\ncommit: triage-${run.id}.txt" }
+          count:
+            "$.frames": { where: { json.type: prompt, json.sid: "${sid}", json.from: page, json.step: triage, json.started: Started triage }, is: 2 }
+      - id: no-command-shown
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.text: "/knackpack:debug-incident The export answers 500\nsince the deploy ${run.id}" }
+              - { json.type: prompt, json.sid: "${sid}", json.text: "say: triage after ${run.id}\ncommit: triage-${run.id}.txt", json.step: triage }
+  - id: EVS-070
+    name: "An Incident session's Correct the diagnosis reaches the open stream with its own label, not as a message that started triage (T-37): after triage writes ROOT-CAUSE.md, the engine's message from Correct the diagnosis carries step root-cause and the label Corrected the diagnosis, with the text after triage's command, while the agent still gets triage's command, which the fake shows by writing the next incident step; the two messages that started triage keep Started triage (a say: line goes first, so the report isn't the session's first message, whose text also carries the engine's notes), and a later marker message, which lands as a committed file, shows the agent got both; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor correct ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: incident }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": incident
+            "$.body.gate.planDoc": null
+      - id: question
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Since which deploy? ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: report
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "The export answers 500\nsince the deploy ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: triaged
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": "/workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md"
+            "$.body.gate.planDoc.hash": "e9bc2ee3f29d14b8a753896fe507d0a9f80649c4e01554690135fb306fbcddb0"
+      - id: correct
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", revise: { kind: root-cause, note: "The cause is the stale cache ${run.id}" } }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+        waive: { FIX-05: "root-cause is one of the three fixed kinds /api/message's revise takes (requirements, plan, root-cause) and can't carry ${run.id}; labelled expects it only in a frame of this scenario's session ${sid} whose text holds ${run.id}, so no earlier run's frame can match" }
+      - id: corrected
+        do: http.request
+        identity: page
+        eventually: { within: 60s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.planDoc.path": "/workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md"
+          differs: { "$.body.gate.planDoc.hash": "e9bc2ee3f29d14b8a753896fe507d0a9f80649c4e01554690135fb306fbcddb0" }
+      - id: marker
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: correct after ${run.id}\ncommit: correct-${run.id}.txt" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: marker-landed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["correct-${run.id}.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["correct-${run.id}.txt"] }
+      - id: marker-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.changes.commits": { subject: "Add correct-${run.id}.txt" }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: labelled
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "The export answers 500\nsince the deploy ${run.id}", json.step: triage, json.started: Started triage }
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "Correct the diagnosis in /workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md: The cause is the stale cache ${run.id}", json.step: root-cause, json.started: Corrected the diagnosis }
+          count:
+            "$.frames": { where: { json.type: prompt, json.sid: "${sid}", json.started: Started triage }, is: 2 }
+      - id: not-triage
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.step: triage, json.text: "Correct the diagnosis in /workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md: The cause is the stale cache ${run.id}" }
+              - { json.type: prompt, json.sid: "${sid}", json.text: "/knackpack:debug-incident Correct the diagnosis in /workspace/s/${box}/docs/${sid}/ROOT-CAUSE.md: The cause is the stale cache ${run.id}" }
+  - id: EVS-026
+    name: "The Execution path offers no step while the agent works (the owner's decision REQ-60): after Define's turn ends with a background subagent still running, the path says the session is busy, Define offers no Continue defining and neither it nor the step card says to press it; once the subagent is done, the path isn't busy and Continue defining and its hint come back"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor busy path ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: not-run
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.workType": change
+            "$.body.gate.path.busy": false
+            "$.body.gate.path.stages[0].id": define
+            "$.body.gate.path.stages[0].detail": "No agreed requirements yet: send what you want built"
+            "$.body.gate.path.stages[0].actions": []
+      - id: ask
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Which orders, and for whom? ${run.id}\nagent-bg: general-purpose => Check orders ${run.id}\nwrite: busy-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: busy-after-turn
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements": null
+            "$.body.gate.path.busy": true
+            "$.body.gate.path.stages[0].id": define
+            "$.body.gate.path.stages[0].detail": "No agreed requirements yet"
+            "$.body.gate.path.stages[0].actions": []
+            "$.body.gate.path.card.step": Define
+            "$.body.gate.path.card.detail": "No agreed requirements yet"
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["busy-${run.id}.md"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["busy-${run.id}.md"] }
+      - id: background-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: agents, json.sid: "${sid}", "json.agents[0].type": general-purpose, "json.agents[0].status": completed }
+      - id: offered-again
+        do: http.request
+        identity: page
+        eventually: { within: 30s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements": null
+            "$.body.gate.path.busy": false
+            "$.body.gate.path.stages[0].detail": "No agreed requirements yet: press Continue defining"
+            "$.body.gate.path.stages[0].actions": [{ ask: define, label: Continue defining, title: "Sends /knackpack:challenge-requirements to this session" }]
+            "$.body.gate.path.card.detail": "No agreed requirements yet: press Continue defining"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: EVS-030
+    name: "Review and Push wait while the agent works (the owner's decisions REQ-65 and REQ-66): after a turn that commits and ends with a background subagent still running, the gate says Review and Push wait until the agent finishes, the path's note is the one about changing files before the requirements are approved, not the one about working outside the project, Review isn't the next step, and the page's Push and Review are refused with 409 working and those words; once the subagent is done, Review no longer waits, and Push is still not offered, since the requirements aren't approved, and is refused with 409 push waits and the same words; nothing was pushed"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor busy review ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: change }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; the work type is set by /api/size now that /api/dispatch takes none, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": change
+            "$.body.gate.review.wait": ""
+      - id: work
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Exporting the orders ${run.id}\ncommit: busy-${run.id}.txt\nagent-bg: general-purpose => Check orders ${run.id}\nwrite: busy-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: push-while-working
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/push"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: working, message: "Waits until Development ACP agent finishes: it asks to push once its work is done." }
+        no_state_check: "refused with 409 by Pushes.Push's page offer check before it claims the session or decides anything, so nothing was pushed or held; no declared read shows a push, and nothing-pushed reads the audit after the stop to find no push entry"
+      - id: review-while-working
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/review"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: working, message: "Waits until Development ACP agent finishes: reviews start by themselves when it asks to push." }
+        no_state_check: "refused with 409 by Dispatcher.Review's page offer check before it plans or starts a reviewer run, so nothing started; no declared read shows a review request"
+      - id: busy-offers
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.path.busy": true
+            "$.body.gate.path.notice.text": "The agent is changing files before the requirements are approved."
+            "$.body.gate.review.wait": "Waits until Development ACP agent finishes: reviews start by themselves when it asks to push."
+            "$.body.gate.review.primary": false
+            "$.body.gate.pushOffer": { available: false, reason: "Waits until Development ACP agent finishes: it asks to push once its work is done." }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["busy-${run.id}.md"] }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["busy-${run.id}.md"] }
+      - id: background-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: agents, json.sid: "${sid}", "json.agents[0].type": general-purpose, "json.agents[0].status": completed }
+      - id: idle-offers
+        do: http.request
+        identity: page
+        eventually: { within: 30s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.path.busy": false
+            "$.body.gate.waiting": "approve the requirements first"
+            "$.body.gate.review.wait": ""
+            "$.body.gate.review.primary": false
+            "$.body.gate.pushOffer": { available: false, reason: "Implement isn't done: approve the requirements first." }
+      - id: push-unapproved
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/push"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "push waits", message: "Implement isn't done: approve the requirements first." }
+        no_state_check: "refused with 409 by Pushes.Push's page offer check before it claims the session or decides anything, so nothing was pushed or held; no declared read shows a push, and nothing-pushed reads the audit after the stop to find no push entry"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: nothing-pushed
+        do: http.request
+        identity: page
+        eventually: { within: 30s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}" }
+          none:
+            "$.body.entries": { kind: push, by: page }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: EVS-031
+    name: "The Execution path says when the agent works outside the project before any approval (the owner's decision REQ-69): after a turn that changes nothing in the worktree and ends with a background subagent still running, before the requirements are approved, the path's note, as information rather than a warning, says the agent is working outside the project and nothing in it has changed yet; once the subagent is done, the note is gone; the branch has no commit"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor outside ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: idle-at-start
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.workType": change
+            "$.body.gate.path.busy": false
+            "$.body.gate.path.notice": null
+      - id: ask
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: Looking around first ${run.id}\nagent-bg: general-purpose => Read the docs ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: outside-noted
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.requirements": null
+            "$.body.gate.path.busy": true
+            "$.body.gate.path.notice": { text: "Working outside the project before your approval: nothing in the project has changed yet.", actions: [], tone: info }
+      - id: background-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: agents, json.sid: "${sid}", "json.agents[0].type": general-purpose, "json.agents[0].status": completed }
+      - id: note-gone
+        do: http.request
+        identity: page
+        eventually: { within: 30s, every: 500ms }
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.path.busy": false
+            "$.body.gate.path.notice": null
+      - id: nothing-committed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/changes"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.changes.branch": "sf/${id}"
+          absent: ["$.body.changes.commits[0]"]
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: EVS-040
+    name: "The engine sends each offer with the words it refuses with (the owner's decision REQ-65): while a session of demo exists, running or stopped, /api/projects gives demo's removeOff and /api/remove-repo refuses with those words; while the agent is in its turn, the listing's bringMainNow says to wait and /api/bring-main refuses with the same words, and once the turn ends it is empty, as ask is while the page controls the running session; once the session is stopped, ask says the session isn't connected, and Access's check gives the This session risks the off that /api/access's allow refuses with; Delete waits for Stop (deleteNow) and Open pull request for a push the engine made (pullOpen); once the session is stopped, bringMainNow says to wake it, Access's read gives actionsOff, and an action run is refused with those words; once the session is deleted, demo has no removeOff"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor offers ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: remove-offered-off
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.projects[0].name": demo
+            "$.body.projects[0].removeOff": "This repository still has sessions, running or stopped. Stop and delete its session first."
+      - id: remove-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-repo"
+          headers: { Origin: "${page.origin}" }
+          body: { name: demo }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: sessions, message: "This repository still has sessions, running or stopped. Stop and delete its session first." }
+        waive: { FIX-05: "demo is the one project up.sh adds before any suite, and every later suite needs it, so its name can't carry ${run.id}; project-kept reads it after this refusal still listed, with the removeOff that the session this scenario's dispatch started gives it" }
+      - id: project-kept
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.projects[0].name": demo
+            "$.body.projects[0].removeOff": "This repository still has sessions, running or stopped. Stop and delete its session first."
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message and holds no write, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: long-turn
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor offers ${run.id}\nread: offers-${run.id}-1.md\nread: offers-${run.id}-2.md\nread: offers-${run.id}-3.md\nread: offers-${run.id}-4.md\nread: offers-${run.id}-5.md\nread: offers-${run.id}-6.md\nread: offers-${run.id}-7.md\nread: offers-${run.id}-8.md\nwrite: offers-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: in-turn
+        do: http.frames
+        on: events
+        eventually: { within: 6s, every: 100ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": true, "json.sessions[0].actions.bringMain": "", "json.sessions[0].actions.bringMainNow": "The session is in its turn. Wait for it to end, then bring in the latest main.", "json.sessions[0].actions.ask": "" }
+      - id: main-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/bring-main"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "in turn", message: "The session is in its turn. Wait for it to end, then bring in the latest main." }
+        no_state_check: "refused with 409 by Dispatcher.BringMain before it fetches main or asks the agent anything, so nothing changed; no page read shows a bring-main, and the turn-ended and idle-offered frames below show the turn the refusal waited for end as the script ran it"
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["offers-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["offers-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: idle-offered
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].running": true, "json.sessions[0].actions.bringMain": "", "json.sessions[0].actions.bringMainNow": "", "json.sessions[0].actions.ask": "", "json.sessions[0].actions.deleteNow": "Stop the session before deleting it.", "json.sessions[0].actions.pullOpen": "Push the branch first: a pull request opens from a pushed branch." }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: ask-off
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].running": false, "json.sessions[0].live": false, "json.sessions[0].actions.ask": "The session isn't connected to the engine now. Wait for it to reconnect, or wake it.", "json.sessions[0].actions.bringMainNow": "The session isn't running. Wake it, then bring in the latest main.", "json.sessions[0].actions.deleteNow": "" }
+      - id: still-off
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.projects[0].name": demo
+            "$.body.projects[0].removeOff": "This repository still has sessions, running or stopped. Stop and delete its session first."
+      - id: access-checked
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: check, sid: "${sid}", host: api.example.org }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.card.host": api.example.org
+          any:
+            "$.body.card.risks": { scope: session, expires: hour, off: "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project." }
+          none:
+            "$.body.card.risks": { scope: project, off: "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project." }
+        no_state_check: "op check builds a card and saves nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants, and no-grant reads the session's grants after it"
+      - id: access-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", host: api.example.org, scope: session, expires: hour, confirmed: true }
+        expect:
+          equal:
+            "$.status": 409
+            "$.headers.content-type": ["application/json; charset=utf-8"]
+            "$.body": { error: stopped, message: "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project." }
+        no_state_check: "refused with 409 by Grants.makeGrant before it saves a grant, so nothing changed; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's grants after it"
+      - id: action-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: action-run, sid: "${sid}", action: "0123456789abcdef0123456789abcdef", args: {} }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: stopped, message: "Actions run for a running session. Wake it first." }
+        no_state_check: "refused with 409 by Grants.StartAction before it looks the action up or starts a container, so nothing ran; /api/access isn't a declared read, since its op decides read or write, and no-grant reads the session's runs after it"
+      - id: no-grant
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.grants": []
+            "$.body.runs": []
+            "$.body.actionsOff": "Actions run for a running session. Wake it first."
+        no_state_check: "op read changes nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants"
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: remove-offered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/projects"
+          headers: { Origin: "${page.origin}" }
+          body: {}
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.projects[0].name": demo
+          absent: ["$.body.projects[0].removeOff"]
+  - id: EVS-060
+    name: "The push check diagram's text version comes as two parts (the owner's words in T-53), and its wires carry their state (T-56): in a new Code change session, /api/gate's flow sends the gate's decision as its status, with the gate's icon and tone and its words first, \"Waiting for reviews; no push decided yet.\", and the commit and the required reviewers' count as its detail, \"Commit <7 hex>. 2 required reviewers: 2 waiting.\"; with no review started, the snapshot, verdicts and decision wires are all waiting, with no tone; the key names the colours as well as the line styles; the one caption and the outLive flag it sent before are gone, and a live flow has no expired status"
+    steps:
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor flow status ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: flow-status
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.workType": change
+            "$.body.gate.flow.gate.look": { icon: more, tone: "", word: "waiting for reviews" }
+            "$.body.gate.flow.status": { icon: more, tone: "", word: "Waiting for reviews; no push decided yet." }
+            "$.body.gate.flow.wires": [{ label: snapshot, phase: pending, tone: "" }, { label: verdicts, phase: pending, tone: "" }, { label: decision, phase: pending, tone: "" }]
+            "$.body.gate.flow.key":
+              - { swatch: solid, words: "Solid: done or taken" }
+              - { swatch: dashed, words: "Dashed: waiting, not taken or not counted" }
+              - { swatch: moving, words: "Moving dashes: running" }
+              - { swatch: ok, words: "Green: passed, allowed or pushed" }
+              - { swatch: warn, words: "Amber: held, overridden or no verdict" }
+              - { swatch: bad, words: "Red: blocked, failed, denied or refused" }
+              - { swatch: untrusted, words: "Dashed zone: untrusted, where the agent's code runs" }
+          matches:
+            "$.body.gate.flow.commit": "[0-9a-f]{7}"
+            "$.body.gate.flow.detail": "Commit [0-9a-f]{7}\\. 2 required reviewers: 2 waiting\\."
+          absent: ["$.body.gate.flow.caption", "$.body.gate.flow.expiredCaption", "$.body.gate.flow.expiredStatus", "$.body.gate.flow.expires", "$.body.gate.flow.outLive"]
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+  - id: EVS-080
+    name: "The composer's Stop works on the agent's own turn only: while the turn runs, the session listing offers stop; once the turn ends with a background subagent still running, the session stays Working and stop is off with the reason that only subagents work and Stop works on the agent's own turn; when the session is idle, stop is off because no turn runs; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor stop ring ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: ask
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor stop ring ${run.id}\nagent-bg: general-purpose => Check stop ${run.id}\nwrite: stop-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["stop-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["stop-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: background-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: agents, json.sid: "${sid}", "json.agents[0].type": general-purpose, "json.agents[0].status": completed }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: stop-offers
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": true, "json.sessions[0].actions.stop": "" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": working, "json.sessions[0].subagents[0].state": running, "json.sessions[0].actions.stop": "Development ACP agent’s subagents are working; Stop works on Development ACP agent’s own turn." }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].summary.word": idle, "json.sessions[0].actions.stop": "no turn is running that this page controls" }
+      - id: stop-never-offered-to-subagents
+        do: http.frames
+        on: events
+        consistently: { for: 1s, every: 200ms }
+        expect:
+          none:
+            "$.frames":
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": false, "json.sessions[0].actions.stop": "" }
+              - { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].busy": true, "json.sessions[0].actions.stop": "Development ACP agent’s subagents are working; Stop works on Development ACP agent’s own turn." }
+  - id: EVS-085
+    name: "A write in the session's own helper copy shows its own words (the owner's decision REQ-67 of 2026-11-26): the fake's write under /workspace/s/${box}/helpers/h-x/ reaches the open stream with its whole path, kept in view with \"In a helper's copy\", not \"Writes outside the worktree\"; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor helper lines ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor helper lines ${run.id}\noutside: /workspace/s/${box}/helpers/h-x/a-${run.id}.txt\nwrite: done-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["done-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["done-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: lines
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write /workspace/s/${box}/helpers/h-x/a-${run.id}.txt", json.line: { path: "/workspace/s/${box}/helpers/h-x/a-${run.id}.txt", outside: true, kept: "In a helper's copy" } }
+  - id: EVS-086
+    name: "Only the session's own helper copies get the helper's words: a write under another box's helpers folder, one under the session's helpers folder in a folder not named h- (sf-0000000a), and one in /srv each reach the open stream with their whole path and \"Writes outside the worktree\", as today; the frames are read after the session is removed, so a failed read leaves no session behind"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor helper lines ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+          present: ["$.body.entries[0].box"]
+        save: { box: "$.body.entries[0].box" }
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message, so the script below reaches the fake agent as typed, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: say
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor helper lines ${run.id}\noutside: /workspace/s/0000000000000000/helpers/h-x/a-${run.id}.txt\noutside: /workspace/s/${box}/helpers/sf-0000000a/a-${run.id}.txt\noutside: /srv/outside-${run.id}.txt\nwrite: done-${run.id}.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: file-written
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["done-${run.id}.md"] }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["done-${run.id}.md"] }
+      - id: turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: box-gone
+        do: docker.container
+        with: { name: "sf-proctor-box-${box}" }
+        eventually: { within: 30s, every: 1s }
+        expect:
+          equal: { "$.found": false }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: lines
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write /workspace/s/0000000000000000/helpers/h-x/a-${run.id}.txt", json.line: { path: "/workspace/s/0000000000000000/helpers/h-x/a-${run.id}.txt", outside: true, kept: "Writes outside the worktree" } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write /workspace/s/${box}/helpers/sf-0000000a/a-${run.id}.txt", json.line: { path: "/workspace/s/${box}/helpers/sf-0000000a/a-${run.id}.txt", outside: true, kept: "Writes outside the worktree" } }
+              - { json.type: tool, json.sid: "${sid}", json.tool: edit, json.summary: "Write /srv/outside-${run.id}.txt", json.line: { path: "/srv/outside-${run.id}.txt", outside: true, kept: "Writes outside the worktree" } }
+  - id: EVS-090
+    name: "The preview of a session's app (REQ-79): /api/preview refuses a session the engine doesn't know, offers the preview while the session runs (the listing's preview is empty), refuses a port outside the session's 10 with words that name its ports, answers a one-time code on the preview's own port with the session's 10 ports and the first as the default, and once the session is stopped the listing's preview and /api/preview's refusal give the same words"
+    steps:
+      - id: unknown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/preview"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "00000000-0000-4000-8000-000000000000" }
+        expect:
+          equal:
+            "$.status": 404
+            "$.body": { error: session, message: "The engine has no session of that id." }
+        no_state_check: "refused with 404 by Previews.Open before it makes a code or changes the preview's target, since the engine has no session of that id; no page read shows the preview's target, which only the preview listener reads"
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor preview ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: preview-offered
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].running": true, "json.sessions[0].actions.preview": "" }
+      - id: port-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/preview"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", port: 1 }
+        expect:
+          equal:
+            "$.status": 400
+            "$.body.error": port
+          matches: { "$.body.message": "Port 1 isn't one of this session's ports \\(4[0-9]{4} to 4[0-9]{4}\\)\\." }
+        no_state_check: "refused with 400 by Previews.Open before it makes a code or changes the preview's target, since port 1 isn't one of the session's 10; no page read shows the preview's target, which only the preview listener reads"
+      - id: opened
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/preview"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.tab": "http://127.0.0.1:${page.preview_port}/"
+          matches:
+            "$.body.url": "http://127\\.0\\.0\\.1:[0-9]+/\\.sf-preview\\?code=[0-9a-f]{64}"
+            "$.body.port": "4[0-9]{4}"
+            "$.body.ports[0]": "4[0-9]{4}"
+            "$.body.ports[9]": "4[0-9]{4}"
+          absent: ["$.body.ports[10]"]
+        no_state_check: "the code and the preview's target are kept in memory and read only by the preview listener on its own port, which no page read reaches; the answer itself shows the code, the port and the session's 10 ports"
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: preview-off
+        do: http.frames
+        on: events
+        eventually: { within: 10s, every: 200ms }
+        expect:
+          any:
+            "$.frames": { json.type: sessions, "json.sessions[0].sid": "${sid}", "json.sessions[0].running": false, "json.sessions[0].actions.preview": "This session isn't running. Wake it first." }
+      - id: stopped-refused
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/preview"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: stopped, message: "This session isn't running. Wake it first." }
+        no_state_check: "refused with 409 by Previews.Open before it makes a code or changes the preview's target, since the session's container isn't running; no page read shows the preview's target, which only the preview listener reads"
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+
+  - id: EVS-095
+    name: "The engine answers the agent's own access request by itself (T-67): once the agent's factory_request_access card is accepted while the agent is idle, with nothing typed, the engine sends the session one message of its own, a [Software Factory] note saying what the person allowed, for whom and how long, and to carry on, which starts the agent's turn (the fake agent echoes it); a host the person gives from the Access dialog, with no card, sends nothing and leaves no note, so the person's next message reaches the agent as typed"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor answered ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message and holds no write, so the scripts below reach the fake agent as typed and the engine's answers reach it as sent, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: ask
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor access ${run.id}\nask-tool: r_allow factory_request_access {\"host\":\"proctor-${sid}.example.org\",\"reason\":\"proctor ${run.id}\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: ask-answered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/r_allow.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/r_allow.txt"] }
+      - id: asked-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: card
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cards[0].kind": request
+            "$.body.cards[0].host": "proctor-${sid}.example.org"
+          present: ["$.body.cards[0].id"]
+          absent: ["$.body.cards[1]"]
+        save: { c1: "$.body.cards[0].id" }
+        no_state_check: "op read changes nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants"
+      - id: allow
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", card: "${c1}", scope: session, expires: never, confirmed: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Allowed proctor-${sid}.example.org for this session, until taken back."
+            "$.body.cards": []
+          any:
+            "$.body.grants": { host: "proctor-${sid}.example.org", who: Asked for by the agent }
+        no_state_check: "the grant's effect on the agent is the engine's message, which only the event stream shows; told asserts it, but it is an http.frames step, which Proctor doesn't count as an http request's state check, and the answer itself lists the grant and no card"
+      - id: told
+        do: http.frames
+        on: events
+        eventually: { within: 15s, every: 200ms }
+        expect:
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "[Software Factory] The person allowed proctor-${sid}.example.org for this session, until taken back, on Software Factory's page, so you can reach it over HTTPS through the proxy now. Carry on with your task." }
+              - { json.type: text, json.sid: "${sid}", json.text: "The fake agent got a note: The person allowed proctor-${sid}.example.org for this session, until taken back, on Software Factory's page, so you can reach it over HTTPS through the proxy now. Carry on with your task.\n\n" }
+      - id: told-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 2 }
+      - id: give
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", host: "proctor-given-${sid}.example.org", scope: session, expires: never, confirmed: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Allowed proctor-given-${sid}.example.org for this session, until taken back."
+          any:
+            "$.body.grants": { host: "proctor-given-${sid}.example.org", who: Given by you }
+        no_state_check: "op allow saves a grant the person made with no card; /api/access isn't a declared read, since its op decides read or write; the answer lists the grant, and quiet and received assert that the engine sent the agent nothing for it, which only the event stream shows"
+      - id: quiet
+        do: http.frames
+        on: events
+        consistently: { for: 3s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: prompt, json.sid: "${sid}" }, is: 2 }
+      - id: after
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: after ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+        no_state_check: "this message's only effect is the agent's turn, which writes no file and only the event stream shows; received asserts it reached the agent as typed, with no note, but it is an http.frames step, which Proctor doesn't count as an http request's state check"
+      - id: after-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 3 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: received
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "say: after ${run.id}" }
+
+  - id: EVS-096
+    name: "The engine answers the agent's own access request by itself (T-67): once the agent's factory_request_access card is declined while the agent is idle, the engine sends the session one [Software Factory] message saying the person didn't allow it, not to ask again for 10 minutes, and to carry on without it, which starts the agent's turn; a card accepted while the agent's turn still runs sends no message then, and its words ride as a note at the front of the person's next message"
+    steps:
+      - id: open
+        do: http.open
+        identity: page
+        as: events
+        with:
+          path: "/api/events"
+          headers: { Origin: "${page.origin}" }
+        expect:
+          equal: { "$.status": 200, "$.open": true, "$.format": ndjson }
+      - id: hello
+        do: http.frames
+        on: events
+        eventually: { within: 5s, every: 100ms }
+        expect:
+          equal:
+            "$.frames[0].json.type": hello
+            "$.frames[0].json.sessions": []
+      - id: start
+        do: http.request
+        identity: page
+        timeout: 110s
+        with:
+          method: POST
+          path: "/api/dispatch"
+          headers: { Origin: "${page.origin}" }
+          body: { path: /workspace/base/demo, agent: dev-acp, name: "proctor declined ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body.ok": true
+          present: ["$.body.id", "$.body.sid"]
+        save: { sid: "$.body.sid", id: "$.body.id" }
+      - id: audited
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.entries[0].kind": session-start
+            "$.body.entries[0].session": "${sid}"
+      - id: typed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/size"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", size: explore }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+        waive: { FIX-05: "size is one of the fixed work types (change, incident, explore) and can't carry ${run.id}; Explore wraps no message and holds no write, so the scripts below reach the fake agent as typed and the engine's answers reach it as sent, and typed-shown and every later step read the session saved from this scenario's dispatch, so no earlier run's session can match" }
+      - id: typed-shown
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.chosen": true
+            "$.body.gate.workType": explore
+      - id: ask
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor access ${run.id}\nask-tool: r_refuse factory_request_access {\"host\":\"proctor-${sid}.example.org\",\"reason\":\"proctor ${run.id}\"}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: ask-answered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/r_refuse.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/r_refuse.txt"] }
+      - id: asked-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 1 }
+      - id: card
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cards[0].kind": request
+            "$.body.cards[0].host": "proctor-${sid}.example.org"
+          present: ["$.body.cards[0].id"]
+          absent: ["$.body.cards[1]"]
+        save: { c1: "$.body.cards[0].id" }
+        no_state_check: "op read changes nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants"
+      - id: refuse
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: refuse, sid: "${sid}", card: "${c1}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Didn't allow proctor-${sid}.example.org. The agent can't ask for it again for 10 minutes."
+            "$.body.cards": []
+            "$.body.grants": []
+        no_state_check: "op refuse takes the card away and saves no grant; /api/access isn't a declared read, since its op decides read or write; the answer lists no card and no grant, and the refusal's effect on the agent is the engine's message, which only the event stream shows; told asserts it, but it is an http.frames step, which Proctor doesn't count as an http request's state check"
+      - id: told
+        do: http.frames
+        on: events
+        eventually: { within: 15s, every: 200ms }
+        expect:
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "[Software Factory] The person didn't allow proctor-${sid}.example.org on Software Factory's page. Don't ask for it again for 10 minutes; if you still need it, say why in your reply. Carry on without it where you can." }
+              - { json.type: text, json.sid: "${sid}", json.text: "The fake agent got a note: The person didn't allow proctor-${sid}.example.org on Software Factory's page. Don't ask for it again for 10 minutes; if you still need it, say why in your reply. Carry on without it where you can.\n\n" }
+      - id: told-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 2 }
+      - id: busy
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: proctor access ${run.id}\nask-tool: r_busy factory_request_access {\"host\":\"proctor-busy-${sid}.example.org\",\"reason\":\"proctor ${run.id}\"}\nread: access-${run.id}-1.md\nread: access-${run.id}-2.md\nread: access-${run.id}-3.md\nread: access-${run.id}-4.md\nread: access-${run.id}-5.md\nread: access-${run.id}-6.md\nread: access-${run.id}-7.md\nread: access-${run.id}-8.md\nread: access-${run.id}-9.md\nread: access-${run.id}-10.md" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: busy-answered
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/file-check"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", paths: ["gate-answers/r_busy.txt"] }
+        eventually: { within: 60s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { found: ["gate-answers/r_busy.txt"] }
+      - id: busy-card
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: read, sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.cards[0].kind": request
+            "$.body.cards[0].host": "proctor-busy-${sid}.example.org"
+          present: ["$.body.cards[0].id"]
+          absent: ["$.body.cards[1]"]
+        save: { c2: "$.body.cards[0].id" }
+        no_state_check: "op read changes nothing; /api/access isn't a declared read, since op allow, apply and revoke on the same path change grants"
+      - id: busy-allow
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/access"
+          headers: { Origin: "${page.origin}" }
+          body: { op: allow, sid: "${sid}", card: "${c2}", scope: session, expires: never, confirmed: true }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.message": "Allowed proctor-busy-${sid}.example.org for this session, until taken back."
+            "$.body.cards": []
+          any:
+            "$.body.grants": { host: "proctor-busy-${sid}.example.org", who: Asked for by the agent }
+        no_state_check: "the grant's effect on the agent is a note with its next message, which only the event stream shows; received asserts it, but it is an http.frames step, which Proctor doesn't count as an http request's state check, and the answer itself lists the grant and no card"
+      - id: busy-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 3 }
+      - id: quiet
+        do: http.frames
+        on: events
+        consistently: { for: 2s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: prompt, json.sid: "${sid}" }, is: 3 }
+      - id: after
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/message"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", text: "say: after ${run.id}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+        no_state_check: "this message's only effect is the agent's turn, which writes no file and only the event stream shows; received asserts it reached the agent with the accepted card's note in front, but it is an http.frames step, which Proctor doesn't count as an http request's state check"
+      - id: after-turn-ended
+        do: http.frames
+        on: events
+        eventually: { within: 30s, every: 200ms }
+        expect:
+          count:
+            "$.frames": { where: { json.type: idle, json.sid: "${sid}" }, is: 4 }
+      - id: stop
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/stop-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 202
+            "$.body": { ok: true }
+      - id: stopped
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        eventually: { within: 30s, every: 500ms }
+        expect:
+          equal:
+            "$.status": 200
+          any:
+            "$.body.entries": { kind: session-stop, by: page, result: stopped, session: "${sid}", branch: "sf/${id}" }
+      - id: remove-dirty
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body.error": dirty
+            "$.body.offer": { flag: worktree, value: "sf-${id}" }
+      - id: not-yet-removed
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/gate"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body.gate.branch": "sf/${id}"
+      - id: remove
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/remove-session"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}", flag: worktree, value: "sf-${id}" }
+        expect:
+          equal:
+            "$.status": 200
+            "$.body": { ok: true }
+      - id: gone
+        do: http.request
+        identity: page
+        with:
+          method: POST
+          path: "/api/audit"
+          headers: { Origin: "${page.origin}" }
+          body: { sid: "${sid}" }
+        expect:
+          equal:
+            "$.status": 409
+            "$.body": { error: "not started here", message: "Only a session this engine started has an audit view here." }
+      - id: received
+        do: http.frames
+        on: events
+        expect:
+          equal: { "$.overflow": false }
+          any:
+            "$.frames":
+              - { json.type: prompt, json.sid: "${sid}", json.from: page, json.text: "[Software Factory] The person allowed proctor-busy-${sid}.example.org for this session, until taken back, on Software Factory's page, so you can reach it over HTTPS through the proxy now. Carry on with your task.\n\nsay: after ${run.id}" }

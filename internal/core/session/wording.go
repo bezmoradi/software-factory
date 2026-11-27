@@ -1,9 +1,12 @@
 package session
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bezmoradi/software-factory/internal/core/review"
 )
 
 type Said struct {
@@ -95,6 +98,7 @@ var splitSaid = map[string]Said{
 	"starting":  {"starting", "warn"},
 	"started":   {"started", "ok"},
 	"dismissed": {"dismissed", ""},
+	"adding":    {"adding its project", "warn"},
 }
 
 func SplitSaid(state string) Said {
@@ -356,7 +360,6 @@ var pluginSaid = map[string]Said{
 	PluginKept:     {"Not updated", "warn"},
 	PluginMissing:  {"Not installed", "bad"},
 	PluginChecking: {"Checking", "muted"},
-	PluginCheckOff: {"Not checked", "muted"},
 }
 
 func PluginSaid(check string) Said {
@@ -386,8 +389,6 @@ func PluginCheckLine(check, branch, from, problem string, kept bool) (line, tone
 		return "nothing could be installed. " + problem, "bad", true
 	case "checking":
 		return "Checking the head of " + branch + " now.", "muted", false
-	case "off":
-		return "Not checked at this start: SF_AGENTS_INSTALL is manual, so the engine made no network call for it; install-agents checks and updates it.", "muted", false
 	}
 	return "Not checked yet at this start.", "muted", false
 }
@@ -494,6 +495,25 @@ func PushMissing(p *PushView, r *ReviewView) []MissingItem {
 		out = append(out, item)
 	}
 	return out
+}
+
+func PushAllowAsk(p *PushView, r *ReviewView) string {
+	if p == nil || r == nil || p.Card == "" || r.Commit != p.Commit || r.Branch != p.Branch {
+		return ""
+	}
+	n := 0
+	for _, role := range r.Roles {
+		if role.State == review.Running && !role.Advisory && slices.Contains(p.MissingReviews, role.Agent) {
+			n++
+		}
+	}
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 review is still running. Push before its verdict?"
+	}
+	return strconv.Itoa(n) + " reviews are still running. Push before their verdicts?"
 }
 
 func CloneWords(p CloneProgress, host string) string {

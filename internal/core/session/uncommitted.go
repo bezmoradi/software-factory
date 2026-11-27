@@ -11,16 +11,6 @@ const (
 	MaxUncommittedShown = 200
 	maxChangedPaths     = 5000
 	worktreeCheckGap    = 2 * time.Second
-	worktreeReadAgain   = 30 * time.Second
-)
-
-type WorktreeState int
-
-const (
-	WorktreeUnread WorktreeState = iota
-	WorktreeUnreadable
-	WorktreeBusy
-	WorktreeSettled
 )
 
 type Uncommitted struct {
@@ -62,8 +52,6 @@ type worktreeBook struct {
 	changed     map[string]changedSet
 	busy        map[string]bool
 	again       map[string]bool
-	failed      map[string]bool
-	asked       map[string]time.Time
 	tools       map[string]map[string]pendingCheck
 	edits       map[string]map[string]bool
 	checks      map[string]map[CheckKind]AgentCheck
@@ -71,7 +59,6 @@ type worktreeBook struct {
 
 func newWorktreeBook() *worktreeBook {
 	return &worktreeBook{uncommitted: map[string]Uncommitted{}, changed: map[string]changedSet{}, busy: map[string]bool{}, again: map[string]bool{},
-		failed: map[string]bool{}, asked: map[string]time.Time{},
 		tools: map[string]map[string]pendingCheck{}, edits: map[string]map[string]bool{}, checks: map[string]map[CheckKind]AgentCheck{}}
 }
 
@@ -132,9 +119,6 @@ func (r *Registry) CheckWorktree(sid string) {
 		if ok {
 			b.uncommitted[sid] = u
 			b.changed[sid] = set
-			delete(b.failed, sid)
-		} else {
-			b.failed[sid] = true
 		}
 		again := b.again[sid]
 		delete(b.again, sid)
@@ -207,8 +191,6 @@ func (b *worktreeBook) forget(sid string) {
 	delete(b.tools, sid)
 	delete(b.edits, sid)
 	delete(b.checks, sid)
-	delete(b.failed, sid)
-	delete(b.asked, sid)
 }
 
 func (r *Registry) factsInto(sid string, info *Info) {
@@ -227,39 +209,6 @@ func (r *Registry) factsInto(sid string, info *Info) {
 	}
 	info.Overlaps = r.overlapsLocked(b, sid)
 	info.Checks = b.checksOf(sid)
-}
-
-func (r *Registry) SettledUncommitted(sid string) (Uncommitted, WorktreeState) {
-	if info, ok := r.Session(sid); !ok || info.Busy {
-		return Uncommitted{}, WorktreeBusy
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	b := r.worktrees
-	if b == nil {
-		return Uncommitted{}, WorktreeUnreadable
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if !b.watch.usable() {
-		return Uncommitted{}, WorktreeUnreadable
-	}
-	if b.busy[sid] {
-		return Uncommitted{}, WorktreeUnread
-	}
-	if u, ok := b.uncommitted[sid]; ok {
-		return u.clone(), WorktreeSettled
-	}
-	now := r.now()
-	if at, ok := b.asked[sid]; ok && now.Sub(at) < worktreeReadAgain {
-		if b.failed[sid] {
-			return Uncommitted{}, WorktreeUnreadable
-		}
-		return Uncommitted{}, WorktreeUnread
-	}
-	b.asked[sid] = now
-	go r.CheckWorktree(sid)
-	return Uncommitted{}, WorktreeUnread
 }
 
 func (r *Registry) AgentChecks(sid string) []AgentCheck {

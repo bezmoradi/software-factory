@@ -24,18 +24,17 @@ func NewPresets(dir string) Presets { return Presets{Dir: dir, mu: &sync.Mutex{}
 var _ session.PresetStore = Presets{}
 
 type presetJSON struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Host        string   `json:"host,omitempty"`
-	Port        int      `json:"port,omitempty"`
-	Credential  string   `json:"credential,omitempty"`
-	Scope       string   `json:"scope"`
-	Expires     string   `json:"expires"`
-	Project     string   `json:"project,omitempty"`
-	Auto        bool     `json:"auto,omitempty"`
-	Made        int64    `json:"made"`
-	GitAccepted []string `json:"gitAccepted,omitempty"`
-	Owner       string   `json:"owner,omitempty"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	Credential string `json:"credential,omitempty"`
+	Scope      string `json:"scope"`
+	Expires    string `json:"expires"`
+	Project    string `json:"project,omitempty"`
+	Auto       bool   `json:"auto,omitempty"`
+	Made       int64  `json:"made"`
+	Owner      string `json:"owner,omitempty"`
 }
 
 type presetsJSON struct {
@@ -59,21 +58,11 @@ func presetOf(j presetJSON) (session.Preset, bool) {
 		j.Host == "" && j.Port == 0 && grantID.MatchString(j.Credential)
 	ok := grantID.MatchString(j.ID) && j.Name != "" && len(j.Name) <= session.MaxPresetName*4 && target &&
 		(j.Scope == session.GrantSession || j.Scope == session.GrantProject) && len(j.Expires) <= 16 && j.Expires != "" &&
-		len(j.Project) <= maxGrantField && (!j.Auto || j.Project != "") && j.Made > 0 && gitAcceptedOK(j.GitAccepted, presetHosts(j))
+		len(j.Project) <= maxGrantField && (!j.Auto || j.Project != "") && j.Made > 0
 	if !ok {
 		return session.Preset{}, false
 	}
-	return session.Preset{ID: j.ID, Name: j.Name, Host: j.Host, Port: j.Port, Credential: j.Credential, Scope: j.Scope, Expires: j.Expires, Project: j.Project, Auto: j.Auto, Made: time.Unix(j.Made, 0), GitAccepted: j.GitAccepted}, true
-}
-
-func presetHosts(j presetJSON) []string {
-	switch {
-	case j.Credential != "":
-		return nil
-	case j.Port != 0:
-		return []string{session.PortTarget(j.Host, j.Port)}
-	}
-	return []string{j.Host}
+	return session.Preset{ID: j.ID, Name: j.Name, Host: j.Host, Port: j.Port, Credential: j.Credential, Scope: j.Scope, Expires: j.Expires, Project: j.Project, Auto: j.Auto, Made: time.Unix(j.Made, 0)}, true
 }
 
 func (s Presets) Load() ([]session.Preset, error) {
@@ -105,7 +94,7 @@ func (s Presets) Save(list []session.Preset) error {
 	defer s.lock()()
 	f := presetsJSON{Version: presetsVersion, Presets: make([]presetJSON, 0, len(list))}
 	for _, p := range list {
-		f.Presets = append(f.Presets, presetJSON{ID: p.ID, Name: p.Name, Host: p.Host, Port: p.Port, Credential: p.Credential, Scope: p.Scope, Expires: p.Expires, Project: p.Project, Auto: p.Auto, Made: p.Made.Unix(), GitAccepted: p.GitAccepted, Owner: owner})
+		f.Presets = append(f.Presets, presetJSON{ID: p.ID, Name: p.Name, Host: p.Host, Port: p.Port, Credential: p.Credential, Scope: p.Scope, Expires: p.Expires, Project: p.Project, Auto: p.Auto, Made: p.Made.Unix(), Owner: owner})
 	}
 	return write(s.Dir, presetsFile, f)
 }

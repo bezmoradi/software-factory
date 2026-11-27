@@ -24,8 +24,8 @@ tables:
       - ["pck_list_extra", { op: list, path: /workspace/base/demo, proctorUnknownField: true }]
       - ["pck_fetch_no_commit", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git" }]
       - ["pck_fetch_commit_number", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 1 }]
-      - ["pck_fetch_extra", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: x }]
-      - ["pck_add_no_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }]
+      - ["pck_fetch_extra", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8, digest: x }]
+      - ["pck_add_no_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8 }]
       - ["pck_remove_empty", { op: remove, path: /workspace/base/demo, digest: "" }]
       - ["pck_use_extra", { op: use, path: /workspace/base/demo, pack: none, proctorUnknownField: true }]
       - ["pck_use_no_pack", { op: use, path: /workspace/base/demo }]
@@ -52,8 +52,8 @@ tables:
     rows:
       - ["pck_unknown_op", { op: delete, path: /workspace/base/demo }, "op", "The engine lists, fetches, adds, uploads, removes and uses packs only."]
       - ["pck_use_bad_pack", { op: use, path: /workspace/base/demo, pack: acme }, "pack", "A project uses knackpack, a pack the engine keeps, by its digest, or none."]
-      - ["pck_add_bad_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
-      - ["pck_add_use_bad_digest", { op: add-use, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
+      - ["pck_add_bad_digest", { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
+      - ["pck_add_use_bad_digest", { op: add-use, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8, digest: abc }, "digest", "Add a pack with the digest the page showed after fetching it."]
       - ["pck_remove_bad_digest", { op: remove, path: /workspace/base/demo, digest: abc }, "digest", "Remove a pack by the digest the page shows."]
       - ["pck_upload_hooks", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: hooks/hooks.json, text: "{}" }] }, "refused upload", "The engine refused this upload: The upload's hooks/hooks.json isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."]
       - ["pck_upload_dotdot", { op: upload, path: /workspace/base/demo, name: acme, files: [{ path: agents/../bin/x, text: x }] }, "refused upload", "The engine refused this upload: The upload's agents/../bin/x isn't a plain path under agents/, skills/<skill>/ or commands/, or the manifest software-factory-pack.json at its top: an upload holds no hooks, servers, settings or programs."]
@@ -81,9 +81,9 @@ tables:
     waive: { EXE-09: { rows: [pck_fetch_http, pck_fetch_branch, pck_fetch_empty_url, pck_fetch_empty_commit], reason: "every row is refused with 400 for its op or a value before the handler reaches a pack or a project's choice, so nothing can be removed or overwritten" } }
     columns: ["case", "body", "error", "field", "message"]
     rows:
-      - ["pck_fetch_http", { op: fetch, path: /workspace/base/demo, url: "http://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "url", "Needs a plain https address of a git repository."]
+      - ["pck_fetch_http", { op: fetch, path: /workspace/base/demo, url: "http://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8 }, "url", "url", "Needs a plain https address of a git repository."]
       - ["pck_fetch_branch", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: main }, "commit", "commit", "Needs a full 40-character commit hash."]
-      - ["pck_fetch_empty_url", { op: fetch, path: /workspace/base/demo, url: "", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }, "url", "url", "Needs a plain https address of a git repository."]
+      - ["pck_fetch_empty_url", { op: fetch, path: /workspace/base/demo, url: "", commit: 232351333737490290fe3b3ce542e848af1973b8 }, "url", "url", "Needs a plain https address of a git repository."]
       - ["pck_fetch_empty_commit", { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: "" }, "commit", "commit", "Needs a full 40-character commit hash."]
   - id: PCK-T03
     name: "/api/packs answers 404 for a project it doesn't list and a pack it doesn't keep"
@@ -124,15 +124,15 @@ tables:
     waive: { EXE-09: { rows: [pck_refused_key, pck_bad_step, pck_missing_agent, pck_name_knackpack, pck_agent_hooks, pck_agent_skills, pck_mcp_file, pck_plugin_hooks_key, pck_skill_shell], reason: "every row is a fetch, which keeps nothing, and each is refused with 400 for what the commit holds, so nothing can be removed or overwritten" } }
     columns: ["case", "commit", "message"]
     rows:
-      - ["pck_refused_key", "6cf86b6cbb1065275770c519a4e4a7ac9d405a2f", "The engine refused this pack: its software-factory-pack.json: the key \"tools\" isn't a pack's to set: the engine sets the reviewers' tools: read-only, the same for every pack."]
-      - ["pck_bad_step", "b206dba85b178eb50d2fb4360395eae8c9d5589f", "The engine refused this pack: its software-factory-pack.json: \"steps\": the define step must name one of the pack's own commands, /acme:<command>."]
-      - ["pck_missing_agent", "3c666bcc75a8539ed3e0852b34a5f1e50379ab3d", "The engine refused this pack: its manifest gives the bug hunter role to \"ghost\", which isn't an agent in its agents folder."]
-      - ["pck_name_knackpack", "0afd61ca00c510612edf2b3a8ee0521941b011a3", "The engine refused this pack: its software-factory-pack.json: \"name\": the name knackpack belongs to the engine's own plugins, so a pack can't take it."]
-      - ["pck_agent_hooks", "d07cd11d8bf2f7fa63f90c3fe658706d7101312b", "The engine refused this pack: its agent agents/bug-finder.md has the front matter key hooks, which a reviewer pack can't hold: hooks would run commands in the trusted reviewer container."]
-      - ["pck_agent_skills", "8002f97861152bf30265fba17396928d8ba66252", "The engine refused this pack: its agent agents/bug-finder.md has the front matter key skills, which a reviewer pack can't hold: skills loads instructions and scripts reviews don't allow."]
-      - ["pck_mcp_file", "26907803f6f1a53a8f872a68af4c30c1f3e9b6bd", "The engine refused this pack: the commit has .mcp.json in its top folder, which can start programs; the engine doesn't take a pack that brings MCP or LSP servers, monitors, workflows or settings."]
-      - ["pck_plugin_hooks_key", "173b6602cbdb0498228f8e4804b09c13b08b4e1c", "The engine refused this pack: its .claude-plugin/plugin.json has the key \"hooks\", which this engine doesn't know as one that starts no programs; a pack's plugin.json holds only keys that start none."]
-      - ["pck_skill_shell", "bd510fee59820c5fb172033cc965c55194b444ba", "The engine refused this pack: the commit's skills/notes/SKILL.md holds ! before a backtick; the engine doesn't install a pack using argument placeholders or inline shell in its skills or commands, which Claude Code runs as it loads them, in the trusted reviewer container too when an agent preloads one."]
+      - ["pck_refused_key", "e327572f2dc8793f93026cb0f219f7b9f865c15e", "The engine refused this pack: its software-factory-pack.json: the key \"tools\" isn't a pack's to set: the engine sets the reviewers' tools: read-only, the same for every pack."]
+      - ["pck_bad_step", "860bcfea7adb907099c6c9fae7c2a13bb3ea23b4", "The engine refused this pack: its software-factory-pack.json: \"steps\": the define step must name one of the pack's own commands, /acme:<command>."]
+      - ["pck_missing_agent", "8bbc5d60b05b4495cf2a1de14831df42164600dd", "The engine refused this pack: its manifest gives the bug hunter role to \"ghost\", which isn't an agent in its agents folder."]
+      - ["pck_name_knackpack", "e373c0fec4b01b62482e17ac931fdc032845318b", "The engine refused this pack: its software-factory-pack.json: \"name\": the name knackpack belongs to the engine's own plugins, so a pack can't take it."]
+      - ["pck_agent_hooks", "9cdfc4b766fd76b0453e293693e805c78e0ced06", "The engine refused this pack: its agent agents/bug-finder.md has the front matter key hooks, which a reviewer pack can't hold: hooks would run commands in the trusted reviewer container."]
+      - ["pck_agent_skills", "c76be177f244f1e6e5c154a3818e2eb92e7d12c1", "The engine refused this pack: its agent agents/bug-finder.md has the front matter key skills, which a reviewer pack can't hold: skills loads instructions and scripts reviews don't allow."]
+      - ["pck_mcp_file", "40893d2b8192db7f3ab18a14ca48340c40d9e489", "The engine refused this pack: the commit has .mcp.json in its top folder, which can start programs; the engine doesn't take a pack that brings MCP or LSP servers, monitors, workflows or settings."]
+      - ["pck_plugin_hooks_key", "4cafec0e2a79c28a03d04b045d163cc2d71e7def", "The engine refused this pack: its .claude-plugin/plugin.json has the key \"hooks\", which this engine doesn't know as one that starts no programs; a pack's plugin.json holds only keys that start none."]
+      - ["pck_skill_shell", "1f59d9da58ab0ca66716b6908ec5a699bca7fd93", "The engine refused this pack: the commit's skills/notes/SKILL.md holds ! before a backtick; the engine doesn't install a pack using argument placeholders or inline shell in its skills or commands, which Claude Code runs as it loads them, in the trusted reviewer container too when an agent preloads one."]
 
   - id: PCK-T05
     name: "An uploaded folder that has no manifest, names another pack, gives a role to an agent it lacks, sets a key the engine owns, or holds an agent with a refused or mismatched front matter is refused, naming the reason, and nothing is kept"
@@ -377,15 +377,15 @@ scenarios:
           method: POST
           path: "/api/packs"
           headers: { Origin: "${page.origin}" }
-          body: { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }
+          body: { op: fetch, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8 }
         expect:
           equal:
             "$.status": 200
             "$.body.pack.name": acme
             "$.body.pack.version": "1.0.0"
             "$.body.pack.digest": a5834966cb9511c24ecfd0fc887cca77edcb977e4e9fa39faf4d42b43b8dd67b
-            "$.body.pack.sessionDigest": 2e6ad49c8f22e571fc629c0dd929e374d6555259edb13a4fb70acf494f955ec7
-            "$.body.pack.source": { kind: git, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0 }
+            "$.body.pack.sessionDigest": 358fd72a682dd75b8d1e8174965b4ee421de0377092e7bee00edff396ef3aa0b
+            "$.body.pack.source": { kind: git, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8 }
             "$.body.pack.roles": { bug-hunter: bug-finder, simplicity: simplicity-checker }
             "$.body.pack.steps": { define: "/acme:requirements", plan: "/acme:plan", review: "/acme:handoff" }
             "$.body.pack.documents": true
@@ -414,7 +414,7 @@ scenarios:
           method: POST
           path: "/api/packs"
           headers: { Origin: "${page.origin}" }
-          body: { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: ac242722936a95e8cbf18f71d1d00b9d433cda03, digest: "${digest}" }
+          body: { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 495e3ac0e6e888678d154a4d2d0f7269e97ed54d, digest: "${digest}" }
         expect:
           equal:
             "$.status": 409
@@ -441,7 +441,7 @@ scenarios:
           method: POST
           path: "/api/packs"
           headers: { Origin: "${page.origin}" }
-          body: { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0, digest: "${digest}" }
+          body: { op: add, path: /workspace/base/demo, url: "https://gitserver.test:8443/public/acme-pack.git", commit: 232351333737490290fe3b3ce542e848af1973b8, digest: "${digest}" }
         expect:
           equal:
             "$.status": 200
@@ -463,8 +463,8 @@ scenarios:
             "$.status": 200
             "$.body.entries[0].kind": pack
             "$.body.entries[0].result": added
-            "$.body.entries[0].commit": c8c68ae1519ca2583cc39c6b8c3b8be5a93986f0
-            "$.body.entries[0].reason": "the developer added the pack acme 1.0.0 from git, pinned at commit c8c68ae1519c, on the page"
+            "$.body.entries[0].commit": 232351333737490290fe3b3ce542e848af1973b8
+            "$.body.entries[0].reason": "the developer added the pack acme 1.0.0 from git, pinned at commit 232351333737, on the page"
       - id: use-acme
         do: http.request
         identity: page
@@ -478,6 +478,7 @@ scenarios:
             "$.status": 200
             "$.body.using": "${digest}"
             "$.body.packs[0].usedBy": [demo]
+            "$.body.packs[0].removeOff": "The pack acme reviews demo. Pick another pack for that project first."
       - id: acme-reviews
         do: http.request
         identity: page
@@ -546,6 +547,7 @@ scenarios:
             "$.status": 200
             "$.body.using": knackpack
             "$.body.packs[0].usedBy": []
+          absent: ["$.body.packs[0].removeOff"]
       - id: knackpack-again
         do: http.request
         identity: page
@@ -673,6 +675,7 @@ scenarios:
             "$.status": 200
             "$.body.using": "${digest}"
             "$.body.packs[0].usedBy": [demo]
+            "$.body.packs[0].removeOff": "The pack beta reviews demo. Pick another pack for that project first."
           absent: ["$.body.packs[1]"]
       - id: start
         do: http.request
@@ -754,7 +757,7 @@ scenarios:
             "$.body.gate.reviewers[1].role": simplicity
           absent: ["$.body.gate.reviewers[2]"]
           any:
-            "$.body.gate.types": { id: change, name: Code change, steps: [implement, review, deliver], push: true }
+            "$.body.gate.types": { id: change, name: Code change, steps: [implement, review, push], push: true }
       - id: use-knackpack
         do: http.request
         identity: page
@@ -768,6 +771,7 @@ scenarios:
             "$.status": 200
             "$.body.using": knackpack
             "$.body.packs[0].usedBy": []
+            "$.body.packs[0].removeOff": "A saved session runs the pack beta, and keeps it across Stop and Wake. Delete that session first."
         waive: { FIX-05: "knackpack is the built-in pack's fixed id and can't carry ${run.id}; no earlier step can send remove's request and read the project's choice, since a remove of this run's digest is an act, but use-beta's answer showed the project using this run's digest before this step, and still-kept reads this step's audit entry" }
       - id: keeps-beta
         do: http.request
@@ -915,7 +919,7 @@ scenarios:
             "$.body.gate.commands": { review: "/beta:handoff" }
             "$.body.gate.reviewers[0].type": "knackpack:adversarial-reviewer"
           any:
-            "$.body.gate.types": { id: change, name: Code change, steps: [implement, review, deliver], push: true }
+            "$.body.gate.types": { id: change, name: Code change, steps: [implement, review, push], push: true }
       - id: stop-again
         do: http.request
         identity: page

@@ -3,7 +3,6 @@ paths:
   - "web/**/*.ts"
   - "web/styles/*.css"
   - "web/index.html"
-  - "compose.browser.yaml"
   - "internal/core/session/bridge.go"
   - "internal/adapters/http/page/stream.go"
 ---
@@ -12,11 +11,11 @@ paths:
 
 The page has three budgets: switching to another session under 150 ms, an event shown under 200 ms after the page reads it from the event stream, and a diff open under 300 ms. They are checked by hand, not by a test, in the containerized Chromium against the development overlay, after "Setup" in [Hand checks for the gate and reviews](gate-hand-checks.md) (its shell functions and project). Each time is measured in the page with the Performance API: `performance.now()` before the action, and again in the first task after the next frame (`requestAnimationFrame`, then a zero-delay timer). A run over a budget is a defect to profile and fix.
 
-**The browser.** `compose.browser.yaml` builds the image `software-factory:dev-browser` (Chromium and the fakes). Build only that image, so the stack keeps the development image, and run Chromium from it on the host network: it reaches the page at `127.0.0.1:7799` as a person who types the address does, so the page's `Sec-Fetch-Site` check passes (an extension's navigation counts as cross-site and is refused), and its DevTools port, 9222, stays on loopback. The image's `chromium` command adds `--no-sandbox --disable-dev-shm-usage` (docs/reference/image-and-compose.md "The image and Compose").
+**The browser.** Chromium is in the development image, `software-factory:dev`, which the development overlay from "Setup" builds; the first command below builds it again without touching the running stack. Run Chromium from that image in a container of its own on the host network: it reaches the page at `127.0.0.1:7799` as a person who types the address does, so the page's `Sec-Fetch-Site` check passes (an extension's navigation counts as cross-site and is refused), and its DevTools port, 9222, stays on loopback. The image's `chromium` command adds `--no-sandbox --disable-dev-shm-usage`.
 
 ```bash
-SF_BROWSER_STAGE=dev-browser docker compose -f compose.yaml -f compose.dev.yaml -f compose.browser.yaml build helper
-docker run -d --name sf-browser --network host --entrypoint chromium software-factory:dev-browser --headless=new --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=/tmp/profile --window-size=1440,900 --no-first-run about:blank
+COMPOSE_FILE=compose.yaml:compose.dev.yaml docker compose build helper
+docker run -d --name sf-browser --network host --entrypoint chromium software-factory:dev --headless=new --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=/tmp/profile --window-size=1440,900 --no-first-run about:blank
 ```
 
 **The data.** 20 sessions: `p01` gets a 5,000-line diff, `p03` to `p20` a turn of 100 steps each, so no conversation is empty, and `p02` gets its 5,000 events from the page itself during the run. They can't be sent before: for a page that opens later, the engine keeps only the last 2,000 events of a development ACP session (`bridgeRing`); a message holds at most 20,000 characters (`session.MaxText`), so they take two scripts of 2,500 steps; and one page key works at a time, so `sf` can't send while the browser holds it.

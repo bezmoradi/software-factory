@@ -2,7 +2,7 @@ version: 2
 suite: diagnostics
 scenarios:
   - id: DGN-001
-    name: "Diagnostics, built after every other suite has run, is a software-factory-diagnostics/1 text with no project name, git host, path, URL or address in it"
+    name: "Diagnostics, built after every other suite has run, is a software-factory-diagnostics/1 text with a usage section and no project name, git host, path, URL or address in it"
     steps:
       - id: diagnostics
         do: http.request
@@ -18,7 +18,7 @@ scenarios:
             "$.headers.content-type": ["application/json; charset=utf-8"]
           keys: { "$.body": [text] }
           matches:
-            "$.body.text": "(?s)software-factory-diagnostics/1\\n.*"
+            "$.body.text": "(?s)software-factory-diagnostics/1\\n.*\\n\\[usage\\]\\n.*"
             "$.headers.x-sf-request[0]": "[0-9a-f]{16}"
           excludes:
             "$.body.text": [demo, proctor, gitserver, /workspace, /var/lib, /tmp, "https://", "http://", "@"]

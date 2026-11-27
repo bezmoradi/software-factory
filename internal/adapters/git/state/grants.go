@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
-	"slices"
 	"sync"
 	"time"
 
@@ -29,23 +28,22 @@ func NewGrants(dir string) Grants { return Grants{Dir: dir, mu: &sync.Mutex{}} }
 var _ session.GrantStore = Grants{}
 
 type grantJSON struct {
-	ID          string   `json:"id"`
-	Host        string   `json:"host,omitempty"`
-	Port        int      `json:"port,omitempty"`
-	Credential  string   `json:"credential,omitempty"`
-	Name        string   `json:"name,omitempty"`
-	Bound       []string `json:"bound,omitempty"`
-	Delivery    string   `json:"delivery,omitempty"`
-	Scope       string   `json:"scope"`
-	Session     string   `json:"session"`
-	Project     string   `json:"project"`
-	Expires     int64    `json:"expires,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	AskedBy     string   `json:"askedBy"`
-	Preset      string   `json:"preset,omitempty"`
-	Made        int64    `json:"made"`
-	GitAccepted []string `json:"gitAccepted,omitempty"`
-	Owner       string   `json:"owner,omitempty"`
+	ID         string   `json:"id"`
+	Host       string   `json:"host,omitempty"`
+	Port       int      `json:"port,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Bound      []string `json:"bound,omitempty"`
+	Delivery   string   `json:"delivery,omitempty"`
+	Scope      string   `json:"scope"`
+	Session    string   `json:"session"`
+	Project    string   `json:"project"`
+	Expires    int64    `json:"expires,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+	AskedBy    string   `json:"askedBy"`
+	Preset     string   `json:"preset,omitempty"`
+	Made       int64    `json:"made"`
+	Owner      string   `json:"owner,omitempty"`
 }
 
 type grantsJSON struct {
@@ -75,18 +73,6 @@ func boundOK(list []string) bool {
 	return true
 }
 
-func gitAcceptedOK(list, hosts []string) bool {
-	if len(list) > session.MaxCredentialBound {
-		return false
-	}
-	for i, h := range list {
-		if !session.ValidBoundEntry(h) || slices.Contains(list[:i], h) || hosts != nil && !slices.Contains(hosts, h) {
-			return false
-		}
-	}
-	return true
-}
-
 func grantTargetOK(j grantJSON) bool {
 	if j.Credential == "" && j.Port != 0 {
 		return session.ValidPortEntry(session.PortTarget(j.Host, j.Port)) && session.HostName(j.Host) == j.Host && j.Name == "" && j.Bound == nil && j.Delivery == ""
@@ -108,10 +94,6 @@ func grantOf(j grantJSON) (session.Grant, bool) {
 	}
 	g := session.Grant{ID: j.ID, Host: j.Host, Port: j.Port, Credential: j.Credential, Name: j.Name, Bound: j.Bound, Delivery: j.Delivery, Scope: j.Scope, Session: j.Session, Project: j.Project,
 		Reason: reason, AskedBy: j.AskedBy, Preset: j.Preset, Made: time.Unix(j.Made, 0)}
-	if !gitAcceptedOK(j.GitAccepted, g.Hosts()) {
-		return session.Grant{}, false
-	}
-	g.GitAccepted = j.GitAccepted
 	if j.Expires > 0 {
 		g.Expires = time.Unix(j.Expires, 0)
 	}
@@ -148,7 +130,7 @@ func (s Grants) Save(list []session.Grant) error {
 	f := grantsJSON{Version: grantsVersion, Grants: make([]grantJSON, 0, len(list))}
 	for _, g := range list {
 		j := grantJSON{ID: g.ID, Host: g.Host, Port: g.Port, Credential: g.Credential, Name: g.Name, Bound: g.Bound, Delivery: g.Delivery, Scope: g.Scope, Session: g.Session, Project: g.Project,
-			Reason: g.Reason, AskedBy: g.AskedBy, Preset: g.Preset, Made: g.Made.Unix(), GitAccepted: g.GitAccepted, Owner: owner}
+			Reason: g.Reason, AskedBy: g.AskedBy, Preset: g.Preset, Made: g.Made.Unix(), Owner: owner}
 		if !g.Expires.IsZero() {
 			j.Expires = g.Expires.Unix()
 		}

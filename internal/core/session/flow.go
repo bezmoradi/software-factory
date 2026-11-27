@@ -38,26 +38,32 @@ type FlowZone struct {
 	Untrusted bool
 }
 
+type FlowWire struct {
+	Label string
+	Phase string
+	Tone  string
+}
+
 type FlowKey struct {
 	Swatch string
 	Words  string
 }
 
 type FlowModel struct {
-	Commit         string
-	Reviews        []FlowNode
-	Runs           []FlowNode
-	Gate           FlowNode
-	Routes         []FlowRoute
-	RoutesLabel    string
-	Wires          []string
-	OutLive        bool
-	Zones          []FlowZone
-	Key            []FlowKey
-	Caption        string
-	Expires        time.Time
-	ExpiredNote    string
-	ExpiredCaption string
+	Commit        string
+	Reviews       []FlowNode
+	Runs          []FlowNode
+	Gate          FlowNode
+	Routes        []FlowRoute
+	RoutesLabel   string
+	Wires         []FlowWire
+	Zones         []FlowZone
+	Key           []FlowKey
+	Status        FlowLook
+	Detail        string
+	Expires       time.Time
+	ExpiredNote   string
+	ExpiredStatus FlowLook
 }
 
 type flowReviewer struct {
@@ -128,6 +134,9 @@ var flowKey = []FlowKey{
 	{"solid", "Solid: done or taken"},
 	{"dashed", "Dashed: waiting, not taken or not counted"},
 	{"moving", "Moving dashes: running"},
+	{"ok", "Green: passed, allowed or pushed"},
+	{"warn", "Amber: held, overridden or no verdict"},
+	{"bad", "Red: blocked, failed, denied or refused"},
 	{"untrusted", "Dashed zone: untrusted, where the agent's code runs"},
 }
 
@@ -234,7 +243,20 @@ func tally(words []string) string {
 	return strings.Join(parts, ", ")
 }
 
-func flowCaption(m flowInput, note string) string {
+func flowStatus(m flowInput, note string) FlowLook {
+	if m.outcome == "" {
+		g := gateLook(m.gate)
+		return FlowLook{g.Icon, g.Tone, upperFirst(g.Word) + "; no push decided yet."}
+	}
+	l := PushResultLook(m.outcome)
+	extra := ""
+	if note != "" {
+		extra = ", " + note
+	}
+	return FlowLook{l.Icon, l.Tone, routeLabel(taken(m.outcome), m.outcome) + extra + "."}
+}
+
+func flowDetail(m flowInput) string {
 	var said []string
 	if m.commit != "" {
 		said = append(said, "Commit "+shortSHA7(m.commit)+".")
@@ -266,15 +288,6 @@ func flowCaption(m flowInput, note string) string {
 			words = append(words, runLook(r.state).Word)
 		}
 		said = append(said, countWord(len(m.runs), "verification run", "verification runs")+": "+tally(words)+".")
-	}
-	if m.outcome != "" {
-		extra := ""
-		if note != "" {
-			extra = ", " + note
-		}
-		said = append(said, "Gate: "+routeLabel(taken(m.outcome), m.outcome)+extra+".")
-	} else {
-		said = append(said, "Gate: "+gateLook(m.gate).Word+"; no push decided yet.")
 	}
 	return strings.Join(said, " ")
 }
@@ -332,6 +345,70 @@ func flowOutLabel(m flowInput) string {
 	return strings.Join(said, ", ")
 }
 
+func waiting(state string) bool {
+	return state == "pending" || state == "running"
+}
+
+func verdictTone(m flowInput) string {
+	tone := ""
+	for _, r := range m.reviewers {
+		if !r.required {
+			continue
+		}
+		switch r.state {
+		case "block", "failed":
+			return "bad"
+		case "pass":
+			tone = cmpOr(tone, "ok")
+		default:
+			tone = "warn"
+		}
+	}
+	for _, r := range m.runs {
+		switch r.state {
+		case "failed":
+			return "bad"
+		case "passed":
+			tone = cmpOr(tone, "ok")
+		default:
+			tone = "warn"
+		}
+	}
+	return tone
+}
+
+func flowWires(m flowInput) []FlowWire {
+	snapshot := FlowWire{}
+	started := false
+	for _, r := range m.reviewers {
+		started = started || r.state != "pending"
+	}
+	for _, r := range m.runs {
+		started = started || r.state != "pending"
+	}
+	if len(m.reviewers)+len(m.runs) > 0 {
+		snapshot.Label = "snapshot"
+		if !started {
+			snapshot.Phase = "pending"
+		}
+	}
+	verdicts := FlowWire{Label: flowOutLabel(m)}
+	open := slices.ContainsFunc(m.reviewers, func(r flowReviewer) bool { return r.required && waiting(r.state) }) || slices.ContainsFunc(m.runs, func(r flowRun) bool { return waiting(r.state) })
+	switch {
+	case m.gate.state == "deciding":
+		verdicts.Phase = "running"
+	case open:
+		verdicts.Phase = "pending"
+	default:
+		verdicts.Tone = verdictTone(m)
+	}
+	decision := FlowWire{Label: "decision", Phase: "pending"}
+	if m.outcome != "" {
+		decision.Phase, decision.Tone = "", PushResultLook(m.outcome).Tone
+	}
+	return []FlowWire{snapshot, verdicts, decision}
+}
+
 func flowOf(m flowInput) FlowModel {
 	out := FlowModel{Commit: shortSHA7(m.commit), Zones: flowZones, Key: flowKey, Reviews: []FlowNode{}, Runs: []FlowNode{}}
 	if !m.looked {
@@ -376,14 +453,12 @@ func flowOf(m flowInput) FlowModel {
 	out.RoutesLabel = "The gate's routes, none taken yet"
 	if m.outcome != "" {
 		out.RoutesLabel = "The gate's routes"
+		l := PushResultLook(m.outcome)
+		out.Gate.Look.Icon, out.Gate.Look.Tone = l.Icon, l.Tone
 	}
-	snapshot := ""
-	if len(m.reviewers)+len(m.runs) > 0 {
-		snapshot = "snapshot"
-	}
-	out.Wires = []string{snapshot, flowOutLabel(m), "decision"}
-	out.OutLive = m.gate.state == "deciding"
-	out.Caption = flowCaption(m, m.note)
+	out.Wires = flowWires(m)
+	out.Status = flowStatus(m, m.note)
+	out.Detail = flowDetail(m)
 	return out
 }
 
@@ -453,7 +528,7 @@ func CardFlow(p *PushView) *FlowModel {
 	if p.Result == "held" && p.Card != "" && !p.Expires.IsZero() {
 		m.Expires = p.Expires
 		m.ExpiredNote = "card expired"
-		m.ExpiredCaption = flowCaption(in, m.ExpiredNote)
+		m.ExpiredStatus = flowStatus(in, m.ExpiredNote)
 	}
 	return &m
 }

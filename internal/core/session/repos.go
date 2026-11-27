@@ -130,6 +130,7 @@ type RepoAdmin interface {
 	View() (RepoView, error)
 	Add(raw string) (Cloning, error)
 	Remove(name string) error
+	RemoveOff(name, url string) string
 	SaveToken(ctx context.Context, host, token string) (TokenInfo, error)
 	RemoveToken(host string) error
 }
@@ -626,28 +627,65 @@ func (c *Repos) removeLocked(name string) (ProjectID, error) {
 	if len(kept) == len(recs) {
 		return ProjectID{}, notFound("repository", "That repository is no longer in the list.")
 	}
-	for _, k := range c.cloning {
-		if k.Name == name || sameRepository(k.URL, recs[at].URL) {
-			return ProjectID{}, conflict("cloning", "This repository is being cloned again. Wait for the clone to finish, then remove it.")
-		}
+	if err := c.removeBusyLocked(name, recs[at].URL); err != nil {
+		return ProjectID{}, err
 	}
-	if _, busy := c.settling[name]; busy {
-		return ProjectID{}, conflict("cloning", "This repository is still being added. Wait a moment, then remove it.")
-	}
-	if c.sessions != nil {
-		if n := c.sessions(name); n > 0 {
-			what := "its session"
-			if n > 1 {
-				what = "its " + strconv.Itoa(n) + " sessions"
-			}
-			return ProjectID{}, conflict("sessions", "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
-		}
+	if err := sessionsHeld(c.sessions, name); err != nil {
+		return ProjectID{}, err
 	}
 	if err := c.cfg.Records.Save(kept); err != nil {
 		return ProjectID{}, conflict("records", "The engine couldn't save its list of repositories.")
 	}
 	c.cfg.Logger.Info("repository", "event", "removed")
 	return ProjectID{Name: name, URL: recs[at].URL}, nil
+}
+
+func (c *Repos) RemoveOff(name, url string) string {
+	c.mu.Lock()
+	err := c.recloningLocked(name, url)
+	count := c.sessions
+	c.mu.Unlock()
+	if err == nil {
+		err = sessionsHeld(count, name)
+	}
+	if err != nil {
+		return err.Message
+	}
+	return ""
+}
+
+func (c *Repos) recloningLocked(name, url string) *Error {
+	for _, k := range c.cloning {
+		if k.Name == name || sameRepository(k.URL, url) {
+			return conflict("cloning", "This repository is being cloned again. Wait for the clone to finish, then remove it.")
+		}
+	}
+	return nil
+}
+
+func (c *Repos) removeBusyLocked(name, url string) *Error {
+	if err := c.recloningLocked(name, url); err != nil {
+		return err
+	}
+	if _, busy := c.settling[name]; busy {
+		return conflict("cloning", "This repository is still being added. Wait a moment, then remove it.")
+	}
+	return nil
+}
+
+func sessionsHeld(count func(name string) int, name string) *Error {
+	if count == nil {
+		return nil
+	}
+	n := count(name)
+	if n == 0 {
+		return nil
+	}
+	what := "its session"
+	if n > 1 {
+		what = "its " + strconv.Itoa(n) + " sessions"
+	}
+	return conflict("sessions", "This repository still has sessions, running or stopped. Stop and delete "+what+" first.")
 }
 
 func tokenShape(host, token string) string {

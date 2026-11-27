@@ -28,7 +28,7 @@ scenarios:
             "$.container.devices": 0
             "$.container.device_requests": 0
             "$.container.publish_all_ports": false
-            "$.container.ports": [{ container_port: "8080/tcp", host_ip: "127.0.0.1", host_port: "${page.port}" }]
+            "$.container.ports": [{ container_port: "8080/tcp", host_ip: "127.0.0.1", host_port: "${page.port}" }, { container_port: "8082/tcp", host_ip: "127.0.0.1", host_port: "${page.preview_port}" }]
             "$.container.tmpfs": ["/tmp"]
             "$.container.mounts":
               - { type: volume, destination: /actions, read_only: false, volume: sf-proctor_actions, subpath: null, source: null }

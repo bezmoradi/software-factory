@@ -59,6 +59,7 @@ type verifyKindJSON struct {
 	Queued   bool           `json:"queued"`
 	Current  *verifyRunJSON `json:"current"`
 	Why      string         `json:"why"`
+	Off      string         `json:"off"`
 }
 
 type verifyViewJSON struct {
@@ -74,6 +75,7 @@ type verifyViewJSON struct {
 	Why      string          `json:"why"`
 	Runs     []verifyRunJSON `json:"runs"`
 	Browser  verifyKindJSON  `json:"browser"`
+	Off      string          `json:"off"`
 }
 
 func verifyRunJSONOf(r session.VerifyRun) verifyRunJSON {
@@ -99,9 +101,9 @@ func currentJSON(r *session.VerifyRun) *verifyRunJSON {
 }
 
 func verifyViewJSONOf(v session.VerifyView) verifyViewJSON {
-	out := verifyViewJSON{Head: v.Head, Branch: v.Branch, Command: v.Command, HasCheck: v.HasCheck, Image: v.Image, Required: v.Required, Busy: v.Busy, Queued: v.Queued, Why: v.Why,
+	out := verifyViewJSON{Head: v.Head, Branch: v.Branch, Command: v.Command, HasCheck: v.HasCheck, Image: v.Image, Required: v.Required, Busy: v.Busy, Queued: v.Queued, Why: v.Why, Off: v.Off,
 		Runs: make([]verifyRunJSON, 0, len(v.Runs)), Current: currentJSON(v.Current),
-		Browser: verifyKindJSON{Command: v.Browser.Command, Has: v.Browser.Has, Required: v.Browser.Required, Queued: v.Browser.Queued, Current: currentJSON(v.Browser.Current), Why: v.Browser.Why}}
+		Browser: verifyKindJSON{Command: v.Browser.Command, Has: v.Browser.Has, Required: v.Browser.Required, Queued: v.Browser.Queued, Current: currentJSON(v.Browser.Current), Why: v.Browser.Why, Off: v.Browser.Off}}
 	for _, r := range v.Runs {
 		out.Runs = append(out.Runs, verifyRunJSONOf(r))
 	}

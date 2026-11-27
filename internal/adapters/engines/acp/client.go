@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"path"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/bezmoradi/software-factory/internal/core/agent"
@@ -280,8 +279,7 @@ func (c *Client) TakesImages() bool {
 
 func (c *Client) PromptWith(ctx context.Context, text string, parts []session.Attachment) error {
 	blocks := []map[string]any{}
-	note := session.AttachedNote(parts, c.TakesImages())
-	if t := strings.TrimSpace(note + "\n\n" + text); t != "" {
+	if t := session.WithAttachedNote(text, session.AttachedNote(parts, c.TakesImages())); t != "" {
 		blocks = append(blocks, map[string]any{"type": "text", "text": t})
 	}
 	for _, p := range parts {

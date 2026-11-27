@@ -21,7 +21,7 @@ const (
 	pushRecordChecked = "Reported by the agent from inside its container; the engine didn't run these. They are the last test, lint, type-check and build commands it ran before this push."
 	pushRecordNoCheck = "None held: the agent reported no test, lint, type-check or build command before this push, or the engine restarted since, as it keeps them in memory only."
 	pushRecordNoRun   = "The engine holds no verification run of this commit from before the push."
-	pushRecordHeader  = "Built by Software Factory from its own records: the audit file, the review records, the approvals and the verification runs. Text it didn't write itself: the person's reasons, the reviewers' verdict lines, the approved requirements, the commands under agentReported, which the agent reported, and the check's output under verification.tail. Tokens and keys are masked."
+	pushRecordHeader  = "Built by Software Factory from its own records: the audit file, the review records, the approvals and the verification runs. Text it didn't write itself: the person's reasons, the reviewers' verdict lines, the approved requirements, plan or root cause, the commands under agentReported, which the agent reported, and the check's output under verification.tail. Tokens and keys are masked."
 )
 
 type PushRecord struct {
@@ -291,11 +291,18 @@ func reviewOf(k review.Key, e ReviewEntry) pushReviewJSON {
 
 func (p *PushRecords) approvals(lines []AuditEntry, sid string, at time.Time) pushApprovalsJSON {
 	var out pushApprovalsJSON
-	var saved *SavedApproval
+	var req, plan *SavedApproval
 	if p.cfg.Work != nil {
-		req, _, kind, ok := p.cfg.Work.SavedApprovals(sid)
+		r, pl, kind, ok := p.cfg.Work.SavedApprovals(sid)
 		if ok {
-			out.WorkType, saved = CleanLine(kind, pushRecordShort), req
+			out.WorkType, req, plan = CleanLine(kind, pushRecordShort), r, pl
+		}
+	}
+	textOf := func(a *pushApprovalJSON, saved *SavedApproval, hash string) {
+		if saved != nil && saved.Hash != "" && saved.Hash == hash && saved.Text != "" {
+			a.Text = maskSecrets(saved.Text)
+		} else {
+			a.TextNotKept = true
 		}
 	}
 	for _, e := range lines {
@@ -305,14 +312,10 @@ func (p *PushRecords) approvals(lines []AuditEntry, sid string, at time.Time) pu
 		a := &pushApprovalJSON{Hash: e.Hash, Commit: e.Commit, Time: e.Time.UTC()}
 		switch {
 		case e.Kind == AuditApproveRequirements && out.Requirements == nil:
-			if saved != nil && saved.Hash != "" && saved.Hash == e.Hash && saved.Text != "" {
-				a.Text = maskSecrets(saved.Text)
-			} else {
-				a.TextNotKept = true
-			}
+			textOf(a, req, e.Hash)
 			out.Requirements = a
 		case e.Kind == AuditApprovePlan && out.Plan == nil:
-			a.TextNotKept = true
+			textOf(a, plan, e.Hash)
 			out.Plan = a
 		}
 	}
@@ -389,6 +392,13 @@ func fitRecord(out *pushRecordJSON) ([]byte, error) {
 		return text, err
 	}
 	steps := []func() bool{
+		func() bool {
+			if out.Approvals.Plan == nil || out.Approvals.Plan.Text == "" {
+				return false
+			}
+			out.Approvals.Plan.Text, out.Approvals.Plan.TextLeftOut = "", true
+			return true
+		},
 		func() bool {
 			if out.Approvals.Requirements == nil || out.Approvals.Requirements.Text == "" {
 				return false

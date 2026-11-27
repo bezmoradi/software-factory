@@ -12,18 +12,14 @@ type AdapterID string
 const Knackpack AdapterID = "knackpack"
 
 type Adapter struct {
-	Name          string
-	Commands      map[Step]string
-	Agents        map[review.Role]string
-	Artifacts     map[Step][]string
-	RootArtifacts map[Step][]string
-	AnyFolder     string
-	Folder        string
-	Documents     Documents
+	Name      string
+	Commands  map[Step]string
+	Agents    map[review.Role]string
+	Folder    string
+	Documents Documents
 }
 
 type Documents struct {
-	Feature      string
 	Requirements string
 	Plan         string
 	RootCause    string
@@ -33,17 +29,11 @@ var defaultAgents = map[review.Role]string{review.BugHunter: "knackpack:adversar
 
 var Adapters = map[AdapterID]Adapter{
 	Knackpack: {
-		Name:     string(Knackpack),
-		Commands: map[Step]string{Define: "/knackpack:challenge-requirements", Plan: "/knackpack:plan-implementation"},
-		Agents:   defaultAgents,
-		Artifacts: map[Step][]string{
-			Define: {"REQUIREMENTS.md"},
-			Plan:   {"PLAN.md"},
-		},
-		RootArtifacts: map[Step][]string{Define: {KnackpackFeature}, Plan: {KnackpackFeature}},
-		AnyFolder:     ".knackpack/*",
-		Folder:        ".knackpack",
-		Documents:     Documents{Feature: KnackpackFeature, Requirements: "REQUIREMENTS.md", Plan: "PLAN.md", RootCause: RootCauseFile},
+		Name:      string(Knackpack),
+		Commands:  map[Step]string{Define: "/knackpack:challenge-requirements", Plan: "/knackpack:plan-implementation"},
+		Agents:    defaultAgents,
+		Folder:    KnackpackFolder,
+		Documents: Documents{Requirements: "REQUIREMENTS.md", Plan: "PLAN.md", RootCause: RootCauseFile},
 	},
 }
 
@@ -58,11 +48,8 @@ func PackAdapter(m PackManifest) Adapter {
 		a.Agents[role] = m.Name + ":" + agent
 	}
 	if d := m.Documents; d != nil {
-		feature := d.Folder + "/feature.json"
-		a.Artifacts = map[Step][]string{Define: {d.Requirements}, Plan: {d.Plan}}
-		a.RootArtifacts = map[Step][]string{Define: {feature}, Plan: {feature}}
-		a.AnyFolder, a.Folder = d.Folder+"/*", d.Folder
-		a.Documents = Documents{Feature: feature, Requirements: d.Requirements, Plan: d.Plan}
+		a.Folder = d.Folder
+		a.Documents = Documents{Requirements: d.Requirements, Plan: d.Plan}
 	}
 	return a
 }

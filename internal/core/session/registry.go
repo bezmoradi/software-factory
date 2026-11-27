@@ -71,6 +71,7 @@ type Admission struct {
 	Box       string
 	Branch    string
 	Doubled   bool
+	Docs      string
 }
 
 type Registration struct {
@@ -148,6 +149,8 @@ type Info struct {
 	Queued          int
 	Unbacked        []TurnMarks
 	StopReason      string
+	OutOfMemory     bool
+	MemoryLimit     int64
 	Uncommitted     *Uncommitted
 	Overlaps        []Overlap
 	Checks          []AgentCheck
@@ -155,6 +158,7 @@ type Info struct {
 	Follow          *FollowView
 	Splits          []SplitView
 	SplitGoal       *SplitGoal
+	Copies          []CopyView
 	Box             string
 	SignInWait      bool
 	HomeHeld        bool
@@ -164,6 +168,9 @@ type Info struct {
 	StalledSince    time.Time
 	Compacting      bool
 	Subagents       bool
+	SubagentRows    []SubagentRow
+	TaskRows        []TaskRow
+	TasksRunning    int
 	CheckpointSaved bool
 	Step            string
 	StepsRan        []string
@@ -212,14 +219,18 @@ type admitted struct {
 	follow       *FollowView
 	splits       []SplitView
 	splitGoal    *SplitGoal
+	copies       []CopyView
 	turnLog      *turnLog
 	unbacked     []TurnMarks
 	lastMessage  string
 	turnSince    time.Time
 	stopReason   string
 	doneItself   bool
+	outOfMemory  bool
+	memoryLimit  int64
 	lastReport   time.Time
-	subagents    bool
+	agents       subagentBook
+	tasks        taskBook
 	compacting   bool
 	contextLevel string
 	checkpointed string
@@ -256,6 +267,8 @@ type Registry struct {
 	order       uint64
 	uploads     *uploadBook
 	shots       screenshotBook
+	docs        docBook
+	scratch     docBook
 	queued      map[string]*queue
 	notes       map[string]map[string]string
 	states      map[string]AgentState
@@ -596,6 +609,7 @@ func sequence(v any) (int64, bool) {
 }
 
 func (r *Registry) Report(given string, b Batch) error {
+	commands := r.promptCommands(given, b)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
@@ -644,9 +658,8 @@ func (r *Registry) Report(given string, b Batch) error {
 				ev = clean.fields(ev["seq"], ev["ts"])
 				if target == nil && seq > c.lastSeq {
 					w := clean
-					moved := docsDiffer(r.workflows[c.sid], &w)
 					r.workflows[c.sid] = &w
-					if moved && r.docsMoved != nil {
+					if r.docsMoved != nil {
 						go r.docsMoved(c.sid)
 					}
 				}
@@ -658,7 +671,12 @@ func (r *Registry) Report(given string, b Batch) error {
 			}
 			c.lastSeq = seq
 			turnEnded = kind == "idle" && c.busy
+			if turnEnded && r.docsMoved != nil {
+				go r.docsMoved(c.sid)
+			}
 			changed = r.noteReport(c.sid, kind, ev, now) || changed
+			changed = r.noteSubagents(c, kind, ev, now) || changed
+			changed = r.noteTasks(c, kind, ev, now) || changed
 			changed = r.noteContext(c.sid, kind, ev) || changed
 			r.limitsSeen(c, kind, ev, now)
 			r.trackTurn(c, kind, ev, seq, now)
@@ -687,6 +705,12 @@ func (r *Registry) Report(given string, b Batch) error {
 			delete(frame, "away")
 			delete(frame, "reported")
 			delete(frame, "checkpoint")
+			for _, k := range foldKeys {
+				delete(frame, k)
+			}
+			maps.Copy(frame, foldOf(kind, ev))
+			maps.Copy(frame, lineOf(kind, ev, r.worktreeOf(c), r.areaOf(c)))
+			stepShown(kind, ev, frame, commands)
 			if cp := r.checkpointOf(c.sid, kind, ev); cp != nil {
 				frame["checkpoint"] = cp
 			}
@@ -712,6 +736,7 @@ func (r *Registry) Report(given string, b Batch) error {
 		}
 	}
 	if changed {
+		r.helpersIdle(c)
 		r.announce(now)
 	}
 	return nil
@@ -852,6 +877,7 @@ func (r *Registry) Admit(sid string, a Admission) {
 	known.Admission = a
 	known.stopReason = ""
 	known.doneItself = false
+	known.outOfMemory, known.memoryLimit = false, 0
 	r.dropOtherBoxes(sid, a.Box)
 	if !known.running && len(known.observations) > 0 {
 		known.observe(level.Observation{By: level.Engine, Event: level.ProcessStarted})
@@ -917,12 +943,17 @@ func (r *Registry) PushLevel(sid string) (level.Result, bool) {
 }
 
 func (r *Registry) Forget(sid string) {
+	r.forget(sid, true)
+}
+
+func (r *Registry) forget(sid string, docs bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.admitted[sid] == nil {
 		return
 	}
 	box := r.admitted[sid].Box
+	folder := cmp.Or(r.admitted[sid].Docs, sid)
 	delete(r.admitted, sid)
 	r.dropCheckers(func(c checker) bool { return c.sid == sid })
 	for key, c := range r.conns {
@@ -951,6 +982,9 @@ func (r *Registry) Forget(sid string) {
 	delete(r.uploads.noImage, sid)
 	r.dropUploads(sid)
 	r.dropScreenshots(box, sid)
+	if docs {
+		r.dropDocs(box, folder)
+	}
 	r.announce(r.now())
 	go r.halt.forget(sid)
 }
@@ -1280,6 +1314,7 @@ func (r *Registry) info(sid string, now time.Time) Info {
 		info.Project = a.Project
 		info.StartedAt = a.StartedAt
 		info.StopReason = a.stopReason
+		info.OutOfMemory, info.MemoryLimit = a.outOfMemory && !a.running, a.memoryLimit
 		info.Lineage = a.Lineage
 		info.Box, info.SignInWait, info.Branch, info.Doubled = a.Box, a.waitSignIn && !a.running, a.Branch, a.Doubled
 		info.HomeHeld = a.homeHeld && !a.running
@@ -1326,6 +1361,10 @@ func (r *Registry) info(sid string, now time.Time) Info {
 				info.SplitGoal = &g
 			}
 		}
+		if len(a.copies) > 0 {
+			info.Copies = slices.Clone(a.copies)
+			info.Needs += copiesWaiting(a.copies)
+		}
 		if st, ok := r.states[sid]; ok {
 			info.State, info.Status, info.WaitingFor = st.State, st.Status, st.WaitingFor
 		} else if a.doneItself && !a.running {
@@ -1369,20 +1408,20 @@ func (r *Registry) controllable(sid string, needControl bool, now time.Time) (*c
 	c := r.only(sid, now)
 	if c == nil {
 		if len(r.liveFor(sid, now)) > 0 {
-			return nil, conflict("disputed", "Two connections claim this session, so the engine takes nothing for it from the page. Press Release on the session to keep the newer one.")
+			return nil, conflict("disputed", saidDisputed)
 		}
-		return nil, conflict("offline", "The session isn't connected to the engine now. Wait for it to reconnect, or wake it.")
+		return nil, conflict("offline", saidOffline)
 	}
 	a := r.admitted[sid]
 	switch {
 	case a == nil:
-		return nil, conflict("unverified", "The engine didn't start this session, so it takes nothing for it from the page.")
+		return nil, conflict("unverified", saidUnverified)
 	case !a.running:
-		return nil, conflict("not running", "The session isn't running. Wake it first.")
+		return nil, conflict("not running", saidNotRunning)
 	case c.protocol < MinProtocol:
-		return nil, conflict("outdated", "The session runs an older plugin than this engine takes. Stop it and wake it again.")
+		return nil, conflict("outdated", saidOutdated)
 	case needControl && !c.controlled:
-		return nil, conflict("read-only", "This session is read-only on this page.")
+		return nil, conflict("read-only", saidReadOnly)
 	}
 	return c, nil
 }
@@ -1442,7 +1481,7 @@ func (r *Registry) message(sid, text string, typed, confirm bool, images, files 
 		first = r.firstStepFor(sid, text, len(images) > 0 || len(files) > 0)
 	}
 	used, err := r.sendTyped(sid, text, confirm, images, files, first)
-	if first.Step != "" && used == "" {
+	if first.Fresh && used == "" {
 		r.unclaimStep(sid, first.Step)
 	}
 	return err
@@ -1455,7 +1494,7 @@ func (r *Registry) sendTyped(sid, text string, confirm bool, images, files []str
 	c, err := r.controllable(sid, true, now)
 	if err != nil {
 		if e, ok := errors.AsType[*Error](err); ok && e.Reason == "read-only" {
-			return "", explained(e, "This session is read-only on this page.")
+			return "", explained(e, saidReadOnly)
 		}
 		return "", err
 	}
@@ -1474,6 +1513,10 @@ func (r *Registry) sendTyped(sid, text string, confirm bool, images, files []str
 	}
 	if name := commandName(text); name != "" && refusedName(name, r.catalogs[sid]) {
 		return "", invalid("command", r.commandRefusedLocked(sid))
+	}
+	sent, noted, step, err := r.stepTextLocked(sid, text, first)
+	if err != nil {
+		return "", err
 	}
 	if c.mode == "bypassPermissions" && !confirm {
 		return "", conflict("confirm", "This session runs with bypassPermissions: Claude runs every tool without asking. Confirm to send anyway.")
@@ -1494,12 +1537,11 @@ func (r *Registry) sendTyped(sid, text string, confirm bool, images, files []str
 	if q != nil && len(q.msgs) >= maxQueued {
 		return "", limited("queue", "Twenty messages already wait for this session to wake.")
 	}
-	sent, noted, step := r.stepTextLocked(sid, text, first)
 	msg["text"] = sent
 	asked := r.checkpointAsked(sid, text)
 	if q != nil {
 		q.msgs = append(q.msgs, msg)
-		q.marked = withStep(q.marked, step)
+		q.marked = withStep(q.marked, first.fresh(step))
 		if noted {
 			r.dropNotesLocked(sid)
 		}

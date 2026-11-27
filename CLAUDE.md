@@ -1,22 +1,20 @@
 # Working on Software Factory
 
-Read `ARCHITECTURE.md` for how the product works and why.
-
 ## Rules
 
 - **No code reads, stores, logs or passes a model credential:** no token file, keychain entry or key variable, and no call to a vendor's OAuth endpoint. Every process the engine starts gets the key variables cleared (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and the like). Reason: each agent must be the vendor's own unmodified binary, signed in by the person with the vendor's own mechanism; vendors' terms forbid products that reuse or route through those sign-ins. The engine holds the git host token the person gives it for pushing, and the credentials the person saves on the page for access grants, which it hands to a session's container only on a grant the person accepts, or to an action's container only for a run the person accepts at its card, runs from the Access dialog, or that runs under an action grant they gave; it refuses one that looks like a model credential. Three exceptions. Two are the owner's decisions of 2026-11-12: the page's Claude Code sign-in passes the one-time code the person pastes from claude.com to Claude Code's own `claude auth login` in a session's container or the reviewer container; and it passes an Anthropic API key the person pastes to that session's container's or the reviewer container's agent-host, which saves it in a file only that container's user can read and points Claude Code's own `apiKeyHelper` setting at it. The third is the owner's decision of 2026-11-13: a company LLM gateway's key or token the person pastes on the page is passed like the Anthropic key, to that session's container's or the reviewer container's agent-host, which saves it in the same file for the same `apiKeyHelper`. The engine keeps, logs and shows back none of them. Whether Anthropic's terms allow the first wasn't checked.
 - **The engine never runs a `git` command line.** It reads `.git` files itself and pushes with a Go git library. Reason: a repository's configuration (`core.fsmonitor`, hooks, diff drivers, credential helpers) names programs git runs, and agents can write `.git`.
-- **Nothing from the agent network is trusted as a decision, a verdict or a push.** The engine accepts only reports and requests from it, and refuses what the page doesn't offer. Reason: anything in the agent container, Claude Code's plugin included, may be run by an agent acting on planted instructions (`ARCHITECTURE.md` "Trust boundary"). Every push goes through the engine only for a session without a git-host grant: with one, its agent can push around the gate, which the red card says (the owner's decisions REQ-271, REQ-272).
-- **After any change to the page server** (`internal/adapters/http/page`, `cmd/server`), **run the page's security checks with curl** (`docs/reference/security-and-sign-in.md` "Page security checks") against the running server. Reason: they keep other sites and processes from driving the page, and only a real request shows the headers and limits actually sent.
-- **No automated tests: don't add `*_test.go` files or `testdata`.** Reason: the owner chose no test strategy. Check a change with the build, `go vet`, `make lint`, `make arch-check`, `make fix-check`, `make vuln`, `make web-check`, `make plugin-check`, `make plugin-validate`, and a live run with `compose.dev.yaml`. A bypass a review finds is fixed and recorded in the change's description, since no test keeps it from coming back. Exception, the owner's decisions of 2026-11-17 and 2026-11-18: Proctor's files under `proctor/` (its specifications of the Go API, run scripts, and the approved transcripts and logs, mutant lists and request bodies it keeps there), run by hand with `make proctor` and not in CI ([`proctor.md`](.claude/rules/proctor.md)); `*_test.go` and `testdata` stay forbidden there too.
+- **Nothing from the agent network is trusted as a decision, a verdict or a push.** The engine accepts only reports and requests from it, and refuses what the page doesn't offer. Reason: anything in the agent container, Claude Code's plugin included, may be run by an agent acting on planted instructions. Every push goes through the engine, and the engine refuses any grant or credential that would open a git host (the owner's decision REQ-04 of 2026-11-25, replacing REQ-271 and REQ-272).
+- **No automated tests: don't add `*_test.go` files or `testdata`.** Reason: the owner chose no test strategy. Check a change with the build, `go vet`, `make lint`, `make arch-check`, `make fix-check`, `make vuln`, `make web-check`, `make plugin-check`, `make plugin-validate`, and a live run with `compose.dev.yaml`. A bypass a review finds is fixed and recorded in the change's description, since no test keeps it from coming back. Exception, the owner's decisions of 2026-11-17 and 2026-11-18: Proctor's files under `proctor/` (its specifications of the Go API, run scripts, and the approved transcripts and logs, mutant lists and request bodies it keeps there), run with `make proctor` and, since the owner's decision of 2026-11-26, by CI's Proctor workflow on every pull request ([`proctor.md`](.claude/rules/proctor.md)); `*_test.go` and `testdata` stay forbidden there too.
 - **Every change keeps Proctor's specifications passing, refactors included.** A change that touches anything but Markdown isn't done until `make proctor` passes on it. A change that alters the Go API's behavior on purpose changes the specifications in the same change, and its description says which and why. Never delete, loosen or waive a specification, a count, an assertion or a scrub rule to make a run pass; a failure the agreed behavior doesn't explain is a bug in the code. How: [`proctor.md`](.claude/rules/proctor.md#changing-the-api). Reason: with no other automated tests, the specifications are what keep a refactor from changing behavior unnoticed.
-- **No comments, in code or configuration:** Go, TypeScript, JavaScript, CSS, HTML, shell, YAML (workflows and compose), Dockerfile, Makefile, TOML and the linters' configuration. Two exceptions: the version comment after a pinned commit SHA or image digest (`uses: actions/checkout@<sha> # v7.0.1`), which Dependabot and reviewers read, and tool directives, which the tools treat as instructions rather than comments (`//go:build`, `//go:embed`, `//nolint:…`, `// Code generated … DO NOT EDIT.`, shebangs, `# syntax=` in the Dockerfile). Reason: the owner's choice. Put an explanation in a name, in this file, a rule file in `.claude/rules/` or `ARCHITECTURE.md`, or in the change's description.
+- **No comments, in code or configuration:** Go, TypeScript, JavaScript, CSS, HTML, shell, YAML (workflows and compose), Dockerfile, Makefile, TOML and the linters' configuration. Two exceptions: the version comment after a pinned commit SHA or image digest (`uses: actions/checkout@<sha> # v7.0.1`), which Dependabot and reviewers read, and tool directives, which the tools treat as instructions rather than comments (`//go:build`, `//go:embed`, `//nolint:…`, `// Code generated … DO NOT EDIT.`, shebangs, `# syntax=` in the Dockerfile). Reason: the owner's choice. Put an explanation in a name, in this file or a rule file in `.claude/rules/`, or in the change's description.
 - **Commit only when the owner asks. Never push, add a remote or publish an image.** Reason: the owner decides what becomes public and when.
+- **Work beside the main checkout goes in git worktrees under `.claude/worktrees/`, one per agent or task, never in a folder outside the repository.** Start each from the branch's HEAD (`git worktree add .claude/worktrees/<name> HEAD`, then apply any uncommitted work it builds on), and remove it with `git worktree remove` once its change is in the branch. Reason: a worktree sees only committed files, `git worktree list` shows every one, and nothing is left outside the project.
 - **Outside libraries are allowed, pinned (`go.sum`, an npm lockfile) and under licenses compatible with MIT.** Reason: Software Factory is MIT-licensed.
 
 ## What this project is
 
-The engine of Software Factory, a standalone Go product; `ARCHITECTURE.md` says how it works and why.
+The engine of Software Factory, a standalone Go product.
 
 ## Project layout
 
@@ -27,7 +25,7 @@ cmd/
 internal/
   core/
     shared/    # cross-cutting contracts: the logger port
-    session/ gate/ review/ push/ workflow/ level/ agent/  # core areas (ARCHITECTURE.md "Code")
+    session/ gate/ review/ push/ workflow/ level/ agent/  # core areas
   adapters/  # implement the ports; the only place third-party libs live
     engines/acp/  # the ACP client, for the development agent (Claude Code runs through the plugin and agent-host)
     sandbox/docker/  # the sandbox check and its probe
@@ -53,14 +51,10 @@ tools/  # small project-root helpers
 
 ```bash
 make up            # start the Docker stack, wait until healthy, open the page (SF_PORT changes the port)
-make dev           # make up from this folder's code, rebuilt on every save: the engine alone for a page change, the engine and egress for Go, and each session's container from its next start and each reviewer container from its start (dev/watch; a change to the box helper needs the image rebuilt)
+make dev           # make up from this folder's code, images built first, rebuilt on every save: the engine alone for a page change, the engine, egress and box helper for Go, the images and whole stack for the Dockerfile, plugin/ or configs/claude-code/, and each session's container from its next start and each reviewer container from its start (dev/watch)
 make down          # stop the Docker stack; volumes and their data stay
 make run           # run the app (serves on :7799; override with PORT)
 ```
-
-## Components
-
-`ARCHITECTURE.md` describes the parts, the trust boundary and the flows, and its Reference section, in `docs/reference/`, has the details to change them by: the image's stages, paths, users and modes, the Compose settings, and how repositories, agent installs, the sandbox check, knackpack, reviews, pushes, start-up files and sign-in work. Read the part you change before changing it.
 
 ## Checking a change
 
@@ -92,7 +86,7 @@ make spelling      # typos 1.52.0, which you install yourself
 
 `make web-check` and `make plugin-check` need `npm ci --prefix web` once; the plugin check uses the page's TypeScript. `make plugin-validate` catches hooks modules Claude Code wouldn't load, which the type checks can't see; it needs a stack that has run once, since it uses the `software-factory:local` image and the Claude Code in the `software-factory_agents` volume (no network, no sign-in). `tools/plugincheck/` holds hand-written declarations of the part of Claude Code's plugin API that `plugin/hooks` uses (written against 2.1.322), so CI can type-check the plugin without Claude Code's own declarations, which Claude Code writes beside a plugin it loads (`plugin/.claude-plugin/types/`, git-ignored) and which aren't ours to publish; `make plugin-check` checks against both when both exist. When the plugin uses something new, declare it there the way the real declarations do. Move the golangci-lint pin with each Go minor release: a linter built for an older Go fails with "export data version … is greater than maximum supported version".
 
-Then run it: stop the real stack (`docker compose down`), `export COMPOSE_FILE=compose.yaml:compose.dev.yaml`, `docker compose up -d --build --remove-orphans`, open the page, and try the flow you changed with the development fakes (`dev/`). After a change to the page server, run the page's security checks (`docs/reference/security-and-sign-in.md` "Page security checks") against the published port.
+Then run it: stop the real stack (`docker compose down`), `export COMPOSE_FILE=compose.yaml:compose.dev.yaml`, `docker compose up -d --build --remove-orphans`, open the page, and try the flow you changed with the development fakes (`dev/`).
 
 ## How the instructions are organized
 

@@ -166,7 +166,7 @@ func startNote(t workflow.WorkType, knackpack bool) string {
 func typeRules(t workflow.WorkType, knackpack bool) string {
 	switch t.Profile() {
 	case workflow.Change:
-		own, choose, each := "the requirements and the plan", ", and chooses whether a plan follows,", "each approval"
+		own, choose, each := "the requirements and the plan", " and then the plan", "each approval"
 		if !t.Plans() {
 			own, choose, each = "the requirements", "", "the approval"
 		}

@@ -64,6 +64,17 @@ export interface SessionUsage {
   context: { tokens: number; breakdown?: ContextBreakdown }
 }
 
+export interface ModelUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+}
+
+export interface TurnUsage extends ModelUsage {
+  model: string
+}
+
 export interface SessionMessage {
   role: 'user' | 'assistant'
   text: string
@@ -74,6 +85,18 @@ export interface AgentEntry {
   type: string
   description: string
   status: string
+}
+
+export interface BackgroundTaskSummary {
+  id: string
+  type: string
+  status: string
+  description: string
+  command?: string
+  agent_type?: string
+  server?: string
+  tool?: string
+  name?: string
 }
 
 export interface CommandEntry {
@@ -99,6 +122,7 @@ export interface EngineInterface {
     list(path: string): Promise<DirEntry[]>
     read(path: string): Promise<string>
     stat(path: string, options?: { resolve?: boolean }): Promise<FileStat>
+    write(path: string, text: string): Promise<void>
   }
   http: { fetch(url: string, options?: HttpOptions): Promise<HttpReply> }
   plugin: { readonly name: string; readonly root: string }
@@ -160,13 +184,13 @@ export interface Events {
   'session.measure': [{ context: { tokens: number }; rateLimits?: RateLimit[]; changed?: string[] }, unknown]
   'session.compact': [
     { agentId?: string; trigger: string },
-    { skip: string; tokensBefore?: undefined; tokensAfter?: undefined } | { skip?: undefined; tokensBefore?: number; tokensAfter?: number },
+    { skip: string; tokensBefore?: undefined; tokensAfter?: undefined } | { skip?: undefined; tokensBefore?: number; tokensAfter?: number; usage?: ModelUsage },
   ]
   'command.run': [{ command: string; args: string; origin?: unknown }, { text?: string }]
   'prompt.submit': [{ text: string; isMeta?: boolean; origin?: unknown; command?: unknown }, unknown]
   'turn.start': [{ turnId: string; agentId?: string }, unknown]
   'turn.complete': [
-    { turnId: string; agentId?: string; reason: string; usage?: { input_tokens: number; output_tokens: number } },
+    { turnId: string; agentId?: string; reason: string; usage?: TurnUsage },
     unknown,
   ]
   'agent.offer': [{ agent: string; description?: string }, unknown]
@@ -175,10 +199,12 @@ export interface Events {
   'classic.SessionStart': [{ source?: string }, { additionalContext?: string[] }]
   'classic.UserPromptSubmit': [{ permission_mode: PermissionMode; prompt: string }, unknown]
   'classic.Stop': [
-    { permission_mode: PermissionMode; stop_hook_active: boolean; last_assistant_message?: string },
+    { permission_mode: PermissionMode; stop_hook_active: boolean; last_assistant_message?: string; background_tasks?: BackgroundTaskSummary[] },
     { block?: string; preventContinuation?: true; stopReason?: string; additionalContext?: string[] },
   ]
   'classic.StopFailure': [{ error: string; permission_mode?: PermissionMode }, unknown]
+  'classic.WorktreeCreate': [{ session_id: string; cwd: string; name: string }, { worktreePath?: string; block?: string }]
+  'classic.WorktreeRemove': [{ session_id: string; cwd: string; worktree_path: string }, { block?: string }]
   'classic.PermissionRequest': [
     { tool_name: string; tool_input: unknown; permission_mode?: string; agent_id?: string; permission_suggestions?: PermissionUpdate[] },
     { decision?: PermissionDecision },

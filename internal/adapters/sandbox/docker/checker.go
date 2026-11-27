@@ -131,14 +131,10 @@ func (c *Checker) probed(ctx context.Context, b session.BoxProbe) level.Observat
 	failed = append(failed, parts...)
 	repos := c.repoHosts()
 	failed = append(failed, Uncovered(want.Allow, c.cfg.Deny, repos)...)
-	var git []string
 	if len(parts) == 0 {
-		var more []string
-		more, git = c.grantParts(ctx, b.Subnet, st, repos)
-		failed = append(failed, more...)
+		failed = append(failed, c.grantParts(ctx, b.Subnet, st, repos)...)
 	}
 	cfg := c.probeConfig(ctx, repos, lasting(want))
-	cfg.Granted = grantedGit(cfg.GitHosts, git)
 	cfg.Marker = newMarker()
 	cfg.Request = shared.RequestOf(ctx)
 	if b.Gateway.IsValid() {
@@ -166,25 +162,7 @@ func observation(e level.Event, parts []string) level.Observation {
 	return level.Observation{By: level.Engine, Event: e, Parts: parts}
 }
 
-func grantedGit(hosts, git []string) []string {
-	var names, out []string
-	for _, g := range git {
-		if _, _, err := net.SplitHostPort(g); err != nil {
-			names = append(names, g)
-		}
-	}
-	for _, h := range hosts {
-		if covered(names, h) {
-			out = append(out, net.JoinHostPort(h, "443"))
-		}
-		if slices.Contains(git, net.JoinHostPort(h, "22")) {
-			out = append(out, net.JoinHostPort(h, "22"))
-		}
-	}
-	return out
-}
-
-func (c *Checker) grantParts(ctx context.Context, subnet netip.Prefix, st session.EgressState, repos []string) ([]string, []string) {
+func (c *Checker) grantParts(ctx context.Context, subnet netip.Prefix, st session.EgressState, repos []string) []string {
 	want := session.EgressList{Allow: []string{}, Expires: map[string]time.Time{}}
 	if c.cfg.Grants != nil {
 		want = c.cfg.Grants.GrantsAt(subnet)
@@ -200,38 +178,27 @@ func (c *Checker) grantParts(ctx context.Context, subnet netip.Prefix, st sessio
 		parts = append(parts, "the egress proxy's grants for the session's network aren't the ones the engine set"+listed(extra, missing))
 	} else if extra, missing := diff(sortedCopy(want.Ports), sortedCopy(got.Ports)); len(extra)+len(missing) > 0 {
 		parts = append(parts, "the egress proxy's port grants for the session's network aren't the ones the engine set"+listed(extra, missing))
-	} else if extra, missing := diff(sortedCopy(want.Git), sortedCopy(got.Git)); len(extra)+len(missing) > 0 {
-		parts = append(parts, "the egress proxy's git-host grants for the session's network aren't the ones the engine set"+listed(extra, missing))
 	} else if !session.SameList(want, got) {
 		parts = append(parts, "the egress proxy's expiring grants for the session's network aren't the ones the engine set")
 	}
-	opened := func(a string) bool { return slices.Contains(want.Git, a) && slices.Contains(got.Git, a) }
-	var plain []string
 	for _, a := range got.Allow {
-		if opened(a) {
-			continue
-		}
-		plain = append(plain, a)
 		if d := deniedBy(st.Deny, a); d != "" {
 			parts = append(parts, "the egress proxy's grants for the session's network name the git host "+a)
 		}
 	}
 	for _, e := range got.Ports {
 		host, _, err := net.SplitHostPort(e)
-		if err == nil && !opened(e) && net.ParseIP(host) == nil && deniedBy(st.Deny, host) != "" {
+		if err == nil && net.ParseIP(host) == nil && deniedBy(st.Deny, host) != "" {
 			parts = append(parts, "the egress proxy's port grants for the session's network name the git host "+e)
 		}
 	}
 	if covered(got.Allow, c.cfg.Outside) {
 		parts = append(parts, "the egress proxy's grants for the session's network cover "+c.cfg.Outside+", the host the sandbox check expects egress to refuse")
 	}
-	for _, p := range Uncovered(plain, c.cfg.Deny, repos) {
+	for _, p := range Uncovered(got.Allow, c.cfg.Deny, repos) {
 		parts = append(parts, strings.Replace(p, "the egress allowlist", "the egress proxy's grants for the session's network", 1))
 	}
-	if len(parts) > 0 {
-		return parts, nil
-	}
-	return nil, slices.DeleteFunc(slices.Clone(got.Git), func(a string) bool { return !opened(a) })
+	return parts
 }
 
 func (c *Checker) status(ctx context.Context) ([]string, session.EgressList, session.EgressState) {
@@ -421,7 +388,7 @@ func (c *Checker) probeConfig(ctx context.Context, repos, allow []string) ProbeC
 }
 
 func Args(cfg ProbeConfig) []string {
-	args := []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-granted", strings.Join(cfg.Granted, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
+	args := []string{"-proxy", cfg.Proxy, "-git", strings.Join(cfg.GitHosts, ","), "-addr", strings.Join(cfg.Addrs, ","), "-outside", cfg.Outside, "-front", cfg.Front, "-marker", cfg.Marker, "-gateway", cfg.Gateway}
 	if shared.ValidRequest(cfg.Request) {
 		args = append(args, "-request", cfg.Request)
 	}

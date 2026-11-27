@@ -16,6 +16,7 @@ services:
   egress:
     <<: *live
   helper:
+    <<: *live
     image: software-factory:dev
     build:
       context: .

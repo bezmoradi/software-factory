@@ -34,6 +34,7 @@ export interface SessionInfo {
   controlled?: boolean
   mode?: string
   modeLabel?: string
+  modeChanged?: boolean
   checkpointSaved?: boolean
   step?: string
   busy?: boolean
@@ -58,6 +59,7 @@ export interface SessionInfo {
   follow?: PullFollow
   splits?: SplitCard[]
   splitGoal?: SplitGoal
+  copies?: CopyCard[]
   box?: string
   commands?: { container?: string; attach?: string; logs?: string; signIn: string }
   filters?: string[]
@@ -73,9 +75,34 @@ export interface SessionInfo {
   readOnly?: string
   stalled?: boolean
   stalledSince?: number
+  subagents?: SubagentRow[]
+  tasks?: TaskRow[]
 }
 
-export type SessionAction = 'control' | 'steps' | 'stop' | 'wake' | 'manage' | 'model' | 'bringMain' | 'fork' | 'copy' | 'restore' | 'checkpoint' | 'review' | 'rules'
+export interface TaskRow {
+  id: string
+  kind: string
+  what: string
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  label: string
+  start: number
+  end?: number
+}
+
+export interface SubagentRow {
+  id: string
+  type: string
+  task: string
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  label: string
+  start: number
+  end?: number
+  tool?: string
+  line?: string
+  tokens?: number
+}
+
+export type SessionAction = 'control' | 'steps' | 'stop' | 'wake' | 'manage' | 'model' | 'bringMain' | 'fork' | 'copy' | 'restore' | 'checkpoint' | 'review' | 'rules' | 'ask' | 'bringMainNow' | 'deleteNow' | 'pullOpen' | 'preview'
 
 export interface SessionControl {
   text: string
@@ -87,11 +114,19 @@ export interface SessionControl {
   alert?: boolean
 }
 
+export interface SplitProject {
+  url: string
+  added: boolean
+  name?: string
+  said: string
+}
+
 export interface SplitCard {
   card: string
   title: string
   message: string
-  state: 'waiting' | 'queued' | 'starting' | 'started' | 'dismissed'
+  project?: SplitProject
+  state: 'waiting' | 'queued' | 'starting' | 'adding' | 'started' | 'dismissed'
   sid?: string
   edited: boolean
   asked: number
@@ -105,6 +140,26 @@ export interface SplitCard {
 }
 
 export type SplitAction = 'start' | 'unqueue' | 'edit' | 'dismiss'
+
+export type CopyAction = 'approve' | 'decline' | 'remove'
+
+export interface CopyCard {
+  card: string
+  url: string
+  ref?: string
+  host: string
+  path: string
+  token: boolean
+  tokenSaid: string
+  risk: string
+  state: 'waiting' | 'fetching' | 'ready' | 'failed'
+  said?: { label: string; tone: string }
+  note: string
+  commit?: string
+  asked: number
+  at: number
+  actions?: Partial<Record<CopyAction, string>>
+}
 
 export interface SplitGoal {
   running: number
@@ -189,6 +244,10 @@ export interface PullFollowView {
   running: boolean
   disabled: string
   connected: boolean
+  ask: string
+  main: string
+  deleteOff: string
+  openOff: string
 }
 
 export interface Uncommitted {
@@ -311,6 +370,16 @@ export interface TestLockView {
   cut: boolean
   branchLeft: number
   changed: LockedTests | null
+}
+
+export interface SubagentsView {
+  sid: string
+  rows: SubagentRow[]
+}
+
+export interface TasksView {
+  sid: string
+  rows: TaskRow[]
 }
 
 export interface SessionFactsView {
@@ -439,6 +508,7 @@ export interface SessionPush {
   remote: string
   missing: string[]
   needsReason: boolean
+  allowAsk: string
   expires: number
   at: number
   audit: PushAudit | null
@@ -550,6 +620,7 @@ export interface PushPanelView {
   sid?: string
   push: SessionPush | null
   disabled: string
+  ask?: string
   answering: boolean
   flagged?: FlaggedFile[]
   flagsRead?: boolean
@@ -695,6 +766,7 @@ export interface ReviewsView {
   sid?: string
   review: SessionReview | null
   disabled: string
+  explainOff?: string
   asking: boolean
   reviewer: ReviewerView | null
   pushing: boolean
@@ -712,6 +784,9 @@ export interface ReviewsView {
   testAsking?: boolean
   readOnly?: string
   flow?: FlowModel | null
+  reviewWait?: string
+  reviewPrimary?: boolean
+  pushWait?: string
 }
 
 export type ChangeFrom = 'fork' | 'reviewed' | 'turn' | 'commit'
@@ -760,6 +835,7 @@ export interface Project {
   autoFindings?: boolean
   prComment?: boolean
   hold?: HoldSetting
+  removeOff?: string
 }
 
 export interface HoldSetting {
@@ -896,6 +972,8 @@ export interface PromptEvent extends Stamped {
   type: 'prompt'
   text: string
   from: 'page' | 'history' | 'terminal' | 'task'
+  step?: string
+  started?: string
   images?: number
   lost?: number
   files?: string[]
@@ -933,6 +1011,32 @@ export interface ToolEvent extends Stamped {
   summary: string
   agentId?: string
   agentName?: string
+  fold?: FoldCount
+  line?: CallLine
+}
+
+export interface FoldCount {
+  verb: string
+  one: string
+  many: string
+}
+
+export interface CallLine {
+  path?: string
+  outside?: boolean
+  edit?: boolean
+  kept?: string
+  command?: string
+  said?: string
+  programs?: string[]
+  more?: number
+}
+
+export interface EndLine {
+  result?: string
+  tail?: string[]
+  added?: number
+  removed?: number
 }
 
 export interface ToolDoneEvent extends Stamped {
@@ -940,6 +1044,8 @@ export interface ToolDoneEvent extends Stamped {
   id: string
   ok: boolean
   outcome: string
+  unfold?: boolean
+  line?: EndLine
 }
 
 export interface BusyEvent extends Stamped {
@@ -1041,8 +1147,6 @@ export interface GateEvent {
   branch: string
   adapter: string
   define: boolean
-  planChoice?: boolean
-  planSwitch?: PlanSwitch
   plan: string
   planHash?: string
   planDoc?: WorkflowDoc | null
@@ -1073,9 +1177,12 @@ export interface GateEvent {
   team?: { approved: boolean; note: string }
   commands?: { define?: string; plan?: string }
   rounds?: number
-  committed?: boolean
+  docsFolder?: string
+  docsNote?: string
   started?: boolean | 'nobase' | null
-  review?: { available: boolean; reason: string; planned: { name: string; agent: string; why: string; summary: string }[] }
+  review?: { available: boolean; reason: string; wait?: string; primary?: boolean; planned: { name: string; agent: string; why: string; summary: string }[]; explainOff?: string }
+  pushOffer?: { available: boolean; reason: string }
+  planReview?: { offered: boolean }
   pushed?: boolean
   path?: GatePath
   flow?: FlowModel | null
@@ -1094,7 +1201,7 @@ export interface AccessRisk {
   label: string
   says: string[]
   accept?: string
-  git: string[]
+  off?: string
 }
 
 export interface AccessNote {
@@ -1152,6 +1259,12 @@ export interface FlowRoute {
   note: string
 }
 
+export interface FlowWire {
+  label: string
+  phase: string
+  tone: string
+}
+
 export interface FlowZone {
   kind: string
   name: string
@@ -1166,14 +1279,14 @@ export interface FlowModel {
   gate: FlowNode
   routes: FlowRoute[]
   routesLabel: string
-  wires: string[]
-  outLive: boolean
+  wires: FlowWire[]
   zones: FlowZone[]
   key: { swatch: string; words: string }[]
-  caption: string
+  status: FlowLook
+  detail: string
   expires?: number
   expiredNote?: string
-  expiredCaption?: string
+  expiredStatus?: FlowLook
 }
 
 export interface CheckedLine {
@@ -1188,13 +1301,15 @@ export interface CheckedLine {
 export interface PathAction { ask: string; label: string; title: string }
 
 export interface GatePath {
-  stages: { id: string; name: string; state: string; active: boolean; detail: string; actions: PathAction[] }[]
+  stages: { id: string; name: string; state: string; status: string; active: boolean; detail: string; actions: PathAction[] }[]
   line: { text: string; actions: PathAction[] } | null
-  card: { step: string; count: string; detail: string; done: number }
+  notice: { text: string; actions: PathAction[]; tone?: string } | null
+  card: { step: string; count: string; detail: string; bar: number[] }
   missing: string[]
   reviewsActive: boolean
   required: string[]
   asks: PathAction[]
+  busy: boolean
 }
 
 export interface WorkflowDoc {
@@ -1205,10 +1320,7 @@ export interface WorkflowDoc {
   changed?: boolean
   clipped?: boolean
   previous?: string
-  commit?: string
-  approvedAt?: string
-  reported?: boolean
-  onBase?: boolean
+  unread?: boolean
   note?: string
   kind?: string
   status?: string
@@ -1263,12 +1375,8 @@ export interface LineCommentBody {
   text: string
 }
 
-export type PlanSwitch = '' | 'add' | 'skip'
-
 export interface PlanApproval {
   kind?: 'plan' | 'requirements' | 'root-cause'
-  planChoice?: boolean
-  planSwitch?: PlanSwitch
   path: string
   text: string
   hash: string
@@ -1280,10 +1388,6 @@ export interface PlanApproval {
   refused?: string
   note?: string
   previous?: string
-  commit?: string
-  approvedAt?: string
-  reported?: boolean
-  onBase?: boolean
   status: string
 }
 
@@ -1494,11 +1598,13 @@ declare global {
     'sf-open': CustomEvent<{ id: string }>
     'sf-close': CustomEvent<{ id: string }>
     'sf-move': CustomEvent<{ id: string; index: number }>
-    'sf-approve': CustomEvent<{ hash: string; plan?: boolean }>
+    'sf-approve': CustomEvent<{ hash: string }>
     'sf-revise': CustomEvent<{ note: string }>
+    'sf-read-document': Event
     'sf-project-setting': CustomEvent<{ path: string; op: 'rounds'; rounds: number } | { path: string; op: 'type'; type: string } | { path: string; op: 'findings'; findings: boolean } | { path: string; op: 'prComment'; on: boolean } | { path: string; op: 'hold'; hold: HoldTyped }>
     'sf-answer': CustomEvent<{ id: string; answer: Answer }>
     'sf-counts': CustomEvent<{ waiting: number; working: number; stopped: number }>
+    'sf-subagent-open': CustomEvent<{ id: string }>
     'sf-markdown-painted': Event
     'sf-tool-path': Event
     'sf-repo': CustomEvent<{ op: 'add'; url: string } | { op: 'remove'; name: string }>
@@ -1510,6 +1616,7 @@ declare global {
     'sf-session-ask': CustomEvent<{ sid: string; action: '' | 'stop' | 'remove' }>
     'sf-open-session': CustomEvent<{ sid: string }>
     'sf-file': CustomEvent<{ path: string; commit?: string; line?: number }>
+    'sf-diff-file': CustomEvent<{ path: string }>
     'sf-reload': Event
     'sf-settled': Event
     'sf-review': CustomEvent<{ all: boolean }>

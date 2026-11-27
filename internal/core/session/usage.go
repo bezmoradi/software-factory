@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bezmoradi/software-factory/internal/core/shared"
@@ -13,6 +14,7 @@ import (
 
 const (
 	UsageNear       = 0.9
+	UsageShown      = 0.75
 	maxWindows      = 8
 	maxPauses       = 20
 	windowAhead     = 60 * 24 * time.Hour
@@ -35,9 +37,7 @@ var windowWords = map[string]string{
 	"seven_day_overage_included": "weekly Fable limit", "overage": "usage credit limit", "spend_limit": "spending limit",
 }
 
-var sideWords = map[string]string{SideAgents: "Claude Code in this session's container", SideReviewers: "Claude Code for the reviewers"}
-
-var signInEndingWords = map[string]string{SideAgents: "Claude Code in a session's container", SideReviewers: sideWords[SideReviewers]}
+var signInEndingWords = map[string]string{SideAgents: "Claude Code in a session's container", SideReviewers: "Claude Code for the reviewers"}
 
 type meterSide struct {
 	plan    string
@@ -269,8 +269,8 @@ func agentSide(agent string) string {
 	return ""
 }
 
-func windowName(side string, w RateWindow) string {
-	return sideWords[side] + "'s " + windowShort(w)
+func windowName(w RateWindow) string {
+	return "Claude " + windowShort(w)
 }
 
 func windowShort(w RateWindow) string {
@@ -325,7 +325,7 @@ func (l *Limits) held(sid, what string) string {
 			continue
 		}
 		l.notePauseLocked(usagePause{sid: sid, side: at.side, box: at.box, kind: w.Kind, what: what, at: now})
-		return windowName(at.side, w) + " is " + percent(w.Utilization) + " used, so the engine starts no automatic review and no automatic Send findings until the person answers on the page; the person can still press Review"
+		return windowName(w) + " is " + percent(w.Utilization) + " used, so the engine starts no automatic review and no automatic Send findings until the person answers on the page; the person can still press Review"
 	}
 	return ""
 }
@@ -405,11 +405,11 @@ func (l *Limits) Continue(ctx context.Context, side, sid, kind string) error {
 		return conflict("not near", "That limit isn't near its end now, so there is nothing to answer.")
 	}
 	l.acks[usageAck{side: side, box: box, kind: kind}] = found.ResetsAt
-	name := windowName(side, *found)
+	name := windowName(*found)
 	lifted := l.liftLocked(side, box, kind)
 	continued := l.cfg.Continued
 	l.mu.Unlock()
-	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
+	l.audit(AuditEntry{Req: shared.RequestOf(ctx), Session: sid, Kind: AuditUsageAnswer, Result: "continued", Reason: "the person chose to keep automatic reviews and automatic Send findings running although the " + name + " is " + percent(found.Utilization) + " used; this holds until the limit resets"})
 	l.flush(true)
 	if continued != nil {
 		for _, p := range lifted {
@@ -522,4 +522,147 @@ func (l *Limits) dropStaleLocked(now time.Time) {
 			delete(l.acks, key)
 		}
 	}
+}
+
+func usageLevel(w RateWindow) string {
+	switch {
+	case w.Utilization >= UsageNear || w.Status == StatusRejected:
+		return capLevelHigh
+	case w.Utilization >= UsageShown:
+		return capLevelLow
+	}
+	return ""
+}
+
+func PlanName(p string) string {
+	words := strings.Split(CleanPlan(p), "_")
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		switch {
+		case w == "":
+		case strings.HasSuffix(w, "x") && len(w) > 1 && strings.Trim(w[:len(w)-1], "0123456789") == "":
+			out = append(out, w[:len(w)-1]+"×")
+		default:
+			out = append(out, strings.ToUpper(w[:1])+w[1:])
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+func capitalized(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func (l *Limits) meterKeysLocked() []meterKey {
+	keys := make([]meterKey, 0, len(l.meter))
+	for k := range l.meter {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b meterKey) int {
+		if a.side != b.side {
+			if a.side == SideReviewers {
+				return -1
+			}
+			if b.side == SideReviewers {
+				return 1
+			}
+			return strings.Compare(a.side, b.side)
+		}
+		return strings.Compare(a.box, b.box)
+	})
+	return keys
+}
+
+func heavier(a, b RateWindow) bool {
+	if (a.Status == StatusRejected) != (b.Status == StatusRejected) {
+		return a.Status == StatusRejected
+	}
+	return a.Utilization > b.Utilization
+}
+
+func (l *Limits) accountLocked(now time.Time) Fields {
+	var kinds []string
+	most := map[string]RateWindow{}
+	plan, planAt := "", time.Time{}
+	for _, k := range l.meterKeysLocked() {
+		list := l.windowsLocked(k.side, k.box, now)
+		if len(list) == 0 {
+			continue
+		}
+		if p, at := l.planLocked(k.side, k.box), l.meter[k].at; p != "" && (plan == "" || at.After(planAt)) {
+			plan, planAt = p, at
+		}
+		for _, w := range list {
+			was, seen := most[w.Kind]
+			if !seen {
+				kinds = append(kinds, w.Kind)
+			}
+			if !seen || heavier(w, was) {
+				most[w.Kind] = w
+			}
+		}
+	}
+	reviewers := map[string]RateWindow{}
+	for _, w := range l.windowsLocked(SideReviewers, "", now) {
+		reviewers[w.Kind] = w
+	}
+	windows := []any{}
+	for _, kind := range kinds {
+		w := most[kind]
+		level := usageLevel(w)
+		if level == "" {
+			continue
+		}
+		near, continued := false, false
+		if r, ok := reviewers[kind]; ok {
+			at, acked := l.acks[usageAck{side: SideReviewers, kind: kind}]
+			continued = acked && at.Equal(r.ResetsAt)
+			near = !continued && (r.Utilization >= UsageNear || r.Status == StatusRejected)
+		}
+		windows = append(windows, Fields{"kind": kind, "name": windowName(w), "label": capitalized(windowShort(w)), "utilization": math.Round(w.Utilization*1000) / 1000, "resetsAt": ms(w.ResetsAt), "status": w.Status,
+			"level": level, "near": near, "continued": continued})
+	}
+	return Fields{"plan": PlanName(plan), "windows": windows}
+}
+
+func (l *Limits) UsageFacts() []DiagFact {
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []DiagFact
+	n := 0
+	for _, k := range l.meterKeysLocked() {
+		list := l.windowsLocked(k.side, k.box, now)
+		if len(list) == 0 {
+			continue
+		}
+		name := SideReviewers
+		if k.side == SideAgents {
+			n++
+			name = "session " + strconv.Itoa(n)
+		}
+		if p := l.planLocked(k.side, k.box); p != "" {
+			out = append(out, DiagFact{Name: name + " plan", Value: p})
+		}
+		if at := l.meter[k].at; !at.IsZero() {
+			out = append(out, DiagFact{Name: name + " reported", Value: at.UTC().Format(time.RFC3339)})
+		}
+		for _, w := range list {
+			v := "used " + strconv.FormatFloat(w.Utilization*100, 'f', 1, 64) + " percent"
+			if !w.ResetsAt.IsZero() {
+				v += " resets " + w.ResetsAt.UTC().Format(time.RFC3339)
+			}
+			if w.Status != "" {
+				v += " " + w.Status
+			}
+			out = append(out, DiagFact{Name: name + " " + strings.ReplaceAll(w.Kind, ":", " "), Value: v})
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, DiagFact{Name: "reported", Value: "none"})
+	}
+	return out
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"maps"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -68,7 +69,6 @@ type SavedApproval struct {
 	Commit string
 	At     time.Time
 	Text   string
-	Plan   bool
 }
 
 type SavedWork struct {
@@ -115,7 +115,7 @@ type WorkConfig struct {
 	Note        func(sid, text string)
 	HistoryOnly func(sid string) error
 	Now         func() time.Time
-	DocsInRepo  bool
+	Texts       ApprovedStore
 	Logger      shared.Logger
 
 	RoleAgents  RoleAgents
@@ -124,9 +124,10 @@ type WorkConfig struct {
 	Changes     ChangeReader
 	Level       func(sid string) (level.Result, bool)
 	Catalog     func() workflow.Catalog
-	Uncommitted func(sid string) (Uncommitted, WorktreeState)
 
 	ApprovalMoved func(sid string, at func(commit string) (ApprovalGiven, bool))
+
+	NothingToExplain func(sid string) string
 }
 
 type workApproval struct {
@@ -134,7 +135,6 @@ type workApproval struct {
 	Commit string
 	At     time.Time
 	Text   string
-	Plan   bool
 }
 
 type workSession struct {
@@ -167,21 +167,25 @@ type Work struct {
 	loose     map[string]loosening
 	looseKeys []string
 
+	docMu    sync.Mutex
+	docs     DocReader
+	docSeen  map[string]string
+	textMu   sync.Mutex
+	textKeys map[string]string
+
 	digestKey [32]byte
 }
 
 type WorkDoc struct {
-	Path       string
-	Text       string
-	Hash       string
-	Clipped    bool
-	Approved   bool
-	Changed    bool
-	Previous   string
-	Commit     string
-	ApprovedAt string
-	Reported   bool
-	OnBase     bool
+	Path      string
+	Text      string
+	Hash      string
+	Clipped   bool
+	Approved  bool
+	Changed   bool
+	Previous  string
+	Unread    bool
+	UnreadWhy string
 }
 
 type WorkReviewer struct {
@@ -201,45 +205,57 @@ type WorkReviewer struct {
 }
 
 type GateView struct {
-	Head          string
-	Branch        string
-	Adapter       workflow.AdapterID
-	Type          string
-	Chosen        bool
-	Profile       workflow.Profile
-	Note          string
-	Types         []workflow.WorkType
-	Commands      map[workflow.Step]string
-	TeamApproved  bool
-	TeamNote      string
-	Requirements  *WorkDoc
-	Plan          *WorkDoc
-	Research      string
-	Define        bool
-	PlanChoice    bool
-	NoPlan        bool
-	PlanSwitch    PlanSwitch
-	FixCommitted  bool
-	Reviewers     []WorkReviewer
-	Missing       []string
-	Allowed       bool
-	Waiting       string
-	Holds         map[string]string
-	Rounds        int
-	FilesListed   bool
-	ChangedFiles  int
-	PlanApprovals bool
-	Flagged       []FlagView
-	FlagsRead     bool
-	LFS           []string
-	Handoff       bool
-	Catalog       workflow.CatalogState
-	CatalogWhy    string
-	Lock          LockView
-	Change        *TypeChange
-	Started       BranchStart
-	Ask           *TypeAsk
-	Ran           []string
+	ExplainOff   string
+	Head         string
+	Branch       string
+	Adapter      workflow.AdapterID
+	Type         string
+	Chosen       bool
+	Profile      workflow.Profile
+	Note         string
+	Types        []workflow.WorkType
+	Commands     map[workflow.Step]string
+	TeamApproved bool
+	TeamNote     string
+	Requirements *WorkDoc
+	Plan         *WorkDoc
+	Research     string
+	DocsFolder   string
+	DocsNote     string
+	Define       bool
+	FixCommitted bool
+	Reviewers    []WorkReviewer
+	Missing      []string
+	Allowed      bool
+	Waiting      string
+	Holds        map[string]string
+	Rounds       int
+	FilesListed  bool
+	ChangedFiles int
+	Flagged      []FlagView
+	FlagsRead    bool
+	LFS          []string
+	Handoff      bool
+	Catalog      workflow.CatalogState
+	CatalogWhy   string
+	Lock         LockView
+	Change       *TypeChange
+	Started      BranchStart
+	Ask          *TypeAsk
+	Ran          []string
+	Early        *EarlyWork
+	PushWait     string
+}
+
+type EarlyWork struct {
+	Commits bool
+}
+
+func earlyWorkOf(g gathered) *EarlyWork {
+	if g.chosen.Profile() != workflow.Change || g.reqOk || g.reqWas || !slices.Contains(g.chosen.Steps, workflow.Define) || g.setup.setup.Workflow.Commands[workflow.Define] == "" {
+		return nil
+	}
+	return &EarlyWork{Commits: g.listed && len(g.files) > 0}
 }
 
 type BranchStart string
@@ -303,7 +319,7 @@ type WorkFacts struct {
 type WorkPage interface {
 	View(ctx context.Context, sid string) (GateView, error)
 	SetType(ctx context.Context, sid, id string) error
-	Approve(ctx context.Context, sid string, plan bool, hash, text string, choice PlanChoice) error
+	Approve(ctx context.Context, sid string, plan bool, hash, text string) error
 	Team(ctx context.Context, path string) (TeamView, error)
 	ApproveTeam(ctx context.Context, path, sha string) (TeamView, error)
 	ForgetTeam(path string) (TeamView, error)
@@ -425,7 +441,7 @@ func NewWork(cfg WorkConfig) (*Work, error) {
 		cfg.Logger = quiet{}
 	}
 	cfg.Audit = masking(cfg.Audit)
-	w := &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}, loose: map[string]loosening{}}
+	w := &Work{cfg: cfg, sessions: map[string]*workSession{}, scans: map[string]scanned{}, sizes: map[string]changeSize{}, loose: map[string]loosening{}, docSeen: map[string]string{}, textKeys: map[string]string{}}
 	if _, err := rand.Read(w.digestKey[:]); err != nil {
 		return nil, errors.New("work: no random key for the flagged files' digests")
 	}
@@ -664,6 +680,7 @@ func (w *Work) Forget(sid string) {
 	delete(w.sessions, sid)
 	w.mu.Unlock()
 	w.persist(sid)
+	w.forgetDocs(sid)
 }
 
 func (w *Work) session(sid string) (workSession, bool) {
@@ -715,42 +732,17 @@ func (w *Work) SetType(ctx context.Context, sid, id string) error {
 	return nil
 }
 
+type docSlot struct {
+	doc  *WorkDoc
+	path string
+	why  string
+}
+
 type workDocs struct {
-	req       *WorkDoc
-	plan      *WorkDoc
-	research  string
-	dir       string
-	held      bool
-	reported  bool
-	shownReq  *WorkDoc
-	shownPlan *WorkDoc
-	baseReq   *WorkDoc
-	basePlan  *WorkDoc
-}
-
-func (d *workDocs) onBranch(files []string, listed bool) {
-	changed := func(doc *WorkDoc) bool { return listed && slices.Contains(files, doc.Path) }
-	if d.req != nil && !changed(d.req) {
-		d.baseReq, d.req = d.req, nil
-	}
-	if d.plan != nil && !changed(d.plan) {
-		d.basePlan, d.plan = d.plan, nil
-	}
-}
-
-func docFrom(d *Doc) *WorkDoc {
-	if d == nil {
-		return nil
-	}
-	return &WorkDoc{Path: d.Path, Text: d.Text, Hash: d.Hash, Clipped: d.Clipped}
-}
-
-func (w *Work) readDoc(repo, head, path string) (string, bool) {
-	f, err := w.cfg.Files.ReadFile(repo, head, path)
-	if err != nil || f.Mode != push.ModeFile || !utf8.Valid(f.Data) {
-		return "", false
-	}
-	return string(f.Data), true
+	req      docSlot
+	plan     docSlot
+	research string
+	folder   string
 }
 
 func shownDoc(path, text string) *WorkDoc {
@@ -762,63 +754,64 @@ func shownDoc(path, text string) *WorkDoc {
 	return d
 }
 
-func (w *Work) committedDocs(sid, repo, head string, def workflow.Adapter, incident bool) workDocs {
-	out := workDocs{held: true}
-	if rep, ok := w.cfg.Reported(sid); ok {
-		out.shownReq, out.shownPlan = docFrom(rep.Requirements), docFrom(rep.Plan)
-		if incident {
-			out.shownPlan = nil
-		}
-		if rep.Research != nil {
-			out.research = rep.Research.Path
-		}
+func readSlot(r DocReader, sid, name string) docSlot {
+	if r == nil || name == "" {
+		return docSlot{}
 	}
-	if head == "" {
-		return out
-	}
-	names := def.Documents
-	feature, _ := w.readDoc(repo, head, names.Feature)
-	out.dir = workflow.FeatureDir([]byte(feature), def.Folder)
-	if out.dir == "" {
-		return out
-	}
-	if t, ok := w.readDoc(repo, head, out.dir+"/"+names.Requirements); ok {
-		out.req = shownDoc(out.dir+"/"+names.Requirements, t)
-		out.req.Commit = head
-	}
-	plan := names.Plan
-	if incident {
-		plan = names.RootCause
-	}
-	if t, ok := w.readDoc(repo, head, out.dir+"/"+plan); ok && plan != "" {
-		out.plan = shownDoc(out.dir+"/"+plan, t)
-		out.plan.Commit = head
+	got := r.ReadDoc(sid, name)
+	out := docSlot{path: got.Path, why: got.Why}
+	if got.State == DocFound {
+		out.doc = shownDoc(got.Path, got.Text)
 	}
 	return out
 }
 
-func (w *Work) docs(sid, repo, head string, def workflow.Adapter, incident bool) workDocs {
-	if w.cfg.DocsInRepo && !def.HasDocuments() {
-		return workDocs{}
+func docNames(def workflow.Adapter, p workflow.Profile) (string, string) {
+	switch p {
+	case workflow.Change:
+		return def.Documents.Requirements, def.Documents.Plan
+	case workflow.Incident:
+		return "", def.Documents.RootCause
 	}
-	if w.cfg.DocsInRepo {
-		return w.committedDocs(sid, repo, head, def, incident)
-	}
-	rep, ok := w.cfg.Reported(sid)
-	if !ok {
-		return workDocs{}
-	}
-	out := workDocs{req: docFrom(rep.Requirements), plan: docFrom(rep.Plan), reported: true}
-	if incident {
-		out.plan = nil
-	}
-	if rep.Research != nil {
+	return "", ""
+}
+
+func (w *Work) UseDocs(r DocReader) {
+	w.docMu.Lock()
+	w.docs = r
+	w.docMu.Unlock()
+}
+
+func (w *Work) docReader() DocReader {
+	w.docMu.Lock()
+	defer w.docMu.Unlock()
+	return w.docs
+}
+
+func (w *Work) readDocs(sid string, def workflow.Adapter, p workflow.Profile) workDocs {
+	out := workDocs{}
+	if rep, ok := w.cfg.Reported(sid); ok && rep.Research != nil {
 		out.research = rep.Research.Path
 	}
+	r := w.docReader()
+	if r == nil {
+		return out
+	}
+	out.folder = r.DocsPath(sid)
+	req, plan := docNames(def, p)
+	out.req, out.plan = readSlot(r, sid, req), readSlot(r, sid, plan)
 	return out
+}
+
+func (s docSlot) key() string {
+	if s.doc != nil {
+		return s.doc.Hash
+	}
+	return s.why
 }
 
 type gathered struct {
+	sid        string
 	ws         workSession
 	t          PushTarget
 	head       string
@@ -834,13 +827,11 @@ type gathered struct {
 	docs       workDocs
 	reqOk      bool
 	reqWas     bool
-	planChosen bool
+	planNeeded bool
 	planOk     bool
 	planWas    bool
 	workBase   string
 	built      bool
-	worked     bool
-	worktree   WorktreeState
 	required   []workflow.Requirement
 	items      []string
 	toApprove  bool
@@ -853,7 +844,7 @@ type gathered struct {
 }
 
 func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTarget, head, main string) gathered {
-	g := gathered{ws: ws, t: t, head: head, main: main}
+	g := gathered{sid: sid, ws: ws, t: t, head: head, main: main}
 	g.setup = w.packSetup(sid, ws.repo)
 	g.adapter = g.setup.setup.Adapter
 	kind := workflow.TypeOr(g.setup.setup.Types, ws.typeID)
@@ -887,45 +878,33 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 			g.net = changes
 		}
 	}
-	g.docs = w.docs(sid, t.Repo, head, g.setup.setup.Workflow, g.chosen.Profile() == workflow.Incident)
-	if g.docs.held {
-		g.docs.onBranch(g.files, g.listed)
-	}
+	g.docs = w.readDocs(sid, g.setup.setup.Workflow, g.chosen.Profile())
 	change := g.chosen.Profile() == workflow.Change
-	counts := func(a *workApproval, d *WorkDoc) bool {
-		if a == nil {
-			return false
-		}
-		if d == nil {
-			return !g.docs.held && !g.docs.reported
-		}
-		return d.Hash == a.Hash
+	counts := func(a *workApproval, s docSlot) bool {
+		return a != nil && a.Text != "" && (s.doc == nil || s.doc.Hash == a.Hash)
 	}
 	g.reqOk = counts(ws.req, g.docs.req)
 	g.reqWas = ws.req != nil && !g.reqOk
-	g.planChosen = g.chosen.Plans() && ws.req != nil && ws.req.Plan
-	g.planOk = counts(ws.plan, g.docs.plan) && (!change || g.reqOk && g.planChosen)
+	g.planNeeded = g.chosen.Plans()
+	g.planOk = counts(ws.plan, g.docs.plan) && (!change || g.reqOk && g.planNeeded)
 	g.planWas = ws.plan != nil && !g.planOk
 	base := ""
 	switch {
 	case g.chosen.Profile() == workflow.Incident && g.planOk:
 		base = ws.plan.Commit
-	case change && g.reqOk && g.planChosen && g.planOk:
+	case change && g.reqOk && g.planNeeded && g.planOk:
 		base, g.workBase = ws.plan.Commit, ws.plan.Commit
-	case change && g.reqOk && !g.planChosen:
+	case change && g.reqOk && !g.planNeeded:
 		base, g.workBase = ws.req.Commit, ws.req.Commit
 	}
 	if base != "" && head != "" && head != base {
 		in, err := w.cfg.History.IsAncestor(ctx, t.Repo, base, head)
 		g.built = err == nil && in
 	}
-	if g.chosen.Plans() && g.reqOk && !g.planChosen {
-		g.worked, g.worktree = w.workUncommitted(sid, g)
-	}
 	g.required = w.deepened(ctx, t, workflow.Required(g.setup.setup, g.chosen, g.files), g.base, head, g.listed)
 	planFile := ""
-	if g.docs.plan != nil {
-		planFile = g.docs.plan.Path
+	if g.docs.plan.doc != nil || g.planOk {
+		planFile = cmpOr(g.docs.plan.path, "the approved "+planWord(g))
 	}
 	flagsRead := true
 	g.flagsRead = true
@@ -939,7 +918,11 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 		}
 		flagsRead = g.listed && g.scan.complete
 		g.flagsRead = flagsRead
+		refused := w.carriedDocs(g)
 		for _, f := range g.scan.flags {
+			if _, doc := slices.BinarySearch(refused, f.Path); doc && f.Commit == "" {
+				continue
+			}
 			v := FlagView{Flag: f, Shown: f.maskedPath(), Allowed: allowedFlag(f, ws.allowed), Digest: w.flagDigest(f), Spec: g.specs && f.Commit == "" && gate.SpecPath(f.Path)}
 			g.flags = append(g.flags, v)
 			flagged = append(flagged, workflow.Flag{Path: f.Label(), Why: f.Why, Allowed: v.Allowed, Fixed: f.Link})
@@ -948,9 +931,9 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	g.items, g.toApprove = workflow.Items(workflow.Progress{
 		Type: g.chosen, Adapter: g.adapter, Commands: g.setup.setup.Workflow.Commands,
 		FilesListed: g.listed || head == "", FilesNote: g.note, FlagsRead: flagsRead, Flagged: flagged,
-		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanChosen: g.planChosen, PlanFile: planFile,
+		ReqOk: g.reqOk, ReqWasApproved: g.reqWas, PlanNeeded: g.planNeeded, PlanFile: planFile,
 		PlanOk: g.planOk, PlanWasApproved: g.planWas, Base: g.workBase, Built: g.built,
-		ChangesCode: head != "" && (!g.listed || changesCode(g.files, g.setup.setup.Workflow.Documents.Feature)),
+		ChangesCode: head != "" && (!g.listed || len(workflow.NotDocs(g.files)) > 0),
 	})
 	if item := specOverItem(g); item != "" {
 		g.items = append([]string{item}, g.items...)
@@ -970,28 +953,6 @@ func (w *Work) gather(ctx context.Context, sid string, ws workSession, t PushTar
 	return g
 }
 
-func (w *Work) workUncommitted(sid string, g gathered) (bool, WorktreeState) {
-	if w.cfg.Uncommitted == nil || g.head == "" {
-		return true, WorktreeUnreadable
-	}
-	u, state := w.cfg.Uncommitted(sid)
-	switch {
-	case state != WorktreeSettled:
-		return true, state
-	case u.Commit != g.head || u.Cut || u.Count > len(u.Paths):
-		return true, state
-	case len(u.Paths) == 0:
-		return false, state
-	case !g.docs.held:
-		return true, state
-	}
-	return !workflow.OnlyArtifacts(u.Paths, workflow.StepArtifactsOf(g.setup.setup.Workflow, []workflow.Step{workflow.Define, workflow.Plan}, g.docs.dir)), state
-}
-
-func changesCode(files []string, feature string) bool {
-	return slices.ContainsFunc(workflow.NotDocs(files), func(f string) bool { return f != feature })
-}
-
 func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, main string) (WorkFacts, bool) {
 	ws, ok := w.session(sid)
 	if !ok {
@@ -1003,7 +964,10 @@ func (w *Work) PushFacts(ctx context.Context, sid string, t PushTarget, head, ma
 	if err != nil {
 		items = append(slices.Clone(items), workUnreadItem)
 	}
-	refusal := lfsRefusal(g.scan.lfs)
+	refusal := w.docsRefusal(g)
+	if refusal == "" {
+		refusal = lfsRefusal(g.scan.lfs)
+	}
 	if refusal == "" {
 		refusal = linkRefusal(g)
 	}
@@ -1079,39 +1043,22 @@ func (w *Work) currentOf(ctx context.Context, sid string, lookup func(sid string
 	return g, nil
 }
 
-func (w *Work) facts(ctx context.Context, g gathered) workflow.Facts {
-	f := workflow.Facts{Profile: g.chosen.Profile(), PlanChosen: g.planChosen, Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
-		UsesArtifacts: g.docs.held, Untyped: !g.ws.chosen}
+func (w *Work) facts(g gathered) workflow.Facts {
+	f := workflow.Facts{Profile: g.chosen.Profile(), PlanNeeded: g.planNeeded, Head: g.head, ReqOk: g.reqOk, PlanOk: g.planOk,
+		DocsFolder: g.docs.folder, Untyped: !g.ws.chosen}
 	for _, t := range g.setup.setup.Types {
 		f.Offered = append(f.Offered, t.ID)
 	}
-	if g.docs.req != nil {
-		f.ReqHash = g.docs.req.Hash
-		f.Brief = w.briefCheck(g.adapter, g.docs.req.Text)
+	if d := g.docs.req.doc; d != nil {
+		f.ReqHash = d.Hash
+		f.Brief = w.briefCheck(g.adapter, d.Text)
 	}
-	if g.docs.plan != nil {
-		f.PlanFile, f.PlanHash = g.docs.plan.Path, g.docs.plan.Hash
-		f.CauseStatus = workflow.RootCauseStatus(g.docs.plan.Text)
+	if d := g.docs.plan.doc; d != nil {
+		f.PlanFile, f.PlanHash = d.Path, d.Hash
+		f.CauseStatus = workflow.RootCauseStatus(d.Text)
 	}
 	if g.reqOk && g.ws.req != nil {
 		f.ReqBaseline = g.ws.req.Commit
-	}
-	if f.UsesArtifacts {
-		f.Artifacts = workflow.StepArtifactsOf(g.setup.setup.Workflow, []workflow.Step{workflow.Plan}, g.docs.dir)
-		if !g.reqOk {
-			f.Artifacts = workflow.StepArtifactsOf(g.setup.setup.Workflow, []workflow.Step{workflow.Define}, "")
-		}
-		if f.ReqBaseline != "" && g.head != "" {
-			if f.ReqBaseline == g.head {
-				f.ArtifactsOnly = true
-			} else if changes, err := w.cfg.Files.ChangedFiles(ctx, g.t.Repo, f.ReqBaseline, g.head); err == nil {
-				paths := make([]string, 0, len(changes))
-				for _, c := range changes {
-					paths = append(paths, c.Path)
-				}
-				f.ArtifactsOnly = workflow.OnlyArtifacts(paths, f.Artifacts)
-			}
-		}
 	}
 	return f
 }
@@ -1124,51 +1071,7 @@ func (w *Work) briefCheck(adapter workflow.AdapterID, text string) workflow.Brie
 	return c
 }
 
-type PlanChoice int
-
-const (
-	PlanUnstated PlanChoice = iota
-	PlanWanted
-	PlanSkipped
-)
-
-type PlanSwitch string
-
-const (
-	PlanSwitchNone PlanSwitch = ""
-	PlanSwitchAdd  PlanSwitch = "add"
-	PlanSwitchSkip PlanSwitch = "skip"
-)
-
-func planSwitchOf(g gathered) PlanSwitch {
-	switch {
-	case !g.chosen.Plans() || !g.reqOk || g.docs.req == nil || g.head == "":
-		return PlanSwitchNone
-	case !g.planChosen && !g.built && !g.worked:
-		return PlanSwitchAdd
-	case g.planChosen && !g.planOk:
-		return PlanSwitchSkip
-	}
-	return PlanSwitchNone
-}
-
-func reapproval(g gathered, choice PlanChoice) error {
-	switch {
-	case g.built:
-		return conflict("built", "Work is committed since your last approval.")
-	case choice == PlanWanted && !g.planChosen && g.worked && g.worktree == WorktreeUnread:
-		return conflict("unread", "The worktree hasn't been read yet; try again shortly.")
-	case choice == PlanWanted && !g.planChosen && g.worked && g.worktree == WorktreeUnreadable:
-		return conflict("unreadable", "The engine couldn't read this session's worktree.")
-	case choice == PlanWanted && !g.planChosen && g.worked:
-		return conflict("work", "Work has started since your last approval.")
-	case choice == PlanSkipped && g.planOk:
-		return conflict("plan approved", "The plan is approved, so it can't be skipped.")
-	}
-	return nil
-}
-
-func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text string, choice PlanChoice) error {
+func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text string) error {
 	if !sha256Hex.MatchString(hash) || textHash(text) != hash {
 		return invalid("hash", "The text the page showed doesn't match its hash. Reload the page and read it again.")
 	}
@@ -1176,27 +1079,17 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	if err != nil {
 		return err
 	}
-	switch {
-	case !plan && g.chosen.Profile() != workflow.Change:
+	if !plan && g.chosen.Profile() != workflow.Change {
 		return conflict("no define", "This session's work type has no Define step, so it has no requirements to approve.")
-	case !plan && g.chosen.Plans() && choice == PlanUnstated:
-		return onField("plan", invalid("fields", "Choose whether a plan follows."))
-	case !plan && !g.chosen.Plans() && choice == PlanWanted:
-		return onField("plan", invalid("plan", "This work type has no Plan step."))
 	}
-	doc, what := g.docs.req, "requirements"
+	slot, what := g.docs.req, "requirements"
 	if plan {
-		doc, what = g.docs.plan, planWord(g)
+		slot, what = g.docs.plan, planWord(g)
 	}
-	onBase := g.docs.baseReq
-	if plan {
-		onBase = g.docs.basePlan
-	}
+	doc := slot.doc
 	switch {
-	case doc == nil && onBase != nil:
-		return conflict("on base", "The "+what+" text is from an earlier task, already on the base branch, so it can't be approved here. The session's own commits must add or change it.")
-	case doc == nil && g.docs.held:
-		return conflict("not committed", "The engine counts only the "+what+" text committed on the session's branch, and there's none there yet. Ask the agent to commit it, then approve.")
+	case doc == nil && slot.why != "":
+		return conflict("unreadable", "The engine couldn't read the "+what+" in the session's documents folder ("+slot.path+"): "+slot.why+". Ask the agent to save it there again as plain text, then approve.")
 	case doc == nil:
 		return conflict("nothing", "There's no "+what+" to approve yet.")
 	case doc.Clipped:
@@ -1206,12 +1099,10 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	case g.head == "":
 		return conflict("head", "The "+what+" weren't approved: the engine couldn't read the session's branch.")
 	}
-	if !plan && g.reqOk {
-		if err := reapproval(g, choice); err != nil {
-			return err
-		}
+	if !plan && g.reqOk && g.built {
+		return conflict("built", "Work is committed since your last approval.")
 	}
-	f := w.facts(ctx, g)
+	f := w.facts(g)
 	kind := workflow.ApproveRequirements
 	if plan {
 		kind = workflow.ApprovePlan
@@ -1219,10 +1110,7 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	if why := workflow.Decide(f, workflow.Action{Kind: kind, Hash: hash}); why != "" {
 		return conflict("held", why)
 	}
-	a := &workApproval{Hash: hash, Commit: g.head, At: w.cfg.Now()}
-	if !plan {
-		a.Text, a.Plan = text, choice == PlanWanted
-	}
+	a := &workApproval{Hash: hash, Commit: g.head, At: w.cfg.Now(), Text: text}
 	var unlocked *TestLock
 	w.mu.Lock()
 	if s := w.sessions[sid]; s != nil {
@@ -1236,22 +1124,26 @@ func (w *Work) Approve(ctx context.Context, sid string, plan bool, hash, text st
 	}
 	w.mu.Unlock()
 	w.persist(sid)
-	chose := ""
-	if !plan && g.chosen.Plans() {
-		chose = planChoiceWords(a.Plan)
-	}
-	w.approved(sid, g.t, g.head, plan, hash, what, chose)
+	w.approved(sid, g.t, g.head, plan, hash, what)
 	if unlocked != nil {
 		w.unlocked(sid, g.t, unlocked, "the developer approved the "+what+" again, which clears the tests locked at commit "+shortSHA(unlocked.Commit))
 	}
 	w.recheckApproval(ctx, sid)
 	w.cfg.Logger.Info("approved", "what", what)
-	if next := nextStep(g, plan, a.Plan); next != "" && w.cfg.Tell != nil {
+	if next := nextStep(g, plan); next != "" && w.cfg.Tell != nil {
 		if err := w.cfg.Tell(sid, next); err != nil {
 			w.cfg.Logger.Warn("approved", "what", what, "event", "next-step-not-sent")
 		}
 	}
 	return nil
+}
+
+func (w *Work) ApprovedRequirements(ctx context.Context, sid string) string {
+	g, err := w.currentOf(ctx, sid, func(sid string) (PushTarget, bool) { return targetOrHeld(w.cfg.Targets, w.cfg.Held, sid) })
+	if err != nil || !g.reqOk || g.ws.req == nil {
+		return ""
+	}
+	return g.ws.req.Text
 }
 
 func (w *Work) RecheckApproval(sid string) {
@@ -1281,17 +1173,24 @@ func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) st
 	if top == "" {
 		return ""
 	}
-	g, err := w.current(ctx, sid)
-	if err != nil {
-		return ""
-	}
-	f := w.facts(ctx, g)
+	var rels []string
 	for _, p := range paths {
 		rel, err := filepath.Rel(top, p)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
 			continue
 		}
-		if why := workflow.Decide(f, workflow.Action{Kind: workflow.EditFile, Path: filepath.ToSlash(rel)}); why != "" {
+		rels = append(rels, filepath.ToSlash(rel))
+	}
+	if why := w.docWrite(sid, rels); why != "" {
+		return why
+	}
+	g, err := w.current(ctx, sid)
+	if err != nil {
+		return ""
+	}
+	f := w.facts(g)
+	for _, rel := range rels {
+		if why := workflow.Decide(f, workflow.Action{Kind: workflow.EditFile, Path: rel}); why != "" {
 			if f.Untyped {
 				w.heldForType(sid)
 			}
@@ -1303,7 +1202,7 @@ func (w *Work) EditHold(ctx context.Context, sid, top string, paths []string) st
 
 const (
 	implementText = "The developer approved the plan on the software factory page. Implement it now, then commit and call factory_push. Each commit message says what changed and why."
-	noPlanText    = "The developer approved the requirements on the software factory page and chose no plan. Implement them now, then commit and call factory_push. Each commit message says what changed and why."
+	noPlanText    = "The developer approved the requirements on the software factory page, and this work type has no Plan step. Implement them now, then commit and call factory_push. Each commit message says what changed and why."
 )
 
 func planWord(g gathered) string {
@@ -1313,13 +1212,13 @@ func planWord(g gathered) string {
 	return "plan"
 }
 
-func nextStep(g gathered, plan, planned bool) string {
+func nextStep(g gathered, plan bool) string {
 	if g.chosen.Profile() == workflow.Incident {
 		return ""
 	}
 	want, text := workflow.Implement, implementText
 	switch {
-	case !plan && planned:
+	case !plan && g.planNeeded:
 		want, text = workflow.Plan, ""
 	case !plan:
 		text = noPlanText
@@ -1460,47 +1359,15 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	}
 	v := GateView{Head: g.head, Branch: g.t.Branch, Adapter: g.adapter, Type: g.chosen.ID, Chosen: g.ws.chosen, Profile: g.chosen.Profile(), Note: g.typeNote,
 		Types: g.setup.setup.Types, Commands: g.setup.setup.Workflow.Commands, TeamApproved: g.setup.approved, TeamNote: g.setup.note,
-		Research: g.docs.research, Rounds: g.setup.rounds, FilesListed: g.listed, ChangedFiles: len(g.files), PlanApprovals: g.docs.held}
-	if d := g.docs.req; d != nil {
-		c := *d
-		c.Approved, c.Changed = g.reqOk, g.reqWas
-		if g.reqWas && g.ws.req != nil {
-			c.Previous = g.ws.req.Text
-		}
-		if g.docs.held && g.ws.req != nil {
-			c.ApprovedAt = g.ws.req.Commit
-		}
-		v.Requirements = &c
-	} else if d := g.docs.baseReq; d != nil {
-		c := *d
-		c.OnBase, c.Changed = true, g.reqWas
-		v.Requirements = &c
-	} else if d := g.docs.shownReq; d != nil {
-		c := *d
-		c.Reported, c.Changed = true, g.reqWas
-		v.Requirements = &c
+		Research: g.docs.research, DocsFolder: g.docs.folder, Rounds: g.setup.rounds, FilesListed: g.listed, ChangedFiles: len(g.files)}
+	if w.cfg.NothingToExplain != nil && g.head != "" && w.cfg.NothingToExplain(sid) == g.head {
+		v.ExplainOff = SaidNothingToExplain
 	}
-	if d := g.docs.plan; d != nil {
-		c := *d
-		c.Approved, c.Changed = g.planOk, g.planWas
-		if g.docs.held && g.ws.plan != nil {
-			c.ApprovedAt = g.ws.plan.Commit
-		}
-		v.Plan = &c
-	} else if d := g.docs.basePlan; d != nil {
-		c := *d
-		c.OnBase, c.Changed = true, g.planWas
-		v.Plan = &c
-	} else if d := g.docs.shownPlan; d != nil {
-		c := *d
-		c.Reported, c.Changed = true, g.planWas
-		v.Plan = &c
-	}
+	v.Requirements = viewDoc(g.docs.req, g.ws.req, g.reqOk, g.reqWas)
+	v.Plan = viewDoc(g.docs.plan, g.ws.plan, g.planOk, g.planWas)
+	v.DocsNote = docsNote([]docSlot{g.docs.req, g.docs.plan}, []*WorkDoc{v.Requirements, v.Plan})
 	change := g.chosen.Profile() == workflow.Change
 	v.Define = change && g.reqOk
-	v.PlanChoice = g.chosen.Plans()
-	v.NoPlan = v.PlanChoice && g.reqOk && !g.planChosen
-	v.PlanSwitch = planSwitchOf(g)
 	v.FixCommitted = g.chosen.Profile() == workflow.Incident && g.built
 	reviewers, missing := w.reviewerStates(g)
 	v.Reviewers = reviewers
@@ -1510,6 +1377,7 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 	v.Started = startedOf(g)
 	v.Ask = w.typeAskOf(g)
 	v.Ran = slices.Clone(g.ws.ran)
+	v.Early = earlyWorkOf(g)
 	if g.head != "" {
 		if tc := w.typeChange(g.t.Repo, g.chosen, g.setup.setup.Protect, g.specs, g.base, g.head, g.net, g.listed); len(tc.Lines) > 0 {
 			v.Change = &tc
@@ -1522,8 +1390,12 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 		v.Handoff = v.Handoff || r.Capped
 	}
 	v.Missing = append([]string{}, g.items...)
-	if why := lfsRefusal(g.scan.lfs); why != "" {
-		v.Missing = append(v.Missing, "a push the engine can make: "+why)
+	refused := linkRefusal(g) != ""
+	for _, why := range []string{w.docsRefusal(g), lfsRefusal(g.scan.lfs)} {
+		if why != "" {
+			v.Missing = append(v.Missing, "a push the engine can make: "+why)
+			refused = true
+		}
 	}
 	if g.headError != "" {
 		v.Missing = append([]string{"the current commit, which " + g.headError}, v.Missing...)
@@ -1532,45 +1404,54 @@ func (w *Work) View(ctx context.Context, sid string) (GateView, error) {
 		v.Missing = append(v.Missing, "a work type that pushes, picked on the page")
 	}
 	lv, _ := w.cfg.Level(sid)
-	if item := gate.SandboxItem(lv); item != "" {
-		v.Missing = append(v.Missing, item)
+	unsandboxed := gate.SandboxItem(lv) != ""
+	if unsandboxed {
+		v.Missing = append(v.Missing, gate.SandboxItem(lv))
 	}
 	v.Missing = append(v.Missing, missing...)
 	v.Allowed = len(v.Missing) == 0
-	f := w.facts(ctx, g)
-	v.Waiting = workflow.ImplementWait(workflow.Build{Profile: g.chosen.Profile(), Head: g.head != "", ReqOk: g.reqOk, PlanChosen: g.planChosen, PlanOk: g.planOk,
+	f := w.facts(g)
+	v.Waiting = workflow.ImplementWait(workflow.Build{Profile: g.chosen.Profile(), Head: g.head != "", ReqOk: g.reqOk, PlanNeeded: g.planNeeded, PlanOk: g.planOk,
 		Built: g.built, Commits: len(g.files), CommitsRead: g.listed, NoBase: g.main == ""})
+	v.PushWait = pushWaitOf(v, g.chosen.Push, refused, unsandboxed)
 	v.Holds = map[string]string{
 		"define": workflow.Decide(f, workflow.Action{Kind: workflow.StartDefine}),
 		"plan":   workflow.Decide(f, workflow.Action{Kind: workflow.StartPlan}),
 	}
 	if change && v.Requirements != nil && !g.reqOk {
 		v.Holds["approveRequirements"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApproveRequirements, Hash: v.Requirements.Hash})
-		if v.Requirements.Reported {
-			v.Holds["approveRequirements"] = notCommitted("requirements")
-		}
-		if v.Requirements.OnBase {
-			v.Holds["approveRequirements"] = fromBase("requirements")
-		}
 	}
 	if v.Plan != nil && !g.planOk {
 		v.Holds["approvePlan"] = workflow.Decide(f, workflow.Action{Kind: workflow.ApprovePlan, Hash: v.Plan.Hash})
-		if v.Plan.Reported {
-			v.Holds["approvePlan"] = notCommitted(planWord(g))
-		}
-		if v.Plan.OnBase {
-			v.Holds["approvePlan"] = fromBase(planWord(g))
-		}
 	}
 	return v, nil
 }
 
-func fromBase(what string) string {
-	return "This " + what + " text is from an earlier task, already on the base branch, so it isn't approvable here. The engine counts only text the session's own commits added or changed."
+func viewDoc(s docSlot, a *workApproval, ok, was bool) *WorkDoc {
+	switch {
+	case s.doc != nil:
+		c := *s.doc
+		c.Approved, c.Changed = ok, was
+		if was && a != nil {
+			c.Previous = a.Text
+		}
+		return &c
+	case ok && a != nil:
+		c := shownDoc(s.path, a.Text)
+		c.Approved, c.Unread, c.UnreadWhy = true, true, s.why
+		return c
+	}
+	return nil
 }
 
-func notCommitted(what string) string {
-	return "This is the " + what + " text as the agent reported it, and it isn't committed on the session's branch. The engine counts an approval only of committed text, so ask the agent to commit it first."
+func docsNote(slots []docSlot, shown []*WorkDoc) string {
+	var out []string
+	for i, s := range slots {
+		if s.doc == nil && s.why != "" && shown[i] == nil {
+			out = append(out, "The engine couldn't read "+path.Base(s.path)+" in the session's documents folder ("+s.path+"): "+s.why+", so it shows nothing to approve from it.")
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func (w *Work) teamView(r Repository) TeamView {

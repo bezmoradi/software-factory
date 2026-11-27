@@ -13,6 +13,8 @@ import (
 const (
 	maxReviewModels    = 4
 	maxReviewDenials   = 20
+	maxOutsideReads    = 5
+	maxOutsideTarget   = 120
 	maxBraceExpansions = 8
 )
 
@@ -55,22 +57,37 @@ func denialsOf(v any) ([]string, []string) {
 		if len(names) < maxReviewDenials && !slices.Contains(names, name) {
 			names = append(names, name)
 		}
-		if slices.Contains(readTools, name) && !instructionRead(name, d["tool_input"]) && !slices.Contains(outside, name) {
-			outside = append(outside, name)
+		if !slices.Contains(readTools, name) || instructionRead(name, d["tool_input"]) {
+			continue
+		}
+		if read := outsideRead(name, d["tool_input"]); len(outside) < maxOutsideReads && !slices.Contains(outside, read) {
+			outside = append(outside, read)
 		}
 	}
 	return names, outside
 }
 
-func instructionRead(tool string, v any) bool {
-	in, _ := v.(map[string]any)
-	target := ""
+func readTarget(in map[string]any) string {
 	for _, key := range []string{"file_path", "path", "pattern"} {
 		if s, _ := in[key].(string); s != "" {
-			target = s
-			break
+			return s
 		}
 	}
+	return ""
+}
+
+func outsideRead(tool string, v any) string {
+	in, _ := v.(map[string]any)
+	target := CleanLine(maskSecrets(strings.Join(strings.Fields(readTarget(in)), " ")), maxOutsideTarget)
+	if target == "" {
+		return tool
+	}
+	return tool + ": " + target
+}
+
+func instructionRead(tool string, v any) bool {
+	in, _ := v.(map[string]any)
+	target := readTarget(in)
 	pattern, _ := in["pattern"].(string)
 	if tool != "Glob" || pattern == "" {
 		return instructionPath(target)

@@ -93,7 +93,7 @@ export function approveStartup(a: StartupApproval, name: string): Promise<boolea
     ...(a.walk?.length ? [el('p', 'small warn', `The search of the worktree's subfolders stopped early, so a skill folder or instruction file further in isn't shown, and approving doesn't cover it: ${plain(a.walk)}.${a.skipped?.length ? ` It also skips ${plain(a.skipped)}.` : ''}`)] : []),
     ...instructionSection(a),
     details(`They can change its permissions, hooks, MCP servers, plugins, agents, commands and endpoints. The worktree is at commit ${shortSha(a.commit)}.`, LEGEND, 'Approving lets this exact set start now and later. Any change to any of them asks again.'),
-  ], 'Approve and start', 'primary')
+  ], 'Approve and start', 'primary', 'Cancel', true)
 }
 
 export function approveTrustFiles(a: StartupApproval, name: string): Promise<boolean> {

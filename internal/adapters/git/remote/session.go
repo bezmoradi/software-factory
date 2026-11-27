@@ -287,7 +287,7 @@ func carryObjects(git *os.Root, objects []push.Object, head string) error {
 	if _, err := packfile.NewEncoder(&buf, sto, false).Encode(hashes, 0); err != nil {
 		return errors.New("the other session's commits couldn't be packed")
 	}
-	if err := storePack(git, &buf, head, nil); err != nil {
+	if err := storePack(git, &buf, head, nil, MaxPack); err != nil {
 		return errors.New("the other session's commits couldn't be written into the session's clone: " + err.Error())
 	}
 	return nil

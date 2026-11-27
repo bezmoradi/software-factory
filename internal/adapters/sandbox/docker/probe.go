@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/netip"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,7 +37,6 @@ var (
 type ProbeConfig struct {
 	Proxy    string
 	GitHosts []string
-	Granted  []string
 	Addrs    []string
 	Outside  string
 	Front    string
@@ -71,24 +69,12 @@ func FrontCheck(front, name string) string { return "front:" + front + ">" + nam
 
 func GatewayCheck(address string) string { return "gateway:" + address }
 
-func (cfg ProbeConfig) granted(h, port string) bool {
-	return slices.Contains(cfg.Granted, net.JoinHostPort(h, port))
-}
-
-func proxyPorts(cfg ProbeConfig, h string) []string {
-	var out []string
-	for _, port := range []string{"443", "22"} {
-		if !cfg.granted(h, port) {
-			out = append(out, port)
-		}
-	}
-	return out
-}
+var proxyPorts = []string{"443", "22"}
 
 func Expected(cfg ProbeConfig) []string {
 	var out []string
 	for _, h := range cfg.GitHosts {
-		for _, port := range proxyPorts(cfg, h) {
+		for _, port := range proxyPorts {
 			out = append(out, ProxyCheck(h, port))
 		}
 		out = append(out, DirectCheck(net.JoinHostPort(h, "443")), DirectCheck(net.JoinHostPort(h, "22")))
@@ -101,9 +87,7 @@ func Expected(cfg ProbeConfig) []string {
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
-			if !cfg.granted(h, "443") {
-				out = append(out, FrontCheck(cfg.Front, h))
-			}
+			out = append(out, FrontCheck(cfg.Front, h))
 		}
 	}
 	for _, a := range OutwardUDP {
@@ -127,7 +111,7 @@ func Probe(ctx context.Context, cfg ProbeConfig, d Dialer) Report {
 	}
 	var jobs []job
 	for _, h := range cfg.GitHosts {
-		for _, port := range proxyPorts(cfg, h) {
+		for _, port := range proxyPorts {
 			jobs = append(jobs, job{ProxyCheck(h, port), func() Result { return throughProxy(ctx, d, cfg, h, port) }})
 		}
 		for _, port := range []string{"443", "22"} {
@@ -151,9 +135,7 @@ func Probe(ctx context.Context, cfg ProbeConfig, d Dialer) Report {
 	}
 	if cfg.Front != "" {
 		for _, h := range cfg.GitHosts {
-			if !cfg.granted(h, "443") {
-				jobs = append(jobs, job{FrontCheck(cfg.Front, h), func() Result { return fronted(ctx, d, cfg, h) }})
-			}
+			jobs = append(jobs, job{FrontCheck(cfg.Front, h), func() Result { return fronted(ctx, d, cfg, h) }})
 		}
 	}
 	if cfg.Gateway != "" {
@@ -321,7 +303,6 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 	fs.SetOutput(io.Discard)
 	proxy := fs.String("proxy", "", "the egress proxy, host:port")
 	git := fs.String("git", "", "comma-separated git host names")
-	granted := fs.String("granted", "", "comma-separated host:port of git hosts a grant opens to this container on 443 or 22, which egress lets through")
 	addrs := fs.String("addr", "", "comma-separated ip:port addresses of git hosts")
 	outside := fs.String("outside", "", "a host outside the allowlist")
 	front := fs.String("front", "", "an allowed host to send other TLS names through")
@@ -349,13 +330,7 @@ func ParseProbeArgs(args []string) (ProbeConfig, error) {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: -gateway must be an IPv4 address")
 		}
 	}
-	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Granted: split(*granted), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker, Request: *request, Gateway: *gw}
-	for _, g := range cfg.Granted {
-		h, port, err := net.SplitHostPort(g)
-		if err != nil || !slices.Contains(cfg.GitHosts, h) || port != "443" && port != "22" {
-			return ProbeConfig{}, fmt.Errorf("sandbox-probe: -granted names %q, which isn't a host -git names on 443 or 22", g)
-		}
-	}
+	cfg := ProbeConfig{Proxy: *proxy, GitHosts: split(*git), Addrs: split(*addrs), Outside: *outside, Front: *front, Marker: *marker, Request: *request, Gateway: *gw}
 	for _, a := range cfg.Addrs {
 		if _, err := netip.ParseAddrPort(a); err != nil {
 			return ProbeConfig{}, fmt.Errorf("sandbox-probe: %q isn't ip:port", a)

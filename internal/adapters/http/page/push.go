@@ -107,14 +107,28 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 			paths = append(paths, p)
 		}
 	}
+	places := session.CheckPlaces(session.BoxFolder(s.cfg.Workspace, ConnBox(r.Context())), top, paths)
 	advice := gate.Check(tool, input, top, paths, false)
+	for _, pl := range places[1:] {
+		if advice.Protected == "" {
+			advice.Protected = gate.Check(tool, input, pl.Top, pl.Paths, false).Protected
+		}
+	}
 	held := ""
 	if s.cfg.Work != nil && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
-		held = s.cfg.Work.EditHold(r.Context(), sid, top, paths)
+		for _, pl := range places {
+			if held == "" {
+				held = s.cfg.Work.EditHold(r.Context(), sid, pl.Top, pl.Paths)
+			}
+		}
 	}
 	guarded := ""
 	if s.cfg.Work != nil && held == "" && advice.Protected == "" && !advice.Pushes && writeTools[tool] && len(paths) > 0 {
-		guarded = s.cfg.Work.Guarded(sid, top, paths)
+		for _, pl := range places {
+			if guarded == "" {
+				guarded = s.cfg.Work.Guarded(sid, pl.Top, pl.Paths)
+			}
+		}
 	}
 	s.refused(sid, adviceKinds{pushes: advice.Pushes, remote: advice.Waits, protected: advice.Protected != "", cloud: advice.Cloud != ""})
 	send(w, http.StatusOK, map[string]any{"kind": string(advice.Kind), "waits": advice.Waits, "pushes": advice.Pushes, "protected": advice.Protected, "held": held, "cloud": advice.Cloud, "irreversible": advice.Undone, "guarded": guarded})

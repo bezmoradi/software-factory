@@ -17,7 +17,7 @@ tables:
         "$.headers.x-content-type-options": ["nosniff"]
         "$.headers.x-frame-options": ["DENY"]
         "$.headers.cache-control": ["no-store"]
-        "$.headers.content-security-policy": ["default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"]
+        "$.headers.content-security-policy": ["default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; frame-src http://127.0.0.1:${page.preview_port}"]
       present: ["$.body_text", "$.headers.x-sf-request"]
       matches: { "$.headers.x-sf-request[0]": "[0-9a-f]{16}" }
       absent: ["$.headers.x-sf-request[1]", "$.headers.access-control-allow-origin"]

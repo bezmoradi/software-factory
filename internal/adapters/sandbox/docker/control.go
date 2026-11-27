@@ -16,7 +16,6 @@ import (
 	"net/netip"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"time"
 
@@ -40,7 +39,6 @@ type sideJSON struct {
 	Allow   []string         `json:"allow"`
 	Ports   []string         `json:"ports,omitempty"`
 	Expires map[string]int64 `json:"expires"`
-	Git     []string         `json:"git,omitempty"`
 }
 
 type statusJSON struct {
@@ -75,15 +73,10 @@ type errPart string
 func (e errPart) Error() string { return string(e) }
 
 func listOf(s sideJSON) (session.EgressList, bool) {
-	if s.Allow == nil || len(s.Allow) > maxSideEntries || len(s.Ports) > maxSideEntries || len(s.Expires) > 2*maxSideEntries || len(s.Git) > 2*maxSideEntries {
+	if s.Allow == nil || len(s.Allow) > maxSideEntries || len(s.Ports) > maxSideEntries || len(s.Expires) > 2*maxSideEntries {
 		return session.EgressList{}, false
 	}
-	for _, g := range s.Git {
-		if !slices.Contains(s.Allow, g) && !slices.Contains(s.Ports, g) {
-			return session.EgressList{}, false
-		}
-	}
-	out := session.EgressList{Allow: sortedCopy(s.Allow), Ports: sortedCopy(s.Ports), Expires: map[string]time.Time{}, Git: sortedCopy(s.Git)}
+	out := session.EgressList{Allow: sortedCopy(s.Allow), Ports: sortedCopy(s.Ports), Expires: map[string]time.Time{}}
 	for h, t := range s.Expires {
 		if t <= 0 {
 			return session.EgressList{}, false
@@ -97,9 +90,6 @@ func sideOf(l session.EgressList) sideJSON {
 	out := sideJSON{Allow: sortedCopy(l.Allow), Expires: map[string]int64{}}
 	if len(l.Ports) > 0 {
 		out.Ports = sortedCopy(l.Ports)
-	}
-	if len(l.Git) > 0 {
-		out.Git = sortedCopy(l.Git)
 	}
 	for h, t := range l.Expires {
 		out.Expires[h] = t.Unix()

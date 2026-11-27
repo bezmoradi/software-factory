@@ -5,6 +5,9 @@ import { icon } from './icon.ts'
 
 const SHOWN = 12
 const FOLDS_ABOVE = SHOWN + 3
+const CHUNK = 1000
+const CHUNKED_ABOVE = 5000
+const DRAWN_AT_MOST = 20000
 
 export interface CodeOptions {
   text: string | NumberedLine[]
@@ -35,6 +38,18 @@ function diffKind(text: string): string {
   return text.startsWith('+') ? 'added' : text.startsWith('-') ? 'removed' : ''
 }
 
+function highlighted(into: HTMLElement, parts: Token[]): void {
+  for (const t of parts) into.append(t.kind ? el('span', `syn-${t.kind}`, t.text) : t.text)
+}
+
+function reuse(kept: HTMLElement | undefined, fresh: HTMLElement): HTMLElement {
+  if (!kept) return fresh
+  kept.className = fresh.className
+  kept.style.cssText = fresh.style.cssText
+  kept.replaceChildren(...fresh.childNodes)
+  return kept
+}
+
 class SfCode extends HTMLElement {
   static readonly #watch = new ResizeObserver(entries => {
     for (const e of entries) if (e.target instanceof SfCode) e.target.#reach()
@@ -42,6 +57,7 @@ class SfCode extends HTMLElement {
 
   #o: CodeOptions = { text: '', label: '' }
   #lines: NumberedLine[] = []
+  #chunks: HTMLElement[] = []
   #shown = false
   #open = false
   #wrap = false
@@ -55,6 +71,7 @@ class SfCode extends HTMLElement {
   readonly #pre = el('pre', 'code-body')
   readonly #code = el('code')
   readonly #more = button('', 'code-more')
+  readonly #cut = el('p', 'code-cut')
 
   constructor() {
     super()
@@ -63,8 +80,7 @@ class SfCode extends HTMLElement {
     this.#pre.append(this.#code)
     this.#more.setAttribute('aria-controls', ensureId(this.#pre))
     this.#more.addEventListener('click', () => {
-      this.#open = !this.#open
-      this.#paint()
+      this.#paint(!this.#open)
       if (!this.#open) this.#more.scrollIntoView({ block: 'nearest' })
     })
     this.#wrapButton.append(icon('wrap'))
@@ -72,7 +88,7 @@ class SfCode extends HTMLElement {
     this.#wrapButton.setAttribute('aria-label', 'Wrap long lines')
     this.#wrapButton.addEventListener('click', () => {
       this.#wrap = !this.#wrap
-      this.#paint()
+      this.#paintWrap()
     })
   }
 
@@ -117,33 +133,77 @@ class SfCode extends HTMLElement {
     }
     replaceKeeping(this.#frame, [this.#pre, ...(o.copy && !head ? [this.#copy] : [])])
     this.#frame.hidden = head && this.#lines.length === 1 && this.#lines[0]!.text === ''
-    replaceKeeping(this, [...(head ? [this.#head] : []), ...(end ? [this.#more] : []), this.#frame, ...(end ? [] : [this.#more])])
+    replaceKeeping(this, [...(head ? [this.#head] : []), ...(end ? [this.#more, this.#cut] : []), this.#frame, ...(end ? [] : [this.#cut, this.#more])])
     this.#paint()
   }
 
-  #paint() {
+  #paint(open = this.#open) {
     const lines = this.#lines
     const n = lines.length
     const folds = n > FOLDS_ABOVE
-    const folded = folds && !this.#open
+    const folded = folds && !open
     const end = this.#o.keep === 'end'
-    const [from, to] = !folded ? [0, n] : end ? [n - SHOWN - 1, n] : [0, SHOWN + 1]
+    const capped = n > DRAWN_AT_MOST
+    const [from, to] = folded ? (end ? [n - SHOWN - 1, n] : [0, SHOWN + 1]) : !capped ? [0, n] : end ? [n - DRAWN_AT_MOST, n] : [0, DRAWN_AT_MOST]
+    const total = lines.at(-1)?.line ?? n
+    const unshown = !capped ? 0 : end ? lines[n - DRAWN_AT_MOST]!.line - lines[0]!.line : total - lines[DRAWN_AT_MOST - 1]!.line
     const peek = !folded ? -1 : end ? from : to - 1
-    this.classList.toggle('code-wrap', this.#wrap)
-    this.classList.toggle('code-folded', folded)
-    this.#wrapButton.setAttribute('aria-pressed', String(this.#wrap))
-    this.#more.hidden = !folds
-    this.#more.setAttribute('aria-expanded', String(this.#open))
-    this.#more.replaceChildren(icon('chevron'), this.#open ? 'Show less' : `Show all ${lines.at(-1)?.line ?? n} lines`)
     const lang = this.#o.lang
     const state = newState()
-    const rows: HTMLElement[] = []
-    for (let i = 0; i < to; i++) {
-      const parts = lang ? tokens(lines[i]!.text, lang, state) : null
-      if (i >= from) rows.push(this.#row(lines[i]!, parts, i === peek, i === n - 1))
+    const parts = (i: number) => (lang ? tokens(lines[i]!.text, lang, state) : null)
+    for (let i = 0; i < from; i++) parts(i)
+    if (to - from > CHUNKED_ABOVE) {
+      const built: HTMLElement[] = []
+      for (let i = from; i < to; i += CHUNK) built.push(this.#chunk(i, Math.min(i + CHUNK, to), parts))
+      this.#chunks = built.map((fresh, k) => reuse(this.#chunks[k], fresh))
+      replaceKeeping(this.#code, this.#chunks)
+    } else {
+      const rows = document.createDocumentFragment()
+      for (let i = from; i < to; i++) rows.append(this.#row(lines[i]!, parts(i), i === peek, i === n - 1))
+      this.#code.replaceChildren(rows)
+      this.#chunks = []
     }
-    this.#code.replaceChildren(...rows)
+    this.#open = open
+    this.classList.toggle('code-folded', folded)
+    this.#more.hidden = !folds
+    this.#more.setAttribute('aria-expanded', String(open))
+    this.#more.replaceChildren(icon('chevron'), open ? 'Show less' : !capped ? `Show all ${total} lines` : `Show the ${end ? 'last' : 'first'} ${(total - unshown).toLocaleString()} of ${total.toLocaleString()} lines`)
+    this.#cut.hidden = folded || !capped
+    this.#cut.textContent = this.#cut.hidden ? '' : `${unshown.toLocaleString()} ${end ? 'earlier' : 'more'} ${unshown === 1 ? 'line' : 'lines'} not shown.${this.#o.copy ? ' Copy copies all of them.' : ''}`
+    this.#paintWrap()
+  }
+
+  #paintWrap() {
+    this.classList.toggle('code-wrap', this.#wrap)
+    this.#wrapButton.setAttribute('aria-pressed', String(this.#wrap))
     this.#reach()
+  }
+
+  #chunk(from: number, to: number, parts: (i: number) => Token[] | null): HTMLElement {
+    const o = this.#o
+    const lines = this.#lines
+    const last = lines.length - 1
+    const merged = !o.numbers && !o.diff && !o.marked?.size && o.look !== 'terminal'
+    const chunk = el('span', merged ? 'code-line code-chunk' : 'code-chunk')
+    let cols = 0
+    for (let i = from; i < to; i++) cols = Math.max(cols, lines[i]!.text.length)
+    chunk.style.setProperty('--rows', String(to - from))
+    chunk.style.setProperty('--cols', String(cols))
+    if (!merged) {
+      for (let i = from; i < to; i++) chunk.append(this.#row(lines[i]!, parts(i), false, i === last))
+      return chunk
+    }
+    const text = el('span', 'code-text')
+    if (o.lang) {
+      for (let i = from; i < to; i++) {
+        highlighted(text, parts(i) ?? [])
+        if (i !== last) text.append('\n')
+      }
+    } else {
+      text.textContent = lines.slice(from, to).map(l => l.text).join('\n') + (to - 1 === last ? '' : '\n')
+    }
+    chunk.append(text)
+    return chunk
   }
 
   #row(line: NumberedLine, parts: Token[] | null, peek: boolean, last: boolean): HTMLElement {
@@ -156,7 +216,7 @@ class SfCode extends HTMLElement {
       row.append(no)
     }
     const text = el('span', 'code-text')
-    if (parts) for (const t of parts) text.append(t.kind ? el('span', `syn-${t.kind}`, t.text) : t.text)
+    if (parts) highlighted(text, parts)
     else if (kind) text.append(el('span', 'code-sign', line.text.slice(0, 1)), line.text.slice(1))
     else text.textContent = line.text
     if (!last) text.append('\n')

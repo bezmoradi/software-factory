@@ -272,8 +272,8 @@
   title: "Approving requirements approves the plan and the other way round"
   edits:
     - file: "internal/adapters/http/page/workflow.go"
-      find: "s.cfg.Work.Approve(r.Context(), sid, plan, hash, text, choice)"
-      replace: "s.cfg.Work.Approve(r.Context(), sid, !plan, hash, text, choice)"
+      find: "s.cfg.Work.Approve(r.Context(), sid, plan, hash, text)"
+      replace: "s.cfg.Work.Approve(r.Context(), sid, !plan, hash, text)"
 - id: PAGE-034
   title: "Approving the team file doesn't check the sha's form"
   edits:
@@ -850,6 +850,30 @@
     - file: "internal/core/gate/hazard.go"
       find: "if at < 0 || !tools[args[at]] {\n\t\treturn true\n\t}"
       replace: "if at < 0 {\n\t\treturn false\n\t}\n\tif !tools[args[at]] {\n\t\treturn true\n\t}"
+- id: GATE-085
+  title: "The rough cloud match counts claude inside a path again, so `f() { :; }; cat ~/.claude/settings.json rc` is refused as a cloud hand-off"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "regexp.MustCompile(`(?i)` + claudeWord + `(?:"
+      replace: "regexp.MustCompile(`(?i)\\bclaude\\b(?:"
+- id: GATE-086
+  title: "The rough cloud match counts rc= as the word rc, so `f() { :; }; claude --version; echo rc=$?` is refused as a cloud hand-off"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "/?(?:remote-control|rc)` + wordEnd + `"
+      replace: "/?(?:remote-control|rc)\\b"
+- id: GATE-087
+  title: "The rough cloud match no longer counts claude as the last part of a program's path, so `f() { :; }; /usr/local/bin/claude --remote x` isn't refused"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "={\\[,/\\\\])claude("
+      replace: "={\\[,\\\\])claude("
+- id: GATE-088
+  title: "The rough irreversible match counts claude inside a path again, so `f() { :; }; cat ~/.claude/settings.json rc` asks the person"
+  edits:
+    - file: "internal/core/gate/hazard.go"
+      find: "|\\b(?:drop|truncate|dropdb)\\b|` + claudeWord)"
+      replace: "|\\b(?:drop|truncate|dropdb)\\b|\\bclaude\\b`)"
 - id: FLOW-001
   title: "Approving the requirements no longer checks the approved text's hash, so a stale approval counts"
   edits:
@@ -863,23 +887,23 @@
       find: "if a.Hash != f.PlanHash {"
       replace: "if a.Hash == \"\" {"
 - id: FLOW-003
-  title: "The plan can be approved at a commit with work beyond the plan's own files"
+  title: "The plan can be approved at a commit beyond the one where the requirements were approved"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "if f.Head == \"\" || (f.Head != f.ReqBaseline && !f.ArtifactsOnly) {"
+      find: "if f.Head == \"\" || f.Head != f.ReqBaseline {"
       replace: "if f.Head == \"\" {"
 - id: FLOW-004
-  title: "Implement may start once the requirements are approved, before the plan the developer chose is"
+  title: "Implement may start once the requirements are approved, before the plan is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "case change && f.PlanChosen && !f.PlanOk:"
-      replace: "case change && f.PlanChosen && !f.ReqOk:"
+      find: "case change && f.PlanNeeded && !f.PlanOk:"
+      replace: "case change && f.PlanNeeded && !f.ReqOk:"
 - id: FLOW-005
-  title: "A Code change's edits are allowed once the requirements are approved, before the plan the developer chose is"
+  title: "A Code change's edits are allowed once the requirements are approved, before the plan is"
   edits:
     - file: "internal/core/workflow/decide.go"
-      find: "case f.Profile != Change || f.ReqOk && (!f.PlanChosen || f.PlanOk) ||"
-      replace: "case f.Profile != Change || f.ReqOk ||"
+      find: "case f.Profile != Change || f.ReqOk && (!f.PlanNeeded || f.PlanOk):"
+      replace: "case f.Profile != Change || f.ReqOk:"
 - id: FLOW-006
   title: "Agent instruction files (CLAUDE.md, .claude/...) count as documentation"
   edits:
@@ -1730,14 +1754,14 @@
   title: "A plan approval counts against requirements that changed after their approval"
   edits:
     - file: "internal/core/session/work.go"
-      find: "(!change || g.reqOk && g.planChosen)"
-      replace: "(!change || ws.req != nil && g.planChosen)"
+      find: "(!change || g.reqOk && g.planNeeded)"
+      replace: "(!change || ws.req != nil && g.planNeeded)"
 - id: SESS-537
   title: "An approval keeps counting after its document changes"
   edits:
     - file: "internal/core/session/work.go"
-      find: "\t\treturn d.Hash == a.Hash\n"
-      replace: "\t\treturn d.Hash != \"\"\n"
+      find: "return a != nil && a.Text != \"\" && (s.doc == nil || s.doc.Hash == a.Hash)"
+      replace: "return a != nil && a.Text != \"\""
 - id: SESS-538
   title: "Symlink refusals under proctor/ are checked only when there is an LFS refusal"
   edits:
@@ -1874,8 +1898,8 @@
   title: "A running session may be deleted from the workspace view"
   edits:
     - file: "internal/core/session/workspace.go"
-      find: "\tcase s.Running:\n\t\trow.Why = \"Stop the session before deleting it.\""
-      replace: "\tcase false:\n\t\trow.Why = \"Stop the session before deleting it.\""
+      find: "\tcase s.Running:\n\t\trow.Why = saidStopFirst"
+      replace: "\tcase false:\n\t\trow.Why = saidStopFirst"
 - id: SESS-561
   title: "A held push counts as pushed for deleting a session"
   edits:
@@ -1964,8 +1988,8 @@
   title: "A repository with one session may be removed"
   edits:
     - file: "internal/core/session/repos.go"
-      find: "if n := c.sessions(name); n > 0 {"
-      replace: "if n := c.sessions(name); n > 1 {"
+      find: "\tif n == 0 {\n\t\treturn nil\n\t}\n\twhat := \"its session\""
+      replace: "\tif n <= 1 {\n\t\treturn nil\n\t}\n\twhat := \"its session\""
 - id: SESS-577
   title: "A project whose clone is present may be recloned"
   edits:
@@ -2867,8 +2891,8 @@
   title: "A pack a project uses can be removed"
   edits:
     - file: "internal/core/session/packs.go"
-      find: "\t\tif len(users) > 0 {"
-      replace: "\t\tif len(users) > 9 {"
+      find: "\tif len(users) > 0 {\n\t\treturn conflict(\"in use\""
+      replace: "\tif len(users) > 9 {\n\t\treturn conflict(\"in use\""
 - id: SESS-592
   title: "No pack keeps knackpack's agents in the roles"
   edits:
@@ -3077,8 +3101,8 @@
   title: "The edit hold counts a session with no work type as typed"
   edits:
     - file: "internal/core/session/work.go"
-      find: "UsesArtifacts: g.docs.held, Untyped: !g.ws.chosen}"
-      replace: "UsesArtifacts: g.docs.held, Untyped: false}"
+      find: "DocsFolder: g.docs.folder, Untyped: !g.ws.chosen}"
+      replace: "DocsFolder: g.docs.folder, Untyped: false}"
 - id: SESS-663
   title: "factory_work_type takes a type the project doesn't offer"
   edits:
@@ -3149,32 +3173,14 @@
   title: "Continue defining shows before Define has run"
   edits:
     - file: "internal/core/session/path.go"
-      find: "if !m.complete() && t.ran[id] && !t.busy && !produced"
-      replace: "if !m.complete() && !t.busy && !produced"
+      find: "if !m.complete() && t.ran[id] && !produced"
+      replace: "if !m.complete() && !produced"
 - id: SESS-670
   title: "An untyped session's card doesn't name the type the agent suggested"
   edits:
     - file: "internal/core/session/worktypeask.go"
       find: "\tif a.Type != \"\" {\n\t\tc.Suggests,"
       replace: "\tif a.Type == \"\" {\n\t\tc.Suggests,"
-- id: SESS-672
-  title: "Approve requirements without a plan choice is taken as Approve and implement"
-  edits:
-    - file: "internal/core/session/work.go"
-      find: "\tcase !plan && g.chosen.Plans() && choice == PlanUnstated:\n"
-      replace: "\tcase false:\n"
-- id: SESS-673
-  title: "Add a plan is taken while work made since the approval is uncommitted"
-  edits:
-    - file: "internal/core/session/work.go"
-      find: "\tcase choice == PlanWanted && !g.planChosen && g.worked:\n"
-      replace: "\tcase false:\n"
-- id: SESS-674
-  title: "Skip the plan is taken once the plan is approved"
-  edits:
-    - file: "internal/core/session/work.go"
-      find: "\tcase choice == PlanSkipped && g.planOk:\n"
-      replace: "\tcase false:\n"
 - id: SESS-675
   title: "A Code change's first typed message goes to the agent as typed, not as Define's command"
   edits:
@@ -3193,3 +3199,1044 @@
     - file: "internal/adapters/http/page/page.go"
       find: "\tsessionNameRoute: {},\n"
       replace: ""
+- id: SESS-677
+  title: "A credential bound to a git host by name is saved: a token bound to the dev git host or api.github.com is accepted instead of refused with 409 git host"
+  edits:
+    - file: "internal/core/session/credentials.go"
+      find: "\t\tif len(g.gitsOf([]string{name})) > 0 {\n"
+      replace: "\t\tif false {\n"
+- id: SESS-678
+  title: "A credential bound to a git host's port is saved: a token bound to ssh.github.com:22 is accepted instead of refused with 409 git host"
+  edits:
+    - file: "internal/core/session/credentials.go"
+      find: "\t\t\tif len(g.gitsOf([]string{PortTarget(host, n)})) > 0 {\n"
+      replace: "\t\t\tif false {\n"
+- id: SESS-679
+  title: "A grant or preset that opens a git host passes the target check: the Access dialog's check and a preset's risk answer a card for the dev git host instead of 409 git host"
+  edits:
+    - file: "internal/core/session/gitrefusal.go"
+      find: "\tcase len(a.gits) == 0:\n\t\treturn nil\n"
+      replace: "\tcase true:\n\t\treturn nil\n"
+- id: SESS-680
+  title: "factory_request_access for a git host over HTTPS isn't refused: the agent's request for the dev git host or api.github.com becomes a card for the person"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\t\tif a := g.hostTarget(host); len(a.gits) > 0 {\n"
+      replace: "\t\tif a := g.hostTarget(host); false && len(a.gits) > 0 {\n"
+- id: SESS-681
+  title: "factory_request_access for a git host's port isn't refused: the agent's request for port 22 of the dev git host becomes a card for the person"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\t\tif a := g.portTarget(host, q.Port); len(a.gits) > 0 {\n"
+      replace: "\t\tif a := g.portTarget(host, q.Port); false && len(a.gits) > 0 {\n"
+- id: SESS-682
+  title: "A shell call folds: the development agent's execute calls are marked with the files-read words, as if a Bash call were a read"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\"search\": searched,\n"
+      replace: "\t\"search\": searched,\n\t\"execute\": filesRead,\n"
+- id: SESS-683
+  title: "A failed call's end isn't marked unfold, so a failed or refused read would stay folded out of sight"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\tif ok, _ := ev[\"ok\"].(bool); !ok {\n"
+      replace: "\t\tif ok, _ := ev[\"ok\"].(bool); false && !ok {\n"
+- id: SESS-684
+  title: "A search call doesn't fold: the development agent's search calls carry no fold words"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\"search\": searched,\n"
+      replace: ""
+- id: SESS-685
+  title: "A successful call's end is marked unfold too, so no read ever stays in its folded line"
+  edits:
+    - file: "internal/core/session/fold.go"
+      find: "\t\tif ok, _ := ev[\"ok\"].(bool); !ok {\n"
+      replace: "\t\tif ok, _ := ev[\"ok\"].(bool); true || !ok {\n"
+- id: OUT-001
+  title: "agent-host keeps no head of a command's output: everything goes to the 3 MiB tail, so the first 1 MiB of a long setup's output is lost"
+  edits:
+    - file: "internal/adapters/agenthost/projectcmd.go"
+      find: "\tif room := session.CommandOutputHead - len(k.head); room > 0 {\n"
+      replace: "\tif room := 0; room > 0 {\n"
+- id: OUT-002
+  title: "agent-host keeps 8 MiB of a command's output instead of 4 MiB, so nothing of a 4.6 MiB setup output is left out in the container"
+  edits:
+    - file: "internal/core/session/commandoutput.go"
+      find: "\tMaxCommandOutput    = 4 << 20\n"
+      replace: "\tMaxCommandOutput    = 8 << 20\n"
+- id: OUT-003
+  title: "The engine sends the page a command's output without hiding token-shaped text"
+  edits:
+    - file: "internal/core/session/commandoutput.go"
+      find: "\tmasked := maskLines(text, true)\n"
+      replace: "\tmasked := text\n"
+- id: OUT-004
+  title: "The engine sends the page the first 512 KiB of a long output instead of 256 KiB"
+  edits:
+    - file: "internal/core/session/commandoutput.go"
+      find: "\toutputShownHead     = 256 << 10\n"
+      replace: "\toutputShownHead     = 512 << 10\n"
+- id: OUT-005
+  title: "A cut output's head isn't cut back to a line end, so the line saying what was left out can follow half a line, or half a token"
+  edits:
+    - file: "internal/core/session/commandoutput.go"
+      find: "\tif i := bytes.LastIndexByte(head, '\\n'); i >= 0 {\n"
+      replace: "\tif i := len(head) - 1; i >= 0 {\n"
+- id: OUT-006
+  title: "Asking for the check's output answers with the setup command's run"
+  edits:
+    - file: "internal/core/session/commandoutput.go"
+      find: "\trun, name := check, \"check\"\n"
+      replace: "\trun, name := setup, \"check\"\n"
+- id: OUT-007
+  title: "The session's view never marks a run as having its whole output kept, so the page offers no Show all output"
+  edits:
+    - file: "internal/adapters/http/page/sessionwork.go"
+      find: "Full: r.Output != \"\","
+      replace: "Full: false,"
+- id: OUT-008
+  title: "The output op takes any kind, so an unknown kind reaches the core instead of the 400 fields refusal"
+  edits:
+    - file: "internal/adapters/http/page/sessionwork.go"
+      find: "!okKind || kind != session.CommandCheck && kind != session.CommandSetup {"
+      replace: "!okKind {"
+- id: SESS-686
+  title: "A path in the worktree isn't shortened: a tool line shows the path as the agent gave it, so every write in the worktree counts as outside it and never groups"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\t\tshort, inside := shortPath(p, cwd)\n"
+      replace: "\t\tshort, inside := p, false\n"
+- id: SESS-687
+  title: "A shell call's description is shown without the program names the engine read from the command, so a description that says less than the command hides rm and sh"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\tline[\"programs\"] = shown\n"
+      replace: ""
+- id: SESS-688
+  title: "A command the engine can't read still shows the agent's description, with no program names behind it"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\tif !parsed || len(names) == 0 || said == \"\" {\n"
+      replace: "\tif said == \"\" {\n"
+- id: SESS-689
+  title: "sudo is skipped like env or time, so a call run with sudo isn't named or kept in view"
+  edits:
+    - file: "internal/core/gate/programs.go"
+      find: "\tquietPrefixes = set(\"env\", "
+      replace: "\tquietPrefixes = set(\"sudo\", \"env\", "
+    - file: "internal/core/gate/programs.go"
+      find: "\tshownPrefixes = set(\"sudo\", \"doas\")\n"
+      replace: "\tshownPrefixes = set(\"doas\")\n"
+- id: SESS-690
+  title: "A failed shell call's last lines aren't kept, so its line shows only that it failed"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\t\t\tline[\"tail\"] = tail\n"
+      replace: ""
+- id: SESS-691
+  title: "Every shell call that isn't in the background says Done, a failed one included"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\t\tcase ok:\n"
+      replace: "\t\tcase true:\n"
+- id: SESS-692
+  title: "A write outside the worktree is marked as an edit that groups with the others, not kept in view"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "\t\tcase writesFile(tool) && !inside:\n"
+      replace: "\t\tcase false && writesFile(tool) && !inside:\n"
+- id: SESS-693
+  title: "The development agent's edits report their added and removed lines the wrong way round"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "f[\"added\"], f[\"removed\"] = float64(added), float64(removed)"
+      replace: "f[\"added\"], f[\"removed\"] = float64(removed), float64(added)"
+- id: SESS-694
+  title: "A failed shell call's exit code isn't passed on, so its line says Failed without the code"
+  edits:
+    - file: "internal/core/session/bridge.go"
+      find: "\t\t\tf[\"exit\"] = float64(code)\n"
+      replace: "\t\t\t_ = code\n"
+- id: SESS-698
+  title: "A session nobody picks a work type for gets no Define command, though its effective type is Code change"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\tif !ok || firstStepKind("
+      replace: "\tif !ok || !ws.chosen || firstStepKind("
+- id: SESS-699
+  title: "A typed message with attached files goes to the agent as typed, not as Define's command"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\treturn (text != \"\" || attached) && !strings.HasPrefix(text, \"/\")"
+      replace: "\treturn !attached && text != \"\" && !strings.HasPrefix(text, \"/\")"
+- id: SESS-700
+  title: "Typed messages stop going as Define's command once Define has run, before a requirements brief is committed"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\tcase step == \"\":\n"
+      replace: "\tcase step == \"\" || slices.Contains(v.Ran, step):\n"
+- id: SESS-701
+  title: "Typed messages keep going as Define's command after the requirements brief is in the session's documents folder"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "(v.Define || readDoc(v.Requirements) || v.Holds[\"define\"] != \"\")"
+      replace: "(v.Define || v.Holds[\"define\"] != \"\")"
+- id: SESS-702
+  title: "A typed message too long to carry Define's command goes to the agent as typed, without a word to the person"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\treturn \"\", false, \"\", tooLongForStep(f.Step, utf16Len(wrap(text))-MaxText)"
+      replace: "\treturn sent, noted, \"\", nil"
+- id: SESS-703
+  title: "A typed message the engine refused leaves Define marked as run"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "\tif first.Fresh && used == \"\" {\n"
+      replace: "\tif first.Fresh && used == \"\" && false {\n"
+- id: SESS-704
+  title: "The attached files' note goes in front of a wrapped Define command, so the agent doesn't get the command"
+  edits:
+    - file: "internal/core/session/uploads.go"
+      find: "\tif commandName(text) != \"\" {\n\t\treturn strings.TrimSpace(text + \"\\n\\n\" + note)"
+      replace: "\tif false {\n\t\treturn strings.TrimSpace(text + \"\\n\\n\" + note)"
+- id: SESS-705
+  title: "The Execution path shows no notice while the agent changes files before the requirements are approved"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "\tout.Notice = earlyNotice(i, v, commands)\n"
+      replace: "\tout.Notice = nil\n"
+- id: SESS-706
+  title: "The early-work notice counts only commits, not files the agent changed and didn't commit"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "!e.Commits && !uncommittedAny(i.Uncommitted)"
+      replace: "!e.Commits"
+- id: SESS-708
+  title: "Ask for the requirements is taken in a session whose work type has no requirements to approve"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "if c := out[string(workflow.Define)]; c != \"\" && v.Early != nil {"
+      replace: "if c := out[string(workflow.Define)]; c != \"\" {"
+- id: SESS-709
+  title: "Ask for the requirements isn't an ask the engine takes"
+  edits:
+    - file: "internal/core/session/composed.go"
+      find: "\tcase AskDefine, AskRequirements, AskPlan,"
+      replace: "\tcase AskDefine, AskPlan,"
+- id: BOX-060
+  title: "A session's container mounts its read-only copies of other repositories read-write, so an agent could change a copy the engine fetched"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Target: session.CopiesAt, ReadOnly: true,"
+      replace: "Target: session.CopiesAt, ReadOnly: false,"
+- id: BOX-061
+  title: "A session's container mounts the whole r/ folder of the workspace volume, so it sees every session's copies of other repositories, instead of only r/<box>"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Subpath: session.CopiesFolder + \"/\" + box}}"
+      replace: "Subpath: session.CopiesFolder}}"
+- id: SESS-760
+  title: "A session can hold 6 read-only copies or cards for copies instead of 5"
+  edits:
+    - file: "internal/core/session/copies.go"
+      find: "MaxCopies       = 5"
+      replace: "MaxCopies       = 6"
+- id: SESS-761
+  title: "A declined copy can be asked for again at once: the decline isn't remembered for 10 minutes"
+  edits:
+    - file: "internal/core/session/copies.go"
+      find: "\tc.declined[sid+\"\\x00\"+got.Folder] = c.cfg.Now()\n"
+      replace: ""
+- id: SESS-762
+  title: "A copy's address may name a private IP address: the IP literal's address class isn't checked"
+  edits:
+    - file: "internal/core/session/copies.go"
+      find: "\t\tif why := CopyAddressRefused(a, nil); why != \"\" {"
+      replace: "\t\tif why := CopyAddressRefused(a, nil); false && why != \"\" {"
+- id: SESS-763
+  title: "A copy's host may be a local name such as localhost: the name isn't checked before its card"
+  edits:
+    - file: "internal/core/session/copies.go"
+      find: "\tif copyLocal(host) {"
+      replace: "\tif false && copyLocal(host) {"
+- id: SESS-764
+  title: "A copy already fetched isn't reused: asking for the same address again makes a new card"
+  edits:
+    - file: "internal/core/session/copies.go"
+      find: "\t\tcase CopyReady:\n\t\t\tc.mu.Unlock()\n\t\t\treturn ForgeReply{Result: CopyThere"
+      replace: "\t\tcase \"\":\n\t\t\tc.mu.Unlock()\n\t\t\treturn ForgeReply{Result: CopyThere"
+- id: PAGE-190
+  title: "/api/copies takes a card id that isn't 32 hex digits"
+  edits:
+    - file: "internal/adapters/http/page/copies.go"
+      find: "|| !okCard || !copyCard.MatchString(card) {"
+      replace: "|| !okCard {"
+- id: HOST-040
+  title: "factory_copy_repository takes an argument it doesn't know instead of refusing it"
+  edits:
+    - file: "internal/adapters/agenthost/mcpcopy.go"
+      find: "\t\tif k != \"url\" && k != \"ref\" {"
+      replace: "\t\tif false && k != \"url\" && k != \"ref\" {"
+- id: SESS-720
+  title: "A subagent's task reaches the page as the agent sent it, control characters and runs of space included"
+  edits:
+    - file: "internal/core/session/subagents.go"
+      find: "kind, task = spokenWithin(kind, maxSubagentType), spoken(task)"
+      replace: "kind = spokenWithin(kind, maxSubagentType)"
+- id: SESS-721
+  title: "The next message keeps the finished subagents of the last turn in the list"
+  edits:
+    - file: "internal/core/session/subagents.go"
+      find: "return !unaskedPrompts[from] && b.nextMessage() || changed"
+      replace: "return changed"
+- id: SESS-722
+  title: "A background subagent that runs after the turn ended doesn't keep the session working"
+  edits:
+    - file: "internal/core/session/sessionnotes.go"
+      find: "info.Subagents, info.SubagentRows = a.agents.running(info.Epoch), a.agents.view(info.Epoch)"
+      replace: "info.Subagents, info.SubagentRows = false, a.agents.view(info.Epoch)"
+- id: SESS-723
+  title: "A subagent's row keeps its first tool line instead of its latest"
+  edits:
+    - file: "internal/core/session/subagents.go"
+      find: "\ts.Tool, s.Line = tool, line\n"
+      replace: "\tif s.Line == \"\" {\n\t\ts.Tool, s.Line = tool, line\n\t}\n"
+- id: SESS-724
+  title: "A subagent whose call failed shows as Done"
+  edits:
+    - file: "internal/core/session/bridgeagents.go"
+      find: "\"failed\": \"failed\", \"declined\""
+      replace: "\"failed\": \"completed\", \"declined\""
+- id: SESS-725
+  title: "A subagent's own tool calls reach the engine without the subagent they ran in"
+  edits:
+    - file: "internal/core/session/bridgeagents.go"
+      find: "f[\"agentId\"] = clip(t.Parent, maxToolID)"
+      replace: "f[\"parent\"] = clip(t.Parent, maxToolID)"
+- id: SESS-813
+  title: "The Agents list keeps its finished subagents once none of them runs, so the strip stays with nothing running"
+  edits:
+    - file: "internal/core/session/subagents.go"
+      find: "return a != nil && a.agents.settled() || changed"
+      replace: "return changed"
+- id: SESS-814
+  title: "The Background tasks list keeps its finished tasks once none of them runs, so the strip stays with nothing running"
+  edits:
+    - file: "internal/core/session/tasks.go"
+      find: "return a != nil && a.tasks.settled() || changed"
+      replace: "return changed"
+- id: SESS-815
+  title: "A subagent that finishes while another still runs drops out of the Agents list at once"
+  edits:
+    - file: "internal/core/session/subagents.go"
+      find: "return !b.running(b.epoch) && b.nextMessage()"
+      replace: "return b.nextMessage()"
+- id: SESS-816
+  title: "A background task that ends while another still runs drops out of the Background tasks list at once"
+  edits:
+    - file: "internal/core/session/tasks.go"
+      find: "return b.running(b.epoch) == 0 && b.nextMessage()"
+      replace: "return b.nextMessage()"
+- id: SESS-765
+  title: "A push that carries a workflow document under .knackpack/ isn't refused, so it goes on to the reviews"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "refusal := w.docsRefusal(g)"
+      replace: "refusal := \"\""
+- id: SESS-766
+  title: "The gate view doesn't list the refusal of a push that carries workflow documents"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "for _, why := range []string{w.docsRefusal(g), lfsRefusal(g.scan.lfs)} {"
+      replace: "for _, why := range []string{lfsRefusal(g.scan.lfs)} {"
+- id: SESS-767
+  title: "The scan for workflow documents finds none of the paths a push carries"
+  edits:
+    - file: "internal/core/session/docrefusal.go"
+      find: "if workflow.DocumentFolder(p, folders) != \"\" {"
+      replace: "if false && workflow.DocumentFolder(p, folders) != \"\" {"
+- id: SESS-768
+  title: "A push of more than 1,000 commits, of which the engine read only the first, isn't refused for the commits it couldn't check"
+  edits:
+    - file: "internal/core/session/docrefusal.go"
+      find: "return g.listed && !g.scan.failed && !g.scan.cut && w.cfg.Contents != nil"
+      replace: "return g.listed && !g.scan.failed && w.cfg.Contents != nil"
+- id: SESS-769
+  title: "An approved document the engine can't read in the session's documents folder clears its approval, though the engine's own copy is what counts"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "return a != nil && a.Text != \"\" && (s.doc == nil || s.doc.Hash == a.Hash)"
+      replace: "return a != nil && a.Text != \"\" && (s.doc != nil && s.doc.Hash == a.Hash)"
+- id: SESS-770
+  title: "/check lets the agent write under .knackpack/, which every push then refuses, instead of denying it with the documents folder's name"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if why := w.docWrite(sid, rels); why != \"\" {"
+      replace: "if why := w.docWrite(sid, rels); false && why != \"\" {"
+- id: SESS-771
+  title: "A session with no saved documents ID, such as a dev-acp one, gets no documents folder instead of the one named by its session ID"
+  edits:
+    - file: "internal/core/session/starter.go"
+      find: "\t\treturn r.docs\n\t}\n\treturn r.sid\n"
+      replace: "\t\treturn r.docs\n\t}\n\treturn \"\"\n"
+- id: SESS-772
+  title: "The engine reads the documents from a folder other than the one it names to the page and the agent"
+  edits:
+    - file: "internal/core/session/docsfolder.go"
+      find: "data, err := files.Read(d.boxFor(sid), d.docsFor(sid), name, MaxDocBytes)"
+      replace: "data, err := files.Read(d.boxFor(sid), d.boxFor(sid), name, MaxDocBytes)"
+- id: SESS-780
+  title: "The step card's bar leaves the current step's segment empty, so it doesn't move while a step is worked on"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "\t\tcase at == focus:\n\t\t\tbar[at] = .5\n"
+      replace: "\t\tcase at == focus:\n\t\t\tbar[at] = 0\n"
+- id: SESS-782
+  title: "The step card counts one step fewer than the step it names"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "Count: \"Step \" + strconv.Itoa(focus+1)"
+      replace: "Count: \"Step \" + strconv.Itoa(focus)"
+- id: SESS-784
+  title: "The current step reads Working while no one works on it"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "\tcase st.Active:\n\t\treturn \"Working\"\n"
+      replace: "\tcase st.Active || st.State == StageCurrent:\n\t\treturn \"Working\"\n"
+- id: SESS-817
+  title: "The Execution path counts only the agent's own turn as busy, so it offers Continue defining while a background subagent still runs"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "t := pathTurn{ran: map[string]bool{}, busy: busy, off:"
+      replace: "t := pathTurn{ran: map[string]bool{}, busy: i.Busy, off:"
+- id: SESS-818
+  title: "The Execution path offers its step buttons while the agent works"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "\tout := []PathAction{}\n\tif t.busy {\n\t\treturn out\n\t}\n"
+      replace: "\tout := []PathAction{}\n"
+- id: SESS-819
+  title: "A step's press hint shows while the agent works"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "func hint(t pathTurn, text string) string {\n\tif t.off || t.busy {"
+      replace: "func hint(t pathTurn, text string) string {\n\tif t.off {"
+- id: SESS-820
+  title: "The Execution path never says the agent works, so the page offers Approve on a document the agent may still be writing"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "Missing: []string{}, Asks: asks, Busy: t.busy}"
+      replace: "Missing: []string{}, Asks: asks, Busy: false}"
+- id: SESS-790
+  title: "A message sent as Define's or triage's command reaches the page with the command in front of the person's words"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "frame[\"text\"] = shown"
+      replace: "frame[\"text\"] = text"
+- id: SESS-791
+  title: "A message that started triage is labelled as starting Define"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "AskTriage: \"Started triage\","
+      replace: "AskTriage: \"Started Define\","
+- id: SESS-792
+  title: "A prompt the agent reports as its own, not sent from the page, is labelled as starting a step and shown without its command"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "if from, _ := ev[\"from\"].(string); from != \"page\" && from != \"history\" {"
+      replace: "if from, _ := ev[\"from\"].(string); false && from != \"page\" && from != \"history\" {"
+- id: FLOW-022
+  title: "A workflow documents folder matches only in its own letter case, so .KNACKPACK/ passes the push and the write check"
+  edits:
+    - file: "internal/core/workflow/artifacts.go"
+      find: "if f != \"\" && strings.EqualFold(first, f) {"
+      replace: "if f != \"\" && first == f {"
+- id: GIT-043
+  title: "A file a commit deletes counts as one the push carries, so a push that only deletes a workflow document is refused"
+  edits:
+    - file: "internal/adapters/git/files/pushed.go"
+      find: "if ch.NewSHA != \"\" && ch.NewMode != push.ModeFolder {"
+      replace: "if ch.NewMode != push.ModeFolder {"
+- id: SESS-806
+  title: "Every session's mode counts as changed from its launch mode, so the top bar always shows the mode"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "return i.Mode != \"\" && ModeLabel(i.Mode) != ModeLabel(launchMode)"
+      replace: "return i.Mode != \"\""
+- id: SESS-807
+  title: "The idle state's task count goes back to the long words, \"3 background tasks running\""
+  edits:
+    - file: "internal/core/session/tasks.go"
+      find: "return strconv.Itoa(running) + \" tasks running\""
+      replace: "return strconv.Itoa(running) + \" background tasks running\""
+- id: SESS-808
+  title: "The state and the task count are joined with a comma, \"idle, 3 tasks running\""
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "return word + \" · \" + BackgroundNote(running)"
+      replace: "return word + \", \" + BackgroundNote(running)"
+- id: SESS-900
+  title: "The engine's message from Correct the diagnosis is labelled as one that started triage"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "\t\t\tstep = ReviseRootCause\n"
+      replace: "\t\t\tstep = AskTriage\n"
+- id: SESS-901
+  title: "The correction of the diagnosis carries the label Started triage"
+  edits:
+    - file: "internal/core/session/firststep.go"
+      find: "ReviseRootCause: \"Corrected the diagnosis\"}"
+      replace: "ReviseRootCause: \"Started triage\"}"
+- id: SESS-902
+  title: "A push refused for the workflow documents it carries still lists the developer's decision on those documents and flags them"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if _, doc := slices.BinarySearch(refused, f.Path); doc && f.Commit == \"\" {"
+      replace: "if _, doc := slices.BinarySearch(refused, f.Path); false && doc && f.Commit == \"\" {"
+- id: SESS-903
+  title: "A push refused for the workflow documents it carries drops the decision on every flagged file, not only on those documents"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "if _, doc := slices.BinarySearch(refused, f.Path); doc && f.Commit == \"\" {"
+      replace: "if _, doc := slices.BinarySearch(refused, f.Path); len(refused) > 0 && f.Commit == \"\" || doc && f.Commit == \"\" {"
+- id: SESS-830
+  title: "Implement reads done while the agent still works, as soon as the work is committed"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "return v.Waiting == \"\" && !busy && !dirty"
+      replace: "return v.Waiting == \"\" && !dirty"
+- id: SESS-831
+  title: "Implement reads done while changes in the worktree aren't committed"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "return v.Waiting == \"\" && !busy && !dirty"
+      replace: "return v.Waiting == \"\" && !busy"
+- id: SESS-832
+  title: "Implement's detail doesn't say the agent is still working"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "return \" · still working\""
+      replace: "return \"\""
+- id: SESS-833
+  title: "Implement's detail doesn't say changes are left uncommitted"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "return \" · uncommitted changes\""
+      replace: "return \"\""
+- id: SESS-834
+  title: "The page's Review starts reviewers while the agent still works"
+  edits:
+    - file: "internal/core/session/starter.go"
+      find: "if err := (PageOffers{Info: d.reg.Session}).Review(sid); err != nil {"
+      replace: "if err := (PageOffers{}).Review(sid); err != nil {"
+- id: SESS-835
+  title: "Push doesn't wait while the agent works: the gate's other reasons answer instead"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "\tif agentWorking(i) {\n\t\treturn errorWorking, pushWorking(i)"
+      replace: "\tif false {\n\t\treturn errorWorking, pushWorking(i)"
+- id: SESS-836
+  title: "The page's Push skips the offer check and goes to the gate whatever is missing"
+  edits:
+    - file: "internal/core/session/pushes.go"
+      find: "if err := p.cfg.Offers.Push(ctx, sid); err != nil {"
+      replace: "if err := (PageOffers{}).Push(ctx, sid); err != nil {"
+- id: SESS-837
+  title: "Push is offered while a required review hasn't run on the latest commit"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "case slices.ContainsFunc(counted, func(r WorkReviewer) bool { return slices.Contains(noVerdictStates, r.State) }):"
+      replace: "case false:"
+- id: SESS-838
+  title: "Push doesn't wait for a missing approval or uncommitted work, so the reviews' reason answers instead"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "case v.Waiting != \"\":"
+      replace: "case false:"
+- id: SESS-839
+  title: "Review is drawn as the next step while Implement isn't done"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "if OfferReview(i, v).Reason != \"\" || !ImplementDone(i, v) {"
+      replace: "if OfferReview(i, v).Reason != \"\" {"
+- id: SESS-840
+  title: "The gate doesn't say Review waits while the agent works"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "if !agentWorking(i) {"
+      replace: "if true {"
+- id: SESS-841
+  title: "The plan review still starts after the plan is approved"
+  edits:
+    - file: "internal/core/session/planreview.go"
+      find: "if plan.Approved {"
+      replace: "if false && plan.Approved {"
+- id: SESS-842
+  title: "The plan review stays offered after the plan is approved"
+  edits:
+    - file: "internal/core/session/offers.go"
+      find: "return v.Plan != nil && strings.TrimSpace(v.Plan.Text) != \"\" && !v.Plan.Approved"
+      replace: "return v.Plan != nil && strings.TrimSpace(v.Plan.Text) != \"\""
+- id: SESS-843
+  title: "The step card shows the stage's full detail again instead of its short text"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "if m.card != \"\" {"
+      replace: "if false {"
+- id: SESS-844
+  title: "The step card's review count says \"on this commit\" again"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "\tcase !verified:\n\t\treturn reviewsPass(done, all)"
+      replace: "\tcase !verified:\n\t\treturn reviewCount(done, all)"
+- id: SESS-845
+  title: "The note about working outside the project shows while the agent is idle"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "if !t.busy || i.Step != \"\" ||"
+      replace: "if i.Step != \"\" ||"
+- id: SESS-846
+  title: "The note about working outside the project still shows after the requirements and plan are approved"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "|| !beforeApproval(v) {"
+      replace: "{"
+- id: SESS-847
+  title: "The path never says the agent works outside the project before an approval"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "out.Notice = outsideNotice(i, v, t)"
+      replace: "out.Notice = nil"
+- id: SESS-848
+  title: "The note about working outside the project is sent as a warning"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "Tone: toneInfo}"
+      replace: "Tone: toneWarn}"
+- id: SESS-849
+  title: "The note about changing files before the requirements are approved is sent without its warning tone"
+  edits:
+    - file: "internal/core/session/path.go"
+      find: "}}, Tone: toneWarn}"
+      replace: "}}}"
+- id: SESS-850
+  title: "The projects listing offers Remove for a project that still has sessions"
+  edits:
+    - file: "internal/core/session/repos.go"
+      find: "err = sessionsHeld(count, name)"
+      replace: "err = sessionsHeld(count, \"\")"
+- id: SESS-851
+  title: "Bring in the latest main is offered while the agent is in its turn"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase i.Busy:\n\t\tout[ActionMainNow] = saidMainInTurn\n"
+      replace: "\tcase false:\n\t\tout[ActionMainNow] = saidMainInTurn\n"
+- id: SESS-852
+  title: "A stopped session's message offer says it isn't running instead of the not-connected words the engine refuses with"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase !i.Live:\n\t\treturn saidOffline\n"
+      replace: "\tcase !i.Live && i.Running:\n\t\treturn saidOffline\n"
+- id: SESS-853
+  title: "A stopped session's This session risks carry no off, so Accept the risk stays offered for a grant the engine refuses"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "v.Risks[i].Off = saidGrantStopped"
+      replace: "v.Risks[i].Off = \"\""
+- id: PAGE-200
+  title: "The projects listing drops removeOff"
+  edits:
+    - file: "internal/adapters/http/page/start.go"
+      find: "Types: typesJSON(workflow.Builtin),\n\t\t\tRemoveOff: s.cfg.Repos.RemoveOff(r.Name, r.URL)}"
+      replace: "Types: typesJSON(workflow.Builtin)}"
+- id: PAGE-201
+  title: "The access card's risks drop off"
+  edits:
+    - file: "internal/adapters/http/page/access.go"
+      find: "Accept: r.Accept, Off: r.Off}"
+      replace: "Accept: r.Accept}"
+- id: SESS-854
+  title: "A stopped session's bringMainNow is empty, though the engine refuses to bring in main until it is woken"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase !i.Running:\n\t\tout[ActionMainNow] = saidMainStopped\n"
+      replace: "\tcase false:\n\t\tout[ActionMainNow] = saidMainStopped\n"
+- id: SESS-855
+  title: "Delete is offered while the session runs"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "out[ActionDeleteNow] = off(!i.Running, saidStopFirst)"
+      replace: "out[ActionDeleteNow] = off(true, saidStopFirst)"
+- id: SESS-856
+  title: "Open pull request is offered before the engine pushed the branch"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tout[ActionPullOpen] = saidPushFirst\n"
+      replace: "\tout[ActionPullOpen] = \"\"\n"
+- id: SESS-857
+  title: "A stopped session's Access view gives no actionsOff, so Run stays offered for an action the engine refuses"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\t\tv.ActionsOff = saidActionStopped\n"
+      replace: ""
+- id: SESS-858
+  title: "The packs view gives a pack in use no removeOff"
+  edits:
+    - file: "internal/core/session/packs.go"
+      find: "pv.RemoveOff = err.Message"
+      replace: "pv.RemoveOff = \"\""
+- id: PAGE-202
+  title: "The packs answer drops removeOff"
+  edits:
+    - file: "internal/adapters/http/page/packs.go"
+      find: ", RemoveOff: v.RemoveOff}"
+      replace: "}"
+- id: PAGE-203
+  title: "The access answer drops actionsOff"
+  edits:
+    - file: "internal/adapters/http/page/access.go"
+      find: "\t\tif v.ActionsOff != \"\" {\n\t\t\tout[\"actionsOff\"] = v.ActionsOff\n\t\t}\n"
+      replace: ""
+- id: SESS-859
+  title: "A session without a check command is offered Verify this commit"
+  edits:
+    - file: "internal/core/session/verify.go"
+      find: "\tcase kind == VerifyCheck && cmds.Check == \"\":\n\t\treturn saidVerifyNoCheck\n"
+      replace: "\tcase false:\n\t\treturn saidVerifyNoCheck\n"
+- id: SESS-860
+  title: "Verify this commit is offered while a run of the session is running"
+  edits:
+    - file: "internal/core/session/verify.go"
+      find: "\t\t\treturn saidVerifyRunning\n"
+      replace: "\t\t\treturn \"\"\n"
+- id: PAGE-204
+  title: "The verification view drops its off"
+  edits:
+    - file: "internal/adapters/http/page/verify.go"
+      find: "Why: v.Why, Off: v.Off,"
+      replace: "Why: v.Why,"
+- id: SESS-870
+  title: "A Code change needs no plan: once the requirements are approved, edits are allowed and the Plan step is refused"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tg.planNeeded = g.chosen.Plans()\n"
+      replace: "\tg.planNeeded = false\n"
+- id: SESS-871
+  title: "Approve requirements takes a plan field again"
+  edits:
+    - file: "internal/adapters/http/page/workflow.go"
+      find: "if !keysWithin(body, \"sid\", \"hash\", \"text\") || sid == \"\" || !okHash"
+      replace: "if !keysWithin(body, \"sid\", \"hash\", \"text\", \"plan\") || sid == \"\" || !okHash"
+- id: SESS-872
+  title: "Approving a Code change's requirements tells the agent to implement instead of sending the Plan step"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase !plan && g.planNeeded:\n\t\twant, text = workflow.Plan, \"\"\n"
+      replace: "\tcase false:\n\t\twant, text = workflow.Plan, \"\"\n"
+- id: SESS-873
+  title: "A Code change whose plan isn't approved waits only for committed work, as if the plan were skipped"
+  edits:
+    - file: "internal/core/workflow/decide.go"
+      find: "\tcase w.Profile == Change && w.PlanNeeded && !w.PlanOk:\n\t\treturn \"approve the plan first\"\n"
+      replace: ""
+- id: SESS-874
+  title: "A push of a Code change doesn't wait for the plan's approval"
+  edits:
+    - file: "internal/core/workflow/items.go"
+      find: "planned := change && p.PlanNeeded"
+      replace: "planned := false"
+- id: SESS-875
+  title: "A Code change's work counts from the commit where the requirements were approved, so committed work skips the plan"
+  edits:
+    - file: "internal/core/session/work.go"
+      find: "\tcase change && g.reqOk && !g.planNeeded:\n"
+      replace: "\tcase change && g.reqOk && !g.planOk:\n"
+- id: SESS-890
+  title: "The flow's status drops \"no push decided yet\", so it reads as if the gate had decided"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "upperFirst(g.Word) + \"; no push decided yet.\"}"
+      replace: "upperFirst(g.Word) + \".\"}"
+- id: SESS-891
+  title: "The flow's status starts in lower case, as the gate's own word does"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "return FlowLook{g.Icon, g.Tone, upperFirst(g.Word) +"
+      replace: "return FlowLook{g.Icon, g.Tone, g.Word +"
+- id: SESS-892
+  title: "The flow's status loses the gate's icon, so the status line shows no mark"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "return FlowLook{g.Icon, g.Tone, upperFirst(g.Word)"
+      replace: "return FlowLook{\"\", g.Tone, upperFirst(g.Word)"
+- id: SESS-893
+  title: "The flow's detail leaves out the commit"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "\t\tsaid = append(said, \"Commit \"+shortSHA7(m.commit)+\".\")\n"
+      replace: ""
+- id: SESS-894
+  title: "The flow's detail leaves out the required reviewers and their states"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "said = append(said, countWord(len(counted), \"required reviewer\", \"required reviewers\")+\": \"+tally(counted)+\".\")"
+      replace: "_ = counted"
+- id: SESS-895
+  title: "The flow's detail carries the gate's part too, as the one caption did, so the decision shows twice"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "\tout.Detail = flowDetail(m)\n"
+      replace: "\tout.Detail = flowDetail(m) + \" Gate: \" + gateLook(m.gate).Word + \"; no push decided yet.\"\n"
+- id: PAGE-210
+  title: "The page's flow drops the status the engine built"
+  edits:
+    - file: "internal/adapters/http/page/flow.go"
+      find: "Status: flowLookOf(m.Status), Detail: m.Detail,"
+      replace: "Detail: m.Detail,"
+- id: PAGE-211
+  title: "The page's flow drops the detail the engine built"
+  edits:
+    - file: "internal/adapters/http/page/flow.go"
+      find: "Status: flowLookOf(m.Status), Detail: m.Detail,"
+      replace: "Status: flowLookOf(m.Status),"
+- id: PAGE-212
+  title: "The page's flow sends an expired status on a live flow that has none"
+  edits:
+    - file: "internal/adapters/http/page/flow.go"
+      find: "if m.ExpiredStatus.Word != \"\" {"
+      replace: "if true {"
+- id: SESS-896
+  title: "The snapshot wire counts as taken before any review starts"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "\t\tif !started {\n\t\t\tsnapshot.Phase = \"pending\"\n\t\t}\n"
+      replace: ""
+- id: SESS-897
+  title: "The verdicts wire shows done while required reviews are still waiting"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "\tcase open:\n\t\tverdicts.Phase = \"pending\"\n"
+      replace: "\tcase open:\n\t\tverdicts.Phase = \"\"\n"
+- id: SESS-898
+  title: "The decision wire shows done before the gate has decided"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "decision := FlowWire{Label: \"decision\", Phase: \"pending\"}"
+      replace: "decision := FlowWire{Label: \"decision\"}"
+- id: SESS-899
+  title: "The diagram's key loses the colours, so only the line styles are named"
+  edits:
+    - file: "internal/core/session/flow.go"
+      find: "\t{\"ok\", \"Green: passed, allowed or pushed\"},\n\t{\"warn\", \"Amber: held, overridden or no verdict\"},\n\t{\"bad\", \"Red: blocked, failed, denied or refused\"},\n"
+      replace: ""
+- id: PAGE-213
+  title: "The page's flow drops each wire's phase"
+  edits:
+    - file: "internal/adapters/http/page/flow.go"
+      find: "flowWireJSON{Label: w.Label, Phase: w.Phase, Tone: w.Tone}"
+      replace: "flowWireJSON{Label: w.Label, Tone: w.Tone}"
+- id: PAGE-214
+  title: "The page's flow sends no wires"
+  edits:
+    - file: "internal/adapters/http/page/flow.go"
+      find: "\tfor _, w := range m.Wires {\n"
+      replace: "\tfor _, w := range m.Wires[:0] {\n"
+- id: SESS-910
+  title: "While only a background subagent runs after the turn ended, Stop is off with the words for an idle session, not that Stop works on the agent's own turn"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase i.Subagents:\n"
+      replace: "\tcase false && i.Subagents:\n"
+- id: SESS-911
+  title: "Stop is offered while only a background subagent runs, though it interrupts only the agent's own turn"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase i.Busy:\n\t\treturn \"\"\n"
+      replace: "\tcase i.Busy || i.Subagents:\n\t\treturn \"\"\n"
+- id: SESS-912
+  title: "An idle session's Stop says subagents are working when none runs"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase i.Subagents:\n"
+      replace: "\tcase i.Subagents || !i.Busy:\n"
+- id: SESS-915
+  title: "A helper copy's paths are never mapped to the copy, so its writes are checked only against the top the plugin sent and get no hold or refusal"
+  edits:
+    - file: "internal/core/session/helpers.go"
+      find: "\t\tif t == \"\" || t == top {"
+      replace: "\t\tif true || t == top {"
+- id: SESS-916
+  title: "Any box's helpers folder counts as the session's own, so another box's helper paths get the session's holds and the helper's words"
+  edits:
+    - file: "internal/core/session/helpers.go"
+      find: "\trest, ok := strings.CutPrefix(path.Clean(file), area+\"/\"+HelpersFolder+\"/\")"
+      replace: "\tif m := regexp.MustCompile(`^/.*/s/[0-9a-f]{16}`).FindString(path.Clean(file)); m != \"\" {\n\t\tarea = m\n\t}\n\trest, ok := strings.CutPrefix(path.Clean(file), area+\"/\"+HelpersFolder+\"/\")"
+- id: SESS-917
+  title: "The protected-write check of a helper's copy measures from the top the plugin sent, so .env and .agents/ in a helper's copy are allowed"
+  edits:
+    - file: "internal/adapters/http/page/push.go"
+      find: "advice.Protected = gate.Check(tool, input, pl.Top, pl.Paths, false).Protected"
+      replace: "advice.Protected = gate.Check(tool, input, top, pl.Paths, false).Protected"
+- id: SESS-918
+  title: "A write in the session's own helper copy shows as a write outside the worktree"
+  edits:
+    - file: "internal/core/session/toolline.go"
+      find: "case writesFile(tool) && !inside && HelperTop(area, p) != \"\":"
+      replace: "case writesFile(tool) && !inside && HelperTop(area, p) == \"-\":"
+- id: SESS-919
+  title: "Any folder of the session's helpers folder counts as a helper copy, sf-0000000a included"
+  edits:
+    - file: "internal/core/session/helpers.go"
+      find: "\tif !helperFolder.MatchString(name) {"
+      replace: "\tif name == \"\" {"
+- id: SESS-920
+  title: "The edit hold and the workflow documents denial of a helper's copy measure from the top the plugin sent, so its writes aren't held"
+  edits:
+    - file: "internal/adapters/http/page/push.go"
+      find: "held = s.cfg.Work.EditHold(r.Context(), sid, pl.Top, pl.Paths)"
+      replace: "held = s.cfg.Work.EditHold(r.Context(), sid, top, pl.Paths)"
+- id: SESS-930
+  title: "A reviewer that blocks and also tried to read outside its review folder counts as no verdict, so its block no longer holds the push"
+  edits:
+    - file: "internal/core/session/reviewrole.go"
+      find: "\tcase len(out.outside) > 0 && v.State == review.Block:\n"
+      replace: "\tcase false && len(out.outside) > 0 && v.State == review.Block:\n"
+- id: SESS-931
+  title: "A reviewer that passes after trying to read outside its review folder keeps its pass"
+  edits:
+    - file: "internal/core/session/reviewrole.go"
+      find: "\tcase len(out.outside) > 0:\n"
+      replace: "\tcase false:\n"
+- id: SESS-932
+  title: "The reason for a read outside the review folder names only the tool, not what it tried to read"
+  edits:
+    - file: "internal/core/session/reviewfacts.go"
+      find: "\treturn tool + \": \" + target\n"
+      replace: "\treturn tool\n"
+- id: SESS-933
+  title: "What a reviewer tried to read outside its review folder is kept without masking a secret in it"
+  edits:
+    - file: "internal/core/session/reviewfacts.go"
+      find: "CleanLine(maskSecrets(strings.Join(strings.Fields(readTarget(in)), \" \")), maxOutsideTarget)"
+      replace: "CleanLine(strings.Join(strings.Fields(readTarget(in)), \" \"), maxOutsideTarget)"
+- id: SESS-934
+  title: "Every read a reviewer tried outside its review folder goes into the reason, with no cap on how many"
+  edits:
+    - file: "internal/core/session/reviewfacts.go"
+      find: "len(outside) < maxOutsideReads && "
+      replace: ""
+- id: SESS-935
+  title: "A session whose container ran out of memory is shown as stopped by itself, with no cause"
+  edits:
+    - file: "internal/core/session/outofmemory.go"
+      find: "\tif err != nil || m.OOMKills <= 0 {\n"
+      replace: "\tif true {\n"
+- id: SESS-936
+  title: "A woken session still says it ran out of memory"
+  edits:
+    - file: "internal/core/session/registry.go"
+      find: "\tknown.outOfMemory, known.memoryLimit = false, 0\n"
+      replace: ""
+- id: SESS-937
+  title: "The session's status says stopped, not out of memory"
+  edits:
+    - file: "internal/core/session/sessionstate.go"
+      find: "\tcase !i.Running && i.OutOfMemory:\n"
+      replace: "\tcase false:\n"
+- id: SESS-938
+  title: "agent-host counts the times the container reached its limit, not the processes killed for it"
+  edits:
+    - file: "internal/adapters/agenthost/memory.go"
+      find: "key != \"oom_kill\""
+      replace: "key != \"oom\""
+- id: SESS-939
+  title: "The out-of-memory words name the limit in the wrong unit"
+  edits:
+    - file: "internal/core/session/outofmemory.go"
+      find: "\t\treturn strconv.FormatInt(n/gib, 10) + \" GiB\"\n"
+      replace: "\t\treturn strconv.FormatInt(n/gib, 10) + \" MiB\"\n"
+- id: SESS-950
+  title: "The gate no longer names the reviews a held push is missing, so Allow on a held card never asks before pushing past reviews that are still running"
+  edits:
+    - file: "internal/core/gate/decision.go"
+      find: "\t\t\treviews = append(reviews, q.Agent)\n"
+      replace: ""
+- id: SESS-951
+  title: "An advisory run that is still running makes Allow ask, though its verdict never counts for the gate"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "role.State == review.Running && !role.Advisory && "
+      replace: "role.State == review.Running && "
+- id: SESS-952
+  title: "Allow asks about reviews of another commit that are running, not only the held card's"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: " || r.Commit != p.Commit"
+      replace: ""
+- id: SESS-953
+  title: "Allow's question counts every review the card is missing, finished ones too, not only those still running"
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "if role.State == review.Running && !role.Advisory && "
+      replace: "if !role.Advisory && "
+- id: SESS-954
+  title: "Allow's question with one review still running says \"1 reviews are still running. Push before their verdicts?\""
+  edits:
+    - file: "internal/core/session/wording.go"
+      find: "\tcase 1:\n\t\treturn \"1 review is still running. Push before its verdict?\"\n"
+      replace: ""
+- id: SESS-955
+  title: "The held card's allowAsk is always empty, so the page's Allow never asks"
+  edits:
+    - file: "internal/adapters/http/page/pushes.go"
+      find: "\tout.AllowAsk = session.PushAllowAsk(v, r)\n"
+      replace: ""
+- id: SESS-940
+  title: "The helper takes an image with no browser for a browser run"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/verifiers.go"
+      find: "\t\tcase http.StatusOK:\n\t\t\treturn nil\n\t\tcase http.StatusNotFound:\n"
+      replace: "\t\tcase http.StatusOK, http.StatusNotFound:\n\t\t\treturn nil\n"
+- id: SESS-956
+  title: "An answer to the agent's own access request never starts its turn: it only waits as a note for the next message"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "if g.cfg.Idle(sid) && g.cfg.Tell(sid, NoteMarker+text) == nil {"
+      replace: "if false {"
+- id: SESS-957
+  title: "An answer to the agent's own access request is sent as a message even while the agent's turn runs"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "if g.cfg.Idle(sid) && g.cfg.Tell(sid, NoteMarker+text) == nil {"
+      replace: "if g.cfg.Tell(sid, NoteMarker+text) == nil {"
+- id: SESS-958
+  title: "A grant the person gives from the Access dialog, with no card, sends the agent a message too"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "\tif kind == AccessRequest {\n\t\ttold = g.allowedWords(gr)\n"
+      replace: "\tif kind != AccessAction {\n\t\ttold = g.allowedWords(gr)\n"
+- id: SESS-959
+  title: "Declining the agent's own access request only leaves a note, so the agent waits for the person to type"
+  edits:
+    - file: "internal/core/session/grantcards.go"
+      find: "g.answerAgent(ctx, sid, refusedNote(what))"
+      replace: "g.cfg.Note(sid, refusedNote(what))"
+- id: SESS-960
+  title: "The engine's answer to an access request goes without the [Software Factory] marker, so it reads as the person's own words"
+  edits:
+    - file: "internal/core/session/grantanswer.go"
+      find: "g.cfg.Tell(sid, NoteMarker+text) == nil"
+      replace: "g.cfg.Tell(sid, text) == nil"
+- id: SESS-944
+  title: "A session's container mounts its whole folder at the short scratch path /t instead of only its scratch folder, s/<box>/scratch"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Subpath: \"s/\" + box + \"/\" + session.ScratchFolderName}}"
+      replace: "Subpath: \"s/\" + box}}"
+- id: SESS-945
+  title: "A session's container mounts its scratch folder read-only, so Claude Code and its commands can't write their temporary files"
+  edits:
+    - file: "internal/adapters/sandbox/boxes/recipe.go"
+      find: "Target: session.ScratchAt, VolumeOptions:"
+      replace: "Target: session.ScratchAt, ReadOnly: true, VolumeOptions:"

@@ -10,6 +10,7 @@ import './usage.ts'
 import './progress.ts'
 import { bySessionOrder, grouped, isRunning, sessionKey, sessionRow, sessionTable } from './session-list.ts'
 import { placeMenu } from '../lib/menu.ts'
+import { offTip } from '../lib/tooltip.ts'
 import { StartFromField } from './start-from.ts'
 import type { CloneProgress, Cloning, Expect, Project, ProjectsView, SessionInfo, Starter, TokenHost } from '../types.ts'
 import { textbox, dropdown, option } from '../lib/controls.ts'
@@ -561,8 +562,9 @@ class SfProjects extends HTMLElement {
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', `Actions for ${p.name}`)
     more.popoverTargetElement = menu
-    const item = (text: string, run: () => void, glyph: string) => {
+    const item = (text: string, run: () => void, glyph: string, off = '') => {
       const b = button('', '', () => {
+        if (b.getAttribute('aria-disabled') === 'true') return
         this.#menuOpen = ''
         menu.hidePopover()
         more.focus()
@@ -572,13 +574,13 @@ class SfProjects extends HTMLElement {
       const mark = el('span', 'mark')
       mark.append(icon(glyph))
       b.append(mark, el('span', '', text))
-      menu.append(b)
+      menu.append(...offTip(b, off))
     }
     item('Project settings', () => emit(this, 'sf-project-page', { name: p.name }), 'settings')
     item('Remove', () => {
       this.#removing = p.path
       this.#render()
-    }, 'trash')
+    }, 'trash', visible(p.removeOff ?? ''))
     menu.addEventListener('toggle', e => {
       if ((e as ToggleEvent).newState !== 'open') {
         if (this.#menuOpen === p.path && menu.isConnected) this.#menuOpen = ''

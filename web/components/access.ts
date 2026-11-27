@@ -5,8 +5,9 @@ import { actions, field, fieldRow, form, showAnswer } from '../lib/form.ts'
 import { dropdown, option, textbox } from '../lib/controls.ts'
 import { emptyState } from '../lib/page.ts'
 import { CHEAP_EVERY_MS, whileOpen } from '../lib/refresh.ts'
-import { openSavePreset, presetLine, presetsOf } from './credentials.ts'
-import { ACCESS_ROUTE, accessCardOf, accessCardView, firstChoice, shownGit, type AccessChoice } from './access-card.ts'
+import { offTip } from '../lib/tooltip.ts'
+import { GIT_HOST_NOTE, openSavePreset, presetLine, presetsOf } from './credentials.ts'
+import { ACCESS_ROUTE, accessCardOf, accessCardView, firstChoice, type AccessChoice } from './access-card.ts'
 import { sessionActionsPart } from './actions.ts'
 import { when } from './usage.ts'
 import type { AccessCard } from '../types.ts'
@@ -21,8 +22,6 @@ interface GrantRow {
   delivery: string
   deliveryTag: string
   copy: string
-  git: boolean
-  closed: string
   scopeLabel: string
   own: boolean
   until: string
@@ -35,7 +34,7 @@ const record = (v: unknown): Record<string, unknown> => (v !== null && typeof v 
 
 function grantsOf(b: Record<string, unknown>): GrantRow[] | null {
   if (!Array.isArray(b.grants)) return null
-  return b.grants.map(record).map(g => ({ id: text(g.id), host: text(g.host), target: text(g.target), credential: text(g.credential), delivery: text(g.delivery), deliveryTag: text(g.deliveryTag), copy: text(g.copy), git: g.git === true, closed: text(g.closed), scopeLabel: text(g.scopeLabel), own: g.own === true, until: typeof g.expires === 'number' && g.expires > 0 ? `until ${when(g.expires * 1000)}` : text(g.until), who: text(g.who), reason: text(g.reason) })).filter(g => g.id && (g.host || g.credential))
+  return b.grants.map(record).map(g => ({ id: text(g.id), host: text(g.host), target: text(g.target), credential: text(g.credential), delivery: text(g.delivery), deliveryTag: text(g.deliveryTag), copy: text(g.copy), scopeLabel: text(g.scopeLabel), own: g.own === true, until: typeof g.expires === 'number' && g.expires > 0 ? `until ${when(g.expires * 1000)}` : text(g.until), who: text(g.who), reason: text(g.reason) })).filter(g => g.id && (g.host || g.credential))
 }
 
 let headings = 0
@@ -43,8 +42,6 @@ let headings = 0
 export function openAccess(post: Post, sid: string, openNetwork: () => void, openCredentials: () => void): void {
   const said = statusLine('small')
   const network = el('p', 'small')
-  const git = el('p', 'small warn')
-  git.hidden = true
   const presets = el('ul', 'list access-presets')
   const presetsPart = el('div')
   presetsPart.append(el('h3', 'label', 'Presets'), el('p', 'small muted', 'Apply a saved grant in one click.'), presets)
@@ -80,8 +77,6 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
       m.close()
       openCredentials()
     }))
-    git.textContent = visible(text(a.body.git))
-    git.hidden = !text(a.body.git)
     const creds = Array.isArray(a.body.credentials) ? a.body.credentials.map(record).filter(c => text(c.id)) : []
     const want = [{ value: '', label: 'A host or a port' }, ...creds.map(c => ({ value: text(c.id), label: `${text(c.name)} (${text(c.typeLabel)})` }))]
     if (whatPick.options.length !== want.length || want.some((c, i) => whatPick.options[i]?.value !== c.value)) {
@@ -95,11 +90,15 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
     presetsPart.hidden = !rows.length
     for (const p of rows) {
       const li = el('li', 'row')
-      li.append(presetLine(p), el('span', 'spacer'), actionButton('Apply', 'ghost small', async () => {
-        const r = await post(ACCESS_ROUTE, { op: 'apply', sid, preset: p.id })
-        tell(r)
-        if (r.ok) paint(r)
-      }, 'button', `apply:${p.id}`))
+      const apply = button('Apply', 'ghost small', () => {
+        if (apply.getAttribute('aria-disabled') === 'true') return
+        void whileBusy(apply, async () => {
+          const r = await post(ACCESS_ROUTE, { op: 'apply', sid, preset: p.id })
+          tell(r)
+          if (r.ok) paint(r)
+        })
+      }, 'button', `apply:${p.id}`)
+      li.append(presetLine(p), el('span', 'spacer'), ...offTip(apply, visible(p.off)))
       presets.append(li)
     }
     list.replaceChildren()
@@ -110,12 +109,10 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
       const first = el('p', 'small')
       if (g.credential) first.append(el('strong', '', visible(g.credential)), ' ', el('span', g.delivery === 'signing' ? 'tag' : 'tag warn', visible(g.deliveryTag)), ' ')
       else first.append(el('code', '', visible(g.target || g.host)), ' ')
-      if (g.git) first.append(el('span', 'tag warn', 'git host'), ' ')
       first.append(el('span', 'tag', visible(g.scopeLabel)), ' ', el('span', 'muted', visible(g.until)))
       const second = el('p', 'small muted', g.reason ? `${visible(g.who)}: “${visible(g.reason)}”` : visible(g.who))
       what.append(first, second)
       if (g.copy) what.append(el('p', 'small warn', visible(g.copy)))
-      if (g.closed) what.append(el('p', 'small warn', visible(g.closed)))
       li.append(what, el('span', 'spacer'), actionButton('Take back', 'ghost small', async () => {
         const r = await post(ACCESS_ROUTE, { op: 'revoke', sid, grant: g.id })
         tell(r)
@@ -138,14 +135,14 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
         showCard()
       },
       accept: async choice => {
-        const a = await post(ACCESS_ROUTE, { op: 'allow', sid, ...what, ...(c.reason ? { reason: c.reason } : {}), scope: choice.scope, expires: choice.expires, confirmed: choice.confirmed, git: shownGit(c.card, choice) })
+        const a = await post(ACCESS_ROUTE, { op: 'allow', sid, ...what, ...(c.reason ? { reason: c.reason } : {}), scope: choice.scope, expires: choice.expires, confirmed: choice.confirmed })
         if (!a.ok && a.error === 'git host') {
           await check()
           say(formSaid, a.message, 'bad')
         }
         return a
       },
-      savePreset: choice => openSavePreset(post, { sid, ...what, scope: choice.scope, expires: choice.expires, confirmed: choice.confirmed, git: shownGit(c.card, choice) }),
+      savePreset: choice => openSavePreset(post, { sid, ...what, scope: choice.scope, expires: choice.expires, confirmed: choice.confirmed }),
       done: a => {
         checked = null
         hostInput.value = ''
@@ -210,10 +207,11 @@ export function openAccess(post: Post, sid: string, openNetwork: () => void, ope
     single: `access:${sid}`,
     focus: 'heading',
     body: [
-      network, git, said,
+      network, said,
       list, allRow,
       presetsPart,
       el('h3', 'label', 'Give access'),
+      el('p', 'small muted', GIT_HOST_NOTE),
       giveForm, cardBox,
       ...sessionActions.nodes,
     ],

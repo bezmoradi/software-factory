@@ -1,6 +1,7 @@
 import { download as downloadFile } from '../api.ts'
 import { actionButton, busy, button, el, emit, labelError, replaceKeeping, sayIfChanged, statusLine, unspoofed, visible } from '../lib/dom.ts'
 import { saveFile } from '../lib/download.ts'
+import { confirmDialog } from '../lib/dialog.ts'
 import { actions, field as formField, form } from '../lib/form.ts'
 import { shortSha } from '../lib/format.ts'
 import { icon } from './icon.ts'
@@ -9,6 +10,7 @@ import { coverageFacts } from './push-coverage.ts'
 import './push-checked.ts'
 import type { FlaggedFile, PushPanelView, SessionPush } from '../types.ts'
 import { textbox } from '../lib/controls.ts'
+import { offTip } from '../lib/tooltip.ts'
 import { toast } from './toasts.ts'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
@@ -188,6 +190,7 @@ class SfPushPanel extends HTMLElement {
     if (commits) box.append(el('p', 'small muted', 'The engine never forces a push, so the agent can rewrite only commits it hasn\'t pushed. If a flagged commit is already on the remote branch, allow it instead.'))
     const ul = el('ul', 'small flagged')
     const off = !!value.disabled
+    const asked = text(value.ask ?? '')
     list.forEach((f, i) => {
       const commit = f.commit ?? ''
       const field = f.field ?? ''
@@ -227,26 +230,25 @@ class SfPushPanel extends HTMLElement {
       }
       allow.setAttribute('aria-label', `Allow it: ${name}`)
       allow.setAttribute('aria-disabled', String(off || !!f.full || !!f.link))
-      if (f.full) allow.title = 'It has more than 20 flagged versions on the branch, so it can\'t be allowed'
-      if (f.link) allow.title = 'A link the hold on Proctor\'s specifications can\'t follow can\'t be allowed'
-      if (commit) allow.title = 'Allows this commit only: another commit with the same text is flagged again'
+      const allowOff = off ? '' : f.full ? 'It has more than 20 flagged versions on the branch, so it can\'t be allowed' : f.link ? 'A link the hold on Proctor\'s specifications can\'t follow can\'t be allowed' : ''
+      if (commit && !allowOff) allow.title = 'Allows this commit only: another commit with the same text is flagged again'
       const spec = !commit && (!!f.spec || f.kind === 'specification')
       const removeText = commit ? 'Ask the agent to rewrite it' : spec ? 'Ask the agent to revert it' : 'Ask the agent to remove it'
       const remove = commit
         ? button(removeText, 'small', () => {
-          if (!off) emit(this, 'sf-rewrite-commit', { commit, field })
+          if (!off && !asked) emit(this, 'sf-rewrite-commit', { commit, field })
         }, 'button', `rewrite:${id}`)
         : button(removeText, 'small', () => {
-          if (!off) emit(this, 'sf-remove-file', { path: f.path, revert: spec })
+          if (!off && !asked) emit(this, 'sf-remove-file', { path: f.path, revert: spec })
         }, 'button', `remove:${id}`)
       remove.setAttribute('aria-label', `${removeText}: ${name}`)
-      remove.setAttribute('aria-disabled', String(off))
+      remove.setAttribute('aria-disabled', String(off || !!asked))
       remove.title = commit
         ? 'Sends the session a message asking it to rewrite this commit if it isn\'t on the remote branch yet'
         : spec
           ? 'Sends the session a message asking it to take this change to a Proctor specification out of every commit on the branch, so the file is as the main branch has it'
           : 'Sends the session a message asking it to take this file out of every commit on the branch and add it to .gitignore'
-      li.append(form({ children: [formField('Your reason for allowing it (the audit file keeps it)', input, { kind: 'inline', cls: 'field-row' }), actions([allow, remove])], onSubmit: allowIt }))
+      li.append(form({ children: [formField('Your reason for allowing it (the audit file keeps it)', input, { kind: 'inline', cls: 'field-row' }), actions([...(allowOff ? offTip(allow, allowOff) : [allow]), ...(asked && !off ? offTip(remove, asked) : [remove])])], onSubmit: allowIt }))
       this.#refusedFor(input)
       ul.append(li)
     })
@@ -358,36 +360,43 @@ class SfPushPanel extends HTMLElement {
     else input.removeAttribute('aria-required')
     const row = formField(p.needsReason ? 'Your reason for allowing it with items missing (the audit file keeps it), or a note for Deny' : 'A note', input, { kind: 'inline', cls: 'field-row', optional: !p.needsReason })
     const off = value.answering || !!value.disabled || p.running
-    const answer = (allow: boolean) => () => {
-      if (off) return
+    const asked = off ? '' : text(value.ask ?? '')
+    const tips: HTMLElement[] = []
+    const send = (allow: boolean) => {
       const reason = input.value
       this.#unrefuse(input)
       this.#answered = allow ? 'allow' : 'deny'
       emit(this, 'sf-push-answer', { card: p.card, commit: p.commit, allow, reason })
+    }
+    const answer = (allow: boolean) => async () => {
+      if (off) return
+      if (allow && p.allowAsk && !(await confirmDialog(text(p.allowAsk), 'reviews-and-the-push-gate', [], 'Allow', 'danger'))) return
+      send(allow)
     }
     const allow = button('Allow', 'primary small', answer(true), 'button', `push-allow:${p.card}`)
     const deny = button('Deny', 'small', answer(false), 'button', `push-deny:${p.card}`)
     const buttons = [allow, deny]
     if (p.handoff) {
       const handoff = button('Hand off', 'small', () => {
-        if (!off) emit(this, 'sf-handoff', { card: p.card, commit: p.commit })
+        if (!off && !asked) emit(this, 'sf-handoff', { card: p.card, commit: p.commit })
       }, 'button', 'handoff')
       handoff.title = 'Denies this push and asks the session for a handoff of the open findings: a reviewer reached this project\'s round limit and still blocks'
       buttons.push(handoff)
     }
     const sent = p.findingsSent ?? 0
     const findings = p.findings && !p.handoff ? button(sent ? 'Findings sent' : 'Send findings', 'small', () => {
-      if (!off && !sent) emit(this, 'sf-send-findings', { card: p.card, commit: p.commit })
+      if (!off && !sent && !asked) emit(this, 'sf-send-findings', { card: p.card, commit: p.commit })
     }, 'button', 'findings') : null
     if (findings) {
       findings.title = 'Sends the session the blocking reviewers\' final messages, marked as untrusted findings to check. The push stays held: Allow and Deny still work.'
       buttons.push(findings)
     }
     for (const b of buttons) b.setAttribute('aria-disabled', String(off))
+    for (const b of buttons) if (asked && b !== allow && b !== deny && !(b === findings && sent)) tips.push(...offTip(b, asked).slice(1))
     if (findings && sent) findings.setAttribute('aria-disabled', 'true')
     if (value.answering && this.#answered === 'allow') busy(allow, true)
     if (value.answering && this.#answered === 'deny') busy(deny, true)
-    box.append(form({ children: [row, actions(buttons)] }))
+    box.append(form({ children: [row, actions([...buttons, ...tips])] }))
     this.#refusedFor(input)
     if (findings && sent) box.append(el('p', 'small muted', `Findings sent to the session at ${when(sent)}; the push stays held.`))
     if (value.disabled) box.append(el('p', 'small muted', text(value.disabled)))

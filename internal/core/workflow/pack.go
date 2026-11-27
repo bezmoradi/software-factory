@@ -22,6 +22,7 @@ var (
 	packCommand   = regexp.MustCompile(`^/([a-z0-9][a-z0-9-]{0,63}):[a-z0-9][a-z0-9-]{0,63}$`)
 	packSteps     = []Step{Define, Plan, Review}
 	reservedPacks = []string{"knackpack", "software-factory"}
+	gitHostPacks  = []string{"forgejo", "gogs", "azuredevops"}
 	engineOwned   = map[string]string{
 		"tools":       "the engine sets the reviewers' tools: read-only, the same for every pack",
 		"model":       "the person picks each role's model on the page",
@@ -58,6 +59,8 @@ func PackNameProblem(name string) string {
 		return "a pack's name is lowercase letters, digits and hyphens, at most 64, starting with a letter or digit"
 	case slices.Contains(reservedPacks, name):
 		return "the name " + name + " belongs to the engine's own plugins, so a pack can't take it"
+	case strings.HasPrefix(name, "git") || slices.Contains(gitHostPacks, name):
+		return "a pack's documents folder is ." + name + ", which is git's or a git host's own, so a pack's name can't start with git or be forgejo, gogs or azuredevops"
 	}
 	return ""
 }

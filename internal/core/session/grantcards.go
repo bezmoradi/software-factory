@@ -23,7 +23,6 @@ const (
 	AccessGiven       = "person"
 	AccessAction      = "action"
 	AccessNetworkNote = "What this session can reach beyond Network access."
-	AccessGitNote     = "This session holds a grant that opens a git host, so its agent can push around Software Factory's gate."
 	HandedGoneWords   = "removed when the engine next reaches the session's container"
 	SignedGoneWords   = "Software Factory signs no more SSH logins with it."
 	maxAnsweredHosts  = 256
@@ -95,8 +94,6 @@ type GrantView struct {
 	Own         bool
 	Who         string
 	Until       string
-	Git         bool
-	Closed      string
 	DeliveryTag string
 	Copy        string
 }
@@ -109,12 +106,12 @@ type AccessView struct {
 	Presets      []PresetView
 	Credentials  []CredentialInfo
 	Network      string
-	Git          string
 	Now          time.Time
 	ActionsOn    bool
 	Actions      []ActionView
 	ActionGrants []ActionGrantView
 	Runs         []ActionRunView
+	ActionsOff   string
 }
 
 type AccessAsk struct {
@@ -133,7 +130,6 @@ type AccessChoice struct {
 	Scope      string
 	Expires    string
 	Confirmed  bool
-	Git        []string
 }
 
 type AccessAnswer struct {
@@ -273,20 +269,8 @@ func (g *Grants) cardsLocked(sid, project string) []AccessCard {
 	return list
 }
 
-func (g *Grants) gitWordsLocked(t GrantTarget, now time.Time, git func(string) string) string {
-	for _, gr := range g.coveringLocked(t, now) {
-		if _, gits, _ := opens(gr, git); len(gits) > 0 {
-			return AccessGitNote
-		}
-	}
-	return ""
-}
-
-func (g *Grants) markerLocked(t GrantTarget, now time.Time, git func(string) string) string {
+func (g *Grants) markerLocked(t GrantTarget) string {
 	var parts []string
-	if w := g.gitWordsLocked(t, now, git); w != "" {
-		parts = append(parts, w)
-	}
 	if g.unsent[t.Box] {
 		parts = append(parts, HandoverPendingNote)
 	}
@@ -294,8 +278,8 @@ func (g *Grants) markerLocked(t GrantTarget, now time.Time, git func(string) str
 	return strings.Join(parts, " ")
 }
 
-func (g *Grants) shownLocked(t GrantTarget, now time.Time, git func(string) string) AccessShown {
-	return AccessShown{Cards: g.cardsLocked(t.SID, t.Project), Marker: g.markerLocked(t, now, git), Notes: slices.Clone(g.notes[t.SID])}
+func (g *Grants) shownLocked(t GrantTarget) AccessShown {
+	return AccessShown{Cards: g.cardsLocked(t.SID, t.Project), Marker: g.markerLocked(t), Notes: slices.Clone(g.notes[t.SID])}
 }
 
 func shownKey(v AccessShown) string {
@@ -322,10 +306,8 @@ func (g *Grants) show(sid string) {
 }
 
 func (g *Grants) showTarget(t GrantTarget, always bool) {
-	now := g.cfg.Now()
-	git := g.gitHosts()
 	g.mu.Lock()
-	v := g.shownLocked(t, now, git)
+	v := g.shownLocked(t)
 	key := shownKey(v)
 	same := g.shown[t.SID] == key
 	g.shown[t.SID] = key
@@ -453,6 +435,9 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 		if err != nil {
 			return refuse("no credential named " + CleanLine(clip(q.Credential, 60), 60) + " is saved, or the engine can't read its credentials; tell the person which one you need and why")
 		}
+		if a := g.credentialTarget(c); len(a.gits) > 0 {
+			return refuse(agentGitWords(a))
+		}
 		card.cred, what = c.ID, c.Name
 		if gr, held := g.heldBy(t, c.ID); held {
 			return AccessAnswer{Result: AccessAllowed, Reason: c.Name + " is already given to this session, " + untilWords(gr.Expires) + ": " + c.Where()}
@@ -463,6 +448,9 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 		if err != nil {
 			return refuse(agentPortWords(named, err))
 		}
+		if a := g.portTarget(host, q.Port); len(a.gits) > 0 {
+			return refuse(agentGitWords(a))
+		}
 		card.host, card.port = host, q.Port
 		what = card.target()
 		if how, open := g.portOpenTo(t, what); open {
@@ -472,6 +460,9 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 		host, err := g.hostRule(q.Host)
 		if err != nil {
 			return refuse(agentHostWords(host, err))
+		}
+		if a := g.hostTarget(host); len(a.gits) > 0 {
+			return refuse(agentGitWords(a))
 		}
 		card.host, what = host, host
 		if how, open := g.openTo(t, host); open {
@@ -496,9 +487,9 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 		}
 		g.mu.Unlock()
 		if c.key() == key {
-			return AccessAnswer{Result: AccessHeld, Reason: "your request for " + what + " is still waiting for the person's answer on Software Factory's page; the answer reaches you with your next message"}
+			return AccessAnswer{Result: AccessHeld, Reason: "your request for " + what + " is still waiting for the person's answer on Software Factory's page; Software Factory sends you the answer once they give it"}
 		}
-		return refuse("this session already has a request waiting for the person; wait for its answer, which reaches you with your next message")
+		return refuse("this session already has a request waiting for the person; wait for its answer, which Software Factory sends you once they give it")
 	}
 	if !g.asks.allow(sid, now) {
 		g.mu.Unlock()
@@ -513,7 +504,7 @@ func (g *Grants) Request(ctx context.Context, sid string, q AccessAsk) AccessAns
 	g.mu.Unlock()
 	g.show(sid)
 	g.cfg.Logger.Info("grants", "event", "asked")
-	return AccessAnswer{Result: AccessHeld, Reason: "Software Factory's page shows your request for " + what + " to the person, who decides whether to allow it, for how long and for which sessions; the answer reaches you with your next message. Go on with other work, or end your turn if you can't go on without it"}
+	return AccessAnswer{Result: AccessHeld, Reason: "Software Factory's page shows your request for " + what + " to the person, who decides whether to allow it, for how long and for which sessions; Software Factory sends you their answer in a message once they give it, or with your next message if you're still working then. Go on with other work, or end your turn if you can't go on without it"}
 }
 
 func (g *Grants) Tried(box, raw string, last time.Time) {
@@ -552,12 +543,19 @@ func (g *Grants) AccessView(sid string) (AccessView, error) {
 		return AccessView{}, err
 	}
 	now := g.cfg.Now()
-	git := g.gitHosts()
 	g.mu.Lock()
 	covering := g.coveringLocked(t, now)
 	cards := g.cardsLocked(sid, t.Project)
 	broken := g.broken
-	v := AccessView{Cards: cards, Network: AccessNetworkNote, Git: g.gitWordsLocked(t, now, git), Now: now, Presets: g.presetViewsLocked(t.Project, true), ActionsOn: g.cfg.Actions.Store != nil, Actions: g.actionViewsLocked()}
+	v := AccessView{Cards: cards, Network: AccessNetworkNote, Now: now, Presets: g.presetViewsLocked(t.Project, true), ActionsOn: g.cfg.Actions.Store != nil, Actions: g.actionViewsLocked()}
+	if !t.Live {
+		v.ActionsOff = saidActionStopped
+		for i := range v.Presets {
+			if v.Presets[i].Scope == GrantSession {
+				v.Presets[i].Off = saidGrantStopped
+			}
+		}
+	}
 	v.ActionGrants, v.Runs = g.actionViewFor(t, now)
 	if !g.credsBroken {
 		for _, c := range g.creds {
@@ -594,12 +592,7 @@ func (g *Grants) AccessView(sid string) (AccessView, error) {
 		case gr.Preset != "":
 			who = "From the preset " + gr.Preset
 		}
-		_, gits, closed := opens(gr, git)
-		view := GrantView{Grant: gr, Own: gr.Scope == GrantSession, Who: who, Until: untilWords(gr.Expires), Git: len(gits) > 0, DeliveryTag: shown[gr.ID].tag, Copy: shown[gr.ID].copy}
-		if len(closed) > 0 {
-			view.Closed = "Egress refuses " + hostList(closed) + " for it: it became a git host after this grant was given. To open it, take this grant back and give it again at its red card."
-		}
-		v.Grants = append(v.Grants, view)
+		v.Grants = append(v.Grants, GrantView{Grant: gr, Own: gr.Scope == GrantSession, Who: who, Until: untilWords(gr.Expires), DeliveryTag: shown[gr.ID].tag, Copy: shown[gr.ID].copy})
 	}
 	if broken {
 		return v, conflict("state", "The engine couldn't read grants.json, so it makes and takes back no grant. Move the file out of the engine's state folder and restart the engine.")
@@ -622,6 +615,9 @@ func (g *Grants) CheckAccess(sid string, q AccessAsk) (AccessCard, error) {
 		if err != nil {
 			return AccessCard{}, err
 		}
+		if err := gitRefusal(g.credentialTarget(c)); err != nil {
+			return AccessCard{}, err
+		}
 		if _, held := g.heldBy(t, c.ID); held {
 			return AccessCard{}, onField("credential", conflict("open", "Already given to this session."))
 		}
@@ -629,6 +625,9 @@ func (g *Grants) CheckAccess(sid string, q AccessAsk) (AccessCard, error) {
 	} else if q.Port != 0 {
 		host, err := g.portRule(q.Host, q.Port)
 		if err != nil {
+			return AccessCard{}, err
+		}
+		if err := gitRefusal(g.portTarget(host, q.Port)); err != nil {
 			return AccessCard{}, err
 		}
 		card.host, card.port = host, q.Port
@@ -639,6 +638,9 @@ func (g *Grants) CheckAccess(sid string, q AccessAsk) (AccessCard, error) {
 		host, err := g.hostRule(q.Host)
 		if err != nil {
 			return AccessCard{}, onField("host", err)
+		}
+		if err := gitRefusal(g.hostTarget(host)); err != nil {
+			return AccessCard{}, err
 		}
 		if _, open := g.openTo(t, host); open {
 			return AccessCard{}, onField("host", conflict("open", "Already open to this session."))
@@ -651,8 +653,17 @@ func (g *Grants) CheckAccess(sid string, q AccessAsk) (AccessCard, error) {
 	if !ok {
 		return AccessCard{}, onField("credential", notFound("credential", "No credential of that name is saved."))
 	}
+	if !t.Live {
+		for i := range v.Risks {
+			if v.Risks[i].Scope == GrantSession {
+				v.Risks[i].Off = saidGrantStopped
+			}
+		}
+	}
 	return v, nil
 }
+
+const saidGrantStopped = "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project."
 
 type grantMaking struct {
 	host    string
@@ -664,7 +675,6 @@ type grantMaking struct {
 	askedBy string
 	preset  string
 	card    string
-	git     []string
 }
 
 func (g *Grants) clashLocked(c Credential, project string, now time.Time) error {
@@ -697,7 +707,7 @@ func (g *Grants) makeGrant(ctx context.Context, t GrantTarget, m grantMaking) (G
 		return Grant{}, onField("expires", invalid("expires", "Choose 1 hour, 1 day, 1 week or until taken back."))
 	}
 	if m.scope == GrantSession && !t.Live {
-		return Grant{}, conflict("stopped", "This session isn't running, and a session's grants end when it stops. Wake it first, or choose This project.")
+		return Grant{}, conflict("stopped", saidGrantStopped)
 	}
 	now := g.cfg.Now()
 	gr := Grant{ID: newGrantID(), Scope: m.scope, Session: t.SID, Project: t.Project, Reason: m.reason, AskedBy: m.askedBy, Preset: m.preset, Made: now.Truncate(time.Second)}
@@ -725,7 +735,9 @@ func (g *Grants) makeGrant(ctx context.Context, t GrantTarget, m grantMaking) (G
 		}
 		gr.Host = host
 	}
-	gr.GitAccepted = acceptedOf(m.git, gr.Hosts())
+	if gits := g.gitsOf(gr.Hosts()); len(gits) > 0 {
+		return Grant{}, gitRefusal(accessTarget{cred: gr.Name, gits: gits})
+	}
 	key := gr.key()
 	var targets []GrantTarget
 	if gr.Scope == GrantProject {
@@ -767,7 +779,7 @@ func (g *Grants) makeGrant(ctx context.Context, t GrantTarget, m grantMaking) (G
 	g.noteAnsweredLocked(t.SID, key, now)
 	g.mu.Unlock()
 	g.auditGrant(ctx, gr, ByPage, ResultGranted, grantWords(gr, ResultGranted))
-	if cred.ID != "" {
+	if cred.ID != "" && m.askedBy != AskedByAgent {
 		g.cfg.Note(t.SID, madeNote(cred, gr))
 	}
 	return gr, nil
@@ -825,25 +837,18 @@ func (g *Grants) AllowAccess(ctx context.Context, sid string, q AccessChoice) (s
 	if err != nil {
 		return "", err
 	}
-	if fresh := unshownGits(a.gits, q.Git); len(fresh) > 0 {
-		g.show(sid)
-		return "", conflict("git host", hostList(fresh)+" became a git host after this card was shown, so nothing was allowed. The card now says what that lets the agent do; read it, then answer again.")
-	}
 	if grantChoice(GrantScopes, q.Scope) && grantChoice(GrantExpiries, q.Expires) {
 		if risk := riskFor(a, q.Scope, q.Expires, t.Project); risk.Accept != "" && !q.Confirmed {
 			return "", onField("confirmed", invalid("confirm", "Tick the box to accept the risk first."))
 		}
 	}
-	m.git = a.gits
 	gr, err := g.makeGrant(ctx, t, m)
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case kind == AccessRequest && gr.Credential == "" && gr.Port > 0:
-		g.cfg.Note(sid, "The person allowed "+gr.Target()+" for "+scopeWords(gr.Scope, gr.Project)+", "+untilWords(gr.Expires)+", on Software Factory's page, so you can reach it now: "+PortReachWords(gr.Host, gr.Port)+".")
-	case kind == AccessRequest && gr.Credential == "":
-		g.cfg.Note(sid, "The person allowed "+gr.Host+" for "+scopeWords(gr.Scope, gr.Project)+", "+untilWords(gr.Expires)+", on Software Factory's page, so you can reach it over HTTPS through the proxy now.")
+	told := ""
+	if kind == AccessRequest {
+		told = g.allowedWords(gr)
 	}
 	said := "Allowed " + gr.what() + " for " + scopeWords(gr.Scope, gr.Project) + ", " + grantForWords[q.Expires] + "."
 	switch {
@@ -855,8 +860,12 @@ func (g *Grants) AllowAccess(ctx context.Context, sid string, q AccessChoice) (s
 		said = "Handed over " + gr.Name + " to " + scopeWords(gr.Scope, gr.Project) + ", " + grantForWords[q.Expires] + "."
 	}
 	if g.apply(ctx) != nil {
+		if told != "" {
+			g.cfg.Note(sid, told)
+		}
 		return said, conflict("egress", "Saved, but egress didn't take it yet, so the agent can't reach "+hostList(gr.Hosts())+" until it does. The engine sets it again within 30 seconds.")
 	}
+	g.answerAgent(ctx, sid, told)
 	return said, nil
 }
 
@@ -876,6 +885,14 @@ func (g *Grants) putBackCard(sid string, at int, c *accessCard) {
 }
 
 func (g *Grants) targetOf(m grantMaking) (accessTarget, error) {
+	a, err := g.ruledTarget(m)
+	if err != nil {
+		return a, err
+	}
+	return a, gitRefusal(a)
+}
+
+func (g *Grants) ruledTarget(m grantMaking) (accessTarget, error) {
 	if m.cred != "" {
 		c, err := g.credentialRule(m.cred)
 		if err != nil {
@@ -944,7 +961,7 @@ func (g *Grants) RefuseAccess(ctx context.Context, sid, id string) (string, erro
 	gr := Grant{Host: c.host, Port: c.port, Scope: GrantSession, Session: sid, Project: t.Project}
 	g.auditGrant(ctx, gr, ByPage, ResultNotGranted, refusedWords(what, c.kind == AccessRequest))
 	if c.kind == AccessRequest {
-		g.cfg.Note(sid, "The person didn't allow "+what+" on Software Factory's page. Don't ask for it again for 10 minutes; if you still need it, say why in your reply.")
+		g.answerAgent(ctx, sid, refusedNote(what))
 	}
 	return "Didn't allow " + what + ". The agent can't ask for it again for 10 minutes.", nil
 }

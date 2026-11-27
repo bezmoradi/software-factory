@@ -1,3 +1,4 @@
+import { offTip } from '../lib/tooltip.ts'
 import { download, request, type EngineAnswer } from '../api.ts'
 import { busy, button, el, focusedKey, refocus, replaceKeeping, say, shown, statusLine, visibleCommand, whileBusy } from '../lib/dom.ts'
 import { isRecord, saidOf, type Said } from '../lib/json.ts'
@@ -56,6 +57,7 @@ interface VerifyView {
   queued: boolean
   current: VerifyRun | null
   why: string
+  off: string
   runs: VerifyRun[]
   browser: BrowserView
 }
@@ -67,6 +69,7 @@ interface BrowserView {
   queued: boolean
   current: VerifyRun | null
   why: string
+  off: string
 }
 
 interface Opened {
@@ -105,7 +108,7 @@ function readRun(v: unknown): VerifyRun | null {
 
 function readBrowser(v: unknown): BrowserView {
   const b = isRecord(v) ? v : {}
-  return { command: text(b.command), hasCommand: b.hasCommand === true, required: b.required === true, queued: b.queued === true, current: readRun(b.current), why: text(b.why) }
+  return { command: text(b.command), hasCommand: b.hasCommand === true, required: b.required === true, queued: b.queued === true, current: readRun(b.current), why: text(b.why), off: text(b.off) }
 }
 
 function readView(v: unknown): VerifyView | null {
@@ -113,7 +116,7 @@ function readView(v: unknown): VerifyView | null {
   const runs = Array.isArray(v.runs) ? v.runs.map(readRun).filter(r => r !== null) : []
   return {
     head: sha(v.head), branch: text(v.branch), command: text(v.command), hasCheck: v.hasCheck === true, image: text(v.image), required: v.required === true,
-    busy: v.busy === true, queued: v.queued === true, current: readRun(v.current), why: text(v.why), runs, browser: readBrowser(v.browser),
+    busy: v.busy === true, queued: v.queued === true, current: readRun(v.current), why: text(v.why), off: text(v.off), runs, browser: readBrowser(v.browser),
   }
 }
 
@@ -347,23 +350,17 @@ class SfVerify extends HTMLElement {
     if (b.why) parts.push(el('p', 'small muted', shown(b.why)))
     const running = v.runs.find(r => r.state === 'running' && r.kind === 'browser')
     const row = el('div', 'row')
-    const why = t.disabled || (!b.hasCommand ? 'Set a browser command first.' : !v.image ? 'Set an image first.' : !v.head ? 'The branch has no commit to verify.' : running ? 'A browser check of this session is running.' : v.busy ? 'The engine runs at most 2 verification runs at once.' : '')
+    const why = t.disabled || shown(b.off)
     const go = button('Run the browser check', 'small', () => {
       if (!why && !this.#busy) void whileBusy(go, () => this.#ask({ op: 'start', kind: 'browser' }, 'The browser check started.'))
     }, 'button', 'verify-browser-start')
     go.setAttribute('aria-disabled', String(!!why || this.#busy))
     if (this.#busy) busy(go, true)
-    row.append(go)
+    row.append(...(why ? offTip(go, why) : [go]))
     if (running) {
       row.append(button('Stop the browser check', 'ghost small', () => {
         if (!this.#busy) void this.#ask({ op: 'stop', id: running.id }, 'The browser check is stopping.')
       }, 'button', 'verify-browser-stop'))
-    }
-    if (why) {
-      const said = el('span', 'small muted', why)
-      said.id = 'verify-browser-why'
-      go.setAttribute('aria-describedby', 'verify-browser-why')
-      row.append(said)
     }
     parts.push(row)
     return parts
@@ -387,23 +384,17 @@ class SfVerify extends HTMLElement {
     if (v.why) parts.push(el('p', 'small muted', shown(v.why)))
     const running = v.runs.find(r => r.state === 'running' && r.kind === 'check')
     const row = el('div', 'row')
-    const why = t.disabled || (!v.hasCheck ? 'Set a check command first.' : !v.image ? 'Set an image first.' : !v.head ? 'The branch has no commit to verify.' : running ? 'A run of this session is running.' : v.busy ? 'The engine runs at most 2 verification runs at once.' : '')
+    const why = t.disabled || shown(v.off)
     const go = button('Verify this commit', 'small', () => {
       if (!why && !this.#busy) void whileBusy(go, () => this.#ask({ op: 'start', kind: 'check' }, 'The verification run started.'))
     }, 'button', 'verify-start')
     go.setAttribute('aria-disabled', String(!!why || this.#busy))
     if (this.#busy) busy(go, true)
-    row.append(go)
+    row.append(...(why ? offTip(go, why) : [go]))
     if (running) {
       row.append(button('Stop the run', 'ghost small', () => {
         if (!this.#busy) void this.#ask({ op: 'stop', id: running.id }, 'The run is stopping.')
       }, 'button', 'verify-stop'))
-    }
-    if (why) {
-      const said = el('span', 'small muted', why)
-      said.id = 'verify-why'
-      go.setAttribute('aria-describedby', 'verify-why')
-      row.append(said)
     }
     parts.push(row)
     parts.push(...this.#browserPart(t, v))

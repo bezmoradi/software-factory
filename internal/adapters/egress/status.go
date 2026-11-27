@@ -28,7 +28,6 @@ type sideJSON struct {
 	Allow   []string         `json:"allow"`
 	Ports   []string         `json:"ports,omitempty"`
 	Expires map[string]int64 `json:"expires"`
-	Git     []string         `json:"git,omitempty"`
 }
 
 type status struct {
@@ -100,7 +99,7 @@ func listsOf(raw map[string]sideJSON) (map[string]Lists, bool) {
 		if s.Allow == nil {
 			return nil, false
 		}
-		l := Lists{Allow: s.Allow, Ports: s.Ports, Expires: map[string]time.Time{}, Git: s.Git}
+		l := Lists{Allow: s.Allow, Ports: s.Ports, Expires: map[string]time.Time{}}
 		for h, t := range s.Expires {
 			if t <= 0 {
 				return nil, false
@@ -188,7 +187,7 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 				http.Error(w, "a side has no allow list", http.StatusBadRequest)
 				return
 			}
-			l := Lists{Allow: s.Allow, Expires: map[string]time.Time{}, Git: s.Git}
+			l := Lists{Allow: s.Allow, Expires: map[string]time.Time{}}
 			for h, t := range s.Expires {
 				if t <= 0 {
 					http.Error(w, "an expiry isn't a time", http.StatusBadRequest)
@@ -273,8 +272,8 @@ func StatusHandler(cfg StatusConfig) http.Handler {
 			}
 			for _, p := range actions {
 				l := raw[p.String()]
-				if len(l.Allow)+len(l.Ports) != 1 || len(l.Git) > 0 {
-					http.Error(w, "an action container's subnet needs exactly one host or host port and no git host", http.StatusBadRequest)
+				if len(l.Allow)+len(l.Ports) != 1 {
+					http.Error(w, "an action container's subnet needs exactly one host or host port", http.StatusBadRequest)
 					return
 				}
 				if entry := slices.Concat(l.Allow, l.Ports)[0]; cfg.Grants.gitTarget(git, entry) {

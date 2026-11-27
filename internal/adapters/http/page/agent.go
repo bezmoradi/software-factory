@@ -41,6 +41,7 @@ var agentRoutes = map[string]string{
 	checksRoute:    http.MethodPost,
 	commentsRoute:  http.MethodPost,
 	splitRoute:     http.MethodPost,
+	copyRoute:      http.MethodPost,
 	workTypeRoute:  http.MethodPost,
 	accessAskRoute: http.MethodPost,
 	actionAskRoute: http.MethodPost,
@@ -49,6 +50,9 @@ var agentRoutes = map[string]string{
 
 	turnCheckRoute:    http.MethodPost,
 	sessionModelRoute: http.MethodGet,
+
+	helperCopyRoute:   http.MethodPost,
+	helperRemoveRoute: http.MethodPost,
 }
 
 func (s *Server) agentRoute(r *http.Request) string {
@@ -182,6 +186,9 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 	case splitRoute:
 		s.splitRequest(w, r)
 		return
+	case copyRoute:
+		s.copyRequest(w, r)
+		return
 	case workTypeRoute:
 		s.workTypeRequest(w, r)
 		return
@@ -205,6 +212,12 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request) {
 		return
 	case sessionModelRoute:
 		s.sessionModel(w, r)
+		return
+	case helperCopyRoute:
+		s.helperCopy(w, r)
+		return
+	case helperRemoveRoute:
+		s.helperRemove(w, r)
 		return
 	}
 	given := connSecret(r)

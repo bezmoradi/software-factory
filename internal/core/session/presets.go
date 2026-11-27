@@ -19,17 +19,16 @@ const (
 )
 
 type Preset struct {
-	ID          string
-	Name        string
-	Host        string
-	Port        int
-	Credential  string
-	Scope       string
-	Expires     string
-	Project     string
-	Auto        bool
-	Made        time.Time
-	GitAccepted []string
+	ID         string
+	Name       string
+	Host       string
+	Port       int
+	Credential string
+	Scope      string
+	Expires    string
+	Project    string
+	Auto       bool
+	Made       time.Time
 }
 
 type PresetStore interface {
@@ -44,6 +43,7 @@ type PresetView struct {
 	ExpiresLabel string
 	Level        string
 	Label        string
+	Off          string
 }
 
 type PresetDraft struct {
@@ -57,7 +57,6 @@ type PresetDraft struct {
 	Session    string
 	Auto       bool
 	Confirmed  bool
-	Git        []string
 }
 
 func (g *Grants) savePresetsLocked(next []Preset) error {
@@ -158,7 +157,6 @@ func (g *Grants) draftPreset(d PresetDraft) (Preset, accessTarget, error) {
 	} else {
 		p.Host, p.Port = a.host, a.port
 	}
-	p.GitAccepted = a.gits
 	return p, a, nil
 }
 
@@ -170,9 +168,6 @@ func (g *Grants) SavePreset(ctx context.Context, d PresetDraft) (string, error) 
 	p, a, err := g.draftPreset(d)
 	if err != nil {
 		return "", err
-	}
-	if fresh := unshownGits(a.gits, d.Git); len(fresh) > 0 {
-		return "", conflict("git host", hostList(fresh)+" became a git host after the page showed this risk, so the preset wasn't saved. The risk now says what that lets the agent do; read it, then save again.")
 	}
 	if r := riskFor(a, p.Scope, p.Expires, projectWords(p.Project)); r.Accept != "" && !d.Confirmed {
 		return "", onField("confirmed", invalid("confirm", "Tick the box to accept the risk first."))
@@ -235,14 +230,13 @@ func (g *Grants) presetByID(id string) (Preset, bool) {
 
 func (g *Grants) presetMaking(p Preset, askedBy string) (grantMaking, error) {
 	m := grantMaking{host: p.Host, port: p.Port, cred: p.Credential, scope: p.Scope, expires: p.Expires, askedBy: askedBy, preset: p.Name}
-	a, err := g.targetOf(m)
+	a, err := g.ruledTarget(m)
 	if err != nil {
 		return grantMaking{}, err
 	}
-	if fresh := slices.DeleteFunc(slices.Clone(a.gits), func(h string) bool { return slices.Contains(p.GitAccepted, h) }); len(fresh) > 0 {
-		return grantMaking{}, conflict("git host", hostList(fresh)+" became a git host after the preset "+p.Name+" was saved, so applying it would let the agent push around Software Factory's gate without its red card. Give it from the session's Access dialog, where its card is red, or save the preset again.")
+	if len(a.gits) > 0 {
+		return grantMaking{}, conflict("git host", "The preset "+p.Name+" opens "+hostList(a.gits)+", which became a git host after it was saved, and "+GitHostOnlyEngine+", so it wasn't applied. Delete the preset.")
 	}
-	m.git = a.gits
 	return m, nil
 }
 

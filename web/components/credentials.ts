@@ -55,6 +55,7 @@ export interface PresetRow {
   auto: boolean
   level: string
   label: string
+  off: string
 }
 
 interface CredentialsView {
@@ -79,7 +80,7 @@ export function presetsOf(v: unknown): PresetRow[] {
   return Array.isArray(v)
     ? v.map(record).map(p => ({
         id: text(p.id), name: text(p.name), kind: text(p.kind), what: text(p.what), scopeLabel: text(p.scopeLabel), expiresLabel: text(p.expiresLabel),
-        project: text(p.project), auto: p.auto === true, level: text(p.level), label: text(p.label),
+        project: text(p.project), auto: p.auto === true, level: text(p.level), label: text(p.label), off: text(p.off),
       })).filter(p => p.id)
     : []
 }
@@ -114,6 +115,7 @@ export function presetLine(p: PresetRow): HTMLElement {
 }
 
 const ADD_CREDENTIAL = 'Add a credential'
+export const GIT_HOST_NOTE = 'Software Factory pushes, opens issues and pull requests and reads CI for you, so it refuses every grant and credential that would open a git host. A git host’s token goes in Projects, under Git host tokens.'
 const RETYPE = 'Type it again: the page never shows it.'
 
 export function openCredentials(post: Post, labelOfSid: (sid: string) => string): void {
@@ -125,12 +127,12 @@ export function openCredentials(post: Post, labelOfSid: (sid: string) => string)
   let editing = ''
   let asking = ''
 
-  const nameInput = textbox({ name: 'name', spellcheck: false, autocomplete: 'off', placeholder: 'github-ci' })
+  const nameInput = textbox({ name: 'name', spellcheck: false, autocomplete: 'off', placeholder: 'npm-ci' })
   const typePick = dropdown({ name: 'type' })
-  const boundInput = textbox({ name: 'bound', spellcheck: false, autocomplete: 'off', placeholder: 'api.github.com, 192.168.1.20:22' })
+  const boundInput = textbox({ name: 'bound', spellcheck: false, autocomplete: 'off', placeholder: 'registry.npmjs.org, 192.168.1.20:22' })
   const tagWrite = checkbox({ name: 'tags', value: 'write' })
   const tagProd = checkbox({ name: 'tags', value: 'production' })
-  const variable = textbox({ name: 'variable', spellcheck: false, autocomplete: 'off', placeholder: 'GH_TOKEN' })
+  const variable = textbox({ name: 'variable', spellcheck: false, autocomplete: 'off', placeholder: 'NPM_TOKEN' })
   const value = textbox({ type: 'password', name: 'value', spellcheck: false, autocomplete: 'off' })
   const keyId = textbox({ name: 'keyId', spellcheck: false, autocomplete: 'off', placeholder: 'AKIA…' })
   const secretKey = textbox({ type: 'password', name: 'secretKey', spellcheck: false, autocomplete: 'off' })
@@ -303,11 +305,11 @@ export function openCredentials(post: Post, labelOfSid: (sid: string) => string)
   replacing(false)
   const credForm = form({
     cls: 'credential-form',
-    children: [fieldRow([field('Name', nameInput), field('Type', typePick)], 'halves'), field('Hosts it may be sent to', boundInput), tagRow, typed, actions([cancelEdit, saveButton]), formSaid],
+    children: [fieldRow([field('Name', nameInput), field('Type', typePick)], 'halves'), field('Hosts it may be sent to', boundInput, { help: GIT_HOST_NOTE }), tagRow, typed, actions([cancelEdit, saveButton]), formSaid],
     onSubmit: () => void whileBusy(saveButton, save),
   })
 
-  const presetName = textbox({ name: 'name', autocomplete: 'off', placeholder: 'GitHub for this project, 1 hour' })
+  const presetName = textbox({ name: 'name', autocomplete: 'off', placeholder: 'npm registry for this project, 1 hour' })
   const presetWhat = dropdown({ name: 'credential' })
   const presetHost = textbox({ name: 'host', spellcheck: false, autocomplete: 'off', placeholder: 'api.example.com' })
   const presetPort = textbox({ name: 'port', inputMode: 'numeric', autocomplete: 'off', placeholder: '22' })
@@ -339,15 +341,12 @@ export function openCredentials(post: Post, labelOfSid: (sid: string) => string)
     project: presetProject.value, auto: presetAuto.checked,
   })
   let checking = 0
-  let shownGit: string[] = []
   const checkRisk = async () => {
     const at = ++checking
     presetConfirm.checked = false
-    shownGit = []
     const a = await post(CREDENTIALS_ROUTE, { op: 'preset-check', preset: draft() })
     if (at !== checking) return
     const r = record(a.body.risk)
-    shownGit = a.ok ? strings(r.git) : []
     presetRisk.hidden = !a.ok
     presetAccept.hidden = !a.ok || !text(r.accept)
     if (!a.ok) return
@@ -378,8 +377,7 @@ export function openCredentials(post: Post, labelOfSid: (sid: string) => string)
       presetRisk, presetAccept, actions([presetCancel, presetButton]), presetSaid,
     ],
     onSubmit: () => void whileBusy(presetButton, async () => {
-      const a = await post(CREDENTIALS_ROUTE, { op: 'preset-save', preset: { ...draft(), confirmed: presetConfirm.checked, git: shownGit } })
-      if (!a.ok && a.error === 'git host') void checkRisk()
+      const a = await post(CREDENTIALS_ROUTE, { op: 'preset-save', preset: { ...draft(), confirmed: presetConfirm.checked } })
       if (!answer(a, presetForm, presetSaid)) return
       presetName.value = ''
       presetConfirm.checked = false
@@ -424,7 +422,6 @@ export interface PresetFromCard {
   scope: string
   expires: string
   confirmed: boolean
-  git: string[]
 }
 
 export function openSavePreset(post: Post, from: PresetFromCard): void {

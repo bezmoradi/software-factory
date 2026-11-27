@@ -3,7 +3,7 @@ import { busy, button, el, labelError, say, statusLine, unspoofed, visible, whil
 import { actions, field, form } from '../lib/form.ts'
 import { consentFor, money } from './consent.ts'
 import type { Needs } from '../types.ts'
-import { emptyState, pageHead } from '../lib/page.ts'
+import { emptyState, pageHead, signInLink } from '../lib/page.ts'
 import { dropdown, option } from '../lib/controls.ts'
 import { CHEAP_EVERY_MS, whileOpen, type WhileOpen } from '../lib/refresh.ts'
 import { toast } from './toasts.ts'
@@ -54,10 +54,18 @@ function isView(v: unknown): v is LessonsView {
   return !!x && Array.isArray(x.findings) && Array.isArray(x.lines) && Array.isArray(x.sessions) && typeof x.offered === 'number'
 }
 
+function signInLine(): HTMLElement {
+  const line = el('p', 'small')
+  line.append(signInLink())
+  line.hidden = true
+  return line
+}
+
 class SfLessons extends HTMLElement {
   #project = ''
   #view: LessonsView | null = null
   #said = statusLine()
+  #signIn = signInLine()
   #body = el('div', 'lessons-body')
   #busy = ''
   #doing = ''
@@ -76,7 +84,7 @@ class SfLessons extends HTMLElement {
         heading.tabIndex = -1
         heading.dataset.key = 'lessons-heading'
       }
-      this.replaceChildren(...head, this.#body, this.#said)
+      this.replaceChildren(...head, this.#body, this.#said, this.#signIn)
     }
     if (!this.#poll?.live) this.#watch()
   }
@@ -103,6 +111,7 @@ class SfLessons extends HTMLElement {
   }
 
   #took(a: EngineAnswer) {
+    this.#signIn.hidden = true
     if (!a.ok) {
       this.#failed = true
       say(this.#said, a.message, 'warn')
@@ -118,10 +127,12 @@ class SfLessons extends HTMLElement {
   async #call(body: Record<string, unknown>): Promise<boolean> {
     const project = this.#project
     if (!project) return false
+    this.#signIn.hidden = true
     const a = await request('/api/lessons', body)
     if (project !== this.#project) return false
     this.#busy = ''
     if (!a.ok) {
+      this.#signIn.hidden = a.error !== 'not signed in' && a.error !== 'sign-in'
       const needs = a.body.needs as Needs | undefined
       if (needs?.next === 'cost' && body.op === 'suggest' && !body.costOk) {
         const ok = await consentFor(needs, project, 'suggesting instruction lines')

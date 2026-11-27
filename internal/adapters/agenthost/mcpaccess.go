@@ -18,7 +18,7 @@ const (
 
 var accessResults = []string{"allowed", "held", "refused"}
 
-const accessDescription = "Ask the person to let this session reach an HTTPS host that egress refuses, such as api.example.com, or .example.com for every name under it; or a port of one host over plain TCP, such as port 22 of a machine on their network at 192.168.1.20 or port 5432 of db.example.com, by giving host and port; or to hand over a credential they saved on Software Factory's page, by its name, such as github-ci. Give host (with port for plain TCP) or credential, and reason, one line of at most 200 characters saying why the task needs it. It doesn't open or hand over anything: Software Factory's page shows a card to the person, who decides whether to allow it, for how long and for which sessions. It answers allowed when the host is already open or the credential already given (saying where: the variable or the file; for an SSH key, the agent socket Software Factory signs logins through, so ssh, scp and rsync work without the key; for AWS keys, the AWS profile holding short-lived copies), held while the person decides (their answer reaches you with your next message), or refused with the reason. You never get a credential's value in the answer, only where it is. A git host opens only behind the person's red card; push with factory_push otherwise. One request waits at a time, and what the person didn't allow can't be asked for again for 10 minutes."
+const accessDescription = "Ask the person to let this session reach an HTTPS host that egress refuses, such as api.example.com, or .example.com for every name under it; or a port of one host over plain TCP, such as port 22 of a machine on their network at 192.168.1.20 or port 5432 of db.example.com, by giving host and port; or to hand over a credential they saved on Software Factory's page, by its name, such as npm-ci. Give host (with port for plain TCP) or credential, and reason, one line of at most 200 characters saying why the task needs it. It doesn't open or hand over anything: Software Factory's page shows a card to the person, who decides whether to allow it, for how long and for which sessions. It answers allowed when the host is already open or the credential already given (saying where: the variable or the file; for an SSH key, the agent socket Software Factory signs logins through, so ssh, scp and rsync work without the key; for AWS keys, the AWS profile holding short-lived copies), held while the person decides (their answer reaches you with your next message), or refused with the reason. You never get a credential's value in the answer, only where it is. Software Factory refuses every host, port and credential that would open a git host, since it reaches the git host itself: push with factory_push, open a pull request with factory_pull_request or an issue with factory_issue, and read CI with factory_checks. One request waits at a time, and what the person didn't allow can't be asked for again for 10 minutes."
 
 func accessToolDefinition() map[string]any {
 	return map[string]any{
@@ -30,7 +30,7 @@ func accessToolDefinition() map[string]any {
 			"properties": map[string]any{
 				"host":       map[string]any{"type": "string", "minLength": 1, "maxLength": maxAccessHost, "description": "A host name like api.example.com, or .example.com for every name under it; with port, one host name or an address like 192.168.1.20; leave it out when you give credential"},
 				"port":       map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "A port of host to reach over plain TCP, like 22 for SSH; leave it out for HTTPS"},
-				"credential": map[string]any{"type": "string", "minLength": 1, "maxLength": maxAccessCredential, "description": "The name of a credential the person saved, like github-ci; leave it out when you give host"},
+				"credential": map[string]any{"type": "string", "minLength": 1, "maxLength": maxAccessCredential, "description": "The name of a credential the person saved, like npm-ci; leave it out when you give host"},
 				"reason":     map[string]any{"type": "string", "minLength": 1, "maxLength": maxAccessReason, "description": "One line of plain text"},
 			},
 			"required":             []string{"reason"},
@@ -72,7 +72,7 @@ func accessArguments(raw json.RawMessage) (accessAsk, string) {
 		return accessAsk{}, "port must be a whole number from 1 to 65535, given with host."
 	}
 	if hasCredential && (strings.TrimSpace(q.credential) == "" || utf8.RuneCountInString(q.credential) > maxAccessCredential) {
-		return accessAsk{}, "credential must be the name of a saved credential, like github-ci."
+		return accessAsk{}, "credential must be the name of a saved credential, like npm-ci."
 	}
 	if strings.TrimSpace(q.reason) == "" || utf8.RuneCountInString(q.reason) > maxAccessReason || strings.ContainsAny(q.reason, "\r\n") {
 		return accessAsk{}, "The reason must be one line of 1 to 200 characters."

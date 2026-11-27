@@ -27,10 +27,10 @@ func (d *Dispatcher) BringMain(ctx context.Context, sid string) (string, error) 
 	running := r.running
 	d.mu.Unlock()
 	if !running {
-		return "", conflict("not running", "The session isn't running. Wake it, then bring in the latest main.")
+		return "", conflict("not running", saidMainStopped)
 	}
 	if !d.reg.TurnSince(sid).IsZero() {
-		return "", conflict("in turn", "The session is in its turn. Wait for it to end, then bring in the latest main.")
+		return "", conflict("in turn", saidMainInTurn)
 	}
 	if d.cfg.Repositories == nil {
 		return "", conflict("no agent-host", "This engine has no repositories to fetch.")

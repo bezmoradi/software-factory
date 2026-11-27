@@ -13,7 +13,11 @@ func useStarts(base context.Context, srv *page.Server, reg *session.Registry, pa
 	if parts.dispatcher == nil {
 		return
 	}
-	splits, err := session.NewSplits(session.SplitsConfig{Dispatcher: parts.dispatcher, Store: state.NewSplits(cfg.StateDir), Show: reg.SetSplits, Tell: tellSession(reg),
+	var repos session.SplitRepos
+	if parts.repos != nil {
+		repos = parts.repos
+	}
+	splits, err := session.NewSplits(session.SplitsConfig{Dispatcher: parts.dispatcher, Store: state.NewSplits(cfg.StateDir), Repos: repos, Show: reg.SetSplits, Tell: tellSession(reg),
 		Base: base, Logger: logger})
 	if err != nil {
 		logger.Warn("splits", "event", "not-started")

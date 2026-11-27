@@ -150,7 +150,7 @@ func lineValue(v string, limit int) bool {
 
 func checkVariable(field, name string) error {
 	if !variableName.MatchString(name) {
-		return onField(field, invalid(field, "Needs capital letters, digits and _, like GH_TOKEN."))
+		return onField(field, invalid(field, "Needs capital letters, digits and _, like NPM_TOKEN."))
 	}
 	if slices.Contains(reservedVariables, name) {
 		return onField(field, invalid(field, withName("Needs another name; ", name, " is taken.")))
@@ -288,7 +288,7 @@ func keepTypeFields(c Credential) Credential {
 func (g *Grants) checkCredential(raw Credential) (Credential, error) {
 	c := normalCredential(raw)
 	if !credentialName.MatchString(c.Name) {
-		return Credential{}, onField("name", invalid("name", "Needs small letters, digits, _ and -, like github-ci."))
+		return Credential{}, onField("name", invalid("name", "Needs small letters, digits, _ and -, like npm-ci."))
 	}
 	if len(c.Bound) == 0 || len(c.Bound) > MaxCredentialBound {
 		return Credential{}, onField("bound", invalid("bound", "Bind it to 1 to 16 hosts."))
@@ -305,6 +305,9 @@ func (g *Grants) checkCredential(raw Credential) (Credential, error) {
 			if err != nil {
 				return Credential{}, onField("bound", err)
 			}
+			if len(g.gitsOf([]string{PortTarget(host, n)})) > 0 {
+				return Credential{}, onField("bound", conflict("git host", "Holds a git host: only Software Factory reaches it."))
+			}
 			bound = append(bound, PortTarget(host, n))
 			continue
 		}
@@ -319,6 +322,9 @@ func (g *Grants) checkCredential(raw Credential) (Credential, error) {
 		}
 		if err := g.cfg.Allow.refuseOutside(name); err != nil {
 			return Credential{}, onField("bound", err)
+		}
+		if len(g.gitsOf([]string{name})) > 0 {
+			return Credential{}, onField("bound", conflict("git host", "Holds a git host: only Software Factory reaches it."))
 		}
 		bound = append(bound, name)
 	}

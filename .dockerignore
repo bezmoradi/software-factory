@@ -2,7 +2,6 @@
 !go.mod
 !go.sum
 !LICENSE
-!README.md
 !third_party/
 !cmd/
 !configs/

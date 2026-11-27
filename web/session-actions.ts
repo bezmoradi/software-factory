@@ -13,6 +13,7 @@ interface SessionActionsDeps {
   loadGate: (s: Session, force?: boolean) => Promise<void>
   starterNames: () => ReadonlyMap<string, string>
   identityAction: (a: EngineAnswer) => Toast['action']
+  signInAction: (a: EngineAnswer) => Toast['action']
   copy: (command: string) => Promise<void>
   forgetSession: (sid: string) => void
 }
@@ -28,7 +29,7 @@ export interface SessionActions {
   startTestList: (s: Session | null) => Promise<void>
   startAside: (s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) => Promise<void>
   checkStep: (s: Session | null, d: { commit: string; step: number; done: boolean; settle: (ok: boolean) => void }) => Promise<void>
-  approve: (kind: 'requirements' | 'plan', hash: string, plan?: boolean) => Promise<void>
+  approve: (kind: 'requirements' | 'plan', hash: string) => Promise<void>
   wakeSession: (s: Session, quiet?: boolean) => Promise<boolean>
   withConsent: (name: string, what: string, send: (c: Consent) => Promise<EngineAnswer>, resumable?: boolean, sid?: string) => Promise<EngineAnswer>
   bringMain: (s: Session) => Promise<void>
@@ -145,7 +146,7 @@ export async function controlBusyWhile<T>(s: Session, work: () => Promise<T>): P
   }
 }
 
-export function startSessionActions({ loadGate, starterNames, identityAction, copy, forgetSession }: SessionActionsDeps): SessionActions {
+export function startSessionActions({ loadGate, starterNames, identityAction, signInAction, copy, forgetSession }: SessionActionsDeps): SessionActions {
   async function manage(s: Session, path: string, body: Record<string, unknown>): Promise<string> {
     busyManage.set(s.sid, { action: path === '/api/stop-session' ? 'stop' : 'remove', at: Date.now(), force: 'flag' in body })
     schedulePaint()
@@ -227,7 +228,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     schedulePaint()
     const message = answer.message
     if (!ok && error === 'reviewed') toast({ id: `review:${s.sid}`, title: 'Every review is done.', description: message, tone: 'info' })
-    else if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined })
+    else if (!ok) toast({ id: `review:${s.sid}`, title: "The review didn't start.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined, action: signInAction(answer) })
   }
 
   async function startTestList(s: Session | null) {
@@ -243,7 +244,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     const { ok, body, message } = answer
     testAsking.delete(s.sid)
     schedulePaint()
-    if (!ok) toast({ id: `test-list:${s.sid}`, title: "The test list wasn't started.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined })
+    if (!ok) toast({ id: `test-list:${s.sid}`, title: "The test list wasn't started.", description: message, tone: 'bad', timeout: body.needs ? 0 : undefined, action: signInAction(answer) })
   }
 
   async function startAside(s: Session | null, route: string, asking: Set<string>, running: boolean, what: string, body: Record<string, unknown>) {
@@ -259,7 +260,8 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     const { ok, body: said, message } = answer
     asking.delete(s.sid)
     schedulePaint()
-    if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: message, tone: 'bad', timeout: said.needs ? 0 : undefined })
+    if (!ok) toast({ id: `${route}:${s.sid}`, title: `${what[0]!.toUpperCase()}${what.slice(1)} wasn't started.`, description: message, tone: 'bad', timeout: said.needs ? 0 : undefined, action: signInAction(answer) })
+    if (!ok) void loadGate(s, true)
   }
 
   async function send(text: string, images: string[] = [], s = current(), pressed = false, files: string[] = [], composed?: ComposedMessage) {
@@ -299,7 +301,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     if (!ok) toast({ id: `walkthrough:${s.sid}`, title: "The step wasn't checked off.", description: message, tone: 'bad' })
   }
 
-  async function approve(kind: 'requirements' | 'plan', hash: string, plan?: boolean) {
+  async function approve(kind: 'requirements' | 'plan', hash: string) {
     const s = current()
     if (!s) return
     s.asked[kind] = { hash, at: Date.now() }
@@ -307,8 +309,7 @@ export function startSessionActions({ loadGate, starterNames, identityAction, co
     schedulePaint()
     setTimeout(schedulePaint, ASK_WAIT_MS)
     const doc = kind === 'plan' ? s.gate?.planDoc : s.gate?.requirements
-    const choice = kind === 'requirements' && s.gate?.planChoice && plan !== undefined ? { plan } : {}
-    const a = doc?.hash === hash ? await request(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text, ...choice }) : null
+    const a = doc?.hash === hash ? await request(kind === 'plan' ? '/api/approve-plan' : '/api/approve-requirements', { sid: s.sid, hash, text: doc.text }) : null
     delete s.asked[kind]
     void loadGate(s, true)
     schedulePaint()

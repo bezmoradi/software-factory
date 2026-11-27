@@ -55,13 +55,10 @@ var _ session.Remote = Remote{}
 
 func (r Remote) HTTPClient() (*http.Client, error) { return r.client() }
 
-func (r Remote) client() (*http.Client, error) {
-	if r.Client != nil {
-		return r.Client, nil
-	}
+func tlsConfig(caFile string) (*tls.Config, error) {
 	tc := &tls.Config{MinVersion: tls.VersionTLS12}
-	if r.CAFile != "" {
-		pem, err := os.ReadFile(r.CAFile)
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, errors.New("the development CA file SF_DEV_GIT_CA names can't be read")
 		}
@@ -73,6 +70,17 @@ func (r Remote) client() (*http.Client, error) {
 			return nil, errors.New("the development CA file SF_DEV_GIT_CA names holds no certificate")
 		}
 		tc.RootCAs = pool
+	}
+	return tc, nil
+}
+
+func (r Remote) client() (*http.Client, error) {
+	if r.Client != nil {
+		return r.Client, nil
+	}
+	tc, err := tlsConfig(r.CAFile)
+	if err != nil {
+		return nil, err
 	}
 	return &http.Client{Transport: &http.Transport{
 		Proxy:                 nil,
@@ -102,14 +110,19 @@ type conn struct {
 	adv   *packp.AdvRefs
 	token string
 	host  string
+	again string
 }
 
 func (r Remote) open(ctx context.Context, raw, token string) (*conn, error) {
-	ep, err := endpoint(raw)
+	c, err := r.client()
 	if err != nil {
 		return nil, err
 	}
-	c, err := r.client()
+	return openWith(ctx, c, raw, token, "add it again")
+}
+
+func openWith(ctx context.Context, c *http.Client, raw, token, again string) (*conn, error) {
+	ep, err := endpoint(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +131,7 @@ func (r Remote) open(ctx context.Context, raw, token string) (*conn, error) {
 		auth = &githttp.BasicAuth{Username: tokenUser, Password: token}
 	}
 	tr := githttp.NewClientWithOptions(c, &githttp.ClientOptions{RedirectPolicy: githttp.NoFollowRedirects})
-	k := &conn{token: token, host: ep.Host}
+	k := &conn{token: token, host: ep.Host, again: again}
 	sess, err := tr.NewUploadPackSession(ep, auth)
 	if err != nil {
 		return nil, k.explain(ctx, err)
@@ -183,7 +196,7 @@ func (k *conn) explain(ctx context.Context, err error) error {
 	msg := ""
 	switch {
 	case errors.Is(err, transport.ErrAuthenticationRequired) && k.token == "":
-		msg = "the git host wants a token for this repository; save one for its host on this page, then add it again"
+		msg = "the git host wants a token for this repository; save one for its host on this page, then " + k.again
 	case errors.Is(err, transport.ErrAuthenticationRequired), errors.Is(err, transport.ErrAuthorizationFailed) && k.token != "":
 		msg = "the git host refused the token saved for its host; check it can read this repository, or replace it"
 	case errors.Is(err, transport.ErrAuthorizationFailed):
@@ -241,6 +254,10 @@ func (k *conn) download(ctx context.Context, git *os.Root, want string, have []s
 }
 
 func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, have []string, depth int, progress func(session.CloneProgress)) error {
+	return k.downloadUpTo(ctx, git, want, have, depth, progress, MaxPack)
+}
+
+func (k *conn) downloadUpTo(ctx context.Context, git *os.Root, want string, have []string, depth int, progress func(session.CloneProgress), limit int64) error {
 	req := packp.NewUploadPackRequestFromCapabilities(k.adv.Capabilities)
 	if depth > 0 && k.adv.Capabilities.Supports(capability.Shallow) {
 		_ = req.Capabilities.Set(capability.Shallow)
@@ -266,9 +283,12 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 		return k.explain(ctx, err)
 	}
 	defer func() { _ = res.Close() }()
-	err = storePack(git, res, want, progress)
+	err = storePack(git, res, want, progress, limit)
 	if err != nil && ctx.Err() != nil {
 		return k.explain(ctx, ctx.Err())
+	}
+	if errors.Is(err, errPackOver) {
+		return err
 	}
 	if err != nil {
 		return errors.New(clean(err.Error(), k.token))
@@ -276,7 +296,9 @@ func (k *conn) downloadDepth(ctx context.Context, git *os.Root, want string, hav
 	return nil
 }
 
-func storePack(git *os.Root, src io.Reader, want string, progress func(session.CloneProgress)) error {
+var errPackOver = errors.New("the repository's pack is larger than the engine takes")
+
+func storePack(git *os.Root, src io.Reader, want string, progress func(session.CloneProgress), limit int64) error {
 	if err := git.MkdirAll("objects/pack", 0o755); err != nil {
 		return errors.New("the clone's objects/pack folder couldn't be made")
 	}
@@ -299,11 +321,14 @@ func storePack(git *os.Root, src io.Reader, want string, progress func(session.C
 		defer m.end()
 		dst = meteredFile{f: f, m: m}
 	}
-	n, err := io.Copy(dst, io.LimitReader(src, MaxPack+1))
+	n, err := io.Copy(dst, io.LimitReader(src, limit+1))
 	if err != nil {
 		return errors.New("the pack didn't arrive whole: " + err.Error())
 	}
-	if n > MaxPack {
+	if n > limit && limit < MaxPack {
+		return errPackOver
+	}
+	if n > limit {
 		return fmt.Errorf("the repository's pack is larger than %d GiB, more than the engine clones", MaxPack>>30)
 	}
 	observers := []packfile.Observer{}

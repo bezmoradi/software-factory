@@ -112,6 +112,7 @@ type lookupsJSON struct {
 	Lookups bool   `json:"lookups"`
 	Message string `json:"message,omitempty"`
 	Tone    string `json:"tone,omitempty"`
+	OnOff   string `json:"onOff,omitempty"`
 }
 
 type projectFactsJSON struct {
@@ -224,7 +225,7 @@ func (s *Server) projectFacts(w http.ResponseWriter, r *http.Request, body map[s
 			send(w, code, p)
 			return
 		}
-		send(w, http.StatusOK, lookupsJSON{Repo: repo, Lookups: on})
+		send(w, http.StatusOK, lookupsJSON{Repo: repo, Lookups: on, OnOff: facts.LookupsOff(repo)})
 		return
 	case "lookups":
 		on, okOn := body["on"].(bool)

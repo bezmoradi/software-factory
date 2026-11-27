@@ -44,28 +44,24 @@ func (r *Registry) noteReport(sid, kind string, ev map[string]any, now time.Time
 		return was != a.compacting
 	case "agents":
 		list, _ := ev["agents"].([]any)
-		a.subagents = false
 		a.agentStates = map[string]string{}
 		for _, x := range list {
 			m, ok := x.(map[string]any)
 			if !ok {
 				continue
 			}
-			if m["status"] == "running" {
-				a.subagents = true
-			}
 			if kind, ok := m["type"].(string); ok {
 				a.agentStates[kind], _ = m["status"].(string)
 			}
 		}
 		return true
-	case "prompt", "tool", "idle":
+	case "prompt", "idle":
 		return a.noteStep(kind, ev)
 	}
 	return false
 }
 
-var stepCommand = regexp.MustCompile(`^\s*(?:<command-name>\s*)?/?knackpack:(challenge-requirements|plan-implementation)\b`)
+var stepCommand = regexp.MustCompile(`^\s*(?:<command-name>\s*)?/knackpack:(challenge-requirements|plan-implementation)\b`)
 
 func stepOf(text string) string {
 	switch m := stepCommand.FindStringSubmatch(text); {
@@ -85,11 +81,6 @@ func (a *admitted) noteStep(kind string, ev map[string]any) bool {
 	case "prompt":
 		text, _ := ev["text"].(string)
 		a.step = stepOf(text)
-	case "tool":
-		summary, _ := ev["summary"].(string)
-		if ev["tool"] == "Skill" && stepOf(summary) != "" {
-			a.step = stepOf(summary)
-		}
 	}
 	grew := a.step != "" && !slices.Contains(a.stepsRan, a.step)
 	if grew {
@@ -100,7 +91,9 @@ func (a *admitted) noteStep(kind string, ev map[string]any) bool {
 
 func (r *Registry) workingInto(sid string, info *Info) {
 	if a := r.admitted[sid]; a != nil && info.Live {
-		info.Compacting, info.Subagents = a.compacting, a.subagents
+		info.Compacting = a.compacting
+		info.Subagents, info.SubagentRows = a.agents.running(info.Epoch), a.agents.view(info.Epoch)
+		info.TasksRunning, info.TaskRows = a.tasks.running(info.Epoch), a.tasks.view(info.Epoch)
 	}
 	if a := r.admitted[sid]; a != nil {
 		info.CheckpointSaved = a.checkpointed != "" && a.checkpointed == a.contextLevel
@@ -136,7 +129,7 @@ func (r *Registry) checkpointAsked(sid, text string) bool {
 
 func (r *Registry) stallInto(sid string, info *Info, now time.Time) {
 	a := r.admitted[sid]
-	if a == nil || a.lastReport.IsZero() || !Controllable(*info) || !info.Busy || info.Needs > 0 || a.subagents || now.Sub(a.lastReport) < StallAfter {
+	if a == nil || a.lastReport.IsZero() || !Controllable(*info) || !info.Busy || info.Needs > 0 || a.agents.running(info.Epoch) || now.Sub(a.lastReport) < StallAfter {
 		return
 	}
 	info.Stalled, info.StalledSince = true, a.lastReport

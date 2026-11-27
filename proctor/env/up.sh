@@ -7,13 +7,16 @@ repo=$(cd "$here/../.." && pwd)
 project=sf-proctor
 state=${PROCTOR_SF_STATE:-/tmp/sf-proctor}
 port=${PROCTOR_SF_PORT:-17799}
+preview_port=${PROCTOR_SF_PREVIEW_PORT:-17800}
 base=http://127.0.0.1:$port
 origin=$base
 demo_url=https://gitserver.test:8443/dev/demo.git
 demo_path=/workspace/base/demo
 knackpack_url=https://gitserver.test:8443/public/knackpack.git
-box_subnets=10.213.15.240/28
+box_subnets=10.213.15.240/28,10.213.15.224/28
 gid=""
+authoritative=${PROCTOR_SF_AUTHORITATIVE:-0}
+checkout=${PROCTOR_SF_CHECKOUT:-$repo}
 
 say() { printf 'sf-proctor: %s\n' "$*" >&2; }
 fail() {
@@ -35,25 +38,52 @@ case "$port" in
 	'' | *[!0-9]*) fail "PROCTOR_SF_PORT must be a port number, got $port" ;;
 esac
 [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || fail "PROCTOR_SF_PORT must be between 1024 and 65535, got $port"
+case "$preview_port" in
+	'' | *[!0-9]*) fail "PROCTOR_SF_PREVIEW_PORT must be a port number, got $preview_port" ;;
+esac
+[ "$preview_port" -ge 1024 ] && [ "$preview_port" -le 65535 ] && [ "$preview_port" -ne "$port" ] || fail "PROCTOR_SF_PREVIEW_PORT must be between 1024 and 65535 and not PROCTOR_SF_PORT, got $preview_port"
 case "$state" in
 	/*) ;;
 	*) fail "PROCTOR_SF_STATE must be an absolute path, got $state" ;;
 esac
+case "$authoritative" in
+	0 | 1) ;;
+	*) fail "PROCTOR_SF_AUTHORITATIVE must be 0 or 1, got $authoritative" ;;
+esac
+case "$checkout" in
+	/*) [ -d "$checkout" ] || fail "PROCTOR_SF_CHECKOUT isn't a folder: $checkout" ;;
+	*) fail "PROCTOR_SF_CHECKOUT must be an absolute path, got $checkout" ;;
+esac
 case "$state" in
-	"$repo" | "$repo"/*) fail "PROCTOR_SF_STATE must be outside the repository, so the key and the binding never enter it" ;;
+	"$repo" | "$repo"/* | "$checkout" | "$checkout"/*) fail "PROCTOR_SF_STATE must be outside the repository and the checkout, so the key and the binding never enter them" ;;
 	*'"'* | *'\'*) fail "PROCTOR_SF_STATE holds a quote or backslash, which the binding can't hold: $state" ;;
 esac
+built_digest() {
+	printf '%s\n' "$2" | grep -qx 'sha256:[0-9a-f]\{64\}' ||
+		fail "PROCTOR_SF_AUTHORITATIVE=1 needs $1, the ID of the $3 image built from the tested commit, as sha256: and 64 hex digits"
+}
+built_dev=""
+built_local=""
+built_gitserver=""
+if [ "$authoritative" -eq 1 ]; then
+	built_dev=${PROCTOR_SF_BUILT_DEV_DIGEST:-}
+	built_local=${PROCTOR_SF_BUILT_LOCAL_DIGEST:-}
+	built_gitserver=${PROCTOR_SF_BUILT_GITSERVER_DIGEST:-}
+	built_digest PROCTOR_SF_BUILT_DEV_DIGEST "$built_dev" dev
+	built_digest PROCTOR_SF_BUILT_LOCAL_DIGEST "$built_local" local
+	built_digest PROCTOR_SF_BUILT_GITSERVER_DIGEST "$built_gitserver" gitserver
+fi
 
 run_compose() {
 	exec env -i PATH="$PATH" HOME="$HOME" ${TMPDIR:+TMPDIR="$TMPDIR"} ${USER:+USER="$USER"} ${LANG:+LANG="$LANG"} \
 		${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} \
 		${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} ${DOCKER_CERT_PATH:+DOCKER_CERT_PATH="$DOCKER_CERT_PATH"} \
 		${DOCKER_TLS_VERIFY:+DOCKER_TLS_VERIFY="$DOCKER_TLS_VERIFY"} \
-		COMPOSE_PROJECT_NAME="$project" SF_PORT="$port" SF_DOCKER_GID="$gid" SF_NO_UPDATE_CHECK=1 SF_OSV=off \
+		COMPOSE_PROJECT_NAME="$project" SF_PORT="$port" SF_PREVIEW_PORT="$preview_port" SF_DOCKER_GID="$gid" SF_NO_UPDATE_CHECK=1 SF_OSV=off \
 		SF_BOX_SUBNETS="$box_subnets" SF_DEV_KNACKPACK_URL="$knackpack_url" \
 		${SF_BOX_SWEEP_DRY:+SF_BOX_SWEEP_DRY="$SF_BOX_SWEEP_DRY"} \
 		docker compose -p "$project" --project-directory "$repo" \
-		-f "$repo/compose.yaml" -f "$repo/compose.dev.yaml" -f "$here/compose.proctor.yaml" "$@"
+		-f "$repo/compose.yaml" -f "$repo/compose.dev.yaml" -f "$repo/proctor/environments/compose.proctor.yaml" "$@"
 }
 compose() { (run_compose "$@"); }
 
@@ -80,9 +110,11 @@ if [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>
 	[ -n "$(docker ps -aq --filter "label=dev.software-factory.stack=$project" 2>/dev/null)" ]; then
 	fail "the Compose project $project has containers already; run $here/down.sh first"
 fi
-if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-	fail "port $port is already in use"
-fi
+for p in "$port" "$preview_port"; do
+	if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+		fail "port $p is already in use"
+	fi
+done
 
 [ -L "$state" ] && fail "$state is a symbolic link; refusing to use it"
 mkdir -p "$state"
@@ -104,11 +136,22 @@ on_exit() {
 }
 trap on_exit EXIT
 
-say "building the images software-factory-proctor:{dev,local,gitserver} (log: $state/build.log)"
-compose build >"$state/build.log" 2>&1 || {
-	tail -20 "$state/build.log" >&2
-	fail "docker compose build failed"
-}
+image_id() { docker image inspect --format '{{.Id}}' "software-factory-proctor:$1" 2>/dev/null; }
+if [ "$authoritative" -eq 1 ]; then
+	id_dev=$(image_id dev) || fail "software-factory-proctor:dev isn't loaded; PROCTOR_SF_AUTHORITATIVE=1 starts the images built from the tested commit and builds none"
+	id_local=$(image_id local) || fail "software-factory-proctor:local isn't loaded; PROCTOR_SF_AUTHORITATIVE=1 starts the images built from the tested commit and builds none"
+	id_gitserver=$(image_id gitserver) || fail "software-factory-proctor:gitserver isn't loaded; PROCTOR_SF_AUTHORITATIVE=1 starts the images built from the tested commit and builds none"
+	[ "$id_dev" = "$built_dev" ] || fail "software-factory-proctor:dev is $id_dev, not the built image $built_dev"
+	[ "$id_local" = "$built_local" ] || fail "software-factory-proctor:local is $id_local, not the built image $built_local"
+	[ "$id_gitserver" = "$built_gitserver" ] || fail "software-factory-proctor:gitserver is $id_gitserver, not the built image $built_gitserver"
+	say "starting the loaded images: dev $id_dev, local $id_local, gitserver $id_gitserver"
+else
+	say "building the images software-factory-proctor:{dev,local,gitserver} (log: $state/build.log)"
+	compose build >"$state/build.log" 2>&1 || {
+		tail -20 "$state/build.log" >&2
+		fail "docker compose build failed"
+	}
+fi
 
 gid=${SF_DOCKER_GID:-}
 if [ -z "$gid" ]; then
@@ -130,6 +173,26 @@ compose up -d --wait --remove-orphans >"$state/up.log" 2>&1 || {
 echo "engine-logs $!" >>"$state/pids"
 
 curl -fsS -o /dev/null "$base/healthz" || fail "$base/healthz didn't answer"
+
+running_dev=""
+running_local=""
+running_gitserver=""
+if [ "$authoritative" -eq 1 ]; then
+	for pair in engine:$id_dev helper:$id_dev egress:$id_local gitserver:$id_gitserver; do
+		service=${pair%%:*}
+		want=${pair#*:}
+		container=$(compose ps -q "$service")
+		[ -n "$container" ] || fail "the $service service has no container"
+		got=$(docker inspect --format '{{.Image}}' "$container") || fail "couldn't read the image of the $service container"
+		[ "$got" = "$want" ] || fail "the $service container runs $got, not the loaded image $want"
+		case "$service" in
+			engine) running_dev=$got ;;
+			egress) running_local=$got ;;
+			gitserver) running_gitserver=$got ;;
+		esac
+	done
+	say "every container runs its loaded image: the engine and helper $running_dev, egress $running_local, the gitserver $running_gitserver"
+fi
 
 sign_in() {
 	curl -sS -o "$state/signin.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: $origin" \
@@ -204,7 +267,16 @@ done
 printf '%s\n' "$key" "$replaced" "$unknown" "$basic" "$token" "$git_token" >"$state/scrub-patterns"
 
 {
-	printf 'environment: local\n'
+	if [ "$authoritative" -eq 1 ]; then
+		printf 'environment: github-actions\n'
+		printf 'disposable: true\n'
+		printf 'images:\n'
+		printf '  dev: { built_digest: "%s", running_digest: "%s" }\n' "$built_dev" "$running_dev"
+		printf '  local: { built_digest: "%s", running_digest: "%s" }\n' "$built_local" "$running_local"
+		printf '  gitserver: { built_digest: "%s", running_digest: "%s" }\n' "$built_gitserver" "$running_gitserver"
+	else
+		printf 'environment: local\n'
+	fi
 	printf 'drivers:\n'
 	printf '  http:\n'
 	printf '    base_url: "%s"\n' "$base"
@@ -222,6 +294,7 @@ printf '%s\n' "$key" "$replaced" "$unknown" "$basic" "$token" "$git_token" >"$st
 	printf '    values:\n'
 	printf '      origin: "%s"\n' "$origin"
 	printf '      port: "%s"\n' "$port"
+	printf '      preview_port: "%s"\n' "$preview_port"
 	printf '    variants:\n'
 	printf '      unknown: { token_env: PROCTOR_SF_UNKNOWN_KEY }\n'
 	printf '      replaced: { token_env: PROCTOR_SF_REPLACED_KEY }\n'

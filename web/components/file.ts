@@ -1,5 +1,6 @@
 import { button, el, emit, replaceKeeping, sayWhenShown, statusLine, visible } from '../lib/dom.ts'
 import { shortSha } from '../lib/format.ts'
+import { langFor, newState, tokens } from '../lib/highlight.ts'
 import type { FileView } from '../types.ts'
 import { icon } from './icon.ts'
 import './markdown.ts'
@@ -8,6 +9,7 @@ let wrapLines = true
 let rendered = true
 const MARKDOWN = /\.(md|markdown)$/i
 const MAX_LINES = 20000
+const MAX_HIGHLIGHT_CHARS = 400_000
 
 class SfFile extends HTMLElement {
   #view: FileView | null = null
@@ -120,11 +122,18 @@ class SfFile extends HTMLElement {
     lines.tabIndex = 0
     lines.style.setProperty('--digits', String(String(shown.length).length))
     const frag = document.createDocumentFragment()
+    const lang = langFor(path)
+    const state = newState()
+    let budget = MAX_HIGHLIGHT_CHARS
     shown.forEach((line, i) => {
       const here = i + 1 === at
       const n = el('span', here ? 'ln at' : 'ln', String(i + 1))
       n.setAttribute('aria-hidden', 'true')
-      const c = el('span', here ? 'lc at' : 'lc', visible(line) || ' ')
+      budget -= line.length
+      const parts = lang && line && budget >= 0 ? tokens(line, lang, state) : null
+      const c = el('span', here ? 'lc at' : 'lc')
+      if (parts) for (const t of parts) c.append(t.kind ? el('span', `syn-${t.kind}`, visible(t.text)) : visible(t.text))
+      else c.textContent = visible(line) || ' '
       if (here) c.setAttribute('aria-current', 'location')
       frag.append(n, c)
     })
